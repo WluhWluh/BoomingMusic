@@ -93,6 +93,7 @@ import com.mardous.booming.playback.processor.BalanceAudioProcessor
 import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
 import com.mardous.booming.playback.renderer.AlacWorkaroundCodecSelector
 import com.mardous.booming.playback.renderer.BoomingMusicRenderersFactory
+import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.ui.screen.MainActivity
 import com.mardous.booming.util.CLEAR_QUEUE_ON_COMPLETION
 import com.mardous.booming.util.ENABLE_HISTORY
@@ -142,6 +143,7 @@ class PlaybackService :
     private val equalizerManager: EqualizerManager by inject()
     private val audioOutputObserver: AudioOutputObserver by inject()
     private val repository: Repository by inject()
+    private val sourceSeparationEngine: SourceSeparationEngine by inject()
 
     private val libraryProvider = LibraryProvider(repository)
     private val songPlayCountHelper = SongPlayCountHelper()
@@ -403,6 +405,7 @@ class PlaybackService :
         availableCommands.add(SessionCommand(Playback.RESTORE_PLAYBACK, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SET_UNSHUFFLED_ORDER, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SET_STOP_POSITION, Bundle.EMPTY))
+        availableCommands.add(SessionCommand(Playback.SEPARATE_CURRENT_SONG_OFFLINE, Bundle.EMPTY))
 
         return MediaSession.ConnectionResult.accept(
             availableCommands.build(),
@@ -674,6 +677,24 @@ class PlaybackService :
                         putBoolean("canceled", canceled)
                     })
                 )
+            }
+
+            Playback.SEPARATE_CURRENT_SONG_OFFLINE -> {
+                val mediaItem = player.currentMediaItem
+                    ?: return Futures.immediateFuture(SessionResult(SessionError.ERROR_INVALID_STATE))
+                serviceScope.future(IO) {
+                    val song = repository.songByMediaItem(mediaItem)
+                    val result = sourceSeparationEngine.separateSongToWav(song)
+                    SessionResult(
+                        SessionResult.RESULT_SUCCESS,
+                        Bundle().apply {
+                            putString("vocalsFile", result.vocalsFile.absolutePath)
+                            putString("instrumentalFile", result.instrumentalFile.absolutePath)
+                            putLong("elapsedMs", result.elapsedMs)
+                            putInt("windowCount", result.windowCount)
+                        }
+                    )
+                }
             }
 
             else -> Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
