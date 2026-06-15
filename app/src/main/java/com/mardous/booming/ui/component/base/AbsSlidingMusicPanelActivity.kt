@@ -79,10 +79,8 @@ import com.mardous.booming.extensions.resources.peekHeightAnimate
 import com.mardous.booming.extensions.resources.show
 import com.mardous.booming.extensions.whichFragment
 import com.mardous.booming.ui.IBackConsumer
-import com.mardous.booming.ui.screen.info.PlayInfoFragment
 import com.mardous.booming.ui.screen.library.LibraryViewModel
 import com.mardous.booming.ui.screen.library.search.SearchFragment
-import com.mardous.booming.ui.screen.lyrics.LyricsEditorFragment
 import com.mardous.booming.ui.screen.lyrics.LyricsViewModel
 import com.mardous.booming.ui.screen.other.MiniPlayerFragment
 import com.mardous.booming.ui.screen.permissions.PermissionsActivity
@@ -141,6 +139,7 @@ abstract class AbsSlidingMusicPanelActivity : AbsBaseActivity(),
 
     private var playerFragment: AbsPlayerFragment? = null
     private var paletteColor: Int = 0
+    private var hideBottomSheetForCurrentDestination: Boolean = false
 
     var panelState: Int
         get() = bottomSheetBehavior.state
@@ -197,11 +196,7 @@ abstract class AbsSlidingMusicPanelActivity : AbsBaseActivity(),
 
         launchAndRepeatWithViewLifecycle {
             playerViewModel.queueFlow.collect { queue ->
-                val currentFragment = currentFragment(R.id.fragment_container)
-                if (currentFragment !is LyricsEditorFragment &&
-                    currentFragment !is PlayInfoFragment) {
-                    hideBottomSheet(queue.isEmpty())
-                }
+                hideBottomSheet(queue.isEmpty() || hideBottomSheetForCurrentDestination)
             }
         }
 
@@ -302,9 +297,12 @@ abstract class AbsSlidingMusicPanelActivity : AbsBaseActivity(),
         visible: Boolean,
         animate: Boolean = false,
         hideBottomSheet: Boolean = playerViewModel.queue.isEmpty(),
+        hideBottomSheetForDestination: Boolean = false,
     ) {
+        hideBottomSheetForCurrentDestination = hideBottomSheetForDestination
+        val shouldHideBottomSheet = hideBottomSheet || hideBottomSheetForCurrentDestination
         if (isInOneTabMode) {
-            hideBottomSheet(hide = hideBottomSheet, animate = animate, isBottomNavVisible = false)
+            hideBottomSheet(hide = shouldHideBottomSheet, animate = animate, isBottomNavVisible = false)
             return
         }
         val isBottomNavView = (navigationView is BottomNavigationView)
@@ -325,7 +323,7 @@ abstract class AbsSlidingMusicPanelActivity : AbsBaseActivity(),
             }
         }
         hideBottomSheet(
-            hide = hideBottomSheet,
+            hide = shouldHideBottomSheet,
             animate = animate,
             isBottomNavVisible = visible && navigationView is BottomNavigationView
         )
