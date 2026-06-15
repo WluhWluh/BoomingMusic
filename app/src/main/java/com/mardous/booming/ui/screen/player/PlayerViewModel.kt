@@ -420,6 +420,7 @@ class PlayerViewModel(
                             completedWindows = progress.completedWindows,
                             totalWindows = progress.totalWindows,
                             percent = progress.percent,
+                            stage = progress.stage,
                         )
                     },
                     shouldCancel = {
@@ -795,6 +796,7 @@ sealed class SourceSeparationUiState {
         val completedWindows: Int = 0,
         val totalWindows: Int = 0,
         val percent: Int = 0,
+        val stage: String? = null,
     ) : SourceSeparationUiState()
 
     data class Completed(

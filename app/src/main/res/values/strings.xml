@@ -21,7 +21,9 @@
     <string name="action_cancel">Cancel</string>
     <string name="action_source_separation">Separate vocals</string>
     <string name="source_separation_preparing">Preparing source separation...</string>
-    <string name="source_separation_progress">Separating vocals: %1$d/%2$d (%3$d%%)</string>
+    <string name="source_separation_processing_windows">Processing audio windows</string>
+    <string name="source_separation_stage">Source separation: %1$s</string>
+    <string name="source_separation_progress">Source separation: %4$s - %1$d/%2$d (%3$d%%)</string>
     <string name="source_separation_complete">Source separation complete</string>
     <string name="source_separation_canceled">Source separation canceled</string>
     <string name="source_separation_failed">Source separation failed</string>
