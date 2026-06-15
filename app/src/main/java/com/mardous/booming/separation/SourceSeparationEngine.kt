@@ -1,18 +1,19 @@
 package com.mardous.booming.separation
 
 import android.content.Context
-import android.os.Environment
 import com.mardous.booming.data.model.Song
+import com.mardous.booming.separation.cache.SourceSeparationCache
 import com.mardous.booming.separation.model.MdxModelVariant
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import com.mardous.booming.separation.model.MdxRangeSeparator
 import com.mardous.booming.separation.model.MdxRuntimeSettings
-import java.io.File
 
 class SourceSeparationEngine(
     private val context: Context,
 ) {
+    private val cache = SourceSeparationCache(context)
+
     fun separateSongToWav(
         song: Song,
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
@@ -20,19 +21,21 @@ class SourceSeparationEngine(
         onProgress: (MdxRangeProgress) -> Unit = {},
     ): MdxRangeSeparationResult {
         require(song != Song.emptySong) { "Cannot separate an empty song." }
-        return MdxRangeSeparator(context)
-            .separate(
-                uri = song.uri,
-                outputDir = offlineOutputDir(),
-                displayName = song.fileName,
-                runtimeSettings = runtimeSettings,
-                modelVariant = modelVariant,
-                onProgress = onProgress,
-            )
-    }
-
-    private fun offlineOutputDir(): File {
-        val musicDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir
-        return File(musicDir, "source-separation/offline").apply { mkdirs() }
+        val run = cache.beginOfflineRun(song, modelVariant)
+        return try {
+            MdxRangeSeparator(context)
+                .separate(
+                    uri = song.uri,
+                    outputDir = run.workDir,
+                    displayName = song.fileName,
+                    runtimeSettings = runtimeSettings,
+                    modelVariant = modelVariant,
+                    onProgress = onProgress,
+                )
+                .let { result -> cache.completeRun(run, result).result }
+        } catch (error: Throwable) {
+            cache.failRun(run, error)
+            throw error
+        }
     }
 }
