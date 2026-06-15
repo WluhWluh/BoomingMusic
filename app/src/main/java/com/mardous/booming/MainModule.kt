@@ -276,7 +276,11 @@ private val viewModule = module {
     }
 
     viewModel {
-        PlayerViewModel(preferences = get(), repository = get())
+        PlayerViewModel(
+            preferences = get(),
+            repository = get(),
+            sourceSeparationEngine = get()
+        )
     }
 
     viewModel {

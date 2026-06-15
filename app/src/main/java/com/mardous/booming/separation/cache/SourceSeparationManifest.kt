@@ -24,6 +24,7 @@ data class SourceSeparationManifest(
 enum class SourceSeparationCacheState {
     Running,
     Completed,
+    Canceled,
     Failed,
 }
 

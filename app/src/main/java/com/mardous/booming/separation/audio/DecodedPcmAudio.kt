@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.audio
 
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
@@ -18,7 +19,10 @@ data class DecodedPcmAudio(
 
     val frameCount: Int = pcm16.size / (channelCount * Short.SIZE_BYTES)
 
-    fun resampleTo(targetSampleRate: Int): DecodedPcmAudio {
+    fun resampleTo(
+        targetSampleRate: Int,
+        shouldCancel: () -> Boolean = { false },
+    ): DecodedPcmAudio {
         require(targetSampleRate > 0) { "Target sample rate must be positive." }
         if (targetSampleRate == sampleRate) return this
         if (frameCount == 0) {
@@ -43,6 +47,9 @@ data class DecodedPcmAudio(
         var outputOffset = 0
 
         for (targetFrame in 0 until outputFrameCount.toInt()) {
+            if (targetFrame % CANCEL_CHECK_INTERVAL_FRAMES == 0) {
+                throwIfCanceled(shouldCancel)
+            }
             val sourcePosition = targetFrame * sourceFramesPerTargetFrame
             val sourceFrame = sourcePosition.toInt().coerceIn(0, frameCount - 1)
             val nextFrame = (sourceFrame + 1).coerceAtMost(frameCount - 1)
@@ -92,6 +99,12 @@ data class DecodedPcmAudio(
         return arrayOf(left, right)
     }
 
+    private fun throwIfCanceled(shouldCancel: () -> Boolean) {
+        if (shouldCancel()) {
+            throw CancellationException("Source separation canceled.")
+        }
+    }
+
     private fun frameByteIndex(frame: Int, channel: Int): Int {
         return (frame * channelCount + channel) * Short.SIZE_BYTES
     }
@@ -100,5 +113,9 @@ data class DecodedPcmAudio(
         val low = pcm16[byteIndex].toInt() and 0xFF
         val high = pcm16[byteIndex + 1].toInt()
         return ((high shl 8) or low).toShort()
+    }
+
+    private companion object {
+        const val CANCEL_CHECK_INTERVAL_FRAMES = 16_384
     }
 }
