@@ -12,6 +12,7 @@ import com.mardous.booming.separation.audio.WavFileWriter
 import com.mardous.booming.separation.cache.SourceSeparationCache
 import java.io.File
 import java.nio.FloatBuffer
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
@@ -30,10 +31,13 @@ class MdxRangeSeparator(
         runtimeSettings: MdxRuntimeSettings = this.runtimeSettings,
         modelVariant: MdxModelVariant = this.modelVariant,
         onProgress: (MdxRangeProgress) -> Unit = {},
+        shouldCancel: () -> Boolean = { false },
     ): MdxRangeSeparationResult {
         val totalStartedAt = SystemClock.elapsedRealtime()
-        val source = AudioPcmDecoder(context).decode(uri)
-        val decoded = source.resampleTo(config.sampleRate)
+        throwIfCanceled(shouldCancel)
+        val source = AudioPcmDecoder(context).decode(uri, shouldCancel = shouldCancel)
+        val decoded = source.resampleTo(config.sampleRate, shouldCancel = shouldCancel)
+        throwIfCanceled(shouldCancel)
 
         val startFrame = msToFrame(startMs).coerceIn(0, decoded.frameCount)
         val requestedEndFrame = endMs?.let { msToFrame(it) } ?: decoded.frameCount
@@ -62,6 +66,7 @@ class MdxRangeSeparator(
                     val inputName = session.inputInfo.keys.first()
                     val outputName = session.outputInfo.keys.first()
                     for (windowIndex in 0 until windowCount) {
+                        throwIfCanceled(shouldCancel)
                         val generationStartFrame = startFrame + windowIndex * config.generationSize
                         val remainingFrames = endFrame - generationStartFrame
                         val writeFrames = minOf(config.generationSize, remainingFrames)
@@ -77,6 +82,7 @@ class MdxRangeSeparator(
                             spectrogram = spectrogram,
                             mixWindow = mixWindow,
                         )
+                        throwIfCanceled(shouldCancel)
                         val residualWindow = subtract(mixWindow, modelOutputWindow)
                         val vocalsWindow = when (modelVariant.modelOutputStem) {
                             MdxStem.VOCALS -> modelOutputWindow
@@ -100,6 +106,7 @@ class MdxRangeSeparator(
                         vocalsWriter.writePcm16(vocalsPcm)
                         instrumentalWriter.writePcm16(instrumentalPcm)
                         onProgress(MdxRangeProgress(windowIndex + 1, windowCount))
+                        throwIfCanceled(shouldCancel)
                     }
                 }
             }
@@ -121,6 +128,12 @@ class MdxRangeSeparator(
             runtimeSettings = runtimeSettings,
             modelVariant = modelVariant,
         )
+    }
+
+    private fun throwIfCanceled(shouldCancel: () -> Boolean) {
+        if (shouldCancel()) {
+            throw CancellationException("Source separation canceled.")
+        }
     }
 
     private fun runWindow(

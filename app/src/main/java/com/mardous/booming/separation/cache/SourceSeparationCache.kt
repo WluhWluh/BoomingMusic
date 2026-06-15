@@ -119,13 +119,36 @@ class SourceSeparationCache(
         run: SourceSeparationRun,
         error: Throwable,
     ): SourceSeparationManifest {
+        return finishUnsuccessfulRun(
+            run = run,
+            state = SourceSeparationCacheState.Failed,
+            error = error,
+        )
+    }
+
+    fun cancelRun(
+        run: SourceSeparationRun,
+        error: Throwable,
+    ): SourceSeparationManifest {
+        return finishUnsuccessfulRun(
+            run = run,
+            state = SourceSeparationCacheState.Canceled,
+            error = error,
+        )
+    }
+
+    private fun finishUnsuccessfulRun(
+        run: SourceSeparationRun,
+        state: SourceSeparationCacheState,
+        error: Throwable,
+    ): SourceSeparationManifest {
         if (run.workDir.exists()) {
             run.workDir.deleteRecursively()
         }
         val now = System.currentTimeMillis()
         val manifest = SourceSeparationManifest(
             pipelineVersion = run.pipelineVersion,
-            state = SourceSeparationCacheState.Failed,
+            state = state,
             songLocator = run.song.toLocator(),
             audioIdentity = SourceAudioIdentity(
                 audioFingerprint = "",

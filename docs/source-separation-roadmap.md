@@ -179,6 +179,30 @@ Segments are a sample-accurate cache format, not independent user-facing songs. 
 
 The MDX model already uses overlap and trim internally. For each model window, only the stable center region should be written into the segment timeline. Adjacent stable regions should be concatenated by exact frame index. They should not be crossfaded by default.
 
+### Playback Change and Partial Cache Strategy
+
+If the user changes songs while the previous song is still being separated, the app should preserve completed partial work but immediately prioritize the newly playing song.
+
+Default behavior:
+
+- Keep completed stable segments for the previous song.
+- Do not delete partial cache merely because playback moved away.
+- Cancel or drop queued segments for the previous song.
+- Let an already running model window finish only if safe cancellation is not available yet.
+- Move the new current song's playback-position segment and next segment to the front of the queue.
+- Pause old-song processing by default after the active song changes.
+- Resume old-song processing only as low-priority idle work after active playback needs are satisfied, if thermal and battery conditions allow it.
+
+Future segment manifests should support at least:
+
+- `Partial` song-level cache state,
+- per-segment `Missing`, `Queued`, `Running`, `Ready`, and `Failed`,
+- completed frame ranges,
+- `lastActiveAtEpochMs`,
+- priority reason such as `CurrentPlayback`, `NextPlayback`, `NearFuture`, or `IdleBackfill`.
+
+This keeps playback responsive and avoids spending full CPU on songs the user has stopped listening to, while still preserving useful work for later reuse.
+
 ### Boundary and Finalization Strategy
 
 There are three separate boundary concerns:
@@ -253,8 +277,8 @@ Implementation notes:
 
 Current limitations:
 
-- No player UI is wired to the engine yet; the current trigger is a developer-only custom command.
-- No cancellation API exists yet.
+- The initial developer-only custom command is still available, but Phase 3 adds the first player-screen manual trigger.
+- Cancellation is now cooperative and can stop decoding, resampling, or processing between model windows, but it still cannot interrupt an active ONNX inference call instantly.
 - The offline path still decodes the whole source into memory before processing.
 - Output is WAV only.
 
@@ -282,12 +306,12 @@ Implementation notes:
 
 - Added a file-based cache index under the app-private external music directory.
 - Added one cache entry directory per song/model/pipeline tuple under `source-separation/entries`.
-- Added `manifest.json` with explicit `Running`, `Completed`, and `Failed` states.
+- Added `manifest.json` with explicit `Running`, `Completed`, `Canceled`, and `Failed` states.
 - Split cache metadata into song locator fields, audio identity fields, diagnostics, output paths, and error information.
 - Added a decoded PCM SHA-256 audio fingerprint to the separation result and cache manifest.
 - Stored file size and raw modified timestamp only as diagnostics, not cache invalidation inputs.
 - Added work and completed directories so successful runs are promoted from temporary output to stable cache files.
-- Added failed-run cleanup so temporary work files are removed and failed manifests do not appear as completed output.
+- Added unsuccessful-run cleanup so temporary work files are removed and failed or canceled manifests do not appear as completed output.
 - Added cache listing, completed-manifest lookup, and delete helpers for later UI work.
 - Verified `:app:assembleNormalDebug` succeeds after cache integration.
 
@@ -300,7 +324,7 @@ Current limitations:
 
 ### Phase 3: Current-Song Manual Separation
 
-Status: pending
+Status: completed
 
 Goals:
 
@@ -315,6 +339,24 @@ Done criteria:
 - Progress is visible.
 - Cancellation leaves no broken completed cache entry.
 - Playback remains usable during processing.
+
+Implementation notes:
+
+- Added a "Separate vocals" action to the expanded player's overflow menu.
+- Added `SourceSeparationUiState` to `PlayerViewModel` for idle, running, completed, canceled, and failed states.
+- Runs source separation on `Dispatchers.IO` without changing the active playback output.
+- Shows an indefinite player-screen Snackbar while separation is running, including completed-window progress once known.
+- Added a Snackbar cancel action that requests cooperative cancellation and cleans temporary work output.
+- Added a `Canceled` cache manifest state so user cancellation is distinct from processing failure and never appears as completed cache.
+- Added cancellation checks to decode, resample, and MDX processing between model windows.
+- Verified `:app:assembleNormalDebug` succeeds.
+
+Current limitations:
+
+- This phase still processes the whole song as a single offline job.
+- Canceling during an active ONNX window waits until that window returns.
+- Progress is limited to model-window count after decode and resample finish.
+- Separated stems are not used for playback until Phase 4.
 
 ### Phase 4: Basic Completed-Stem Playback Mode
 
@@ -343,6 +385,8 @@ Goals:
 - Write ready segments as sample-accurate stable regions.
 - Make current position and next segment the highest-priority work.
 - Support reprioritization after seek.
+- Preserve partial cache when the user changes songs.
+- Pause or downgrade old-song work when playback moves to a different song.
 - Avoid default crossfades between model output segments.
 
 Done criteria:
@@ -351,6 +395,7 @@ Done criteria:
 - Segment readiness is persisted.
 - Seeking to an unready section reprioritizes that section.
 - Already computed segments are reused.
+- Changing songs keeps completed segments but does not let old-song work block the new current song.
 - Adjacent ready segments join on exact frame boundaries.
 
 ### Phase 6: Play While Processing
@@ -362,6 +407,7 @@ Goals:
 - Start separated playback once the current segment and the next segment are ready.
 - Pause or visually gate separated output when the requested position is not ready.
 - Automatically resume when enough data is available.
+- Switch scheduler priority immediately when the current song changes.
 - Read ready stems from the sample-accurate segment timeline.
 - Avoid disruptive playback jumps when segment boundaries become ready.
 - Add only a minimal anti-click fade if direct sample-boundary joins are audibly imperfect.
@@ -372,6 +418,7 @@ Done criteria:
 - If the playback head outruns available separated audio, the UI clearly shows processing.
 - Playback resumes automatically when ready.
 - User seeking during processing remains responsive.
+- User song changes reprioritize the active song without deleting useful partial cache from the old song.
 - Segment transitions are not perceptibly worse than the completed full-song output.
 
 ### Phase 7: Background and Thermal Behavior

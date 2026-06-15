@@ -281,7 +281,12 @@ private val viewModule = module {
     }
 
     viewModel {
-        PlayerViewModel(preferences = get(), repository = get(), albumCoverSaver = get())
+        PlayerViewModel(
+            preferences = get(),
+            repository = get(),
+            albumCoverSaver = get(),
+            sourceSeparationEngine = get()
+        )
     }
 
     viewModel {

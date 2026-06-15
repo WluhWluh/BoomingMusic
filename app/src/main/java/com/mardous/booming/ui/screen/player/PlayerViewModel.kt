@@ -41,6 +41,7 @@ import com.mardous.booming.playback.progress.ProgressObserver
 import com.mardous.booming.playback.shuffle.OpenShuffleMode
 import com.mardous.booming.playback.shuffle.ShuffleManager
 import com.mardous.booming.playback.toMediaItems
+import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
 import com.mardous.booming.util.Preferences
 import com.mardous.booming.util.REMEMBER_SHUFFLE_MODE
@@ -64,6 +65,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.cancellation.CancellationException
 
 const val QUEUE_DEBOUNCE = 100L
 
@@ -72,7 +75,8 @@ const val QUEUE_DEBOUNCE = 100L
 class PlayerViewModel(
     private val preferences: SharedPreferences,
     private val repository: Repository,
-    private val albumCoverSaver: AlbumCoverSaver
+    private val albumCoverSaver: AlbumCoverSaver,
+    private val sourceSeparationEngine: SourceSeparationEngine
 ) : ViewModel(), Player.Listener {
 
     private val queueMutex = Mutex()
@@ -133,10 +137,18 @@ class PlayerViewModel(
     private val _extraInfoFlow = MutableStateFlow<String?>(null)
     val extraInfoFlow = _extraInfoFlow.asStateFlow()
 
+    private val sourceSeparationCancelRequested = AtomicBoolean(false)
+    private var sourceSeparationJob: Job? = null
+
+    private val _sourceSeparationStateFlow =
+        MutableStateFlow<SourceSeparationUiState>(SourceSeparationUiState.Idle)
+    val sourceSeparationStateFlow = _sourceSeparationStateFlow.asStateFlow()
+
     private val internalJobs = mutableListOf<Job>()
 
     override fun onCleared() {
         progressObserver.stop()
+        cancelSourceSeparation()
         cancelInternalJobs()
         super.onCleared()
     }
@@ -364,6 +376,76 @@ class PlayerViewModel(
 
     fun generateExtraInfo() {
         onGenerateExtraInfo(currentSong)
+    }
+
+    fun startSourceSeparationForCurrentSong() {
+        if (sourceSeparationJob != null) return
+
+        val song = currentSong
+        if (song == Song.emptySong) {
+            _sourceSeparationStateFlow.value = SourceSeparationUiState.Failed(
+                songId = song.id,
+                songTitle = song.title,
+                message = null,
+            )
+            return
+        }
+
+        sourceSeparationCancelRequested.set(false)
+        sourceSeparationJob = viewModelScope.launch(IO) {
+            val activeJob = coroutineContext[Job]
+            _sourceSeparationStateFlow.value = SourceSeparationUiState.Running(
+                songId = song.id,
+                songTitle = song.title,
+            )
+            try {
+                sourceSeparationEngine.separateSongToWav(
+                    song = song,
+                    onProgress = { progress ->
+                        _sourceSeparationStateFlow.value = SourceSeparationUiState.Running(
+                            songId = song.id,
+                            songTitle = song.title,
+                            completedWindows = progress.completedWindows,
+                            totalWindows = progress.totalWindows,
+                            percent = progress.percent,
+                        )
+                    },
+                    shouldCancel = {
+                        sourceSeparationCancelRequested.get() || activeJob?.isActive != true
+                    },
+                )
+                _sourceSeparationStateFlow.value = SourceSeparationUiState.Completed(
+                    songId = song.id,
+                    songTitle = song.title,
+                )
+            } catch (_: CancellationException) {
+                _sourceSeparationStateFlow.value = SourceSeparationUiState.Canceled(
+                    songId = song.id,
+                    songTitle = song.title,
+                )
+            } catch (error: Throwable) {
+                Log.e(TAG, "Source separation failed", error)
+                _sourceSeparationStateFlow.value = SourceSeparationUiState.Failed(
+                    songId = song.id,
+                    songTitle = song.title,
+                    message = error.message,
+                )
+            } finally {
+                sourceSeparationJob = null
+                sourceSeparationCancelRequested.set(false)
+            }
+        }
+    }
+
+    fun cancelSourceSeparation() {
+        sourceSeparationCancelRequested.set(true)
+        sourceSeparationJob?.cancel()
+    }
+
+    fun clearSourceSeparationStatus() {
+        if (_sourceSeparationStateFlow.value !is SourceSeparationUiState.Running) {
+            _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
+        }
     }
 
     fun playSongAt(newPosition: Int) {
@@ -690,4 +772,32 @@ class PlayerViewModel(
     companion object {
         private const val TAG = "PlayerViewModel"
     }
+}
+
+sealed class SourceSeparationUiState {
+    data object Idle : SourceSeparationUiState()
+
+    data class Running(
+        val songId: Long,
+        val songTitle: String,
+        val completedWindows: Int = 0,
+        val totalWindows: Int = 0,
+        val percent: Int = 0,
+    ) : SourceSeparationUiState()
+
+    data class Completed(
+        val songId: Long,
+        val songTitle: String,
+    ) : SourceSeparationUiState()
+
+    data class Canceled(
+        val songId: Long,
+        val songTitle: String,
+    ) : SourceSeparationUiState()
+
+    data class Failed(
+        val songId: Long,
+        val songTitle: String,
+        val message: String?,
+    ) : SourceSeparationUiState()
 }
