@@ -169,8 +169,13 @@ class MainActivity : AbsSlidingMusicPanelActivity(), MediaController.Listener {
                 R.id.nav_queue,
                 R.id.nav_lyrics_editor,
                 R.id.nav_play_info,
-                R.id.nav_about -> {
-                    setBottomNavVisibility(visible = false, hideBottomSheet = true)
+                R.id.nav_about,
+                R.id.nav_licenses,
+                R.id.nav_translators -> {
+                    setBottomNavVisibility(
+                        visible = false,
+                        hideBottomSheetForDestination = true
+                    )
                 }
 
                 else -> setBottomNavVisibility(visible = false, animate = true) // Hide Bottom Navigation Bar
