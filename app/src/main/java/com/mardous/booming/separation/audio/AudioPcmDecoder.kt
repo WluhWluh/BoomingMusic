@@ -9,10 +9,14 @@ import android.net.Uri
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 
 class AudioPcmDecoder(private val context: Context) {
-    fun decode(uri: Uri): DecodedPcmAudio {
+    fun decode(
+        uri: Uri,
+        shouldCancel: () -> Boolean = { false },
+    ): DecodedPcmAudio {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         var codecStarted = false
@@ -40,6 +44,7 @@ class AudioPcmDecoder(private val context: Context) {
             var writerFormat: AudioOutputFormat? = null
 
             while (!outputEnded) {
+                throwIfCanceled(shouldCancel)
                 if (!inputEnded) {
                     val inputIndex = codec.dequeueInputBuffer(TIMEOUT_US)
                     if (inputIndex >= 0) {
@@ -102,6 +107,12 @@ class AudioPcmDecoder(private val context: Context) {
             }
             codec?.release()
             extractor.release()
+        }
+    }
+
+    private fun throwIfCanceled(shouldCancel: () -> Boolean) {
+        if (shouldCancel()) {
+            throw CancellationException("Source separation canceled.")
         }
     }
 
