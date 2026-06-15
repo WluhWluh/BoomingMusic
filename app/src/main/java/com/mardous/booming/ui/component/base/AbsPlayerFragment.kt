@@ -95,6 +95,7 @@ import com.mardous.booming.ui.screen.lyrics.LyricsFragment
 import com.mardous.booming.ui.screen.player.PlayerGesturesController
 import com.mardous.booming.ui.screen.player.PlayerGesturesController.GestureType
 import com.mardous.booming.ui.screen.player.PlayerViewModel
+import com.mardous.booming.ui.screen.player.SourceSeparationUiState
 import com.mardous.booming.ui.screen.player.cover.CoverPagerFragment
 import com.mardous.booming.ui.screen.tageditor.SongTagEditorActivity
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
@@ -116,6 +117,7 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
 
     private var gesturesController: PlayerGesturesController? = null
     private var coverFragment: CoverPagerFragment? = null
+    private var sourceSeparationSnackbar: Snackbar? = null
 
     protected abstract val colorSchemeMode: PlayerColorSchemeMode
     protected abstract val playerControlsFragment: AbsPlayerControlsFragment
@@ -147,6 +149,11 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
         viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
             playerViewModel.colorSchemeFlow.collect { scheme ->
                 applyColorScheme(scheme)?.start()
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationStateFlow.collect { state ->
+                onSourceSeparationStateChanged(view, state)
             }
         }
         viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
@@ -276,6 +283,11 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                             .toBundle()
                     )
                 }
+                true
+            }
+
+            R.id.action_source_separation -> {
+                playerViewModel.startSourceSeparationForCurrentSong()
                 true
             }
 
@@ -426,6 +438,8 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
     }
 
     override fun onDestroyView() {
+        sourceSeparationSnackbar?.dismiss()
+        sourceSeparationSnackbar = null
         view?.setOnTouchListener(null)
         gesturesController?.release()
         gesturesController = null
@@ -610,6 +624,59 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                 if (it is AnimatedVectorDrawable) {
                     it.start()
                 }
+            }
+        }
+    }
+
+    private fun onSourceSeparationStateChanged(
+        view: View,
+        state: SourceSeparationUiState,
+    ) {
+        when (state) {
+            SourceSeparationUiState.Idle -> {
+                sourceSeparationSnackbar?.dismiss()
+                sourceSeparationSnackbar = null
+            }
+            is SourceSeparationUiState.Running -> {
+                val message = if (state.totalWindows > 0) {
+                    getString(
+                        R.string.source_separation_progress,
+                        state.completedWindows,
+                        state.totalWindows,
+                        state.percent,
+                    )
+                } else {
+                    getString(R.string.source_separation_preparing)
+                }
+                val snackbar = sourceSeparationSnackbar
+                    ?.takeIf { it.isShownOrQueued }
+                    ?: Snackbar.make(view, message, Snackbar.LENGTH_INDEFINITE)
+                        .setAction(R.string.action_cancel) {
+                            playerViewModel.cancelSourceSeparation()
+                        }
+                        .also {
+                            sourceSeparationSnackbar = it
+                            it.show()
+                        }
+                snackbar.setText(message)
+            }
+            is SourceSeparationUiState.Completed -> {
+                sourceSeparationSnackbar?.dismiss()
+                sourceSeparationSnackbar = null
+                Snackbar.make(view, R.string.source_separation_complete, Snackbar.LENGTH_SHORT).show()
+                playerViewModel.clearSourceSeparationStatus()
+            }
+            is SourceSeparationUiState.Canceled -> {
+                sourceSeparationSnackbar?.dismiss()
+                sourceSeparationSnackbar = null
+                Snackbar.make(view, R.string.source_separation_canceled, Snackbar.LENGTH_SHORT).show()
+                playerViewModel.clearSourceSeparationStatus()
+            }
+            is SourceSeparationUiState.Failed -> {
+                sourceSeparationSnackbar?.dismiss()
+                sourceSeparationSnackbar = null
+                Snackbar.make(view, R.string.source_separation_failed, Snackbar.LENGTH_SHORT).show()
+                playerViewModel.clearSourceSeparationStatus()
             }
         }
     }
