@@ -346,16 +346,18 @@ Implementation notes:
 - Added `SourceSeparationUiState` to `PlayerViewModel` for idle, running, completed, canceled, and failed states.
 - Runs source separation on `Dispatchers.IO` without changing the active playback output.
 - Shows an indefinite player-screen Snackbar while separation is running, including completed-window progress once known.
+- Shows pre-window stage details such as decoding, resampling, model preparation, ONNX session creation, and output setup.
 - Added a Snackbar cancel action that requests cooperative cancellation and cleans temporary work output.
 - Added a `Canceled` cache manifest state so user cancellation is distinct from processing failure and never appears as completed cache.
 - Added cancellation checks to decode, resample, and MDX processing between model windows.
+- Writes `timing.txt` next to completed WAV stems with decode, resample, model-file, session setup, STFT, ONNX inference, ISTFT, PCM conversion, and WAV write timings.
 - Verified `:app:assembleNormalDebug` succeeds.
 
 Current limitations:
 
 - This phase still processes the whole song as a single offline job.
 - Canceling during an active ONNX window waits until that window returns.
-- Progress is limited to model-window count after decode and resample finish.
+- Progress is diagnostic-stage-oriented until window processing begins.
 - Separated stems are not used for playback until Phase 4.
 
 ### Phase 4: Basic Completed-Stem Playback Mode

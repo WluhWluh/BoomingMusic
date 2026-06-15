@@ -690,6 +690,7 @@ class PlaybackService :
                         Bundle().apply {
                             putString("vocalsFile", result.vocalsFile.absolutePath)
                             putString("instrumentalFile", result.instrumentalFile.absolutePath)
+                            putString("timingFile", result.timingFile.absolutePath)
                             putLong("elapsedMs", result.elapsedMs)
                             putInt("windowCount", result.windowCount)
                         }
