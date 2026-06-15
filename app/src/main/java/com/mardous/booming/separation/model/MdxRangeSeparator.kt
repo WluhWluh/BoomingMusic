@@ -9,6 +9,7 @@ import ai.onnxruntime.OrtSession
 import com.mardous.booming.separation.audio.AudioPcmDecoder
 import com.mardous.booming.separation.audio.DecodedPcmAudio
 import com.mardous.booming.separation.audio.WavFileWriter
+import com.mardous.booming.separation.cache.SourceSeparationCache
 import java.io.File
 import java.nio.FloatBuffer
 import kotlin.math.ceil
@@ -112,7 +113,10 @@ class MdxRangeSeparator(
             frames = targetFrames,
             windowCount = windowCount,
             elapsedMs = SystemClock.elapsedRealtime() - totalStartedAt,
+            sourcePcmSha256 = SourceSeparationCache.sha256Hex(source.pcm16),
+            sourceFrameCount = source.frameCount,
             sourceSampleRate = source.sampleRate,
+            sourceChannelCount = source.channelCount,
             outputSampleRate = decoded.sampleRate,
             runtimeSettings = runtimeSettings,
             modelVariant = modelVariant,
@@ -247,7 +251,10 @@ data class MdxRangeSeparationResult(
     val frames: Int,
     val windowCount: Int,
     val elapsedMs: Long,
+    val sourcePcmSha256: String,
+    val sourceFrameCount: Int,
     val sourceSampleRate: Int,
+    val sourceChannelCount: Int,
     val outputSampleRate: Int,
     val runtimeSettings: MdxRuntimeSettings,
     val modelVariant: MdxModelVariant,

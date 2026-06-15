@@ -254,14 +254,13 @@ Implementation notes:
 Current limitations:
 
 - No player UI is wired to the engine yet; the current trigger is a developer-only custom command.
-- No cache index exists yet.
 - No cancellation API exists yet.
 - The offline path still decodes the whole source into memory before processing.
 - Output is WAV only.
 
 ### Phase 2: Cache Index and File Layout
 
-Status: pending
+Status: completed
 
 Goals:
 
@@ -278,6 +277,26 @@ Done criteria:
 - Metadata-only edits such as artist, album, lyrics, or cover changes do not force recomputation when decoded audio is unchanged.
 - Replaced or edited audio content does not accidentally reuse stale stems.
 - Failed partial output does not appear as completed cache.
+
+Implementation notes:
+
+- Added a file-based cache index under the app-private external music directory.
+- Added one cache entry directory per song/model/pipeline tuple under `source-separation/entries`.
+- Added `manifest.json` with explicit `Running`, `Completed`, and `Failed` states.
+- Split cache metadata into song locator fields, audio identity fields, diagnostics, output paths, and error information.
+- Added a decoded PCM SHA-256 audio fingerprint to the separation result and cache manifest.
+- Stored file size and raw modified timestamp only as diagnostics, not cache invalidation inputs.
+- Added work and completed directories so successful runs are promoted from temporary output to stable cache files.
+- Added failed-run cleanup so temporary work files are removed and failed manifests do not appear as completed output.
+- Added cache listing, completed-manifest lookup, and delete helpers for later UI work.
+- Verified `:app:assembleNormalDebug` succeeds after cache integration.
+
+Current limitations:
+
+- Phase 2 cache entries are full-song WAV outputs only.
+- Segment-level readiness and partial playback cache files are still deferred to Phase 5.
+- Completed-cache FLAC promotion is still deferred to Phase 8.
+- The first audio fingerprint is decoded PCM SHA-256 computed during full-song separation; a faster encoded audio-track hash can be evaluated later.
 
 ### Phase 3: Current-Song Manual Separation
 
