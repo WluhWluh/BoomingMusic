@@ -9,6 +9,7 @@ object Playback {
 
     const val SET_UNSHUFFLED_ORDER = "com.mardous.booming.command.set.unshuffled_order"
     const val SET_STOP_POSITION = "com.mardous.booming.command.set.stop_position"
+    const val SEPARATE_CURRENT_SONG_OFFLINE = "com.mardous.booming.command.separate_current_song_offline"
 
     // Custom events
     const val EVENT_MEDIA_CONTENT_CHANGED = "com.mardous.booming.event.media_content_changed"
