@@ -25,10 +25,12 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.mardous.booming.playback.processor.BalanceAudioProcessor
 import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
+import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 
 @OptIn(UnstableApi::class)
 class BoomingMusicRenderersFactory(
     context: Context,
+    private val sourceSeparationMixProcessor: SourceSeparationMixAudioProcessor,
     private val balanceProcessor: BalanceAudioProcessor,
     private val replayGainProcessor: ReplayGainAudioProcessor
 ) : DefaultRenderersFactory(context) {
@@ -39,7 +41,7 @@ class BoomingMusicRenderersFactory(
         enableAudioOutputPlaybackParams: Boolean
     ): AudioSink {
         return DefaultAudioSink.Builder(context)
-            .setAudioProcessors(arrayOf(balanceProcessor, replayGainProcessor))
+            .setAudioProcessors(arrayOf(sourceSeparationMixProcessor, balanceProcessor, replayGainProcessor))
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
             .build()

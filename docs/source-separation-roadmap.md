@@ -203,6 +203,37 @@ Future segment manifests should support at least:
 
 This keeps playback responsive and avoids spending full CPU on songs the user has stopped listening to, while still preserving useful work for later reuse.
 
+### Separated Playback Blend Modes
+
+Separated playback should use a player-screen tri-state control modeled after the existing repeat button:
+
+- `Off`: the default mode. Playback always uses the original source audio file, even if completed separated stems already exist. Stem playback and mixing are not activated. The control uses the base blend icon with the normal disabled/inactive control color.
+- `Global`: playback uses completed separated stems when they are available. The blend slider reads and writes one app-level global blend value. Per-song memory is ignored in this mode, so changing the blend affects every completed-cache song played in Global mode.
+- `PerSong`: playback uses completed separated stems when they are available. The blend slider reads and writes a per-song blend value. The app-level global blend is ignored in this mode. If the current song has no stored per-song blend yet, playback should default to the neutral center blend where both stems are fully present.
+
+The selected mode should be persisted separately from the blend values:
+
+- app-level separated playback mode enum,
+- app-level global blend value,
+- per-song blend value stored with the separated cache entry or a cache-owned playback settings sidecar.
+
+Per-song blend memory should follow the valid separated cache identity instead of volatile library metadata. Metadata-only edits should not erase the per-song blend if the completed stems still match the decoded audio identity. Deleting a song's separated cache should delete its per-song blend memory as well.
+
+On song transitions:
+
+- `Off` mode keeps playback on the original media item.
+- `Global` mode automatically uses completed stems with the global blend when a completed cache exists.
+- `PerSong` mode automatically uses completed stems with that song's saved blend, or the neutral center blend if no saved value exists.
+- If no completed cache exists in `Global` or `PerSong` mode, playback should fall back to the original source without changing the selected mode.
+
+Every explicit user-triggered mode change should show a short toast because the three states are not self-explanatory. Automatic song transitions should not show repeated toasts; an unavailable-cache notice should be reserved for explicit user actions.
+
+The first embedded control can reuse the same visual pattern as repeat mode:
+
+- one base vector icon for `Off` and `Global`, with inactive/active color handled by existing button tint,
+- one per-song vector icon for `PerSong`, using active color,
+- no hardcoded disabled opacity inside the vector files.
+
 ### Boundary and Finalization Strategy
 
 There are three separate boundary concerns:
@@ -362,7 +393,7 @@ Current limitations:
 
 ### Phase 4: Basic Completed-Stem Playback Mode
 
-Status: pending
+Status: completed
 
 Goals:
 
@@ -376,6 +407,35 @@ Done criteria:
 - The blend slider works during playback.
 - Seeking remains accurate enough for daily use.
 - Returning to normal playback is possible.
+
+Implementation notes:
+
+- Added a completed-cache lookup path for the playback service.
+- Added a `SourceSeparationMixAudioProcessor` that lets ExoPlayer play the completed instrumental WAV while synchronously mixing the completed vocals WAV from the same playback position.
+- Added MediaSession commands for enabling or disabling separated playback and for changing the vocals/instrumental blend.
+- Added player ViewModel state for separated playback mode.
+- Added an experimental player-menu control panel with a blend slider and enable/original actions.
+- Preserved normal player controls, pause/resume, seeking, and notification behavior by keeping playback inside the existing Media3 player.
+- Prevented the temporary instrumental stem media item from being saved into the persistent playback queue.
+- Verified `:app:assembleNormalDebug` succeeds.
+
+Current limitations:
+
+- Phase 4 only works after a full-song WAV cache already exists.
+- The blend slider is currently exposed in a menu dialog rather than embedded persistently into every player style.
+- Separated playback is currently a simple enabled/disabled state; it still needs the planned `Off`, `Global`, and `PerSong` mode split.
+- Song transitions to completed caches still need to apply the selected blend mode and the correct global or per-song blend memory automatically.
+- The mixer assumes the completed WAV stems are 16-bit stereo and sample-aligned with the instrumental stem used by ExoPlayer.
+- This still uses completed WAV files; FLAC promotion remains deferred to Phase 8.
+- Play-while-processing and segment readiness remain deferred to Phase 5 and Phase 6.
+
+Planned follow-up before Phase 5:
+
+- Replace or supplement the menu-only separated playback dialog with an embedded tri-state player control.
+- Persist the selected separated playback mode, the global blend value, and per-song blend values.
+- Reapply the correct mode and blend after song changes, seeks, service recreation, and app restart.
+- Show a toast when the user cycles the tri-state control.
+- Keep the existing detailed blend slider as the precise adjustment surface for the active mode.
 
 ### Phase 5: Segment-Based Processing
 

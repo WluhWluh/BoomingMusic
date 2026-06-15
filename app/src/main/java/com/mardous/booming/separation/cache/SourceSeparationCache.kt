@@ -76,6 +76,13 @@ class SourceSeparationCache(
         val vocalsFile = moveIntoDirectory(result.vocalsFile, completedDir, VOCALS_WAV)
         val instrumentalFile = moveIntoDirectory(result.instrumentalFile, completedDir, INSTRUMENTAL_WAV)
         val timingFile = moveIntoDirectory(result.timingFile, completedDir, TIMING_TXT)
+        timingFile.writeText(
+            result.timingReport.toFileText(
+                vocalsFile = vocalsFile,
+                instrumentalFile = instrumentalFile,
+            ),
+            Charsets.UTF_8,
+        )
         val totalBytes = vocalsFile.length() + instrumentalFile.length()
         val now = System.currentTimeMillis()
         val manifest = SourceSeparationManifest(
@@ -190,6 +197,19 @@ class SourceSeparationCache(
         return readEntry(song, modelVariant, pipelineVersion)
             ?.takeIf { it.state == SourceSeparationCacheState.Completed }
             ?.takeIf { it.audioIdentity == audioIdentity }
+    }
+
+    fun readCompletedForSong(
+        song: Song,
+        modelVariant: MdxModelVariant,
+        pipelineVersion: Int = PIPELINE_VERSION,
+    ): SourceSeparationManifest? {
+        return readEntry(song, modelVariant, pipelineVersion)
+            ?.takeIf { it.state == SourceSeparationCacheState.Completed }
+            ?.takeIf { manifest ->
+                val output = manifest.output ?: return@takeIf false
+                File(output.vocalsPath).isFile && File(output.instrumentalPath).isFile
+            }
     }
 
     fun listManifests(): List<SourceSeparationManifest> {

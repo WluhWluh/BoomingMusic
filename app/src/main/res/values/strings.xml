@@ -20,6 +20,15 @@
     <string name="action_previous">Previous</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_source_separation">Separate vocals</string>
+    <string name="action_source_separation_playback">Separated playback</string>
+    <string name="source_separation_playback_enabled">Separated playback enabled</string>
+    <string name="source_separation_playback_disabled">Separated playback disabled</string>
+    <string name="source_separation_blend_title">Stem blend</string>
+    <string name="source_separation_blend_vocals">Vocals</string>
+    <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_enable_playback">Enable</string>
+    <string name="source_separation_restore_original">Original</string>
+    <string name="source_separation_playback_unavailable">Separated playback is unavailable</string>
     <string name="source_separation_preparing">Preparing source separation...</string>
     <string name="source_separation_processing_windows">Processing audio windows</string>
     <string name="source_separation_stage">Source separation: %1$s</string>

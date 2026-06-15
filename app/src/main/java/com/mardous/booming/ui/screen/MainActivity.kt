@@ -86,6 +86,12 @@ class MainActivity : AbsSlidingMusicPanelActivity(), MediaController.Listener {
                 SessionResult(SessionResult.RESULT_SUCCESS)
             }
 
+            Playback.EVENT_SOURCE_SEPARATION_PLAYBACK_CHANGED -> {
+                playerViewModel.updateSourceSeparationPlaybackState(args)
+                playerViewModel.submitEvent(MediaEvent.SourceSeparationPlaybackChanged)
+                SessionResult(SessionResult.RESULT_SUCCESS)
+            }
+
             else -> SessionResult(SessionError.ERROR_NOT_SUPPORTED)
         }
         return Futures.immediateFuture(sessionResult)
