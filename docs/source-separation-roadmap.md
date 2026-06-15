@@ -149,7 +149,7 @@ When the user seeks, the queue should reprioritize around the new playback posit
 
 ### Phase 0: Branch and Planning
 
-Status: in progress
+Status: completed
 
 Goals:
 
@@ -165,7 +165,7 @@ Done criteria:
 
 ### Phase 1: Import the Offline Separation Engine
 
-Status: pending
+Status: completed
 
 Goals:
 
@@ -180,6 +180,27 @@ Done criteria:
 - A debug-only or hidden entry point can separate the current song to WAV files.
 - Output stems sound correct on at least one known test song.
 - The existing playback path still works when separation is unused.
+
+Implementation notes:
+
+- Added ONNX Runtime Android and JTransforms dependencies.
+- Added optional local model asset packaging from `models/uvr-mdx`.
+- Added `models/` to `.gitignore` so local ONNX weights stay out of Git.
+- Copied the locally verified `UVR_MDXNET_9482.onnx` into the ignored model directory for personal debug builds.
+- Added the offline engine under `com.mardous.booming.separation`.
+- Added PCM decoding, sample-rate conversion, WAV writing, MDX STFT/ISTFT, ONNX session setup, and range separation.
+- Added `SourceSeparationEngine`, a Koin-registered internal entry point that can separate a `Song` into vocals and instrumental WAV files under the app-private external music directory.
+- Added a hidden MediaSession command, `Playback.SEPARATE_CURRENT_SONG_OFFLINE`, that separates the currently playing song and returns output file paths in the command result bundle.
+- Verified `:app:assembleNormalDebug` succeeds.
+- Verified the x86_64 debug APK contains `assets/UVR_MDXNET_9482.onnx` and ONNX Runtime native libraries.
+
+Current limitations:
+
+- No player UI is wired to the engine yet; the current trigger is a developer-only custom command.
+- No cache index exists yet.
+- No cancellation API exists yet.
+- The offline path still decodes the whole source into memory before processing.
+- Output is WAV only.
 
 ### Phase 2: Cache Index and File Layout
 
@@ -362,4 +383,3 @@ The first useful milestone should be deliberately modest:
 5. Only then attempt play-while-processing.
 
 This keeps the project useful at each stage and avoids mixing the most fragile playback work with the initial model integration.
-

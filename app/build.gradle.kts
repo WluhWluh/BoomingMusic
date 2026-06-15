@@ -118,6 +118,9 @@ android {
     }
 
     sourceSets {
+        named("main") {
+            assets.directories.add("../models/uvr-mdx")
+        }
         named("normal") {
             kotlin.directories.add("src/shared/java")
         }
@@ -327,4 +330,6 @@ dependencies {
     implementation(libs.versioncompare)
     implementation(libs.commons.text)
     implementation(libs.juniversalchardet)
+    implementation(libs.onnxruntime.android)
+    implementation(libs.jtransforms)
 }

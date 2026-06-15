@@ -77,3 +77,6 @@ Gemfile.lock
 
 local.properties
 /.kotlin/
+
+# Local model weights for personal source-separation builds
+models/
