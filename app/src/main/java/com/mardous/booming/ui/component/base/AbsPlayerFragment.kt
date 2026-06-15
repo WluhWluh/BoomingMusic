@@ -644,9 +644,13 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                         state.completedWindows,
                         state.totalWindows,
                         state.percent,
+                        state.stage ?: getString(R.string.source_separation_processing_windows),
                     )
                 } else {
-                    getString(R.string.source_separation_preparing)
+                    getString(
+                        R.string.source_separation_stage,
+                        state.stage ?: getString(R.string.source_separation_preparing),
+                    )
                 }
                 val snackbar = sourceSeparationSnackbar
                     ?.takeIf { it.isShownOrQueued }

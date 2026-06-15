@@ -75,6 +75,7 @@ class SourceSeparationCache(
         val completedDir = run.completedDir.apply { mkdirs() }
         val vocalsFile = moveIntoDirectory(result.vocalsFile, completedDir, VOCALS_WAV)
         val instrumentalFile = moveIntoDirectory(result.instrumentalFile, completedDir, INSTRUMENTAL_WAV)
+        val timingFile = moveIntoDirectory(result.timingFile, completedDir, TIMING_TXT)
         val totalBytes = vocalsFile.length() + instrumentalFile.length()
         val now = System.currentTimeMillis()
         val manifest = SourceSeparationManifest(
@@ -93,6 +94,7 @@ class SourceSeparationCache(
             output = SourceSeparationOutput(
                 vocalsPath = vocalsFile.absolutePath,
                 instrumentalPath = instrumentalFile.absolutePath,
+                timingPath = timingFile.absolutePath,
                 outputSampleRate = result.outputSampleRate,
                 outputFrameCount = result.frames,
                 windowCount = result.windowCount,
@@ -111,6 +113,7 @@ class SourceSeparationCache(
             result = result.copy(
                 vocalsFile = vocalsFile,
                 instrumentalFile = instrumentalFile,
+                timingFile = timingFile,
             )
         )
     }
@@ -284,6 +287,7 @@ class SourceSeparationCache(
         private const val MANIFEST_FILE_NAME = "manifest.json"
         private const val VOCALS_WAV = "vocals.wav"
         private const val INSTRUMENTAL_WAV = "instrumental.wav"
+        private const val TIMING_TXT = "timing.txt"
 
         fun sha256Hex(bytes: ByteArray): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
