@@ -67,8 +67,11 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
 - Booming Music uses Media3/ExoPlayer through `PlaybackService`.
 - The current playback service already has a custom renderer factory and audio processors, but source separation should not be implemented as a simple `AudioProcessor` unless timestamp alignment is solved.
 - The MDX pipeline requires 44.1 kHz stereo PCM and STFT/ISTFT conversion around ONNX inference.
-- The first implementation can accept temporary WAV segment caches for correctness.
-- Compressed stem storage should come after playback correctness, because MP3/AAC encoder delay and availability can complicate stem alignment.
+- The first implementation can accept temporary WAV or raw PCM segment caches for correctness.
+- Segment output should be built from each MDX window's trimmed stable region, then joined on exact sample boundaries.
+- Playback should not use crossfades as the primary segment-joining strategy. Very short anti-click fades may be considered only if measured or audible boundary artifacts remain.
+- Completed stem storage should default to FLAC because it preserves sample-accurate alignment while saving space compared with WAV.
+- Opus can be evaluated later as an optional small-size mode. MP3 should not be a first target because Android does not provide a reliable platform MP3 encoder and external encoders add size, delay, and licensing complexity.
 - App-private storage is the safest first cache location.
 
 ## Proposed Architecture
@@ -89,7 +92,8 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
   - PCM decoding,
   - optional segment decoding,
   - WAV writing,
-  - future compressed output encoding.
+  - future FLAC output encoding,
+  - optional Opus output experiments.
 - `separation/cache`
   - cache key generation,
   - segment file layout,
@@ -113,17 +117,35 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
 
 ### Cache Identity
 
-Cache entries should not be keyed by song ID alone. The first practical key should include:
+Cache entries should not be invalidated by ordinary metadata edits. Booming Music can edit tags such as artist, album, lyrics, and cover art; those changes may rewrite the source file and update file size or modification time even when the decoded audio content is unchanged.
+
+The cache model should therefore separate song location from audio identity.
+
+Song locator fields help find and display the cache entry:
 
 - song ID,
-- file path or media URI,
-- file size,
-- raw modified timestamp,
-- duration,
+- file path,
+- media URI,
+- title,
+- artist,
+- album.
+
+These fields may change without forcing recomputation.
+
+Audio identity fields decide whether separated stems remain valid:
+
+- audio fingerprint,
+- decoded frame count,
+- decoded sample rate,
+- decoded channel layout,
 - model variant,
 - pipeline version.
 
-This should prevent accidental reuse after a local file is replaced or the separation algorithm changes.
+The first implementation can compute `audioFingerprint` as a SHA-256 hash of the decoded PCM stream during separation. This is slower than hashing the encoded audio track, but it is robust against metadata-only rewrites and can be computed while the offline engine already has decoded audio available.
+
+Later optimization can hash only the encoded audio track samples through `MediaExtractor`, skipping container metadata such as cover art and tags. That faster path must be validated against common local formats before replacing the decoded PCM hash.
+
+File size and raw modified timestamp should be stored as diagnostic fields in the manifest, but they should not be used as mandatory cache invalidation inputs.
 
 ### Segment Model
 
@@ -144,6 +166,41 @@ The scheduler should prioritize:
 5. remaining tail segments.
 
 When the user seeks, the queue should reprioritize around the new playback position.
+
+Segments are a sample-accurate cache format, not independent user-facing songs. Each segment should record:
+
+- global start frame,
+- global end frame,
+- model input window frame range,
+- stable output frame range,
+- sample rate,
+- channel count,
+- stem file paths or byte ranges.
+
+The MDX model already uses overlap and trim internally. For each model window, only the stable center region should be written into the segment timeline. Adjacent stable regions should be concatenated by exact frame index. They should not be crossfaded by default.
+
+### Boundary and Finalization Strategy
+
+There are three separate boundary concerns:
+
+- Model window reconstruction: handled by STFT/ISTFT plus MDX stable-region trim.
+- Playback segment continuity: handled by reading the sample-accurate segment timeline in order.
+- Final cache creation: handled by concatenating completed stable regions in global frame order.
+
+The final whole-song stems should be generated from the same stable segment data used for playback. They should not re-run model inference and should not include playback-only fades. After all segments are complete, the app should atomically promote the full-track stems to the completed-cache format.
+
+Default completed-cache format:
+
+- `vocals.flac`
+- `instrumental.flac`
+
+FLAC is preferred because it is lossless and avoids encoder-delay alignment problems. A manifest should store the exact frame count so decoded FLAC output can be checked against the segment timeline.
+
+Optional future small-cache format:
+
+- Opus, after encode/decode alignment tests pass on target devices.
+
+MP3 is not planned for the first implementation.
 
 ## Development Phases
 
@@ -210,13 +267,16 @@ Goals:
 
 - Define app-private cache directories.
 - Add a persistent cache index.
-- Record model variant, source fingerprint, output files, state, created time, and total size.
+- Record song locator fields separately from audio identity fields.
+- Record audio fingerprint, model variant, pipeline version, output files, state, created time, and total cache size.
+- Store file size and raw modified timestamp as diagnostic metadata only.
 - Add safe cleanup for failed or canceled runs.
 
 Done criteria:
 
 - Completed output can be discovered after app restart.
-- Replaced source files do not accidentally reuse stale stems.
+- Metadata-only edits such as artist, album, lyrics, or cover changes do not force recomputation when decoded audio is unchanged.
+- Replaced or edited audio content does not accidentally reuse stale stems.
 - Failed partial output does not appear as completed cache.
 
 ### Phase 3: Current-Song Manual Separation
@@ -261,9 +321,10 @@ Status: pending
 Goals:
 
 - Replace full-song-only processing with segment state tracking.
-- Write ready segments independently.
+- Write ready segments as sample-accurate stable regions.
 - Make current position and next segment the highest-priority work.
 - Support reprioritization after seek.
+- Avoid default crossfades between model output segments.
 
 Done criteria:
 
@@ -271,6 +332,7 @@ Done criteria:
 - Segment readiness is persisted.
 - Seeking to an unready section reprioritizes that section.
 - Already computed segments are reused.
+- Adjacent ready segments join on exact frame boundaries.
 
 ### Phase 6: Play While Processing
 
@@ -281,7 +343,9 @@ Goals:
 - Start separated playback once the current segment and the next segment are ready.
 - Pause or visually gate separated output when the requested position is not ready.
 - Automatically resume when enough data is available.
+- Read ready stems from the sample-accurate segment timeline.
 - Avoid disruptive playback jumps when segment boundaries become ready.
+- Add only a minimal anti-click fade if direct sample-boundary joins are audibly imperfect.
 
 Done criteria:
 
@@ -289,6 +353,7 @@ Done criteria:
 - If the playback head outruns available separated audio, the UI clearly shows processing.
 - Playback resumes automatically when ready.
 - User seeking during processing remains responsive.
+- Segment transitions are not perceptibly worse than the completed full-song output.
 
 ### Phase 7: Background and Thermal Behavior
 
@@ -313,17 +378,20 @@ Status: pending
 
 Goals:
 
-- Evaluate MP3, AAC/M4A, or another compressed cache format.
-- Verify stem alignment after encoding and decoding.
-- Keep WAV caches while processing, then atomically promote compressed outputs after full-song completion.
-- Delete temporary WAV files after successful compression.
+- Promote completed segment timelines to full-track FLAC stems by default.
+- Store exact frame counts and codec metadata in the cache manifest.
+- Verify decoded FLAC frame count and alignment before deleting temporary segment data.
+- Keep WAV or raw PCM segment caches while processing, then atomically promote completed FLAC outputs after full-song completion.
+- Evaluate Opus later as an optional small-size mode only after encode/decode alignment tests pass.
+- Do not target MP3 for the first implementation.
 
 Done criteria:
 
-- Completed songs use compressed cache files.
-- Compression does not introduce audible stem desync.
-- Temporary WAV files are cleaned up safely.
-- Playback can still use partial WAV segments while a song is not fully complete.
+- Completed songs use FLAC cache files by default.
+- FLAC output preserves the exact expected frame count.
+- Compression does not introduce audible or measurable stem desync.
+- Temporary segment files are cleaned up safely after promotion.
+- Playback can still use partial segment caches while a song is not fully complete.
 
 ### Phase 9: Cache Management UX
 
@@ -365,12 +433,13 @@ Done criteria:
 
 - Model licensing is unclear for redistribution.
 - ONNX Runtime and bundled models will significantly increase APK size.
-- MP3 encoding may require native libraries and licensing review.
-- Compressed stems may drift because of encoder delay or padding.
+- MP3 encoding would require native libraries or third-party encoders and is not planned for the first implementation.
+- Lossy compressed stems may drift because of encoder delay or padding; FLAC avoids this and should be the default completed-cache format.
 - Two independent players are likely to drift and should be avoided unless the Media3 custom-source path proves too expensive.
 - Running inference while playing audio may cause thermal throttling or playback stutter.
 - The prototype currently decodes full songs into memory; a production-like path may need segment or streaming decode.
 - Accurate segment boundary playback will be the hardest part of the project.
+- Crossfading segment boundaries by default could hide alignment bugs while also changing the separated audio. The preferred path is sample-accurate stable-region concatenation.
 
 ## First Implementation Preference
 
