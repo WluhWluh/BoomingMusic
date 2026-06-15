@@ -3,6 +3,7 @@ package com.mardous.booming.separation
 import android.content.Context
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.cache.SourceSeparationCache
+import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.separation.model.MdxModelVariant
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
@@ -14,6 +15,14 @@ class SourceSeparationEngine(
     private val context: Context,
 ) {
     private val cache = SourceSeparationCache(context)
+
+    fun completedCacheForSong(
+        song: Song,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): SourceSeparationManifest? {
+        require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
+        return cache.readCompletedForSong(song, modelVariant)
+    }
 
     fun separateSongToWav(
         song: Song,

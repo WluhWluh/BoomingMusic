@@ -30,6 +30,7 @@ import android.view.MenuItem
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.annotation.CallSuper
 import androidx.annotation.LayoutRes
 import androidx.appcompat.content.res.AppCompatResources
@@ -51,6 +52,9 @@ import coil3.size.Scale
 import com.commit451.coiltransformations.BlurTransformation
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.slider.Slider
+import com.google.android.material.snackbar.Snackbar
 import com.mardous.booming.R
 import com.mardous.booming.core.model.MediaEvent
 import com.mardous.booming.core.model.PaletteColor
@@ -90,6 +94,7 @@ import com.mardous.booming.ui.screen.lyrics.LyricsFragment
 import com.mardous.booming.ui.screen.player.PlayerGesturesController
 import com.mardous.booming.ui.screen.player.PlayerGesturesController.GestureType
 import com.mardous.booming.ui.screen.player.PlayerViewModel
+import com.mardous.booming.ui.screen.player.SourceSeparationPlaybackUiState
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
 import com.mardous.booming.ui.screen.player.cover.CoverPagerFragment
 import com.mardous.booming.ui.screen.tageditor.SongTagEditorActivity
@@ -113,6 +118,8 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
     private var gesturesController: PlayerGesturesController? = null
     private var coverFragment: CoverPagerFragment? = null
     private var sourceSeparationSnackbar: Snackbar? = null
+    private var sourceSeparationPlaybackDialog: AlertDialog? = null
+    private var lastSourceSeparationPlaybackMessage: String? = null
 
     protected abstract val colorSchemeMode: PlayerColorSchemeMode
     protected abstract val playerControlsFragment: AbsPlayerControlsFragment
@@ -149,6 +156,11 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
         viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
             playerViewModel.sourceSeparationStateFlow.collect { state ->
                 onSourceSeparationStateChanged(view, state)
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationPlaybackStateFlow.collect { state ->
+                onSourceSeparationPlaybackStateChanged(view, state)
             }
         }
         viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
@@ -283,6 +295,11 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
 
             R.id.action_source_separation -> {
                 playerViewModel.startSourceSeparationForCurrentSong()
+                true
+            }
+
+            R.id.action_source_separation_playback -> {
+                showSourceSeparationPlaybackDialog()
                 true
             }
 
@@ -435,6 +452,8 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
     override fun onDestroyView() {
         sourceSeparationSnackbar?.dismiss()
         sourceSeparationSnackbar = null
+        sourceSeparationPlaybackDialog?.dismiss()
+        sourceSeparationPlaybackDialog = null
         view?.setOnTouchListener(null)
         gesturesController?.release()
         gesturesController = null
@@ -673,6 +692,45 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                 playerViewModel.clearSourceSeparationStatus()
             }
         }
+    }
+
+    private fun onSourceSeparationPlaybackStateChanged(
+        view: View,
+        state: SourceSeparationPlaybackUiState,
+    ) {
+        val message = state.message?.takeIf { it != lastSourceSeparationPlaybackMessage }
+            ?: return
+        lastSourceSeparationPlaybackMessage = message
+        Snackbar.make(view, message, Snackbar.LENGTH_SHORT).show()
+    }
+
+    private fun showSourceSeparationPlaybackDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_source_separation_playback, null)
+        val slider = dialogView.findViewById<Slider>(R.id.sourceSeparationBlendSlider)
+        val state = playerViewModel.sourceSeparationPlaybackStateFlow.value
+        var pendingBlend = state.blend
+        slider.value = state.blend.coerceIn(slider.valueFrom, slider.valueTo)
+        slider.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) {
+                pendingBlend = value
+                if (playerViewModel.sourceSeparationPlaybackStateFlow.value.enabled) {
+                    playerViewModel.setSourceSeparationBlend(value)
+                }
+            }
+        }
+
+        sourceSeparationPlaybackDialog?.dismiss()
+        sourceSeparationPlaybackDialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.source_separation_blend_title)
+            .setView(dialogView)
+            .setPositiveButton(R.string.source_separation_enable_playback) { _, _ ->
+                playerViewModel.setSourceSeparationPlaybackEnabled(true, pendingBlend)
+            }
+            .setNegativeButton(R.string.source_separation_restore_original) { _, _ ->
+                playerViewModel.setSourceSeparationPlaybackEnabled(false)
+            }
+            .setNeutralButton(android.R.string.cancel, null)
+            .show()
     }
 
     fun setViewAction(view: View, action: NowPlayingAction) {

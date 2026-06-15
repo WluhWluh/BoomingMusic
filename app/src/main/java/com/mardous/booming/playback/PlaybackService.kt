@@ -15,6 +15,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -91,6 +92,7 @@ import com.mardous.booming.playback.library.LibraryProvider
 import com.mardous.booming.playback.library.MediaIDs
 import com.mardous.booming.playback.processor.BalanceAudioProcessor
 import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
+import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.playback.renderer.AlacWorkaroundCodecSelector
 import com.mardous.booming.playback.renderer.BoomingMusicRenderersFactory
 import com.mardous.booming.separation.SourceSeparationEngine
@@ -124,6 +126,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.android.ext.android.inject
 import java.io.ByteArrayOutputStream
+import java.io.File
 import kotlin.random.Random
 
 @OptIn(UnstableApi::class)
@@ -155,6 +158,7 @@ class PlaybackService :
     }
 
     private val playerThread = HandlerThread("Booming-ExoPlayer", Process.THREAD_PRIORITY_AUDIO)
+    private val sourceSeparationMixProcessor: SourceSeparationMixAudioProcessor by inject()
     private val balanceProcessor: BalanceAudioProcessor by inject()
     private val replayGainProcessor: ReplayGainAudioProcessor by inject()
 
@@ -170,6 +174,7 @@ class PlaybackService :
     private var pausedByZeroVolume = false
     private var hasSetUnshuffledOrder = false
     private var stopIndex = -1
+    private var sourceSeparationPlaybackSession: SourceSeparationPlaybackSession? = null
 
     private var headsetClickCount = 0
     private val headsetClickRunnable = Runnable {
@@ -257,7 +262,12 @@ class PlaybackService :
                         .build(), handleAudioFocus
                 )
                 .setRenderersFactory(
-                    BoomingMusicRenderersFactory(this, balanceProcessor, replayGainProcessor)
+                    BoomingMusicRenderersFactory(
+                        this,
+                        sourceSeparationMixProcessor,
+                        balanceProcessor,
+                        replayGainProcessor,
+                    )
                         .setEnableAudioFloatOutput(equalizerManager.audioFloatOutput.value)
                         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
                         .setMediaCodecSelector(AlacWorkaroundCodecSelector())
@@ -308,7 +318,14 @@ class PlaybackService :
 
         mediaStoreObserver.init(this)
 
-        persistentStorage = PersistentStorage(this, serviceScope, player)
+        persistentStorage = PersistentStorage(this, serviceScope, player) {
+            player.mediaItems.map { mediaItem ->
+                sourceSeparationPlaybackSession
+                    ?.takeIf { it.songId.toString() == mediaItem.mediaId }
+                    ?.originalMediaItem
+                    ?: mediaItem
+            }
+        }
         persistentStorage.restoreState { items, shuffleOrder ->
             player.setMediaItems(items.mediaItems, items.startIndex, items.startPositionMs)
             player.prepare()
@@ -363,6 +380,7 @@ class PlaybackService :
         mediaStoreObserver.stop(this)
         mediaSession?.release()
         player.removeListener(this)
+        sourceSeparationMixProcessor.disable()
         player.release()
         playerThread.quitSafely()
         equalizerManager.release()
@@ -406,6 +424,8 @@ class PlaybackService :
         availableCommands.add(SessionCommand(Playback.SET_UNSHUFFLED_ORDER, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SET_STOP_POSITION, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SEPARATE_CURRENT_SONG_OFFLINE, Bundle.EMPTY))
+        availableCommands.add(SessionCommand(Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED, Bundle.EMPTY))
+        availableCommands.add(SessionCommand(Playback.SET_SOURCE_SEPARATION_BLEND, Bundle.EMPTY))
 
         return MediaSession.ConnectionResult.accept(
             availableCommands.build(),
@@ -698,6 +718,31 @@ class PlaybackService :
                 }
             }
 
+            Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED -> {
+                val enabled = args.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, false)
+                if (args.containsKey(Playback.EXTRA_SOURCE_SEPARATION_BLEND)) {
+                    sourceSeparationMixProcessor.setBlend(
+                        args.getFloat(
+                            Playback.EXTRA_SOURCE_SEPARATION_BLEND,
+                            sourceSeparationMixProcessor.blend,
+                        )
+                    )
+                }
+                serviceScope.future {
+                    setSourceSeparationPlaybackEnabled(enabled)
+                }
+            }
+
+            Playback.SET_SOURCE_SEPARATION_BLEND -> {
+                val blend = args.getFloat(
+                    Playback.EXTRA_SOURCE_SEPARATION_BLEND,
+                    sourceSeparationMixProcessor.blend,
+                )
+                serviceScope.future {
+                    setSourceSeparationBlend(blend)
+                }
+            }
+
             else -> Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
         }
     }
@@ -774,6 +819,13 @@ class PlaybackService :
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         val isPlaying = player.isPlaying
+        sourceSeparationPlaybackSession?.let { session ->
+            if (mediaItem?.mediaId == session.songId.toString()) {
+                sourceSeparationMixProcessor.seekTo(player.currentPosition)
+            } else {
+                clearSourceSeparationPlayback(restoreOriginalItem = false)
+            }
+        }
 
         serviceScope.launch(IO) {
             val newSong = repository.songByMediaItem(mediaItem)
@@ -820,6 +872,16 @@ class PlaybackService :
 
         persistentStorage.saveState()
         updateWidgets(force = true)
+    }
+
+    override fun onPositionDiscontinuity(
+        oldPosition: Player.PositionInfo,
+        newPosition: Player.PositionInfo,
+        reason: Int
+    ) {
+        if (sourceSeparationPlaybackSession != null) {
+            sourceSeparationMixProcessor.seekTo(newPosition.positionMs)
+        }
     }
 
     override fun onPlayerError(error: PlaybackException) {
@@ -914,6 +976,158 @@ class PlaybackService :
 
     private fun toggleShuffle() {
         player.shuffleModeEnabled = !player.shuffleModeEnabled
+    }
+
+    private suspend fun setSourceSeparationPlaybackEnabled(enabled: Boolean): SessionResult {
+        return if (enabled) {
+            enableSourceSeparationPlayback()
+        } else {
+            clearSourceSeparationPlayback(restoreOriginalItem = true)
+            sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+        }
+    }
+
+    private suspend fun enableSourceSeparationPlayback(): SessionResult {
+        val mediaItem = player.currentMediaItem
+            ?: return sourceSeparationPlaybackResult(
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = "No playable song is selected.",
+            )
+
+        val song = withContext(IO) {
+            repository.songByMediaItem(mediaItem)
+        }
+        if (song == Song.emptySong) {
+            return sourceSeparationPlaybackResult(
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = "No playable song is selected.",
+            )
+        }
+
+        sourceSeparationPlaybackSession
+            ?.takeIf { it.songId == song.id }
+            ?.let {
+                sourceSeparationMixProcessor.seekTo(player.currentPosition)
+                return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+            }
+
+        val manifest = withContext(IO) {
+            runCatching {
+                sourceSeparationEngine.completedCacheForSong(song)
+            }.getOrNull()
+        }
+        val output = manifest?.output
+            ?: return sourceSeparationPlaybackResult(
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = "No separated cache found for this song.",
+            )
+
+        val vocalsFile = File(output.vocalsPath)
+        val instrumentalFile = File(output.instrumentalPath)
+        if (!vocalsFile.isFile || !instrumentalFile.isFile) {
+            return sourceSeparationPlaybackResult(
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = "Separated stem files are missing.",
+            )
+        }
+
+        clearSourceSeparationPlayback(restoreOriginalItem = false, broadcast = false)
+
+        val index = player.currentMediaItemIndex
+        if (index == C.INDEX_UNSET) {
+            return sourceSeparationPlaybackResult(
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = "No playable song is selected.",
+            )
+        }
+
+        val positionMs = player.currentPosition.coerceAtLeast(0)
+        val playWhenReady = player.playWhenReady
+        val stemMediaItem = mediaItem.buildUpon()
+            .setUri(Uri.fromFile(instrumentalFile))
+            .setMediaId(song.id.toString())
+            .build()
+
+        sourceSeparationMixProcessor.enable(
+            vocalsFile = vocalsFile,
+            positionMs = positionMs,
+            initialBlend = sourceSeparationMixProcessor.blend,
+        )
+        sourceSeparationPlaybackSession = SourceSeparationPlaybackSession(
+            songId = song.id,
+            originalMediaItem = mediaItem,
+            vocalsFile = vocalsFile,
+            instrumentalFile = instrumentalFile,
+        )
+
+        player.replaceMediaItem(index, stemMediaItem)
+        player.seekTo(index, positionMs)
+        player.prepare()
+        player.playWhenReady = playWhenReady
+
+        broadcastSourceSeparationPlaybackChanged()
+        return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+    }
+
+    private fun setSourceSeparationBlend(blend: Float): SessionResult {
+        sourceSeparationMixProcessor.setBlend(blend)
+        broadcastSourceSeparationPlaybackChanged()
+        return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+    }
+
+    private fun clearSourceSeparationPlayback(
+        restoreOriginalItem: Boolean,
+        broadcast: Boolean = true,
+    ) {
+        val session = sourceSeparationPlaybackSession
+        sourceSeparationPlaybackSession = null
+        sourceSeparationMixProcessor.disable()
+
+        if (restoreOriginalItem && session != null) {
+            val index = player.currentMediaItemIndex
+            if (index != C.INDEX_UNSET && player.currentMediaItem?.mediaId == session.songId.toString()) {
+                val positionMs = player.currentPosition.coerceAtLeast(0)
+                val playWhenReady = player.playWhenReady
+                player.replaceMediaItem(index, session.originalMediaItem)
+                player.seekTo(index, positionMs)
+                player.prepare()
+                player.playWhenReady = playWhenReady
+            }
+        }
+
+        if (broadcast) {
+            broadcastSourceSeparationPlaybackChanged()
+        }
+    }
+
+    private fun sourceSeparationPlaybackResult(
+        resultCode: Int,
+        message: String? = null,
+    ): SessionResult {
+        return SessionResult(
+            resultCode,
+            sourceSeparationPlaybackBundle(message),
+        )
+    }
+
+    private fun sourceSeparationPlaybackBundle(message: String? = null): Bundle {
+        return Bundle().apply {
+            putBoolean(
+                Playback.EXTRA_SOURCE_SEPARATION_ENABLED,
+                sourceSeparationPlaybackSession != null,
+            )
+            putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, sourceSeparationMixProcessor.blend)
+            if (!message.isNullOrEmpty()) {
+                putString(Playback.EXTRA_SOURCE_SEPARATION_MESSAGE, message)
+            }
+        }
+    }
+
+    private fun broadcastSourceSeparationPlaybackChanged(message: String? = null) {
+        mediaSession?.broadcastCustomCommand(
+            SessionCommand(Playback.EVENT_SOURCE_SEPARATION_PLAYBACK_CHANGED, Bundle.EMPTY),
+            sourceSeparationPlaybackBundle(message),
+        )
     }
 
     private fun cycleRepeat() {
@@ -1275,3 +1489,10 @@ class PlaybackService :
         private const val FOREGROUND_SERVICE_TIMEOUT = (60 * 1000) * 2L
     }
 }
+
+private data class SourceSeparationPlaybackSession(
+    val songId: Long,
+    val originalMediaItem: MediaItem,
+    val vocalsFile: File,
+    val instrumentalFile: File,
+)
