@@ -59,6 +59,7 @@ data class SourceFileDiagnostics(
 data class SourceSeparationOutput(
     val vocalsPath: String,
     val instrumentalPath: String,
+    val timingPath: String? = null,
     val outputSampleRate: Int,
     val outputFrameCount: Int,
     val windowCount: Int,
