@@ -36,7 +36,8 @@ typealias RestorationListener = (MediaItemsWithStartPosition, ShuffleOrder?) -> 
 class PersistentStorage(
     context: Context,
     private val coroutineScope: CoroutineScope,
-    private val player: AdvancedForwardingPlayer
+    private val player: AdvancedForwardingPlayer,
+    private val mediaItemsProvider: () -> List<MediaItem> = { player.mediaItems }
 ) : KoinComponent {
 
     // Synchronization lock for listener sets
@@ -251,7 +252,7 @@ class PersistentStorage(
                 val shuffleModeEnabled = player.shuffleModeEnabled
                 val position = player.currentMediaItemIndex
                 val positionInTrack = player.currentPosition
-                val mediaItems = player.mediaItems
+                val mediaItems = mediaItemsProvider()
                 val shuffleOrder = when (val shuffleOrder = player.exoPlayer.shuffleOrder) {
                     is ImprovedShuffleOrder -> SerializedOrder.serializedFromOrder(shuffleOrder)
                     else -> null

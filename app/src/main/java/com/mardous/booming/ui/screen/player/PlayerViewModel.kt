@@ -148,6 +148,10 @@ class PlayerViewModel(
         MutableStateFlow<SourceSeparationUiState>(SourceSeparationUiState.Idle)
     val sourceSeparationStateFlow = _sourceSeparationStateFlow.asStateFlow()
 
+    private val _sourceSeparationPlaybackStateFlow =
+        MutableStateFlow(SourceSeparationPlaybackUiState())
+    val sourceSeparationPlaybackStateFlow = _sourceSeparationPlaybackStateFlow.asStateFlow()
+
     private val internalJobs = mutableListOf<Job>()
 
     override fun onCleared() {
@@ -459,6 +463,90 @@ class PlayerViewModel(
         if (_sourceSeparationStateFlow.value !is SourceSeparationUiState.Running) {
             _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
         }
+    }
+
+    fun setSourceSeparationPlaybackEnabled(enabled: Boolean, blend: Float? = null) {
+        viewModelScope.launch {
+            val args = Bundle().apply {
+                putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, enabled)
+                if (blend != null) {
+                    putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, blend)
+                }
+            }
+            val result = sendSourceSeparationPlaybackCommand(
+                action = Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+                args = args,
+            )
+            updateSourceSeparationPlaybackState(result)
+        }
+    }
+
+    fun setSourceSeparationBlend(blend: Float) {
+        viewModelScope.launch {
+            val args = Bundle().apply {
+                putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, blend)
+            }
+            val result = sendSourceSeparationPlaybackCommand(
+                action = Playback.SET_SOURCE_SEPARATION_BLEND,
+                args = args,
+            )
+            updateSourceSeparationPlaybackState(result)
+        }
+    }
+
+    fun updateSourceSeparationPlaybackState(args: Bundle) {
+        updateSourceSeparationPlaybackState(
+            SessionResult(SessionResult.RESULT_SUCCESS, args)
+        )
+    }
+
+    private suspend fun sendSourceSeparationPlaybackCommand(
+        action: String,
+        args: Bundle,
+    ): SessionResult {
+        val controller = mediaController
+            ?: return SessionResult(
+                SessionError.ERROR_INVALID_STATE,
+                Bundle().apply {
+                    putString(
+                        Playback.EXTRA_SOURCE_SEPARATION_MESSAGE,
+                        "Playback is not connected.",
+                    )
+                },
+            )
+
+        return runCatching {
+            controller.sendCustomCommand(SessionCommand(action, Bundle.EMPTY), args).await()
+        }.getOrElse { error ->
+            SessionResult(
+                SessionError.ERROR_UNKNOWN,
+                Bundle().apply {
+                    putString(Playback.EXTRA_SOURCE_SEPARATION_MESSAGE, error.message)
+                },
+            )
+        }
+    }
+
+    private fun updateSourceSeparationPlaybackState(result: SessionResult) {
+        val extras = result.extras
+        val current = _sourceSeparationPlaybackStateFlow.value
+        val message = extras.getString(Playback.EXTRA_SOURCE_SEPARATION_MESSAGE)
+            ?: if (result.resultCode == SessionResult.RESULT_SUCCESS) null
+            else "Source separation playback is unavailable."
+
+        _sourceSeparationPlaybackStateFlow.value = SourceSeparationPlaybackUiState(
+            enabled = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_ENABLED)) {
+                extras.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED)
+            } else {
+                current.enabled
+            },
+            blend = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_BLEND)) {
+                extras.getFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND)
+            } else {
+                current.blend
+            },
+            message = message,
+        )
     }
 
     fun playSongAt(newPosition: Int) {
@@ -815,3 +903,9 @@ sealed class SourceSeparationUiState {
         val message: String?,
     ) : SourceSeparationUiState()
 }
+
+data class SourceSeparationPlaybackUiState(
+    val enabled: Boolean = false,
+    val blend: Float = 0.5f,
+    val message: String? = null,
+)

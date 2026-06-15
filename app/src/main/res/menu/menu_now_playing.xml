@@ -31,6 +31,11 @@
 		android:icon="@drawable/ic_graphic_eq_24dp"
 		app:showAsAction="never"/>
 	<item
+		android:id="@+id/action_source_separation_playback"
+		android:title="@string/action_source_separation_playback"
+		android:icon="@drawable/ic_tune_24dp"
+		app:showAsAction="never"/>
+	<item
 		android:id="@+id/action_sound_settings"
 		android:title="@string/sound_settings"
 		android:icon="@drawable/ic_volume_up_24dp"
