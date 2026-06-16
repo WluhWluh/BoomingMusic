@@ -216,6 +216,45 @@ class SourceSeparationCache(
             }
     }
 
+    fun readSegmentSnapshot(
+        song: Song,
+        modelVariant: MdxModelVariant,
+        pipelineVersion: Int = PIPELINE_VERSION,
+    ): SourceSeparationSegmentSnapshot? {
+        val entryDir = entryDir(song, modelVariant, pipelineVersion)
+        val manifest = readManifest(entryDir) ?: return null
+        val segmentPlan = manifest.segmentPlan ?: return null
+        return manifest.toSegmentSnapshot(entryDir, segmentPlan)
+    }
+
+    fun readSegmentSnapshot(
+        manifest: SourceSeparationManifest,
+    ): SourceSeparationSegmentSnapshot? {
+        val segmentPlan = manifest.segmentPlan ?: return null
+        val entryDir = entryDir(
+            songId = manifest.songLocator.songId,
+            modelVariant = manifest.audioIdentity.modelVariant,
+            pipelineVersion = manifest.pipelineVersion,
+        )
+        return manifest.toSegmentSnapshot(entryDir, segmentPlan)
+    }
+
+    fun updateSegmentState(
+        run: SourceSeparationRun,
+        segmentIndex: Int,
+        state: SourceSeparationSegmentState,
+    ): SourceSeparationManifest? {
+        val manifest = readManifest(run.rootDir) ?: return null
+        val segmentPlan = manifest.segmentPlan ?: return manifest
+        val updatedPlan = segmentPlan.withSegmentState(segmentIndex, state)
+        val updatedManifest = manifest.copy(
+            segmentPlan = updatedPlan,
+            updatedAtEpochMs = System.currentTimeMillis(),
+        )
+        writeManifest(run.rootDir, updatedManifest)
+        return updatedManifest
+    }
+
     fun listManifests(): List<SourceSeparationManifest> {
         val entriesDir = File(rootDir, ENTRIES_DIR_NAME)
         if (!entriesDir.isDirectory) return emptyList()
@@ -244,6 +283,36 @@ class SourceSeparationCache(
             SourceSeparationSegmentStem.Instrumental -> segment.instrumentalPath
         }
         return File(run.rootDir, relativePath)
+    }
+
+    private fun SourceSeparationManifest.toSegmentSnapshot(
+        entryDir: File,
+        segmentPlan: SourceSeparationSegmentPlan,
+    ): SourceSeparationSegmentSnapshot {
+        return SourceSeparationSegmentSnapshot(
+            manifest = this,
+            segmentPlan = segmentPlan,
+            segments = segmentPlan.segments.map { segment ->
+                val vocalsFile = File(entryDir, segment.vocalsPath)
+                val instrumentalFile = File(entryDir, segment.instrumentalPath)
+                val vocalsReady = vocalsFile.isFile && vocalsFile.length() > 0L
+                val instrumentalReady = instrumentalFile.isFile && instrumentalFile.length() > 0L
+                SourceSeparationSegmentFileState(
+                    segment = segment,
+                    state = when {
+                        vocalsReady && instrumentalReady -> SourceSeparationSegmentState.Ready
+                        segment.state == SourceSeparationSegmentState.Running -> SourceSeparationSegmentState.Running
+                        segment.state == SourceSeparationSegmentState.Queued -> SourceSeparationSegmentState.Queued
+                        segment.state == SourceSeparationSegmentState.Failed -> SourceSeparationSegmentState.Failed
+                        else -> SourceSeparationSegmentState.Missing
+                    },
+                    vocalsFile = vocalsFile,
+                    instrumentalFile = instrumentalFile,
+                    vocalsReady = vocalsReady,
+                    instrumentalReady = instrumentalReady,
+                )
+            },
+        )
     }
 
     private fun entryDir(song: Song, modelVariant: MdxModelVariant, pipelineVersion: Int): File {
