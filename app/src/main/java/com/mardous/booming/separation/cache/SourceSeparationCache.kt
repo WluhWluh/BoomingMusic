@@ -404,12 +404,22 @@ class SourceSeparationCache(
 
     private fun copyIntoDirectory(source: File, targetDir: File, targetName: String): File {
         targetDir.mkdirs()
-        val target = File(targetDir, targetName)
-        if (target.exists() && !target.delete()) {
-            error("Could not replace output file: ${target.absolutePath}")
-        }
+        val target = uniqueTargetFile(targetDir, targetName)
         source.copyTo(target, overwrite = true)
         return target
+    }
+
+    private fun uniqueTargetFile(targetDir: File, targetName: String): File {
+        val extensionIndex = targetName.lastIndexOf('.')
+        val base = if (extensionIndex > 0) targetName.substring(0, extensionIndex) else targetName
+        val extension = if (extensionIndex > 0) targetName.substring(extensionIndex) else ""
+        var candidate = File(targetDir, targetName)
+        var suffix = 2
+        while (candidate.exists()) {
+            candidate = File(targetDir, "${base}_$suffix$extension")
+            suffix += 1
+        }
+        return candidate
     }
 
     private fun File.directorySize(): Long {

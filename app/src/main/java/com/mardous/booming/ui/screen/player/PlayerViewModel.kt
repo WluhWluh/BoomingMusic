@@ -143,6 +143,7 @@ class PlayerViewModel(
 
     private val sourceSeparationCancelRequested = AtomicBoolean(false)
     private var sourceSeparationJob: Job? = null
+    private var sourceSeparationPlaybackSyncJob: Job? = null
 
     private val _sourceSeparationStateFlow =
         MutableStateFlow<SourceSeparationUiState>(SourceSeparationUiState.Idle)
@@ -500,15 +501,31 @@ class PlayerViewModel(
     }
 
     private fun syncSourceSeparationPlaybackIfRequested() {
-        val mode = _sourceSeparationBlendModeFlow.value
-        val playbackState = _sourceSeparationPlaybackStateFlow.value
-        if (mode == SourceSeparationBlendMode.Off || playbackState.enabled) {
+        if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
+            _sourceSeparationPlaybackStateFlow.value.enabled ||
+            sourceSeparationPlaybackSyncJob?.isActive == true
+        ) {
             return
         }
-        mediaController?.sendCustomCommand(
-            SessionCommand(Playback.SYNC_SOURCE_SEPARATION_PLAYBACK, Bundle.EMPTY),
-            Bundle.EMPTY,
-        )
+
+        sourceSeparationPlaybackSyncJob = viewModelScope.launch {
+            if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
+                _sourceSeparationPlaybackStateFlow.value.enabled
+            ) {
+                return@launch
+            }
+
+            runCatching {
+                sendSourceSeparationPlaybackCommand(
+                    action = Playback.SYNC_SOURCE_SEPARATION_PLAYBACK,
+                    args = Bundle.EMPTY,
+                )
+            }.onSuccess { result ->
+                updateSourceSeparationPlaybackState(result)
+            }.onFailure { error ->
+                Log.w(TAG, "Failed to sync source separation playback", error)
+            }
+        }
     }
 
     fun setSourceSeparationBlendMode(mode: SourceSeparationBlendMode) {
