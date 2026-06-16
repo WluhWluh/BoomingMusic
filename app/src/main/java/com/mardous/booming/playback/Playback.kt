@@ -12,6 +12,8 @@ object Playback {
     const val SEPARATE_CURRENT_SONG_OFFLINE = "com.mardous.booming.command.separate_current_song_offline"
     const val SET_SOURCE_SEPARATION_PLAYBACK_ENABLED =
         "com.mardous.booming.command.source_separation.playback_enabled"
+    const val SYNC_SOURCE_SEPARATION_PLAYBACK =
+        "com.mardous.booming.command.source_separation.sync_playback"
     const val SET_SOURCE_SEPARATION_BLEND = "com.mardous.booming.command.source_separation.blend"
 
     // Custom events

@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Environment
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.model.MdxModelVariant
+import com.mardous.booming.separation.model.MdxRangePreparation
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -76,9 +77,9 @@ class SourceSeparationCache(
         result: MdxRangeSeparationResult,
     ): SourceSeparationCompletion {
         val completedDir = run.completedDir.apply { mkdirs() }
-        val vocalsFile = moveIntoDirectory(result.vocalsFile, completedDir, VOCALS_WAV)
-        val instrumentalFile = moveIntoDirectory(result.instrumentalFile, completedDir, INSTRUMENTAL_WAV)
-        val timingFile = moveIntoDirectory(result.timingFile, completedDir, TIMING_TXT)
+        val vocalsFile = copyIntoDirectory(result.vocalsFile, completedDir, VOCALS_WAV)
+        val instrumentalFile = copyIntoDirectory(result.instrumentalFile, completedDir, INSTRUMENTAL_WAV)
+        val timingFile = copyIntoDirectory(result.timingFile, completedDir, TIMING_TXT)
         timingFile.writeText(
             result.timingReport.toFileText(
                 vocalsFile = vocalsFile,
@@ -86,7 +87,7 @@ class SourceSeparationCache(
             ),
             Charsets.UTF_8,
         )
-        val totalBytes = vocalsFile.length() + instrumentalFile.length() + run.segmentsDir.directorySize()
+        val totalBytes = run.rootDir.directorySize()
         val now = System.currentTimeMillis()
         val manifest = SourceSeparationManifest(
             pipelineVersion = run.pipelineVersion,
@@ -115,9 +116,6 @@ class SourceSeparationCache(
             createdAtEpochMs = readManifest(run.rootDir)?.createdAtEpochMs ?: now,
             updatedAtEpochMs = now,
         )
-        if (run.workDir.exists()) {
-            run.workDir.deleteRecursively()
-        }
         writeManifest(run.rootDir, manifest)
         return SourceSeparationCompletion(
             manifest = manifest,
@@ -127,6 +125,41 @@ class SourceSeparationCache(
                 timingFile = timingFile,
             )
         )
+    }
+
+    fun updateRunPreparation(
+        run: SourceSeparationRun,
+        preparation: MdxRangePreparation,
+    ): SourceSeparationManifest? {
+        val manifest = readManifest(run.rootDir) ?: return null
+        val now = System.currentTimeMillis()
+        val updatedManifest = manifest.copy(
+            state = SourceSeparationCacheState.Running,
+            audioIdentity = SourceAudioIdentity(
+                audioFingerprint = preparation.sourcePcmSha256,
+                decodedFrameCount = preparation.sourceFrameCount,
+                decodedSampleRate = preparation.sourceSampleRate,
+                decodedChannelCount = preparation.sourceChannelCount,
+                modelVariant = run.modelVariant.name,
+                pipelineVersion = run.pipelineVersion,
+            ),
+            output = SourceSeparationOutput(
+                vocalsPath = preparation.vocalsFile.absolutePath,
+                instrumentalPath = preparation.instrumentalFile.absolutePath,
+                timingPath = preparation.timingFile.absolutePath,
+                outputSampleRate = preparation.outputSampleRate,
+                outputFrameCount = preparation.frames,
+                windowCount = preparation.windowCount,
+                elapsedMs = 0L,
+                totalBytes = preparation.vocalsFile.length() +
+                        preparation.instrumentalFile.length() +
+                        run.segmentsDir.directorySize(),
+            ),
+            segmentPlan = preparation.segmentPlan,
+            updatedAtEpochMs = now,
+        )
+        writeManifest(run.rootDir, updatedManifest)
+        return updatedManifest
     }
 
     fun failRun(
@@ -216,6 +249,22 @@ class SourceSeparationCache(
             }
     }
 
+    fun readPlayableForSong(
+        song: Song,
+        modelVariant: MdxModelVariant,
+        pipelineVersion: Int = PIPELINE_VERSION,
+    ): SourceSeparationManifest? {
+        return readEntry(song, modelVariant, pipelineVersion)
+            ?.takeIf { manifest ->
+                manifest.state == SourceSeparationCacheState.Completed ||
+                        manifest.state == SourceSeparationCacheState.Running
+            }
+            ?.takeIf { manifest ->
+                val output = manifest.output ?: return@takeIf false
+                File(output.vocalsPath).isFile && File(output.instrumentalPath).isFile
+            }
+    }
+
     fun readSegmentSnapshot(
         song: Song,
         modelVariant: MdxModelVariant,
@@ -297,10 +346,12 @@ class SourceSeparationCache(
                 val instrumentalFile = File(entryDir, segment.instrumentalPath)
                 val vocalsReady = vocalsFile.isFile && vocalsFile.length() > 0L
                 val instrumentalReady = instrumentalFile.isFile && instrumentalFile.length() > 0L
+                val filesPresent = vocalsReady && instrumentalReady
                 SourceSeparationSegmentFileState(
                     segment = segment,
                     state = when {
-                        vocalsReady && instrumentalReady -> SourceSeparationSegmentState.Ready
+                        !filesPresent -> SourceSeparationSegmentState.Missing
+                        segment.state == SourceSeparationSegmentState.Ready -> SourceSeparationSegmentState.Ready
                         segment.state == SourceSeparationSegmentState.Running -> SourceSeparationSegmentState.Running
                         segment.state == SourceSeparationSegmentState.Queued -> SourceSeparationSegmentState.Queued
                         segment.state == SourceSeparationSegmentState.Failed -> SourceSeparationSegmentState.Failed
@@ -351,16 +402,13 @@ class SourceSeparationCache(
         }
     }
 
-    private fun moveIntoDirectory(source: File, targetDir: File, targetName: String): File {
+    private fun copyIntoDirectory(source: File, targetDir: File, targetName: String): File {
         targetDir.mkdirs()
         val target = File(targetDir, targetName)
         if (target.exists() && !target.delete()) {
             error("Could not replace output file: ${target.absolutePath}")
         }
-        if (!source.renameTo(target)) {
-            source.copyTo(target, overwrite = true)
-            source.delete()
-        }
+        source.copyTo(target, overwrite = true)
         return target
     }
 

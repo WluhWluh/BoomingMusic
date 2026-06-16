@@ -567,10 +567,14 @@ Implementation notes:
 - Manifest output now records the generated segment plan alongside the completed full-song cache.
 - Added segment snapshots that derive real `Ready`/`Missing` availability from the presence of both stem files instead of trusting manifest state alone.
 - Added a cache helper for updating individual segment states, preparing for queued/running/failed partial processing.
+- The running separation path now writes the segment plan to the manifest before model-window processing starts.
+- Each model window updates its manifest segment state from `Queued` to `Running` to `Ready` as work progresses.
+- Running stem WAV files are preallocated to the full output duration, so completed windows can be written into a song-aligned timeline while future regions remain silent.
+- Completed runs currently copy final WAV files into `completed/` while leaving the running `work/` files in place, allowing an active experimental playback session to keep using the same file paths after final promotion.
 
 ### Phase 6: Play While Processing
 
-Status: pending
+Status: in progress
 
 Goals:
 
@@ -592,6 +596,22 @@ Done criteria:
 - User song changes reprioritize the active song without deleting useful partial cache from the old song.
 - Segment transitions are not perceptibly worse than the completed full-song output.
 - Detailed processing progress is available in the settings sheet without relying on the old indefinite Snackbar.
+
+Implementation notes:
+
+- Added a playable-cache lookup that can return a `Running` cache only when the current playback segment and the following segment are already marked `Ready`.
+- The playback service now tries to use the running full-duration stem WAV timeline, guarded by segment readiness, before falling back to the original source.
+- Added a MediaSession sync command so the UI can request a non-disruptive retry after each separation progress update.
+- If the user has enabled separated playback before the current ready window is available, normal source playback continues and the app retries automatically as windows complete.
+- Verified `:app:assembleNormalDebug` succeeds after the first play-while-processing experiment.
+
+Current limitations:
+
+- Segment processing is still sequential from the beginning of the song.
+- Seeking to an unready position does not reprioritize model inference yet.
+- If separated playback outruns prepared segments, future unprocessed regions in the preallocated WAV timeline will currently play as silence instead of pausing with a clear readiness indicator.
+- The settings sheet still uses the old coarse progress text instead of a dedicated current/next segment readiness model.
+- Running `work/` WAV files are retained after completion for active playback-session stability; a later cleanup strategy should remove them once playback no longer references them.
 
 ### Phase 7: Background and Thermal Behavior
 
