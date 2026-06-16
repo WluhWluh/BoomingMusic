@@ -207,7 +207,7 @@ This keeps playback responsive and avoids spending full CPU on songs the user ha
 
 Separated playback should use a player-screen tri-state control modeled after the existing repeat button:
 
-- `Off`: the default mode. Playback always uses the original source audio file, even if completed separated stems already exist. Stem playback and mixing are not activated. The control uses the base blend icon with the normal disabled/inactive control color.
+- `Off`: the default mode. Playback always uses the original source audio file, even if completed separated stems already exist. Stem playback and mixing are not activated. The control uses the outline blend icon.
 - `Global`: playback uses completed separated stems when they are available. The blend slider reads and writes one app-level global blend value. Per-song memory is ignored in this mode, so changing the blend affects every completed-cache song played in Global mode.
 - `PerSong`: playback uses completed separated stems when they are available. The blend slider reads and writes a per-song blend value. The app-level global blend is ignored in this mode. If the current song has no stored per-song blend yet, playback should default to the neutral center blend where both stems are fully present.
 
@@ -226,13 +226,13 @@ On song transitions:
 - `PerSong` mode automatically uses completed stems with that song's saved blend, or the neutral center blend if no saved value exists.
 - If no completed cache exists in `Global` or `PerSong` mode, playback should fall back to the original source without changing the selected mode.
 
-Every explicit user-triggered mode change should show a short toast because the three states are not self-explanatory. Automatic song transitions should not show repeated toasts; an unavailable-cache notice should be reserved for explicit user actions.
+The embedded control should use icon shape, not disabled alpha or brightness, to communicate state:
 
-The first embedded control can reuse the same visual pattern as repeat mode:
-
-- one base vector icon for `Off` and `Global`, with inactive/active color handled by existing button tint,
-- one per-song vector icon for `PerSong`, using active color,
-- no hardcoded disabled opacity inside the vector files.
+- `ic_stem_blend_outline_24dp` for `Off`,
+- `ic_stem_blend_24dp` for `Global`,
+- `ic_stem_blend_per_song_24dp` for `PerSong`,
+- no toast is shown when cycling modes,
+- all three modes use the normal tint/background treatment of their surrounding player controls.
 
 ### Boundary and Finalization Strategy
 

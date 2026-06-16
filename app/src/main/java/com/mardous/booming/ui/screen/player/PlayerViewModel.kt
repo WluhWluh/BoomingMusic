@@ -152,6 +152,10 @@ class PlayerViewModel(
         MutableStateFlow(SourceSeparationPlaybackUiState())
     val sourceSeparationPlaybackStateFlow = _sourceSeparationPlaybackStateFlow.asStateFlow()
 
+    private val _sourceSeparationBlendModeFlow =
+        MutableStateFlow(SourceSeparationBlendMode.Off)
+    val sourceSeparationBlendModeFlow = _sourceSeparationBlendModeFlow.asStateFlow()
+
     private val internalJobs = mutableListOf<Job>()
 
     override fun onCleared() {
@@ -492,6 +496,16 @@ class PlayerViewModel(
             )
             updateSourceSeparationPlaybackState(result)
         }
+    }
+
+    fun cycleSourceSeparationBlendMode(): SourceSeparationBlendMode {
+        val nextMode = _sourceSeparationBlendModeFlow.value.next()
+        setSourceSeparationBlendMode(nextMode)
+        return nextMode
+    }
+
+    fun setSourceSeparationBlendMode(mode: SourceSeparationBlendMode) {
+        _sourceSeparationBlendModeFlow.value = mode
     }
 
     fun updateSourceSeparationPlaybackState(args: Bundle) {
@@ -909,3 +923,15 @@ data class SourceSeparationPlaybackUiState(
     val blend: Float = 0.5f,
     val message: String? = null,
 )
+
+enum class SourceSeparationBlendMode {
+    Off,
+    Global,
+    PerSong;
+
+    fun next(): SourceSeparationBlendMode = when (this) {
+        Off -> Global
+        Global -> PerSong
+        PerSong -> Off
+    }
+}
