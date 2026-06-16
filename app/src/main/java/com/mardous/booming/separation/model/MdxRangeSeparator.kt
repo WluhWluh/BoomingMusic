@@ -10,6 +10,8 @@ import com.mardous.booming.separation.audio.AudioPcmDecoder
 import com.mardous.booming.separation.audio.DecodedPcmAudio
 import com.mardous.booming.separation.audio.WavFileWriter
 import com.mardous.booming.separation.cache.SourceSeparationCache
+import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
+import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import java.io.File
 import java.nio.FloatBuffer
 import kotlin.coroutines.cancellation.CancellationException
@@ -25,6 +27,7 @@ class MdxRangeSeparator(
     fun separate(
         uri: Uri,
         outputDir: File,
+        segmentOutputDir: File? = null,
         displayName: String,
         startMs: Long = 0L,
         endMs: Long? = null,
@@ -68,7 +71,22 @@ class MdxRangeSeparator(
             )
         }
 
-        val windowCount = ceil(targetFrames.toDouble() / config.generationSize.toDouble()).toInt()
+        val segmentPlan = SourceSeparationSegmentPlan.build(
+            rangeStartFrame = startFrame,
+            rangeEndFrame = endFrame,
+            sampleRate = config.sampleRate,
+            generationSize = config.generationSize,
+            trim = config.trim,
+            chunkSize = config.chunkSize,
+            defaultState = if (segmentOutputDir != null) {
+                SourceSeparationSegmentState.Ready
+            } else {
+                SourceSeparationSegmentState.Missing
+            },
+        )
+        segmentOutputDir?.mkdirs()
+
+        val windowCount = segmentPlan.segmentCount
         val environment = OrtEnvironment.getEnvironment()
         val spectrogram = MdxSpectrogram(config)
 
@@ -88,6 +106,7 @@ class MdxRangeSeparator(
                         val generationStartFrame = startFrame + windowIndex * config.generationSize
                         val remainingFrames = endFrame - generationStartFrame
                         val writeFrames = minOf(config.generationSize, remainingFrames)
+                        val segment = segmentPlan.segments[windowIndex]
                         onProgress(MdxRangeProgress(windowIndex, windowCount, stage = "Preparing window ${windowIndex + 1}/${windowCount}"))
                         val mixWindow = measureElapsed(timing, "Window input") {
                             decoded.toStereoFloatContextWindow(
@@ -134,6 +153,10 @@ class MdxRangeSeparator(
                         measureElapsed(timing, "WAV write") {
                             vocalsWriter.writePcm16(vocalsPcm)
                             instrumentalWriter.writePcm16(instrumentalPcm)
+                            if (segmentOutputDir != null) {
+                                writeSegmentWav(segmentOutputDir, segment.vocalsPath, vocalsPcm)
+                                writeSegmentWav(segmentOutputDir, segment.instrumentalPath, instrumentalPcm)
+                            }
                         }
                         onProgress(MdxRangeProgress(windowIndex + 1, windowCount, stage = "Processed window ${windowIndex + 1}/${windowCount}"))
                         throwIfCanceled(shouldCancel)
@@ -173,10 +196,19 @@ class MdxRangeSeparator(
             sourceSampleRate = source.sampleRate,
             sourceChannelCount = source.channelCount,
             outputSampleRate = decoded.sampleRate,
+            segmentPlan = segmentPlan,
             timingReport = timingReport,
             runtimeSettings = runtimeSettings,
             modelVariant = modelVariant,
         )
+    }
+
+    private fun writeSegmentWav(rootDir: File, relativePath: String, pcm16: ByteArray) {
+        val file = File(rootDir.parentFile ?: rootDir, relativePath)
+        file.parentFile?.mkdirs()
+        WavFileWriter(file, config.sampleRate, MdxDspConfig.STEREO_CHANNELS).use { writer ->
+            writer.writePcm16(pcm16)
+        }
     }
 
     private inline fun <T> measureElapsed(timing: MdxRangeTimingAccumulator, stage: String, block: () -> T): T {
@@ -355,6 +387,7 @@ data class MdxRangeSeparationResult(
     val sourceSampleRate: Int,
     val sourceChannelCount: Int,
     val outputSampleRate: Int,
+    val segmentPlan: SourceSeparationSegmentPlan,
     val timingReport: MdxRangeTimingReport,
     val runtimeSettings: MdxRuntimeSettings,
     val modelVariant: MdxModelVariant,
