@@ -10,6 +10,7 @@ import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import com.mardous.booming.separation.model.MdxRangeSeparator
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import java.io.File
 import kotlin.coroutines.cancellation.CancellationException
 
 class SourceSeparationEngine(
@@ -30,20 +31,140 @@ class SourceSeparationEngine(
         playbackPositionMs: Long,
         modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
     ): SourceSeparationManifest? {
+        return when (val status = playableCacheStatusForSong(song, playbackPositionMs, modelVariant)) {
+            is SourceSeparationPlayableCacheStatus.Ready -> status.manifest
+            SourceSeparationPlayableCacheStatus.Processing,
+            SourceSeparationPlayableCacheStatus.Unavailable -> null
+        }
+    }
+
+    fun playableCacheStatusForSong(
+        song: Song,
+        playbackPositionMs: Long,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): SourceSeparationPlayableCacheStatus {
         require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
-        val manifest = cache.readPlayableForSong(song, modelVariant) ?: return null
+        val manifest = cache.readEntry(song, modelVariant)
+            ?: return SourceSeparationPlayableCacheStatus.Unavailable
         if (manifest.state == SourceSeparationCacheState.Completed) {
-            return manifest
+            return if (manifest.hasUsableOutputFiles()) {
+                SourceSeparationPlayableCacheStatus.Ready(manifest)
+            } else {
+                SourceSeparationPlayableCacheStatus.Unavailable
+            }
+        }
+        if (manifest.state != SourceSeparationCacheState.Running) {
+            return SourceSeparationPlayableCacheStatus.Unavailable
+        }
+        if (!manifest.hasUsableOutputFiles()) {
+            return SourceSeparationPlayableCacheStatus.Processing
         }
 
-        val snapshot = cache.readSegmentSnapshot(manifest) ?: return null
-        val sampleRate = snapshot.segmentPlan.sampleRate.takeIf { it > 0 } ?: return null
+        val snapshot = cache.readSegmentSnapshot(manifest)
+            ?: return SourceSeparationPlayableCacheStatus.Processing
+        val sampleRate = snapshot.segmentPlan.sampleRate.takeIf { it > 0 }
+            ?: return SourceSeparationPlayableCacheStatus.Processing
         val frame = ((playbackPositionMs.coerceAtLeast(0L) * sampleRate) / 1000L)
             .coerceAtMost(Int.MAX_VALUE.toLong())
             .toInt()
-        return manifest.takeIf {
-            snapshot.hasReadyPlaybackWindowAtFrame(frame)
+        return if (snapshot.hasReadyPlaybackWindowAtFrame(frame)) {
+            SourceSeparationPlayableCacheStatus.Ready(manifest)
+        } else {
+            SourceSeparationPlayableCacheStatus.Processing
         }
+    }
+
+    fun playableCacheDebugInfoForSong(
+        song: Song,
+        playbackPositionMs: Long,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): SourceSeparationPlayableCacheDebugInfo {
+        require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
+        val manifest = cache.readEntry(song, modelVariant)
+            ?: return SourceSeparationPlayableCacheDebugInfo(
+                status = "Unavailable",
+                note = "manifestMissing",
+            )
+        val output = manifest.output
+        val vocalsFile = output?.vocalsPath?.let(::File)
+        val instrumentalFile = output?.instrumentalPath?.let(::File)
+        val outputReady = vocalsFile?.isFile == true && instrumentalFile?.isFile == true
+
+        if (manifest.state == SourceSeparationCacheState.Completed) {
+            return SourceSeparationPlayableCacheDebugInfo(
+                status = if (outputReady) "Ready" else "Unavailable",
+                manifestState = manifest.state,
+                manifestUpdatedAtEpochMs = manifest.updatedAtEpochMs,
+                outputReady = outputReady,
+                vocalsLength = vocalsFile?.length(),
+                instrumentalLength = instrumentalFile?.length(),
+                note = if (outputReady) "completed" else "completedOutputMissing",
+            )
+        }
+        if (manifest.state != SourceSeparationCacheState.Running) {
+            return SourceSeparationPlayableCacheDebugInfo(
+                status = "Unavailable",
+                manifestState = manifest.state,
+                manifestUpdatedAtEpochMs = manifest.updatedAtEpochMs,
+                outputReady = outputReady,
+                vocalsLength = vocalsFile?.length(),
+                instrumentalLength = instrumentalFile?.length(),
+                note = "notRunningOrCompleted",
+            )
+        }
+        if (!outputReady) {
+            return SourceSeparationPlayableCacheDebugInfo(
+                status = "Processing",
+                manifestState = manifest.state,
+                manifestUpdatedAtEpochMs = manifest.updatedAtEpochMs,
+                outputReady = false,
+                vocalsLength = vocalsFile?.length(),
+                instrumentalLength = instrumentalFile?.length(),
+                note = "runningOutputMissing",
+            )
+        }
+
+        val snapshot = cache.readSegmentSnapshot(manifest)
+            ?: return SourceSeparationPlayableCacheDebugInfo(
+                status = "Processing",
+                manifestState = manifest.state,
+                manifestUpdatedAtEpochMs = manifest.updatedAtEpochMs,
+                outputReady = true,
+                vocalsLength = vocalsFile.length(),
+                instrumentalLength = instrumentalFile.length(),
+                note = "segmentSnapshotMissing",
+            )
+        val sampleRate = snapshot.segmentPlan.sampleRate.takeIf { it > 0 }
+            ?: return SourceSeparationPlayableCacheDebugInfo(
+                status = "Processing",
+                manifestState = manifest.state,
+                manifestUpdatedAtEpochMs = manifest.updatedAtEpochMs,
+                outputReady = true,
+                vocalsLength = vocalsFile.length(),
+                instrumentalLength = instrumentalFile.length(),
+                note = "invalidSampleRate",
+            )
+        val frame = ((playbackPositionMs.coerceAtLeast(0L) * sampleRate) / 1000L)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+        val segmentIndex = snapshot.segmentPlan.segmentIndexForFrame(frame)
+        val ready = snapshot.hasReadyPlaybackWindowAtFrame(frame)
+        return SourceSeparationPlayableCacheDebugInfo(
+            status = if (ready) "Ready" else "Processing",
+            manifestState = manifest.state,
+            manifestUpdatedAtEpochMs = manifest.updatedAtEpochMs,
+            outputReady = true,
+            vocalsLength = vocalsFile.length(),
+            instrumentalLength = instrumentalFile.length(),
+            frame = frame,
+            sampleRate = sampleRate,
+            segmentIndex = segmentIndex,
+            currentSegment = snapshot.segments.getOrNull(segmentIndex)?.toDebugInfo(),
+            nextSegment = snapshot.segments.getOrNull(segmentIndex + 1)?.toDebugInfo(),
+            readyCount = snapshot.readyCount,
+            totalCount = snapshot.totalCount,
+            note = if (ready) "currentAndNextReady" else "currentOrNextNotReady",
+        )
     }
 
     fun separateSongToWav(
@@ -90,4 +211,80 @@ class SourceSeparationEngine(
             throw error
         }
     }
+}
+
+sealed class SourceSeparationPlayableCacheStatus {
+    data class Ready(val manifest: SourceSeparationManifest) : SourceSeparationPlayableCacheStatus()
+    data object Processing : SourceSeparationPlayableCacheStatus()
+    data object Unavailable : SourceSeparationPlayableCacheStatus()
+}
+
+data class SourceSeparationPlayableCacheDebugInfo(
+    val status: String,
+    val manifestState: SourceSeparationCacheState? = null,
+    val manifestUpdatedAtEpochMs: Long? = null,
+    val outputReady: Boolean = false,
+    val vocalsLength: Long? = null,
+    val instrumentalLength: Long? = null,
+    val frame: Int? = null,
+    val sampleRate: Int? = null,
+    val segmentIndex: Int? = null,
+    val currentSegment: SourceSeparationSegmentDebugInfo? = null,
+    val nextSegment: SourceSeparationSegmentDebugInfo? = null,
+    val readyCount: Int? = null,
+    val totalCount: Int? = null,
+    val note: String? = null,
+) {
+    fun toTraceString(): String {
+        return buildString {
+            append("cacheStatus=").append(status)
+            append(" manifestState=").append(manifestState)
+            append(" outputReady=").append(outputReady)
+            append(" vocalBytes=").append(vocalsLength)
+            append(" instrumentalBytes=").append(instrumentalLength)
+            append(" frame=").append(frame)
+            append(" sampleRate=").append(sampleRate)
+            append(" segmentIndex=").append(segmentIndex)
+            append(" current=").append(currentSegment?.toTraceString())
+            append(" next=").append(nextSegment?.toTraceString())
+            append(" ready=").append(readyCount).append('/').append(totalCount)
+            append(" updatedAt=").append(manifestUpdatedAtEpochMs)
+            append(" note=").append(note)
+        }
+    }
+}
+
+data class SourceSeparationSegmentDebugInfo(
+    val index: Int,
+    val state: String,
+    val playbackStartFrame: Int,
+    val playbackEndFrame: Int,
+    val vocalsReady: Boolean,
+    val instrumentalReady: Boolean,
+    val vocalsLength: Long,
+    val instrumentalLength: Long,
+) {
+    fun toTraceString(): String {
+        return "index=$index,state=$state,start=$playbackStartFrame,end=$playbackEndFrame," +
+                "vocalsReady=$vocalsReady,instrumentalReady=$instrumentalReady," +
+                "vocalsBytes=$vocalsLength,instrumentalBytes=$instrumentalLength"
+    }
+}
+
+private fun SourceSeparationManifest.hasUsableOutputFiles(): Boolean {
+    val output = output ?: return false
+    return File(output.vocalsPath).isFile && File(output.instrumentalPath).isFile
+}
+
+private fun com.mardous.booming.separation.cache.SourceSeparationSegmentFileState.toDebugInfo(): SourceSeparationSegmentDebugInfo {
+    return SourceSeparationSegmentDebugInfo(
+        index = segment.index,
+        state = state.name,
+        playbackStartFrame = segment.playbackStartFrame,
+        playbackEndFrame = segment.playbackEndFrame,
+        vocalsReady = vocalsReady,
+        instrumentalReady = instrumentalReady,
+        vocalsLength = vocalsFile.length(),
+        instrumentalLength = instrumentalFile.length(),
+    )
 }

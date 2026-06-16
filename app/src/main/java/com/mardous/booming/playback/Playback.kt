@@ -27,5 +27,7 @@ object Playback {
     // Source separation extras
     const val EXTRA_SOURCE_SEPARATION_ENABLED = "source_separation_enabled"
     const val EXTRA_SOURCE_SEPARATION_BLEND = "source_separation_blend"
+    const val EXTRA_SOURCE_SEPARATION_PROCESSING = "source_separation_processing"
+    const val EXTRA_SOURCE_SEPARATION_SONG_ID = "source_separation_song_id"
     const val EXTRA_SOURCE_SEPARATION_MESSAGE = "source_separation_message"
 }

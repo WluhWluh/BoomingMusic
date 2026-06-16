@@ -602,14 +602,15 @@ Implementation notes:
 - Added a playable-cache lookup that can return a `Running` cache only when the current playback segment and the following segment are already marked `Ready`.
 - The playback service now tries to use the running full-duration stem WAV timeline, guarded by segment readiness, before falling back to the original source.
 - Added a MediaSession sync command so the UI can request a non-disruptive retry after each separation progress update.
-- If the user has enabled separated playback before the current ready window is available, normal source playback continues and the app retries automatically as windows complete.
+- If the user has enabled separated playback before the current ready window is available, playback now enters a processing gate, pauses, and retries automatically as windows complete.
 - Verified `:app:assembleNormalDebug` succeeds after the first play-while-processing experiment.
+- Seeks during running separated playback now re-check current and next segment readiness. If the target window is not ready, playback restores the original media item, pauses, reports a processing state, and automatically switches back to separated playback when the window becomes ready.
+- Starting a separation while separated playback is requested now uses the same processing gate: playback pauses while the initial playable window is unavailable instead of continuing with the original audio.
 
 Current limitations:
 
 - Segment processing is still sequential from the beginning of the song.
 - Seeking to an unready position does not reprioritize model inference yet.
-- If separated playback outruns prepared segments, future unprocessed regions in the preallocated WAV timeline will currently play as silence instead of pausing with a clear readiness indicator.
 - The settings sheet still uses the old coarse progress text instead of a dedicated current/next segment readiness model.
 - Running `work/` WAV files are retained after completion for active playback-session stability; a later cleanup strategy should remove them once playback no longer references them.
 

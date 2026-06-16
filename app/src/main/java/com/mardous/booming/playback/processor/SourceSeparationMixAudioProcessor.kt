@@ -27,14 +27,23 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     @Volatile
     private var instrumentalGain = 1f
 
+    @Volatile
+    private var inputMode = InputMode.InstrumentalStem
+
     private val lock = Any()
     private var vocalsInput: RandomAccessFile? = null
     private var scratch = ByteArray(0)
 
-    fun enable(vocalsFile: File, positionMs: Long, initialBlend: Float = blend) {
+    fun enable(
+        vocalsFile: File,
+        positionMs: Long,
+        initialBlend: Float = blend,
+        inputMode: InputMode = InputMode.InstrumentalStem,
+    ) {
         setBlend(initialBlend)
         synchronized(lock) {
             closeLocked()
+            this.inputMode = inputMode
             vocalsInput = RandomAccessFile(vocalsFile, "r")
             active = true
             seekToLocked(positionMs)
@@ -95,6 +104,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         }
 
         inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
+        val mode = inputMode
         var vocalsOffset = 0
         while (inputBuffer.remaining() >= frameSize) {
             val inputLeft = inputBuffer.short.toInt()
@@ -103,8 +113,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             val vocalRight = readPcm16(vocalsOffset + BYTES_PER_SAMPLE, bytesRead)
             vocalsOffset += frameSize
 
-            buffer.putShort(mixSample(inputLeft, vocalLeft))
-            buffer.putShort(mixSample(inputRight, vocalRight))
+            buffer.putShort(mixSample(inputLeft, vocalLeft, mode))
+            buffer.putShort(mixSample(inputRight, vocalRight, mode))
         }
 
         if (inputBuffer.hasRemaining()) {
@@ -144,8 +154,14 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         return (low or (high shl 8)).toShort().toInt()
     }
 
-    private fun mixSample(instrumentalSample: Int, vocalSample: Int): Short {
-        return (instrumentalSample * instrumentalGain + vocalSample * vocalsGain)
+    private fun mixSample(inputSample: Int, vocalSample: Int, mode: InputMode): Short {
+        val output = when (mode) {
+            InputMode.InstrumentalStem ->
+                inputSample * instrumentalGain + vocalSample * vocalsGain
+            InputMode.OriginalSource ->
+                inputSample * instrumentalGain + vocalSample * (vocalsGain - instrumentalGain)
+        }
+        return output
             .toInt()
             .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
             .toShort()
@@ -175,5 +191,10 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         private const val DEFAULT_FRAME_SIZE = CHANNEL_COUNT_STEREO * BYTES_PER_SAMPLE
         private const val MILLIS_PER_SECOND = 1000
         private const val WAV_HEADER_SIZE = 44L
+    }
+
+    enum class InputMode {
+        InstrumentalStem,
+        OriginalSource,
     }
 }
