@@ -104,11 +104,10 @@ class PeekPlayerFragment : AbsPlayerFragment(R.layout.fragment_peek_player) {
 
     override fun onMenuInflated(menu: Menu) {
         super.onMenuInflated(menu)
-        menu.removeItem(R.id.menu_source_separation_blend_mode)
         menu.setShowAsAction(R.id.action_favorite)
         menu.setShowAsAction(R.id.action_playing_queue)
         menu.setShowAsAction(R.id.action_show_lyrics)
-        menu.setShowAsAction(R.id.source_separation_blend_mode_button)
+        menu.setShowAsAction(R.id.action_source_separation_settings)
     }
 
     override fun onCreateChildFragments() {

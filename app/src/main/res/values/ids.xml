@@ -18,7 +18,7 @@
     <item name="action_new_playlist" type="id"/>
     <item name="action_import_playlist" type="id"/>
     <item name="action_multi_select_adapter_check_all" type="id"/>
-    <item name="source_separation_blend_mode_button" type="id"/>
+    <item name="source_separation_settings_button" type="id"/>
 
     <item name="id_inset_consumed" type="id"/>
     <item name="id_wave_amplitude_animator" type="id" />

@@ -67,7 +67,7 @@ class GradientPlayerFragment : AbsPlayerFragment(R.layout.fragment_gradient_play
     private fun setupListeners() {
         binding.openQueueButton.setOnClickListener(this)
         binding.showLyricsButton.setOnClickListener(this)
-        binding.sourceSeparationBlendModeButton.setOnClickListener(this)
+        binding.sourceSeparationSettingsButton.setOnClickListener(this)
         binding.soundSettingsButton.setOnClickListener(this)
     }
 
@@ -75,9 +75,7 @@ class GradientPlayerFragment : AbsPlayerFragment(R.layout.fragment_gradient_play
         when (v) {
             binding.openQueueButton -> onQuickActionEvent(NowPlayingAction.OpenPlayQueue)
             binding.showLyricsButton -> onQuickActionEvent(NowPlayingAction.Lyrics)
-            binding.sourceSeparationBlendModeButton -> {
-                playerViewModel.cycleSourceSeparationBlendMode()
-            }
+            binding.sourceSeparationSettingsButton -> onQuickActionEvent(NowPlayingAction.SourceSeparationSettings)
             binding.soundSettingsButton -> onQuickActionEvent(NowPlayingAction.SoundSettings)
         }
     }
@@ -90,8 +88,7 @@ class GradientPlayerFragment : AbsPlayerFragment(R.layout.fragment_gradient_play
         super.onMenuInflated(menu)
         menu.removeItem(R.id.action_playing_queue)
         menu.removeItem(R.id.action_show_lyrics)
-        menu.removeItem(R.id.source_separation_blend_mode_button)
-        menu.removeItem(R.id.menu_source_separation_blend_mode)
+        menu.removeItem(R.id.action_source_separation_settings)
         menu.removeItem(R.id.action_sound_settings)
         menu.removeItem(R.id.action_favorite)
     }
@@ -110,22 +107,22 @@ class GradientPlayerFragment : AbsPlayerFragment(R.layout.fragment_gradient_play
         val oldMaskColor = binding.mask.backgroundTintList?.defaultColor
             ?: Color.TRANSPARENT
         val oldPrimaryTextColor = binding.openQueueButton.iconTint.defaultColor
-        val oldBlendColor = binding.sourceSeparationBlendModeButton.iconTint.defaultColor
+        val oldBlendColor = binding.sourceSeparationSettingsButton.iconTint.defaultColor
         return mutableListOf(
             binding.colorBackground.surfaceTintTarget(scheme.surfaceColor),
             binding.mask.tintTarget(oldMaskColor, scheme.surfaceColor),
             binding.openQueueButton.iconButtonTintTarget(oldPrimaryTextColor, scheme.onSurfaceColor),
             binding.showLyricsButton.iconButtonTintTarget(oldPrimaryTextColor, scheme.onSurfaceColor),
-            binding.sourceSeparationBlendModeButton.iconButtonTintTarget(oldBlendColor, scheme.onSurfaceColor),
+            binding.sourceSeparationSettingsButton.iconButtonTintTarget(oldBlendColor, scheme.onSurfaceColor),
             binding.soundSettingsButton.iconButtonTintTarget(oldPrimaryTextColor, scheme.onSurfaceColor)
         ).also {
             it.addAll(playerControlsFragment.getTintTargets(scheme))
         }
     }
 
-    override fun onSourceSeparationBlendModeChanged(mode: SourceSeparationBlendMode) {
-        super.onSourceSeparationBlendModeChanged(mode)
-        setSourceSeparationBlendButtonState(_binding?.sourceSeparationBlendModeButton, mode)
+    override fun onSourceSeparationSettingsStateChanged(mode: SourceSeparationBlendMode) {
+        super.onSourceSeparationSettingsStateChanged(mode)
+        setSourceSeparationBlendButtonState(_binding?.sourceSeparationSettingsButton, mode)
     }
 
     override fun onLyricsVisibilityChange(animatorSet: AnimatorSet, lyricsVisible: Boolean) {
