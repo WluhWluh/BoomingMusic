@@ -535,7 +535,7 @@ Current limitations:
 
 ### Phase 5: Segment-Based Processing
 
-Status: pending
+Status: in progress
 
 Goals:
 
@@ -557,6 +557,14 @@ Done criteria:
 - Changing songs keeps completed segments but does not let old-song work block the new current song.
 - Adjacent ready segments join on exact frame boundaries.
 - Pausing does not delete completed segment work.
+
+Implementation notes:
+
+- Added `SourceSeparationSegmentPlan` to describe sample-accurate stable regions for a song range.
+- Added `SourceSeparationSegmentScheduler` to rank segments by playback position, near-future need, and idle backfill.
+- Added segment-relative stem file layout metadata to the cache model.
+- The full-song offline separation path now also writes segment WAV outputs under the entry's `segments/` directory so the segment layout is real and inspectable before live playback uses it.
+- Manifest output now records the generated segment plan alongside the completed full-song cache.
 
 ### Phase 6: Play While Processing
 
