@@ -41,6 +41,7 @@ import com.mardous.booming.extensions.getOnBackPressedDispatcher
 import com.mardous.booming.extensions.whichFragment
 import com.mardous.booming.ui.component.base.AbsPlayerControlsFragment
 import com.mardous.booming.ui.component.base.AbsPlayerFragment
+import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
 import com.mardous.booming.util.Preferences
 
 /**
@@ -85,6 +86,9 @@ class M3PlayerFragment : AbsPlayerFragment(R.layout.fragment_m3_player) {
         popupMenu = inflateMenuInView(binding.moreAction)
         setViewAction(binding.openQueueButton, NowPlayingAction.OpenPlayQueue)
         setViewAction(binding.showLyricsButton, NowPlayingAction.Lyrics)
+        binding.sourceSeparationBlendModeButton.setOnClickListener {
+            playerViewModel.cycleSourceSeparationBlendMode()
+        }
         setViewAction(binding.sleepTimerAction, NowPlayingAction.SleepTimer)
         setViewAction(binding.addToPlaylistAction, NowPlayingAction.AddToPlaylist)
     }
@@ -100,6 +104,8 @@ class M3PlayerFragment : AbsPlayerFragment(R.layout.fragment_m3_player) {
         menu.removeItem(R.id.action_playing_queue)
         menu.removeItem(R.id.action_sleep_timer)
         menu.removeItem(R.id.action_show_lyrics)
+        menu.removeItem(R.id.source_separation_blend_mode_button)
+        menu.removeItem(R.id.menu_source_separation_blend_mode)
         menu.removeItem(R.id.action_add_to_playlist)
     }
 
@@ -110,10 +116,12 @@ class M3PlayerFragment : AbsPlayerFragment(R.layout.fragment_m3_player) {
 
     override fun getTintTargets(scheme: PlayerColorScheme): List<PlayerTintTarget> {
         val oldColor = binding.openQueueButton.iconTint.defaultColor
+        val oldBlendColor = binding.sourceSeparationBlendModeButton.iconTint.defaultColor
         return mutableListOf(
             binding.root.surfaceTintTarget(scheme.surfaceColor),
             binding.openQueueButton.iconButtonTintTarget(oldColor, scheme.onSurfaceColor),
             binding.showLyricsButton.iconButtonTintTarget(oldColor, scheme.onSurfaceColor),
+            binding.sourceSeparationBlendModeButton.iconButtonTintTarget(oldBlendColor, scheme.onSurfaceColor),
             binding.sleepTimerAction.iconButtonTintTarget(oldColor, scheme.onSurfaceColor),
             binding.addToPlaylistAction.iconButtonTintTarget(oldColor, scheme.onSurfaceColor),
             binding.moreAction.iconButtonTintTarget(oldColor, scheme.onSurfaceColor),
@@ -132,6 +140,11 @@ class M3PlayerFragment : AbsPlayerFragment(R.layout.fragment_m3_player) {
                 it.contentDescription = getString(R.string.action_show_lyrics)
             }
         }
+    }
+
+    override fun onSourceSeparationBlendModeChanged(mode: SourceSeparationBlendMode) {
+        super.onSourceSeparationBlendModeChanged(mode)
+        setSourceSeparationBlendButtonState(_binding?.sourceSeparationBlendModeButton, mode)
     }
 
     override fun onIsFavoriteChanged(isFavorite: Boolean, withAnimation: Boolean) {
