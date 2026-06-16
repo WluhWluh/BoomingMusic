@@ -41,6 +41,7 @@ class SourceSeparationEngine(
                 .separate(
                     uri = song.uri,
                     outputDir = run.workDir,
+                    segmentOutputDir = run.segmentsDir,
                     displayName = song.fileName,
                     runtimeSettings = runtimeSettings,
                     modelVariant = modelVariant,

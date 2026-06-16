@@ -32,12 +32,14 @@ class SourceSeparationCache(
         val runDir = entryDir(song = song, modelVariant = modelVariant, pipelineVersion = pipelineVersion)
         val workDir = File(runDir, WORK_DIR_NAME)
         val completedDir = File(runDir, COMPLETED_DIR_NAME)
+        val segmentsDir = File(runDir, SEGMENTS_DIR_NAME)
 
         if (workDir.exists()) {
             workDir.deleteRecursively()
         }
         workDir.mkdirs()
         completedDir.mkdirs()
+        segmentsDir.mkdirs()
 
         val now = System.currentTimeMillis()
         val initialManifest = SourceSeparationManifest(
@@ -65,6 +67,7 @@ class SourceSeparationCache(
             rootDir = runDir,
             workDir = workDir,
             completedDir = completedDir,
+            segmentsDir = segmentsDir,
         )
     }
 
@@ -83,7 +86,7 @@ class SourceSeparationCache(
             ),
             Charsets.UTF_8,
         )
-        val totalBytes = vocalsFile.length() + instrumentalFile.length()
+        val totalBytes = vocalsFile.length() + instrumentalFile.length() + run.segmentsDir.directorySize()
         val now = System.currentTimeMillis()
         val manifest = SourceSeparationManifest(
             pipelineVersion = run.pipelineVersion,
@@ -108,6 +111,7 @@ class SourceSeparationCache(
                 elapsedMs = result.elapsedMs,
                 totalBytes = totalBytes,
             ),
+            segmentPlan = result.segmentPlan,
             createdAtEpochMs = readManifest(run.rootDir)?.createdAtEpochMs ?: now,
             updatedAtEpochMs = now,
         )
@@ -230,6 +234,18 @@ class SourceSeparationCache(
         return !dir.exists() || dir.deleteRecursively()
     }
 
+    fun segmentStemFile(
+        run: SourceSeparationRun,
+        segment: SourceSeparationSegment,
+        stem: SourceSeparationSegmentStem,
+    ): File {
+        val relativePath = when (stem) {
+            SourceSeparationSegmentStem.Vocals -> segment.vocalsPath
+            SourceSeparationSegmentStem.Instrumental -> segment.instrumentalPath
+        }
+        return File(run.rootDir, relativePath)
+    }
+
     private fun entryDir(song: Song, modelVariant: MdxModelVariant, pipelineVersion: Int): File {
         return entryDir(song.id, modelVariant.name, pipelineVersion)
     }
@@ -279,6 +295,13 @@ class SourceSeparationCache(
         return target
     }
 
+    private fun File.directorySize(): Long {
+        if (!isDirectory) return 0L
+        return walkTopDown()
+            .filter { it.isFile }
+            .sumOf { it.length() }
+    }
+
     private fun Song.toLocator(): SourceSongLocator {
         return SourceSongLocator(
             songId = id,
@@ -304,6 +327,7 @@ class SourceSeparationCache(
         private const val ENTRIES_DIR_NAME = "entries"
         private const val WORK_DIR_NAME = "work"
         private const val COMPLETED_DIR_NAME = "completed"
+        private const val SEGMENTS_DIR_NAME = "segments"
         private const val MANIFEST_FILE_NAME = "manifest.json"
         private const val VOCALS_WAV = "vocals.wav"
         private const val INSTRUMENTAL_WAV = "instrumental.wav"
@@ -323,9 +347,15 @@ data class SourceSeparationRun(
     val rootDir: File,
     val workDir: File,
     val completedDir: File,
+    val segmentsDir: File,
 )
 
 data class SourceSeparationCompletion(
     val manifest: SourceSeparationManifest,
     val result: MdxRangeSeparationResult,
 )
+
+enum class SourceSeparationSegmentStem {
+    Vocals,
+    Instrumental,
+}

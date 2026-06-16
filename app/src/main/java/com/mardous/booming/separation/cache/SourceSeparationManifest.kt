@@ -11,6 +11,7 @@ data class SourceSeparationManifest(
     val audioIdentity: SourceAudioIdentity,
     val diagnostics: SourceFileDiagnostics,
     val output: SourceSeparationOutput? = null,
+    val segmentPlan: SourceSeparationSegmentPlan? = null,
     val error: SourceSeparationError? = null,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
