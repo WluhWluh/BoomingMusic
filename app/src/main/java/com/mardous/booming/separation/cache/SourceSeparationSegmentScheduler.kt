@@ -3,6 +3,7 @@ package com.mardous.booming.separation.cache
 data class SourceSeparationSegmentWorkItem(
     val segment: SourceSeparationSegment,
     val priority: SourceSeparationSegmentPriority,
+    val state: SourceSeparationSegmentState,
 )
 
 enum class SourceSeparationSegmentPriority {
@@ -14,6 +15,29 @@ enum class SourceSeparationSegmentPriority {
 }
 
 object SourceSeparationSegmentScheduler {
+    fun prioritize(
+        snapshot: SourceSeparationSegmentSnapshot,
+        playbackFrame: Int,
+        nearFutureCount: Int = DEFAULT_NEAR_FUTURE_COUNT,
+    ): List<SourceSeparationSegmentWorkItem> {
+        val pendingSegments = snapshot.segments
+            .filter { it.state != SourceSeparationSegmentState.Ready }
+        if (pendingSegments.isEmpty()) {
+            return emptyList()
+        }
+
+        val currentIndex = snapshot.segmentPlan.segmentIndexForFrame(playbackFrame)
+        return pendingSegments
+            .map { segmentState ->
+                SourceSeparationSegmentWorkItem(
+                    segment = segmentState.segment,
+                    priority = segmentState.segment.priorityFor(currentIndex, nearFutureCount),
+                    state = segmentState.state,
+                )
+            }
+            .sortedByPriority(currentIndex)
+    }
+
     fun prioritize(
         segmentPlan: SourceSeparationSegmentPlan,
         playbackFrame: Int,
@@ -31,13 +55,20 @@ object SourceSeparationSegmentScheduler {
                 SourceSeparationSegmentWorkItem(
                     segment = segment,
                     priority = segment.priorityFor(currentIndex, nearFutureCount),
+                    state = segment.state,
                 )
             }
-            .sortedWith(
-                compareBy<SourceSeparationSegmentWorkItem> { it.priority.ordinal }
-                    .thenBy { distanceFromPlayback(it.segment.index, currentIndex) }
-                    .thenBy { it.segment.index }
-            )
+            .sortedByPriority(currentIndex)
+    }
+
+    private fun List<SourceSeparationSegmentWorkItem>.sortedByPriority(
+        currentIndex: Int,
+    ): List<SourceSeparationSegmentWorkItem> {
+        return sortedWith(
+            compareBy<SourceSeparationSegmentWorkItem> { it.priority.ordinal }
+                .thenBy { distanceFromPlayback(it.segment.index, currentIndex) }
+                .thenBy { it.segment.index }
+        )
     }
 
     private fun SourceSeparationSegment.priorityFor(
