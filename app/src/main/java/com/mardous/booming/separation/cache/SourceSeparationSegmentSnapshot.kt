@@ -23,6 +23,16 @@ data class SourceSeparationSegmentSnapshot(
     fun segmentAtFrame(frame: Int): SourceSeparationSegmentFileState? {
         return segments.getOrNull(segmentPlan.segmentIndexForFrame(frame))
     }
+
+    fun hasReadyPlaybackWindowAtFrame(frame: Int): Boolean {
+        if (segments.isEmpty()) return false
+        val segmentIndex = segmentPlan.segmentIndexForFrame(frame)
+        val current = segments.getOrNull(segmentIndex) ?: return false
+        if (!current.isReady) return false
+
+        val next = segments.getOrNull(segmentIndex + 1)
+        return next == null || next.isReady
+    }
 }
 
 data class SourceSeparationSegmentFileState(

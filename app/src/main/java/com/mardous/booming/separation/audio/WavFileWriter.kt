@@ -8,6 +8,7 @@ class WavFileWriter(
     file: File,
     private val sampleRate: Int,
     private val channelCount: Int,
+    private val declaredDataSizeBytes: Long? = null,
 ) : Closeable {
     private val output = RandomAccessFile(file, "rw")
     private var dataSize = 0L
@@ -16,7 +17,11 @@ class WavFileWriter(
         require(sampleRate > 0) { "Sample rate must be positive." }
         require(channelCount > 0) { "Channel count must be positive." }
         output.setLength(0)
-        writeHeader(0L)
+        val initialDataSize = declaredDataSizeBytes ?: 0L
+        writeHeader(initialDataSize)
+        if (declaredDataSizeBytes != null) {
+            output.setLength(HEADER_SIZE + initialDataSize)
+        }
     }
 
     fun writePcm16(bytes: ByteArray) {
@@ -27,7 +32,11 @@ class WavFileWriter(
 
     override fun close() {
         output.seek(0)
-        writeHeader(dataSize)
+        val finalDataSize = declaredDataSizeBytes ?: dataSize
+        require(dataSize <= finalDataSize) {
+            "WAV data exceeds declared output size."
+        }
+        writeHeader(finalDataSize)
         output.close()
     }
 
