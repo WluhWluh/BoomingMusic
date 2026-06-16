@@ -1048,9 +1048,10 @@ class PlaybackService :
                 return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
             }
 
+        val positionMs = player.currentPosition.coerceAtLeast(0)
         val manifest = withContext(IO) {
             runCatching {
-                sourceSeparationEngine.playableCacheForSong(song, player.currentPosition)
+                sourceSeparationEngine.playableCacheForSong(song, positionMs)
             }.getOrNull()
         }
         val output = manifest?.output
@@ -1081,7 +1082,6 @@ class PlaybackService :
             )
         }
 
-        val positionMs = player.currentPosition.coerceAtLeast(0)
         val playWhenReady = player.playWhenReady
         val originalMediaItem = song.toMediaItem(mediaItem.mediaId)
         val stemMediaItem = originalMediaItem.buildUpon()
@@ -1593,5 +1593,5 @@ private fun MediaItem.isSourceSeparationStemMediaItem(): Boolean {
     val path = uri.path ?: return false
     return uri.scheme == "file" &&
             path.contains("/source-separation/entries/") &&
-            path.contains("_instrumental.")
+            path.substringAfterLast('/').contains("instrumental")
 }
