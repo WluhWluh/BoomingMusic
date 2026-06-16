@@ -30,8 +30,8 @@ import com.mardous.booming.extensions.resources.applyColor
 import com.mardous.booming.extensions.whichFragment
 import com.mardous.booming.ui.component.base.AbsPlayerControlsFragment
 import com.mardous.booming.ui.component.base.AbsPlayerFragment
-import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
 import com.mardous.booming.ui.component.preferences.dialog.ExtraInfoPreferenceDialog
+import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
 import com.mardous.booming.util.Preferences
 
 class ExpressivePlayerFragment : AbsPlayerFragment(R.layout.fragment_expressive_player),
@@ -130,7 +130,9 @@ class ExpressivePlayerFragment : AbsPlayerFragment(R.layout.fragment_expressive_
         setViewAction(binding.favoriteButton, NowPlayingAction.ToggleFavoriteState)
         setViewAction(binding.openQueueButton, NowPlayingAction.OpenPlayQueue)
         binding.showLyricsButton?.let { setViewAction(it, NowPlayingAction.Lyrics) }
-        binding.sourceSeparationBlendModeButton?.setOnClickListener(this)
+        binding.sourceSeparationSettingsButton?.let {
+            setViewAction(it, NowPlayingAction.SourceSeparationSettings)
+        }
         binding.soundSettingsButton?.let { setViewAction(it, NowPlayingAction.SoundSettings) }
     }
 
@@ -144,9 +146,6 @@ class ExpressivePlayerFragment : AbsPlayerFragment(R.layout.fragment_expressive_
         when (view) {
             binding.repeatButton -> playerViewModel.cycleRepeatMode()
             binding.shuffleButton -> playerViewModel.toggleShuffleMode()
-            binding.sourceSeparationBlendModeButton -> {
-                playerViewModel.cycleSourceSeparationBlendMode()
-            }
         }
     }
 
@@ -166,11 +165,10 @@ class ExpressivePlayerFragment : AbsPlayerFragment(R.layout.fragment_expressive_
         menu.removeItem(R.id.action_playing_queue)
         menu.findItem(R.id.action_show_lyrics)?.isVisible = isLandscape()
         menu.findItem(R.id.action_sound_settings)?.isVisible = isLandscape()
-        if (_binding?.sourceSeparationBlendModeButton != null) {
-            menu.removeItem(R.id.source_separation_blend_mode_button)
-            menu.removeItem(R.id.menu_source_separation_blend_mode)
+        if (_binding?.sourceSeparationSettingsButton != null) {
+            menu.removeItem(R.id.action_source_separation_settings)
         } else {
-            menu.removeItem(R.id.source_separation_blend_mode_button)
+            menu.findItem(R.id.action_source_separation_settings)?.isVisible = isLandscape()
         }
     }
 
@@ -204,7 +202,7 @@ class ExpressivePlayerFragment : AbsPlayerFragment(R.layout.fragment_expressive_
         } else {
             scheme.secondaryContainerColor
         }
-        val oldBlendColor = binding.sourceSeparationBlendModeButton?.backgroundTintList?.defaultColor
+        val oldBlendColor = binding.sourceSeparationSettingsButton?.backgroundTintList?.defaultColor
             ?: oldPrimaryTextColor
         return listOfNotNull(
             binding.root.surfaceTintTarget(scheme.surfaceColor),
@@ -216,7 +214,7 @@ class ExpressivePlayerFragment : AbsPlayerFragment(R.layout.fragment_expressive_
             binding.moreButton.tintTarget(oldTonalColor, scheme.secondaryContainerColor),
             binding.repeatButton.tintTarget(oldRepeatColor, newRepeatColor),
             binding.shuffleButton.tintTarget(oldShuffleColor, newShuffleColor),
-            binding.sourceSeparationBlendModeButton?.tintTarget(oldBlendColor, scheme.secondaryContainerColor),
+            binding.sourceSeparationSettingsButton?.tintTarget(oldBlendColor, scheme.secondaryContainerColor),
             binding.openQueueButton.tintTarget(oldTonalColor, scheme.secondaryContainerColor),
             binding.showLyricsButton?.tintTarget(oldTonalColor, scheme.secondaryContainerColor),
             binding.soundSettingsButton?.tintTarget(oldTonalColor, scheme.secondaryContainerColor)
@@ -225,9 +223,9 @@ class ExpressivePlayerFragment : AbsPlayerFragment(R.layout.fragment_expressive_
         }
     }
 
-    override fun onSourceSeparationBlendModeChanged(mode: SourceSeparationBlendMode) {
-        super.onSourceSeparationBlendModeChanged(mode)
-        setSourceSeparationBlendTonalButtonState(_binding?.sourceSeparationBlendModeButton, mode)
+    override fun onSourceSeparationSettingsStateChanged(mode: SourceSeparationBlendMode) {
+        super.onSourceSeparationSettingsStateChanged(mode)
+        setSourceSeparationBlendTonalButtonState(_binding?.sourceSeparationSettingsButton, mode)
     }
 
     override fun onIsFavoriteChanged(isFavorite: Boolean, withAnimation: Boolean) {

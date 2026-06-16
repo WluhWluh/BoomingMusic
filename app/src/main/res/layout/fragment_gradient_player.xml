@@ -78,11 +78,11 @@
                 app:iconTint="?colorOnSurface" />
 
             <com.google.android.material.button.MaterialButton
-                android:id="@id/source_separation_blend_mode_button"
+                android:id="@id/source_separation_settings_button"
                 style="?materialIconButtonStyle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:contentDescription="@string/source_separation_blend_mode_off"
+                android:contentDescription="@string/action_source_separation_settings"
                 app:icon="@drawable/ic_stem_blend_outline_24dp"
                 app:iconTint="?colorOnSurface" />
 
