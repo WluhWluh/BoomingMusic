@@ -426,6 +426,7 @@ class PlaybackService :
         availableCommands.add(SessionCommand(Playback.SET_STOP_POSITION, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SEPARATE_CURRENT_SONG_OFFLINE, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED, Bundle.EMPTY))
+        availableCommands.add(SessionCommand(Playback.SYNC_SOURCE_SEPARATION_PLAYBACK, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SET_SOURCE_SEPARATION_BLEND, Bundle.EMPTY))
 
         return MediaSession.ConnectionResult.accept(
@@ -744,6 +745,12 @@ class PlaybackService :
                 }
             }
 
+            Playback.SYNC_SOURCE_SEPARATION_PLAYBACK -> {
+                serviceScope.future {
+                    syncSourceSeparationPlayback()
+                }
+            }
+
             else -> Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
         }
     }
@@ -1007,6 +1014,13 @@ class PlaybackService :
         }
     }
 
+    private suspend fun syncSourceSeparationPlayback(): SessionResult {
+        if (!sourceSeparationPlaybackRequested || sourceSeparationPlaybackSession != null) {
+            return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+        }
+        return enableSourceSeparationPlayback(showUnavailableMessage = false)
+    }
+
     private suspend fun enableSourceSeparationPlayback(
         showUnavailableMessage: Boolean = true,
     ): SessionResult {
@@ -1037,7 +1051,7 @@ class PlaybackService :
 
         val manifest = withContext(IO) {
             runCatching {
-                sourceSeparationEngine.completedCacheForSong(song)
+                sourceSeparationEngine.playableCacheForSong(song, player.currentPosition)
             }.getOrNull()
         }
         val output = manifest?.output
