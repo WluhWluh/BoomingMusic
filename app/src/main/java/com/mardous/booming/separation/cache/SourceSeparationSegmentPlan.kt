@@ -25,6 +25,21 @@ data class SourceSeparationSegmentPlan(
         return (relativeFrame / generationSize).coerceIn(0, segments.lastIndex)
     }
 
+    fun withSegmentState(
+        segmentIndex: Int,
+        state: SourceSeparationSegmentState,
+    ): SourceSeparationSegmentPlan {
+        return copy(
+            segments = segments.map { segment ->
+                if (segment.index == segmentIndex) {
+                    segment.copy(state = state)
+                } else {
+                    segment
+                }
+            }
+        )
+    }
+
     companion object {
         fun build(
             rangeStartFrame: Int,

@@ -565,6 +565,8 @@ Implementation notes:
 - Added segment-relative stem file layout metadata to the cache model.
 - The full-song offline separation path now also writes segment WAV outputs under the entry's `segments/` directory so the segment layout is real and inspectable before live playback uses it.
 - Manifest output now records the generated segment plan alongside the completed full-song cache.
+- Added segment snapshots that derive real `Ready`/`Missing` availability from the presence of both stem files instead of trusting manifest state alone.
+- Added a cache helper for updating individual segment states, preparing for queued/running/failed partial processing.
 
 ### Phase 6: Play While Processing
 
