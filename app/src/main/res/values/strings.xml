@@ -43,6 +43,7 @@
     <string name="source_separation_status_canceled">Separation canceled for \"%1$s\".</string>
     <string name="source_separation_status_failed">Separation failed for \"%1$s\".</string>
     <string name="source_separation_status_failed_with_message">Separation failed for \"%1$s\": %2$s</string>
+    <string name="source_separation_playback_processing">Processing separated audio for the current position...</string>
     <string name="source_separation_active_mode">Mode: %1$s</string>
     <string name="source_separation_preparing">Preparing source separation...</string>
     <string name="source_separation_processing_windows">Processing audio windows</string>

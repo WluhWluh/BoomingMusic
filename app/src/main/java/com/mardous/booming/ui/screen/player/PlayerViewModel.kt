@@ -499,16 +499,28 @@ class PlayerViewModel(
     }
 
     private fun syncSourceSeparationPlaybackIfRequested() {
+        val playbackState = _sourceSeparationPlaybackStateFlow.value
+        val currentSongId = currentSong.id
+        val currentSongPlaybackReady =
+            playbackState.enabled &&
+                    !playbackState.processing &&
+                    playbackState.songId == currentSongId
         if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
-            _sourceSeparationPlaybackStateFlow.value.enabled ||
+            currentSongPlaybackReady ||
             sourceSeparationPlaybackSyncJob?.isActive == true
         ) {
             return
         }
 
         sourceSeparationPlaybackSyncJob = viewModelScope.launch {
+            val latestPlaybackState = _sourceSeparationPlaybackStateFlow.value
+            val latestSongId = currentSong.id
+            val latestSongPlaybackReady =
+                latestPlaybackState.enabled &&
+                        !latestPlaybackState.processing &&
+                        latestPlaybackState.songId == latestSongId
             if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
-                _sourceSeparationPlaybackStateFlow.value.enabled
+                latestSongPlaybackReady
             ) {
                 return@launch
             }
@@ -576,10 +588,24 @@ class PlayerViewModel(
             } else {
                 current.enabled
             },
+            processing = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_PROCESSING)) {
+                extras.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_PROCESSING)
+            } else {
+                current.processing
+            },
             blend = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_BLEND)) {
                 extras.getFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND)
             } else {
                 current.blend
+            },
+            songId = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_SONG_ID)) {
+                extras.getLong(Playback.EXTRA_SOURCE_SEPARATION_SONG_ID)
+            } else if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_ENABLED) &&
+                !extras.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED)
+            ) {
+                null
+            } else {
+                current.songId
             },
             message = message,
         )
@@ -936,7 +962,9 @@ sealed class SourceSeparationUiState {
 
 data class SourceSeparationPlaybackUiState(
     val enabled: Boolean = false,
+    val processing: Boolean = false,
     val blend: Float = 0.5f,
+    val songId: Long? = null,
     val message: String? = null,
 )
 
