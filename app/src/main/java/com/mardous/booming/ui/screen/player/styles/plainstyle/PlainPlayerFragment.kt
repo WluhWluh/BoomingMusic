@@ -110,10 +110,12 @@ class PlainPlayerFragment : AbsPlayerFragment(R.layout.fragment_plain_player) {
 
     override fun onMenuInflated(menu: Menu) {
         super.onMenuInflated(menu)
+        menu.removeItem(R.id.menu_source_separation_blend_mode)
         menu.setShowAsAction(R.id.action_playing_queue, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
         menu.setShowAsAction(R.id.action_favorite, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
         menu.setShowAsAction(R.id.action_sleep_timer, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
         menu.setShowAsAction(R.id.action_show_lyrics, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
+        menu.setShowAsAction(R.id.source_separation_blend_mode_button, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
     }
 
     override fun onCreateChildFragments() {

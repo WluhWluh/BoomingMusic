@@ -79,6 +79,7 @@ import com.mardous.booming.extensions.navigation.genreDetailArgs
 import com.mardous.booming.extensions.requestView
 import com.mardous.booming.extensions.resources.animateBackgroundColor
 import com.mardous.booming.extensions.resources.animateTintColor
+import com.mardous.booming.extensions.resources.applyColor
 import com.mardous.booming.extensions.resources.inflateMenu
 import com.mardous.booming.extensions.resources.setMarquee
 import com.mardous.booming.extensions.utilities.buildInfoString
@@ -96,6 +97,7 @@ import com.mardous.booming.ui.screen.lyrics.LyricsEditorFragmentArgs
 import com.mardous.booming.ui.screen.lyrics.LyricsFragment
 import com.mardous.booming.ui.screen.player.PlayerGesturesController
 import com.mardous.booming.ui.screen.player.PlayerGesturesController.GestureType
+import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
 import com.mardous.booming.ui.screen.player.PlayerViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationPlaybackUiState
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
@@ -167,6 +169,11 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
             }
         }
         viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationBlendModeFlow.collect { mode ->
+                onSourceSeparationBlendModeChanged(mode)
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
             combine(
                 playerViewModel.currentSongFlow,
                 playerViewModel.colorSchemeFlow
@@ -210,6 +217,9 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                     popupMenu.setOnMenuItemClickListener { onMenuItemClick(it) }
                 }
                 view.setOnClickListener {
+                    popupMenu.menu.onSourceSeparationBlendModeChanged(
+                        playerViewModel.sourceSeparationBlendModeFlow.value
+                    )
                     popupMenu.show()
                 }
                 return popupMenu
@@ -219,7 +229,9 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
     }
 
     @CallSuper
-    protected open fun onMenuInflated(menu: Menu) {}
+    protected open fun onMenuInflated(menu: Menu) {
+        menu.onSourceSeparationBlendModeChanged(playerViewModel.sourceSeparationBlendModeFlow.value)
+    }
 
     protected fun Menu.setShowAsAction(itemId: Int, mode: Int = MenuItem.SHOW_AS_ACTION_IF_ROOM) {
         findItem(itemId)?.setShowAsAction(mode)
@@ -303,6 +315,26 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
 
             R.id.action_source_separation_playback -> {
                 showSourceSeparationPlaybackDialog()
+                true
+            }
+
+            R.id.source_separation_blend_mode_button -> {
+                playerViewModel.cycleSourceSeparationBlendMode()
+                true
+            }
+
+            R.id.action_source_separation_blend_mode_off -> {
+                setSourceSeparationBlendMode(SourceSeparationBlendMode.Off)
+                true
+            }
+
+            R.id.action_source_separation_blend_mode_global -> {
+                setSourceSeparationBlendMode(SourceSeparationBlendMode.Global)
+                true
+            }
+
+            R.id.action_source_separation_blend_mode_per_song -> {
+                setSourceSeparationBlendMode(SourceSeparationBlendMode.PerSong)
                 true
             }
 
@@ -446,6 +478,10 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                     .setTitle(R.string.action_show_lyrics)
             }
         }
+    }
+
+    protected open fun onSourceSeparationBlendModeChanged(mode: SourceSeparationBlendMode) {
+        playerToolbar?.menu?.onSourceSeparationBlendModeChanged(mode)
     }
 
     override fun onLyricsVisibilityChange(animatorSet: AnimatorSet, lyricsVisible: Boolean) {
@@ -741,6 +777,48 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
             .show()
     }
 
+    protected fun setSourceSeparationBlendButtonState(button: MaterialButton?, mode: SourceSeparationBlendMode) {
+        button ?: return
+        button.setIconResource(mode.sourceSeparationBlendIconRes)
+        button.contentDescription = getString(mode.sourceSeparationBlendTitleRes)
+        button.applyColor(
+            color = playerViewModel.colorScheme.onSurfaceColor,
+            isIconButton = true,
+        )
+    }
+
+    protected fun setSourceSeparationBlendTonalButtonState(button: MaterialButton?, mode: SourceSeparationBlendMode) {
+        button ?: return
+        button.setIconResource(mode.sourceSeparationBlendIconRes)
+        button.contentDescription = getString(mode.sourceSeparationBlendTitleRes)
+        button.applyColor(color = playerViewModel.colorScheme.secondaryContainerColor)
+    }
+
+    protected fun setSourceSeparationBlendMode(mode: SourceSeparationBlendMode) {
+        playerViewModel.setSourceSeparationBlendMode(mode)
+    }
+
+    protected fun Menu.onSourceSeparationBlendModeChanged(mode: SourceSeparationBlendMode) {
+        val iconColor = playerViewModel.colorScheme.onSurfaceColor
+        findItem(R.id.source_separation_blend_mode_button)?.apply {
+            setIcon(getSourceSeparationBlendDrawable(mode, iconColor))
+            setTitle(mode.sourceSeparationBlendTitleRes)
+        }
+        findItem(R.id.menu_source_separation_blend_mode)?.apply {
+            setIcon(getSourceSeparationBlendDrawable(mode, iconColor))
+            setTitle(R.string.action_source_separation_blend_mode)
+        }
+        findItem(R.id.action_source_separation_blend_mode_off)?.isChecked =
+            mode == SourceSeparationBlendMode.Off
+        findItem(R.id.action_source_separation_blend_mode_global)?.isChecked =
+            mode == SourceSeparationBlendMode.Global
+        findItem(R.id.action_source_separation_blend_mode_per_song)?.isChecked =
+            mode == SourceSeparationBlendMode.PerSong
+    }
+
+    private fun getSourceSeparationBlendDrawable(mode: SourceSeparationBlendMode, color: Int) =
+        getTintedDrawable(mode.sourceSeparationBlendIconRes, color)
+
     fun setViewAction(view: View, action: NowPlayingAction) {
         view.setOnClickListener { onQuickActionEvent(action) }
     }
@@ -813,6 +891,20 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
         }
     }
 }
+
+private val SourceSeparationBlendMode.sourceSeparationBlendIconRes: Int
+    get() = when (this) {
+        SourceSeparationBlendMode.Off -> R.drawable.ic_stem_blend_outline_24dp
+        SourceSeparationBlendMode.Global -> R.drawable.ic_stem_blend_24dp
+        SourceSeparationBlendMode.PerSong -> R.drawable.ic_stem_blend_per_song_24dp
+    }
+
+private val SourceSeparationBlendMode.sourceSeparationBlendTitleRes: Int
+    get() = when (this) {
+        SourceSeparationBlendMode.Off -> R.string.source_separation_blend_mode_off
+        SourceSeparationBlendMode.Global -> R.string.source_separation_blend_mode_global
+        SourceSeparationBlendMode.PerSong -> R.string.source_separation_blend_mode_per_song
+    }
 
 fun goToArtist(activity: Activity, song: Song) {
     goToDestination(
