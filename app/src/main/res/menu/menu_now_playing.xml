@@ -21,6 +21,31 @@
 		android:icon="@drawable/ic_lyrics_outline_24dp"
 		app:showAsAction="never"/>
 	<item
+		android:id="@id/source_separation_blend_mode_button"
+		android:title="@string/source_separation_blend_mode_off"
+		android:icon="@drawable/ic_stem_blend_outline_24dp"
+		app:showAsAction="never"/>
+	<item
+		android:id="@+id/menu_source_separation_blend_mode"
+		android:title="@string/action_source_separation_blend_mode"
+		android:icon="@drawable/ic_stem_blend_outline_24dp"
+		app:showAsAction="never">
+		<menu>
+			<item
+				android:id="@+id/action_source_separation_blend_mode_off"
+				android:title="@string/source_separation_blend_mode_off"
+				android:checkable="true"/>
+			<item
+				android:id="@+id/action_source_separation_blend_mode_global"
+				android:title="@string/source_separation_blend_mode_global"
+				android:checkable="true"/>
+			<item
+				android:id="@+id/action_source_separation_blend_mode_per_song"
+				android:title="@string/source_separation_blend_mode_per_song"
+				android:checkable="true"/>
+		</menu>
+	</item>
+	<item
 		android:id="@+id/action_equalizer"
 		android:title="@string/equalizer_label"
 		android:icon="@drawable/ic_equalizer_24dp"
