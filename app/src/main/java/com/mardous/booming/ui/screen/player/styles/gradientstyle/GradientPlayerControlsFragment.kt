@@ -80,8 +80,6 @@ class GradientPlayerControlsFragment : AbsPlayerControlsFragment(R.layout.fragme
         setupListeners()
         setViewAction(binding.favorite, NowPlayingAction.ToggleFavoriteState)
         popupMenu = playerFragment?.inflateMenuInView(binding.menu)
-        popupMenu?.menu?.removeItem(R.id.source_separation_blend_mode_button)
-        popupMenu?.menu?.removeItem(R.id.menu_source_separation_blend_mode)
         ViewCompat.setOnApplyWindowInsetsListener(view) { v: View, insets: WindowInsetsCompat ->
             val displayCutout = insets.getInsets(Type.displayCutout())
             v.updatePadding(left = displayCutout.left, right = displayCutout.right)

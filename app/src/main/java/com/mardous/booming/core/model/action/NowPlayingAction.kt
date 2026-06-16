@@ -76,6 +76,10 @@ enum class NowPlayingAction(
         iconRes = R.drawable.ic_media_output_24dp,
         titleRes = R.string.sound_settings
     ),
+    SourceSeparationSettings(
+        iconRes = R.drawable.ic_stem_blend_outline_24dp,
+        titleRes = R.string.action_source_separation_settings
+    ),
     WebSearch(
         iconRes = R.drawable.ic_search_24dp,
         titleRes = R.string.web_search

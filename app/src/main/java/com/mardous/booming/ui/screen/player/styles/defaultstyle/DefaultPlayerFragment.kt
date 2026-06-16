@@ -103,10 +103,9 @@ class DefaultPlayerFragment : AbsPlayerFragment(R.layout.fragment_default_player
     override fun onMenuInflated(menu: Menu) {
         super.onMenuInflated(menu)
         menu.removeItem(R.id.action_sound_settings)
-        menu.removeItem(R.id.menu_source_separation_blend_mode)
         menu.setShowAsAction(R.id.action_favorite, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
         menu.setShowAsAction(R.id.action_show_lyrics, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
-        menu.setShowAsAction(R.id.source_separation_blend_mode_button, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
+        menu.setShowAsAction(R.id.action_source_separation_settings, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
         setupQueueMenuItem(menu)
     }
 

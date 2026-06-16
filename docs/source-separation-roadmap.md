@@ -7,9 +7,10 @@ This document tracks the personal experimental branch for adding on-device two-s
 The target experience is:
 
 - The user starts playback normally.
-- The expanded player exposes a source separation action.
+- The expanded player exposes a source separation settings entry.
+- The entry opens a source separation settings sheet; its icon reflects the active separated playback state.
 - When separation is enabled, the app computes vocals and instrumental stems on device.
-- A horizontal blend slider appears:
+- The settings sheet exposes a horizontal blend slider:
   - one end outputs vocals only,
   - the other end outputs instrumental only,
   - the center plays both stems at full level, approximating the original mix.
@@ -110,9 +111,11 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
   - readiness gating,
   - seek handling.
 - `separation/ui`
-  - player action,
+  - player settings entry,
+  - settings bottom sheet,
   - blend slider,
   - processing indicators,
+  - current-song progress and cache controls,
   - cache management entry points.
 
 ### Cache Identity
@@ -203,17 +206,33 @@ Future segment manifests should support at least:
 
 This keeps playback responsive and avoids spending full CPU on songs the user has stopped listening to, while still preserving useful work for later reuse.
 
-### Separated Playback Blend Modes
+### Separated Playback Settings and Icon State
 
-Separated playback should use a player-screen tri-state control modeled after the existing repeat button:
+Separated playback should be controlled from a source separation settings sheet instead of by directly cycling a player button. The player-screen source separation button is an entry point and state indicator:
 
-- `Off`: the default mode. Playback always uses the original source audio file, even if completed separated stems already exist. Stem playback and mixing are not activated. The control uses the outline blend icon.
-- `Global`: playback uses completed separated stems when they are available. The blend slider reads and writes one app-level global blend value. Per-song memory is ignored in this mode, so changing the blend affects every completed-cache song played in Global mode.
-- `PerSong`: playback uses completed separated stems when they are available. The blend slider reads and writes a per-song blend value. The app-level global blend is ignored in this mode. If the current song has no stored per-song blend yet, playback should default to the neutral center blend where both stems are fully present.
+- tapping it always opens the source separation settings sheet,
+- it does not directly change the separated playback mode,
+- its icon is derived from the current settings.
 
-The selected mode should be persisted separately from the blend values:
+The user-facing behavior is still equivalent to three playback states:
 
-- app-level separated playback mode enum,
+- `Off`: the default state. Playback always uses the original source audio file, even if completed separated stems already exist. Stem playback and mixing are not activated. The entry uses the outline blend icon.
+- `Global`: playback uses completed separated stems when they are available. The blend slider reads and writes one app-level global blend value. Per-song memory is ignored in this state, so changing the blend affects every completed-cache song played while global blending is active.
+- `PerSong`: playback uses completed separated stems when they are available. The blend slider reads and writes a per-song blend value. The app-level global blend is ignored in this state. If the current song has no stored per-song blend yet, playback should default to the neutral center blend where both stems are fully present.
+
+The durable settings should be modeled as two simple concepts:
+
+- app-level separated playback enabled flag,
+- app-level per-song blend memory enabled flag.
+
+The three icon states can then be derived from those concepts:
+
+- disabled playback -> `Off`,
+- enabled playback without per-song memory -> `Global`,
+- enabled playback with per-song memory -> `PerSong`.
+
+Blend values should be persisted separately from these mode settings:
+
 - app-level global blend value,
 - per-song blend value stored with the separated cache entry or a cache-owned playback settings sidecar.
 
@@ -226,13 +245,54 @@ On song transitions:
 - `PerSong` mode automatically uses completed stems with that song's saved blend, or the neutral center blend if no saved value exists.
 - If no completed cache exists in `Global` or `PerSong` mode, playback should fall back to the original source without changing the selected mode.
 
-The embedded control should use icon shape, not disabled alpha or brightness, to communicate state:
+The source separation entry should use icon shape, not disabled alpha or brightness, to communicate state:
 
 - `ic_stem_blend_outline_24dp` for `Off`,
 - `ic_stem_blend_24dp` for `Global`,
 - `ic_stem_blend_per_song_24dp` for `PerSong`,
-- no toast is shown when cycling modes,
+- no toast is shown when the settings change,
 - all three modes use the normal tint/background treatment of their surrounding player controls.
+
+### Source Separation Settings Sheet Strategy
+
+The source separation UI should move toward a dedicated bottom sheet that matches the existing Sound Settings sheet style. The preferred structure is:
+
+- a `BottomSheetDialogFragment`,
+- Compose content wrapped in `BoomingMusicTheme`,
+- `BottomSheetDialogSurface`,
+- `LazyColumn`,
+- `TitledCard`,
+- labeled switches matching Sound Settings rows,
+- a centered Material slider matching the Sound Settings balance control.
+
+Near-term work should avoid building the final full UI before the segment cache and live playback state model exists. The first UI step should be a small settings-entry skeleton:
+
+- rename the current `source_separation_blend_mode_button` concept to a source separation settings entry such as `action_source_separation_settings` or `source_separation_settings_button`,
+- make the entry open the sheet instead of cycling playback mode,
+- keep the three icon states as passive reflections of the real settings,
+- expose only controls that already have reliable backing state,
+- keep long-running progress behavior unchanged until the sheet has a stable progress model.
+
+The final sheet should include:
+
+- master switch for separated playback,
+- switch for remembering blend per song,
+- vocals/instrumental blend slider,
+- current song separation status,
+- current segment and near-future segment readiness once segment processing exists,
+- pause or resume controls only after pause can preserve partial work,
+- cancel or stop controls for discardable full-song jobs,
+- delete-current-song-cache action,
+- links or entry points to broader cache management.
+
+The existing overflow actions should be removed only after the sheet can replace them safely:
+
+- `Separate vocals`,
+- `Separated playback`.
+
+The existing separation progress Snackbar should also be removed only after the settings sheet can display progress. Brief completion, failure, or recovery messages may still use Snackbar or another short transient surface, but detailed progress should live in the sheet.
+
+True pause should not be exposed until partial segment manifests can preserve completed work. The current full-song WAV job can be canceled, but cancellation deletes temporary work; labeling that action as "Pause" would be misleading.
 
 ### Boundary and Finalization Strategy
 
@@ -431,11 +491,47 @@ Current limitations:
 
 Planned follow-up before Phase 5:
 
-- Replace or supplement the menu-only separated playback dialog with an embedded tri-state player control.
-- Persist the selected separated playback mode, the global blend value, and per-song blend values.
-- Reapply the correct mode and blend after song changes, seeks, service recreation, and app restart.
-- Show a toast when the user cycles the tri-state control.
-- Keep the existing detailed blend slider as the precise adjustment surface for the active mode.
+- Replace the direct-cycling blend-mode entry with a source separation settings entry.
+- Add a minimal Sound Settings-style source separation bottom sheet.
+- Model separated playback settings as a master enabled flag plus a per-song-memory flag.
+- Persist the global blend value and per-song blend values separately from those flags.
+- Reapply the correct settings and blend after song changes, seeks, service recreation, and app restart.
+- Keep the existing direct progress Snackbar until the sheet has reliable progress state.
+
+### Phase 4.5: Source Separation Settings Entry Skeleton
+
+Status: in progress
+
+Goals:
+
+- Rename the player source separation entry so it no longer implies direct blend-mode cycling.
+- Make the entry open a Sound Settings-style bottom sheet.
+- Keep the entry icon as a passive state indicator.
+- Add a minimal sheet around the existing completed-stem playback capabilities.
+- Avoid adding fake pause/resume controls before partial segment preservation exists.
+
+Done criteria:
+
+- The source separation entry opens the sheet in every player style that exposes the button. Completed.
+- The entry no longer directly cycles modes. Completed.
+- The sheet can toggle separated playback, toggle per-song blend memory, and adjust the active blend value for completed caches. Completed for the current in-memory prototype state.
+- The icon state updates from the durable settings. Partial: the icon updates from current in-memory mode state, but persistence is still pending.
+- The old separated playback dialog is no longer needed for normal use. Completed.
+- The app still builds and completed-cache playback still works. Completed for `:app:assembleNormalDebug`.
+
+Implementation notes:
+
+- Renamed the player entry from a blend-mode button to a source separation settings entry.
+- Added a Sound Settings-style `SourceSeparationSettingsFragment` bottom sheet.
+- Routed player-style source separation buttons and menu items to the settings sheet.
+- Removed the direct click-to-cycle behavior from player controls.
+- Removed the old separated playback dialog surface.
+
+Current limitations:
+
+- The settings are still in the current `PlayerViewModel` prototype state and are not yet persisted.
+- Per-song blend memory is represented by the mode switch only; actual per-song blend storage is still pending.
+- The long-running separation Snackbar remains until the sheet owns a reliable progress model.
 
 ### Phase 5: Segment-Based Processing
 
@@ -450,6 +546,7 @@ Goals:
 - Preserve partial cache when the user changes songs.
 - Pause or downgrade old-song work when playback moves to a different song.
 - Avoid default crossfades between model output segments.
+- Define real pause/resume semantics around preserved segment manifests instead of full-song temporary WAV cancellation.
 
 Done criteria:
 
@@ -459,6 +556,7 @@ Done criteria:
 - Already computed segments are reused.
 - Changing songs keeps completed segments but does not let old-song work block the new current song.
 - Adjacent ready segments join on exact frame boundaries.
+- Pausing does not delete completed segment work.
 
 ### Phase 6: Play While Processing
 
@@ -473,6 +571,7 @@ Goals:
 - Read ready stems from the sample-accurate segment timeline.
 - Avoid disruptive playback jumps when segment boundaries become ready.
 - Add only a minimal anti-click fade if direct sample-boundary joins are audibly imperfect.
+- Feed current-song readiness and progress into the source separation settings sheet.
 
 Done criteria:
 
@@ -482,6 +581,7 @@ Done criteria:
 - User seeking during processing remains responsive.
 - User song changes reprioritize the active song without deleting useful partial cache from the old song.
 - Segment transitions are not perceptibly worse than the completed full-song output.
+- Detailed processing progress is available in the settings sheet without relying on the old indefinite Snackbar.
 
 ### Phase 7: Background and Thermal Behavior
 
@@ -521,19 +621,26 @@ Done criteria:
 - Temporary segment files are cleaned up safely after promotion.
 - Playback can still use partial segment caches while a song is not fully complete.
 
-### Phase 9: Cache Management UX
+### Phase 9: Cache Management and Full Settings UX
 
 Status: pending
 
 Goals:
 
+- Finish the source separation settings sheet as the main control surface.
+- Remove the old overflow actions once the sheet fully replaces them.
+- Remove the long-running progress Snackbar once progress is represented in the sheet.
 - Add a way to list songs with separated caches.
 - Show cache size and model/pipeline information.
 - Allow deleting a single song's separated cache.
+- Allow deleting the current song's separated cache from the settings sheet.
 - Consider an optional "delete all separated tracks" action.
 
 Done criteria:
 
+- The source separation sheet contains the master switch, per-song memory switch, blend slider, current song progress, pause/resume or stop controls, and current-song cache deletion.
+- The old `Separate vocals` and `Separated playback` overflow actions have been removed.
+- Detailed processing progress no longer depends on an indefinite Snackbar.
 - The user can find all cached separated songs.
 - Deleting cache does not delete original music.
 - Storage usage is visible enough for personal maintenance.
@@ -577,6 +684,9 @@ The first useful milestone should be deliberately modest:
 2. Separate the current song to app-private WAV files.
 3. Add cache indexing.
 4. Play completed cached stems with a blend slider.
-5. Only then attempt play-while-processing.
+5. Add only a minimal source separation settings entry skeleton.
+6. Build segment-based caching and resumable processing semantics.
+7. Only then attempt play-while-processing.
+8. Finish the full settings sheet and remove the older temporary menu/Snackbar surfaces.
 
 This keeps the project useful at each stage and avoids mixing the most fragile playback work with the initial model integration.

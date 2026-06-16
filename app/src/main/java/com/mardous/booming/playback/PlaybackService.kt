@@ -175,6 +175,7 @@ class PlaybackService :
     private var hasSetUnshuffledOrder = false
     private var stopIndex = -1
     private var sourceSeparationPlaybackSession: SourceSeparationPlaybackSession? = null
+    private var sourceSeparationPlaybackRequested = false
 
     private var headsetClickCount = 0
     private val headsetClickRunnable = Runnable {
@@ -819,11 +820,28 @@ class PlaybackService :
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         val isPlaying = player.isPlaying
-        sourceSeparationPlaybackSession?.let { session ->
-            if (mediaItem?.mediaId == session.songId.toString()) {
+        val activeSession = sourceSeparationPlaybackSession
+        if (activeSession != null) {
+            if (mediaItem?.mediaId == activeSession.songId.toString()) {
                 sourceSeparationMixProcessor.seekTo(player.currentPosition)
             } else {
-                clearSourceSeparationPlayback(restoreOriginalItem = false)
+                clearSourceSeparationPlayback(restoreOriginalItem = true, broadcast = false)
+            }
+        }
+        if (sourceSeparationPlaybackRequested && mediaItem != null &&
+            mediaItem.mediaId != activeSession?.songId?.toString()
+        ) {
+            serviceScope.launch {
+                enableSourceSeparationPlayback(showUnavailableMessage = false)
+                if (sourceSeparationPlaybackSession == null) {
+                    broadcastSourceSeparationPlaybackChanged()
+                }
+            }
+        } else if (!sourceSeparationPlaybackRequested &&
+            mediaItem?.isSourceSeparationStemMediaItem() == true
+        ) {
+            serviceScope.launch {
+                restoreCurrentSourceSeparationStemMediaItemIfNeeded()
             }
         }
 
@@ -979,17 +997,22 @@ class PlaybackService :
     }
 
     private suspend fun setSourceSeparationPlaybackEnabled(enabled: Boolean): SessionResult {
+        sourceSeparationPlaybackRequested = enabled
         return if (enabled) {
             enableSourceSeparationPlayback()
         } else {
             clearSourceSeparationPlayback(restoreOriginalItem = true)
+            restoreCurrentSourceSeparationStemMediaItemIfNeeded()
             sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
         }
     }
 
-    private suspend fun enableSourceSeparationPlayback(): SessionResult {
+    private suspend fun enableSourceSeparationPlayback(
+        showUnavailableMessage: Boolean = true,
+    ): SessionResult {
         val mediaItem = player.currentMediaItem
-            ?: return sourceSeparationPlaybackResult(
+            ?: return sourceSeparationPlaybackUnavailable(
+                showMessage = showUnavailableMessage,
                 resultCode = SessionError.ERROR_INVALID_STATE,
                 message = "No playable song is selected.",
             )
@@ -998,7 +1021,8 @@ class PlaybackService :
             repository.songByMediaItem(mediaItem)
         }
         if (song == Song.emptySong) {
-            return sourceSeparationPlaybackResult(
+            return sourceSeparationPlaybackUnavailable(
+                showMessage = showUnavailableMessage,
                 resultCode = SessionError.ERROR_INVALID_STATE,
                 message = "No playable song is selected.",
             )
@@ -1017,7 +1041,8 @@ class PlaybackService :
             }.getOrNull()
         }
         val output = manifest?.output
-            ?: return sourceSeparationPlaybackResult(
+            ?: return sourceSeparationPlaybackUnavailable(
+                showMessage = showUnavailableMessage,
                 resultCode = SessionError.ERROR_INVALID_STATE,
                 message = "No separated cache found for this song.",
             )
@@ -1025,7 +1050,8 @@ class PlaybackService :
         val vocalsFile = File(output.vocalsPath)
         val instrumentalFile = File(output.instrumentalPath)
         if (!vocalsFile.isFile || !instrumentalFile.isFile) {
-            return sourceSeparationPlaybackResult(
+            return sourceSeparationPlaybackUnavailable(
+                showMessage = showUnavailableMessage,
                 resultCode = SessionError.ERROR_INVALID_STATE,
                 message = "Separated stem files are missing.",
             )
@@ -1035,7 +1061,8 @@ class PlaybackService :
 
         val index = player.currentMediaItemIndex
         if (index == C.INDEX_UNSET) {
-            return sourceSeparationPlaybackResult(
+            return sourceSeparationPlaybackUnavailable(
+                showMessage = showUnavailableMessage,
                 resultCode = SessionError.ERROR_INVALID_STATE,
                 message = "No playable song is selected.",
             )
@@ -1043,7 +1070,8 @@ class PlaybackService :
 
         val positionMs = player.currentPosition.coerceAtLeast(0)
         val playWhenReady = player.playWhenReady
-        val stemMediaItem = mediaItem.buildUpon()
+        val originalMediaItem = song.toMediaItem(mediaItem.mediaId)
+        val stemMediaItem = originalMediaItem.buildUpon()
             .setUri(Uri.fromFile(instrumentalFile))
             .setMediaId(song.id.toString())
             .build()
@@ -1055,7 +1083,8 @@ class PlaybackService :
         )
         sourceSeparationPlaybackSession = SourceSeparationPlaybackSession(
             songId = song.id,
-            originalMediaItem = mediaItem,
+            mediaItemIndex = index,
+            originalMediaItem = originalMediaItem,
             vocalsFile = vocalsFile,
             instrumentalFile = instrumentalFile,
         )
@@ -1084,20 +1113,68 @@ class PlaybackService :
         sourceSeparationMixProcessor.disable()
 
         if (restoreOriginalItem && session != null) {
-            val index = player.currentMediaItemIndex
-            if (index != C.INDEX_UNSET && player.currentMediaItem?.mediaId == session.songId.toString()) {
-                val positionMs = player.currentPosition.coerceAtLeast(0)
-                val playWhenReady = player.playWhenReady
-                player.replaceMediaItem(index, session.originalMediaItem)
-                player.seekTo(index, positionMs)
-                player.prepare()
-                player.playWhenReady = playWhenReady
-            }
+            restoreOriginalMediaItem(session)
         }
 
         if (broadcast) {
             broadcastSourceSeparationPlaybackChanged()
         }
+    }
+
+    private suspend fun restoreCurrentSourceSeparationStemMediaItemIfNeeded() {
+        val index = player.currentMediaItemIndex
+        val mediaItem = player.currentMediaItem
+        if (index == C.INDEX_UNSET || mediaItem?.isSourceSeparationStemMediaItem() != true) {
+            return
+        }
+
+        val song = withContext(IO) {
+            repository.songByMediaItem(mediaItem)
+        }
+        if (song == Song.emptySong) {
+            return
+        }
+
+        val positionMs = player.currentPosition.coerceAtLeast(0)
+        val playWhenReady = player.playWhenReady
+        player.replaceMediaItem(index, song.toMediaItem(mediaItem.mediaId))
+        player.seekTo(index, positionMs)
+        player.prepare()
+        player.playWhenReady = playWhenReady
+        broadcastSourceSeparationPlaybackChanged()
+    }
+
+    private fun restoreOriginalMediaItem(session: SourceSeparationPlaybackSession) {
+        val sessionMediaId = session.songId.toString()
+        val index = session.mediaItemIndex
+            .takeIf { it in 0 until player.mediaItemCount }
+            ?.takeIf { player.getMediaItemAt(it).mediaId == sessionMediaId }
+            ?: (0 until player.mediaItemCount).firstOrNull {
+                player.getMediaItemAt(it).mediaId == sessionMediaId &&
+                        player.getMediaItemAt(it).isSourceSeparationStemMediaItem()
+            }
+            ?: return
+
+        val isCurrentItem = index == player.currentMediaItemIndex
+        val positionMs = player.currentPosition.coerceAtLeast(0)
+        val playWhenReady = player.playWhenReady
+        player.replaceMediaItem(index, session.originalMediaItem)
+        if (isCurrentItem) {
+            player.seekTo(index, positionMs)
+            player.prepare()
+            player.playWhenReady = playWhenReady
+        }
+    }
+
+    private fun sourceSeparationPlaybackUnavailable(
+        showMessage: Boolean,
+        resultCode: Int,
+        message: String,
+    ): SessionResult {
+        return sourceSeparationPlaybackResult(
+            resultCode = if (showMessage) resultCode else SessionResult.RESULT_SUCCESS,
+            message = message.takeIf { showMessage },
+        )
     }
 
     private fun sourceSeparationPlaybackResult(
@@ -1492,7 +1569,16 @@ class PlaybackService :
 
 private data class SourceSeparationPlaybackSession(
     val songId: Long,
+    val mediaItemIndex: Int,
     val originalMediaItem: MediaItem,
     val vocalsFile: File,
     val instrumentalFile: File,
 )
+
+private fun MediaItem.isSourceSeparationStemMediaItem(): Boolean {
+    val uri = localConfiguration?.uri ?: return false
+    val path = uri.path ?: return false
+    return uri.scheme == "file" &&
+            path.contains("/source-separation/entries/") &&
+            path.contains("_instrumental.")
+}
