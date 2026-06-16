@@ -288,6 +288,15 @@ private fun SourceSeparationSettingsSheet(
                             modifier = Modifier.padding(cardContentPadding)
                         ) {
                             SourceSeparationStatusText(separationState)
+                            AnimatedVisibility(
+                                visible = playbackState.processing
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.source_separation_playback_processing),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
 
                             AnimatedVisibility(
                                 visible = separationState is SourceSeparationUiState.Running
