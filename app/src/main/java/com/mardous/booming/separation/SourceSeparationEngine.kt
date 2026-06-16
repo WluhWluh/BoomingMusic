@@ -3,6 +3,7 @@ package com.mardous.booming.separation
 import android.content.Context
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.cache.SourceSeparationCache
+import com.mardous.booming.separation.cache.SourceSeparationCacheState
 import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.separation.model.MdxModelVariant
 import com.mardous.booming.separation.model.MdxRangeProgress
@@ -22,6 +23,27 @@ class SourceSeparationEngine(
     ): SourceSeparationManifest? {
         require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
         return cache.readCompletedForSong(song, modelVariant)
+    }
+
+    fun playableCacheForSong(
+        song: Song,
+        playbackPositionMs: Long,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): SourceSeparationManifest? {
+        require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
+        val manifest = cache.readPlayableForSong(song, modelVariant) ?: return null
+        if (manifest.state == SourceSeparationCacheState.Completed) {
+            return manifest
+        }
+
+        val snapshot = cache.readSegmentSnapshot(manifest) ?: return null
+        val sampleRate = snapshot.segmentPlan.sampleRate.takeIf { it > 0 } ?: return null
+        val frame = ((playbackPositionMs.coerceAtLeast(0L) * sampleRate) / 1000L)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+        return manifest.takeIf {
+            snapshot.hasReadyPlaybackWindowAtFrame(frame)
+        }
     }
 
     fun separateSongToWav(
@@ -46,6 +68,12 @@ class SourceSeparationEngine(
                     runtimeSettings = runtimeSettings,
                     modelVariant = modelVariant,
                     onProgress = onProgress,
+                    onPrepared = { preparation ->
+                        cache.updateRunPreparation(run, preparation)
+                    },
+                    onSegmentStateChanged = { segmentIndex, state ->
+                        cache.updateSegmentState(run, segmentIndex, state)
+                    },
                     shouldCancel = shouldCancel,
                 )
                 .let { result ->

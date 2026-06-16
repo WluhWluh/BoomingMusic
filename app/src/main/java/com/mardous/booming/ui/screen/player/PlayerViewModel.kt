@@ -422,6 +422,7 @@ class PlayerViewModel(
                             percent = progress.percent,
                             stage = progress.stage,
                         )
+                        syncSourceSeparationPlaybackIfRequested()
                     },
                     shouldCancel = {
                         sourceSeparationCancelRequested.get() || activeJob?.isActive != true
@@ -488,6 +489,18 @@ class PlayerViewModel(
             )
             updateSourceSeparationPlaybackState(result)
         }
+    }
+
+    private fun syncSourceSeparationPlaybackIfRequested() {
+        val mode = _sourceSeparationBlendModeFlow.value
+        val playbackState = _sourceSeparationPlaybackStateFlow.value
+        if (mode == SourceSeparationBlendMode.Off || playbackState.enabled) {
+            return
+        }
+        mediaController?.sendCustomCommand(
+            SessionCommand(Playback.SYNC_SOURCE_SEPARATION_PLAYBACK, Bundle.EMPTY),
+            Bundle.EMPTY,
+        )
     }
 
     fun setSourceSeparationBlendMode(mode: SourceSeparationBlendMode) {
