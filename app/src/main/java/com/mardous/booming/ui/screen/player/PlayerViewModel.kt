@@ -486,12 +486,6 @@ class PlayerViewModel(
         }
     }
 
-    fun cycleSourceSeparationBlendMode(): SourceSeparationBlendMode {
-        val nextMode = _sourceSeparationBlendModeFlow.value.next()
-        setSourceSeparationBlendMode(nextMode)
-        return nextMode
-    }
-
     fun setSourceSeparationBlendMode(mode: SourceSeparationBlendMode) {
         _sourceSeparationBlendModeFlow.value = mode
     }
@@ -915,11 +909,5 @@ data class SourceSeparationPlaybackUiState(
 enum class SourceSeparationBlendMode {
     Off,
     Global,
-    PerSong;
-
-    fun next(): SourceSeparationBlendMode = when (this) {
-        Off -> Global
-        Global -> PerSong
-        PerSong -> Off
-    }
+    PerSong
 }

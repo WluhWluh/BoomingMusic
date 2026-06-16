@@ -196,6 +196,11 @@
         android:name="com.mardous.booming.ui.screen.sound.SoundSettingsFragment"
         android:label="SoundSettingsFragment"/>
 
+    <dialog
+        android:id="@+id/nav_source_separation_settings"
+        android:name="com.mardous.booming.ui.screen.player.SourceSeparationSettingsFragment"
+        android:label="SourceSeparationSettingsFragment"/>
+
     <fragment
         android:id="@+id/nav_about"
         android:name="com.mardous.booming.ui.screen.about.AboutFragment"
