@@ -11,6 +11,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 class AudioPcmDecoder(private val context: Context) {
     fun decode(
@@ -30,6 +31,7 @@ class AudioPcmDecoder(private val context: Context) {
             val inputFormat = extractor.getTrackFormat(trackIndex)
             val mime = inputFormat.getString(MediaFormat.KEY_MIME)
                 ?: error("Audio track has no MIME type.")
+            val trackMetadata = audioTrackMetadata(inputFormat, mime)
 
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(inputFormat, null, null, 0)
@@ -134,6 +136,7 @@ class AudioPcmDecoder(private val context: Context) {
             val inputFormat = extractor.getTrackFormat(trackIndex)
             val mime = inputFormat.getString(MediaFormat.KEY_MIME)
                 ?: error("Audio track has no MIME type.")
+            val trackMetadata = audioTrackMetadata(inputFormat, mime)
 
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(inputFormat, null, null, 0)
@@ -227,9 +230,6 @@ class AudioPcmDecoder(private val context: Context) {
                                         }
                                         val keptFrames = frameCount - trimStartFrames - trimEndFrames
                                         if (keptFrames > 0) {
-                                            firstOutputTimeUs = firstOutputTimeUs ?: bufferStartUs
-                                            lastOutputTimeUs = bufferInfo.presentationTimeUs
-                                            decodedOutputBuffers += 1
                                             val trimmedInfo = MediaCodec.BufferInfo().apply {
                                                 set(
                                                     bufferInfo.offset + trimStartFrames * inputBytesPerFrame,
@@ -240,6 +240,9 @@ class AudioPcmDecoder(private val context: Context) {
                                                     bufferInfo.flags,
                                                 )
                                             }
+                                            firstOutputTimeUs = firstOutputTimeUs ?: trimmedInfo.presentationTimeUs
+                                            lastOutputTimeUs = trimmedInfo.presentationTimeUs
+                                            decodedOutputBuffers += 1
                                             writePcmAs16Bit(output, outputBuffer, trimmedInfo, activeFormat.encoding)
                                         }
                                     }
@@ -266,6 +269,179 @@ class AudioPcmDecoder(private val context: Context) {
                 firstOutputTimeUs = firstOutputTimeUs,
                 lastOutputTimeUs = lastOutputTimeUs,
                 outputBufferCount = decodedOutputBuffers,
+                trackMetadata = trackMetadata,
+            )
+        } finally {
+            if (codecStarted) {
+                codec?.stop()
+            }
+            codec?.release()
+            extractor.release()
+        }
+    }
+
+    fun decodeWindowWithPrerollCursor(
+        uri: Uri,
+        startUs: Long,
+        endUs: Long,
+        prerollUs: Long,
+        shouldCancel: () -> Boolean = { false },
+    ): WindowDecodedPcmAudio {
+        require(startUs >= 0L) { "Window start must not be negative." }
+        require(endUs > startUs) { "Window end must be after start." }
+        require(prerollUs >= 0L) { "Preroll must not be negative." }
+
+        val decodeStartUs = (startUs - prerollUs).coerceAtLeast(0L)
+        val extractor = MediaExtractor()
+        var codec: MediaCodec? = null
+        var codecStarted = false
+
+        try {
+            extractor.setDataSource(context, uri, null)
+            val trackIndex = findAudioTrack(extractor)
+            if (trackIndex < 0) error("No audio track was found.")
+
+            extractor.selectTrack(trackIndex)
+            extractor.seekTo(decodeStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            val actualStartUs = extractor.sampleTime.takeIf { it >= 0L } ?: decodeStartUs
+            val inputFormat = extractor.getTrackFormat(trackIndex)
+            val mime = inputFormat.getString(MediaFormat.KEY_MIME)
+                ?: error("Audio track has no MIME type.")
+            val trackMetadata = audioTrackMetadata(inputFormat, mime)
+
+            codec = MediaCodec.createDecoderByType(mime)
+            codec.configure(inputFormat, null, null, 0)
+            codec.start()
+            codecStarted = true
+
+            val bufferInfo = MediaCodec.BufferInfo()
+            val output = ByteArrayOutputStream()
+            var inputEnded = false
+            var outputEnded = false
+            var outputFormat = codec.outputFormat
+            var writerFormat: AudioOutputFormat? = null
+            var firstOutputTimeUs: Long? = null
+            var lastOutputTimeUs: Long? = null
+            var decodedOutputBuffers = 0
+            var cursorFrame: Long? = null
+            var cursorAnchorTimeUs: Long? = null
+
+            while (!outputEnded) {
+                throwIfCanceled(shouldCancel)
+                if (!inputEnded) {
+                    val inputIndex = codec.dequeueInputBuffer(TIMEOUT_US)
+                    if (inputIndex >= 0) {
+                        val inputBuffer = codec.getInputBuffer(inputIndex)
+                            ?: error("Decoder returned a null input buffer.")
+                        val sampleTimeUs = extractor.sampleTime
+                        if (sampleTimeUs < 0 || sampleTimeUs >= endUs) {
+                            codec.queueInputBuffer(
+                                inputIndex,
+                                0,
+                                0,
+                                0L,
+                                MediaCodec.BUFFER_FLAG_END_OF_STREAM,
+                            )
+                            inputEnded = true
+                        } else {
+                            val sampleSize = extractor.readSampleData(inputBuffer, 0)
+                            if (sampleSize < 0) {
+                                codec.queueInputBuffer(
+                                    inputIndex,
+                                    0,
+                                    0,
+                                    0L,
+                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM,
+                                )
+                                inputEnded = true
+                            } else {
+                                codec.queueInputBuffer(
+                                    inputIndex,
+                                    0,
+                                    sampleSize,
+                                    sampleTimeUs,
+                                    0,
+                                )
+                                extractor.advance()
+                            }
+                        }
+                    }
+                }
+
+                when (val outputIndex = codec.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)) {
+                    MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
+                    MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        outputFormat = codec.outputFormat
+                        if (writerFormat != null) error("Decoder output format changed after writing began.")
+                    }
+                    else -> {
+                        if (outputIndex >= 0) {
+                            val outputBuffer = codec.getOutputBuffer(outputIndex)
+                            if (bufferInfo.size > 0 && outputBuffer != null) {
+                                val activeFormat = writerFormat ?: audioOutputFormat(outputFormat).also {
+                                    writerFormat = it
+                                }
+                                val inputBytesPerFrame = activeFormat.inputBytesPerFrame()
+                                if (inputBytesPerFrame > 0) {
+                                    val frameCount = bufferInfo.size / inputBytesPerFrame
+                                    if (cursorFrame == null) {
+                                        cursorAnchorTimeUs = bufferInfo.presentationTimeUs
+                                        cursorFrame = usToFrame(bufferInfo.presentationTimeUs, activeFormat.sampleRate)
+                                    }
+                                    val bufferStartFrame = cursorFrame
+                                    val bufferEndFrame = bufferStartFrame + frameCount
+                                    val requestedStartFrame = usToFrame(startUs, activeFormat.sampleRate)
+                                    val requestedEndFrame = usToFrame(endUs, activeFormat.sampleRate)
+                                    if (bufferEndFrame > requestedStartFrame && bufferStartFrame < requestedEndFrame) {
+                                        val trimStartFrames = (requestedStartFrame - bufferStartFrame)
+                                            .coerceIn(0L, frameCount.toLong())
+                                            .toInt()
+                                        val trimEndFrames = (bufferEndFrame - requestedEndFrame)
+                                            .coerceIn(0L, frameCount.toLong())
+                                            .toInt()
+                                        val keptFrames = frameCount - trimStartFrames - trimEndFrames
+                                        if (keptFrames > 0) {
+                                            val keptStartFrame = bufferStartFrame + trimStartFrames
+                                            val trimmedInfo = MediaCodec.BufferInfo().apply {
+                                                set(
+                                                    bufferInfo.offset + trimStartFrames * inputBytesPerFrame,
+                                                    keptFrames * inputBytesPerFrame,
+                                                    frameToUs(keptStartFrame, activeFormat.sampleRate),
+                                                    bufferInfo.flags,
+                                                )
+                                            }
+                                            firstOutputTimeUs = firstOutputTimeUs ?: trimmedInfo.presentationTimeUs
+                                            lastOutputTimeUs = trimmedInfo.presentationTimeUs
+                                            decodedOutputBuffers += 1
+                                            writePcmAs16Bit(output, outputBuffer, trimmedInfo, activeFormat.encoding)
+                                        }
+                                    }
+                                    cursorFrame = bufferEndFrame
+                                }
+                            }
+                            outputEnded = bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                            codec.releaseOutputBuffer(outputIndex, false)
+                        }
+                    }
+                }
+            }
+
+            val format = writerFormat ?: error("Decoder produced no PCM output.")
+            val audio = DecodedPcmAudio(
+                sampleRate = format.sampleRate,
+                channelCount = format.channelCount,
+                pcm16 = output.toByteArray(),
+            )
+            return WindowDecodedPcmAudio(
+                audio = audio,
+                requestedStartUs = startUs,
+                requestedEndUs = endUs,
+                extractorStartUs = actualStartUs,
+                firstOutputTimeUs = firstOutputTimeUs,
+                lastOutputTimeUs = lastOutputTimeUs,
+                outputBufferCount = decodedOutputBuffers,
+                cursorAnchorTimeUs = cursorAnchorTimeUs,
+                trackMetadata = trackMetadata,
             )
         } finally {
             if (codecStarted) {
@@ -299,6 +475,17 @@ class AudioPcmDecoder(private val context: Context) {
         val encoding = format.optionalInteger(MediaFormat.KEY_PCM_ENCODING)
             ?: AudioFormat.ENCODING_PCM_16BIT
         return AudioOutputFormat(sampleRate, channelCount, encoding)
+    }
+
+    private fun audioTrackMetadata(
+        format: MediaFormat,
+        mimeType: String,
+    ): AudioDecodeTrackMetadata {
+        return AudioDecodeTrackMetadata(
+            mimeType = mimeType,
+            encoderDelayFrames = format.optionalInteger(MediaFormat.KEY_ENCODER_DELAY),
+            encoderPaddingFrames = format.optionalInteger(MediaFormat.KEY_ENCODER_PADDING),
+        )
     }
 
     private fun writePcmAs16Bit(
@@ -342,6 +529,14 @@ class AudioPcmDecoder(private val context: Context) {
         return if (containsKey(key)) getInteger(key) else null
     }
 
+    private fun usToFrame(timeUs: Long, sampleRate: Int): Long {
+        return (timeUs.toDouble() * sampleRate / MICROS_PER_SECOND).roundToLong()
+    }
+
+    private fun frameToUs(frame: Long, sampleRate: Int): Long {
+        return (frame * MICROS_PER_SECOND) / sampleRate.toLong()
+    }
+
     private data class AudioOutputFormat(
         val sampleRate: Int,
         val channelCount: Int,
@@ -371,4 +566,12 @@ data class WindowDecodedPcmAudio(
     val firstOutputTimeUs: Long?,
     val lastOutputTimeUs: Long?,
     val outputBufferCount: Int,
+    val cursorAnchorTimeUs: Long? = null,
+    val trackMetadata: AudioDecodeTrackMetadata? = null,
+)
+
+data class AudioDecodeTrackMetadata(
+    val mimeType: String,
+    val encoderDelayFrames: Int?,
+    val encoderPaddingFrames: Int?,
 )

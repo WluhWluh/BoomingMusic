@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Environment
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.audio.AudioWindowDecodeExperiment
+import com.mardous.booming.separation.audio.AudioWindowDecodeExperimentProgress
 import com.mardous.booming.separation.audio.AudioWindowDecodeExperimentResult
 import com.mardous.booming.separation.cache.SourceSeparationCache
 import com.mardous.booming.separation.cache.SourceSeparationCacheState
@@ -218,6 +219,7 @@ class SourceSeparationEngine(
     fun runWindowDecodeExperiment(
         song: Song,
         playbackPositionMs: Long,
+        onProgress: (AudioWindowDecodeExperimentProgress) -> Unit = {},
         shouldCancel: () -> Boolean = { false },
     ): AudioWindowDecodeExperimentResult {
         require(song != Song.emptySong) { "Cannot test window decoding for an empty song." }
@@ -233,6 +235,7 @@ class SourceSeparationEngine(
             displayName = song.fileName,
             playbackPositionMs = playbackPositionMs,
             reportDir = reportDir,
+            onProgress = onProgress,
             shouldCancel = shouldCancel,
         )
     }
