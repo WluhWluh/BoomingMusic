@@ -533,12 +533,69 @@ Current limitations:
 - Per-song blend memory is represented by the mode switch only; actual per-song blend storage is still pending.
 - The long-running separation Snackbar remains until the sheet owns a reliable progress model.
 
-### Phase 5: Segment-Based Processing
+### Phase 5A: Window Decode Experiment
 
 Status: in progress
 
 Goals:
 
+- Verify whether Android `MediaExtractor`/`MediaCodec` can reliably decode only the source range needed by one MDX context window.
+- Compare a locally decoded window against the same window cut from the current full-song decode path.
+- Measure full-song decode time versus local-window decode time on real devices.
+- Use the current playback position to choose a representative MDX segment window.
+- Keep the experiment isolated from normal separation and playback behavior.
+
+Done criteria:
+
+- The app can generate a diagnostic report for the current song and playback position.
+- The report includes requested frame/time ranges, full decode timing, window decode timing, frame counts, direct PCM difference, and best small-offset PCM difference.
+- The experiment can be run on several common local formats before the production pipeline depends on it.
+- Existing full-song separation and play-while-processing behavior remain unchanged.
+
+Implementation notes:
+
+- The current full-song path still decodes the whole source into memory before segment processing begins.
+- `startMs` and `endMs` in `MdxRangeSeparator` are currently applied only after full decode and resample, so they do not reduce initial wait time yet.
+- A successful window decoder experiment should lead to a segment-first pipeline where each MDX context window is decoded, resampled, processed, and written independently.
+- Audio identity should move away from full decoded PCM SHA-256 before production local-window processing. A hash of encoded audio samples from `MediaExtractor`, excluding container metadata, is the preferred follow-up candidate.
+
+Current limitations:
+
+- This phase is diagnostic only and may still run a full decode for comparison.
+- MediaCodec seek behavior can vary by codec/container, so one successful format is not enough to promote the approach.
+- Exact PCM equality may not hold near seek boundaries; the report should evaluate small alignment offsets rather than relying only on byte equality.
+
+Latest diagnostic direction:
+
+- Run several probes per song from one report: the current playback position, the beginning, common mid-song points, half duration, and near the end.
+- Decode the full song only once as the reference, then compare each local window against the corresponding reference slice.
+- Compare both request-aligned placement and first-decoder-output-timestamp placement.
+- Treat a stable non-zero best offset as a warning that the container or codec needs explicit timestamp-delay compensation before production use.
+- Pay special attention to AAC/M4A, where decoder priming or timestamp behavior may shift local-window PCM even when MP3, FLAC, and WAV are aligned.
+
+Initial conclusions from the first two experiment rounds:
+
+- FLAC is already close to ideal for window decoding across multiple positions.
+- MP3 can look good near the start but shows position-dependent seek offsets later in the song.
+- AAC/M4A can require codec-specific compensation and does not share one universal offset behavior.
+- OGG and WAV exposed a second issue: local-window resampling from an arbitrary cut does not always match full-song resampling followed by slicing.
+- The local window idea is still promising because it is much faster than full decode, but the production path needs a better alignment model before it can replace the current whole-song decode.
+
+Planned third experiment round:
+
+- Compare raw decoded windows before resampling so seek and codec delay can be separated from interpolation effects.
+- Add a global-phase resampling candidate that aligns local resampling to the song-wide frame position instead of resetting phase at the window start.
+- Add a preroll-and-cursor trim candidate that decodes slightly earlier than the target window, then trims using accumulated decoded frame position instead of only buffer timestamps.
+- Keep reporting request-aligned and first-output-aligned results so the effect of each strategy is easy to compare.
+- Promote the window decoder only if the third round shows stable low error across multiple formats and multiple positions.
+
+### Phase 5B: Segment-Based Processing
+
+Status: in progress
+
+Goals:
+
+- Replace the current full-song decode-and-process path after Phase 5A proves local window decoding is reliable enough.
 - Replace full-song-only processing with segment state tracking.
 - Write ready segments as sample-accurate stable regions.
 - Make current position and next segment the highest-priority work.

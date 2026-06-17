@@ -105,6 +105,9 @@ private fun SourceSeparationSettingsSheet(
     val playbackState by viewModel.sourceSeparationPlaybackStateFlow.collectAsState()
     val blendMode by viewModel.sourceSeparationBlendModeFlow.collectAsState()
     val separationState by viewModel.sourceSeparationStateFlow.collectAsState()
+    val windowDecodeExperimentState by viewModel
+        .sourceSeparationWindowDecodeExperimentStateFlow
+        .collectAsState()
 
     val separatedPlaybackEnabled = blendMode != SourceSeparationBlendMode.Off
     val rememberPerSong = blendMode == SourceSeparationBlendMode.PerSong
@@ -325,12 +328,61 @@ private fun SourceSeparationSettingsSheet(
                                     Text(stringResource(R.string.source_separation_start_current_song))
                                 }
                             }
+
+                            OutlinedButton(
+                                onClick = {
+                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
+                                    viewModel.runWindowDecodeExperimentForCurrentSong()
+                                },
+                                enabled = windowDecodeExperimentState !is
+                                        SourceSeparationWindowDecodeExperimentUiState.Running,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(stringResource(R.string.source_separation_window_decode_experiment))
+                            }
+
+                            SourceSeparationWindowDecodeExperimentStatusText(windowDecodeExperimentState)
                         }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SourceSeparationWindowDecodeExperimentStatusText(
+    state: SourceSeparationWindowDecodeExperimentUiState
+) {
+    val text = when (state) {
+        SourceSeparationWindowDecodeExperimentUiState.Idle -> null
+        SourceSeparationWindowDecodeExperimentUiState.Running -> {
+            stringResource(R.string.source_separation_window_decode_running)
+        }
+        is SourceSeparationWindowDecodeExperimentUiState.Completed -> {
+            stringResource(
+                R.string.source_separation_window_decode_completed,
+                state.reportPath,
+                state.fullDecodeMs,
+                state.probeCount,
+                state.totalWindowDecodeMs,
+                state.worstOffsetFrames,
+                state.worstMeanAbsoluteError,
+            )
+        }
+        is SourceSeparationWindowDecodeExperimentUiState.Failed -> {
+            stringResource(
+                R.string.source_separation_window_decode_failed,
+                state.message.orEmpty(),
+            )
+        }
+    } ?: return
+
+    Text(
+        text = text,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall
+    )
 }
 
 @Composable
