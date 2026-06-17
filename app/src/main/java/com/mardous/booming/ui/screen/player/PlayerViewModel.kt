@@ -140,6 +140,7 @@ class PlayerViewModel(
     private val sourceSeparationCancelRequested = AtomicBoolean(false)
     private var sourceSeparationJob: Job? = null
     private var sourceSeparationPlaybackSyncJob: Job? = null
+    private var sourceSeparationWindowDecodeExperimentJob: Job? = null
 
     private val _sourceSeparationStateFlow =
         MutableStateFlow<SourceSeparationUiState>(SourceSeparationUiState.Idle)
@@ -148,6 +149,13 @@ class PlayerViewModel(
     private val _sourceSeparationPlaybackStateFlow =
         MutableStateFlow(SourceSeparationPlaybackUiState())
     val sourceSeparationPlaybackStateFlow = _sourceSeparationPlaybackStateFlow.asStateFlow()
+
+    private val _sourceSeparationWindowDecodeExperimentStateFlow =
+        MutableStateFlow<SourceSeparationWindowDecodeExperimentUiState>(
+            SourceSeparationWindowDecodeExperimentUiState.Idle
+        )
+    val sourceSeparationWindowDecodeExperimentStateFlow =
+        _sourceSeparationWindowDecodeExperimentStateFlow.asStateFlow()
 
     private val _sourceSeparationBlendModeFlow =
         MutableStateFlow(SourceSeparationBlendMode.Off)
@@ -158,6 +166,7 @@ class PlayerViewModel(
     override fun onCleared() {
         progressObserver.stop()
         cancelSourceSeparation()
+        sourceSeparationWindowDecodeExperimentJob?.cancel()
         cancelInternalJobs()
         super.onCleared()
     }
@@ -456,6 +465,45 @@ class PlayerViewModel(
     fun clearSourceSeparationStatus() {
         if (_sourceSeparationStateFlow.value !is SourceSeparationUiState.Running) {
             _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
+        }
+    }
+
+    fun runWindowDecodeExperimentForCurrentSong() {
+        if (sourceSeparationWindowDecodeExperimentJob?.isActive == true) return
+        val song = currentSong
+        if (song == Song.emptySong) {
+            _sourceSeparationWindowDecodeExperimentStateFlow.value =
+                SourceSeparationWindowDecodeExperimentUiState.Failed("No playable song is selected.")
+            return
+        }
+        val positionMs = progress.takeIf { it != C.TIME_UNSET } ?: 0L
+        sourceSeparationWindowDecodeExperimentJob = viewModelScope.launch(IO) {
+            _sourceSeparationWindowDecodeExperimentStateFlow.value =
+                SourceSeparationWindowDecodeExperimentUiState.Running
+            try {
+                val result = sourceSeparationEngine.runWindowDecodeExperiment(
+                    song = song,
+                    playbackPositionMs = positionMs,
+                )
+                _sourceSeparationWindowDecodeExperimentStateFlow.value =
+                    SourceSeparationWindowDecodeExperimentUiState.Completed(
+                        reportPath = result.reportFile.absolutePath,
+                        fullDecodeMs = result.fullDecodeMs,
+                        probeCount = result.probes.size,
+                        totalWindowDecodeMs = result.totalWindowDecodeMs,
+                        worstOffsetFrames = result.worstSummary.offsetFrames,
+                        worstMeanAbsoluteError = result.worstSummary.meanAbsoluteError,
+                    )
+            } catch (_: CancellationException) {
+                _sourceSeparationWindowDecodeExperimentStateFlow.value =
+                    SourceSeparationWindowDecodeExperimentUiState.Idle
+            } catch (error: Throwable) {
+                Log.e(TAG, "Window decode experiment failed", error)
+                _sourceSeparationWindowDecodeExperimentStateFlow.value =
+                    SourceSeparationWindowDecodeExperimentUiState.Failed(error.message)
+            } finally {
+                sourceSeparationWindowDecodeExperimentJob = null
+            }
         }
     }
 
@@ -963,6 +1011,22 @@ data class SourceSeparationPlaybackUiState(
     val songId: Long? = null,
     val message: String? = null,
 )
+
+sealed class SourceSeparationWindowDecodeExperimentUiState {
+    data object Idle : SourceSeparationWindowDecodeExperimentUiState()
+    data object Running : SourceSeparationWindowDecodeExperimentUiState()
+    data class Completed(
+        val reportPath: String,
+        val fullDecodeMs: Long,
+        val probeCount: Int,
+        val totalWindowDecodeMs: Long,
+        val worstOffsetFrames: Int,
+        val worstMeanAbsoluteError: Double,
+    ) : SourceSeparationWindowDecodeExperimentUiState()
+    data class Failed(
+        val message: String?,
+    ) : SourceSeparationWindowDecodeExperimentUiState()
+}
 
 enum class SourceSeparationBlendMode {
     Off,
