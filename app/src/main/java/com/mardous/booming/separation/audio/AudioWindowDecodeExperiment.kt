@@ -991,6 +991,8 @@ data class AudioWindowDecodeExperimentResult(
             appendFamilyFocus(AudioWindowDecodeCandidateFamily.SongTimelineFrameDeficitPlacement)
             appendFamilyFocus(AudioWindowDecodeCandidateFamily.PrerollSongTimelineResample)
             appendLine()
+            appendMp3AnchorCalibration()
+            appendLine()
             appendLine("Candidate family summary:")
             AudioWindowDecodeCandidateFamily.entries.forEach { family ->
                 val summary = familySummary(family)
@@ -1028,6 +1030,7 @@ data class AudioWindowDecodeExperimentResult(
             appendLine("Best/worst summaries are intentionally grouped by candidate family; raw source-rate and resampled candidates are not mixed.")
             appendLine("Direct summaries compare the candidate exactly as production would use it; best-offset summaries only diagnose whether a fixed or variable delay explains a mismatch.")
             appendLine("Stable-region summaries compare only the segment body that would be written after trimming model context.")
+            appendLine("MP3 anchor calibration is diagnostic only; production must use a deterministic correction profile or fall back to full-song decode.")
         }
     }
 
@@ -1073,6 +1076,121 @@ data class AudioWindowDecodeExperimentResult(
         appendLine("  Direct usability: ${summary.directUsability}")
     }
 
+    private fun StringBuilder.appendMp3AnchorCalibration() {
+        val summary = mp3AnchorCalibrationSummary()
+        appendLine("MP3 anchor calibration:")
+        if (summary == null) {
+            appendLine("  Not applicable; this report did not decode audio/mpeg probes with stable comparisons.")
+            return
+        }
+
+        appendLine("  MIME type: ${summary.mimeType}")
+        appendLine("  Encoder delay frames: ${summary.encoderDelayFrames.toNullableFramesReport()}")
+        appendLine("  Encoder padding frames: ${summary.encoderPaddingFrames.toNullableFramesReport()}")
+        appendLine("  Assumed MP3 frame size: $MP3_FRAME_SIZE_FRAMES source frames")
+        appendLine("  First-probe correction: ${summary.firstProbeCorrectionFrames} frames")
+        appendLine(
+            "  Beginning-segment correction: ${summary.beginningSegmentCorrectionFrames} frames " +
+                    "from ${summary.beginningSegmentProbeCount} probe(s), spread ${summary.beginningSegmentSpreadFrames} frames"
+        )
+        appendLine(
+            "  All-probe median correction: ${summary.allProbeMedianCorrectionFrames} frames, " +
+                    "spread ${summary.allProbeSpreadFrames} frames"
+        )
+        appendLine(
+            "  Beginning correction prediction: exact ${summary.beginningPredictionExactCount}/${summary.probeRows.size}, " +
+                    "within 1 frame ${summary.beginningPredictionWithinOneFrameCount}/${summary.probeRows.size}, " +
+                    "within 4 frames ${summary.beginningPredictionWithinFourFramesCount}/${summary.probeRows.size}, " +
+                    "worst error ${summary.beginningPredictionWorstAbsErrorFrames} frames"
+        )
+        appendLine("  Recommendation: ${summary.recommendation}")
+        appendLine("  Probe rows:")
+        appendLine(
+            "    # posMs segment requestedMod extractorDelta frameDeficit residual resolved directBest predicted error"
+        )
+        summary.probeRows.forEachIndexed { index, row ->
+            val predicted = row.predictedPlacement(summary.beginningSegmentCorrectionFrames)
+            val error = row.predictionError(summary.beginningSegmentCorrectionFrames)
+            appendLine(
+                "    ${index + 1} ${row.playbackPositionMs} ${row.segmentIndex} " +
+                        "${row.requestedStartModuloFrames} ${row.extractorStartDeltaFrames} " +
+                        "${row.frameDeficitOffsetFrames} ${row.frameDeficitResidualFrames} " +
+                        "${row.resolvedPlacementFrames} ${row.directStableBestOffsetFrames} " +
+                        "$predicted $error"
+            )
+        }
+    }
+
+    private fun mp3AnchorCalibrationSummary(): Mp3AnchorCalibrationSummary? {
+        val mp3Probes = probes.filter { it.trackMetadata?.mimeType == MP3_MIME_TYPE }
+        if (mp3Probes.isEmpty()) return null
+
+        val rows = mp3Probes.mapNotNull { probe ->
+            val directBest = probe.sourceRateComparison.stableBestOffset ?: return@mapNotNull null
+            val frameDeficitBest = probe.sourceRateFrameDeficitPlacementComparison.stableBestOffset
+                ?: return@mapNotNull null
+            val extractorStartFrame = usToSourceFrameFloor(probe.extractorStartUs)
+            val extractorStartDeltaFrames = extractorStartFrame - probe.requestedSourceWindowStartFrame
+            val resolvedPlacementFrames = probe.frameDeficitPlacementOffsetSourceFrames +
+                    frameDeficitBest.offsetFrames
+            Mp3AnchorCalibrationProbeRow(
+                playbackPositionMs = probe.playbackPositionMs,
+                segmentIndex = probe.segmentIndex,
+                requestedSourceWindowStartFrame = probe.requestedSourceWindowStartFrame,
+                requestedStartModuloFrames = positiveModulo(
+                    probe.requestedSourceWindowStartFrame,
+                    MP3_FRAME_SIZE_FRAMES,
+                ),
+                extractorStartDeltaFrames = extractorStartDeltaFrames,
+                frameDeficitOffsetFrames = probe.frameDeficitPlacementOffsetSourceFrames,
+                frameDeficitResidualFrames = frameDeficitBest.offsetFrames,
+                resolvedPlacementFrames = resolvedPlacementFrames,
+                directStableBestOffsetFrames = directBest.offsetFrames,
+            )
+        }
+        if (rows.isEmpty()) return null
+
+        val beginningRows = rows.filter { it.segmentIndex == 0 }.ifEmpty { listOf(rows.first()) }
+        val beginningCorrectionFrames = medianRounded(beginningRows.map { it.frameDeficitResidualFrames })
+        val allCorrectionFrames = medianRounded(rows.map { it.frameDeficitResidualFrames })
+        val metadata = mp3Probes.firstNotNullOfOrNull { it.trackMetadata }
+        return Mp3AnchorCalibrationSummary(
+            mimeType = metadata?.mimeType ?: MP3_MIME_TYPE,
+            encoderDelayFrames = metadata?.encoderDelayFrames,
+            encoderPaddingFrames = metadata?.encoderPaddingFrames,
+            probeRows = rows,
+            firstProbeCorrectionFrames = rows.first().frameDeficitResidualFrames,
+            beginningSegmentCorrectionFrames = beginningCorrectionFrames,
+            beginningSegmentProbeCount = beginningRows.size,
+            beginningSegmentSpreadFrames = spreadFrames(beginningRows.map { it.frameDeficitResidualFrames }),
+            allProbeMedianCorrectionFrames = allCorrectionFrames,
+            allProbeSpreadFrames = spreadFrames(rows.map { it.frameDeficitResidualFrames }),
+        )
+    }
+
+    private fun usToSourceFrameFloor(timeUs: Long): Int {
+        return floor(timeUs.toDouble() * sourceSampleRate.toDouble() / MICROS_PER_SECOND.toDouble())
+            .toInt()
+    }
+
+    private fun medianRounded(values: List<Int>): Int {
+        val sorted = values.sorted()
+        val middle = sorted.size / 2
+        return if (sorted.size % 2 == 1) {
+            sorted[middle]
+        } else {
+            ((sorted[middle - 1] + sorted[middle]).toDouble() / 2.0).roundToInt()
+        }
+    }
+
+    private fun spreadFrames(values: List<Int>): Int {
+        return (values.maxOrNull() ?: 0) - (values.minOrNull() ?: 0)
+    }
+
+    private fun positiveModulo(value: Int, modulo: Int): Int {
+        return ((value % modulo) + modulo) % modulo
+    }
+
     private fun PcmWindowComparison?.toNullableReportLine(): String {
         return this?.toReportLine() ?: "unavailable"
     }
@@ -1090,6 +1208,66 @@ data class AudioWindowDecodeExperimentResult(
         } else {
             "$values variable"
         }
+    }
+
+    private companion object {
+        const val MP3_MIME_TYPE = "audio/mpeg"
+        const val MP3_FRAME_SIZE_FRAMES = 1152
+        const val MICROS_PER_SECOND = 1_000_000L
+    }
+}
+
+private data class Mp3AnchorCalibrationSummary(
+    val mimeType: String,
+    val encoderDelayFrames: Int?,
+    val encoderPaddingFrames: Int?,
+    val probeRows: List<Mp3AnchorCalibrationProbeRow>,
+    val firstProbeCorrectionFrames: Int,
+    val beginningSegmentCorrectionFrames: Int,
+    val beginningSegmentProbeCount: Int,
+    val beginningSegmentSpreadFrames: Int,
+    val allProbeMedianCorrectionFrames: Int,
+    val allProbeSpreadFrames: Int,
+) {
+    val beginningPredictionExactCount: Int = probeRows.count {
+        it.predictionError(beginningSegmentCorrectionFrames) == 0
+    }
+    val beginningPredictionWithinOneFrameCount: Int = probeRows.count {
+        abs(it.predictionError(beginningSegmentCorrectionFrames)) <= 1
+    }
+    val beginningPredictionWithinFourFramesCount: Int = probeRows.count {
+        abs(it.predictionError(beginningSegmentCorrectionFrames)) <= 4
+    }
+    val beginningPredictionWorstAbsErrorFrames: Int = probeRows.maxOfOrNull {
+        abs(it.predictionError(beginningSegmentCorrectionFrames))
+    } ?: 0
+    val recommendation: String = when {
+        beginningSegmentSpreadFrames <= 1 && beginningPredictionWorstAbsErrorFrames <= 1 ->
+            "strong; a short beginning-segment calibration predicts all tested MP3 anchors within 1 frame"
+        beginningSegmentSpreadFrames <= 4 && beginningPredictionWorstAbsErrorFrames <= 4 ->
+            "promising; a short beginning-segment calibration predicts all tested MP3 anchors within 4 frames"
+        else ->
+            "risky; correction spread is too wide for production without a fallback"
+    }
+}
+
+private data class Mp3AnchorCalibrationProbeRow(
+    val playbackPositionMs: Long,
+    val segmentIndex: Int,
+    val requestedSourceWindowStartFrame: Int,
+    val requestedStartModuloFrames: Int,
+    val extractorStartDeltaFrames: Int,
+    val frameDeficitOffsetFrames: Int,
+    val frameDeficitResidualFrames: Int,
+    val resolvedPlacementFrames: Int,
+    val directStableBestOffsetFrames: Int,
+) {
+    fun predictedPlacement(correctionFrames: Int): Int {
+        return frameDeficitOffsetFrames + correctionFrames
+    }
+
+    fun predictionError(correctionFrames: Int): Int {
+        return predictedPlacement(correctionFrames) - directStableBestOffsetFrames
     }
 }
 
