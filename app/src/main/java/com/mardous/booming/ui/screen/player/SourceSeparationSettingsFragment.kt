@@ -356,8 +356,24 @@ private fun SourceSeparationWindowDecodeExperimentStatusText(
 ) {
     val text = when (state) {
         SourceSeparationWindowDecodeExperimentUiState.Idle -> null
-        SourceSeparationWindowDecodeExperimentUiState.Running -> {
-            stringResource(R.string.source_separation_window_decode_running)
+        is SourceSeparationWindowDecodeExperimentUiState.Running -> {
+            val probeText = if (state.probeIndex != null && state.probeCount != null) {
+                stringResource(
+                    R.string.source_separation_window_decode_probe_progress,
+                    state.probeIndex,
+                    state.probeCount,
+                )
+            } else {
+                stringResource(R.string.source_separation_window_decode_probe_preparing)
+            }
+            stringResource(
+                R.string.source_separation_window_decode_running,
+                state.percent,
+                state.completedSteps,
+                state.totalSteps,
+                probeText,
+                state.stage,
+            )
         }
         is SourceSeparationWindowDecodeExperimentUiState.Completed -> {
             stringResource(
