@@ -55,35 +55,73 @@ class AudioWindowDecodeExperiment(
         completedSteps += 1
 
         val targetPlaybackPositionMs = playbackPositionMs.coerceAtLeast(0L)
-        val probePositionsMs = buildProbePositionsMs(
+        val probePlans = buildProbePlans(
             requestedPositionMs = targetPlaybackPositionMs,
             totalFrames = referenceTimed.value.frameCount,
             sourceSampleRate = referenceTimed.value.sampleRate,
         )
-        probeCount = probePositionsMs.size
+        probeCount = probePlans.size
         totalSteps = REFERENCE_STEP_COUNT + probeCount * PROBE_STEP_COUNT + REPORT_STEP_COUNT
 
-        val probes = probePositionsMs.mapIndexed { index, positionMs ->
-            val probeIndex = index + 1
-            runProbe(
-                uri = uri,
-                referenceFull = referenceTimed.value,
-                referenceResampled = referenceResampledTimed.value,
-                requestedLabel = if (positionMs == targetPlaybackPositionMs) {
-                    "Current playback"
-                } else {
-                    "Probe ${index + 1}"
-                },
-                playbackPositionMs = positionMs,
-                onStage = { stage ->
-                    publish("Probe $probeIndex/$probeCount: $stage", probeIndex)
-                },
-                onStepComplete = {
-                    completedSteps += 1
-                },
-                shouldCancel = shouldCancel,
-            )
+        val probeResultsByIndex = mutableMapOf<Int, AudioWindowDecodeProbeResult>()
+        val calibrationPlans = probePlans.filter { it.isCalibration }
+        val holdoutPlans = probePlans.filterNot { it.isCalibration }
+
+        if (calibrationPlans.isNotEmpty()) {
+            calibrationPlans.forEachIndexed { calibrationIndex, plan ->
+                val result = runProbe(
+                    uri = uri,
+                    referenceFull = referenceTimed.value,
+                    referenceResampled = referenceResampledTimed.value,
+                    requestedLabel = plan.label,
+                    playbackPositionMs = plan.playbackPositionMs,
+                    isCalibrationProbe = plan.isCalibration,
+                    mp3CalibrationCorrectionFrames = null,
+                    onStage = { stage ->
+                        publish(
+                            "Calibration probe ${calibrationIndex + 1}/${calibrationPlans.size}: $stage",
+                            plan.index + 1,
+                        )
+                    },
+                    onStepComplete = {
+                        completedSteps += 1
+                    },
+                    shouldCancel = shouldCancel,
+                )
+                probeResultsByIndex[plan.index] = result
+            }
         }
+
+        val mp3CalibrationCorrectionFrames = deriveMp3CalibrationCorrection(
+            calibrationPlans.mapNotNull { probeResultsByIndex[it.index] },
+        )
+
+        if (holdoutPlans.isNotEmpty()) {
+            holdoutPlans.forEachIndexed { holdoutIndex, plan ->
+                val result = runProbe(
+                    uri = uri,
+                    referenceFull = referenceTimed.value,
+                    referenceResampled = referenceResampledTimed.value,
+                    requestedLabel = plan.label,
+                    playbackPositionMs = plan.playbackPositionMs,
+                    isCalibrationProbe = plan.isCalibration,
+                    mp3CalibrationCorrectionFrames = mp3CalibrationCorrectionFrames,
+                    onStage = { stage ->
+                        publish(
+                            "Holdout probe ${holdoutIndex + 1}/${holdoutPlans.size}: $stage",
+                            plan.index + 1,
+                        )
+                    },
+                    onStepComplete = {
+                        completedSteps += 1
+                    },
+                    shouldCancel = shouldCancel,
+                )
+                probeResultsByIndex[plan.index] = result
+            }
+        }
+
+        val probes = probeResultsByIndex.toSortedMap().values.toList()
 
         val safeName = displayName.substringBeforeLast('.')
             .replace(Regex("[^A-Za-z0-9._-]+"), "_")
@@ -113,6 +151,8 @@ class AudioWindowDecodeExperiment(
         referenceResampled: DecodedPcmAudio,
         requestedLabel: String,
         playbackPositionMs: Long,
+        isCalibrationProbe: Boolean,
+        mp3CalibrationCorrectionFrames: Int?,
         onStage: (String) -> Unit,
         onStepComplete: () -> Unit,
         shouldCancel: () -> Boolean,
@@ -222,6 +262,20 @@ class AudioWindowDecodeExperiment(
             maxFrames = referenceWindowEndFrame - referenceWindowStartFrame,
             destinationStartFrame = frameDeficitPlacementOffsetSourceFrames,
         )
+        val mp3CalibratedPlacementOffsetSourceFrames = if (
+            localWindow.value.trackMetadata?.mimeType == MP3_MIME_TYPE &&
+            mp3CalibrationCorrectionFrames != null
+        ) {
+            frameDeficitPlacementOffsetSourceFrames + mp3CalibrationCorrectionFrames
+        } else {
+            null
+        }
+        val sourceRateMp3CalibratedPlaced = mp3CalibratedPlacementOffsetSourceFrames?.let { offsetFrames ->
+            localWindow.value.audio.toStereoPcm16Placed(
+                maxFrames = referenceWindowEndFrame - referenceWindowStartFrame,
+                destinationStartFrame = offsetFrames,
+            )
+        }
         val sourceRateMetadataDelayPlaced = metadataDelayPlacementOffsetSourceFrames?.let { offsetFrames ->
             localWindow.value.audio.toStereoPcm16Placed(
                 maxFrames = referenceWindowEndFrame - referenceWindowStartFrame,
@@ -267,6 +321,19 @@ class AudioWindowDecodeExperiment(
                         frameDeficitPlacementOffsetSourceFrames,
                 shouldCancel = shouldCancel,
             )
+        }
+        val songTimelineMp3CalibratedResampledTimed = mp3CalibratedPlacementOffsetSourceFrames?.let { offsetFrames ->
+            timedProbeStage("Song-timeline MP3 calibrated resample") {
+                localWindow.value.audio.resampleToTargetWindowOnSongTimeline(
+                    targetSampleRate = config.sampleRate,
+                    targetWindowStartFrame = windowStartFrame,
+                    sourceWindowStartFrame = referenceWindowStartFrame + offsetFrames,
+                    shouldCancel = shouldCancel,
+                )
+            }
+        } ?: run {
+            completeProbeStage("Song-timeline MP3 calibrated resample unavailable")
+            null
         }
         val songTimelineMetadataDelayResampledTimed = metadataDelayPlacementOffsetSourceFrames?.let { offsetFrames ->
             timedProbeStage("Song-timeline metadata-delay resample") {
@@ -327,6 +394,14 @@ class AudioWindowDecodeExperiment(
                     stableStartFrame = stableSourceStartFrame,
                     stableFrames = stableSourceFrameCount,
                 ),
+                sourceRateMp3CalibratedPlacement = sourceRateMp3CalibratedPlaced?.let {
+                    compareCandidate(
+                        reference = sourceRateExpected,
+                        candidate = it,
+                        stableStartFrame = stableSourceStartFrame,
+                        stableFrames = stableSourceFrameCount,
+                    )
+                },
                 sourceRateMetadataDelayPlacement = sourceRateMetadataDelayPlaced?.let {
                     compareCandidate(
                         reference = sourceRateExpected,
@@ -369,6 +444,14 @@ class AudioWindowDecodeExperiment(
                     stableStartFrame = stableTargetStartFrame,
                     stableFrames = stableTargetFrameCount,
                 ),
+                songTimelineMp3CalibratedPlacement = songTimelineMp3CalibratedResampledTimed?.value?.let {
+                    compareCandidate(
+                        reference = currentExpected,
+                        candidate = it,
+                        stableStartFrame = stableTargetStartFrame,
+                        stableFrames = stableTargetFrameCount,
+                    )
+                },
                 songTimelineMetadataDelayPlacement = songTimelineMetadataDelayResampledTimed?.value?.let {
                     compareCandidate(
                         reference = currentExpected,
@@ -399,6 +482,7 @@ class AudioWindowDecodeExperiment(
 
         return AudioWindowDecodeProbeResult(
             label = requestedLabel,
+            isCalibrationProbe = isCalibrationProbe,
             playbackPositionMs = playbackPositionMs,
             segmentIndex = segmentIndex,
             targetFrame = referenceTargetFrame,
@@ -420,6 +504,7 @@ class AudioWindowDecodeExperiment(
             songTimelineResampleMs = songTimelineResampledTimed.elapsedMs,
             songTimelineTimestampResampleMs = songTimelineTimestampResampledTimed.elapsedMs,
             songTimelineFrameDeficitResampleMs = songTimelineFrameDeficitResampledTimed.elapsedMs,
+            songTimelineMp3CalibratedResampleMs = songTimelineMp3CalibratedResampledTimed?.elapsedMs,
             songTimelineMetadataDelayResampleMs = songTimelineMetadataDelayResampledTimed?.elapsedMs,
             prerollSongTimelineResampleMs = prerollSongTimelineResampledTimed.elapsedMs,
             extractorStartUs = localWindow.value.extractorStartUs,
@@ -431,16 +516,20 @@ class AudioWindowDecodeExperiment(
             trackMetadata = localWindow.value.trackMetadata,
             timestampPlacementOffsetSourceFrames = timestampPlacementOffsetSourceFrames,
             frameDeficitPlacementOffsetSourceFrames = frameDeficitPlacementOffsetSourceFrames,
+            mp3CalibrationCorrectionFrames = mp3CalibrationCorrectionFrames,
+            mp3CalibratedPlacementOffsetSourceFrames = mp3CalibratedPlacementOffsetSourceFrames,
             metadataDelayPlacementOffsetSourceFrames = metadataDelayPlacementOffsetSourceFrames,
             sourceRateComparison = sourceRateComparisons.sourceRate,
             sourceRatePrerollComparison = sourceRateComparisons.sourceRatePreroll,
             sourceRateTimestampPlacementComparison = sourceRateComparisons.sourceRateTimestampPlacement,
             sourceRateFrameDeficitPlacementComparison = sourceRateComparisons.sourceRateFrameDeficitPlacement,
+            sourceRateMp3CalibratedPlacementComparison = sourceRateComparisons.sourceRateMp3CalibratedPlacement,
             sourceRateMetadataDelayPlacementComparison = sourceRateComparisons.sourceRateMetadataDelayPlacement,
             currentResampledComparison = currentResampleComparison,
             songTimelineResampledComparison = songTimelineComparisons.songTimeline,
             songTimelineTimestampPlacementComparison = songTimelineComparisons.songTimelineTimestampPlacement,
             songTimelineFrameDeficitPlacementComparison = songTimelineComparisons.songTimelineFrameDeficitPlacement,
+            songTimelineMp3CalibratedPlacementComparison = songTimelineComparisons.songTimelineMp3CalibratedPlacement,
             songTimelineMetadataDelayPlacementComparison = songTimelineComparisons.songTimelineMetadataDelayPlacement,
             prerollResampledComparison = prerollComparisons.prerollResample,
             prerollSongTimelineResampledComparison = prerollComparisons.prerollSongTimeline,
@@ -513,6 +602,55 @@ class AudioWindowDecodeExperiment(
         )
             .map { it.coerceIn(0L, nearEndMs) }
             .distinct()
+    }
+
+    private fun buildProbePlans(
+        requestedPositionMs: Long,
+        totalFrames: Int,
+        sourceSampleRate: Int,
+    ): List<AudioWindowDecodeProbePlan> {
+        return buildProbePositionsMs(
+            requestedPositionMs = requestedPositionMs,
+            totalFrames = totalFrames,
+            sourceSampleRate = sourceSampleRate,
+        ).mapIndexed { index, playbackPositionMs ->
+            val isCalibration = when (index) {
+                0, 1, 2, 3, 4, 5 -> true
+                else -> false
+            }
+            AudioWindowDecodeProbePlan(
+                index = index,
+                playbackPositionMs = playbackPositionMs,
+                label = if (playbackPositionMs == requestedPositionMs) {
+                    "Current playback"
+                } else {
+                    "Probe ${index + 1}"
+                },
+                isCalibration = isCalibration,
+            )
+        }
+    }
+
+    private fun deriveMp3CalibrationCorrection(probes: List<AudioWindowDecodeProbeResult>): Int? {
+        val mp3Probes = probes.filter { it.trackMetadata?.mimeType == MP3_MIME_TYPE }
+        if (mp3Probes.isEmpty()) return null
+        val calibrationRows = mp3Probes.filter { it.isCalibrationProbe }
+        val rows = if (calibrationRows.isNotEmpty()) calibrationRows else mp3Probes
+        val residuals = rows.mapNotNull {
+            it.sourceRateFrameDeficitPlacementComparison.stableBestOffset?.offsetFrames
+        }
+        if (residuals.isEmpty()) return null
+        return medianRounded(residuals)
+    }
+
+    private fun medianRounded(values: List<Int>): Int {
+        val sorted = values.sorted()
+        val middle = sorted.size / 2
+        return if (sorted.size % 2 == 1) {
+            sorted[middle]
+        } else {
+            ((sorted[middle - 1] + sorted[middle]).toDouble() / 2.0).roundToInt()
+        }
     }
 
     private fun DecodedPcmAudio.slicePcm16(
@@ -904,8 +1042,9 @@ class AudioWindowDecodeExperiment(
         const val PROBE_WINDOW_MARGIN_MS = 7_000L
         const val CANCEL_CHECK_INTERVAL_FRAMES = 16_384
         const val REFERENCE_STEP_COUNT = 2
-        const val PROBE_STEP_COUNT = 13
+        const val PROBE_STEP_COUNT = 14
         const val REPORT_STEP_COUNT = 1
+        const val MP3_MIME_TYPE = "audio/mpeg"
     }
 }
 
@@ -914,6 +1053,7 @@ private data class SourceRateCandidateComparisons(
     val sourceRatePreroll: PcmWindowAlignmentComparison,
     val sourceRateTimestampPlacement: PcmWindowAlignmentComparison?,
     val sourceRateFrameDeficitPlacement: PcmWindowAlignmentComparison,
+    val sourceRateMp3CalibratedPlacement: PcmWindowAlignmentComparison?,
     val sourceRateMetadataDelayPlacement: PcmWindowAlignmentComparison?,
 )
 
@@ -921,6 +1061,7 @@ private data class SongTimelineCandidateComparisons(
     val songTimeline: PcmWindowAlignmentComparison,
     val songTimelineTimestampPlacement: PcmWindowAlignmentComparison?,
     val songTimelineFrameDeficitPlacement: PcmWindowAlignmentComparison,
+    val songTimelineMp3CalibratedPlacement: PcmWindowAlignmentComparison?,
     val songTimelineMetadataDelayPlacement: PcmWindowAlignmentComparison?,
 )
 
@@ -1103,19 +1244,26 @@ data class AudioWindowDecodeExperimentResult(
                     "within 4 frames ${summary.beginningPredictionWithinFourFramesCount}/${summary.probeRows.size}, " +
                     "worst error ${summary.beginningPredictionWorstAbsErrorFrames} frames"
         )
+        appendLine(
+            "  Holdout calibrated direct: ${summary.holdoutCalibratedDirectSummary}"
+        )
+        appendLine(
+            "  Holdout calibrated best-offset: ${summary.holdoutCalibratedBestOffsetSummary}"
+        )
         appendLine("  Recommendation: ${summary.recommendation}")
         appendLine("  Probe rows:")
-        appendLine(
-            "    # posMs segment requestedMod extractorDelta frameDeficit residual resolved directBest predicted error"
-        )
+        appendLine("    # phase posMs segment requestedMod extractorDelta frameDeficit residual resolved directBest calibratedDirect calibratedBest predicted error")
         summary.probeRows.forEachIndexed { index, row ->
             val predicted = row.predictedPlacement(summary.beginningSegmentCorrectionFrames)
             val error = row.predictionError(summary.beginningSegmentCorrectionFrames)
             appendLine(
-                "    ${index + 1} ${row.playbackPositionMs} ${row.segmentIndex} " +
+                "    ${index + 1} ${if (row.isCalibrationProbe) "calibration" else "holdout"} " +
+                        "${row.playbackPositionMs} ${row.segmentIndex} " +
                         "${row.requestedStartModuloFrames} ${row.extractorStartDeltaFrames} " +
                         "${row.frameDeficitOffsetFrames} ${row.frameDeficitResidualFrames} " +
                         "${row.resolvedPlacementFrames} ${row.directStableBestOffsetFrames} " +
+                        "${row.calibratedStableDirect.toNullableReportLine()} " +
+                        "${row.calibratedStableBestOffset.toNullableReportLine()} " +
                         "$predicted $error"
             )
         }
@@ -1136,6 +1284,7 @@ data class AudioWindowDecodeExperimentResult(
             Mp3AnchorCalibrationProbeRow(
                 playbackPositionMs = probe.playbackPositionMs,
                 segmentIndex = probe.segmentIndex,
+                isCalibrationProbe = probe.isCalibrationProbe,
                 requestedSourceWindowStartFrame = probe.requestedSourceWindowStartFrame,
                 requestedStartModuloFrames = positiveModulo(
                     probe.requestedSourceWindowStartFrame,
@@ -1146,6 +1295,8 @@ data class AudioWindowDecodeExperimentResult(
                 frameDeficitResidualFrames = frameDeficitBest.offsetFrames,
                 resolvedPlacementFrames = resolvedPlacementFrames,
                 directStableBestOffsetFrames = directBest.offsetFrames,
+                calibratedStableDirect = probe.sourceRateMp3CalibratedPlacementComparison?.stableDirect,
+                calibratedStableBestOffset = probe.sourceRateMp3CalibratedPlacementComparison?.stableBestOffset,
             )
         }
         if (rows.isEmpty()) return null
@@ -1217,6 +1368,13 @@ data class AudioWindowDecodeExperimentResult(
     }
 }
 
+private data class AudioWindowDecodeProbePlan(
+    val index: Int,
+    val playbackPositionMs: Long,
+    val label: String,
+    val isCalibration: Boolean,
+)
+
 private data class Mp3AnchorCalibrationSummary(
     val mimeType: String,
     val encoderDelayFrames: Int?,
@@ -1241,7 +1399,15 @@ private data class Mp3AnchorCalibrationSummary(
     val beginningPredictionWorstAbsErrorFrames: Int = probeRows.maxOfOrNull {
         abs(it.predictionError(beginningSegmentCorrectionFrames))
     } ?: 0
+    val holdoutCalibratedDirectSummary: String = summarizeHoldoutComparisons {
+        it.calibratedStableDirect
+    }
+    val holdoutCalibratedBestOffsetSummary: String = summarizeHoldoutComparisons {
+        it.calibratedStableBestOffset
+    }
     val recommendation: String = when {
+        holdoutCalibratedDirectIsBitPerfect ->
+            "strong; calibrated holdout windows are bit-perfect at zero offset"
         beginningSegmentSpreadFrames <= 1 && beginningPredictionWorstAbsErrorFrames <= 1 ->
             "strong; a short beginning-segment calibration predicts all tested MP3 anchors within 1 frame"
         beginningSegmentSpreadFrames <= 4 && beginningPredictionWorstAbsErrorFrames <= 4 ->
@@ -1249,11 +1415,32 @@ private data class Mp3AnchorCalibrationSummary(
         else ->
             "risky; correction spread is too wide for production without a fallback"
     }
+
+    private val holdoutCalibratedDirectIsBitPerfect: Boolean
+        get() {
+            val holdoutComparisons = probeRows
+                .filterNot { it.isCalibrationProbe }
+                .mapNotNull { it.calibratedStableDirect }
+            return holdoutComparisons.isNotEmpty() && holdoutComparisons.all { it.maxAbsoluteError == 0 }
+        }
+
+    private fun summarizeHoldoutComparisons(
+        selector: (Mp3AnchorCalibrationProbeRow) -> PcmWindowComparison?,
+    ): String {
+        val comparisons = probeRows
+            .filterNot { it.isCalibrationProbe }
+            .mapNotNull(selector)
+        if (comparisons.isEmpty()) return "unavailable"
+        val worst = comparisons.maxBy { it.meanAbsoluteError }
+        val bitPerfect = comparisons.count { it.maxAbsoluteError == 0 }
+        return "$bitPerfect/${comparisons.size} bit-perfect, worst ${worst.toReportLine()}"
+    }
 }
 
 private data class Mp3AnchorCalibrationProbeRow(
     val playbackPositionMs: Long,
     val segmentIndex: Int,
+    val isCalibrationProbe: Boolean,
     val requestedSourceWindowStartFrame: Int,
     val requestedStartModuloFrames: Int,
     val extractorStartDeltaFrames: Int,
@@ -1261,6 +1448,8 @@ private data class Mp3AnchorCalibrationProbeRow(
     val frameDeficitResidualFrames: Int,
     val resolvedPlacementFrames: Int,
     val directStableBestOffsetFrames: Int,
+    val calibratedStableDirect: PcmWindowComparison?,
+    val calibratedStableBestOffset: PcmWindowComparison?,
 ) {
     fun predictedPlacement(correctionFrames: Int): Int {
         return frameDeficitOffsetFrames + correctionFrames
@@ -1273,6 +1462,7 @@ private data class Mp3AnchorCalibrationProbeRow(
 
 data class AudioWindowDecodeProbeResult(
     val label: String,
+    val isCalibrationProbe: Boolean,
     val playbackPositionMs: Long,
     val segmentIndex: Int,
     val targetFrame: Int,
@@ -1294,6 +1484,7 @@ data class AudioWindowDecodeProbeResult(
     val songTimelineResampleMs: Long,
     val songTimelineTimestampResampleMs: Long,
     val songTimelineFrameDeficitResampleMs: Long,
+    val songTimelineMp3CalibratedResampleMs: Long?,
     val songTimelineMetadataDelayResampleMs: Long?,
     val prerollSongTimelineResampleMs: Long,
     val extractorStartUs: Long,
@@ -1305,16 +1496,20 @@ data class AudioWindowDecodeProbeResult(
     val trackMetadata: AudioDecodeTrackMetadata?,
     val timestampPlacementOffsetSourceFrames: Int?,
     val frameDeficitPlacementOffsetSourceFrames: Int,
+    val mp3CalibrationCorrectionFrames: Int?,
+    val mp3CalibratedPlacementOffsetSourceFrames: Int?,
     val metadataDelayPlacementOffsetSourceFrames: Int?,
     val sourceRateComparison: PcmWindowAlignmentComparison,
     val sourceRatePrerollComparison: PcmWindowAlignmentComparison,
     val sourceRateTimestampPlacementComparison: PcmWindowAlignmentComparison?,
     val sourceRateFrameDeficitPlacementComparison: PcmWindowAlignmentComparison,
+    val sourceRateMp3CalibratedPlacementComparison: PcmWindowAlignmentComparison?,
     val sourceRateMetadataDelayPlacementComparison: PcmWindowAlignmentComparison?,
     val currentResampledComparison: PcmWindowAlignmentComparison,
     val songTimelineResampledComparison: PcmWindowAlignmentComparison,
     val songTimelineTimestampPlacementComparison: PcmWindowAlignmentComparison?,
     val songTimelineFrameDeficitPlacementComparison: PcmWindowAlignmentComparison,
+    val songTimelineMp3CalibratedPlacementComparison: PcmWindowAlignmentComparison?,
     val songTimelineMetadataDelayPlacementComparison: PcmWindowAlignmentComparison?,
     val prerollResampledComparison: PcmWindowAlignmentComparison,
     val prerollSongTimelineResampledComparison: PcmWindowAlignmentComparison,
@@ -1327,11 +1522,13 @@ data class AudioWindowDecodeProbeResult(
             AudioWindowDecodeCandidateFamily.SourceRatePreroll -> sourceRatePrerollComparison
             AudioWindowDecodeCandidateFamily.SourceRateTimestampPlacement -> sourceRateTimestampPlacementComparison
             AudioWindowDecodeCandidateFamily.SourceRateFrameDeficitPlacement -> sourceRateFrameDeficitPlacementComparison
+            AudioWindowDecodeCandidateFamily.SourceRateMp3CalibratedPlacement -> sourceRateMp3CalibratedPlacementComparison
             AudioWindowDecodeCandidateFamily.SourceRateMetadataDelayPlacement -> sourceRateMetadataDelayPlacementComparison
             AudioWindowDecodeCandidateFamily.CurrentResample -> currentResampledComparison
             AudioWindowDecodeCandidateFamily.SongTimelineResample -> songTimelineResampledComparison
             AudioWindowDecodeCandidateFamily.SongTimelineTimestampPlacement -> songTimelineTimestampPlacementComparison
             AudioWindowDecodeCandidateFamily.SongTimelineFrameDeficitPlacement -> songTimelineFrameDeficitPlacementComparison
+            AudioWindowDecodeCandidateFamily.SongTimelineMp3CalibratedPlacement -> songTimelineMp3CalibratedPlacementComparison
             AudioWindowDecodeCandidateFamily.SongTimelineMetadataDelayPlacement -> songTimelineMetadataDelayPlacementComparison
             AudioWindowDecodeCandidateFamily.PrerollResample -> prerollResampledComparison
             AudioWindowDecodeCandidateFamily.PrerollSongTimelineResample -> prerollSongTimelineResampledComparison
@@ -1341,6 +1538,7 @@ data class AudioWindowDecodeProbeResult(
     fun toReportText(): String {
         return buildString {
             appendLine("Playback position: ${playbackPositionMs}ms")
+            appendLine("Calibration probe: ${if (isCalibrationProbe) "yes" else "no"}")
             appendLine("Segment index: $segmentIndex")
             appendLine("Source-rate target frame: $targetFrame")
             appendLine("Target-rate frame: $targetSampleRateFrame")
@@ -1368,6 +1566,8 @@ data class AudioWindowDecodeProbeResult(
             appendLine("Encoder padding frames: ${trackMetadata?.encoderPaddingFrames.toOptionalFrames()}")
             appendLine("Timestamp placement offset source frames: ${timestampPlacementOffsetSourceFrames.toOptionalFrames()}")
             appendLine("Frame-deficit placement offset source frames: $frameDeficitPlacementOffsetSourceFrames")
+            appendLine("MP3 calibration correction frames: ${mp3CalibrationCorrectionFrames.toOptionalFrames()}")
+            appendLine("MP3 calibrated placement offset source frames: ${mp3CalibratedPlacementOffsetSourceFrames.toOptionalFrames()}")
             appendLine("Metadata-delay placement offset source frames: ${metadataDelayPlacementOffsetSourceFrames.toOptionalFrames()}")
             appendLine("Local decode: ${localWindowDecodeMs}ms")
             appendLine("Local resample: ${localWindowResampleMs}ms")
@@ -1376,6 +1576,7 @@ data class AudioWindowDecodeProbeResult(
             appendLine("Song-timeline resample: ${songTimelineResampleMs}ms")
             appendLine("Song-timeline timestamp resample: ${songTimelineTimestampResampleMs}ms")
             appendLine("Song-timeline frame-deficit resample: ${songTimelineFrameDeficitResampleMs}ms")
+            appendLine("Song-timeline MP3 calibrated resample: ${songTimelineMp3CalibratedResampleMs.toOptionalMs()}")
             appendLine("Song-timeline metadata-delay resample: ${songTimelineMetadataDelayResampleMs.toOptionalMs()}")
             appendLine("Preroll song-timeline resample: ${prerollSongTimelineResampleMs}ms")
             appendLine()
@@ -1384,11 +1585,13 @@ data class AudioWindowDecodeProbeResult(
             appendComparison("Source-rate preroll", sourceRatePrerollComparison)
             appendNullableComparison("Source-rate timestamp placement", sourceRateTimestampPlacementComparison)
             appendComparison("Source-rate frame-deficit placement", sourceRateFrameDeficitPlacementComparison)
+            appendNullableComparison("Source-rate MP3 calibrated placement", sourceRateMp3CalibratedPlacementComparison)
             appendNullableComparison("Source-rate metadata-delay placement", sourceRateMetadataDelayPlacementComparison)
             appendComparison("Current resample", currentResampledComparison)
             appendComparison("Song-timeline resample", songTimelineResampledComparison)
             appendNullableComparison("Song-timeline timestamp placement", songTimelineTimestampPlacementComparison)
             appendComparison("Song-timeline frame-deficit placement", songTimelineFrameDeficitPlacementComparison)
+            appendNullableComparison("Song-timeline MP3 calibrated placement", songTimelineMp3CalibratedPlacementComparison)
             appendNullableComparison("Song-timeline metadata-delay placement", songTimelineMetadataDelayPlacementComparison)
             appendComparison("Preroll resample", prerollResampledComparison)
             appendComparison("Preroll song-timeline resample", prerollSongTimelineResampledComparison)
@@ -1440,11 +1643,13 @@ enum class AudioWindowDecodeCandidateFamily(
     SourceRatePreroll("Source-rate preroll"),
     SourceRateTimestampPlacement("Source-rate timestamp placement"),
     SourceRateFrameDeficitPlacement("Source-rate frame-deficit placement"),
+    SourceRateMp3CalibratedPlacement("Source-rate MP3 calibrated placement"),
     SourceRateMetadataDelayPlacement("Source-rate metadata-delay placement"),
     CurrentResample("Current local resample"),
     SongTimelineResample("Song-timeline resample"),
     SongTimelineTimestampPlacement("Song-timeline timestamp placement"),
     SongTimelineFrameDeficitPlacement("Song-timeline frame-deficit placement"),
+    SongTimelineMp3CalibratedPlacement("Song-timeline MP3 calibrated placement"),
     SongTimelineMetadataDelayPlacement("Song-timeline metadata-delay placement"),
     PrerollResample("Preroll local resample"),
     PrerollSongTimelineResample("Preroll song-timeline resample"),
