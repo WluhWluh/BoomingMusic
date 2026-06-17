@@ -39,8 +39,10 @@
     <string name="source_separation_current_song">Current song</string>
     <string name="source_separation_start_current_song">Separate current song</string>
     <string name="source_separation_window_decode_experiment">Test window decode</string>
-    <string name="source_separation_window_decode_running">Testing local window decode...</string>
-    <string name="source_separation_window_decode_completed">Window decode report saved: %1$s\nFull decode: %2$dms, probes: %3$d, total window decode: %4$dms, worst offset: %5$d frames, worst mean error: %6$.3f</string>
+    <string name="source_separation_window_decode_running">Testing local window decode (%1$d%%, step %2$d/%3$d): %4$s\nCurrent stage: %5$s</string>
+    <string name="source_separation_window_decode_probe_progress">Probe %1$d/%2$d</string>
+    <string name="source_separation_window_decode_probe_preparing">Preparing probe</string>
+    <string name="source_separation_window_decode_completed">Window decode report saved: %1$s\nFull decode: %2$dms, probes: %3$d, total window decode: %4$dms, worst song-timeline offset: %5$d frames, worst song-timeline mean error: %6$.3f</string>
     <string name="source_separation_window_decode_failed">Window decode test failed: %1$s</string>
     <string name="source_separation_status_idle">No active separation task.</string>
     <string name="source_separation_status_completed">Separation completed for \"%1$s\".</string>
