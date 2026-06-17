@@ -581,13 +581,19 @@ Initial conclusions from the first two experiment rounds:
 - OGG and WAV exposed a second issue: local-window resampling from an arbitrary cut does not always match full-song resampling followed by slicing.
 - The local window idea is still promising because it is much faster than full decode, but the production path needs a better alignment model before it can replace the current whole-song decode.
 
-Planned third experiment round:
+Latest conclusions from rounds 5 and 6:
 
-- Compare raw decoded windows before resampling so seek and codec delay can be separated from interpolation effects.
-- Add a global-phase resampling candidate that aligns local resampling to the song-wide frame position instead of resetting phase at the window start.
-- Add a preroll-and-cursor trim candidate that decodes slightly earlier than the target window, then trims using accumulated decoded frame position instead of only buffer timestamps.
-- Keep reporting request-aligned and first-output-aligned results so the effect of each strategy is easy to compare.
-- Promote the window decoder only if the third round shows stable low error across multiple formats and multiple positions.
+- Non-MP3 formats are now good candidates for a strict production fallback path: the local-window strategy looks reliable when the chosen placement rule is stable.
+- MP3 is the remaining format that needs dedicated attention. Its raw frame-deficit signal appears file-specific but often stable enough to justify a short calibration probe.
+- The next step should treat MP3 as a file-level anchor calibration problem keyed by audio fingerprint, not as a generic "one rule fits every format" decode problem.
+- Brute-force best-offset search remains diagnostic only. Production should use a deterministic profile or fall back to the current full-song path.
+
+Planned MP3 calibration round:
+
+- Compare the MP3 raw frame-deficit placement offset against the search-verified best offset across several songs and positions.
+- Check whether one short probe can produce a file-level correction that stays stable across the rest of the song.
+- Cache the correction by audio fingerprint only when the spread is tight enough to trust.
+- Keep the existing non-MP3 findings as a fallback-oriented reference instead of trying to force one universal rule across all codecs.
 
 ### Phase 5B: Segment-Based Processing
 

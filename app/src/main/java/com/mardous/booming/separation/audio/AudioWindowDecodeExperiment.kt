@@ -5,8 +5,11 @@ import android.net.Uri
 import android.os.SystemClock
 import com.mardous.booming.separation.model.MdxDspConfig
 import java.io.File
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
-import kotlin.math.roundToLong
+import kotlin.math.ceil
+import kotlin.math.floor
+import kotlin.math.roundToInt
 
 class AudioWindowDecodeExperiment(
     private val context: Context,
@@ -17,31 +20,67 @@ class AudioWindowDecodeExperiment(
         displayName: String,
         playbackPositionMs: Long,
         reportDir: File,
+        onProgress: (AudioWindowDecodeExperimentProgress) -> Unit = {},
         shouldCancel: () -> Boolean = { false },
     ): AudioWindowDecodeExperimentResult {
         reportDir.mkdirs()
-        val fullDecode = timed {
+        var completedSteps = 0
+        var totalSteps = REFERENCE_STEP_COUNT
+        var probeCount = 0
+
+        fun publish(
+            stage: String,
+            probeIndex: Int? = null,
+        ) {
+            onProgress(
+                AudioWindowDecodeExperimentProgress(
+                    completedSteps = completedSteps,
+                    totalSteps = totalSteps,
+                    stage = stage,
+                    probeIndex = probeIndex,
+                    probeCount = probeCount.takeIf { it > 0 },
+                )
+            )
+        }
+
+        publish("Decoding full reference audio")
+        val referenceTimed = timed {
             AudioPcmDecoder(context).decode(uri, shouldCancel = shouldCancel)
         }
-        val reference = timed {
-            fullDecode.value.resampleTo(config.sampleRate, shouldCancel = shouldCancel)
+        completedSteps += 1
+        publish("Resampling full reference audio")
+        val referenceResampledTimed = timed {
+            referenceTimed.value.resampleTo(config.sampleRate, shouldCancel = shouldCancel)
         }
+        completedSteps += 1
 
         val targetPlaybackPositionMs = playbackPositionMs.coerceAtLeast(0L)
         val probePositionsMs = buildProbePositionsMs(
             requestedPositionMs = targetPlaybackPositionMs,
-            totalFrames = reference.value.frameCount,
+            totalFrames = referenceTimed.value.frameCount,
+            sourceSampleRate = referenceTimed.value.sampleRate,
         )
+        probeCount = probePositionsMs.size
+        totalSteps = REFERENCE_STEP_COUNT + probeCount * PROBE_STEP_COUNT + REPORT_STEP_COUNT
+
         val probes = probePositionsMs.mapIndexed { index, positionMs ->
+            val probeIndex = index + 1
             runProbe(
                 uri = uri,
-                reference = reference.value,
+                referenceFull = referenceTimed.value,
+                referenceResampled = referenceResampledTimed.value,
                 requestedLabel = if (positionMs == targetPlaybackPositionMs) {
                     "Current playback"
                 } else {
                     "Probe ${index + 1}"
                 },
                 playbackPositionMs = positionMs,
+                onStage = { stage ->
+                    publish("Probe $probeIndex/$probeCount: $stage", probeIndex)
+                },
+                onStepComplete = {
+                    completedSteps += 1
+                },
                 shouldCancel = shouldCancel,
             )
         }
@@ -50,39 +89,82 @@ class AudioWindowDecodeExperiment(
             .replace(Regex("[^A-Za-z0-9._-]+"), "_")
             .ifBlank { "audio" }
         val reportFile = uniqueFile(reportDir, "${safeName}_window_decode_experiment.txt")
+        publish("Writing report")
         val result = AudioWindowDecodeExperimentResult(
             reportFile = reportFile,
             displayName = displayName,
             requestedPlaybackPositionMs = targetPlaybackPositionMs,
-            referenceFrameCount = reference.value.frameCount,
-            referenceSampleRate = reference.value.sampleRate,
-            referenceChannelCount = reference.value.channelCount,
-            fullDecodeMs = fullDecode.elapsedMs,
-            fullResampleMs = reference.elapsedMs,
+            sourceSampleRate = referenceTimed.value.sampleRate,
+            referenceFrameCount = referenceTimed.value.frameCount,
+            referenceChannelCount = referenceTimed.value.channelCount,
+            fullDecodeMs = referenceTimed.elapsedMs,
+            fullResampleMs = referenceResampledTimed.elapsedMs,
             probes = probes,
         )
         reportFile.writeText(result.toReportText(), Charsets.UTF_8)
+        completedSteps += 1
+        publish("Finished")
         return result
     }
 
     private fun runProbe(
         uri: Uri,
-        reference: DecodedPcmAudio,
+        referenceFull: DecodedPcmAudio,
+        referenceResampled: DecodedPcmAudio,
         requestedLabel: String,
         playbackPositionMs: Long,
+        onStage: (String) -> Unit,
+        onStepComplete: () -> Unit,
         shouldCancel: () -> Boolean,
     ): AudioWindowDecodeProbeResult {
-        val targetFrame = ((playbackPositionMs.coerceAtLeast(0L) * config.sampleRate) / MILLIS_PER_SECOND)
-            .coerceIn(0L, reference.frameCount.toLong())
+        fun <T> timedProbeStage(
+            stage: String,
+            block: () -> T,
+        ): TimedValue<T> {
+            onStage(stage)
+            val result = timed(block)
+            onStepComplete()
+            return result
+        }
+
+        fun completeProbeStage(stage: String) {
+            onStage(stage)
+            onStepComplete()
+        }
+
+        fun <T> probeStage(
+            stage: String,
+            block: () -> T,
+        ): T {
+            onStage(stage)
+            throwIfCanceled(shouldCancel)
+            val result = block()
+            throwIfCanceled(shouldCancel)
+            onStepComplete()
+            return result
+        }
+
+        val referenceTargetFrame = ((playbackPositionMs.coerceAtLeast(0L) * referenceFull.sampleRate) / MILLIS_PER_SECOND)
+            .coerceIn(0L, referenceFull.frameCount.toLong())
             .toInt()
-        val segmentIndex = (targetFrame / config.generationSize).coerceAtLeast(0)
+        val modelTargetFrame = sourceFrameToTargetFrame(referenceTargetFrame, referenceFull.sampleRate)
+        val segmentIndex = (modelTargetFrame / config.generationSize).coerceAtLeast(0)
         val playbackStartFrame = segmentIndex * config.generationSize
         val windowStartFrame = playbackStartFrame - config.trim
         val windowEndFrame = windowStartFrame + config.chunkSize
-        val requestedStartUs = frameToUs(windowStartFrame.coerceAtLeast(0), config.sampleRate)
-        val requestedEndUs = frameToUs(windowEndFrame.coerceAtLeast(0), config.sampleRate)
+        val referenceWindowStartFrame = targetFrameToSourceFrameFloor(
+            targetFrame = windowStartFrame.coerceAtLeast(0),
+            sourceSampleRate = referenceFull.sampleRate,
+        )
+        val referenceWindowEndFrame = targetFrameToSourceFrameCeil(
+            targetFrame = windowEndFrame.coerceAtLeast(0),
+            sourceSampleRate = referenceFull.sampleRate,
+        ).coerceAtLeast(referenceWindowStartFrame + 1)
+        val requestedStartUs = frameToUs(referenceWindowStartFrame, referenceFull.sampleRate)
+        val requestedEndUs = frameToUs(referenceWindowEndFrame, referenceFull.sampleRate)
+        val prerollUs = config.trimFramesToUs()
 
-        val localWindow = timed {
+        val localWindow = timedProbeStage("Local window decode") {
             AudioPcmDecoder(context).decodeWindow(
                 uri = uri,
                 startUs = requestedStartUs,
@@ -90,77 +172,340 @@ class AudioWindowDecodeExperiment(
                 shouldCancel = shouldCancel,
             )
         }
-        val localResampled = timed {
-            localWindow.value.audio.resampleTo(config.sampleRate, shouldCancel = shouldCancel)
+        val prerollWindow = timedProbeStage("Preroll window decode") {
+            AudioPcmDecoder(context).decodeWindowWithPrerollCursor(
+                uri = uri,
+                startUs = requestedStartUs,
+                endUs = requestedEndUs,
+                prerollUs = prerollUs,
+                shouldCancel = shouldCancel,
+            )
         }
 
-        val expected = reference.slicePcm16(
-            startFrame = windowStartFrame,
-            frames = config.chunkSize,
+        val sourceRateExpected = referenceFull.slicePcm16(
+            startFrame = referenceWindowStartFrame,
+            frames = referenceWindowEndFrame - referenceWindowStartFrame,
             outputChannelCount = MdxDspConfig.STEREO_CHANNELS,
         )
-        val requestAlignedCandidate = localResampled.value.slicePcm16IntoWindow(
+        val sourceRateLocal = localWindow.value.audio.toStereoPcm16(
+            startFrame = 0,
+            maxFrames = referenceWindowEndFrame - referenceWindowStartFrame,
+        )
+        val sourceRatePreroll = prerollWindow.value.audio.toStereoPcm16(
+            startFrame = 0,
+            maxFrames = referenceWindowEndFrame - referenceWindowStartFrame,
+        )
+        val stableSourceStartFrame = (
+                targetFrameToSourceFrameFloor(playbackStartFrame, referenceFull.sampleRate) -
+                        referenceWindowStartFrame
+                ).coerceAtLeast(0)
+        val stableSourceEndFrame = (
+                targetFrameToSourceFrameCeil(playbackStartFrame + config.generationSize, referenceFull.sampleRate) -
+                        referenceWindowStartFrame
+                ).coerceAtLeast(stableSourceStartFrame)
+        val stableSourceFrameCount = stableSourceEndFrame - stableSourceStartFrame
+        val stableTargetStartFrame = config.trim
+        val stableTargetFrameCount = config.generationSize
+        val timestampPlacementOffsetSourceFrames = localWindow.value.firstOutputTimeUs
+            ?.let { usDeltaToFrame(it - requestedStartUs, referenceFull.sampleRate) }
+        val frameDeficitPlacementOffsetSourceFrames = (
+                referenceWindowEndFrame - referenceWindowStartFrame - localWindow.value.audio.frameCount
+                ).coerceAtLeast(0)
+        val metadataDelayPlacementOffsetSourceFrames = localWindow.value.trackMetadata
+            ?.encoderDelayFrames
+            ?.takeIf { referenceWindowStartFrame == 0 }
+        val sourceRateTimestampPlaced = localWindow.value.audio.toStereoPcm16Placed(
+            maxFrames = referenceWindowEndFrame - referenceWindowStartFrame,
+            destinationStartFrame = timestampPlacementOffsetSourceFrames ?: 0,
+        )
+        val sourceRateFrameDeficitPlaced = localWindow.value.audio.toStereoPcm16Placed(
+            maxFrames = referenceWindowEndFrame - referenceWindowStartFrame,
+            destinationStartFrame = frameDeficitPlacementOffsetSourceFrames,
+        )
+        val sourceRateMetadataDelayPlaced = metadataDelayPlacementOffsetSourceFrames?.let { offsetFrames ->
+            localWindow.value.audio.toStereoPcm16Placed(
+                maxFrames = referenceWindowEndFrame - referenceWindowStartFrame,
+                destinationStartFrame = offsetFrames,
+            )
+        }
+
+        val currentResampledTimed = timedProbeStage("Current local resample") {
+            localWindow.value.audio.resampleTo(config.sampleRate, shouldCancel = shouldCancel)
+        }
+        val currentExpected = referenceResampled.slicePcm16(
+                startFrame = windowStartFrame,
+                frames = config.chunkSize,
+                outputChannelCount = MdxDspConfig.STEREO_CHANNELS,
+            )
+        val currentResampledAligned = currentResampledTimed.value.slicePcm16IntoWindow(
             frames = config.chunkSize,
             outputChannelCount = MdxDspConfig.STEREO_CHANNELS,
             destinationStartFrame = maxOf(0, -windowStartFrame),
         )
-        val firstOutputAlignedCandidate = localResampled.value.slicePcm16IntoWindow(
+        val songTimelineResampledTimed = timedProbeStage("Song-timeline resample") {
+            localWindow.value.audio.resampleToTargetWindowOnSongTimeline(
+                targetSampleRate = config.sampleRate,
+                targetWindowStartFrame = windowStartFrame,
+                sourceWindowStartFrame = referenceWindowStartFrame,
+                shouldCancel = shouldCancel,
+            )
+        }
+        val songTimelineTimestampResampledTimed = timedProbeStage("Song-timeline timestamp resample") {
+            localWindow.value.audio.resampleToTargetWindowOnSongTimeline(
+                targetSampleRate = config.sampleRate,
+                targetWindowStartFrame = windowStartFrame,
+                sourceWindowStartFrame = referenceWindowStartFrame +
+                        (timestampPlacementOffsetSourceFrames ?: 0),
+                shouldCancel = shouldCancel,
+            )
+        }
+        val songTimelineFrameDeficitResampledTimed = timedProbeStage("Song-timeline frame-deficit resample") {
+            localWindow.value.audio.resampleToTargetWindowOnSongTimeline(
+                targetSampleRate = config.sampleRate,
+                targetWindowStartFrame = windowStartFrame,
+                sourceWindowStartFrame = referenceWindowStartFrame +
+                        frameDeficitPlacementOffsetSourceFrames,
+                shouldCancel = shouldCancel,
+            )
+        }
+        val songTimelineMetadataDelayResampledTimed = metadataDelayPlacementOffsetSourceFrames?.let { offsetFrames ->
+            timedProbeStage("Song-timeline metadata-delay resample") {
+                localWindow.value.audio.resampleToTargetWindowOnSongTimeline(
+                    targetSampleRate = config.sampleRate,
+                    targetWindowStartFrame = windowStartFrame,
+                    sourceWindowStartFrame = referenceWindowStartFrame + offsetFrames,
+                    shouldCancel = shouldCancel,
+                )
+            }
+        } ?: run {
+            completeProbeStage("Song-timeline metadata-delay resample unavailable")
+            null
+        }
+
+        val prerollResampledTimed = timedProbeStage("Preroll local resample") {
+            prerollWindow.value.audio.resampleTo(config.sampleRate, shouldCancel = shouldCancel)
+        }
+        val prerollResampledAligned = prerollResampledTimed.value.slicePcm16IntoWindow(
             frames = config.chunkSize,
             outputChannelCount = MdxDspConfig.STEREO_CHANNELS,
-            destinationStartFrame = firstOutputDestinationFrame(
-                windowStartFrame = windowStartFrame,
-                firstOutputTimeUs = localWindow.value.firstOutputTimeUs,
-            ),
+            destinationStartFrame = maxOf(0, -windowStartFrame),
         )
+        val prerollSongTimelineResampledTimed = timedProbeStage("Preroll song-timeline resample") {
+            prerollWindow.value.audio.resampleToTargetWindowOnSongTimeline(
+                targetSampleRate = config.sampleRate,
+                targetWindowStartFrame = windowStartFrame,
+                sourceWindowStartFrame = referenceWindowStartFrame,
+                shouldCancel = shouldCancel,
+            )
+        }
 
-        val requestAligned = compareCandidate(expected, requestAlignedCandidate)
-        val firstOutputAligned = compareCandidate(expected, firstOutputAlignedCandidate)
+        val sourceRateComparisons = probeStage("Comparing source-rate candidates") {
+            SourceRateCandidateComparisons(
+                sourceRate = compareCandidate(
+                    reference = sourceRateExpected,
+                    candidate = sourceRateLocal,
+                    stableStartFrame = stableSourceStartFrame,
+                    stableFrames = stableSourceFrameCount,
+                ),
+                sourceRatePreroll = compareCandidate(
+                    reference = sourceRateExpected,
+                    candidate = sourceRatePreroll,
+                    stableStartFrame = stableSourceStartFrame,
+                    stableFrames = stableSourceFrameCount,
+                ),
+                sourceRateTimestampPlacement = timestampPlacementOffsetSourceFrames?.let {
+                    compareCandidate(
+                        reference = sourceRateExpected,
+                        candidate = sourceRateTimestampPlaced,
+                        stableStartFrame = stableSourceStartFrame,
+                        stableFrames = stableSourceFrameCount,
+                    )
+                },
+                sourceRateFrameDeficitPlacement = compareCandidate(
+                    reference = sourceRateExpected,
+                    candidate = sourceRateFrameDeficitPlaced,
+                    stableStartFrame = stableSourceStartFrame,
+                    stableFrames = stableSourceFrameCount,
+                ),
+                sourceRateMetadataDelayPlacement = sourceRateMetadataDelayPlaced?.let {
+                    compareCandidate(
+                        reference = sourceRateExpected,
+                        candidate = it,
+                        stableStartFrame = stableSourceStartFrame,
+                        stableFrames = stableSourceFrameCount,
+                    )
+                },
+            )
+        }
+
+        val currentResampleComparison = probeStage("Comparing current-resample candidate") {
+            compareCandidate(
+                reference = currentExpected,
+                candidate = currentResampledAligned,
+                stableStartFrame = stableTargetStartFrame,
+                stableFrames = stableTargetFrameCount,
+            )
+        }
+
+        val songTimelineComparisons = probeStage("Comparing song-timeline candidates") {
+            SongTimelineCandidateComparisons(
+                songTimeline = compareCandidate(
+                    reference = currentExpected,
+                    candidate = songTimelineResampledTimed.value,
+                    stableStartFrame = stableTargetStartFrame,
+                    stableFrames = stableTargetFrameCount,
+                ),
+                songTimelineTimestampPlacement = timestampPlacementOffsetSourceFrames?.let {
+                    compareCandidate(
+                        reference = currentExpected,
+                        candidate = songTimelineTimestampResampledTimed.value,
+                        stableStartFrame = stableTargetStartFrame,
+                        stableFrames = stableTargetFrameCount,
+                    )
+                },
+                songTimelineFrameDeficitPlacement = compareCandidate(
+                    reference = currentExpected,
+                    candidate = songTimelineFrameDeficitResampledTimed.value,
+                    stableStartFrame = stableTargetStartFrame,
+                    stableFrames = stableTargetFrameCount,
+                ),
+                songTimelineMetadataDelayPlacement = songTimelineMetadataDelayResampledTimed?.value?.let {
+                    compareCandidate(
+                        reference = currentExpected,
+                        candidate = it,
+                        stableStartFrame = stableTargetStartFrame,
+                        stableFrames = stableTargetFrameCount,
+                    )
+                },
+            )
+        }
+
+        val prerollComparisons = probeStage("Comparing preroll candidates") {
+            PrerollCandidateComparisons(
+                prerollResample = compareCandidate(
+                    reference = currentExpected,
+                    candidate = prerollResampledAligned,
+                    stableStartFrame = stableTargetStartFrame,
+                    stableFrames = stableTargetFrameCount,
+                ),
+                prerollSongTimeline = compareCandidate(
+                    reference = currentExpected,
+                    candidate = prerollSongTimelineResampledTimed.value,
+                    stableStartFrame = stableTargetStartFrame,
+                    stableFrames = stableTargetFrameCount,
+                ),
+            )
+        }
 
         return AudioWindowDecodeProbeResult(
             label = requestedLabel,
             playbackPositionMs = playbackPositionMs,
             segmentIndex = segmentIndex,
-            targetFrame = targetFrame,
+            targetFrame = referenceTargetFrame,
+            targetSampleRateFrame = modelTargetFrame,
             requestedStartUs = requestedStartUs,
             requestedEndUs = requestedEndUs,
             requestedWindowStartFrame = windowStartFrame,
             requestedWindowEndFrame = windowEndFrame,
-            windowDecodeMs = localWindow.elapsedMs,
-            windowResampleMs = localResampled.elapsedMs,
+            requestedSourceWindowStartFrame = referenceWindowStartFrame,
+            requestedSourceWindowEndFrame = referenceWindowEndFrame,
+            stableSourceStartFrame = stableSourceStartFrame,
+            stableSourceFrameCount = stableSourceFrameCount,
+            stableTargetStartFrame = stableTargetStartFrame,
+            stableTargetFrameCount = stableTargetFrameCount,
+            localWindowDecodeMs = localWindow.elapsedMs,
+            localWindowResampleMs = currentResampledTimed.elapsedMs,
+            prerollWindowDecodeMs = prerollWindow.elapsedMs,
+            prerollWindowResampleMs = prerollResampledTimed.elapsedMs,
+            songTimelineResampleMs = songTimelineResampledTimed.elapsedMs,
+            songTimelineTimestampResampleMs = songTimelineTimestampResampledTimed.elapsedMs,
+            songTimelineFrameDeficitResampleMs = songTimelineFrameDeficitResampledTimed.elapsedMs,
+            songTimelineMetadataDelayResampleMs = songTimelineMetadataDelayResampledTimed?.elapsedMs,
+            prerollSongTimelineResampleMs = prerollSongTimelineResampledTimed.elapsedMs,
             extractorStartUs = localWindow.value.extractorStartUs,
             firstOutputTimeUs = localWindow.value.firstOutputTimeUs,
             lastOutputTimeUs = localWindow.value.lastOutputTimeUs,
+            prerollCursorAnchorTimeUs = prerollWindow.value.cursorAnchorTimeUs,
             outputBufferCount = localWindow.value.outputBufferCount,
-            windowFrameCount = localResampled.value.frameCount,
-            requestAligned = requestAligned,
-            firstOutputAligned = firstOutputAligned,
+            windowFrameCount = localWindow.value.audio.frameCount,
+            trackMetadata = localWindow.value.trackMetadata,
+            timestampPlacementOffsetSourceFrames = timestampPlacementOffsetSourceFrames,
+            frameDeficitPlacementOffsetSourceFrames = frameDeficitPlacementOffsetSourceFrames,
+            metadataDelayPlacementOffsetSourceFrames = metadataDelayPlacementOffsetSourceFrames,
+            sourceRateComparison = sourceRateComparisons.sourceRate,
+            sourceRatePrerollComparison = sourceRateComparisons.sourceRatePreroll,
+            sourceRateTimestampPlacementComparison = sourceRateComparisons.sourceRateTimestampPlacement,
+            sourceRateFrameDeficitPlacementComparison = sourceRateComparisons.sourceRateFrameDeficitPlacement,
+            sourceRateMetadataDelayPlacementComparison = sourceRateComparisons.sourceRateMetadataDelayPlacement,
+            currentResampledComparison = currentResampleComparison,
+            songTimelineResampledComparison = songTimelineComparisons.songTimeline,
+            songTimelineTimestampPlacementComparison = songTimelineComparisons.songTimelineTimestampPlacement,
+            songTimelineFrameDeficitPlacementComparison = songTimelineComparisons.songTimelineFrameDeficitPlacement,
+            songTimelineMetadataDelayPlacementComparison = songTimelineComparisons.songTimelineMetadataDelayPlacement,
+            prerollResampledComparison = prerollComparisons.prerollResample,
+            prerollSongTimelineResampledComparison = prerollComparisons.prerollSongTimeline,
         )
     }
 
     private fun compareCandidate(
-        expected: ShortArray,
+        reference: ShortArray,
         candidate: ShortArray,
+        stableStartFrame: Int? = null,
+        stableFrames: Int? = null,
     ): PcmWindowAlignmentComparison {
+        val stableComparison = if (stableStartFrame != null && stableFrames != null && stableFrames > 0) {
+            val stableReference = reference.sliceInterleavedFrames(
+                startFrame = stableStartFrame,
+                frames = stableFrames,
+                channelCount = MdxDspConfig.STEREO_CHANNELS,
+            )
+            val stableCandidate = candidate.sliceInterleavedFrames(
+                startFrame = stableStartFrame,
+                frames = stableFrames,
+                channelCount = MdxDspConfig.STEREO_CHANNELS,
+            )
+            comparePcm16(stableReference, stableCandidate) to bestOffsetComparison(
+                reference = stableReference,
+                candidate = stableCandidate,
+                maxOffsetFrames = MAX_OFFSET_SEARCH_FRAMES,
+                channelCount = MdxDspConfig.STEREO_CHANNELS,
+            )
+        } else {
+            null
+        }
         return PcmWindowAlignmentComparison(
-            direct = comparePcm16(expected, candidate),
+            direct = comparePcm16(reference, candidate),
             bestOffset = bestOffsetComparison(
-                reference = expected,
+                reference = reference,
                 candidate = candidate,
                 maxOffsetFrames = MAX_OFFSET_SEARCH_FRAMES,
                 channelCount = MdxDspConfig.STEREO_CHANNELS,
             ),
+            stableDirect = stableComparison?.first,
+            stableBestOffset = stableComparison?.second,
         )
     }
 
     private fun buildProbePositionsMs(
         requestedPositionMs: Long,
         totalFrames: Int,
+        sourceSampleRate: Int,
     ): List<Long> {
-        val durationMs = frameToMs(totalFrames, config.sampleRate)
+        val durationMs = frameToMs(totalFrames, sourceSampleRate)
         val nearEndMs = (durationMs - PROBE_WINDOW_MARGIN_MS).coerceAtLeast(0L)
+        val firstSegmentBoundaryMs = frameToMs(config.generationSize, config.sampleRate)
+        val secondSegmentBoundaryMs = frameToMs(config.generationSize * 2, config.sampleRate)
         return listOf(
             requestedPositionMs,
             0L,
+            1_000L,
+            5_000L,
+            firstSegmentBoundaryMs - 1L,
+            firstSegmentBoundaryMs,
+            firstSegmentBoundaryMs + 1L,
+            secondSegmentBoundaryMs - 1L,
+            secondSegmentBoundaryMs,
+            secondSegmentBoundaryMs + 1L,
             30_000L,
             60_000L,
             durationMs / 2L,
@@ -214,13 +559,7 @@ class AudioWindowDecodeExperiment(
         offsetFrames: Int,
     ): PcmWindowComparison {
         if (count == 0) {
-            return PcmWindowComparison(
-                offsetFrames = offsetFrames,
-                comparedSamples = 0,
-                equalSamples = 0,
-                meanAbsoluteError = 0.0,
-                maxAbsoluteError = 0,
-            )
+            return PcmWindowComparison(0, 0, 0, 0.0, 0)
         }
         var equal = 0
         var absoluteErrorTotal = 0L
@@ -231,13 +570,14 @@ class AudioWindowDecodeExperiment(
             absoluteErrorTotal += error.toLong()
             if (error > maxAbsoluteError) maxAbsoluteError = error
         }
-        return PcmWindowComparison(
+        val comparison = PcmWindowComparison(
             offsetFrames = offsetFrames,
             comparedSamples = count,
             equalSamples = equal,
             meanAbsoluteError = absoluteErrorTotal.toDouble() / count.toDouble(),
             maxAbsoluteError = maxAbsoluteError,
         )
+        return comparison
     }
 
     private fun bestOffsetComparison(
@@ -246,33 +586,199 @@ class AudioWindowDecodeExperiment(
         maxOffsetFrames: Int,
         channelCount: Int,
     ): PcmWindowComparison {
-        var best = comparePcm16(reference, candidate)
-        for (offsetFrames in -maxOffsetFrames..maxOffsetFrames) {
-            if (offsetFrames == 0) continue
-            val offsetSamples = offsetFrames * channelCount
-            val referenceStart = maxOf(0, offsetSamples)
-            val candidateStart = maxOf(0, -offsetSamples)
-            val count = minOf(reference.size - referenceStart, candidate.size - candidateStart)
-            if (count <= 0) continue
-            val comparison = comparePcm16(
-                reference = reference,
-                candidate = candidate,
-                referenceStart = referenceStart,
-                candidateStart = candidateStart,
-                count = count,
-                offsetFrames = offsetFrames,
-            )
-            if (comparison.meanAbsoluteError < best.meanAbsoluteError) {
-                best = comparison
+        val sampledSearch = sampledBestOffsetSearch(
+            reference = reference,
+            candidate = candidate,
+            maxOffsetFrames = maxOffsetFrames,
+            channelCount = channelCount,
+        )
+        val candidateOffsets = buildSet {
+            add(0)
+            add(sampledSearch)
+            for (offset in sampledSearch - BEST_OFFSET_REFINE_RADIUS_FRAMES
+                    ..sampledSearch + BEST_OFFSET_REFINE_RADIUS_FRAMES) {
+                add(offset.coerceIn(-maxOffsetFrames, maxOffsetFrames))
             }
         }
-        return best
+        return candidateOffsets
+            .mapNotNull { offsetFrames ->
+                comparePcm16AtOffset(
+                    reference = reference,
+                    candidate = candidate,
+                    offsetFrames = offsetFrames,
+                    channelCount = channelCount,
+                )
+            }
+            .minByOrNull { it.meanAbsoluteError }
+            ?: comparePcm16(reference, candidate)
+    }
+
+    private fun sampledBestOffsetSearch(
+        reference: ShortArray,
+        candidate: ShortArray,
+        maxOffsetFrames: Int,
+        channelCount: Int,
+    ): Int {
+        var bestOffsetFrames = 0
+        var bestError = sampledMeanAbsoluteErrorAtOffset(
+            reference = reference,
+            candidate = candidate,
+            offsetFrames = 0,
+            channelCount = channelCount,
+        )
+        for (offsetFrames in -maxOffsetFrames..maxOffsetFrames step BEST_OFFSET_COARSE_STEP_FRAMES) {
+            val error = sampledMeanAbsoluteErrorAtOffset(
+                reference = reference,
+                candidate = candidate,
+                offsetFrames = offsetFrames,
+                channelCount = channelCount,
+            )
+            if (error < bestError) {
+                bestError = error
+                bestOffsetFrames = offsetFrames
+            }
+        }
+        return bestOffsetFrames
+    }
+
+    private fun sampledMeanAbsoluteErrorAtOffset(
+        reference: ShortArray,
+        candidate: ShortArray,
+        offsetFrames: Int,
+        channelCount: Int,
+    ): Double {
+        val offsetSamples = offsetFrames * channelCount
+        val referenceStart = maxOf(0, offsetSamples)
+        val candidateStart = maxOf(0, -offsetSamples)
+        val count = minOf(reference.size - referenceStart, candidate.size - candidateStart)
+        if (count <= 0) return Double.POSITIVE_INFINITY
+
+        val sampleStride = (BEST_OFFSET_SAMPLE_STRIDE_FRAMES * channelCount).coerceAtLeast(channelCount)
+        var index = 0
+        var sampled = 0
+        var absoluteErrorTotal = 0L
+        while (index < count) {
+            for (channel in 0 until channelCount) {
+                val sampleIndex = index + channel
+                if (sampleIndex >= count) break
+                val error = abs(
+                    reference[referenceStart + sampleIndex].toInt() -
+                            candidate[candidateStart + sampleIndex].toInt()
+                )
+                absoluteErrorTotal += error.toLong()
+                sampled += 1
+            }
+            index += sampleStride
+        }
+        return if (sampled > 0) {
+            absoluteErrorTotal.toDouble() / sampled.toDouble()
+        } else {
+            Double.POSITIVE_INFINITY
+        }
+    }
+
+    private fun comparePcm16AtOffset(
+        reference: ShortArray,
+        candidate: ShortArray,
+        offsetFrames: Int,
+        channelCount: Int,
+    ): PcmWindowComparison? {
+        val offsetSamples = offsetFrames * channelCount
+        val referenceStart = maxOf(0, offsetSamples)
+        val candidateStart = maxOf(0, -offsetSamples)
+        val count = minOf(reference.size - referenceStart, candidate.size - candidateStart)
+        if (count <= 0) return null
+        return comparePcm16(
+            reference = reference,
+            candidate = candidate,
+            referenceStart = referenceStart,
+            candidateStart = candidateStart,
+            count = count,
+            offsetFrames = offsetFrames,
+        )
     }
 
     private fun DecodedPcmAudio.readLittleEndianShort(byteIndex: Int): Short {
         val low = pcm16[byteIndex].toInt() and 0xFF
         val high = pcm16[byteIndex + 1].toInt()
         return ((high shl 8) or low).toShort()
+    }
+
+    private fun DecodedPcmAudio.toStereoPcm16(
+        startFrame: Int,
+        maxFrames: Int,
+    ): ShortArray {
+        val frames = minOf(frameCount - startFrame.coerceAtLeast(0), maxFrames)
+        val output = ShortArray(maxFrames * MdxDspConfig.STEREO_CHANNELS)
+        if (frames <= 0) return output
+        val source = slicePcm16(
+            startFrame = startFrame,
+            frames = frames,
+            outputChannelCount = MdxDspConfig.STEREO_CHANNELS,
+        )
+        source.copyInto(output)
+        return output
+    }
+
+    private fun DecodedPcmAudio.toStereoPcm16Placed(
+        maxFrames: Int,
+        destinationStartFrame: Int,
+    ): ShortArray {
+        val output = ShortArray(maxFrames * MdxDspConfig.STEREO_CHANNELS)
+        val safeDestinationStartFrame = destinationStartFrame.coerceIn(0, maxFrames)
+        val copyFrames = minOf(frameCount, maxFrames - safeDestinationStartFrame)
+        if (copyFrames <= 0) return output
+        val source = slicePcm16(
+            startFrame = 0,
+            frames = copyFrames,
+            outputChannelCount = MdxDspConfig.STEREO_CHANNELS,
+        )
+        source.copyInto(
+            destination = output,
+            destinationOffset = safeDestinationStartFrame * MdxDspConfig.STEREO_CHANNELS,
+        )
+        return output
+    }
+
+    private fun DecodedPcmAudio.resampleToTargetWindowOnSongTimeline(
+        targetSampleRate: Int,
+        targetWindowStartFrame: Int,
+        sourceWindowStartFrame: Int,
+        shouldCancel: () -> Boolean = { false },
+    ): ShortArray {
+        val output = ShortArray(config.chunkSize * MdxDspConfig.STEREO_CHANNELS)
+        if (frameCount == 0) return output
+
+        for (targetFrameInWindow in 0 until config.chunkSize) {
+            if (targetFrameInWindow % CANCEL_CHECK_INTERVAL_FRAMES == 0) {
+                throwIfCanceled(shouldCancel)
+            }
+            val globalTargetFrame = targetWindowStartFrame + targetFrameInWindow
+            if (globalTargetFrame < 0) continue
+
+            val globalSourcePosition = globalTargetFrame.toDouble() * sampleRate.toDouble() /
+                    targetSampleRate.toDouble()
+            val localSourcePosition = globalSourcePosition - sourceWindowStartFrame.toDouble()
+            if (localSourcePosition < 0.0 || localSourcePosition > (frameCount - 1).toDouble()) {
+                continue
+            }
+
+            val sourceFrame = floor(localSourcePosition).toInt().coerceIn(0, frameCount - 1)
+            val nextFrame = (sourceFrame + 1).coerceAtMost(frameCount - 1)
+            val fraction = (localSourcePosition - sourceFrame).toFloat()
+            val outputOffset = targetFrameInWindow * MdxDspConfig.STEREO_CHANNELS
+
+            for (channel in 0 until MdxDspConfig.STEREO_CHANNELS) {
+                val sourceChannel = channel.coerceAtMost(channelCount - 1)
+                val current = readSample(sourceFrame, sourceChannel).toFloat()
+                val next = readSample(nextFrame, sourceChannel).toFloat()
+                val value = (current + (next - current) * fraction)
+                    .roundToInt()
+                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                output[outputOffset + channel] = value.toShort()
+            }
+        }
+        return output
     }
 
     private fun DecodedPcmAudio.slicePcm16IntoWindow(
@@ -296,22 +802,28 @@ class AudioWindowDecodeExperiment(
         return output
     }
 
-    private inline fun <T> timed(block: () -> T): TimedValue<T> {
-        val start = SystemClock.elapsedRealtime()
-        return TimedValue(
-            value = block(),
-            elapsedMs = SystemClock.elapsedRealtime() - start,
+    private fun ShortArray.sliceInterleavedFrames(
+        startFrame: Int,
+        frames: Int,
+        channelCount: Int,
+    ): ShortArray {
+        val output = ShortArray(frames * channelCount)
+        val sourceFrameCount = size / channelCount
+        val copyStartFrame = startFrame.coerceIn(0, sourceFrameCount)
+        val copyEndFrame = (startFrame + frames).coerceIn(copyStartFrame, sourceFrameCount)
+        val copyFrames = copyEndFrame - copyStartFrame
+        if (copyFrames <= 0) return output
+        copyInto(
+            destination = output,
+            destinationOffset = (copyStartFrame - startFrame) * channelCount,
+            startIndex = copyStartFrame * channelCount,
+            endIndex = copyEndFrame * channelCount,
         )
+        return output
     }
 
-    private fun firstOutputDestinationFrame(
-        windowStartFrame: Int,
-        firstOutputTimeUs: Long?,
-    ): Int {
-        val firstOutputFrame = firstOutputTimeUs
-            ?.let { usToFrame(it, config.sampleRate) }
-            ?: windowStartFrame.coerceAtLeast(0)
-        return firstOutputFrame - windowStartFrame
+    private fun DecodedPcmAudio.readSample(frame: Int, channel: Int): Short {
+        return readLittleEndianShort((frame * channelCount + channel) * Short.SIZE_BYTES)
     }
 
     private fun frameToMs(frame: Int, sampleRate: Int): Long {
@@ -322,8 +834,32 @@ class AudioWindowDecodeExperiment(
         return (frame.toLong() * MICROS_PER_SECOND) / sampleRate.toLong()
     }
 
-    private fun usToFrame(timeUs: Long, sampleRate: Int): Int {
-        return (timeUs.toDouble() * sampleRate / MICROS_PER_SECOND).roundToLong().toInt()
+    private fun usDeltaToFrame(timeUs: Long, sampleRate: Int): Int {
+        return floor(timeUs.toDouble() * sampleRate.toDouble() / MICROS_PER_SECOND.toDouble())
+            .toInt()
+            .coerceAtLeast(0)
+    }
+
+    private fun sourceFrameToTargetFrame(sourceFrame: Int, sourceSampleRate: Int): Int {
+        return floor(sourceFrame.toDouble() * config.sampleRate.toDouble() / sourceSampleRate.toDouble())
+            .toInt()
+            .coerceAtLeast(0)
+    }
+
+    private fun targetFrameToSourceFrameFloor(targetFrame: Int, sourceSampleRate: Int): Int {
+        return floor(targetFrame.toDouble() * sourceSampleRate.toDouble() / config.sampleRate.toDouble())
+            .toInt()
+            .coerceAtLeast(0)
+    }
+
+    private fun targetFrameToSourceFrameCeil(targetFrame: Int, sourceSampleRate: Int): Int {
+        return ceil(targetFrame.toDouble() * sourceSampleRate.toDouble() / config.sampleRate.toDouble())
+            .toInt()
+            .coerceAtLeast(0)
+    }
+
+    private fun MdxDspConfig.trimFramesToUs(): Long {
+        return (trim.toLong() * MICROS_PER_SECOND) / sampleRate.toLong()
     }
 
     private fun uniqueFile(dir: File, name: String): File {
@@ -339,6 +875,20 @@ class AudioWindowDecodeExperiment(
         return candidate
     }
 
+    private inline fun <T> timed(block: () -> T): TimedValue<T> {
+        val start = SystemClock.elapsedRealtime()
+        return TimedValue(
+            value = block(),
+            elapsedMs = SystemClock.elapsedRealtime() - start,
+        )
+    }
+
+    private fun throwIfCanceled(shouldCancel: () -> Boolean) {
+        if (shouldCancel()) {
+            throw CancellationException("Source separation canceled.")
+        }
+    }
+
     private data class TimedValue<T>(
         val value: T,
         val elapsedMs: Long,
@@ -348,7 +898,48 @@ class AudioWindowDecodeExperiment(
         const val MILLIS_PER_SECOND = 1000L
         const val MICROS_PER_SECOND = 1_000_000L
         const val MAX_OFFSET_SEARCH_FRAMES = 4096
+        const val BEST_OFFSET_COARSE_STEP_FRAMES = 16
+        const val BEST_OFFSET_REFINE_RADIUS_FRAMES = 32
+        const val BEST_OFFSET_SAMPLE_STRIDE_FRAMES = 64
         const val PROBE_WINDOW_MARGIN_MS = 7_000L
+        const val CANCEL_CHECK_INTERVAL_FRAMES = 16_384
+        const val REFERENCE_STEP_COUNT = 2
+        const val PROBE_STEP_COUNT = 13
+        const val REPORT_STEP_COUNT = 1
+    }
+}
+
+private data class SourceRateCandidateComparisons(
+    val sourceRate: PcmWindowAlignmentComparison,
+    val sourceRatePreroll: PcmWindowAlignmentComparison,
+    val sourceRateTimestampPlacement: PcmWindowAlignmentComparison?,
+    val sourceRateFrameDeficitPlacement: PcmWindowAlignmentComparison,
+    val sourceRateMetadataDelayPlacement: PcmWindowAlignmentComparison?,
+)
+
+private data class SongTimelineCandidateComparisons(
+    val songTimeline: PcmWindowAlignmentComparison,
+    val songTimelineTimestampPlacement: PcmWindowAlignmentComparison?,
+    val songTimelineFrameDeficitPlacement: PcmWindowAlignmentComparison,
+    val songTimelineMetadataDelayPlacement: PcmWindowAlignmentComparison?,
+)
+
+private data class PrerollCandidateComparisons(
+    val prerollResample: PcmWindowAlignmentComparison,
+    val prerollSongTimeline: PcmWindowAlignmentComparison,
+)
+
+data class AudioWindowDecodeExperimentProgress(
+    val completedSteps: Int,
+    val totalSteps: Int,
+    val stage: String,
+    val probeIndex: Int? = null,
+    val probeCount: Int? = null,
+) {
+    val percent: Int = if (totalSteps > 0) {
+        ((completedSteps * 100.0) / totalSteps.toDouble()).roundToInt().coerceIn(0, 100)
+    } else {
+        0
     }
 }
 
@@ -356,27 +947,22 @@ data class AudioWindowDecodeExperimentResult(
     val reportFile: File,
     val displayName: String,
     val requestedPlaybackPositionMs: Long,
+    val sourceSampleRate: Int,
     val referenceFrameCount: Int,
-    val referenceSampleRate: Int,
     val referenceChannelCount: Int,
     val fullDecodeMs: Long,
     val fullResampleMs: Long,
     val probes: List<AudioWindowDecodeProbeResult>,
 ) {
-    val totalWindowDecodeMs: Long = probes.sumOf { it.windowDecodeMs }
-    val totalWindowResampleMs: Long = probes.sumOf { it.windowResampleMs }
-    val bestSummary: PcmWindowComparison = probes.minByOrNull {
-        it.bestCandidate.bestOffset.meanAbsoluteError
-    }?.bestCandidate?.bestOffset ?: PcmWindowComparison(
-        offsetFrames = 0,
-        comparedSamples = 0,
-        equalSamples = 0,
-        meanAbsoluteError = 0.0,
-        maxAbsoluteError = 0,
-    )
-    val worstSummary: PcmWindowComparison = probes.maxByOrNull {
-        it.bestCandidate.bestOffset.meanAbsoluteError
-    }?.bestCandidate?.bestOffset ?: bestSummary
+    val totalLocalDecodeMs: Long = probes.sumOf { it.localWindowDecodeMs }
+    val totalPrerollDecodeMs: Long = probes.sumOf { it.prerollWindowDecodeMs }
+    val totalLocalResampleMs: Long = probes.sumOf { it.localWindowResampleMs }
+    val totalPrerollResampleMs: Long = probes.sumOf { it.prerollWindowResampleMs }
+    val totalSongTimelineResampleMs: Long = probes.sumOf { it.songTimelineResampleMs }
+    val totalPrerollSongTimelineResampleMs: Long = probes.sumOf { it.prerollSongTimelineResampleMs }
+    val worstSongTimelineSummary: PcmWindowComparison = familySummary(
+        AudioWindowDecodeCandidateFamily.SongTimelineResample,
+    ).worstBestOffset
 
     fun toReportText(): String {
         return buildString {
@@ -386,17 +972,47 @@ data class AudioWindowDecodeExperimentResult(
             appendLine()
             appendLine("Reference full decode:")
             appendLine("Frames: $referenceFrameCount")
-            appendLine("Sample rate: $referenceSampleRate")
+            appendLine("Sample rate: $sourceSampleRate")
             appendLine("Channels: $referenceChannelCount")
             appendLine("Full decode: ${fullDecodeMs}ms")
             appendLine("Full resample: ${fullResampleMs}ms")
             appendLine()
             appendLine("Probe summary:")
             appendLine("Probe count: ${probes.size}")
-            appendLine("Total window decode: ${totalWindowDecodeMs}ms")
-            appendLine("Total window resample: ${totalWindowResampleMs}ms")
-            appendLine("Best probe/candidate: ${bestSummary.toReportLine()}")
-            appendLine("Worst probe/candidate: ${worstSummary.toReportLine()}")
+            appendLine("Total local decode: ${totalLocalDecodeMs}ms")
+            appendLine("Total preroll decode: ${totalPrerollDecodeMs}ms")
+            appendLine("Total local resample: ${totalLocalResampleMs}ms")
+            appendLine("Total preroll resample: ${totalPrerollResampleMs}ms")
+            appendLine("Total song-timeline resample: ${totalSongTimelineResampleMs}ms")
+            appendLine("Total preroll song-timeline resample: ${totalPrerollSongTimelineResampleMs}ms")
+            appendLine()
+            appendLine("Production candidate focus:")
+            appendFamilyFocus(AudioWindowDecodeCandidateFamily.SongTimelineResample)
+            appendFamilyFocus(AudioWindowDecodeCandidateFamily.SongTimelineFrameDeficitPlacement)
+            appendFamilyFocus(AudioWindowDecodeCandidateFamily.PrerollSongTimelineResample)
+            appendLine()
+            appendLine("Candidate family summary:")
+            AudioWindowDecodeCandidateFamily.entries.forEach { family ->
+                val summary = familySummary(family)
+                appendLine("${family.reportName}:")
+                if (summary.available) {
+                    appendLine("  Full-window direct best: ${summary.bestDirect.toReportLine()}")
+                    appendLine("  Full-window direct worst: ${summary.worstDirect.toReportLine()}")
+                    appendLine("  Stable-region direct best: ${summary.bestStableDirect.toNullableReportLine()}")
+                    appendLine("  Stable-region direct worst: ${summary.worstStableDirect.toNullableReportLine()}")
+                    appendLine("  Full-window best-offset best: ${summary.bestBestOffset.toReportLine()}")
+                    appendLine("  Full-window best-offset worst: ${summary.worstBestOffset.toReportLine()}")
+                    appendLine("  Stable-region best-offset best: ${summary.bestStableBestOffset.toNullableReportLine()}")
+                    appendLine("  Stable-region best-offset worst: ${summary.worstStableBestOffset.toNullableReportLine()}")
+                    appendLine("  Full-window best-offset frames: ${summary.bestOffsetFrames.toOffsetSeriesReport()}")
+                    appendLine("  Stable-region best-offset frames: ${summary.stableBestOffsetFrames.toOffsetSeriesReport()}")
+                    appendLine("  Worst absolute full-window best offset: ${summary.worstAbsoluteBestOffsetFrames} frames")
+                    appendLine("  Worst absolute stable-region best offset: ${summary.worstAbsoluteStableBestOffsetFrames.toNullableFramesReport()}")
+                    appendLine("  Direct usability: ${summary.directUsability}")
+                } else {
+                    appendLine("  Unavailable for these probes")
+                }
+            }
             appendLine()
             probes.forEachIndexed { index, probe ->
                 appendLine("Probe ${index + 1}: ${probe.label}")
@@ -404,10 +1020,75 @@ data class AudioWindowDecodeExperimentResult(
                 appendLine()
             }
             appendLine("Note:")
-            appendLine("This diagnostic still performs a full decode once for reference comparison.")
-            appendLine("Request-aligned places the decoded PCM at the requested window start.")
-            appendLine("First-output-aligned places the decoded PCM at the decoder's first output timestamp.")
-            appendLine("The window decoder is production-worthy only if several source formats show low error and stable offset behavior at multiple positions.")
+            appendLine("Raw source-rate comparison isolates seek and decoder delay from resampling.")
+            appendLine("Current resample uses the existing local-window phase.")
+            appendLine("Song-timeline resample samples the local decoded PCM using absolute song-frame positions on the target 44.1 kHz timeline.")
+            appendLine("Timestamp and frame-deficit placement candidates test whether local decoder delay can be explained before production rules are chosen.")
+            appendLine("Preroll cursor uses an earlier seek point and trims by decoded frame cursor.")
+            appendLine("Best/worst summaries are intentionally grouped by candidate family; raw source-rate and resampled candidates are not mixed.")
+            appendLine("Direct summaries compare the candidate exactly as production would use it; best-offset summaries only diagnose whether a fixed or variable delay explains a mismatch.")
+            appendLine("Stable-region summaries compare only the segment body that would be written after trimming model context.")
+        }
+    }
+
+    private fun familySummary(
+        family: AudioWindowDecodeCandidateFamily,
+    ): AudioWindowDecodeCandidateFamilySummary {
+        val comparisons = probes.mapNotNull { it.comparisonFor(family) }
+        val directComparisons = comparisons.map { it.direct }
+        val bestOffsetComparisons = comparisons.map { it.bestOffset }
+        val stableDirectComparisons = comparisons.mapNotNull { it.stableDirect }
+        val stableBestOffsetComparisons = comparisons.mapNotNull { it.stableBestOffset }
+        return AudioWindowDecodeCandidateFamilySummary(
+            available = comparisons.isNotEmpty(),
+            bestDirect = directComparisons.minByOrNull { it.meanAbsoluteError } ?: emptyComparison(),
+            worstDirect = directComparisons.maxByOrNull { it.meanAbsoluteError } ?: emptyComparison(),
+            bestStableDirect = stableDirectComparisons.minByOrNull { it.meanAbsoluteError },
+            worstStableDirect = stableDirectComparisons.maxByOrNull { it.meanAbsoluteError },
+            bestBestOffset = bestOffsetComparisons.minByOrNull { it.meanAbsoluteError } ?: emptyComparison(),
+            worstBestOffset = bestOffsetComparisons.maxByOrNull { it.meanAbsoluteError } ?: emptyComparison(),
+            bestStableBestOffset = stableBestOffsetComparisons.minByOrNull { it.meanAbsoluteError },
+            worstStableBestOffset = stableBestOffsetComparisons.maxByOrNull { it.meanAbsoluteError },
+            bestOffsetFrames = bestOffsetComparisons.map { it.offsetFrames },
+            stableBestOffsetFrames = stableBestOffsetComparisons.map { it.offsetFrames },
+        )
+    }
+
+    private fun emptyComparison(): PcmWindowComparison {
+        return PcmWindowComparison(0, 0, 0, 0.0, 0)
+    }
+
+    private fun StringBuilder.appendFamilyFocus(
+        family: AudioWindowDecodeCandidateFamily,
+    ) {
+        val summary = familySummary(family)
+        appendLine("${family.reportName}:")
+        if (!summary.available) {
+            appendLine("  unavailable")
+            return
+        }
+        appendLine("  Stable direct worst: ${summary.worstStableDirect.toNullableReportLine()}")
+        appendLine("  Stable best-offset worst: ${summary.worstStableBestOffset.toNullableReportLine()}")
+        appendLine("  Stable best-offset frames: ${summary.stableBestOffsetFrames.toOffsetSeriesReport()}")
+        appendLine("  Direct usability: ${summary.directUsability}")
+    }
+
+    private fun PcmWindowComparison?.toNullableReportLine(): String {
+        return this?.toReportLine() ?: "unavailable"
+    }
+
+    private fun Int?.toNullableFramesReport(): String {
+        return this?.let { "$it frames" } ?: "unavailable"
+    }
+
+    private fun List<Int>.toOffsetSeriesReport(): String {
+        if (isEmpty()) return "unavailable"
+        val distinct = distinct()
+        val values = joinToString(prefix = "[", postfix = "]")
+        return if (distinct.size == 1) {
+            "$values constant"
+        } else {
+            "$values variable"
         }
     }
 }
@@ -417,56 +1098,218 @@ data class AudioWindowDecodeProbeResult(
     val playbackPositionMs: Long,
     val segmentIndex: Int,
     val targetFrame: Int,
+    val targetSampleRateFrame: Int,
     val requestedStartUs: Long,
     val requestedEndUs: Long,
     val requestedWindowStartFrame: Int,
     val requestedWindowEndFrame: Int,
-    val windowDecodeMs: Long,
-    val windowResampleMs: Long,
+    val requestedSourceWindowStartFrame: Int,
+    val requestedSourceWindowEndFrame: Int,
+    val stableSourceStartFrame: Int,
+    val stableSourceFrameCount: Int,
+    val stableTargetStartFrame: Int,
+    val stableTargetFrameCount: Int,
+    val localWindowDecodeMs: Long,
+    val localWindowResampleMs: Long,
+    val prerollWindowDecodeMs: Long,
+    val prerollWindowResampleMs: Long,
+    val songTimelineResampleMs: Long,
+    val songTimelineTimestampResampleMs: Long,
+    val songTimelineFrameDeficitResampleMs: Long,
+    val songTimelineMetadataDelayResampleMs: Long?,
+    val prerollSongTimelineResampleMs: Long,
     val extractorStartUs: Long,
     val firstOutputTimeUs: Long?,
     val lastOutputTimeUs: Long?,
+    val prerollCursorAnchorTimeUs: Long?,
     val outputBufferCount: Int,
     val windowFrameCount: Int,
-    val requestAligned: PcmWindowAlignmentComparison,
-    val firstOutputAligned: PcmWindowAlignmentComparison,
+    val trackMetadata: AudioDecodeTrackMetadata?,
+    val timestampPlacementOffsetSourceFrames: Int?,
+    val frameDeficitPlacementOffsetSourceFrames: Int,
+    val metadataDelayPlacementOffsetSourceFrames: Int?,
+    val sourceRateComparison: PcmWindowAlignmentComparison,
+    val sourceRatePrerollComparison: PcmWindowAlignmentComparison,
+    val sourceRateTimestampPlacementComparison: PcmWindowAlignmentComparison?,
+    val sourceRateFrameDeficitPlacementComparison: PcmWindowAlignmentComparison,
+    val sourceRateMetadataDelayPlacementComparison: PcmWindowAlignmentComparison?,
+    val currentResampledComparison: PcmWindowAlignmentComparison,
+    val songTimelineResampledComparison: PcmWindowAlignmentComparison,
+    val songTimelineTimestampPlacementComparison: PcmWindowAlignmentComparison?,
+    val songTimelineFrameDeficitPlacementComparison: PcmWindowAlignmentComparison,
+    val songTimelineMetadataDelayPlacementComparison: PcmWindowAlignmentComparison?,
+    val prerollResampledComparison: PcmWindowAlignmentComparison,
+    val prerollSongTimelineResampledComparison: PcmWindowAlignmentComparison,
 ) {
-    val bestCandidate: PcmWindowAlignmentComparison
-        get() = if (firstOutputAligned.bestOffset.meanAbsoluteError < requestAligned.bestOffset.meanAbsoluteError) {
-            firstOutputAligned
-        } else {
-            requestAligned
+    fun comparisonFor(
+        family: AudioWindowDecodeCandidateFamily,
+    ): PcmWindowAlignmentComparison? {
+        return when (family) {
+            AudioWindowDecodeCandidateFamily.SourceRate -> sourceRateComparison
+            AudioWindowDecodeCandidateFamily.SourceRatePreroll -> sourceRatePrerollComparison
+            AudioWindowDecodeCandidateFamily.SourceRateTimestampPlacement -> sourceRateTimestampPlacementComparison
+            AudioWindowDecodeCandidateFamily.SourceRateFrameDeficitPlacement -> sourceRateFrameDeficitPlacementComparison
+            AudioWindowDecodeCandidateFamily.SourceRateMetadataDelayPlacement -> sourceRateMetadataDelayPlacementComparison
+            AudioWindowDecodeCandidateFamily.CurrentResample -> currentResampledComparison
+            AudioWindowDecodeCandidateFamily.SongTimelineResample -> songTimelineResampledComparison
+            AudioWindowDecodeCandidateFamily.SongTimelineTimestampPlacement -> songTimelineTimestampPlacementComparison
+            AudioWindowDecodeCandidateFamily.SongTimelineFrameDeficitPlacement -> songTimelineFrameDeficitPlacementComparison
+            AudioWindowDecodeCandidateFamily.SongTimelineMetadataDelayPlacement -> songTimelineMetadataDelayPlacementComparison
+            AudioWindowDecodeCandidateFamily.PrerollResample -> prerollResampledComparison
+            AudioWindowDecodeCandidateFamily.PrerollSongTimelineResample -> prerollSongTimelineResampledComparison
         }
+    }
 
     fun toReportText(): String {
         return buildString {
             appendLine("Playback position: ${playbackPositionMs}ms")
             appendLine("Segment index: $segmentIndex")
-            appendLine("Target frame: $targetFrame")
-            appendLine("Requested window frames: $requestedWindowStartFrame..$requestedWindowEndFrame")
+            appendLine("Source-rate target frame: $targetFrame")
+            appendLine("Target-rate frame: $targetSampleRateFrame")
+            appendLine("Requested target-rate window frames: $requestedWindowStartFrame..$requestedWindowEndFrame")
+            appendLine("Requested source-rate window frames: $requestedSourceWindowStartFrame..$requestedSourceWindowEndFrame")
+            appendLine(
+                "Stable target-rate region in window: $stableTargetStartFrame.." +
+                        "${stableTargetStartFrame + stableTargetFrameCount}"
+            )
+            appendLine(
+                "Stable source-rate region in window: $stableSourceStartFrame.." +
+                        "${stableSourceStartFrame + stableSourceFrameCount}"
+            )
             appendLine("Requested window time: ${requestedStartUs}us..${requestedEndUs}us")
             appendLine()
             appendLine("Local window decode:")
             appendLine("Extractor start: ${extractorStartUs}us")
-            appendLine("First output: ${firstOutputTimeUs}us")
-            appendLine("Last output: ${lastOutputTimeUs}us")
+            appendLine("First output: ${firstOutputTimeUs.toOptionalUs()}")
+            appendLine("Last output: ${lastOutputTimeUs.toOptionalUs()}")
+            appendLine("Preroll cursor anchor: ${prerollCursorAnchorTimeUs.toOptionalUs()}")
             appendLine("Output buffers: $outputBufferCount")
-            appendLine("Frames after resample: $windowFrameCount")
-            appendLine("Window decode: ${windowDecodeMs}ms")
-            appendLine("Window resample: ${windowResampleMs}ms")
+            appendLine("Frames after decode: $windowFrameCount")
+            appendLine("MIME type: ${trackMetadata?.mimeType ?: "unavailable"}")
+            appendLine("Encoder delay frames: ${trackMetadata?.encoderDelayFrames.toOptionalFrames()}")
+            appendLine("Encoder padding frames: ${trackMetadata?.encoderPaddingFrames.toOptionalFrames()}")
+            appendLine("Timestamp placement offset source frames: ${timestampPlacementOffsetSourceFrames.toOptionalFrames()}")
+            appendLine("Frame-deficit placement offset source frames: $frameDeficitPlacementOffsetSourceFrames")
+            appendLine("Metadata-delay placement offset source frames: ${metadataDelayPlacementOffsetSourceFrames.toOptionalFrames()}")
+            appendLine("Local decode: ${localWindowDecodeMs}ms")
+            appendLine("Local resample: ${localWindowResampleMs}ms")
+            appendLine("Preroll decode: ${prerollWindowDecodeMs}ms")
+            appendLine("Preroll resample: ${prerollWindowResampleMs}ms")
+            appendLine("Song-timeline resample: ${songTimelineResampleMs}ms")
+            appendLine("Song-timeline timestamp resample: ${songTimelineTimestampResampleMs}ms")
+            appendLine("Song-timeline frame-deficit resample: ${songTimelineFrameDeficitResampleMs}ms")
+            appendLine("Song-timeline metadata-delay resample: ${songTimelineMetadataDelayResampleMs.toOptionalMs()}")
+            appendLine("Preroll song-timeline resample: ${prerollSongTimelineResampleMs}ms")
             appendLine()
             appendLine("PCM comparison:")
-            appendLine("Request-aligned direct: ${requestAligned.direct.toReportLine()}")
-            appendLine("Request-aligned best offset: ${requestAligned.bestOffset.toReportLine()}")
-            appendLine("First-output-aligned direct: ${firstOutputAligned.direct.toReportLine()}")
-            appendLine("First-output-aligned best offset: ${firstOutputAligned.bestOffset.toReportLine()}")
+            appendComparison("Source-rate", sourceRateComparison)
+            appendComparison("Source-rate preroll", sourceRatePrerollComparison)
+            appendNullableComparison("Source-rate timestamp placement", sourceRateTimestampPlacementComparison)
+            appendComparison("Source-rate frame-deficit placement", sourceRateFrameDeficitPlacementComparison)
+            appendNullableComparison("Source-rate metadata-delay placement", sourceRateMetadataDelayPlacementComparison)
+            appendComparison("Current resample", currentResampledComparison)
+            appendComparison("Song-timeline resample", songTimelineResampledComparison)
+            appendNullableComparison("Song-timeline timestamp placement", songTimelineTimestampPlacementComparison)
+            appendComparison("Song-timeline frame-deficit placement", songTimelineFrameDeficitPlacementComparison)
+            appendNullableComparison("Song-timeline metadata-delay placement", songTimelineMetadataDelayPlacementComparison)
+            appendComparison("Preroll resample", prerollResampledComparison)
+            appendComparison("Preroll song-timeline resample", prerollSongTimelineResampledComparison)
         }
+    }
+
+    private fun StringBuilder.appendNullableComparison(
+        label: String,
+        comparison: PcmWindowAlignmentComparison?,
+    ) {
+        if (comparison == null) {
+            appendLine("$label: unavailable")
+        } else {
+            appendComparison(label, comparison)
+        }
+    }
+
+    private fun StringBuilder.appendComparison(
+        label: String,
+        comparison: PcmWindowAlignmentComparison,
+    ) {
+        appendLine("$label direct: ${comparison.direct.toReportLine()}")
+        appendLine("$label stable direct: ${comparison.stableDirect.toNullableReportLine()}")
+        appendLine("$label best offset: ${comparison.bestOffset.toReportLine()}")
+        appendLine("$label stable best offset: ${comparison.stableBestOffset.toNullableReportLine()}")
+    }
+
+    private fun PcmWindowComparison?.toNullableReportLine(): String {
+        return this?.toReportLine() ?: "unavailable"
+    }
+
+    private fun Long?.toOptionalMs(): String {
+        return this?.let { "${it}ms" } ?: "unavailable"
+    }
+
+    private fun Long?.toOptionalUs(): String {
+        return this?.let { "${it}us" } ?: "unavailable"
+    }
+
+    private fun Int?.toOptionalFrames(): String {
+        return this?.let { "$it" } ?: "unavailable"
+    }
+}
+
+enum class AudioWindowDecodeCandidateFamily(
+    val reportName: String,
+) {
+    SourceRate("Source-rate local"),
+    SourceRatePreroll("Source-rate preroll"),
+    SourceRateTimestampPlacement("Source-rate timestamp placement"),
+    SourceRateFrameDeficitPlacement("Source-rate frame-deficit placement"),
+    SourceRateMetadataDelayPlacement("Source-rate metadata-delay placement"),
+    CurrentResample("Current local resample"),
+    SongTimelineResample("Song-timeline resample"),
+    SongTimelineTimestampPlacement("Song-timeline timestamp placement"),
+    SongTimelineFrameDeficitPlacement("Song-timeline frame-deficit placement"),
+    SongTimelineMetadataDelayPlacement("Song-timeline metadata-delay placement"),
+    PrerollResample("Preroll local resample"),
+    PrerollSongTimelineResample("Preroll song-timeline resample"),
+}
+
+data class AudioWindowDecodeCandidateFamilySummary(
+    val available: Boolean,
+    val bestDirect: PcmWindowComparison,
+    val worstDirect: PcmWindowComparison,
+    val bestStableDirect: PcmWindowComparison?,
+    val worstStableDirect: PcmWindowComparison?,
+    val bestBestOffset: PcmWindowComparison,
+    val worstBestOffset: PcmWindowComparison,
+    val bestStableBestOffset: PcmWindowComparison?,
+    val worstStableBestOffset: PcmWindowComparison?,
+    val bestOffsetFrames: List<Int>,
+    val stableBestOffsetFrames: List<Int>,
+) {
+    val worstAbsoluteBestOffsetFrames: Int = bestOffsetFrames.maxOfOrNull { abs(it) } ?: 0
+    val worstAbsoluteStableBestOffsetFrames: Int? = stableBestOffsetFrames.maxOfOrNull { abs(it) }
+    val directUsability: String
+        get() {
+            val stableWorst = worstStableDirect ?: return "unknown; stable-region comparison unavailable"
+            return when {
+                stableWorst.maxAbsoluteError == 0 -> "strong; stable region is bit-perfect at zero offset"
+                stableWorst.meanAbsoluteError <= DIRECT_USABILITY_MEAN_ERROR_THRESHOLD &&
+                        stableWorst.maxAbsoluteError <= DIRECT_USABILITY_MAX_ERROR_THRESHOLD ->
+                    "likely usable; stable zero-offset error is tiny"
+                else -> "risky; stable zero-offset comparison still has audible-scale mismatch"
+            }
+        }
+
+    private companion object {
+        const val DIRECT_USABILITY_MEAN_ERROR_THRESHOLD = 1.0
+        const val DIRECT_USABILITY_MAX_ERROR_THRESHOLD = 256
     }
 }
 
 data class PcmWindowAlignmentComparison(
     val direct: PcmWindowComparison,
     val bestOffset: PcmWindowComparison,
+    val stableDirect: PcmWindowComparison?,
+    val stableBestOffset: PcmWindowComparison?,
 )
 
 data class PcmWindowComparison(

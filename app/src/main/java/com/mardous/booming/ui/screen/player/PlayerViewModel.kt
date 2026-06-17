@@ -479,20 +479,36 @@ class PlayerViewModel(
         val positionMs = progress.takeIf { it != C.TIME_UNSET } ?: 0L
         sourceSeparationWindowDecodeExperimentJob = viewModelScope.launch(IO) {
             _sourceSeparationWindowDecodeExperimentStateFlow.value =
-                SourceSeparationWindowDecodeExperimentUiState.Running
+                SourceSeparationWindowDecodeExperimentUiState.Running(
+                    stage = "Starting",
+                    completedSteps = 0,
+                    totalSteps = 0,
+                    percent = 0,
+                )
             try {
                 val result = sourceSeparationEngine.runWindowDecodeExperiment(
                     song = song,
                     playbackPositionMs = positionMs,
+                    onProgress = { progress ->
+                        _sourceSeparationWindowDecodeExperimentStateFlow.value =
+                            SourceSeparationWindowDecodeExperimentUiState.Running(
+                                stage = progress.stage,
+                                completedSteps = progress.completedSteps,
+                                totalSteps = progress.totalSteps,
+                                percent = progress.percent,
+                                probeIndex = progress.probeIndex,
+                                probeCount = progress.probeCount,
+                            )
+                    },
                 )
                 _sourceSeparationWindowDecodeExperimentStateFlow.value =
                     SourceSeparationWindowDecodeExperimentUiState.Completed(
                         reportPath = result.reportFile.absolutePath,
                         fullDecodeMs = result.fullDecodeMs,
                         probeCount = result.probes.size,
-                        totalWindowDecodeMs = result.totalWindowDecodeMs,
-                        worstOffsetFrames = result.worstSummary.offsetFrames,
-                        worstMeanAbsoluteError = result.worstSummary.meanAbsoluteError,
+                        totalWindowDecodeMs = result.totalLocalDecodeMs,
+                        worstOffsetFrames = result.worstSongTimelineSummary.offsetFrames,
+                        worstMeanAbsoluteError = result.worstSongTimelineSummary.meanAbsoluteError,
                     )
             } catch (_: CancellationException) {
                 _sourceSeparationWindowDecodeExperimentStateFlow.value =
@@ -1014,7 +1030,14 @@ data class SourceSeparationPlaybackUiState(
 
 sealed class SourceSeparationWindowDecodeExperimentUiState {
     data object Idle : SourceSeparationWindowDecodeExperimentUiState()
-    data object Running : SourceSeparationWindowDecodeExperimentUiState()
+    data class Running(
+        val stage: String,
+        val completedSteps: Int,
+        val totalSteps: Int,
+        val percent: Int,
+        val probeIndex: Int? = null,
+        val probeCount: Int? = null,
+    ) : SourceSeparationWindowDecodeExperimentUiState()
     data class Completed(
         val reportPath: String,
         val fullDecodeMs: Long,
