@@ -67,6 +67,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -480,6 +481,11 @@ class PlayerViewModel(
                         )
                         syncSourceSeparationPlaybackIfRequested()
                     },
+                    onPrepared = {
+                        if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.PerSong) {
+                            migrateTemporaryPerSongSourceSeparationBlend(song)
+                        }
+                    },
                     playbackPositionMsProvider = {
                         progress.takeIf {
                             currentSong.id == song.id && it != C.TIME_UNSET
@@ -791,10 +797,14 @@ class PlayerViewModel(
             }
             SourceSeparationBlendMode.PerSong -> {
                 withContext(IO) {
-                    runCatching {
+                    val persistedBlend = runCatching {
                         sourceSeparationEngine.separatedPlaybackBlendForSong(song)
                     }.getOrNull()
-                } ?: DEFAULT_SOURCE_SEPARATION_BLEND
+                    persistedBlend
+                        ?: readTemporaryPerSongSourceSeparationBlend(song)
+                            ?.also { blend -> migrateTemporaryPerSongSourceSeparationBlend(song, blend) }
+                        ?: DEFAULT_SOURCE_SEPARATION_BLEND
+                }
             }
         }.coerceIn(0f, 1f)
     }
@@ -843,12 +853,68 @@ class PlayerViewModel(
     }
 
     private fun savePerSongSourceSeparationBlend(song: Song, blend: Float): Boolean {
-        return runCatching {
+        val normalizedBlend = blend.coerceIn(0f, 1f)
+        writeTemporaryPerSongSourceSeparationBlend(song, normalizedBlend)
+        val saved = runCatching {
+            sourceSeparationEngine.saveSeparatedPlaybackBlendForSong(
+                song = song,
+                blend = normalizedBlend,
+            )
+        }.getOrDefault(false)
+        if (saved) {
+            removeTemporaryPerSongSourceSeparationBlend(song)
+        }
+        return saved
+    }
+
+    private fun migrateTemporaryPerSongSourceSeparationBlend(song: Song): Boolean {
+        val blend = readTemporaryPerSongSourceSeparationBlend(song) ?: return false
+        return migrateTemporaryPerSongSourceSeparationBlend(song, blend)
+    }
+
+    private fun migrateTemporaryPerSongSourceSeparationBlend(song: Song, blend: Float): Boolean {
+        val saved = runCatching {
             sourceSeparationEngine.saveSeparatedPlaybackBlendForSong(
                 song = song,
                 blend = blend.coerceIn(0f, 1f),
             )
         }.getOrDefault(false)
+        if (saved) {
+            removeTemporaryPerSongSourceSeparationBlend(song)
+        }
+        return saved
+    }
+
+    private fun readTemporaryPerSongSourceSeparationBlend(song: Song): Float? {
+        val key = temporaryPerSongSourceSeparationBlendKey(song)
+        return if (preferences.contains(key)) {
+            preferences.getFloat(key, DEFAULT_SOURCE_SEPARATION_BLEND).coerceIn(0f, 1f)
+        } else {
+            null
+        }
+    }
+
+    private fun writeTemporaryPerSongSourceSeparationBlend(song: Song, blend: Float) {
+        preferences.edit {
+            putFloat(temporaryPerSongSourceSeparationBlendKey(song), blend.coerceIn(0f, 1f))
+        }
+    }
+
+    private fun removeTemporaryPerSongSourceSeparationBlend(song: Song) {
+        preferences.edit {
+            remove(temporaryPerSongSourceSeparationBlendKey(song))
+        }
+    }
+
+    private fun temporaryPerSongSourceSeparationBlendKey(song: Song): String {
+        val identity = "${song.id}|${song.uri}|${song.data}"
+        return "$KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND.${sha256Hex(identity)}"
+    }
+
+    private fun sha256Hex(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(value.encodeToByteArray())
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     private fun readSourceSeparationBlendMode(): SourceSeparationBlendMode {
@@ -1282,6 +1348,8 @@ class PlayerViewModel(
             "source_separation.remember_per_song"
         private const val KEY_SOURCE_SEPARATION_GLOBAL_BLEND =
             "source_separation.global_blend"
+        private const val KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND =
+            "source_separation.per_song_blend.pending"
     }
 }
 
