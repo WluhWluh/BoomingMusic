@@ -104,13 +104,13 @@ private fun SourceSeparationSettingsSheet(
 
     val playbackState by viewModel.sourceSeparationPlaybackStateFlow.collectAsState()
     val blendMode by viewModel.sourceSeparationBlendModeFlow.collectAsState()
+    val rememberPerSong by viewModel.sourceSeparationRememberPerSongFlow.collectAsState()
     val separationState by viewModel.sourceSeparationStateFlow.collectAsState()
     val windowDecodeExperimentState by viewModel
         .sourceSeparationWindowDecodeExperimentStateFlow
         .collectAsState()
 
     val separatedPlaybackEnabled = blendMode != SourceSeparationBlendMode.Off
-    val rememberPerSong = blendMode == SourceSeparationBlendMode.PerSong
     var blend by remember(playbackState.blend) {
         mutableFloatStateOf(playbackState.blend.coerceIn(0f, 1f))
     }
@@ -150,16 +150,6 @@ private fun SourceSeparationSettingsSheet(
                                 title = stringResource(R.string.source_separation_playback_title),
                                 description = stringResource(R.string.source_separation_playback_description)
                             ) { checked ->
-                                val nextMode = if (checked) {
-                                    if (rememberPerSong) {
-                                        SourceSeparationBlendMode.PerSong
-                                    } else {
-                                        SourceSeparationBlendMode.Global
-                                    }
-                                } else {
-                                    SourceSeparationBlendMode.Off
-                                }
-                                viewModel.setSourceSeparationBlendMode(nextMode)
                                 viewModel.setSourceSeparationPlaybackEnabled(checked, blend)
                             }
 
@@ -169,13 +159,7 @@ private fun SourceSeparationSettingsSheet(
                                 description = stringResource(R.string.source_separation_remember_per_song_description),
                                 enabled = separatedPlaybackEnabled
                             ) { checked ->
-                                viewModel.setSourceSeparationBlendMode(
-                                    if (checked) {
-                                        SourceSeparationBlendMode.PerSong
-                                    } else {
-                                        SourceSeparationBlendMode.Global
-                                    }
-                                )
+                                viewModel.setSourceSeparationRememberPerSongEnabled(checked)
                             }
 
                             Text(
