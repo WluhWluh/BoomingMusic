@@ -193,6 +193,7 @@ class SourceSeparationEngine(
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
         modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
         onProgress: (MdxRangeProgress) -> Unit = {},
+        onPrepared: (SourceSeparationManifest) -> Unit = {},
         playbackPositionMsProvider: () -> Long? = { null },
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
@@ -213,7 +214,7 @@ class SourceSeparationEngine(
                     modelVariant = modelVariant,
                     onProgress = onProgress,
                     onPrepared = { preparation ->
-                        cache.updateRunPreparation(run, preparation)
+                        cache.updateRunPreparation(run, preparation)?.let(onPrepared)
                     },
                     onSegmentStateChanged = { segmentIndex, state ->
                         cache.updateSegmentState(run, segmentIndex, state)
