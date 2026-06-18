@@ -337,6 +337,9 @@ class PlayerViewModel(
             if (!events.contains(Player.EVENT_TIMELINE_CHANGED)) {
                 _positionFlow.value = position.setCurrentIndex(player.currentMediaItemIndex)
             }
+            _progressFlow.value = player.contentPosition
+            _durationFlow.value = player.contentDuration
+            syncSourceSeparationPlaybackIfRequested(force = true)
             if (!player.playWhenReady) {
                 _progressFlow.value = player.contentPosition
                 _durationFlow.value = player.contentDuration
@@ -395,6 +398,7 @@ class PlayerViewModel(
     fun seekTo(positionMillis: Long) {
         _progressFlow.value = positionMillis
         mediaController?.seekTo(positionMillis)
+        syncSourceSeparationPlaybackIfRequested(force = true)
     }
 
     fun generateExtraInfo() {
@@ -433,6 +437,18 @@ class PlayerViewModel(
                             percent = progress.percent,
                             stage = progress.stage,
                             sourceDecodeDiagnostics = progress.sourceDecodeDiagnostics?.toDisplayText(),
+                            scheduler = progress.scheduler?.let { scheduler ->
+                                SourceSeparationSchedulerUiState(
+                                    playbackSegmentIndex = scheduler.playbackSegmentIndex,
+                                    playbackSegmentState = scheduler.playbackSegmentState,
+                                    nextSegmentIndex = scheduler.nextSegmentIndex,
+                                    nextSegmentState = scheduler.nextSegmentState,
+                                    processingSegmentIndex = scheduler.processingSegmentIndex,
+                                    priority = scheduler.priority,
+                                    readySegments = scheduler.readySegments,
+                                    totalSegments = scheduler.totalSegments,
+                                )
+                            },
                         )
                         syncSourceSeparationPlaybackIfRequested()
                     },
@@ -563,7 +579,7 @@ class PlayerViewModel(
         }
     }
 
-    private fun syncSourceSeparationPlaybackIfRequested() {
+    private fun syncSourceSeparationPlaybackIfRequested(force: Boolean = false) {
         val playbackState = _sourceSeparationPlaybackStateFlow.value
         val currentSongId = currentSong.id
         val currentSongPlaybackReady =
@@ -571,7 +587,7 @@ class PlayerViewModel(
                     !playbackState.processing &&
                     playbackState.songId == currentSongId
         if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
-            currentSongPlaybackReady ||
+            (!force && currentSongPlaybackReady) ||
             sourceSeparationPlaybackSyncJob?.isActive == true
         ) {
             return
@@ -585,7 +601,7 @@ class PlayerViewModel(
                         !latestPlaybackState.processing &&
                         latestPlaybackState.songId == latestSongId
             if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
-                latestSongPlaybackReady
+                (!force && latestSongPlaybackReady)
             ) {
                 return@launch
             }
@@ -1013,6 +1029,7 @@ sealed class SourceSeparationUiState {
         val percent: Int = 0,
         val stage: String? = null,
         val sourceDecodeDiagnostics: String? = null,
+        val scheduler: SourceSeparationSchedulerUiState? = null,
     ) : SourceSeparationUiState()
 
     data class Completed(
@@ -1038,6 +1055,17 @@ data class SourceSeparationPlaybackUiState(
     val blend: Float = 0.5f,
     val songId: Long? = null,
     val message: String? = null,
+)
+
+data class SourceSeparationSchedulerUiState(
+    val playbackSegmentIndex: Int?,
+    val playbackSegmentState: String?,
+    val nextSegmentIndex: Int?,
+    val nextSegmentState: String?,
+    val processingSegmentIndex: Int,
+    val priority: String?,
+    val readySegments: Int,
+    val totalSegments: Int,
 )
 
 sealed class SourceSeparationWindowDecodeExperimentUiState {
