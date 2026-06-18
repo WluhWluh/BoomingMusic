@@ -190,6 +190,7 @@ class PlaybackService :
     private var stopIndex = -1
     private var sourceSeparationPlaybackSession: SourceSeparationPlaybackSession? = null
     private var sourceSeparationPlaybackRequested = false
+    private var sourceSeparationPlaybackAutoSyncOnTransition = true
     private var sourceSeparationPlaybackIsProcessing = false
     private var sourceSeparationPlaybackResumeWhenReady = false
     private var sourceSeparationPlaybackInternalPlayWhenReady: Boolean? = null
@@ -780,9 +781,13 @@ class PlaybackService :
                     Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE,
                     true,
                 )
+                val autoSyncOnTransition = args.getBoolean(
+                    Playback.EXTRA_SOURCE_SEPARATION_AUTO_SYNC_ON_TRANSITION,
+                    true,
+                )
                 traceSourceSeparationPlayback(
                     "command.setPlaybackEnabled",
-                    "enabled=$enabled showMessage=$showMessage " +
+                    "enabled=$enabled showMessage=$showMessage autoSyncOnTransition=$autoSyncOnTransition " +
                             "hasBlend=${args.containsKey(Playback.EXTRA_SOURCE_SEPARATION_BLEND)}"
                 )
                 if (args.containsKey(Playback.EXTRA_SOURCE_SEPARATION_BLEND)) {
@@ -797,6 +802,7 @@ class PlaybackService :
                     setSourceSeparationPlaybackEnabled(
                         enabled = enabled,
                         showMessage = showMessage,
+                        autoSyncOnTransition = autoSyncOnTransition,
                     )
                 }
             }
@@ -816,9 +822,16 @@ class PlaybackService :
             }
 
             Playback.SYNC_SOURCE_SEPARATION_PLAYBACK -> {
-                traceSourceSeparationPlayback("command.syncPlayback")
+                val allowNewSession = args.getBoolean(
+                    Playback.EXTRA_SOURCE_SEPARATION_ALLOW_NEW_SESSION,
+                    sourceSeparationPlaybackAutoSyncOnTransition,
+                )
+                traceSourceSeparationPlayback(
+                    "command.syncPlayback",
+                    "allowNewSession=$allowNewSession"
+                )
                 serviceScope.future {
-                    syncSourceSeparationPlayback()
+                    syncSourceSeparationPlayback(allowNewSession = allowNewSession)
                 }
             }
 
@@ -959,8 +972,19 @@ class PlaybackService :
             sourceSeparationPlaybackRequested && mediaItem != null &&
             mediaItem.mediaId != activeSession?.songId?.toString()
         ) {
-            serviceScope.launch {
-                ensureSourceSeparationPlaybackReady(showUnavailableMessage = false)
+            muteSourceSeparationOutputForSwitch(
+                reason = "transition",
+                waitForMixedOutput = true,
+            )
+            if (sourceSeparationPlaybackAutoSyncOnTransition) {
+                serviceScope.launch {
+                    ensureSourceSeparationPlaybackReady(showUnavailableMessage = false)
+                }
+            } else {
+                traceSourceSeparationPlayback(
+                    "player.onMediaItemTransition.deferAutoSync",
+                    "reason=clientBlendRequired"
+                )
             }
         } else if (!isInternalMediaItemChange &&
             !sourceSeparationPlaybackRequested &&
@@ -1154,17 +1178,20 @@ class PlaybackService :
     private suspend fun setSourceSeparationPlaybackEnabled(
         enabled: Boolean,
         showMessage: Boolean,
+        autoSyncOnTransition: Boolean,
     ): SessionResult {
         traceSourceSeparationPlayback(
             "playback.setEnabled.start",
-            "enabled=$enabled showMessage=$showMessage"
+            "enabled=$enabled showMessage=$showMessage autoSyncOnTransition=$autoSyncOnTransition"
         )
         sourceSeparationPlaybackRequested = enabled
+        sourceSeparationPlaybackAutoSyncOnTransition = autoSyncOnTransition
         val result = if (enabled) {
             ensureSourceSeparationPlaybackReady(
                 showUnavailableMessage = showMessage,
                 allowPauseForProcessing = true,
                 resumeWhenReady = player.playWhenReady || player.isPlaying,
+                allowNewSession = true,
             )
         } else {
             sourceSeparationPlaybackResumeWhenReady = false
@@ -1182,14 +1209,22 @@ class PlaybackService :
         return result
     }
 
-    private suspend fun syncSourceSeparationPlayback(): SessionResult {
-        traceSourceSeparationPlayback("playback.sync.start")
+    private suspend fun syncSourceSeparationPlayback(
+        allowNewSession: Boolean = sourceSeparationPlaybackAutoSyncOnTransition,
+    ): SessionResult {
+        traceSourceSeparationPlayback(
+            "playback.sync.start",
+            "allowNewSession=$allowNewSession"
+        )
         if (!sourceSeparationPlaybackRequested) {
             val result = sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
             traceSourceSeparationPlayback("playback.sync.skip", "requested=false")
             return result
         }
-        val result = ensureSourceSeparationPlaybackReady(showUnavailableMessage = false)
+        val result = ensureSourceSeparationPlaybackReady(
+            showUnavailableMessage = false,
+            allowNewSession = allowNewSession,
+        )
         traceSourceSeparationPlayback("playback.sync.end", "result=${result.resultCode}")
         return result
     }
@@ -1198,6 +1233,7 @@ class PlaybackService :
         showUnavailableMessage: Boolean = true,
         allowPauseForProcessing: Boolean = true,
         resumeWhenReady: Boolean = sourceSeparationPlaybackResumeWhenReady,
+        allowNewSession: Boolean = true,
     ): SessionResult {
         return sourceSeparationPlaybackReadinessMutex.withLock {
             val checkId = ++sourceSeparationPlaybackCheckSeq
@@ -1206,6 +1242,7 @@ class PlaybackService :
                 showUnavailableMessage = showUnavailableMessage,
                 allowPauseForProcessing = allowPauseForProcessing,
                 resumeWhenReady = resumeWhenReady,
+                allowNewSession = allowNewSession,
             )
         }
     }
@@ -1215,11 +1252,12 @@ class PlaybackService :
         showUnavailableMessage: Boolean,
         allowPauseForProcessing: Boolean,
         resumeWhenReady: Boolean,
+        allowNewSession: Boolean,
     ): SessionResult {
         traceSourceSeparationPlayback(
             "check.start",
             "id=$checkId showMessage=$showUnavailableMessage allowPause=$allowPauseForProcessing " +
-                    "resumeWhenReady=$resumeWhenReady"
+                    "resumeWhenReady=$resumeWhenReady allowNewSession=$allowNewSession"
         )
         if (!sourceSeparationPlaybackRequested) {
             clearSourceSeparationPlaybackProcessing()
@@ -1355,6 +1393,14 @@ class PlaybackService :
                     }
                 }
             }
+
+        if (!allowNewSession) {
+            traceSourceSeparationPlayback(
+                "check.newSession.skip",
+                "id=$checkId reason=clientBlendRequired songId=${song.id}"
+            )
+            return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+        }
 
         val positionMs = player.currentPosition.coerceAtLeast(0)
         val status = withContext(IO) {
@@ -1934,6 +1980,9 @@ class PlaybackService :
         resultCode: Int,
         message: String,
     ): SessionResult {
+        if (sourceSeparationOutputMuted && sourceSeparationPlaybackSession == null) {
+            restoreSourceSeparationOutputVolume("playbackUnavailable")
+        }
         return sourceSeparationPlaybackResult(
             resultCode = if (showMessage) resultCode else SessionResult.RESULT_SUCCESS,
             message = message.takeIf { showMessage },
