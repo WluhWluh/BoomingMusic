@@ -31,4 +31,8 @@ object Playback {
     const val EXTRA_SOURCE_SEPARATION_SONG_ID = "source_separation_song_id"
     const val EXTRA_SOURCE_SEPARATION_MESSAGE = "source_separation_message"
     const val EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE = "source_separation_show_message"
+    const val EXTRA_SOURCE_SEPARATION_AUTO_SYNC_ON_TRANSITION =
+        "source_separation_auto_sync_on_transition"
+    const val EXTRA_SOURCE_SEPARATION_ALLOW_NEW_SESSION =
+        "source_separation_allow_new_session"
 }
