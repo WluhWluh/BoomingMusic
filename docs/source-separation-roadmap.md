@@ -492,7 +492,7 @@ Planned follow-up before Phase 5:
 - Replace the direct-cycling blend-mode entry with a source separation settings entry.
 - Add a minimal Sound Settings-style source separation bottom sheet.
 - Model separated playback settings as a master enabled flag plus a per-song-memory flag.
-- Persist the global blend value and per-song blend values separately from those flags.
+- Persist the global blend value and per-song blend values separately from those flags. Completed in the initial persistence pass.
 - Reapply the correct settings and blend after song changes, seeks, service recreation, and app restart.
 - Keep the existing direct progress Snackbar until the sheet has reliable progress state.
 
@@ -512,8 +512,11 @@ Done criteria:
 
 - The source separation entry opens the sheet in every player style that exposes the button. Completed.
 - The entry no longer directly cycles modes. Completed.
-- The sheet can toggle separated playback, toggle per-song blend memory, and adjust the active blend value for completed caches. Completed for the current in-memory prototype state.
-- The icon state updates from the durable settings. Partial: the icon updates from current in-memory mode state, but persistence is still pending.
+- The sheet can toggle separated playback, toggle per-song blend memory, and adjust the active blend value for completed caches. Completed for the current prototype control surface.
+- The icon state updates from the durable settings. Completed for app-level separated playback and per-song-memory flags.
+- App-level separated playback enabled, per-song memory enabled, and global blend are persisted in shared preferences.
+- Per-song blend is persisted in a cache-owned `playback-settings.json` sidecar keyed to the separated cache's encoded-audio fingerprint.
+- Saved settings are reapplied after song changes, service reconnection, and app restart.
 - The old separated playback dialog is no longer needed for normal use. Completed.
 - The app still builds and completed-cache playback still works. Completed for `:app:assembleNormalDebug`.
 
@@ -524,11 +527,12 @@ Implementation notes:
 - Routed player-style source separation buttons and menu items to the settings sheet.
 - Removed the direct click-to-cycle behavior from player controls.
 - Removed the old separated playback dialog surface.
+- Split the control state into durable app-level flags instead of deriving the per-song-memory switch only from the three-state icon mode.
+- Added a cache-owned playback settings sidecar for per-song blend memory. The sidecar is ignored if its fingerprint does not match the current manifest audio fingerprint.
 
 Current limitations:
 
-- The settings are still in the current `PlayerViewModel` prototype state and are not yet persisted.
-- Per-song blend memory is represented by the mode switch only; actual per-song blend storage is still pending.
+- The per-song blend sidecar currently follows the existing cache entry lookup, which is still rooted by MediaStore song id. Cross-song-id cache reuse after file moves or MediaStore rescans remains deferred to the future audio-fingerprint cache index.
 - The long-running separation Snackbar remains until the sheet owns a reliable progress model.
 
 ### Phase 5A: Window Decode Experiment

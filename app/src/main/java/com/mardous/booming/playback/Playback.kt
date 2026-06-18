@@ -30,4 +30,5 @@ object Playback {
     const val EXTRA_SOURCE_SEPARATION_PROCESSING = "source_separation_processing"
     const val EXTRA_SOURCE_SEPARATION_SONG_ID = "source_separation_song_id"
     const val EXTRA_SOURCE_SEPARATION_MESSAGE = "source_separation_message"
+    const val EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE = "source_separation_show_message"
 }
