@@ -222,16 +222,20 @@ class PlayerViewModel(
                 .launchIn(viewModelScope)
 
             internalJobs += currentSongFlow
-                .debounce(500)
                 .distinctUntilChangedBy { it.id }
                 .onEach { song ->
-                    onGenerateExtraInfo(song)
                     pauseSourceSeparationIfSongChanged(song)
                     applySourceSeparationSettingsForSong(
                         song = song,
                         showMessage = false,
                     )
                 }
+                .launchIn(viewModelScope)
+
+            internalJobs += currentSongFlow
+                .debounce(500)
+                .distinctUntilChangedBy { it.id }
+                .onEach { song -> onGenerateExtraInfo(song) }
                 .launchIn(viewModelScope)
 
             internalJobs += isPlayingFlow
@@ -363,7 +367,11 @@ class PlayerViewModel(
             }
             _progressFlow.value = player.contentPosition
             _durationFlow.value = player.contentDuration
-            syncSourceSeparationPlaybackIfRequested(force = true)
+            if (_sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.PerSong ||
+                !events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)
+            ) {
+                syncSourceSeparationPlaybackIfRequested(force = true)
+            }
             if (!player.playWhenReady) {
                 _progressFlow.value = player.contentPosition
                 _durationFlow.value = player.contentDuration
@@ -832,6 +840,10 @@ class PlayerViewModel(
         val args = Bundle().apply {
             putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, enabled)
             putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, showMessage)
+            putBoolean(
+                Playback.EXTRA_SOURCE_SEPARATION_AUTO_SYNC_ON_TRANSITION,
+                _sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.PerSong,
+            )
             if (blend != null) {
                 putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, blend.coerceIn(0f, 1f))
             }
