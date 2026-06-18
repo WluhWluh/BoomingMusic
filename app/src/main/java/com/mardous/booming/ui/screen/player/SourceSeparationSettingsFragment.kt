@@ -291,6 +291,7 @@ private fun SourceSeparationSettingsSheet(
                             modifier = Modifier.padding(cardContentPadding)
                         ) {
                             SourceSeparationStatusText(separationState)
+                            SourceSeparationDecodeDiagnosticsText(separationState)
                             AnimatedVisibility(
                                 visible = playbackState.processing
                             ) {
@@ -348,6 +349,22 @@ private fun SourceSeparationSettingsSheet(
             }
         }
     }
+}
+
+@Composable
+private fun SourceSeparationDecodeDiagnosticsText(
+    state: SourceSeparationUiState
+) {
+    val text = (state as? SourceSeparationUiState.Running)
+        ?.sourceDecodeDiagnostics
+        ?.takeIf { it.isNotBlank() }
+        ?: return
+
+    Text(
+        text = text,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall
+    )
 }
 
 @Composable
