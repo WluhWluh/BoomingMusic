@@ -647,6 +647,15 @@ MP3 no-gapless-metadata experiment result:
 - The 384-source-frame quantized calibrated placement removed that residual on every holdout in this sample set.
 - This supports a conservative production prototype for no-gapless-metadata 44.1 kHz MP3, but only behind a lightweight per-file calibration gate keyed by the encoded-audio-sample fingerprint. Files that fail calibration or cannot be calibrated should still fall back to full-song decode.
 
+MP3 no-gapless-metadata production prototype:
+
+- 44.1 kHz MP3 files with both encoder delay and encoder padding metadata missing now have a separate experimental window-decode profile instead of being rejected at routing time.
+- Before using that profile, the app computes the encoded-audio-sample fingerprint and checks a small per-file calibration cache under the app cache directory.
+- On a cache miss, the gate decodes several short local probe windows from the same file and records their raw frame deficits and quantized placement offsets for diagnostics.
+- Passing calibration is cached by encoded-audio-sample fingerprint. The current production gate no longer requires cross-seek PCM overlap to match sample-for-sample because real-device testing showed that check rejects the same files that passed the full-reference experiment; MP3 decoder state at local seek boundaries is not a valid hard gate for stable-region correctness.
+- Failure still throws from decoder/preflight errors and falls back to the full-song decode path.
+- This production gate is intentionally weaker than the debug full-reference experiment because it does not decode the whole song for comparison. The debug experiment remains the reference test for absolute bit-perfect validation; the production gate now acts as a low-cost routing/cache diagnostic plus a decode viability check.
+
 Next hardening steps:
 
 - Consider mid-run fallback cleanup for the rarer case where preflight succeeds but a later window decode fails.
