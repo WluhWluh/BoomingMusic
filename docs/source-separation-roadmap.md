@@ -144,9 +144,7 @@ Audio identity fields decide whether separated stems remain valid:
 - model variant,
 - pipeline version.
 
-The first implementation can compute `audioFingerprint` as a SHA-256 hash of the decoded PCM stream during separation. This is slower than hashing the encoded audio track, but it is robust against metadata-only rewrites and can be computed while the offline engine already has decoded audio available.
-
-Later optimization can hash only the encoded audio track samples through `MediaExtractor`, skipping container metadata such as cover art and tags. That faster path must be validated against common local formats before replacing the decoded PCM hash.
+The current implementation computes `audioFingerprint` from the selected encoded audio track samples through `MediaExtractor`, plus decoder-relevant track fields such as MIME type, sample rate, channel count, duration, encoder delay, and encoder padding. This skips container metadata such as cover art, lyrics, and tags, so metadata-only rewrites should not invalidate separated caches. A decoded PCM hash remains a possible fallback strategy if a platform extractor proves unreliable for a specific format.
 
 File size and raw modified timestamp should be stored as diagnostic fields in the manifest, but they should not be used as mandatory cache invalidation inputs.
 
@@ -631,12 +629,13 @@ First production prototype validation:
 - Unsupported or not-yet-whitelisted formats still fall back to the full-song decode path and were verified to keep working.
 - The current MP3 path remains experimental and is intentionally limited to 44.1 kHz sources with encoder delay and padding metadata.
 - Separation timing reports and the source separation settings sheet should expose the active decode mode, window profile, source MIME/sample-rate/channel metadata, and fallback reason so format routing can be checked during normal use.
+- Whitelisted window-decode inputs now run a lightweight first-window preflight before committing to the window path. If the preflight fails, separation falls back to the full-song decode path and exposes the preflight failure as the fallback reason.
+- Completed cache manifests now use an encoded-audio-sample fingerprint instead of the temporary window-profile identity or decoded PCM hash. The fingerprint is derived from the selected audio track's encoded samples and decoder-relevant track fields, so cover art, lyrics, and normal tag edits should not invalidate separated caches.
 
 Next hardening steps:
 
-- Add a lightweight window-decode preflight before committing to a window profile.
-- Fall back to full-song decode when preflight fails, rather than failing the separation task.
-- Replace the temporary window-path identity with an encoded-audio-sample fingerprint so metadata-only edits do not invalidate caches without requiring a full decoded PCM hash.
+- Consider mid-run fallback cleanup for the rarer case where preflight succeeds but a later window decode fails.
+- Add a cache-index lookup by audio fingerprint if cross-song-id reuse becomes necessary after MediaStore rescans or file moves.
 - Keep 48 kHz MP3, low-rate MP3, AAC/M4A, Opus, FLAC, WMA, and platform-unsupported cases on full-song fallback until deterministic placement profiles are proven.
 
 ### Phase 5B: Segment-Based Processing
