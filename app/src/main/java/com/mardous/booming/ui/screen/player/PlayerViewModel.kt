@@ -42,6 +42,7 @@ import com.mardous.booming.core.model.shuffle.OpenShuffleMode
 import com.mardous.booming.playback.shuffle.ShuffleManager
 import com.mardous.booming.playback.toMediaItems
 import com.mardous.booming.separation.SourceSeparationEngine
+import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
 import com.mardous.booming.util.Preferences
 import com.mardous.booming.util.REMEMBER_SHUFFLE_MODE
@@ -138,7 +139,10 @@ class PlayerViewModel(
     val extraInfoFlow = _extraInfoFlow.asStateFlow()
 
     private val sourceSeparationCancelRequested = AtomicBoolean(false)
+    private val sourceSeparationPauseRequested = AtomicBoolean(false)
     private var sourceSeparationJob: Job? = null
+    private var sourceSeparationSongId: Long? = null
+    private var sourceSeparationPendingStartSongId: Long? = null
     private var sourceSeparationPlaybackSyncJob: Job? = null
     private var sourceSeparationWindowDecodeExperimentJob: Job? = null
 
@@ -207,7 +211,10 @@ class PlayerViewModel(
             internalJobs += currentSongFlow
                 .debounce(500)
                 .distinctUntilChangedBy { it.id }
-                .onEach { song -> onGenerateExtraInfo(song) }
+                .onEach { song ->
+                    onGenerateExtraInfo(song)
+                    pauseSourceSeparationIfSongChanged(song)
+                }
                 .launchIn(viewModelScope)
 
             internalJobs += isPlayingFlow
@@ -406,9 +413,16 @@ class PlayerViewModel(
     }
 
     fun startSourceSeparationForCurrentSong() {
-        if (sourceSeparationJob != null) return
-
         val song = currentSong
+        val runningSongId = sourceSeparationSongId
+        if (sourceSeparationJob != null) {
+            if (runningSongId != null && runningSongId != song.id) {
+                sourceSeparationPauseRequested.set(true)
+                sourceSeparationPendingStartSongId = song.id
+            }
+            return
+        }
+
         if (song == Song.emptySong) {
             _sourceSeparationStateFlow.value = SourceSeparationUiState.Failed(
                 songId = song.id,
@@ -419,6 +433,8 @@ class PlayerViewModel(
         }
 
         sourceSeparationCancelRequested.set(false)
+        sourceSeparationPauseRequested.set(false)
+        sourceSeparationSongId = song.id
         sourceSeparationJob = viewModelScope.launch(IO) {
             val activeJob = coroutineContext[Job]
             _sourceSeparationStateFlow.value = SourceSeparationUiState.Running(
@@ -457,11 +473,21 @@ class PlayerViewModel(
                             currentSong.id == song.id && it != C.TIME_UNSET
                         }
                     },
+                    shouldPause = {
+                        sourceSeparationPauseRequested.get() ||
+                                currentSong.id != song.id ||
+                                activeJob?.isActive != true
+                    },
                     shouldCancel = {
                         sourceSeparationCancelRequested.get() || activeJob?.isActive != true
                     },
                 )
                 _sourceSeparationStateFlow.value = SourceSeparationUiState.Completed(
+                    songId = song.id,
+                    songTitle = song.title,
+                )
+            } catch (_: SourceSeparationPausedException) {
+                _sourceSeparationStateFlow.value = SourceSeparationUiState.Paused(
                     songId = song.id,
                     songTitle = song.title,
                 )
@@ -478,8 +504,15 @@ class PlayerViewModel(
                     message = error.message,
                 )
             } finally {
+                val pendingStartSongId = sourceSeparationPendingStartSongId
                 sourceSeparationJob = null
+                sourceSeparationSongId = null
+                sourceSeparationPendingStartSongId = null
                 sourceSeparationCancelRequested.set(false)
+                sourceSeparationPauseRequested.set(false)
+                if (pendingStartSongId != null && currentSong.id == pendingStartSongId) {
+                    startSourceSeparationForCurrentSong()
+                }
             }
         }
     }
@@ -487,6 +520,13 @@ class PlayerViewModel(
     fun cancelSourceSeparation() {
         sourceSeparationCancelRequested.set(true)
         sourceSeparationJob?.cancel()
+    }
+
+    private fun pauseSourceSeparationIfSongChanged(song: Song) {
+        val runningSongId = sourceSeparationSongId ?: return
+        if (song.id != runningSongId) {
+            sourceSeparationPauseRequested.set(true)
+        }
     }
 
     fun clearSourceSeparationStatus() {
@@ -1038,6 +1078,11 @@ sealed class SourceSeparationUiState {
     ) : SourceSeparationUiState()
 
     data class Canceled(
+        val songId: Long,
+        val songTitle: String,
+    ) : SourceSeparationUiState()
+
+    data class Paused(
         val songId: Long,
         val songTitle: String,
     ) : SourceSeparationUiState()
