@@ -396,6 +396,35 @@ class SourceSeparationCache(
         return !dir.exists() || dir.deleteRecursively()
     }
 
+    fun readPlaybackSettings(
+        song: Song,
+        modelVariant: MdxModelVariant,
+        pipelineVersion: Int = PIPELINE_VERSION,
+    ): SourceSeparationPlaybackSettings? {
+        val dir = entryDir(song, modelVariant, pipelineVersion)
+        val manifest = readManifest(dir) ?: return null
+        return readPlaybackSettings(dir, manifest)
+    }
+
+    fun writePlaybackSettings(
+        song: Song,
+        modelVariant: MdxModelVariant,
+        blend: Float,
+        pipelineVersion: Int = PIPELINE_VERSION,
+    ): SourceSeparationPlaybackSettings? {
+        val dir = entryDir(song, modelVariant, pipelineVersion)
+        val manifest = readManifest(dir) ?: return null
+        val audioFingerprint = manifest.audioIdentity.audioFingerprint.takeIf { it.isNotBlank() }
+            ?: return null
+        val settings = SourceSeparationPlaybackSettings(
+            audioFingerprint = audioFingerprint,
+            blend = blend.coerceIn(0f, 1f),
+            updatedAtEpochMs = System.currentTimeMillis(),
+        )
+        writePlaybackSettings(dir, settings)
+        return settings
+    }
+
     fun segmentStemFile(
         run: SourceSeparationRun,
         segment: SourceSeparationSegment,
@@ -476,6 +505,50 @@ class SourceSeparationCache(
         }
     }
 
+    private fun readPlaybackSettings(
+        dir: File,
+        manifest: SourceSeparationManifest,
+    ): SourceSeparationPlaybackSettings? {
+        val audioFingerprint = manifest.audioIdentity.audioFingerprint.takeIf { it.isNotBlank() }
+            ?: return null
+        val file = File(dir, PLAYBACK_SETTINGS_FILE_NAME)
+        if (!file.isFile) return null
+        return try {
+            json.decodeFromString(
+                SourceSeparationPlaybackSettings.serializer(),
+                file.readText(Charsets.UTF_8),
+            ).takeIf { settings ->
+                settings.audioFingerprint == audioFingerprint &&
+                        settings.blend in 0f..1f
+            }
+        } catch (_: SerializationException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+    }
+
+    private fun writePlaybackSettings(
+        dir: File,
+        settings: SourceSeparationPlaybackSettings,
+    ) {
+        dir.mkdirs()
+        val target = File(dir, PLAYBACK_SETTINGS_FILE_NAME)
+        val temp = File(dir, "$PLAYBACK_SETTINGS_FILE_NAME.tmp")
+        temp.writeText(
+            json.encodeToString(SourceSeparationPlaybackSettings.serializer(), settings),
+            Charsets.UTF_8,
+        )
+        if (target.exists() && !target.delete()) {
+            temp.delete()
+            error("Could not replace playback settings: ${target.absolutePath}")
+        }
+        if (!temp.renameTo(target)) {
+            temp.copyTo(target, overwrite = true)
+            temp.delete()
+        }
+    }
+
     private fun copyIntoDirectory(source: File, targetDir: File, targetName: String): File {
         targetDir.mkdirs()
         val target = uniqueTargetFile(targetDir, targetName)
@@ -530,6 +603,7 @@ class SourceSeparationCache(
         private const val COMPLETED_DIR_NAME = "completed"
         private const val SEGMENTS_DIR_NAME = "segments"
         private const val MANIFEST_FILE_NAME = "manifest.json"
+        private const val PLAYBACK_SETTINGS_FILE_NAME = "playback-settings.json"
         private const val VOCALS_WAV = "vocals.wav"
         private const val INSTRUMENTAL_WAV = "instrumental.wav"
         private const val TIMING_TXT = "timing.txt"

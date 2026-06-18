@@ -42,6 +42,23 @@ class SourceSeparationEngine(
         }
     }
 
+    fun separatedPlaybackBlendForSong(
+        song: Song,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): Float? {
+        require(song != Song.emptySong) { "Cannot read separated playback settings for an empty song." }
+        return cache.readPlaybackSettings(song, modelVariant)?.blend
+    }
+
+    fun saveSeparatedPlaybackBlendForSong(
+        song: Song,
+        blend: Float,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): Boolean {
+        require(song != Song.emptySong) { "Cannot save separated playback settings for an empty song." }
+        return cache.writePlaybackSettings(song, modelVariant, blend) != null
+    }
+
     fun playableCacheStatusForSong(
         song: Song,
         playbackPositionMs: Long,
