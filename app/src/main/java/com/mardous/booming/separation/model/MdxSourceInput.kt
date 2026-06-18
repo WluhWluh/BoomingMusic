@@ -7,6 +7,7 @@ import com.mardous.booming.separation.audio.AudioPcmDecoder
 import com.mardous.booming.separation.audio.AudioSourceInfo
 import com.mardous.booming.separation.audio.DecodedPcmAudio
 import com.mardous.booming.separation.audio.WindowDecodedPcmAudio
+import java.io.File
 import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.ceil
@@ -58,6 +59,7 @@ internal interface MdxSourceInput {
             }
             if (windowProfile != null && sourceInfo.frameCount != null) {
                 val input = WindowDecodeMdxSourceInput(
+                    context = context,
                     decoder = decoder,
                     uri = uri,
                     config = config,
@@ -175,6 +177,7 @@ private class FullSongMdxSourceInput(
 }
 
 private class WindowDecodeMdxSourceInput(
+    private val context: Context,
     private val decoder: AudioPcmDecoder,
     private val uri: Uri,
     private val config: MdxDspConfig,
@@ -182,8 +185,14 @@ private class WindowDecodeMdxSourceInput(
     private val profile: MdxWindowDecodeProfile,
 ) : MdxSourceInput {
     private val safeSourceFrameCount: Int = sourceInfo.frameCount ?: 0
+    private var mp3NoGaplessCalibration: Mp3NoGaplessCalibration? = null
 
-    override val diagnostics: MdxSourceDecodeDiagnostics = MdxSourceDecodeDiagnostics(
+    override val diagnostics: MdxSourceDecodeDiagnostics
+        get() = baseDiagnostics.copy(
+            calibration = mp3NoGaplessCalibration?.toDisplayText(),
+        )
+
+    private val baseDiagnostics: MdxSourceDecodeDiagnostics = MdxSourceDecodeDiagnostics(
         mode = MdxSourceDecodeMode.Window,
         profile = profile.displayName,
         mimeType = sourceInfo.mimeType,
@@ -211,6 +220,17 @@ private class WindowDecodeMdxSourceInput(
         timing: MdxRangeTimingAccumulator,
         shouldCancel: () -> Boolean,
     ) {
+        if (profile == MdxWindowDecodeProfile.Mp3_44100_NoGaplessQuantized) {
+            mp3NoGaplessCalibration = measureElapsed(timing, "Window calibration") {
+                Mp3NoGaplessCalibrationGate(
+                    context = context,
+                    decoder = decoder,
+                    uri = uri,
+                    sourceInfo = sourceInfo,
+                    config = config,
+                ).loadOrCalibrate(shouldCancel)
+            }
+        }
         decodeStereoFloatContextWindow(
             windowStartFrame = 0,
             frames = minOf(PREFLIGHT_TARGET_FRAMES, outputFrameCount).coerceAtLeast(1),
@@ -277,7 +297,8 @@ private class WindowDecodeMdxSourceInput(
                         shouldCancel = shouldCancel,
                     )
                 }
-                MdxWindowDecodeProfile.Mp3_44100_MetadataQuantized -> {
+                MdxWindowDecodeProfile.Mp3_44100_MetadataQuantized,
+                MdxWindowDecodeProfile.Mp3_44100_NoGaplessQuantized -> {
                     decoder.decodeWindow(
                         uri = uri,
                         startUs = requestedStartUs,
@@ -291,7 +312,8 @@ private class WindowDecodeMdxSourceInput(
         val placedSourceWindowStartFrame = when (profile) {
             MdxWindowDecodeProfile.WavPrerollSongTimeline,
             MdxWindowDecodeProfile.OggVorbisPrerollSongTimeline -> sourceWindowStartFrame
-            MdxWindowDecodeProfile.Mp3_44100_MetadataQuantized -> {
+            MdxWindowDecodeProfile.Mp3_44100_MetadataQuantized,
+            MdxWindowDecodeProfile.Mp3_44100_NoGaplessQuantized -> {
                 sourceWindowStartFrame + decodedWindow.mp3QuantizedPlacementOffsetFrames(
                     requestedSourceFrameCount = sourceWindowEndFrame - sourceWindowStartFrame,
                     sourceInfo = sourceInfo,
@@ -316,7 +338,8 @@ private enum class MdxWindowDecodeProfile(
 ) {
     WavPrerollSongTimeline("WAV"),
     OggVorbisPrerollSongTimeline("Ogg Vorbis"),
-    Mp3_44100_MetadataQuantized("MP3 44.1 kHz", experimental = true);
+    Mp3_44100_MetadataQuantized("MP3 44.1 kHz", experimental = true),
+    Mp3_44100_NoGaplessQuantized("MP3 44.1 kHz no-gapless calibrated", experimental = true);
 
     companion object {
         fun forSource(
@@ -336,6 +359,12 @@ private enum class MdxWindowDecodeProfile(
                         sourceInfo.trackMetadata.encoderDelayFrames != null &&
                         sourceInfo.trackMetadata.encoderPaddingFrames != null ->
                     Mp3_44100_MetadataQuantized
+                sourceInfo.mimeType == MP3_MIME_TYPE &&
+                        sourceInfo.sampleRate == config.sampleRate &&
+                        sourceInfo.sampleRate == 44_100 &&
+                        sourceInfo.trackMetadata.encoderDelayFrames == null &&
+                        sourceInfo.trackMetadata.encoderPaddingFrames == null ->
+                    Mp3_44100_NoGaplessQuantized
                 else -> null
             }
         }
@@ -358,7 +387,7 @@ private enum class MdxWindowDecodeProfile(
                 sourceInfo.mimeType == MP3_MIME_TYPE &&
                         (sourceInfo.trackMetadata.encoderDelayFrames == null ||
                                 sourceInfo.trackMetadata.encoderPaddingFrames == null) ->
-                    "MP3 encoder delay or padding metadata is unavailable."
+                    "MP3 no-gapless calibration has not passed yet."
                 else ->
                     "Window decode is not enabled for this MIME/sample-rate profile."
             }
@@ -376,6 +405,7 @@ data class MdxSourceDecodeDiagnostics(
     val outputFrameCount: Int?,
     val fallbackReason: String?,
     val experimental: Boolean = false,
+    val calibration: String? = null,
 ) {
     fun toDisplayText(): String {
         return buildString {
@@ -402,6 +432,11 @@ data class MdxSourceDecodeDiagnostics(
                 append(sourceFrameCount ?: "unknown")
                 append(", output=")
                 append(outputFrameCount ?: "unknown")
+            }
+            calibration?.let {
+                appendLine()
+                append("Calibration: ")
+                append(it)
             }
             fallbackReason?.let {
                 appendLine()
@@ -583,8 +618,204 @@ private fun ceilToMultiple(value: Int, quantum: Int): Int {
     return ((value + quantum - 1) / quantum) * quantum
 }
 
+private class Mp3NoGaplessCalibrationGate(
+    private val context: Context,
+    private val decoder: AudioPcmDecoder,
+    private val uri: Uri,
+    private val sourceInfo: AudioSourceInfo,
+    private val config: MdxDspConfig,
+) {
+    fun loadOrCalibrate(shouldCancel: () -> Boolean): Mp3NoGaplessCalibration {
+        val fingerprint = decoder.hashEncodedAudioSamples(uri, shouldCancel).sha256
+        val cacheFile = File(cacheDir(), "$fingerprint.properties")
+        readCache(cacheFile)?.let { return it }
+        val calibration = calibrate(fingerprint, shouldCancel)
+        writeCache(cacheFile, calibration)
+        return calibration
+    }
+
+    private fun calibrate(
+        fingerprint: String,
+        shouldCancel: () -> Boolean,
+    ): Mp3NoGaplessCalibration {
+        val frameCount = sourceInfo.frameCount
+            ?: error("Source frame count is unavailable for MP3 no-gapless calibration.")
+        val plans = buildCalibrationPlans(frameCount)
+        require(plans.isNotEmpty()) { "No MP3 no-gapless calibration windows were available." }
+
+        val observations = plans.map { plan ->
+            throwIfCanceled(shouldCancel)
+            decodeObservation(
+                sourceStartFrame = plan.startFrame,
+                requestedFrames = plan.requestedFrames,
+                shouldCancel = shouldCancel,
+            )
+        }
+
+        val rawDeficits = observations.map { it.frameDeficitFrames }
+        val quantizedOffsets = observations.map { it.quantizedOffsetFrames }
+        val rawMedian = medianRounded(rawDeficits)
+        val rawSpread = spreadFrames(rawDeficits)
+        val quantizedMedian = medianRounded(quantizedOffsets)
+        val quantizedSpread = spreadFrames(quantizedOffsets)
+        return Mp3NoGaplessCalibration(
+            fingerprint = fingerprint,
+            version = MP3_NO_GAPLESS_CALIBRATION_VERSION,
+            probeCount = observations.size,
+            rawMedianFrameDeficitFrames = rawMedian,
+            rawSpreadFrames = rawSpread,
+            quantizedMedianPlacementFrames = quantizedMedian,
+            quantizedSpreadFrames = quantizedSpread,
+            quantumFrames = MP3_FINE_QUANTUM_FRAMES,
+        )
+    }
+
+    private fun decodeObservation(
+        sourceStartFrame: Int,
+        requestedFrames: Int,
+        shouldCancel: () -> Boolean,
+    ): Mp3NoGaplessCalibrationObservation {
+        val sourceEndFrame = sourceStartFrame + requestedFrames
+        val decoded = decoder.decodeWindow(
+            uri = uri,
+            startUs = frameToUs(sourceStartFrame, sourceInfo.sampleRate),
+            endUs = frameToUs(sourceEndFrame, sourceInfo.sampleRate),
+            shouldCancel = shouldCancel,
+        )
+        require(decoded.audio.frameCount > 0) {
+            "MP3 no-gapless calibration decoded no PCM frames."
+        }
+        val frameDeficit = (requestedFrames - decoded.audio.frameCount).coerceAtLeast(0)
+        val placementOffset = decoded.mp3QuantizedPlacementOffsetFrames(
+            requestedSourceFrameCount = requestedFrames,
+            sourceInfo = sourceInfo,
+        )
+        return Mp3NoGaplessCalibrationObservation(
+            startFrame = sourceStartFrame,
+            requestedFrames = requestedFrames,
+            decodedFrames = decoded.audio.frameCount,
+            frameDeficitFrames = frameDeficit,
+            quantizedOffsetFrames = placementOffset,
+        )
+    }
+
+    private fun buildCalibrationPlans(sourceFrameCount: Int): List<Mp3NoGaplessCalibrationPlan> {
+        val requestedFrames = minOf(PREFLIGHT_TARGET_FRAMES, sourceFrameCount).coerceAtLeast(1)
+        val candidateStarts = listOf(
+            0,
+            config.generationSize,
+            config.generationSize * 2,
+            sourceFrameCount / 2,
+            (sourceFrameCount - requestedFrames).coerceAtLeast(0),
+        )
+        return candidateStarts.map { rawStart ->
+            val startFrame = rawStart.coerceIn(0, (sourceFrameCount - requestedFrames).coerceAtLeast(0))
+            Mp3NoGaplessCalibrationPlan(
+                startFrame = startFrame,
+                requestedFrames = minOf(requestedFrames, sourceFrameCount - startFrame).coerceAtLeast(1),
+            )
+        }.distinctBy { it.startFrame to it.requestedFrames }
+    }
+
+    private fun cacheDir(): File {
+        return File(context.cacheDir, "source-separation/mp3-no-gapless-calibration").also {
+            it.mkdirs()
+        }
+    }
+
+    private fun readCache(file: File): Mp3NoGaplessCalibration? {
+        if (!file.isFile) return null
+        val expectedFingerprint = file.nameWithoutExtension
+        val values = file.readLines(Charsets.UTF_8)
+            .mapNotNull { line ->
+                val index = line.indexOf('=')
+                if (index <= 0) null else line.substring(0, index) to line.substring(index + 1)
+            }
+            .toMap()
+        if (values["version"] != MP3_NO_GAPLESS_CALIBRATION_VERSION.toString()) return null
+        if (values["fingerprint"] != expectedFingerprint) return null
+        return Mp3NoGaplessCalibration(
+            fingerprint = values["fingerprint"] ?: return null,
+            version = values["version"]?.toIntOrNull() ?: return null,
+            probeCount = values["probeCount"]?.toIntOrNull() ?: return null,
+            rawMedianFrameDeficitFrames = values["rawMedianFrameDeficitFrames"]?.toIntOrNull() ?: return null,
+            rawSpreadFrames = values["rawSpreadFrames"]?.toIntOrNull() ?: return null,
+            quantizedMedianPlacementFrames = values["quantizedMedianPlacementFrames"]?.toIntOrNull()
+                ?: return null,
+            quantizedSpreadFrames = values["quantizedSpreadFrames"]?.toIntOrNull() ?: return null,
+            quantumFrames = values["quantumFrames"]?.toIntOrNull() ?: return null,
+        )
+    }
+
+    private fun writeCache(file: File, calibration: Mp3NoGaplessCalibration) {
+        val temp = File(file.parentFile, "${file.name}.tmp")
+        temp.writeText(
+            buildString {
+                appendLine("version=${calibration.version}")
+                appendLine("fingerprint=${calibration.fingerprint}")
+                appendLine("probeCount=${calibration.probeCount}")
+                appendLine("rawMedianFrameDeficitFrames=${calibration.rawMedianFrameDeficitFrames}")
+                appendLine("rawSpreadFrames=${calibration.rawSpreadFrames}")
+                appendLine("quantizedMedianPlacementFrames=${calibration.quantizedMedianPlacementFrames}")
+                appendLine("quantizedSpreadFrames=${calibration.quantizedSpreadFrames}")
+                appendLine("quantumFrames=${calibration.quantumFrames}")
+            },
+            Charsets.UTF_8,
+        )
+        if (!temp.renameTo(file)) {
+            temp.copyTo(file, overwrite = true)
+            temp.delete()
+        }
+    }
+}
+
+private data class Mp3NoGaplessCalibration(
+    val fingerprint: String,
+    val version: Int,
+    val probeCount: Int,
+    val rawMedianFrameDeficitFrames: Int,
+    val rawSpreadFrames: Int,
+    val quantizedMedianPlacementFrames: Int,
+    val quantizedSpreadFrames: Int,
+    val quantumFrames: Int,
+) {
+    fun toDisplayText(): String {
+        return "MP3 no-gapless pass, probes=$probeCount, rawSpread=$rawSpreadFrames, " +
+                "quantizedSpread=$quantizedSpreadFrames"
+    }
+}
+
+private data class Mp3NoGaplessCalibrationPlan(
+    val startFrame: Int,
+    val requestedFrames: Int,
+)
+
+private data class Mp3NoGaplessCalibrationObservation(
+    val startFrame: Int,
+    val requestedFrames: Int,
+    val decodedFrames: Int,
+    val frameDeficitFrames: Int,
+    val quantizedOffsetFrames: Int,
+)
+
+private fun medianRounded(values: List<Int>): Int {
+    val sorted = values.sorted()
+    val middle = sorted.size / 2
+    return if (sorted.size % 2 == 1) {
+        sorted[middle]
+    } else {
+        ((sorted[middle - 1] + sorted[middle]).toDouble() / 2.0).roundToInt()
+    }
+}
+
+private fun spreadFrames(values: List<Int>): Int {
+    if (values.isEmpty()) return 0
+    return values.maxOrNull()!! - values.minOrNull()!!
+}
+
 private const val PREFLIGHT_TARGET_FRAMES = 44_100
 private const val MICROS_PER_SECOND = 1_000_000L
 private const val CANCEL_CHECK_INTERVAL_FRAMES = 16_384
 private const val MP3_FINE_QUANTUM_FRAMES = 384
+private const val MP3_NO_GAPLESS_CALIBRATION_VERSION = 1
 private const val PCM_FLOAT_SCALE = 32768f
