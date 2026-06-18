@@ -140,6 +140,9 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
+private const val SOURCE_SEPARATION_QUEUE_REPLACEMENT_TOKEN_KEY =
+    "com.mardous.booming.source_separation.queue_replacement_token"
+
 @OptIn(UnstableApi::class)
 class PlaybackService :
     MediaLibraryService(),
@@ -203,6 +206,7 @@ class PlaybackService :
     private var sourceSeparationOutputMuted = false
     private var sourceSeparationOutputWaitingForMixedOutput = false
     private var sourceSeparationOutputMuteStartedAtMs = 0L
+    private var sourceSeparationPlaybackContextGeneration = 0L
 
     private var headsetClickCount = 0
     private val headsetClickRunnable = Runnable {
@@ -623,6 +627,9 @@ class PlaybackService :
         startIndex: Int,
         startPositionMs: Long
     ): ListenableFuture<MediaItemsWithStartPosition> {
+        sourceSeparationPlaybackContextGeneration++
+        sourceSeparationPlaybackGateJob?.cancel()
+        sourceSeparationPlaybackGateJob = null
         player.exoPlayer.let { exoPlayer ->
             if (exoPlayer.shuffleOrder !is ImprovedShuffleOrder && !hasSetUnshuffledOrder) {
                 exoPlayer.shuffleOrder = ImprovedShuffleOrder(
@@ -919,6 +926,9 @@ class PlaybackService :
                     "activeSession=${activeSession?.songId} stem=${mediaItem?.isSourceSeparationStemMediaItem()} " +
                     "internalItemChange=$isInternalMediaItemChange"
         )
+        if (!isInternalMediaItemChange) {
+            sourceSeparationPlaybackContextGeneration++
+        }
         if (activeSession != null) {
             if (mediaItem?.mediaId == activeSession.songId.toString()) {
                 sourceSeparationMixProcessor.seekTo(player.currentPosition)
@@ -1203,6 +1213,8 @@ class PlaybackService :
             return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
         }
 
+        val contextGeneration = sourceSeparationPlaybackContextGeneration
+        val mediaItemIndex = player.currentMediaItemIndex
         val mediaItem = player.currentMediaItem
             ?: run {
                 clearSourceSeparationPlaybackProcessing()
@@ -1216,6 +1228,16 @@ class PlaybackService :
 
         val song = withContext(IO) {
             repository.songByMediaItem(mediaItem)
+        }
+        if (!isSourceSeparationPlaybackCheckCurrent(
+                checkId = checkId,
+                contextGeneration = contextGeneration,
+                mediaItem = mediaItem,
+                mediaItemIndex = mediaItemIndex,
+                stage = "after song lookup",
+            )
+        ) {
+            return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
         }
         if (!sourceSeparationPlaybackRequested) {
             clearSourceSeparationPlaybackProcessing()
@@ -1249,6 +1271,16 @@ class PlaybackService :
                     runCatching {
                         sourceSeparationEngine.playableCacheDebugInfoForSong(song, positionMs)
                     }.getOrNull()
+                }
+                if (!isSourceSeparationPlaybackCheckCurrent(
+                        checkId = checkId,
+                        contextGeneration = contextGeneration,
+                        mediaItem = mediaItem,
+                        mediaItemIndex = mediaItemIndex,
+                        stage = "after active status",
+                    )
+                ) {
+                    return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
                 }
                 traceSourceSeparationPlayback(
                     "check.activeSession.status",
@@ -1320,6 +1352,16 @@ class PlaybackService :
                 sourceSeparationEngine.playableCacheDebugInfoForSong(song, positionMs)
             }.getOrNull()
         }
+        if (!isSourceSeparationPlaybackCheckCurrent(
+                checkId = checkId,
+                contextGeneration = contextGeneration,
+                mediaItem = mediaItem,
+                mediaItemIndex = mediaItemIndex,
+                stage = "after new status",
+            )
+        ) {
+            return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+        }
         traceSourceSeparationPlayback(
             "check.newSession.status",
             "id=$checkId songId=${song.id} position=$positionMs status=${status.traceName()} " +
@@ -1380,6 +1422,11 @@ class PlaybackService :
         val shouldPlayAfterSwitch = resumeWhenReady || playWhenReady
         val originalMediaItem = song.toMediaItem(mediaItem.mediaId)
         val isRunningCache = manifest.state == SourceSeparationCacheState.Running
+        val queueReplacementToken = if (isRunningCache) {
+            null
+        } else {
+            "source-separation:${song.id}:$checkId:${SystemClock.elapsedRealtime()}"
+        }
         val playbackMediaItem = if (isRunningCache) {
             originalMediaItem
         } else {
@@ -1387,12 +1434,14 @@ class PlaybackService :
                 .setUri(Uri.fromFile(instrumentalFile))
                 .setMediaId(song.id.toString())
                 .build()
+                .withSourceSeparationQueueReplacementToken(queueReplacementToken!!)
         }
 
         val session = SourceSeparationPlaybackSession(
             songId = song.id,
             mediaItemIndex = index,
             originalMediaItem = originalMediaItem,
+            queueReplacementToken = queueReplacementToken,
             vocalsFile = vocalsFile,
             instrumentalFile = instrumentalFile,
             inputMode = if (isRunningCache) InputMode.OriginalSource else InputMode.InstrumentalStem,
@@ -1405,6 +1454,16 @@ class PlaybackService :
             "id=$checkId index=$index position=$positionMs resumeWhenReady=$resumeWhenReady " +
                     "previousPlayWhenReady=$playWhenReady manifestState=${manifest.state}"
         )
+        if (!isSourceSeparationPlaybackCheckCurrent(
+                checkId = checkId,
+                contextGeneration = contextGeneration,
+                mediaItem = mediaItem,
+                mediaItemIndex = mediaItemIndex,
+                stage = "before apply new session",
+            )
+        ) {
+            return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+        }
 
         val resumeAfterSwitch = pauseSourceSeparationOutputForSwitch(
             reason = "newSession",
@@ -1417,7 +1476,9 @@ class PlaybackService :
         sourceSeparationPlaybackSession = session
         enableSourceSeparationMixProcessor(session, positionMs)
         withSourceSeparationInternalMediaItemChange {
-            player.replaceMediaItem(index, playbackMediaItem)
+            if (session.replacesQueueMediaItem) {
+                player.replaceMediaItem(index, playbackMediaItem)
+            }
             player.seekTo(index, positionMs)
             player.prepare()
             setSourceSeparationPlayWhenReady(false)
@@ -1645,23 +1706,59 @@ class PlaybackService :
         }
     }
 
+    private fun isSourceSeparationPlaybackCheckCurrent(
+        checkId: Long,
+        contextGeneration: Long,
+        mediaItem: MediaItem,
+        mediaItemIndex: Int,
+        stage: String,
+    ): Boolean {
+        val currentMediaItem = player.currentMediaItem
+        val isCurrent = sourceSeparationPlaybackRequested &&
+                contextGeneration == sourceSeparationPlaybackContextGeneration &&
+                mediaItemIndex == player.currentMediaItemIndex &&
+                currentMediaItem?.mediaId == mediaItem.mediaId
+        if (!isCurrent) {
+            traceSourceSeparationPlayback(
+                "check.stale",
+                "id=$checkId stage=$stage startGeneration=$contextGeneration " +
+                        "currentGeneration=$sourceSeparationPlaybackContextGeneration " +
+                        "startIndex=$mediaItemIndex currentIndex=${player.currentMediaItemIndex} " +
+                        "startMediaId=${mediaItem.mediaId} currentMediaId=${currentMediaItem?.mediaId}"
+            )
+        }
+        return isCurrent
+    }
+
     private fun restoreOriginalMediaItem(
         session: SourceSeparationPlaybackSession,
         resumePlayback: Boolean = player.playWhenReady,
     ): Boolean {
         traceSourceSeparationPlayback(
             "playback.restoreOriginal.lookup",
-            "sessionSongId=${session.songId} sessionIndex=${session.mediaItemIndex}"
+            "sessionSongId=${session.songId} sessionIndex=${session.mediaItemIndex} " +
+                    "token=${session.queueReplacementToken}"
         )
-        val sessionMediaId = session.songId.toString()
+        if (!session.replacesQueueMediaItem) {
+            traceSourceSeparationPlayback(
+                "playback.restoreOriginal.skip",
+                "reason=noQueueReplacement"
+            )
+            return false
+        }
         val index = session.mediaItemIndex
             .takeIf { it in 0 until player.mediaItemCount }
-            ?.takeIf { player.getMediaItemAt(it).mediaId == sessionMediaId }
+            ?.takeIf { player.getMediaItemAt(it).matchesSourceSeparationQueueReplacement(session) }
             ?: (0 until player.mediaItemCount).firstOrNull {
-                player.getMediaItemAt(it).mediaId == sessionMediaId &&
-                        player.getMediaItemAt(it).isSourceSeparationStemMediaItem()
+                player.getMediaItemAt(it).matchesSourceSeparationQueueReplacement(session)
             }
-            ?: return false
+            ?: run {
+                traceSourceSeparationPlayback(
+                    "playback.restoreOriginal.skip",
+                    "reason=replacementNotFound"
+                )
+                return false
+            }
 
         val isCurrentItem = index == player.currentMediaItemIndex
         val positionMs = player.currentPosition.coerceAtLeast(0)
@@ -1788,8 +1885,7 @@ class PlaybackService :
     }
 
     private fun SourceSeparationPlaybackSession.affectsCurrentSourceSeparationItem(): Boolean {
-        return mediaItemIndex == player.currentMediaItemIndex ||
-                player.currentMediaItem?.mediaId == songId.toString()
+        return player.currentMediaItem?.matchesSourceSeparationQueueReplacement(this) == true
     }
 
     private fun withSourceSeparationInternalMediaItemChange(block: () -> Unit) {
@@ -2417,13 +2513,17 @@ private data class SourceSeparationPlaybackSession(
     val songId: Long,
     val mediaItemIndex: Int,
     val originalMediaItem: MediaItem,
+    val queueReplacementToken: String?,
     val vocalsFile: File,
     val instrumentalFile: File,
     val inputMode: InputMode,
     val stemSampleRate: Int,
     val stemChannelCount: Int,
     val requiresReadinessGate: Boolean,
-)
+) {
+    val replacesQueueMediaItem: Boolean
+        get() = queueReplacementToken != null
+}
 
 private fun MediaItem.isSourceSeparationStemMediaItem(): Boolean {
     val uri = localConfiguration?.uri ?: return false
@@ -2431,6 +2531,29 @@ private fun MediaItem.isSourceSeparationStemMediaItem(): Boolean {
     return uri.scheme == "file" &&
             path.contains("/source-separation/entries/") &&
             path.substringAfterLast('/').contains("instrumental")
+}
+
+private fun MediaItem.matchesSourceSeparationQueueReplacement(
+    session: SourceSeparationPlaybackSession,
+): Boolean {
+    val token = session.queueReplacementToken ?: return false
+    return mediaMetadata.extras
+        ?.getString(SOURCE_SEPARATION_QUEUE_REPLACEMENT_TOKEN_KEY) == token &&
+            mediaId == session.songId.toString() &&
+            isSourceSeparationStemMediaItem()
+}
+
+private fun MediaItem.withSourceSeparationQueueReplacementToken(token: String): MediaItem {
+    val extras = Bundle(mediaMetadata.extras ?: Bundle()).apply {
+        putString(SOURCE_SEPARATION_QUEUE_REPLACEMENT_TOKEN_KEY, token)
+    }
+    return buildUpon()
+        .setMediaMetadata(
+            mediaMetadata.buildUpon()
+                .setExtras(extras)
+                .build()
+        )
+        .build()
 }
 
 private fun SourceSeparationPlayableCacheStatus.traceName(): String {
