@@ -177,6 +177,7 @@ class SourceSeparationEngine(
         modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
         onProgress: (MdxRangeProgress) -> Unit = {},
         playbackPositionMsProvider: () -> Long? = { null },
+        shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
     ): MdxRangeSeparationResult {
         require(song != Song.emptySong) { "Cannot separate an empty song." }
@@ -201,6 +202,8 @@ class SourceSeparationEngine(
                         cache.updateSegmentState(run, segmentIndex, state)
                     },
                     playbackPositionMsProvider = playbackPositionMsProvider,
+                    resumeManifest = run.resumeManifest,
+                    shouldPause = shouldPause,
                     shouldCancel = shouldCancel,
                 )
                 .let { result ->
@@ -210,7 +213,11 @@ class SourceSeparationEngine(
                     cache.completeRun(run, result).result
                 }
         } catch (error: CancellationException) {
-            cache.cancelRun(run, error)
+            if (error is SourceSeparationPausedException) {
+                cache.pauseRun(run)
+            } else {
+                cache.cancelRun(run, error)
+            }
             throw error
         } catch (error: Throwable) {
             cache.failRun(run, error)
@@ -242,6 +249,8 @@ class SourceSeparationEngine(
         )
     }
 }
+
+class SourceSeparationPausedException : CancellationException("Source separation paused.")
 
 sealed class SourceSeparationPlayableCacheStatus {
     data class Ready(val manifest: SourceSeparationManifest) : SourceSeparationPlayableCacheStatus()

@@ -695,6 +695,15 @@ Next scheduler refinement steps:
 4. Add active-song ownership to processing: after song changes, preserve completed segments for the old song but pause or downgrade its remaining work once the current ONNX window finishes.
 5. Add partial-cache resume so a new run can skip already ready segments after cancellation, app restart, or process death.
 
+Active-song pause prototype:
+
+- The current player-scoped separation task now watches the active song. When playback changes to another song, the old task is asked to pause at the next safe boundary.
+- The active ONNX inference window is not interrupted. After that window is written and marked ready, the task stops without marking the cache as canceled or failed.
+- The cache entry remains in `Running` state and keeps its `work/` full-duration WAV files, segment WAV files, and manifest segment readiness.
+- Starting separation for that song again reuses the existing `Running` manifest, verifies segment files on disk, preserves ready segment states, and skips ready segments.
+- Manual testing confirmed that changing songs pauses the old song after the current window, and returning to that song resumes from the preserved partial segment cache.
+- This is still a player-scoped single active task, not a background multi-song queue. A future worker layer can resume old songs as low-priority idle work after current-song needs are satisfied.
+
 ### Phase 6: Play While Processing
 
 Status: in progress

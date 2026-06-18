@@ -34,9 +34,48 @@ class SourceSeparationCache(
         val workDir = File(runDir, WORK_DIR_NAME)
         val completedDir = File(runDir, COMPLETED_DIR_NAME)
         val segmentsDir = File(runDir, SEGMENTS_DIR_NAME)
+        val existingManifest = readManifest(runDir)
+        val resumeManifest = existingManifest
+            ?.takeIf { manifest ->
+                manifest.state == SourceSeparationCacheState.Running &&
+                        manifest.output != null &&
+                        manifest.segmentPlan != null
+            }
+            ?.let { manifest ->
+                val segmentPlan = manifest.segmentPlan ?: return@let null
+                val snapshot = manifest.toSegmentSnapshot(runDir, segmentPlan)
+                manifest.copy(
+                    segmentPlan = segmentPlan.copy(
+                        segments = snapshot.segments.map { segmentState ->
+                            segmentState.segment.copy(state = segmentState.state)
+                        },
+                    ),
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                )
+            }
+
+        if (resumeManifest != null) {
+            workDir.mkdirs()
+            completedDir.mkdirs()
+            segmentsDir.mkdirs()
+            writeManifest(runDir, resumeManifest)
+            return SourceSeparationRun(
+                song = song,
+                modelVariant = modelVariant,
+                pipelineVersion = pipelineVersion,
+                rootDir = runDir,
+                workDir = workDir,
+                completedDir = completedDir,
+                segmentsDir = segmentsDir,
+                resumeManifest = resumeManifest,
+            )
+        }
 
         if (workDir.exists()) {
             workDir.deleteRecursively()
+        }
+        if (segmentsDir.exists()) {
+            segmentsDir.deleteRecursively()
         }
         workDir.mkdirs()
         completedDir.mkdirs()
@@ -69,6 +108,7 @@ class SourceSeparationCache(
             workDir = workDir,
             completedDir = completedDir,
             segmentsDir = segmentsDir,
+            resumeManifest = null,
         )
     }
 
@@ -133,6 +173,14 @@ class SourceSeparationCache(
     ): SourceSeparationManifest? {
         val manifest = readManifest(run.rootDir) ?: return null
         val now = System.currentTimeMillis()
+        val existingSegmentPlan = run.resumeManifest?.segmentPlan
+            ?.takeIf { existing ->
+                existing.rangeStartFrame == preparation.segmentPlan.rangeStartFrame &&
+                        existing.rangeEndFrame == preparation.segmentPlan.rangeEndFrame &&
+                        existing.sampleRate == preparation.segmentPlan.sampleRate &&
+                        existing.generationSize == preparation.segmentPlan.generationSize &&
+                        existing.segmentCount == preparation.segmentPlan.segmentCount
+            }
         val updatedManifest = manifest.copy(
             state = SourceSeparationCacheState.Running,
             audioIdentity = SourceAudioIdentity(
@@ -155,7 +203,7 @@ class SourceSeparationCache(
                         preparation.instrumentalFile.length() +
                         run.segmentsDir.directorySize(),
             ),
-            segmentPlan = preparation.segmentPlan,
+            segmentPlan = existingSegmentPlan ?: preparation.segmentPlan,
             updatedAtEpochMs = now,
         )
         writeManifest(run.rootDir, updatedManifest)
@@ -182,6 +230,32 @@ class SourceSeparationCache(
             state = SourceSeparationCacheState.Canceled,
             error = error,
         )
+    }
+
+    fun pauseRun(run: SourceSeparationRun): SourceSeparationManifest {
+        val manifest = readManifest(run.rootDir)
+        val now = System.currentTimeMillis()
+        val updatedManifest = manifest?.copy(
+            state = SourceSeparationCacheState.Running,
+            updatedAtEpochMs = now,
+        ) ?: SourceSeparationManifest(
+            pipelineVersion = run.pipelineVersion,
+            state = SourceSeparationCacheState.Running,
+            songLocator = run.song.toLocator(),
+            audioIdentity = SourceAudioIdentity(
+                audioFingerprint = "",
+                decodedFrameCount = 0,
+                decodedSampleRate = 0,
+                decodedChannelCount = 0,
+                modelVariant = run.modelVariant.name,
+                pipelineVersion = run.pipelineVersion,
+            ),
+            diagnostics = run.song.toDiagnostics(),
+            createdAtEpochMs = now,
+            updatedAtEpochMs = now,
+        )
+        writeManifest(run.rootDir, updatedManifest)
+        return updatedManifest
     }
 
     private fun finishUnsuccessfulRun(
@@ -475,6 +549,7 @@ data class SourceSeparationRun(
     val workDir: File,
     val completedDir: File,
     val segmentsDir: File,
+    val resumeManifest: SourceSeparationManifest? = null,
 )
 
 data class SourceSeparationCompletion(

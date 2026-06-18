@@ -48,6 +48,7 @@
     <string name="source_separation_status_idle">No active separation task.</string>
     <string name="source_separation_status_completed">Separation completed for \"%1$s\".</string>
     <string name="source_separation_status_canceled">Separation canceled for \"%1$s\".</string>
+    <string name="source_separation_status_paused">Separation paused for \"%1$s\".</string>
     <string name="source_separation_status_failed">Separation failed for \"%1$s\".</string>
     <string name="source_separation_status_failed_with_message">Separation failed for \"%1$s\": %2$s</string>
     <string name="source_separation_playback_processing">Processing separated audio for the current position...</string>
