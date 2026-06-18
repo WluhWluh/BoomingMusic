@@ -710,6 +710,10 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                 Snackbar.make(view, R.string.source_separation_canceled, Snackbar.LENGTH_SHORT).show()
                 playerViewModel.clearSourceSeparationStatus()
             }
+            is SourceSeparationUiState.Paused -> {
+                sourceSeparationSnackbar?.dismiss()
+                sourceSeparationSnackbar = null
+            }
             is SourceSeparationUiState.Failed -> {
                 sourceSeparationSnackbar?.dismiss()
                 sourceSeparationSnackbar = null

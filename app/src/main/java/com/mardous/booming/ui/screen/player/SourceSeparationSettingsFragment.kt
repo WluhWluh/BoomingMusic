@@ -476,6 +476,9 @@ private fun SourceSeparationStatusText(
         is SourceSeparationUiState.Canceled -> {
             stringResource(R.string.source_separation_status_canceled, state.songTitle)
         }
+        is SourceSeparationUiState.Paused -> {
+            stringResource(R.string.source_separation_status_paused, state.songTitle)
+        }
         is SourceSeparationUiState.Failed -> {
             if (state.message.isNullOrBlank()) {
                 stringResource(R.string.source_separation_status_failed, state.songTitle)

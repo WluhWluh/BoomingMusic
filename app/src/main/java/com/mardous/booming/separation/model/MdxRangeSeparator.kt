@@ -7,10 +7,12 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import com.mardous.booming.separation.audio.WavFileWriter
+import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.SourceSeparationSegmentScheduler
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPriority
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
+import com.mardous.booming.separation.cache.SourceSeparationManifest
 import java.io.File
 import java.nio.FloatBuffer
 import kotlin.coroutines.cancellation.CancellationException
@@ -35,6 +37,8 @@ class MdxRangeSeparator(
         onPrepared: (MdxRangePreparation) -> Unit = {},
         onSegmentStateChanged: (segmentIndex: Int, state: SourceSeparationSegmentState) -> Unit = { _, _ -> },
         playbackPositionMsProvider: () -> Long? = { null },
+        resumeManifest: SourceSeparationManifest? = null,
+        shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
     ): MdxRangeSeparationResult {
         val timing = MdxRangeTimingAccumulator()
@@ -67,9 +71,15 @@ class MdxRangeSeparator(
             val baseName = safeBaseName(displayName)
             val rangeTag = "${modelVariant.outputTag}_${frameToMs(startFrame)}ms_${frameToMs(endFrame)}ms"
             Triple(
-                uniqueOutputFile(outputDir, "${baseName}_${rangeTag}_vocals.wav"),
-                uniqueOutputFile(outputDir, "${baseName}_${rangeTag}_instrumental.wav"),
-                uniqueOutputFile(outputDir, "${baseName}_${rangeTag}_timing.txt"),
+                resumeManifest?.output?.vocalsPath?.let(::File)
+                    ?.takeIf { it.parentFile == outputDir }
+                    ?: uniqueOutputFile(outputDir, "${baseName}_${rangeTag}_vocals.wav"),
+                resumeManifest?.output?.instrumentalPath?.let(::File)
+                    ?.takeIf { it.parentFile == outputDir }
+                    ?: uniqueOutputFile(outputDir, "${baseName}_${rangeTag}_instrumental.wav"),
+                resumeManifest?.output?.timingPath?.let(::File)
+                    ?.takeIf { it.parentFile == outputDir }
+                    ?: uniqueOutputFile(outputDir, "${baseName}_${rangeTag}_timing.txt"),
             )
         }
 
@@ -87,6 +97,15 @@ class MdxRangeSeparator(
             },
         )
         var currentSegmentPlan = segmentPlan
+        currentSegmentPlan = resumeManifest?.segmentPlan
+            ?.takeIf { existing ->
+                existing.rangeStartFrame == segmentPlan.rangeStartFrame &&
+                        existing.rangeEndFrame == segmentPlan.rangeEndFrame &&
+                        existing.sampleRate == segmentPlan.sampleRate &&
+                        existing.generationSize == segmentPlan.generationSize &&
+                        existing.segmentCount == segmentPlan.segmentCount
+            }
+            ?: segmentPlan
         segmentOutputDir?.mkdirs()
 
         val windowCount = segmentPlan.segmentCount
@@ -104,7 +123,7 @@ class MdxRangeSeparator(
                 sourceSampleRate = sourceInput.sourceSampleRate,
                 sourceChannelCount = sourceInput.sourceChannelCount,
                 outputSampleRate = config.sampleRate,
-                segmentPlan = segmentPlan,
+                segmentPlan = currentSegmentPlan,
             )
         )
 
@@ -122,12 +141,14 @@ class MdxRangeSeparator(
             sampleRate = config.sampleRate,
             channelCount = MdxDspConfig.STEREO_CHANNELS,
             declaredDataSizeBytes = declaredOutputDataSizeBytes,
+            preserveExistingData = resumeManifest != null,
         ).use { vocalsWriter ->
             WavFileWriter(
                 file = instrumentalFile,
                 sampleRate = config.sampleRate,
                 channelCount = MdxDspConfig.STEREO_CHANNELS,
                 declaredDataSizeBytes = declaredOutputDataSizeBytes,
+                preserveExistingData = resumeManifest != null,
             ).use { instrumentalWriter ->
                 onProgress(MdxRangeProgress.preparing("Creating ONNX session"))
                 val session = measureElapsed(timing, "Session setup") {
@@ -138,13 +159,17 @@ class MdxRangeSeparator(
                 session.use {
                     val inputName = session.inputInfo.keys.first()
                     val outputName = session.outputInfo.keys.first()
-                    var processedWindowCount = 0
+                    var processedWindowCount = currentSegmentPlan.segments
+                        .count { it.state == SourceSeparationSegmentState.Ready }
                     val processedSegments = mutableSetOf<Int>()
                     var schedulerTargetSegmentIndex: Int? = null
                     while (processedWindowCount < windowCount) {
+                        throwIfPaused(shouldPause)
                         throwIfCanceled(shouldCancel)
                         var requestedPlaybackSegmentIndex: Int? = null
                         var selectedPriority: SourceSeparationSegmentPriority? = null
+                        val readySegmentCount = currentSegmentPlan.segments
+                            .count { it.state == SourceSeparationSegmentState.Ready }
                         val segment = if (canWriteWindowsByFrame) {
                             val latestPlaybackSegmentIndex = playbackPositionMsProvider()
                                 ?.let { msToFrame(it) }
@@ -166,7 +191,10 @@ class MdxRangeSeparator(
                                 ?.segment
                         } else {
                             null
-                        } ?: currentSegmentPlan.segments.firstOrNull { it.index !in processedSegments }
+                        } ?: currentSegmentPlan.segments.firstOrNull {
+                            it.index !in processedSegments &&
+                                    it.state != SourceSeparationSegmentState.Ready
+                        }
                             ?: break
                         selectedPriority = selectedPriority ?: SourceSeparationSegmentPriority.IdleBackfill
                         val windowIndex = segment.index
@@ -183,7 +211,7 @@ class MdxRangeSeparator(
                                 ?.let { currentSegmentPlan.segments.getOrNull(it)?.state?.name },
                             processingSegmentIndex = segment.index,
                             priority = selectedPriority.name,
-                            readySegments = processedWindowCount,
+                            readySegments = readySegmentCount,
                             totalSegments = windowCount,
                         )
                         currentSegmentPlan = currentSegmentPlan.withSegmentState(
@@ -257,11 +285,12 @@ class MdxRangeSeparator(
                             }
                         }
                         processedSegments += segment.index
-                        processedWindowCount += 1
                         currentSegmentPlan = currentSegmentPlan.withSegmentState(
                             segmentIndex = segment.index,
                             state = SourceSeparationSegmentState.Ready,
                         )
+                        processedWindowCount = currentSegmentPlan.segments
+                            .count { it.state == SourceSeparationSegmentState.Ready }
                         onSegmentStateChanged(segment.index, SourceSeparationSegmentState.Ready)
                         onProgress(
                             MdxRangeProgress(
@@ -361,6 +390,12 @@ class MdxRangeSeparator(
     private fun throwIfCanceled(shouldCancel: () -> Boolean) {
         if (shouldCancel()) {
             throw CancellationException("Source separation canceled.")
+        }
+    }
+
+    private fun throwIfPaused(shouldPause: () -> Boolean) {
+        if (shouldPause()) {
+            throw SourceSeparationPausedException()
         }
     }
 

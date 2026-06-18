@@ -5,10 +5,11 @@ import java.io.File
 import java.io.RandomAccessFile
 
 class WavFileWriter(
-    file: File,
+    private val file: File,
     private val sampleRate: Int,
     private val channelCount: Int,
     private val declaredDataSizeBytes: Long? = null,
+    private val preserveExistingData: Boolean = false,
 ) : Closeable {
     private val output = RandomAccessFile(file, "rw")
     private var dataSize = 0L
@@ -16,11 +17,16 @@ class WavFileWriter(
     init {
         require(sampleRate > 0) { "Sample rate must be positive." }
         require(channelCount > 0) { "Channel count must be positive." }
-        output.setLength(0)
         val initialDataSize = declaredDataSizeBytes ?: 0L
+        if (!preserveExistingData || !file.isFile) {
+            output.setLength(0)
+        }
         writeHeader(initialDataSize)
         if (declaredDataSizeBytes != null) {
-            output.setLength(HEADER_SIZE + initialDataSize)
+            val declaredLength = HEADER_SIZE + initialDataSize
+            if (!preserveExistingData || output.length() < declaredLength) {
+                output.setLength(declaredLength)
+            }
         }
     }
 
