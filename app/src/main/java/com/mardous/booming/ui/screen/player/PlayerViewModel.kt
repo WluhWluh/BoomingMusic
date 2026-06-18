@@ -157,6 +157,15 @@ class PlayerViewModel(
         MutableStateFlow<SourceSeparationUiState>(SourceSeparationUiState.Idle)
     val sourceSeparationStateFlow = _sourceSeparationStateFlow.asStateFlow()
 
+    private val _currentSourceSeparationCacheAvailableFlow = MutableStateFlow(false)
+    val currentSourceSeparationCacheAvailableFlow =
+        _currentSourceSeparationCacheAvailableFlow.asStateFlow()
+
+    private val _sourceSeparationPendingActionFlow =
+        MutableStateFlow<SourceSeparationPendingAction?>(null)
+    val sourceSeparationPendingActionFlow =
+        _sourceSeparationPendingActionFlow.asStateFlow()
+
     private val _sourceSeparationPlaybackStateFlow =
         MutableStateFlow(
             SourceSeparationPlaybackUiState(
@@ -229,6 +238,7 @@ class PlayerViewModel(
                 .distinctUntilChangedBy { it.id }
                 .onEach { song ->
                     pauseSourceSeparationIfSongChanged(song)
+                    refreshCurrentSourceSeparationCacheAvailable(song)
                     applySourceSeparationSettingsForSong(
                         song = song,
                         showMessage = false,
@@ -504,6 +514,9 @@ class PlayerViewModel(
                         }
                     },
                     onPrepared = {
+                        if (currentSong.id == song.id) {
+                            refreshCurrentSourceSeparationCacheAvailable(song)
+                        }
                         if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.PerSong) {
                             migrateTemporaryPerSongSourceSeparationBlend(song)
                         }
@@ -532,11 +545,14 @@ class PlayerViewModel(
                     songId = song.id,
                     songTitle = song.title,
                 )
+                if (currentSong.id == song.id) {
+                    refreshCurrentSourceSeparationCacheAvailable(song)
+                }
             } catch (_: SourceSeparationPausedException) {
-                _sourceSeparationStateFlow.value = SourceSeparationUiState.Paused(
-                    songId = song.id,
-                    songTitle = song.title,
-                )
+                _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
+                if (currentSong.id == song.id) {
+                    refreshCurrentSourceSeparationCacheAvailable(song)
+                }
             } catch (_: CancellationException) {
                 _sourceSeparationStateFlow.value = SourceSeparationUiState.Canceled(
                     songId = song.id,
@@ -556,6 +572,7 @@ class PlayerViewModel(
                 sourceSeparationPendingStartSongId = null
                 sourceSeparationCancelRequested.set(false)
                 sourceSeparationPauseRequested.set(false)
+                _sourceSeparationPendingActionFlow.value = null
                 if (pendingStartSongId != null && currentSong.id == pendingStartSongId) {
                     startSourceSeparationForCurrentSong()
                 }
@@ -568,10 +585,55 @@ class PlayerViewModel(
         sourceSeparationJob?.cancel()
     }
 
+    fun pauseSourceSeparation() {
+        if (sourceSeparationJob?.isActive == true) {
+            _sourceSeparationPendingActionFlow.value = SourceSeparationPendingAction.Pause
+        }
+        sourceSeparationPauseRequested.set(true)
+    }
+
+    fun deleteSourceSeparationCacheForCurrentSong() {
+        val song = currentSong
+        if (song == Song.emptySong) return
+        viewModelScope.launch(IO) {
+            if (sourceSeparationSongId == song.id) {
+                _sourceSeparationPendingActionFlow.value = SourceSeparationPendingAction.DeleteCache
+                sourceSeparationPauseRequested.set(true)
+                sourceSeparationJob?.join()
+            }
+            val deleted = runCatching {
+                sourceSeparationEngine.deleteCacheForSong(song)
+            }.getOrDefault(false)
+            if (currentSong.id == song.id) {
+                if (deleted) {
+                    _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
+                    refreshCurrentSourceSeparationCacheAvailable(song)
+                    syncSourceSeparationPlaybackIfRequested(force = true)
+                }
+                _sourceSeparationPendingActionFlow.value = null
+            }
+        }
+    }
+
     private fun pauseSourceSeparationIfSongChanged(song: Song) {
         val runningSongId = sourceSeparationSongId ?: return
         if (song.id != runningSongId) {
             sourceSeparationPauseRequested.set(true)
+        }
+    }
+
+    private fun refreshCurrentSourceSeparationCacheAvailable(song: Song = currentSong) {
+        viewModelScope.launch(IO) {
+            val available = if (song == Song.emptySong) {
+                false
+            } else {
+                runCatching {
+                    sourceSeparationEngine.hasCacheForSong(song)
+                }.getOrDefault(false)
+            }
+            if (currentSong.id == song.id) {
+                _currentSourceSeparationCacheAvailableFlow.value = available
+            }
         }
     }
 
@@ -1418,6 +1480,11 @@ sealed class SourceSeparationUiState {
         val songTitle: String,
         val message: String?,
     ) : SourceSeparationUiState()
+}
+
+enum class SourceSeparationPendingAction {
+    Pause,
+    DeleteCache,
 }
 
 data class SourceSeparationPlaybackUiState(
