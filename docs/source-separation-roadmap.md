@@ -533,7 +533,7 @@ Current limitations:
 
 ### Phase 5A: Window Decode Experiment
 
-Status: in progress
+Status: production prototype validated for selected formats
 
 Goals:
 
@@ -557,9 +557,8 @@ Implementation notes:
 - A successful window decoder experiment should lead to a segment-first pipeline where each MDX context window is decoded, resampled, processed, and written independently.
 - Audio identity should move away from full decoded PCM SHA-256 before production local-window processing. A hash of encoded audio samples from `MediaExtractor`, excluding container metadata, is the preferred follow-up candidate.
 
-Current limitations:
+Historical limitations:
 
-- This phase is diagnostic only and may still run a full decode for comparison.
 - MediaCodec seek behavior can vary by codec/container, so one successful format is not enough to promote the approach.
 - Exact PCM equality may not hold near seek boundaries; the report should evaluate small alignment offsets rather than relying only on byte equality.
 
@@ -637,6 +636,8 @@ Next hardening steps:
 - Consider mid-run fallback cleanup for the rarer case where preflight succeeds but a later window decode fails.
 - Add a cache-index lookup by audio fingerprint if cross-song-id reuse becomes necessary after MediaStore rescans or file moves.
 - Keep 48 kHz MP3, low-rate MP3, AAC/M4A, Opus, FLAC, WMA, and platform-unsupported cases on full-song fallback until deterministic placement profiles are proven.
+- Device-to-device and run-to-run timing comparisons should account for thermal throttling. A later retest showed that apparent slowdown after enabling window decode was also present in a pre-window-decode build after extended S25 testing, so the current timing concern is treated as thermal/load-related rather than a window-decode regression.
+- The main development focus now moves back to Phase 5B/6 scheduling and live playback behavior instead of expanding the window-decode whitelist.
 
 ### Phase 5B: Segment-Based Processing
 
@@ -676,7 +677,23 @@ Implementation notes:
 - The running separation path now writes the segment plan to the manifest before model-window processing starts.
 - Each model window updates its manifest segment state from `Queued` to `Running` to `Ready` as work progresses.
 - Running stem WAV files are preallocated to the full output duration, so completed windows can be written into a song-aligned timeline while future regions remain silent.
+- The separator can now choose the next unprocessed segment from `SourceSeparationSegmentScheduler` after each completed model window. This lets the active playback position and next segment move to the front of the current song's work when the user seeks.
+- Whole-song work WAVs support frame-addressed writes for preallocated files, so out-of-order segment processing does not corrupt the final song timeline.
 - Completed runs currently copy final WAV files into `completed/` while leaving the running `work/` files in place, allowing an active experimental playback session to keep using the same file paths after final promotion.
+
+Current limitations:
+
+- Reprioritization is currently scoped to the active song's in-flight separation run. It does not yet provide a global multi-song work queue.
+- A model window that is already inside ONNX inference still runs to completion before the new playback-head priority can take effect.
+- Partial-cache resume after app restart or cancellation still needs a stable manifest recovery path.
+
+Next scheduler refinement steps:
+
+1. Expose scheduler decisions in the source separation sheet: playback segment, processing segment, priority reason, current/next readiness, and ready segment count.
+2. Trigger playback readiness sync immediately after seeks so the processing gate and scheduler target update together.
+3. Add light debounce or segment-change gating so continuous scrubbing does not churn scheduler intent more often than useful.
+4. Add active-song ownership to processing: after song changes, preserve completed segments for the old song but pause or downgrade its remaining work once the current ONNX window finishes.
+5. Add partial-cache resume so a new run can skip already ready segments after cancellation, app restart, or process death.
 
 ### Phase 6: Play While Processing
 
@@ -715,8 +732,7 @@ Implementation notes:
 
 Current limitations:
 
-- Segment processing is still sequential from the beginning of the song.
-- Seeking to an unready position does not reprioritize model inference yet.
+- A newly selected segment priority takes effect between model windows. Seeking to an unready position can now move that position's segment and its next segment ahead of remaining backfill work, but it cannot interrupt an active ONNX inference call.
 - The settings sheet still uses the old coarse progress text instead of a dedicated current/next segment readiness model.
 - Running `work/` WAV files are retained after completion for active playback-session stability; a later cleanup strategy should remove them once playback no longer references them.
 
@@ -813,9 +829,9 @@ Done criteria:
 - Accurate segment boundary playback will be the hardest part of the project.
 - Crossfading segment boundaries by default could hide alignment bugs while also changing the separated audio. The preferred path is sample-accurate stable-region concatenation.
 
-## First Implementation Preference
+## Current Implementation Order
 
-The first useful milestone should be deliberately modest:
+The early milestone ordering was deliberately modest:
 
 1. Import the proven offline engine.
 2. Separate the current song to app-private WAV files.
@@ -826,4 +842,11 @@ The first useful milestone should be deliberately modest:
 7. Only then attempt play-while-processing.
 8. Finish the full settings sheet and remove the older temporary menu/Snackbar surfaces.
 
-This keeps the project useful at each stage and avoids mixing the most fragile playback work with the initial model integration.
+The first seven items now exist in prototype form. The current preferred order is:
+
+1. Harden playback-head-driven segment scheduling for seek and song-change behavior.
+2. Define partial-cache pause/resume/recovery semantics.
+3. Feed current/next segment readiness and scheduler priority into the source separation sheet.
+4. Promote completed segment timelines to FLAC and clean temporary WAV work files safely.
+5. Finish cache management and remove the older temporary menu/Snackbar surfaces.
+6. Expand window-decode profiles only after the core live playback path is stable.
