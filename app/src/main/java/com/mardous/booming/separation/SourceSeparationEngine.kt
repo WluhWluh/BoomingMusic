@@ -176,6 +176,7 @@ class SourceSeparationEngine(
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
         modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
         onProgress: (MdxRangeProgress) -> Unit = {},
+        playbackPositionMsProvider: () -> Long? = { null },
         shouldCancel: () -> Boolean = { false },
     ): MdxRangeSeparationResult {
         require(song != Song.emptySong) { "Cannot separate an empty song." }
@@ -199,6 +200,7 @@ class SourceSeparationEngine(
                     onSegmentStateChanged = { segmentIndex, state ->
                         cache.updateSegmentState(run, segmentIndex, state)
                     },
+                    playbackPositionMsProvider = playbackPositionMsProvider,
                     shouldCancel = shouldCancel,
                 )
                 .let { result ->

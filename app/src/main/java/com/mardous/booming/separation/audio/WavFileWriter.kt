@@ -30,6 +30,21 @@ class WavFileWriter(
         dataSize += bytes.size
     }
 
+    fun writePcm16AtFrame(frameOffset: Int, bytes: ByteArray) {
+        require(declaredDataSizeBytes != null) {
+            "Random-access WAV writes require a declared output size."
+        }
+        require(frameOffset >= 0) { "Frame offset must be non-negative." }
+        val byteOffset = frameOffset.toLong() * channelCount * BYTES_PER_SAMPLE
+        val endOffset = byteOffset + bytes.size
+        require(endOffset <= declaredDataSizeBytes) {
+            "WAV data exceeds declared output size."
+        }
+        output.seek(HEADER_SIZE + byteOffset)
+        output.write(bytes)
+        dataSize = maxOf(dataSize, endOffset)
+    }
+
     override fun close() {
         output.seek(0)
         val finalDataSize = declaredDataSizeBytes ?: dataSize
