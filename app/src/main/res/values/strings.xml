@@ -37,6 +37,7 @@
     <string name="source_separation_remember_per_song_title">Remember blend per song</string>
     <string name="source_separation_remember_per_song_description">Use a separate blend setting for each separated song.</string>
     <string name="source_separation_current_song">Current song</string>
+    <string name="source_separation_scheduler_status">Scheduler: %1$s</string>
     <string name="source_separation_start_current_song">Separate current song</string>
     <string name="source_separation_window_decode_experiment">Test window decode</string>
     <string name="source_separation_window_decode_running">Testing local window decode (%1$d%%, step %2$d/%3$d): %4$s\nCurrent stage: %5$s</string>

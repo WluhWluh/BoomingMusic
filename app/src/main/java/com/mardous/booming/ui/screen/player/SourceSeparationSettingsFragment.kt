@@ -291,6 +291,7 @@ private fun SourceSeparationSettingsSheet(
                             modifier = Modifier.padding(cardContentPadding)
                         ) {
                             SourceSeparationStatusText(separationState)
+                            SourceSeparationSchedulerText(separationState)
                             SourceSeparationDecodeDiagnosticsText(separationState)
                             AnimatedVisibility(
                                 visible = playbackState.processing
@@ -362,6 +363,35 @@ private fun SourceSeparationDecodeDiagnosticsText(
 
     Text(
         text = text,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall
+    )
+}
+
+@Composable
+private fun SourceSeparationSchedulerText(
+    state: SourceSeparationUiState
+) {
+    val scheduler = (state as? SourceSeparationUiState.Running)
+        ?.scheduler
+        ?: return
+
+    val playbackSegmentText = scheduler.playbackSegmentIndex?.let { index ->
+        val segmentState = scheduler.playbackSegmentState ?: "?"
+        "playback=$index/$segmentState"
+    } ?: "playback=idle"
+    val nextSegmentText = scheduler.nextSegmentIndex?.let { index ->
+        val segmentState = scheduler.nextSegmentState ?: "?"
+        "next=$index/$segmentState"
+    } ?: "next=none"
+    val processingText = "processing=${scheduler.processingSegmentIndex}/${scheduler.priority ?: "?"}"
+    val readyText = "ready=${scheduler.readySegments}/${scheduler.totalSegments}"
+
+    Text(
+        text = stringResource(
+            R.string.source_separation_scheduler_status,
+            "$playbackSegmentText  $nextSegmentText  $processingText  $readyText",
+        ),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.bodySmall
     )
