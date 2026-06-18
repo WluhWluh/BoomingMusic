@@ -720,7 +720,7 @@ Implementation notes:
 - Added segment-relative stem file layout metadata to the cache model.
 - The full-song offline separation path now also writes segment WAV outputs under the entry's `segments/` directory so the segment layout is real and inspectable before live playback uses it.
 - Manifest output now records the generated segment plan alongside the completed full-song cache.
-- Added segment snapshots that derive real `Ready`/`Missing` availability from the presence of both stem files instead of trusting manifest state alone.
+- Added segment snapshots that derive real availability from the manifest state plus exact segment stem WAV validation, so stale or partial files are not treated as playable.
 - Added a cache helper for updating individual segment states, preparing for queued/running/failed partial processing.
 - The running separation path now writes the segment plan to the manifest before model-window processing starts.
 - Each model window updates its manifest segment state from `Queued` to `Running` to `Ready` as work progresses.
@@ -733,7 +733,6 @@ Current limitations:
 
 - Reprioritization is currently scoped to the active song's in-flight separation run. It does not yet provide a global multi-song work queue.
 - A model window that is already inside ONNX inference still runs to completion before the new playback-head priority can take effect.
-- Partial-cache resume after app restart or cancellation still needs a stable manifest recovery path.
 
 Next scheduler refinement steps:
 
@@ -741,7 +740,7 @@ Next scheduler refinement steps:
 2. Trigger playback readiness sync immediately after seeks so the processing gate and scheduler target update together.
 3. Add light debounce or segment-change gating so continuous scrubbing does not churn scheduler intent more often than useful.
 4. Add active-song ownership to processing: after song changes, preserve completed segments for the old song but pause or downgrade its remaining work once the current ONNX window finishes.
-5. Add partial-cache resume so a new run can skip already ready segments after cancellation, app restart, or process death.
+5. Move from the current single active task to a real background queue only after the foreground current-song path stays stable.
 
 Active-song pause prototype:
 
@@ -751,6 +750,14 @@ Active-song pause prototype:
 - Starting separation for that song again reuses the existing `Running` manifest, verifies segment files on disk, preserves ready segment states, and skips ready segments.
 - Manual testing confirmed that changing songs pauses the old song after the current window, and returning to that song resumes from the preserved partial segment cache.
 - This is still a player-scoped single active task, not a background multi-song queue. A future worker layer can resume old songs as low-priority idle work after current-song needs are satisfied.
+
+Partial-cache restart recovery prototype:
+
+- A new separation run can now resume from a previous `Running` manifest after app restart or process death.
+- Recovery only preserves segments that were already marked `Ready` in the manifest and whose vocals/instrumental segment WAV files exactly match the expected 44-byte PCM16 WAV layout and data size.
+- Ready segments are only skipped when the full-duration running work WAV files are also present and valid, because those files are the live playback and final-promotion timeline.
+- Stale `Running`, `Queued`, `Failed`, or incomplete segments are normalized back to `Queued` and processed again.
+- If the full-duration work WAVs are missing or invalid, all segments are queued again so old segment files cannot make playback trust an empty or mismatched stem timeline.
 
 ### Phase 6: Play While Processing
 

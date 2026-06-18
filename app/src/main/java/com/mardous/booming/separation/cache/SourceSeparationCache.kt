@@ -43,11 +43,22 @@ class SourceSeparationCache(
             }
             ?.let { manifest ->
                 val segmentPlan = manifest.segmentPlan ?: return@let null
+                val canPreserveReadySegments = manifest.output
+                    ?.hasValidWorkStemFiles()
+                    ?: false
                 val snapshot = manifest.toSegmentSnapshot(runDir, segmentPlan)
                 manifest.copy(
                     segmentPlan = segmentPlan.copy(
                         segments = snapshot.segments.map { segmentState ->
-                            segmentState.segment.copy(state = segmentState.state)
+                            segmentState.segment.copy(
+                                state = if (canPreserveReadySegments &&
+                                    segmentState.state == SourceSeparationSegmentState.Ready
+                                ) {
+                                    SourceSeparationSegmentState.Ready
+                                } else {
+                                    SourceSeparationSegmentState.Queued
+                                }
+                            )
                         },
                     ),
                     updatedAtEpochMs = System.currentTimeMillis(),
@@ -447,14 +458,21 @@ class SourceSeparationCache(
             segments = segmentPlan.segments.map { segment ->
                 val vocalsFile = File(entryDir, segment.vocalsPath)
                 val instrumentalFile = File(entryDir, segment.instrumentalPath)
-                val vocalsReady = vocalsFile.isFile && vocalsFile.length() > 0L
-                val instrumentalReady = instrumentalFile.isFile && instrumentalFile.length() > 0L
+                val expectedDataSizeBytes = segment.expectedPcm16DataSizeBytes()
+                val vocalsReady = vocalsFile.isPcm16WavWithDataSize(
+                    expectedDataSizeBytes = expectedDataSizeBytes,
+                    expectedSampleRate = segmentPlan.sampleRate,
+                )
+                val instrumentalReady = instrumentalFile.isPcm16WavWithDataSize(
+                    expectedDataSizeBytes = expectedDataSizeBytes,
+                    expectedSampleRate = segmentPlan.sampleRate,
+                )
                 val filesPresent = vocalsReady && instrumentalReady
                 SourceSeparationSegmentFileState(
                     segment = segment,
                     state = when {
-                        !filesPresent -> SourceSeparationSegmentState.Missing
-                        segment.state == SourceSeparationSegmentState.Ready -> SourceSeparationSegmentState.Ready
+                        filesPresent && segment.state == SourceSeparationSegmentState.Ready ->
+                            SourceSeparationSegmentState.Ready
                         segment.state == SourceSeparationSegmentState.Running -> SourceSeparationSegmentState.Running
                         segment.state == SourceSeparationSegmentState.Queued -> SourceSeparationSegmentState.Queued
                         segment.state == SourceSeparationSegmentState.Failed -> SourceSeparationSegmentState.Failed
@@ -467,6 +485,76 @@ class SourceSeparationCache(
                 )
             },
         )
+    }
+
+    private fun SourceSeparationOutput.hasValidWorkStemFiles(): Boolean {
+        val expectedDataSizeBytes = outputFrameCount.toLong() *
+                SOURCE_SEPARATION_STEM_CHANNEL_COUNT *
+                PCM16_BYTES_PER_SAMPLE
+        return File(vocalsPath).isPcm16WavWithDataSize(
+            expectedDataSizeBytes = expectedDataSizeBytes,
+            expectedSampleRate = outputSampleRate,
+        ) &&
+                File(instrumentalPath).isPcm16WavWithDataSize(
+                    expectedDataSizeBytes = expectedDataSizeBytes,
+                    expectedSampleRate = outputSampleRate,
+                )
+    }
+
+    private fun SourceSeparationSegment.expectedPcm16DataSizeBytes(): Long {
+        return playbackFrameCount.toLong() *
+                SOURCE_SEPARATION_STEM_CHANNEL_COUNT *
+                PCM16_BYTES_PER_SAMPLE
+    }
+
+    private fun File.isPcm16WavWithDataSize(
+        expectedDataSizeBytes: Long,
+        expectedSampleRate: Int,
+    ): Boolean {
+        if (expectedDataSizeBytes < 0L ||
+            expectedSampleRate <= 0 ||
+            !isFile ||
+            length() != WAV_HEADER_BYTES + expectedDataSizeBytes
+        ) {
+            return false
+        }
+
+        return runCatching {
+            inputStream().use { input ->
+                val header = ByteArray(WAV_HEADER_BYTES.toInt())
+                var bytesRead = 0
+                while (bytesRead < header.size) {
+                    val count = input.read(header, bytesRead, header.size - bytesRead)
+                    if (count < 0) return@runCatching false
+                    bytesRead += count
+                }
+                header.asAscii(0, 4) == "RIFF" &&
+                        header.asAscii(8, 4) == "WAVE" &&
+                        header.asAscii(12, 4) == "fmt " &&
+                        header.littleEndianShort(20) == 1 &&
+                        header.littleEndianShort(22) == SOURCE_SEPARATION_STEM_CHANNEL_COUNT &&
+                        header.littleEndianUInt(24) == expectedSampleRate.toLong() &&
+                        header.littleEndianShort(34) == 16 &&
+                        header.asAscii(36, 4) == "data" &&
+                        header.littleEndianUInt(40) == expectedDataSizeBytes
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun ByteArray.asAscii(offset: Int, length: Int): String {
+        return String(this, offset, length, Charsets.US_ASCII)
+    }
+
+    private fun ByteArray.littleEndianShort(offset: Int): Int {
+        return (this[offset].toInt() and 0xFF) or
+                ((this[offset + 1].toInt() and 0xFF) shl 8)
+    }
+
+    private fun ByteArray.littleEndianUInt(offset: Int): Long {
+        return (this[offset].toLong() and 0xFF) or
+                ((this[offset + 1].toLong() and 0xFF) shl 8) or
+                ((this[offset + 2].toLong() and 0xFF) shl 16) or
+                ((this[offset + 3].toLong() and 0xFF) shl 24)
     }
 
     private fun entryDir(song: Song, modelVariant: MdxModelVariant, pipelineVersion: Int): File {
@@ -607,6 +695,9 @@ class SourceSeparationCache(
         private const val VOCALS_WAV = "vocals.wav"
         private const val INSTRUMENTAL_WAV = "instrumental.wav"
         private const val TIMING_TXT = "timing.txt"
+        private const val WAV_HEADER_BYTES = 44L
+        private const val SOURCE_SEPARATION_STEM_CHANNEL_COUNT = 2
+        private const val PCM16_BYTES_PER_SAMPLE = 2
 
         fun sha256Hex(bytes: ByteArray): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
