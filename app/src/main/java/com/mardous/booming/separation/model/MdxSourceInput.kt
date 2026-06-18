@@ -7,7 +7,6 @@ import com.mardous.booming.separation.audio.AudioPcmDecoder
 import com.mardous.booming.separation.audio.AudioSourceInfo
 import com.mardous.booming.separation.audio.DecodedPcmAudio
 import com.mardous.booming.separation.audio.WindowDecodedPcmAudio
-import com.mardous.booming.separation.cache.SourceSeparationCache
 import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.ceil
@@ -17,7 +16,6 @@ import kotlin.math.roundToLong
 
 internal interface MdxSourceInput {
     val diagnostics: MdxSourceDecodeDiagnostics
-    val sourcePcmSha256: String
     val sourceFrameCount: Int
     val sourceSampleRate: Int
     val sourceChannelCount: Int
@@ -29,6 +27,11 @@ internal interface MdxSourceInput {
         timing: MdxRangeTimingAccumulator,
         shouldCancel: () -> Boolean,
     ): Array<FloatArray>
+
+    fun sourceAudioFingerprint(
+        timing: MdxRangeTimingAccumulator,
+        shouldCancel: () -> Boolean,
+    ): String
 
     companion object {
         fun create(
@@ -48,6 +51,11 @@ internal interface MdxSourceInput {
             throwIfCanceled(shouldCancel)
 
             val windowProfile = MdxWindowDecodeProfile.forSource(sourceInfo, displayName, config)
+            var fallbackReason: String? = if (sourceInfo.frameCount == null) {
+                "Source duration is unavailable."
+            } else {
+                MdxWindowDecodeProfile.fallbackReason(sourceInfo, displayName, config)
+            }
             if (windowProfile != null && sourceInfo.frameCount != null) {
                 val input = WindowDecodeMdxSourceInput(
                     decoder = decoder,
@@ -56,20 +64,30 @@ internal interface MdxSourceInput {
                     sourceInfo = sourceInfo,
                     profile = windowProfile,
                 )
-                onProgress(
-                    MdxRangeProgress.preparing(
-                        stage = "Using ${windowProfile.displayName} window decoding",
-                        diagnostics = input.diagnostics,
+                try {
+                    onProgress(
+                        MdxRangeProgress.preparing(
+                            stage = "Checking ${windowProfile.displayName} window decoding",
+                            diagnostics = input.diagnostics,
+                        )
                     )
-                )
-                return input
+                    input.preflight(timing, shouldCancel)
+                    throwIfCanceled(shouldCancel)
+                    onProgress(
+                        MdxRangeProgress.preparing(
+                            stage = "Using ${windowProfile.displayName} window decoding",
+                            diagnostics = input.diagnostics,
+                        )
+                    )
+                    return input
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Throwable) {
+                    fallbackReason = "Window decode preflight failed for " +
+                            "${windowProfile.displayName}: ${error.fallbackMessage()}"
+                }
             }
 
-            val fallbackReason = if (sourceInfo.frameCount == null) {
-                "Source duration is unavailable."
-            } else {
-                MdxWindowDecodeProfile.fallbackReason(sourceInfo, displayName, config)
-            }
             val fallbackDiagnostics = MdxSourceDecodeDiagnostics(
                 mode = MdxSourceDecodeMode.FullSong,
                 profile = null,
@@ -113,6 +131,8 @@ internal interface MdxSourceInput {
             }
             throwIfCanceled(shouldCancel)
             return FullSongMdxSourceInput(
+                decoder = decoder,
+                uri = uri,
                 source = source,
                 decoded = decoded,
                 diagnostics = decodedFallbackDiagnostics.copy(
@@ -124,11 +144,12 @@ internal interface MdxSourceInput {
 }
 
 private class FullSongMdxSourceInput(
+    private val decoder: AudioPcmDecoder,
+    private val uri: Uri,
     private val source: DecodedPcmAudio,
     private val decoded: DecodedPcmAudio,
     override val diagnostics: MdxSourceDecodeDiagnostics,
 ) : MdxSourceInput {
-    override val sourcePcmSha256: String = SourceSeparationCache.sha256Hex(source.pcm16)
     override val sourceFrameCount: Int = source.frameCount
     override val sourceSampleRate: Int = source.sampleRate
     override val sourceChannelCount: Int = source.channelCount
@@ -143,6 +164,13 @@ private class FullSongMdxSourceInput(
         return measureElapsed(timing, "Window input") {
             decoded.toStereoFloatContextWindow(windowStartFrame, frames)
         }
+    }
+
+    override fun sourceAudioFingerprint(
+        timing: MdxRangeTimingAccumulator,
+        shouldCancel: () -> Boolean,
+    ): String {
+        return encodedAudioFingerprint(decoder, uri, timing, shouldCancel)
     }
 }
 
@@ -170,18 +198,6 @@ private class WindowDecodeMdxSourceInput(
         fallbackReason = null,
         experimental = profile.experimental,
     )
-    override val sourcePcmSha256: String = SourceSeparationCache.sha256Hex(
-        buildString {
-            append("window-decode-v1|")
-            append(profile.name).append('|')
-            append(sourceInfo.mimeType).append('|')
-            append(sourceInfo.sampleRate).append('|')
-            append(sourceInfo.channelCount).append('|')
-            append(sourceInfo.durationUs).append('|')
-            append(sourceInfo.trackMetadata.encoderDelayFrames).append('|')
-            append(sourceInfo.trackMetadata.encoderPaddingFrames)
-        }.encodeToByteArray()
-    )
     override val sourceFrameCount: Int = safeSourceFrameCount
     override val sourceSampleRate: Int = sourceInfo.sampleRate
     override val sourceChannelCount: Int = sourceInfo.channelCount
@@ -191,11 +207,50 @@ private class WindowDecodeMdxSourceInput(
         targetSampleRate = config.sampleRate,
     )
 
+    fun preflight(
+        timing: MdxRangeTimingAccumulator,
+        shouldCancel: () -> Boolean,
+    ) {
+        decodeStereoFloatContextWindow(
+            windowStartFrame = 0,
+            frames = minOf(PREFLIGHT_TARGET_FRAMES, outputFrameCount).coerceAtLeast(1),
+            timing = timing,
+            shouldCancel = shouldCancel,
+            decodeStage = "Window preflight decode",
+            resampleStage = "Window preflight resample",
+        )
+    }
+
+    override fun sourceAudioFingerprint(
+        timing: MdxRangeTimingAccumulator,
+        shouldCancel: () -> Boolean,
+    ): String {
+        return encodedAudioFingerprint(decoder, uri, timing, shouldCancel)
+    }
+
     override fun toStereoFloatContextWindow(
         windowStartFrame: Int,
         frames: Int,
         timing: MdxRangeTimingAccumulator,
         shouldCancel: () -> Boolean,
+    ): Array<FloatArray> {
+        return decodeStereoFloatContextWindow(
+            windowStartFrame = windowStartFrame,
+            frames = frames,
+            timing = timing,
+            shouldCancel = shouldCancel,
+            decodeStage = "Window decode",
+            resampleStage = "Window resample",
+        )
+    }
+
+    private fun decodeStereoFloatContextWindow(
+        windowStartFrame: Int,
+        frames: Int,
+        timing: MdxRangeTimingAccumulator,
+        shouldCancel: () -> Boolean,
+        decodeStage: String,
+        resampleStage: String,
     ): Array<FloatArray> {
         val sourceWindowStartFrame = targetFrameToSourceFrameFloor(
             targetFrame = windowStartFrame.coerceAtLeast(0),
@@ -210,7 +265,7 @@ private class WindowDecodeMdxSourceInput(
         val requestedStartUs = frameToUs(sourceWindowStartFrame, sourceInfo.sampleRate)
         val requestedEndUs = frameToUs(sourceWindowEndFrame, sourceInfo.sampleRate)
 
-        val decodedWindow = measureElapsed(timing, "Window decode") {
+        val decodedWindow = measureElapsed(timing, decodeStage) {
             when (profile) {
                 MdxWindowDecodeProfile.WavPrerollSongTimeline,
                 MdxWindowDecodeProfile.OggVorbisPrerollSongTimeline -> {
@@ -243,7 +298,7 @@ private class WindowDecodeMdxSourceInput(
                 )
             }
         }
-        return measureElapsed(timing, "Window resample") {
+        return measureElapsed(timing, resampleStage) {
             decodedWindow.audio.toStereoFloatTargetWindowOnSongTimeline(
                 targetWindowStartFrame = windowStartFrame,
                 frames = frames,
@@ -468,6 +523,26 @@ private fun throwIfCanceled(shouldCancel: () -> Boolean) {
     }
 }
 
+private fun encodedAudioFingerprint(
+    decoder: AudioPcmDecoder,
+    uri: Uri,
+    timing: MdxRangeTimingAccumulator,
+    shouldCancel: () -> Boolean,
+): String {
+    val hash = measureElapsed(timing, "Source audio fingerprint") {
+        decoder.hashEncodedAudioSamples(uri, shouldCancel)
+    }
+    return "encoded-samples-v1:${hash.sha256}"
+}
+
+private fun Throwable.fallbackMessage(): String {
+    return message
+        ?.lineSequence()
+        ?.firstOrNull()
+        ?.takeIf { it.isNotBlank() }
+        ?: this::class.java.simpleName
+}
+
 private fun frameToUs(frame: Int, sampleRate: Int): Long {
     return (frame.toLong() * MICROS_PER_SECOND) / sampleRate.toLong()
 }
@@ -508,6 +583,7 @@ private fun ceilToMultiple(value: Int, quantum: Int): Int {
     return ((value + quantum - 1) / quantum) * quantum
 }
 
+private const val PREFLIGHT_TARGET_FRAMES = 44_100
 private const val MICROS_PER_SECOND = 1_000_000L
 private const val CANCEL_CHECK_INTERVAL_FRAMES = 16_384
 private const val MP3_FINE_QUANTUM_FRAMES = 384
