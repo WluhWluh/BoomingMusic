@@ -14,6 +14,34 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 class AudioPcmDecoder(private val context: Context) {
+    fun inspect(uri: Uri): AudioSourceInfo {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(context, uri, null)
+            val trackIndex = findAudioTrack(extractor)
+            if (trackIndex < 0) error("No audio track was found.")
+
+            val format = extractor.getTrackFormat(trackIndex)
+            val mime = format.getString(MediaFormat.KEY_MIME)
+                ?: error("Audio track has no MIME type.")
+            val sampleRate = format.optionalInteger(MediaFormat.KEY_SAMPLE_RATE)
+                ?: error("Audio track has no sample rate.")
+            val channelCount = format.optionalInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                ?: error("Audio track has no channel count.")
+            val durationUs = format.optionalLong(MediaFormat.KEY_DURATION)
+                ?.takeIf { it > 0L }
+            return AudioSourceInfo(
+                mimeType = mime,
+                sampleRate = sampleRate,
+                channelCount = channelCount,
+                durationUs = durationUs,
+                trackMetadata = audioTrackMetadata(format, mime),
+            )
+        } finally {
+            extractor.release()
+        }
+    }
+
     fun decode(
         uri: Uri,
         shouldCancel: () -> Boolean = { false },
@@ -529,6 +557,10 @@ class AudioPcmDecoder(private val context: Context) {
         return if (containsKey(key)) getInteger(key) else null
     }
 
+    private fun MediaFormat.optionalLong(key: String): Long? {
+        return if (containsKey(key)) getLong(key) else null
+    }
+
     private fun usToFrame(timeUs: Long, sampleRate: Int): Long {
         return (timeUs.toDouble() * sampleRate / MICROS_PER_SECOND).roundToLong()
     }
@@ -554,6 +586,24 @@ class AudioPcmDecoder(private val context: Context) {
 
     private companion object {
         const val TIMEOUT_US = 10_000L
+        const val MICROS_PER_SECOND = 1_000_000L
+    }
+}
+
+data class AudioSourceInfo(
+    val mimeType: String,
+    val sampleRate: Int,
+    val channelCount: Int,
+    val durationUs: Long?,
+    val trackMetadata: AudioDecodeTrackMetadata,
+) {
+    val frameCount: Int?
+        get() = durationUs
+            ?.let { (it.toDouble() * sampleRate.toDouble() / MICROS_PER_SECOND).roundToLong() }
+            ?.coerceIn(0L, Int.MAX_VALUE.toLong())
+            ?.toInt()
+
+    private companion object {
         const val MICROS_PER_SECOND = 1_000_000L
     }
 }

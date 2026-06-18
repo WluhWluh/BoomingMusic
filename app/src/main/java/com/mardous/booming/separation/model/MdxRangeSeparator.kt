@@ -6,16 +6,12 @@ import android.os.SystemClock
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import com.mardous.booming.separation.audio.AudioPcmDecoder
-import com.mardous.booming.separation.audio.DecodedPcmAudio
 import com.mardous.booming.separation.audio.WavFileWriter
-import com.mardous.booming.separation.cache.SourceSeparationCache
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import java.io.File
 import java.nio.FloatBuffer
 import kotlin.coroutines.cancellation.CancellationException
-import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 class MdxRangeSeparator(
@@ -41,22 +37,22 @@ class MdxRangeSeparator(
         val timing = MdxRangeTimingAccumulator()
         val totalStartedAt = SystemClock.elapsedRealtime()
         throwIfCanceled(shouldCancel)
-        onProgress(MdxRangeProgress.preparing("Decoding source audio"))
-        val source = measureElapsed(timing, "Decode") {
-            AudioPcmDecoder(context).decode(uri, shouldCancel = shouldCancel)
-        }
-        onProgress(MdxRangeProgress.preparing("Resampling source audio"))
-        val decoded = measureElapsed(timing, "Resample") {
-            source.resampleTo(config.sampleRate, shouldCancel = shouldCancel)
-        }
+        val sourceInput = MdxSourceInput.create(
+            context = context,
+            config = config,
+            uri = uri,
+            displayName = displayName,
+            timing = timing,
+            onProgress = onProgress,
+            shouldCancel = shouldCancel,
+        )
         throwIfCanceled(shouldCancel)
 
-        val startFrame = msToFrame(startMs).coerceIn(0, decoded.frameCount)
-        val requestedEndFrame = endMs?.let { msToFrame(it) } ?: decoded.frameCount
-        val endFrame = requestedEndFrame.coerceIn(startFrame, decoded.frameCount)
+        val startFrame = msToFrame(startMs).coerceIn(0, sourceInput.outputFrameCount)
+        val requestedEndFrame = endMs?.let { msToFrame(it) } ?: sourceInput.outputFrameCount
+        val endFrame = requestedEndFrame.coerceIn(startFrame, sourceInput.outputFrameCount)
         val targetFrames = endFrame - startFrame
         require(targetFrames > 0) { "Selected range is empty." }
-        val sourcePcmSha256 = SourceSeparationCache.sha256Hex(source.pcm16)
 
         onProgress(MdxRangeProgress.preparing("Preparing model file"))
         val modelFile = measureElapsed(timing, "Model file") {
@@ -100,11 +96,11 @@ class MdxRangeSeparator(
                 endMs = frameToMs(endFrame),
                 frames = targetFrames,
                 windowCount = windowCount,
-                sourcePcmSha256 = sourcePcmSha256,
-                sourceFrameCount = source.frameCount,
-                sourceSampleRate = source.sampleRate,
-                sourceChannelCount = source.channelCount,
-                outputSampleRate = decoded.sampleRate,
+                sourcePcmSha256 = sourceInput.sourcePcmSha256,
+                sourceFrameCount = sourceInput.sourceFrameCount,
+                sourceSampleRate = sourceInput.sourceSampleRate,
+                sourceChannelCount = sourceInput.sourceChannelCount,
+                outputSampleRate = config.sampleRate,
                 segmentPlan = segmentPlan,
             )
         )
@@ -149,13 +145,20 @@ class MdxRangeSeparator(
                             state = SourceSeparationSegmentState.Running,
                         )
                         onSegmentStateChanged(segment.index, SourceSeparationSegmentState.Running)
-                        onProgress(MdxRangeProgress(windowIndex, windowCount, stage = "Preparing window ${windowIndex + 1}/${windowCount}"))
-                        val mixWindow = measureElapsed(timing, "Window input") {
-                            decoded.toStereoFloatContextWindow(
-                                windowStartFrame = generationStartFrame - config.trim,
-                                frames = config.chunkSize,
+                        onProgress(
+                            MdxRangeProgress(
+                                windowIndex,
+                                windowCount,
+                                stage = "Preparing window ${windowIndex + 1}/${windowCount}",
+                                sourceDecodeDiagnostics = sourceInput.diagnostics,
                             )
-                        }
+                        )
+                        val mixWindow = sourceInput.toStereoFloatContextWindow(
+                            windowStartFrame = generationStartFrame - config.trim,
+                            frames = config.chunkSize,
+                            timing = timing,
+                            shouldCancel = shouldCancel,
+                        )
 
                         val modelOutputWindow = runWindow(
                             session = session,
@@ -205,7 +208,14 @@ class MdxRangeSeparator(
                             state = SourceSeparationSegmentState.Ready,
                         )
                         onSegmentStateChanged(segment.index, SourceSeparationSegmentState.Ready)
-                        onProgress(MdxRangeProgress(windowIndex + 1, windowCount, stage = "Processed window ${windowIndex + 1}/${windowCount}"))
+                        onProgress(
+                            MdxRangeProgress(
+                                windowIndex + 1,
+                                windowCount,
+                                stage = "Processed window ${windowIndex + 1}/${windowCount}",
+                                sourceDecodeDiagnostics = sourceInput.diagnostics,
+                            )
+                        )
                         throwIfCanceled(shouldCancel)
                     }
                 }
@@ -213,13 +223,21 @@ class MdxRangeSeparator(
         }
 
         val elapsedMs = SystemClock.elapsedRealtime() - totalStartedAt
-        onProgress(MdxRangeProgress(windowCount, windowCount, stage = "Writing timing report"))
+        onProgress(
+            MdxRangeProgress(
+                windowCount,
+                windowCount,
+                stage = "Writing timing report",
+                sourceDecodeDiagnostics = sourceInput.diagnostics,
+            )
+        )
         val timingReport = timing.toReport(
             audioDurationSeconds = targetFrames.toDouble() / config.sampleRate,
             windowCount = windowCount,
             totalMs = elapsedMs,
             runtimeSettings = runtimeSettings,
             modelVariant = modelVariant,
+            sourceDecodeDiagnostics = sourceInput.diagnostics,
         )
         timingFile.writeText(
             timingReport.toFileText(
@@ -238,15 +256,16 @@ class MdxRangeSeparator(
             frames = targetFrames,
             windowCount = windowCount,
             elapsedMs = elapsedMs,
-            sourcePcmSha256 = sourcePcmSha256,
-            sourceFrameCount = source.frameCount,
-            sourceSampleRate = source.sampleRate,
-            sourceChannelCount = source.channelCount,
-            outputSampleRate = decoded.sampleRate,
+            sourcePcmSha256 = sourceInput.sourcePcmSha256,
+            sourceFrameCount = sourceInput.sourceFrameCount,
+            sourceSampleRate = sourceInput.sourceSampleRate,
+            sourceChannelCount = sourceInput.sourceChannelCount,
+            outputSampleRate = config.sampleRate,
             segmentPlan = currentSegmentPlan,
             timingReport = timingReport,
             runtimeSettings = runtimeSettings,
             modelVariant = modelVariant,
+            sourceDecodeDiagnostics = sourceInput.diagnostics,
         )
     }
 
@@ -305,30 +324,6 @@ class MdxRangeSeparator(
                 }
             }
         }
-    }
-
-    private fun DecodedPcmAudio.toStereoFloatContextWindow(
-        windowStartFrame: Int,
-        frames: Int,
-    ): Array<FloatArray> {
-        val windowEndFrame = windowStartFrame + frames
-        val copyStartFrame = maxOf(0, windowStartFrame)
-        val copyEndFrame = minOf(frameCount, windowEndFrame)
-        val window = Array(MdxDspConfig.STEREO_CHANNELS) { FloatArray(frames) }
-        if (copyEndFrame <= copyStartFrame) return window
-
-        val source = toStereoFloat(
-            startFrame = copyStartFrame,
-            maxFrames = copyEndFrame - copyStartFrame,
-        )
-        val destinationOffset = copyStartFrame - windowStartFrame
-        for (channel in 0 until MdxDspConfig.STEREO_CHANNELS) {
-            source[channel].copyInto(
-                destination = window[channel],
-                destinationOffset = destinationOffset,
-            )
-        }
-        return window
     }
 
     private fun stereoFloatToPcm16(waveform: Array<FloatArray>, startFrame: Int, frames: Int): ByteArray {
@@ -402,6 +397,7 @@ data class MdxRangeProgress(
     val completedWindows: Int,
     val totalWindows: Int,
     val stage: String? = null,
+    val sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics? = null,
 ) {
     val percent: Int = if (totalWindows > 0) {
         ((completedWindows * 100.0) / totalWindows).roundToInt()
@@ -410,11 +406,15 @@ data class MdxRangeProgress(
     }
 
     companion object {
-        fun preparing(stage: String): MdxRangeProgress {
+        fun preparing(
+            stage: String,
+            diagnostics: MdxSourceDecodeDiagnostics? = null,
+        ): MdxRangeProgress {
             return MdxRangeProgress(
                 completedWindows = 0,
                 totalWindows = 0,
                 stage = stage,
+                sourceDecodeDiagnostics = diagnostics,
             )
         }
     }
@@ -454,6 +454,7 @@ data class MdxRangeSeparationResult(
     val timingReport: MdxRangeTimingReport,
     val runtimeSettings: MdxRuntimeSettings,
     val modelVariant: MdxModelVariant,
+    val sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics,
 ) {
     val durationSeconds: Double
         get() = frames.toDouble() / outputSampleRate
