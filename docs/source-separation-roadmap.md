@@ -533,7 +533,7 @@ Current limitations:
 
 ### Phase 5A: Window Decode Experiment
 
-Status: production prototype validated for selected formats
+Status: completed for the current production whitelist; maintenance only
 
 Goals:
 
@@ -608,25 +608,32 @@ FFmpeg batch and MP3 adaptive findings:
 - WAV and Ogg Vorbis are the strongest production candidates. The preroll song-timeline strategy was bit-perfect at zero offset for every supported batch sample in those families.
 - MP3 needs a format-specific path. The MP3-only adaptive batch completed all 5 supported MP3 cases: 22.05 kHz and 44.1 kHz files were strong, while 48 kHz and 8 kHz still showed residual mismatch.
 - 44.1 kHz MP3 should enter the first production prototype with short file-level calibration and quantized calibrated placement. Other MP3 sample rates should keep the full-song fallback until more evidence closes the residual offset problem.
-- AAC/M4A, Opus, FLAC, WMA, and unsupported platform-decoder cases should remain on the full-song fallback for now. Some samples are promising, but the batch results are not uniform enough for a safe first production enablement.
+- AAC/M4A, Opus, non-44.1 kHz FLAC, WMA, and unsupported platform-decoder cases should remain on the full-song fallback for now. Some samples are promising, but the batch results are not uniform enough for a safe first production enablement.
 - Window decode is the right low-latency direction, but it should be a selective optimization with per-format gates, per-file validation where needed, and automatic fallback to full-song decode. It should not replace the full-song decoder universally.
 
 First production window-decode prototype:
 
-- Enable window decode only for WAV, Ogg Vorbis, and 44.1 kHz MP3.
+- Enable window decode only for WAV, Ogg Vorbis, 44.1 kHz MP3, and 44.1 kHz FLAC.
 - Use preroll song-timeline placement for WAV and Ogg Vorbis.
 - Use MP3 file-level calibration plus quantized calibrated placement for 44.1 kHz MP3.
+- Use first-output timestamp placement for 44.1 kHz FLAC.
 - If metadata, calibration, or local decode validation fails, silently fall back to the current full-song decode path.
 - Keep the output contract identical to the current segment writer: stable intervals must land on exact song-timeline frames, and completed WAV stems remain the source of truth for playback.
 - Keep the debug batch runner available for regression tests before expanding the whitelist to more codecs or sample rates.
 
 First production prototype validation:
 
-- WAV, Ogg Vorbis, and 44.1 kHz MP3 now use the selective window-decode path in normal separation.
-- Real-device testing confirmed that the initial decode wait for these three families is no longer perceptible before model-window progress starts.
-- Output vocals and instrumental WAV files remained correct for the tested WAV, Ogg Vorbis, and 44.1 kHz MP3 sources.
+- WAV, Ogg Vorbis, 44.1 kHz MP3, and 44.1 kHz FLAC now use the selective window-decode path in normal separation.
+- The currently enabled and tested window-decode profiles are:
+  - WAV files reported as `audio/raw` with a `.wav` file name, using preroll song-timeline placement.
+  - Ogg Vorbis sources reported as `audio/vorbis`, using preroll song-timeline placement.
+  - 44.1 kHz MP3 sources with gapless metadata, using quantized placement.
+  - 44.1 kHz MP3 sources without gapless metadata, using the no-gapless calibration profile.
+  - 44.1 kHz FLAC sources, using first-output timestamp placement.
+- Real-device testing confirmed that the initial decode wait for the enabled profiles is no longer perceptible before model-window progress starts.
+- Output vocals and instrumental WAV files remained correct for tested WAV, Ogg Vorbis, 44.1 kHz MP3, and 44.1 kHz FLAC sources.
 - Unsupported or not-yet-whitelisted formats still fall back to the full-song decode path and were verified to keep working.
-- The current MP3 path remains experimental and is intentionally limited to 44.1 kHz sources with encoder delay and padding metadata.
+- The current MP3 path remains experimental and is intentionally limited to 44.1 kHz sources, including the no-gapless calibrated profile.
 - Separation timing reports and the source separation settings sheet should expose the active decode mode, window profile, source MIME/sample-rate/channel metadata, and fallback reason so format routing can be checked during normal use.
 - Whitelisted window-decode inputs now run a lightweight first-window preflight before committing to the window path. If the preflight fails, separation falls back to the full-song decode path and exposes the preflight failure as the fallback reason.
 - Completed cache manifests now use an encoded-audio-sample fingerprint instead of the temporary window-profile identity or decoded PCM hash. The fingerprint is derived from the selected audio track's encoded samples and decoder-relevant track fields, so cover art, lyrics, and normal tag edits should not invalidate separated caches.
@@ -656,11 +663,18 @@ MP3 no-gapless-metadata production prototype:
 - Failure still throws from decoder/preflight errors and falls back to the full-song decode path.
 - This production gate is intentionally weaker than the debug full-reference experiment because it does not decode the whole song for comparison. The debug experiment remains the reference test for absolute bit-perfect validation; the production gate now acts as a low-cost routing/cache diagnostic plus a decode viability check.
 
+44.1 kHz FLAC production prototype:
+
+- The earlier S25 batch showed that full-length 44.1 kHz FLAC failed the default song-timeline candidate but passed the first-output timestamp placement candidate across all tested probes.
+- A conservative 44.1 kHz FLAC window-decode profile now uses normal local decode plus first-output timestamp placement.
+- Normal separation testing confirmed that 44.1 kHz FLAC produces correct vocals and instrumental output with the window-decode path.
+- Non-44.1 kHz FLAC remains on full-song fallback. The 48 kHz/24-bit batch sample still showed source-rate residual alignment issues that should be handled in a separate experiment before production enablement.
+
 Next hardening steps:
 
 - Consider mid-run fallback cleanup for the rarer case where preflight succeeds but a later window decode fails.
 - Add a cache-index lookup by audio fingerprint if cross-song-id reuse becomes necessary after MediaStore rescans or file moves.
-- Keep 48 kHz MP3, low-rate MP3, AAC/M4A, Opus, FLAC, WMA, and platform-unsupported cases on full-song fallback until deterministic placement profiles are proven.
+- Keep 48 kHz MP3, low-rate MP3, AAC/M4A, Opus, non-44.1 kHz FLAC, WMA, and platform-unsupported cases on full-song fallback until deterministic placement profiles are proven.
 - Device-to-device and run-to-run timing comparisons should account for thermal throttling. A later retest showed that apparent slowdown after enabling window decode was also present in a pre-window-decode build after extended S25 testing, so the current timing concern is treated as thermal/load-related rather than a window-decode regression.
 - The main development focus now moves back to Phase 5B/6 scheduling and live playback behavior instead of expanding the window-decode whitelist.
 

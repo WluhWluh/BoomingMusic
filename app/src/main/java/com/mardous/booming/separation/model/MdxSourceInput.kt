@@ -297,6 +297,7 @@ private class WindowDecodeMdxSourceInput(
                         shouldCancel = shouldCancel,
                     )
                 }
+                MdxWindowDecodeProfile.Flac_44100_TimestampSongTimeline,
                 MdxWindowDecodeProfile.Mp3_44100_MetadataQuantized,
                 MdxWindowDecodeProfile.Mp3_44100_NoGaplessQuantized -> {
                     decoder.decodeWindow(
@@ -312,6 +313,12 @@ private class WindowDecodeMdxSourceInput(
         val placedSourceWindowStartFrame = when (profile) {
             MdxWindowDecodeProfile.WavPrerollSongTimeline,
             MdxWindowDecodeProfile.OggVorbisPrerollSongTimeline -> sourceWindowStartFrame
+            MdxWindowDecodeProfile.Flac_44100_TimestampSongTimeline -> {
+                sourceWindowStartFrame + decodedWindow.timestampPlacementOffsetFrames(
+                    requestedStartUs = requestedStartUs,
+                    sampleRate = sourceInfo.sampleRate,
+                )
+            }
             MdxWindowDecodeProfile.Mp3_44100_MetadataQuantized,
             MdxWindowDecodeProfile.Mp3_44100_NoGaplessQuantized -> {
                 sourceWindowStartFrame + decodedWindow.mp3QuantizedPlacementOffsetFrames(
@@ -338,6 +345,7 @@ private enum class MdxWindowDecodeProfile(
 ) {
     WavPrerollSongTimeline("WAV"),
     OggVorbisPrerollSongTimeline("Ogg Vorbis"),
+    Flac_44100_TimestampSongTimeline("FLAC 44.1 kHz", experimental = true),
     Mp3_44100_MetadataQuantized("MP3 44.1 kHz", experimental = true),
     Mp3_44100_NoGaplessQuantized("MP3 44.1 kHz no-gapless calibrated", experimental = true);
 
@@ -353,6 +361,10 @@ private enum class MdxWindowDecodeProfile(
                     WavPrerollSongTimeline
                 sourceInfo.mimeType == OGG_VORBIS_MIME_TYPE ->
                     OggVorbisPrerollSongTimeline
+                sourceInfo.mimeType == FLAC_MIME_TYPE &&
+                        sourceInfo.sampleRate == config.sampleRate &&
+                        sourceInfo.sampleRate == 44_100 ->
+                    Flac_44100_TimestampSongTimeline
                 sourceInfo.mimeType == MP3_MIME_TYPE &&
                         sourceInfo.sampleRate == config.sampleRate &&
                         sourceInfo.sampleRate == 44_100 &&
@@ -371,6 +383,7 @@ private enum class MdxWindowDecodeProfile(
 
         private const val WAV_MIME_TYPE = "audio/raw"
         private const val OGG_VORBIS_MIME_TYPE = "audio/vorbis"
+        private const val FLAC_MIME_TYPE = "audio/flac"
         private const val MP3_MIME_TYPE = "audio/mpeg"
 
         fun fallbackReason(
@@ -382,6 +395,8 @@ private enum class MdxWindowDecodeProfile(
             return when {
                 sourceInfo.mimeType == WAV_MIME_TYPE && !lowerName.endsWith(".wav") ->
                     "WAV MIME was reported without a .wav file name."
+                sourceInfo.mimeType == FLAC_MIME_TYPE && sourceInfo.sampleRate != config.sampleRate ->
+                    "FLAC window decode is currently enabled only for 44.1 kHz sources."
                 sourceInfo.mimeType == MP3_MIME_TYPE && sourceInfo.sampleRate != config.sampleRate ->
                     "MP3 window decode is currently enabled only for 44.1 kHz sources."
                 sourceInfo.mimeType == MP3_MIME_TYPE &&
@@ -463,6 +478,19 @@ private fun WindowDecodedPcmAudio.mp3QuantizedPlacementOffsetFrames(
             )
     return ceilToMultiple(frameDeficit + correction, MP3_FINE_QUANTUM_FRAMES)
         .coerceAtLeast(0)
+}
+
+private fun WindowDecodedPcmAudio.timestampPlacementOffsetFrames(
+    requestedStartUs: Long,
+    sampleRate: Int,
+): Int {
+    val firstOutputUs = firstOutputTimeUs
+        ?: error("Window decoder produced no output timestamp.")
+    return floor(
+        (firstOutputUs - requestedStartUs).toDouble() *
+                sampleRate.toDouble() /
+                MICROS_PER_SECOND.toDouble()
+    ).toInt().coerceAtLeast(0)
 }
 
 private fun Int?.orZero(): Int = this ?: 0
