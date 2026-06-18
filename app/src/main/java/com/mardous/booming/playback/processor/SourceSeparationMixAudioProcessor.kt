@@ -9,6 +9,7 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.roundToLong
 
 @OptIn(UnstableApi::class)
@@ -17,6 +18,12 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     @Volatile
     var blend: Float = CENTER_BLEND
         private set
+
+    @Volatile
+    var debugTraceSink: ((String) -> Unit)? = null
+
+    @Volatile
+    var mixedOutputStartedSink: (() -> Unit)? = null
 
     @Volatile
     private var active = false
@@ -30,11 +37,30 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     @Volatile
     private var inputMode = InputMode.InstrumentalStem
 
+    @Volatile
+    private var stemSampleRate = DEFAULT_SAMPLE_RATE
+
+    @Volatile
+    private var stemChannelCount = CHANNEL_COUNT_STEREO
+
     private val lock = Any()
     private var vocalsInput: RandomAccessFile? = null
     private var instrumentalInput: RandomAccessFile? = null
     private var scratch = ByteArray(0)
     private var instrumentalScratch = ByteArray(0)
+    private val debugSessionSeq = AtomicLong()
+    private val debugQueueSeq = AtomicLong()
+
+    @Volatile
+    private var debugSessionId = 0L
+
+    @Volatile
+    private var debugQueueTraceRemaining = 0
+
+    @Volatile
+    private var notifyMixedOutputStarted = false
+
+    private var mixedOutputPrerollFramesRemaining = 0L
 
     fun enable(
         vocalsFile: File,
@@ -42,20 +68,35 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         positionMs: Long,
         initialBlend: Float = blend,
         inputMode: InputMode = InputMode.InstrumentalStem,
+        stemSampleRate: Int = DEFAULT_SAMPLE_RATE,
+        stemChannelCount: Int = CHANNEL_COUNT_STEREO,
     ) {
         setBlend(initialBlend)
         synchronized(lock) {
             closeLocked()
+            debugSessionId = debugSessionSeq.incrementAndGet()
+            debugQueueSeq.set(0)
+            debugQueueTraceRemaining = DEBUG_INITIAL_QUEUE_TRACE_COUNT
+            resetMixedOutputNotificationLocked()
             this.inputMode = inputMode
+            this.stemSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
+            this.stemChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
             vocalsInput = RandomAccessFile(vocalsFile, "r")
             instrumentalInput = instrumentalFile?.let { RandomAccessFile(it, "r") }
             active = true
             seekToLocked(positionMs)
+            traceDebug(
+                "enable",
+                "session=$debugSessionId mode=$inputMode positionMs=$positionMs " +
+                        "blend=$blend stemRate=${this.stemSampleRate} stemChannels=${this.stemChannelCount} " +
+                        "vocals=${vocalsFile.length()} instrumental=${instrumentalFile?.length()}"
+            )
         }
     }
 
     fun disable() {
         synchronized(lock) {
+            traceDebug("disable", "session=$debugSessionId active=$active")
             active = false
             closeLocked()
         }
@@ -66,17 +107,30 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         blend = normalized
         vocalsGain = if (normalized <= CENTER_BLEND) 1f else (1f - normalized) / CENTER_BLEND
         instrumentalGain = if (normalized >= CENTER_BLEND) 1f else normalized / CENTER_BLEND
+        traceDebug(
+            "setBlend",
+            "session=$debugSessionId blend=$blend vocalsGain=$vocalsGain instrumentalGain=$instrumentalGain"
+        )
     }
 
     fun seekTo(positionMs: Long) {
         synchronized(lock) {
             if (active) {
                 seekToLocked(positionMs)
+                debugQueueSeq.set(0)
+                debugQueueTraceRemaining = DEBUG_INITIAL_QUEUE_TRACE_COUNT
+                resetMixedOutputNotificationLocked()
+                traceDebug("seekTo", "session=$debugSessionId positionMs=$positionMs")
             }
         }
     }
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        traceDebug(
+            "onConfigure",
+            "session=$debugSessionId active=$active encoding=${inputAudioFormat.encoding} " +
+                    "rate=${inputAudioFormat.sampleRate} channels=${inputAudioFormat.channelCount}"
+        )
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
             throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
@@ -90,9 +144,16 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         val buffer = replaceOutputBuffer(remaining)
         buffer.order(ByteOrder.LITTLE_ENDIAN)
 
+        val queueSeq = debugQueueSeq.incrementAndGet()
         if (!canMixCurrentFormat()) {
-            buffer.put(inputBuffer)
-            buffer.flip()
+            queueUnmixedInput(inputBuffer, buffer, remaining, "format")
+            traceQueueIfNeeded(
+                queueSeq = queueSeq,
+                branch = "unmixed-format-${unmixedOutputAction()}",
+                remaining = remaining,
+                bytesRead = null,
+                instrumentalBytesRead = null,
+            )
             return
         }
 
@@ -103,8 +164,14 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         val instrumentalBytesRead = readInstrumental(bytesToRead)
 
         if (bytesRead == null) {
-            buffer.put(inputBuffer)
-            buffer.flip()
+            queueUnmixedInput(inputBuffer, buffer, remaining, "vocals-null")
+            traceQueueIfNeeded(
+                queueSeq = queueSeq,
+                branch = "unmixed-vocals-null-${unmixedOutputAction()}",
+                remaining = remaining,
+                bytesRead = null,
+                instrumentalBytesRead = instrumentalBytesRead,
+            )
             return
         }
 
@@ -137,16 +204,37 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             buffer.put(inputBuffer)
         }
         buffer.flip()
-    }
-
-    override fun onReset() {
-        disable()
+        notifyMixedOutputStartedIfNeeded(frames)
+        traceQueueIfNeeded(
+            queueSeq = queueSeq,
+            branch = "mixed",
+            remaining = remaining,
+            bytesRead = bytesRead,
+            instrumentalBytesRead = instrumentalBytesRead,
+        )
     }
 
     private fun canMixCurrentFormat(): Boolean {
         return active &&
                 inputAudioFormat.encoding == C.ENCODING_PCM_16BIT &&
                 inputAudioFormat.channelCount == CHANNEL_COUNT_STEREO
+    }
+
+    private fun queueUnmixedInput(
+        inputBuffer: ByteBuffer,
+        outputBuffer: ByteBuffer,
+        byteCount: Int,
+        reason: String,
+    ) {
+        if (active && inputMode == InputMode.OriginalSource) {
+            repeat(byteCount) {
+                outputBuffer.put(0)
+            }
+            inputBuffer.position(inputBuffer.limit())
+        } else {
+            outputBuffer.put(inputBuffer)
+        }
+        outputBuffer.flip()
     }
 
     private fun readVocals(byteCount: Int): Int? {
@@ -212,8 +300,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     private fun seekToLocked(positionMs: Long) {
-        val sampleRate = inputAudioFormat.sampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
-        val frameSize = inputAudioFormat.channelCount
+        val sampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
+        val frameSize = stemChannelCount
             .takeIf { it > 0 }
             ?.times(BYTES_PER_SAMPLE)
             ?: DEFAULT_FRAME_SIZE
@@ -227,11 +315,75 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         vocalsInput = null
         instrumentalInput?.close()
         instrumentalInput = null
+        notifyMixedOutputStarted = false
+        mixedOutputPrerollFramesRemaining = 0L
+    }
+
+    private fun resetMixedOutputNotificationLocked() {
+        notifyMixedOutputStarted = true
+        mixedOutputPrerollFramesRemaining = -1L
+    }
+
+    private fun notifyMixedOutputStartedIfNeeded(frames: Int) {
+        if (!notifyMixedOutputStarted) return
+        if (mixedOutputPrerollFramesRemaining < 0L) {
+            val sampleRate = inputAudioFormat.sampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
+            mixedOutputPrerollFramesRemaining =
+                sampleRate * MIXED_OUTPUT_READY_PREROLL_MS / MILLIS_PER_SECOND
+            traceDebug(
+                "mixedOutputPreroll.start",
+                "session=$debugSessionId sampleRate=$sampleRate frames=$mixedOutputPrerollFramesRemaining"
+            )
+        }
+        mixedOutputPrerollFramesRemaining -= frames.toLong()
+        if (mixedOutputPrerollFramesRemaining > 0L) return
+        notifyMixedOutputStarted = false
+        mixedOutputPrerollFramesRemaining = 0L
+        traceDebug("mixedOutputPreroll.ready", "session=$debugSessionId")
+        mixedOutputStartedSink?.invoke()
+    }
+
+    private fun traceQueueIfNeeded(
+        queueSeq: Long,
+        branch: String,
+        remaining: Int,
+        bytesRead: Int?,
+        instrumentalBytesRead: Int?,
+    ) {
+        val remainingTraces = debugQueueTraceRemaining
+        if (remainingTraces <= 0 && queueSeq % DEBUG_QUEUE_TRACE_INTERVAL != 0L) {
+            return
+        }
+        if (remainingTraces > 0) {
+            debugQueueTraceRemaining = remainingTraces - 1
+        }
+        traceDebug(
+            "queueInput",
+            "session=$debugSessionId seq=$queueSeq branch=$branch active=$active mode=$inputMode " +
+                    "inputEncoding=${inputAudioFormat.encoding} inputRate=${inputAudioFormat.sampleRate} " +
+                    "inputChannels=${inputAudioFormat.channelCount} remaining=$remaining " +
+                    "vocalsBytes=$bytesRead instrumentalBytes=$instrumentalBytesRead"
+        )
+    }
+
+    private fun unmixedOutputAction(): String {
+        return if (active && inputMode == InputMode.OriginalSource) {
+            "muteOriginal"
+        } else {
+            "passthroughOriginal"
+        }
+    }
+
+    private fun traceDebug(event: String, detail: String) {
+        debugTraceSink?.invoke("mix.$event | $detail")
     }
 
     companion object {
         const val CENTER_BLEND = 0.5f
 
+        private const val DEBUG_INITIAL_QUEUE_TRACE_COUNT = 80
+        private const val DEBUG_QUEUE_TRACE_INTERVAL = 200L
+        private const val MIXED_OUTPUT_READY_PREROLL_MS = 800L
         private const val CHANNEL_COUNT_STEREO = 2
         private const val BYTES_PER_SAMPLE = 2
         private const val DEFAULT_SAMPLE_RATE = 44_100

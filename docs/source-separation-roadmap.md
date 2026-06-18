@@ -738,6 +738,10 @@ Implementation notes:
 - Verified `:app:assembleNormalDebug` succeeds after the first play-while-processing experiment.
 - Seeks during running separated playback now re-check current and next segment readiness. If the target window is not ready, playback restores the original media item, pauses, reports a processing state, and automatically switches back to separated playback when the window becomes ready.
 - Starting a separation while separated playback is requested now uses the same processing gate: playback pauses while the initial playable window is unavailable instead of continuing with the original audio.
+- Completed separated playback uses the instrumental stem WAV as the ExoPlayer media item and mixes the vocals stem from the same completed stem timeline.
+- Running separated playback keeps the original source as the ExoPlayer clock input while the mixer reads both work-in-progress stem WAVs directly. This avoids ExoPlayer pre-buffering unwritten zero-filled ranges from the instrumental work WAV while still suppressing original-source leakage.
+- Separated playback transitions pause output while replacing media items, seeking, preparing, and realigning the stem processor, then restore playback only after the new timeline is ready.
+- The stem mixer seeks by the output stem sample rate stored in the manifest instead of by the current ExoPlayer input format, preventing stale-format or source-format seeks from offsetting vocals and instrumental stems.
 
 Current limitations:
 
