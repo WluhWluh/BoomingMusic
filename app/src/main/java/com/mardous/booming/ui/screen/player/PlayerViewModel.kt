@@ -389,6 +389,7 @@ class PlayerViewModel(
     }
 
     fun seekTo(positionMillis: Long) {
+        _progressFlow.value = positionMillis
         mediaController?.seekTo(positionMillis)
     }
 
@@ -430,6 +431,11 @@ class PlayerViewModel(
                             sourceDecodeDiagnostics = progress.sourceDecodeDiagnostics?.toDisplayText(),
                         )
                         syncSourceSeparationPlaybackIfRequested()
+                    },
+                    playbackPositionMsProvider = {
+                        progress.takeIf {
+                            currentSong.id == song.id && it != C.TIME_UNSET
+                        }
                     },
                     shouldCancel = {
                         sourceSeparationCancelRequested.get() || activeJob?.isActive != true
