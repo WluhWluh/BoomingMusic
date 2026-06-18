@@ -516,6 +516,7 @@ Done criteria:
 - The icon state updates from the durable settings. Completed for app-level separated playback and per-song-memory flags.
 - App-level separated playback enabled, per-song memory enabled, and global blend are persisted in shared preferences.
 - Per-song blend is persisted in a cache-owned `playback-settings.json` sidecar keyed to the separated cache's encoded-audio fingerprint.
+- Per-song blend also has a best-effort temporary shared-preferences store for songs whose separated cache is not prepared yet. This lets a user adjust and restore the blend while separation is still running or paused.
 - Saved settings are reapplied after song changes, service reconnection, and app restart.
 - The old separated playback dialog is no longer needed for normal use. Completed.
 - The app still builds and completed-cache playback still works. Completed for `:app:assembleNormalDebug`.
@@ -529,10 +530,12 @@ Implementation notes:
 - Removed the old separated playback dialog surface.
 - Split the control state into durable app-level flags instead of deriving the per-song-memory switch only from the three-state icon mode.
 - Added a cache-owned playback settings sidecar for per-song blend memory. The sidecar is ignored if its fingerprint does not match the current manifest audio fingerprint.
+- Added a temporary per-song blend store keyed by a hash of the current library song id, URI, and file path. When the separation manifest receives a real encoded-audio fingerprint, the temporary value is migrated to the cache-owned sidecar and removed.
 
 Current limitations:
 
 - The per-song blend sidecar currently follows the existing cache entry lookup, which is still rooted by MediaStore song id. Cross-song-id cache reuse after file moves or MediaStore rescans remains deferred to the future audio-fingerprint cache index.
+- The temporary per-song blend store is intentionally best-effort and only exists to bridge the period before a fingerprint-backed cache sidecar is available.
 - The long-running separation Snackbar remains until the sheet owns a reliable progress model.
 
 ### Phase 5A: Window Decode Experiment
