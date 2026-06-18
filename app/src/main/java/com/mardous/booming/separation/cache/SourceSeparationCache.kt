@@ -94,7 +94,7 @@ class SourceSeparationCache(
             state = SourceSeparationCacheState.Completed,
             songLocator = run.song.toLocator(),
             audioIdentity = SourceAudioIdentity(
-                audioFingerprint = result.sourcePcmSha256,
+                audioFingerprint = result.sourceAudioFingerprint,
                 decodedFrameCount = result.sourceFrameCount,
                 decodedSampleRate = result.sourceSampleRate,
                 decodedChannelCount = result.sourceChannelCount,
@@ -136,7 +136,7 @@ class SourceSeparationCache(
         val updatedManifest = manifest.copy(
             state = SourceSeparationCacheState.Running,
             audioIdentity = SourceAudioIdentity(
-                audioFingerprint = preparation.sourcePcmSha256,
+                audioFingerprint = preparation.sourceAudioFingerprint,
                 decodedFrameCount = preparation.sourceFrameCount,
                 decodedSampleRate = preparation.sourceSampleRate,
                 decodedChannelCount = preparation.sourceChannelCount,
