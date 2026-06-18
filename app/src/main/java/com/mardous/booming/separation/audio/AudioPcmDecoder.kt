@@ -9,6 +9,7 @@ import android.net.Uri
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.security.MessageDigest
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -36,6 +37,89 @@ class AudioPcmDecoder(private val context: Context) {
                 channelCount = channelCount,
                 durationUs = durationUs,
                 trackMetadata = audioTrackMetadata(format, mime),
+            )
+        } finally {
+            extractor.release()
+        }
+    }
+
+    fun hashEncodedAudioSamples(
+        uri: Uri,
+        shouldCancel: () -> Boolean = { false },
+    ): EncodedAudioSamplesHash {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(context, uri, null)
+            val trackIndex = findAudioTrack(extractor)
+            if (trackIndex < 0) error("No audio track was found.")
+
+            extractor.selectTrack(trackIndex)
+            val format = extractor.getTrackFormat(trackIndex)
+            val mime = format.getString(MediaFormat.KEY_MIME)
+                ?: error("Audio track has no MIME type.")
+            val sampleRate = format.optionalInteger(MediaFormat.KEY_SAMPLE_RATE)
+                ?: error("Audio track has no sample rate.")
+            val channelCount = format.optionalInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                ?: error("Audio track has no channel count.")
+            val durationUs = format.optionalLong(MediaFormat.KEY_DURATION) ?: -1L
+            val trackMetadata = audioTrackMetadata(format, mime)
+            val digest = MessageDigest.getInstance("SHA-256")
+            digest.updateString("booming-encoded-audio-samples-v1")
+            digest.updateString(mime)
+            digest.updateInt(sampleRate)
+            digest.updateInt(channelCount)
+            digest.updateLong(durationUs)
+            digest.updateInt(trackMetadata.encoderDelayFrames ?: -1)
+            digest.updateInt(trackMetadata.encoderPaddingFrames ?: -1)
+
+            var buffer = ByteBuffer.allocateDirect(
+                format.optionalInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+                    ?.coerceAtLeast(DEFAULT_SAMPLE_HASH_BUFFER_BYTES)
+                    ?.coerceAtMost(MAX_SAMPLE_HASH_BUFFER_BYTES)
+                    ?: DEFAULT_SAMPLE_HASH_BUFFER_BYTES
+            )
+            val scratch = ByteArray(SAMPLE_HASH_CHUNK_BYTES)
+            var sampleCount = 0L
+            var byteCount = 0L
+
+            while (true) {
+                throwIfCanceled(shouldCancel)
+                buffer.clear()
+                var sampleSize = extractor.readSampleData(buffer, 0)
+                while (sampleSize == buffer.capacity() && buffer.capacity() < MAX_SAMPLE_HASH_BUFFER_BYTES) {
+                    buffer = ByteBuffer.allocateDirect(
+                        (buffer.capacity() * 2).coerceAtMost(MAX_SAMPLE_HASH_BUFFER_BYTES)
+                    )
+                    buffer.clear()
+                    sampleSize = extractor.readSampleData(buffer, 0)
+                }
+                if (sampleSize < 0) break
+                require(sampleSize <= buffer.capacity()) {
+                    "Encoded audio sample is larger than the hash buffer."
+                }
+
+                digest.updateLong(extractor.sampleTime)
+                digest.updateInt(extractor.sampleFlags)
+                digest.updateInt(sampleSize)
+                buffer.position(0)
+                buffer.limit(sampleSize)
+                while (buffer.hasRemaining()) {
+                    val length = minOf(buffer.remaining(), scratch.size)
+                    buffer.get(scratch, 0, length)
+                    digest.update(scratch, 0, length)
+                }
+
+                sampleCount += 1
+                byteCount += sampleSize.toLong()
+                val advanced = extractor.advance()
+                if (!advanced && sampleSize == 0) break
+            }
+
+            require(sampleCount > 0L) { "No encoded audio samples were read." }
+            return EncodedAudioSamplesHash(
+                sha256 = digest.digest().toHexString(),
+                sampleCount = sampleCount,
+                byteCount = byteCount,
             )
         } finally {
             extractor.release()
@@ -569,6 +653,37 @@ class AudioPcmDecoder(private val context: Context) {
         return (frame * MICROS_PER_SECOND) / sampleRate.toLong()
     }
 
+    private fun MessageDigest.updateString(value: String) {
+        update(value.encodeToByteArray())
+        updateInt(0)
+    }
+
+    private fun MessageDigest.updateInt(value: Int) {
+        update(byteArrayOf(
+            (value ushr 24).toByte(),
+            (value ushr 16).toByte(),
+            (value ushr 8).toByte(),
+            value.toByte(),
+        ))
+    }
+
+    private fun MessageDigest.updateLong(value: Long) {
+        update(byteArrayOf(
+            (value ushr 56).toByte(),
+            (value ushr 48).toByte(),
+            (value ushr 40).toByte(),
+            (value ushr 32).toByte(),
+            (value ushr 24).toByte(),
+            (value ushr 16).toByte(),
+            (value ushr 8).toByte(),
+            value.toByte(),
+        ))
+    }
+
+    private fun ByteArray.toHexString(): String {
+        return joinToString("") { "%02x".format(it) }
+    }
+
     private data class AudioOutputFormat(
         val sampleRate: Int,
         val channelCount: Int,
@@ -587,8 +702,17 @@ class AudioPcmDecoder(private val context: Context) {
     private companion object {
         const val TIMEOUT_US = 10_000L
         const val MICROS_PER_SECOND = 1_000_000L
+        const val DEFAULT_SAMPLE_HASH_BUFFER_BYTES = 1024 * 1024
+        const val MAX_SAMPLE_HASH_BUFFER_BYTES = 16 * 1024 * 1024
+        const val SAMPLE_HASH_CHUNK_BYTES = 64 * 1024
     }
 }
+
+data class EncodedAudioSamplesHash(
+    val sha256: String,
+    val sampleCount: Long,
+    val byteCount: Long,
+)
 
 data class AudioSourceInfo(
     val mimeType: String,

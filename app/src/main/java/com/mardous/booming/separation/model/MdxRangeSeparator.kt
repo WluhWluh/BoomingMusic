@@ -96,7 +96,7 @@ class MdxRangeSeparator(
                 endMs = frameToMs(endFrame),
                 frames = targetFrames,
                 windowCount = windowCount,
-                sourcePcmSha256 = sourceInput.sourcePcmSha256,
+                sourceAudioFingerprint = PENDING_SOURCE_AUDIO_FINGERPRINT,
                 sourceFrameCount = sourceInput.sourceFrameCount,
                 sourceSampleRate = sourceInput.sourceSampleRate,
                 sourceChannelCount = sourceInput.sourceChannelCount,
@@ -222,6 +222,16 @@ class MdxRangeSeparator(
             }
         }
 
+        onProgress(
+            MdxRangeProgress(
+                windowCount,
+                windowCount,
+                stage = "Hashing source audio",
+                sourceDecodeDiagnostics = sourceInput.diagnostics,
+            )
+        )
+        val sourceAudioFingerprint = sourceInput.sourceAudioFingerprint(timing, shouldCancel)
+        throwIfCanceled(shouldCancel)
         val elapsedMs = SystemClock.elapsedRealtime() - totalStartedAt
         onProgress(
             MdxRangeProgress(
@@ -256,7 +266,7 @@ class MdxRangeSeparator(
             frames = targetFrames,
             windowCount = windowCount,
             elapsedMs = elapsedMs,
-            sourcePcmSha256 = sourceInput.sourcePcmSha256,
+            sourceAudioFingerprint = sourceAudioFingerprint,
             sourceFrameCount = sourceInput.sourceFrameCount,
             sourceSampleRate = sourceInput.sourceSampleRate,
             sourceChannelCount = sourceInput.sourceChannelCount,
@@ -428,7 +438,7 @@ data class MdxRangePreparation(
     val endMs: Long,
     val frames: Int,
     val windowCount: Int,
-    val sourcePcmSha256: String,
+    val sourceAudioFingerprint: String,
     val sourceFrameCount: Int,
     val sourceSampleRate: Int,
     val sourceChannelCount: Int,
@@ -445,7 +455,7 @@ data class MdxRangeSeparationResult(
     val frames: Int,
     val windowCount: Int,
     val elapsedMs: Long,
-    val sourcePcmSha256: String,
+    val sourceAudioFingerprint: String,
     val sourceFrameCount: Int,
     val sourceSampleRate: Int,
     val sourceChannelCount: Int,
@@ -459,3 +469,5 @@ data class MdxRangeSeparationResult(
     val durationSeconds: Double
         get() = frames.toDouble() / outputSampleRate
 }
+
+private const val PENDING_SOURCE_AUDIO_FINGERPRINT = "pending"
