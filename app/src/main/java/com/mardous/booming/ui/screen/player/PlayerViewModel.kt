@@ -439,6 +439,7 @@ class PlayerViewModel(
                             totalWindows = progress.totalWindows,
                             percent = progress.percent,
                             stage = progress.stage,
+                            sourceDecodeDiagnostics = progress.sourceDecodeDiagnostics?.toDisplayText(),
                         )
                         syncSourceSeparationPlaybackIfRequested()
                     },
@@ -1013,6 +1014,7 @@ sealed class SourceSeparationUiState {
         val totalWindows: Int = 0,
         val percent: Int = 0,
         val stage: String? = null,
+        val sourceDecodeDiagnostics: String? = null,
     ) : SourceSeparationUiState()
 
     data class Completed(

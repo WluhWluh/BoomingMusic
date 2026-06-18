@@ -16,6 +16,7 @@ internal class MdxRangeTimingAccumulator {
         totalMs: Long,
         runtimeSettings: MdxRuntimeSettings,
         modelVariant: MdxModelVariant,
+        sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics,
     ): MdxRangeTimingReport {
         return MdxRangeTimingReport(
             audioDurationSeconds = audioDurationSeconds,
@@ -23,6 +24,7 @@ internal class MdxRangeTimingAccumulator {
             totalMs = totalMs,
             runtimeSettings = runtimeSettings,
             modelVariant = modelVariant,
+            sourceDecodeDiagnostics = sourceDecodeDiagnostics,
             stageMs = LinkedHashMap(stageMs),
         )
     }
@@ -34,6 +36,7 @@ data class MdxRangeTimingReport(
     val totalMs: Long,
     val runtimeSettings: MdxRuntimeSettings,
     val modelVariant: MdxModelVariant,
+    val sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics,
     val stageMs: Map<String, Long>,
 ) {
     fun toFileText(
@@ -46,6 +49,7 @@ data class MdxRangeTimingReport(
             appendLine("Windows: $windowCount")
             appendLine("Model: ${modelVariant.displayName}")
             appendLine(runtimeSettings.toDisplayText())
+            appendLine(sourceDecodeDiagnostics.toDisplayText())
             appendLine("Vocals: ${vocalsFile.absolutePath}")
             appendLine("Instrumental: ${instrumentalFile.absolutePath}")
             appendLine()
@@ -97,6 +101,8 @@ data class MdxRangeTimingReport(
     private companion object {
         val PER_WINDOW_STAGES = setOf(
             "Window input",
+            "Window decode",
+            "Window resample",
             "STFT",
             "Tensor create",
             "ONNX inference",

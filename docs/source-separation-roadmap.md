@@ -623,6 +623,22 @@ First production window-decode prototype:
 - Keep the output contract identical to the current segment writer: stable intervals must land on exact song-timeline frames, and completed WAV stems remain the source of truth for playback.
 - Keep the debug batch runner available for regression tests before expanding the whitelist to more codecs or sample rates.
 
+First production prototype validation:
+
+- WAV, Ogg Vorbis, and 44.1 kHz MP3 now use the selective window-decode path in normal separation.
+- Real-device testing confirmed that the initial decode wait for these three families is no longer perceptible before model-window progress starts.
+- Output vocals and instrumental WAV files remained correct for the tested WAV, Ogg Vorbis, and 44.1 kHz MP3 sources.
+- Unsupported or not-yet-whitelisted formats still fall back to the full-song decode path and were verified to keep working.
+- The current MP3 path remains experimental and is intentionally limited to 44.1 kHz sources with encoder delay and padding metadata.
+- Separation timing reports and the source separation settings sheet should expose the active decode mode, window profile, source MIME/sample-rate/channel metadata, and fallback reason so format routing can be checked during normal use.
+
+Next hardening steps:
+
+- Add a lightweight window-decode preflight before committing to a window profile.
+- Fall back to full-song decode when preflight fails, rather than failing the separation task.
+- Replace the temporary window-path identity with an encoded-audio-sample fingerprint so metadata-only edits do not invalidate caches without requiring a full decoded PCM hash.
+- Keep 48 kHz MP3, low-rate MP3, AAC/M4A, Opus, FLAC, WMA, and platform-unsupported cases on full-song fallback until deterministic placement profiles are proven.
+
 ### Phase 5B: Segment-Based Processing
 
 Status: in progress
