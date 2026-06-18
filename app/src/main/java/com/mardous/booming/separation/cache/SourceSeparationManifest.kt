@@ -73,3 +73,15 @@ data class SourceSeparationError(
     val type: String,
     val message: String?,
 )
+
+@Serializable
+data class SourceSeparationPlaybackSettings(
+    val schemaVersion: Int = SCHEMA_VERSION,
+    val audioFingerprint: String,
+    val blend: Float,
+    val updatedAtEpochMs: Long,
+) {
+    companion object {
+        const val SCHEMA_VERSION = 1
+    }
+}

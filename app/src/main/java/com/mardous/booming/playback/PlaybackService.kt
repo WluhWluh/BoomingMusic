@@ -777,9 +777,14 @@ class PlaybackService :
 
             Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED -> {
                 val enabled = args.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, false)
+                val showMessage = args.getBoolean(
+                    Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE,
+                    true,
+                )
                 traceSourceSeparationPlayback(
                     "command.setPlaybackEnabled",
-                    "enabled=$enabled hasBlend=${args.containsKey(Playback.EXTRA_SOURCE_SEPARATION_BLEND)}"
+                    "enabled=$enabled showMessage=$showMessage " +
+                            "hasBlend=${args.containsKey(Playback.EXTRA_SOURCE_SEPARATION_BLEND)}"
                 )
                 if (args.containsKey(Playback.EXTRA_SOURCE_SEPARATION_BLEND)) {
                     sourceSeparationMixProcessor.setBlend(
@@ -790,7 +795,10 @@ class PlaybackService :
                     )
                 }
                 serviceScope.future {
-                    setSourceSeparationPlaybackEnabled(enabled)
+                    setSourceSeparationPlaybackEnabled(
+                        enabled = enabled,
+                        showMessage = showMessage,
+                    )
                 }
             }
 
@@ -1142,12 +1150,18 @@ class PlaybackService :
         player.shuffleModeEnabled = !player.shuffleModeEnabled
     }
 
-    private suspend fun setSourceSeparationPlaybackEnabled(enabled: Boolean): SessionResult {
-        traceSourceSeparationPlayback("playback.setEnabled.start", "enabled=$enabled")
+    private suspend fun setSourceSeparationPlaybackEnabled(
+        enabled: Boolean,
+        showMessage: Boolean,
+    ): SessionResult {
+        traceSourceSeparationPlayback(
+            "playback.setEnabled.start",
+            "enabled=$enabled showMessage=$showMessage"
+        )
         sourceSeparationPlaybackRequested = enabled
         val result = if (enabled) {
             ensureSourceSeparationPlaybackReady(
-                showUnavailableMessage = true,
+                showUnavailableMessage = showMessage,
                 allowPauseForProcessing = true,
                 resumeWhenReady = player.playWhenReady || player.isPlaying,
             )
@@ -1325,6 +1339,7 @@ class PlaybackService :
                             restoreOriginalItem = false,
                             allowPause = allowPauseForProcessing,
                             resumeWhenReady = resumeWhenReady,
+                            showMessage = showUnavailableMessage,
                         )
                     }
                     SourceSeparationPlayableCacheStatus.Unavailable -> {
@@ -1378,6 +1393,7 @@ class PlaybackService :
                 restoreOriginalItem = false,
                 allowPause = allowPauseForProcessing,
                 resumeWhenReady = resumeWhenReady,
+                showMessage = showUnavailableMessage,
             )
         }
         val manifest = (status as? SourceSeparationPlayableCacheStatus.Ready)?.manifest
@@ -1641,6 +1657,7 @@ class PlaybackService :
         restoreOriginalItem: Boolean,
         allowPause: Boolean,
         resumeWhenReady: Boolean,
+        showMessage: Boolean,
     ): SessionResult {
         val shouldResume = sourceSeparationPlaybackResumeWhenReady ||
                 resumeWhenReady ||
@@ -1666,6 +1683,7 @@ class PlaybackService :
             sourceSeparationPlaybackIsProcessing = true
         }
         val message = getString(R.string.source_separation_playback_processing)
+            .takeIf { showMessage }
         broadcastSourceSeparationPlaybackChanged(message)
         scheduleSourceSeparationPlaybackGateRetry()
         return sourceSeparationPlaybackResult(
