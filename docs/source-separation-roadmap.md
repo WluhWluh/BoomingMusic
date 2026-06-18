@@ -518,6 +518,7 @@ Done criteria:
 - Per-song blend is persisted in a cache-owned `playback-settings.json` sidecar keyed to the separated cache's encoded-audio fingerprint.
 - Per-song blend also has a best-effort temporary shared-preferences store for songs whose separated cache is not prepared yet. This lets a user adjust and restore the blend while separation is still running or paused.
 - Saved settings are reapplied after song changes, service reconnection, and app restart.
+- Song transitions in per-song blend mode defer new separated playback sessions until the target song's blend is loaded and sent by the UI layer, preventing a brief output with the previous song's blend.
 - The old separated playback dialog is no longer needed for normal use. Completed.
 - The app still builds and completed-cache playback still works. Completed for `:app:assembleNormalDebug`.
 
@@ -531,6 +532,7 @@ Implementation notes:
 - Split the control state into durable app-level flags instead of deriving the per-song-memory switch only from the three-state icon mode.
 - Added a cache-owned playback settings sidecar for per-song blend memory. The sidecar is ignored if its fingerprint does not match the current manifest audio fingerprint.
 - Added a temporary per-song blend store keyed by a hash of the current library song id, URI, and file path. When the separation manifest receives a real encoded-audio fingerprint, the temporary value is migrated to the cache-owned sidecar and removed.
+- Added a playback-service gate so global blend can auto-sync on song transitions, while per-song blend waits for the target song's explicit blend command before creating a new separated playback session.
 
 Current limitations:
 
