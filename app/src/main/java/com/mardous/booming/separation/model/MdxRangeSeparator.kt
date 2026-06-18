@@ -7,6 +7,7 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import com.mardous.booming.separation.audio.WavFileWriter
+import com.mardous.booming.separation.cache.SourceSeparationSegmentScheduler
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import java.io.File
@@ -32,6 +33,7 @@ class MdxRangeSeparator(
         onProgress: (MdxRangeProgress) -> Unit = {},
         onPrepared: (MdxRangePreparation) -> Unit = {},
         onSegmentStateChanged: (segmentIndex: Int, state: SourceSeparationSegmentState) -> Unit = { _, _ -> },
+        playbackPositionMsProvider: () -> Long? = { null },
         shouldCancel: () -> Boolean = { false },
     ): MdxRangeSeparationResult {
         val timing = MdxRangeTimingAccumulator()
@@ -112,6 +114,7 @@ class MdxRangeSeparator(
         } else {
             null
         }
+        val canWriteWindowsByFrame = declaredOutputDataSizeBytes != null
 
         WavFileWriter(
             file = vocalsFile,
@@ -134,12 +137,27 @@ class MdxRangeSeparator(
                 session.use {
                     val inputName = session.inputInfo.keys.first()
                     val outputName = session.outputInfo.keys.first()
-                    for (windowIndex in 0 until windowCount) {
+                    var processedWindowCount = 0
+                    val processedSegments = mutableSetOf<Int>()
+                    while (processedWindowCount < windowCount) {
                         throwIfCanceled(shouldCancel)
-                        val generationStartFrame = startFrame + windowIndex * config.generationSize
+                        val segment = if (canWriteWindowsByFrame) {
+                            val playbackFrame = playbackPositionMsProvider()
+                                ?.let { msToFrame(it) }
+                                ?.coerceIn(startFrame, endFrame)
+                                ?: startFrame + processedWindowCount * config.generationSize
+                            SourceSeparationSegmentScheduler
+                                .prioritize(currentSegmentPlan, playbackFrame)
+                                .firstOrNull { it.segment.index !in processedSegments }
+                                ?.segment
+                        } else {
+                            null
+                        } ?: currentSegmentPlan.segments.firstOrNull { it.index !in processedSegments }
+                            ?: break
+                        val windowIndex = segment.index
+                        val generationStartFrame = segment.playbackStartFrame
                         val remainingFrames = endFrame - generationStartFrame
                         val writeFrames = minOf(config.generationSize, remainingFrames)
-                        val segment = segmentPlan.segments[windowIndex]
                         currentSegmentPlan = currentSegmentPlan.withSegmentState(
                             segmentIndex = segment.index,
                             state = SourceSeparationSegmentState.Running,
@@ -147,7 +165,7 @@ class MdxRangeSeparator(
                         onSegmentStateChanged(segment.index, SourceSeparationSegmentState.Running)
                         onProgress(
                             MdxRangeProgress(
-                                windowIndex,
+                                processedWindowCount,
                                 windowCount,
                                 stage = "Preparing window ${windowIndex + 1}/${windowCount}",
                                 sourceDecodeDiagnostics = sourceInput.diagnostics,
@@ -196,13 +214,21 @@ class MdxRangeSeparator(
                             )
                         }
                         measureElapsed(timing, "WAV write") {
-                            vocalsWriter.writePcm16(vocalsPcm)
-                            instrumentalWriter.writePcm16(instrumentalPcm)
+                            val writeFrameOffset = generationStartFrame - startFrame
+                            if (declaredOutputDataSizeBytes != null) {
+                                vocalsWriter.writePcm16AtFrame(writeFrameOffset, vocalsPcm)
+                                instrumentalWriter.writePcm16AtFrame(writeFrameOffset, instrumentalPcm)
+                            } else {
+                                vocalsWriter.writePcm16(vocalsPcm)
+                                instrumentalWriter.writePcm16(instrumentalPcm)
+                            }
                             if (segmentOutputDir != null) {
                                 writeSegmentWav(segmentOutputDir, segment.vocalsPath, vocalsPcm)
                                 writeSegmentWav(segmentOutputDir, segment.instrumentalPath, instrumentalPcm)
                             }
                         }
+                        processedSegments += segment.index
+                        processedWindowCount += 1
                         currentSegmentPlan = currentSegmentPlan.withSegmentState(
                             segmentIndex = segment.index,
                             state = SourceSeparationSegmentState.Ready,
@@ -210,7 +236,7 @@ class MdxRangeSeparator(
                         onSegmentStateChanged(segment.index, SourceSeparationSegmentState.Ready)
                         onProgress(
                             MdxRangeProgress(
-                                windowIndex + 1,
+                                processedWindowCount,
                                 windowCount,
                                 stage = "Processed window ${windowIndex + 1}/${windowCount}",
                                 sourceDecodeDiagnostics = sourceInput.diagnostics,
