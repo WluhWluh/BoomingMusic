@@ -631,6 +631,22 @@ First production prototype validation:
 - Whitelisted window-decode inputs now run a lightweight first-window preflight before committing to the window path. If the preflight fails, separation falls back to the full-song decode path and exposes the preflight failure as the fallback reason.
 - Completed cache manifests now use an encoded-audio-sample fingerprint instead of the temporary window-profile identity or decoded PCM hash. The fingerprint is derived from the selected audio track's encoded samples and decoder-relevant track fields, so cover art, lyrics, and normal tag edits should not invalidate separated caches.
 
+MP3 no-gapless-metadata experiment preparation:
+
+- Some local 44.1 kHz MP3 files report neither encoder delay nor encoder padding metadata, so the current production window-decode whitelist intentionally falls back to full-song decode for them.
+- Before changing the production route, add a debug-only batch mode for `audio/mpeg` 44.1 kHz files with missing delay/padding metadata.
+- The experiment reuses the existing local-window probe data and evaluates `frameDeficit + short file-level calibration + 384-source-frame quantization` without trusting metadata correction.
+- Per-file reports now include an `MP3 no-gapless-metadata calibration gate` with applicability, correction spread, prediction error, holdout bit-perfect count, and a pass/promising/borderline/fallback decision.
+- The debug batch CSV now includes the same gate fields so a directory of user-provided MP3 samples can be scanned quickly after running on the S25.
+
+MP3 no-gapless-metadata experiment result:
+
+- The first S25 sample set at `test/mp3_no_gapless_metadata` covered 7 local 44.1 kHz MP3 files with both encoder delay and encoder padding metadata unavailable.
+- All 7 files passed the new gate: `mp3NoGaplessApplicable=true`, `mp3NoGaplessDecision=pass`, correction `0 frames`, correction spread `0 frames`, worst prediction error `1 frame`, and quantized calibrated holdouts `7/7` bit-perfect at zero offset.
+- Plain calibrated direct placement was not sufficient on the holdouts. Every file showed a stable residual `1 frame` best offset before quantization.
+- The 384-source-frame quantized calibrated placement removed that residual on every holdout in this sample set.
+- This supports a conservative production prototype for no-gapless-metadata 44.1 kHz MP3, but only behind a lightweight per-file calibration gate keyed by the encoded-audio-sample fingerprint. Files that fail calibration or cannot be calibrated should still fall back to full-song decode.
+
 Next hardening steps:
 
 - Consider mid-run fallback cleanup for the rarer case where preflight succeeds but a later window decode fails.
