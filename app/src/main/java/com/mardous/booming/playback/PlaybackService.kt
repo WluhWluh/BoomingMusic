@@ -1240,11 +1240,12 @@ class PlaybackService :
                         )
                         val wasProcessing = sourceSeparationPlaybackIsProcessing
                         sourceSeparationPlaybackIsProcessing = false
-                        sourceSeparationPlaybackSession = it.copy(
+                        val updatedSession = it.copy(
                             requiresReadinessGate = status.manifest.state == SourceSeparationCacheState.Running,
                         )
+                        sourceSeparationPlaybackSession = updatedSession
                         if (wasProcessing) {
-                            sourceSeparationMixProcessor.seekTo(player.currentPosition)
+                            realignSourceSeparationPlaybackAfterProcessing(updatedSession)
                         }
                         if (sourceSeparationPlaybackResumeWhenReady) {
                             sourceSeparationPlaybackResumeWhenReady = false
@@ -1362,6 +1363,7 @@ class PlaybackService :
 
         sourceSeparationMixProcessor.enable(
             vocalsFile = vocalsFile,
+            instrumentalFile = if (isRunningCache) instrumentalFile else null,
             positionMs = positionMs,
             initialBlend = sourceSeparationMixProcessor.blend,
             inputMode = if (isRunningCache) InputMode.OriginalSource else InputMode.InstrumentalStem,
@@ -1372,6 +1374,7 @@ class PlaybackService :
             originalMediaItem = originalMediaItem,
             vocalsFile = vocalsFile,
             instrumentalFile = instrumentalFile,
+            inputMode = if (isRunningCache) InputMode.OriginalSource else InputMode.InstrumentalStem,
             requiresReadinessGate = isRunningCache,
         )
         traceSourceSeparationPlayback(
@@ -1398,6 +1401,31 @@ class PlaybackService :
         sourceSeparationMixProcessor.setBlend(blend)
         broadcastSourceSeparationPlaybackChanged()
         return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+    }
+
+    private fun realignSourceSeparationPlaybackAfterProcessing(session: SourceSeparationPlaybackSession) {
+        val positionMs = player.currentPosition.coerceAtLeast(0)
+        traceSourceSeparationPlayback(
+            "playback.realignAfterProcessing",
+            "songId=${session.songId} position=$positionMs"
+        )
+        sourceSeparationMixProcessor.enable(
+            vocalsFile = session.vocalsFile,
+            instrumentalFile = if (session.inputMode == InputMode.OriginalSource) {
+                session.instrumentalFile
+            } else {
+                null
+            },
+            positionMs = positionMs,
+            initialBlend = sourceSeparationMixProcessor.blend,
+            inputMode = session.inputMode,
+        )
+        val index = player.currentMediaItemIndex
+        if (index != C.INDEX_UNSET) {
+            player.seekTo(index, positionMs)
+        } else {
+            player.seekTo(positionMs)
+        }
     }
 
     private fun clearSourceSeparationPlayback(
@@ -2164,6 +2192,7 @@ private data class SourceSeparationPlaybackSession(
     val originalMediaItem: MediaItem,
     val vocalsFile: File,
     val instrumentalFile: File,
+    val inputMode: InputMode,
     val requiresReadinessGate: Boolean,
 )
 
