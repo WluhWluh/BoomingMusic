@@ -30,6 +30,22 @@ class SourceSeparationEngine(
         return cache.readCompletedForSong(song, modelVariant)
     }
 
+    fun hasCacheForSong(
+        song: Song,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): Boolean {
+        require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
+        return cache.hasEntry(song, modelVariant)
+    }
+
+    fun deleteCacheForSong(
+        song: Song,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): Boolean {
+        require(song != Song.emptySong) { "Cannot delete separated cache for an empty song." }
+        return cache.deleteEntry(song, modelVariant)
+    }
+
     fun playableCacheForSong(
         song: Song,
         playbackPositionMs: Long,

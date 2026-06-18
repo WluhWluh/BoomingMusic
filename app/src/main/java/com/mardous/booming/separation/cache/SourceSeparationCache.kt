@@ -310,6 +310,14 @@ class SourceSeparationCache(
         return readManifest(entryDir(song, modelVariant, pipelineVersion))
     }
 
+    fun hasEntry(
+        song: Song,
+        modelVariant: MdxModelVariant,
+        pipelineVersion: Int = PIPELINE_VERSION,
+    ): Boolean {
+        return entryDir(song, modelVariant, pipelineVersion).exists()
+    }
+
     fun readCompletedForAudio(
         song: Song,
         audioIdentity: SourceAudioIdentity,
@@ -404,6 +412,15 @@ class SourceSeparationCache(
             modelVariant = manifest.audioIdentity.modelVariant,
             pipelineVersion = manifest.pipelineVersion,
         )
+        return !dir.exists() || dir.deleteRecursively()
+    }
+
+    fun deleteEntry(
+        song: Song,
+        modelVariant: MdxModelVariant,
+        pipelineVersion: Int = PIPELINE_VERSION,
+    ): Boolean {
+        val dir = entryDir(song, modelVariant, pipelineVersion)
         return !dir.exists() || dir.deleteRecursively()
     }
 

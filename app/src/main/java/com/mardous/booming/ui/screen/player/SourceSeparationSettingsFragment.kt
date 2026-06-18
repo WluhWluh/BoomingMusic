@@ -106,6 +106,10 @@ private fun SourceSeparationSettingsSheet(
     val blendMode by viewModel.sourceSeparationBlendModeFlow.collectAsState()
     val rememberPerSong by viewModel.sourceSeparationRememberPerSongFlow.collectAsState()
     val separationState by viewModel.sourceSeparationStateFlow.collectAsState()
+    val currentSongCacheAvailable by viewModel
+        .currentSourceSeparationCacheAvailableFlow
+        .collectAsState()
+    val pendingAction by viewModel.sourceSeparationPendingActionFlow.collectAsState()
     val windowDecodeExperimentState by viewModel
         .sourceSeparationWindowDecodeExperimentStateFlow
         .collectAsState()
@@ -293,11 +297,20 @@ private fun SourceSeparationSettingsSheet(
                                 OutlinedButton(
                                     onClick = {
                                         hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
-                                        viewModel.cancelSourceSeparation()
+                                        viewModel.pauseSourceSeparation()
                                     },
+                                    enabled = pendingAction == null,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(stringResource(R.string.action_cancel))
+                                    Text(
+                                        text = if (pendingAction == SourceSeparationPendingAction.Pause) {
+                                            stringResource(
+                                                R.string.source_separation_wait_current_window
+                                            )
+                                        } else {
+                                            stringResource(R.string.action_pause)
+                                        }
+                                    )
                                 }
                             }
 
@@ -312,6 +325,37 @@ private fun SourceSeparationSettingsSheet(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(stringResource(R.string.source_separation_start_current_song))
+                                }
+                            }
+
+                            AnimatedVisibility(
+                                visible = currentSongCacheAvailable
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
+                                        viewModel.deleteSourceSeparationCacheForCurrentSong()
+                                    },
+                                    enabled = pendingAction == null,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_delete_24dp),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = if (pendingAction == SourceSeparationPendingAction.DeleteCache) {
+                                            stringResource(
+                                                R.string.source_separation_wait_current_window
+                                            )
+                                        } else {
+                                            stringResource(
+                                                R.string.source_separation_clear_current_cache
+                                            )
+                                        },
+                                        modifier = Modifier.padding(start = 8.dp)
+                                    )
                                 }
                             }
 
