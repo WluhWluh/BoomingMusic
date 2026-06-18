@@ -1377,6 +1377,8 @@ data class AudioWindowDecodeExperimentResult(
             appendLine()
             appendMp3AnchorCalibration()
             appendLine()
+            appendMp3NoGaplessMetadataGate()
+            appendLine()
             appendLine("Candidate family summary:")
             AudioWindowDecodeCandidateFamily.entries.forEach { family ->
                 val summary = familySummary(family)
@@ -1416,6 +1418,106 @@ data class AudioWindowDecodeExperimentResult(
             appendLine("Stable-region summaries compare only the segment body that would be written after trimming model context.")
             appendLine("MP3 anchor calibration is diagnostic only; production must use a deterministic correction profile or fall back to full-song decode.")
         }
+    }
+
+    fun mp3NoGaplessMetadataGate(): AudioWindowDecodeMp3NoGaplessMetadataGate {
+        val metadata = probes.firstNotNullOfOrNull { it.trackMetadata }
+            ?: return AudioWindowDecodeMp3NoGaplessMetadataGate.notApplicable("No track metadata was available.")
+        if (metadata.mimeType != MP3_MIME_TYPE) {
+            return AudioWindowDecodeMp3NoGaplessMetadataGate.notApplicable(
+                "MIME type is ${metadata.mimeType}, not $MP3_MIME_TYPE.",
+            )
+        }
+        if (sourceSampleRate != MP3_NO_GAPLESS_SAMPLE_RATE) {
+            return AudioWindowDecodeMp3NoGaplessMetadataGate.notApplicable(
+                "Sample rate is $sourceSampleRate Hz, not $MP3_NO_GAPLESS_SAMPLE_RATE Hz.",
+            )
+        }
+        if (metadata.encoderDelayFrames != null || metadata.encoderPaddingFrames != null) {
+            return AudioWindowDecodeMp3NoGaplessMetadataGate.notApplicable(
+                "Encoder delay/padding metadata is present.",
+            )
+        }
+
+        val summary = mp3AnchorCalibrationSummary()
+            ?: return AudioWindowDecodeMp3NoGaplessMetadataGate(
+                applicable = true,
+                decision = "fallback",
+                reason = "No MP3 anchor calibration summary could be derived.",
+                mimeType = metadata.mimeType,
+                sampleRate = sourceSampleRate,
+                correctionFrames = null,
+                correctionSpreadFrames = null,
+                worstPredictionErrorFrames = null,
+                holdoutBitPerfectCount = null,
+                holdoutCount = null,
+                worstHoldoutStableDirectMaxError = null,
+                worstHoldoutStableBestOffsetFrames = null,
+            )
+        val holdoutRows = summary.probeRows.filterNot { it.isCalibrationProbe }
+        val holdoutDirectComparisons = holdoutRows.mapNotNull {
+            it.quantizedCalibratedStableDirect
+        }
+        val holdoutBestOffsetComparisons = holdoutRows.mapNotNull {
+            it.quantizedCalibratedStableBestOffset
+        }
+        val holdoutBitPerfectCount = holdoutDirectComparisons.count {
+            it.maxAbsoluteError == 0
+        }
+        val worstHoldoutDirect = holdoutDirectComparisons.maxByOrNull {
+            it.meanAbsoluteError
+        }
+        val worstHoldoutBestOffset = holdoutBestOffsetComparisons.maxByOrNull {
+            abs(it.offsetFrames)
+        }
+        val holdoutCount = holdoutRows.size
+        val reason: String
+        val decision: String
+        when {
+            holdoutCount == 0 -> {
+                decision = "fallback"
+                reason = "No holdout probes were available."
+            }
+            holdoutDirectComparisons.size != holdoutCount -> {
+                decision = "fallback"
+                reason = "Some holdout probes did not produce quantized calibrated comparisons."
+            }
+            holdoutBitPerfectCount == holdoutDirectComparisons.size -> {
+                decision = "pass"
+                reason = "All holdout quantized calibrated windows are bit-perfect at zero offset."
+            }
+            summary.beginningSegmentSpreadFrames <= 1 &&
+                    summary.beginningPredictionWorstAbsErrorFrames <= 1 &&
+                    (worstHoldoutBestOffset?.let { abs(it.offsetFrames) <= 1 } == true) -> {
+                decision = "promising"
+                reason = "Short calibration predicts anchors within 1 frame and holdout best offsets stay within 1 frame."
+            }
+            summary.beginningSegmentSpreadFrames <= 4 &&
+                    summary.beginningPredictionWorstAbsErrorFrames <= 4 &&
+                    (worstHoldoutBestOffset?.let { abs(it.offsetFrames) <= 4 } == true) -> {
+                decision = "borderline"
+                reason = "Short calibration is stable within 4 frames, but not bit-perfect."
+            }
+            else -> {
+                decision = "fallback"
+                reason = "Correction or holdout offsets are not stable enough for production."
+            }
+        }
+
+        return AudioWindowDecodeMp3NoGaplessMetadataGate(
+            applicable = true,
+            decision = decision,
+            reason = reason,
+            mimeType = metadata.mimeType,
+            sampleRate = sourceSampleRate,
+            correctionFrames = summary.beginningSegmentCorrectionFrames,
+            correctionSpreadFrames = summary.beginningSegmentSpreadFrames,
+            worstPredictionErrorFrames = summary.beginningPredictionWorstAbsErrorFrames,
+            holdoutBitPerfectCount = holdoutBitPerfectCount,
+            holdoutCount = holdoutCount,
+            worstHoldoutStableDirectMaxError = worstHoldoutDirect?.maxAbsoluteError,
+            worstHoldoutStableBestOffsetFrames = worstHoldoutBestOffset?.offsetFrames,
+        )
     }
 
     fun familySummary(
@@ -1534,6 +1636,26 @@ data class AudioWindowDecodeExperimentResult(
                         "$predicted $quantized $error $quantizedError"
             )
         }
+    }
+
+    private fun StringBuilder.appendMp3NoGaplessMetadataGate() {
+        val gate = mp3NoGaplessMetadataGate()
+        appendLine("MP3 no-gapless-metadata calibration gate:")
+        appendLine("  Applicable: ${if (gate.applicable) "yes" else "no"}")
+        appendLine("  MIME type: ${gate.mimeType ?: "unavailable"}")
+        appendLine("  Sample rate: ${gate.sampleRate?.let { "$it Hz" } ?: "unavailable"}")
+        appendLine("  Decision: ${gate.decision}")
+        appendLine("  Reason: ${gate.reason}")
+        appendLine("  Candidate: frameDeficit + short calibration, rounded up to $MP3_FINE_QUANTUM_FRAMES source frames")
+        appendLine("  Correction: ${gate.correctionFrames.toNullableFramesReport()}")
+        appendLine("  Correction spread: ${gate.correctionSpreadFrames.toNullableFramesReport()}")
+        appendLine("  Worst prediction error: ${gate.worstPredictionErrorFrames.toNullableFramesReport()}")
+        appendLine(
+            "  Holdout bit-perfect: ${gate.holdoutBitPerfectCount?.toString() ?: "unavailable"}/" +
+                    (gate.holdoutCount?.toString() ?: "unavailable")
+        )
+        appendLine("  Worst holdout stable direct max error: ${gate.worstHoldoutStableDirectMaxError ?: "unavailable"}")
+        appendLine("  Worst holdout stable best offset: ${gate.worstHoldoutStableBestOffsetFrames.toNullableFramesReport()}")
     }
 
     private fun mp3AnchorCalibrationSummary(): Mp3AnchorCalibrationSummary? {
@@ -1676,8 +1798,43 @@ data class AudioWindowDecodeExperimentResult(
 
     private companion object {
         const val MP3_MIME_TYPE = "audio/mpeg"
+        const val MP3_NO_GAPLESS_SAMPLE_RATE = 44_100
         const val MP3_FRAME_SIZE_FRAMES = 1152
         const val MICROS_PER_SECOND = 1_000_000L
+    }
+}
+
+data class AudioWindowDecodeMp3NoGaplessMetadataGate(
+    val applicable: Boolean,
+    val decision: String,
+    val reason: String,
+    val mimeType: String?,
+    val sampleRate: Int?,
+    val correctionFrames: Int?,
+    val correctionSpreadFrames: Int?,
+    val worstPredictionErrorFrames: Int?,
+    val holdoutBitPerfectCount: Int?,
+    val holdoutCount: Int?,
+    val worstHoldoutStableDirectMaxError: Int?,
+    val worstHoldoutStableBestOffsetFrames: Int?,
+) {
+    companion object {
+        fun notApplicable(reason: String): AudioWindowDecodeMp3NoGaplessMetadataGate {
+            return AudioWindowDecodeMp3NoGaplessMetadataGate(
+                applicable = false,
+                decision = "skip",
+                reason = reason,
+                mimeType = null,
+                sampleRate = null,
+                correctionFrames = null,
+                correctionSpreadFrames = null,
+                worstPredictionErrorFrames = null,
+                holdoutBitPerfectCount = null,
+                holdoutCount = null,
+                worstHoldoutStableDirectMaxError = null,
+                worstHoldoutStableBestOffsetFrames = null,
+            )
+        }
     }
 }
 
