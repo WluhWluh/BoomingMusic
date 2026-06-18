@@ -595,6 +595,34 @@ Planned MP3 calibration round:
 - Cache the correction by audio fingerprint only when the spread is tight enough to trust.
 - Keep the existing non-MP3 findings as a fallback-oriented reference instead of trying to force one universal rule across all codecs.
 
+Round 8 follow-up findings and Round 9 experiment plan:
+
+- MP3 beginning-segment calibration is close but not yet production-safe by itself. One tested MP3 stayed within 1 source frame, while another stayed within 4 source frames but still had 1-3 frame residual errors on holdout probes.
+- The holdout rows suggest that the search-verified MP3 placement often lands on a 384-source-frame grid after applying file-level calibration. Round 9 therefore adds a diagnostic `MP3 quantized calibrated` candidate that applies the beginning correction and then rounds placement up to the next 384-frame boundary.
+- The quantized MP3 candidate is diagnostic only. It must prove bit-perfect zero-offset holdout behavior across more than the two current MP3 files before it can become a production profile.
+- 22.05 kHz AAC remains the weakest non-MP3 sample. Some probes are bit-perfect, while others show large direct mismatches that look related to AAC priming, low sample-rate frame math, and local-window tail truncation.
+- Round 9 adds low-sample-rate AAC tail-extension probes. For `audio/mp4a-latm` at 24 kHz or lower, the experiment decodes one encoder-delay/AAC-frame of extra tail audio and then evaluates timestamp and metadata-delay song-timeline placement against the original requested window.
+- If the AAC tail-extension candidate improves only a subset of probes, the production path should keep 22.05 kHz AAC on full-song decode fallback until a deterministic profile is proven.
+
+FFmpeg batch and MP3 adaptive findings:
+
+- A debug-only batch runner now tests a directory of decoder samples on-device and writes per-file reports plus a CSV summary. This should remain debug-only unless the experiment harness is deliberately productized later.
+- The S25 batch over `test/decode_cases/luv_in_b_ffmpeg` completed 33 of 43 files. The 10 failures were platform decoder support limits, mainly ALAC, unusual WAV, and unsupported WMA variants, rather than window-placement algorithm failures.
+- WAV and Ogg Vorbis are the strongest production candidates. The preroll song-timeline strategy was bit-perfect at zero offset for every supported batch sample in those families.
+- MP3 needs a format-specific path. The MP3-only adaptive batch completed all 5 supported MP3 cases: 22.05 kHz and 44.1 kHz files were strong, while 48 kHz and 8 kHz still showed residual mismatch.
+- 44.1 kHz MP3 should enter the first production prototype with short file-level calibration and quantized calibrated placement. Other MP3 sample rates should keep the full-song fallback until more evidence closes the residual offset problem.
+- AAC/M4A, Opus, FLAC, WMA, and unsupported platform-decoder cases should remain on the full-song fallback for now. Some samples are promising, but the batch results are not uniform enough for a safe first production enablement.
+- Window decode is the right low-latency direction, but it should be a selective optimization with per-format gates, per-file validation where needed, and automatic fallback to full-song decode. It should not replace the full-song decoder universally.
+
+First production window-decode prototype:
+
+- Enable window decode only for WAV, Ogg Vorbis, and 44.1 kHz MP3.
+- Use preroll song-timeline placement for WAV and Ogg Vorbis.
+- Use MP3 file-level calibration plus quantized calibrated placement for 44.1 kHz MP3.
+- If metadata, calibration, or local decode validation fails, silently fall back to the current full-song decode path.
+- Keep the output contract identical to the current segment writer: stable intervals must land on exact song-timeline frames, and completed WAV stems remain the source of truth for playback.
+- Keep the debug batch runner available for regression tests before expanding the whitelist to more codecs or sample rates.
+
 ### Phase 5B: Segment-Based Processing
 
 Status: in progress
