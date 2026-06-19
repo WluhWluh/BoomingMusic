@@ -5,7 +5,9 @@ import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
+import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import java.io.File
+import java.io.Closeable
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -44,8 +46,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private var stemChannelCount = CHANNEL_COUNT_STEREO
 
     private val lock = Any()
-    private var vocalsInput: RandomAccessFile? = null
-    private var instrumentalInput: RandomAccessFile? = null
+    private var vocalsInput: StemPcmInput? = null
+    private var instrumentalInput: StemPcmInput? = null
     private var scratch = ByteArray(0)
     private var instrumentalScratch = ByteArray(0)
     private val debugSessionSeq = AtomicLong()
@@ -81,8 +83,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             this.inputMode = inputMode
             this.stemSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
             this.stemChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
-            vocalsInput = RandomAccessFile(vocalsFile, "r")
-            instrumentalInput = instrumentalFile?.let { RandomAccessFile(it, "r") }
+            vocalsInput = openStemInput(vocalsFile)
+            instrumentalInput = instrumentalFile?.let(::openStemInput)
             active = true
             seekToLocked(positionMs)
             traceDebug(
@@ -246,7 +248,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 if (scratch.size < byteCount) {
                     scratch = ByteArray(byteCount)
                 }
-                input.read(scratch, 0, byteCount).coerceAtLeast(0)
+                input.read(scratch, byteCount).coerceAtLeast(0)
             }
         }
     }
@@ -260,7 +262,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 if (instrumentalScratch.size < byteCount) {
                     instrumentalScratch = ByteArray(byteCount)
                 }
-                input.read(instrumentalScratch, 0, byteCount).coerceAtLeast(0)
+                input.read(instrumentalScratch, byteCount).coerceAtLeast(0)
             }
         }
     }
@@ -306,8 +308,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             ?.times(BYTES_PER_SAMPLE)
             ?: DEFAULT_FRAME_SIZE
         val frame = (positionMs.coerceAtLeast(0) * sampleRate / MILLIS_PER_SECOND.toFloat()).roundToLong()
-        vocalsInput?.seek(WAV_HEADER_SIZE + frame * frameSize)
-        instrumentalInput?.seek(WAV_HEADER_SIZE + frame * frameSize)
+        val bytePosition = frame * frameSize
+        vocalsInput?.seekToPcmByte(bytePosition)
+        instrumentalInput?.seekToPcmByte(bytePosition)
     }
 
     private fun closeLocked() {
@@ -378,6 +381,14 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         debugTraceSink?.invoke("mix.$event | $detail")
     }
 
+    private fun openStemInput(file: File): StemPcmInput {
+        return if (file.extension.equals("flac", ignoreCase = true)) {
+            FlacStemPcmInput(file)
+        } else {
+            WavStemPcmInput(file)
+        }
+    }
+
     companion object {
         const val CENTER_BLEND = 0.5f
 
@@ -395,5 +406,48 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     enum class InputMode {
         InstrumentalStem,
         OriginalSource,
+    }
+
+    private interface StemPcmInput : Closeable {
+        fun read(buffer: ByteArray, byteCount: Int): Int
+        fun seekToPcmByte(bytePosition: Long)
+    }
+
+    private class WavStemPcmInput(file: File) : StemPcmInput {
+        private val input = RandomAccessFile(file, "r")
+
+        override fun read(buffer: ByteArray, byteCount: Int): Int {
+            return input.read(buffer, 0, byteCount)
+        }
+
+        override fun seekToPcmByte(bytePosition: Long) {
+            input.seek(WAV_HEADER_SIZE + bytePosition.coerceAtLeast(0L))
+        }
+
+        override fun close() {
+            input.close()
+        }
+    }
+
+    private class FlacStemPcmInput(file: File) : StemPcmInput {
+        private val pcm = Pcm16StereoFlacEncoder.decodeFlacFile(file).pcm16
+        private var position = 0
+
+        override fun read(buffer: ByteArray, byteCount: Int): Int {
+            if (position >= pcm.size) return -1
+            val count = minOf(byteCount, pcm.size - position)
+            pcm.copyInto(buffer, destinationOffset = 0, startIndex = position, endIndex = position + count)
+            position += count
+            return count
+        }
+
+        override fun seekToPcmByte(bytePosition: Long) {
+            position = bytePosition
+                .coerceAtLeast(0L)
+                .coerceAtMost(pcm.size.toLong())
+                .toInt()
+        }
+
+        override fun close() = Unit
     }
 }
