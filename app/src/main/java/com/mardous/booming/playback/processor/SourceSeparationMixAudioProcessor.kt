@@ -383,7 +383,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
     private fun openStemInput(file: File): StemPcmInput {
         return if (file.extension.equals("flac", ignoreCase = true)) {
-            FlacStemPcmInput(file)
+            FlacStemPcmInput(file) { detail ->
+                traceDebug("flac", detail)
+            }
         } else {
             WavStemPcmInput(file)
         }
@@ -429,11 +431,25 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         }
     }
 
-    private class FlacStemPcmInput(file: File) : StemPcmInput {
-        private val pcm = Pcm16StereoFlacEncoder.decodeFlacFile(file).pcm16
+    private class FlacStemPcmInput(
+        file: File,
+        traceSink: ((String) -> Unit)?,
+    ) : StemPcmInput {
+        private val reader = Pcm16StereoFlacEncoder.openIndexedPcmReader(file, traceSink)
+        private val fallbackPcm = if (reader == null) {
+            traceSink?.invoke("fallbackWholeFileDecode file=${file.name}")
+            Pcm16StereoFlacEncoder.decodeFlacFile(file).pcm16
+        } else {
+            null
+        }
         private var position = 0
 
         override fun read(buffer: ByteArray, byteCount: Int): Int {
+            val activeReader = reader
+            if (activeReader != null) {
+                return activeReader.read(buffer, byteCount)
+            }
+            val pcm = fallbackPcm ?: return -1
             if (position >= pcm.size) return -1
             val count = minOf(byteCount, pcm.size - position)
             pcm.copyInto(buffer, destinationOffset = 0, startIndex = position, endIndex = position + count)
@@ -442,12 +458,20 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         }
 
         override fun seekToPcmByte(bytePosition: Long) {
+            val activeReader = reader
+            if (activeReader != null) {
+                activeReader.seekToPcmByte(bytePosition)
+                return
+            }
+            val pcm = fallbackPcm ?: return
             position = bytePosition
                 .coerceAtLeast(0L)
                 .coerceAtMost(pcm.size.toLong())
                 .toInt()
         }
 
-        override fun close() = Unit
+        override fun close() {
+            reader?.close()
+        }
     }
 }

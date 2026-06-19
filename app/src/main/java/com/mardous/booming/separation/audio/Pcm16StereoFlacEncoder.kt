@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.audio
 
 import java.io.ByteArrayOutputStream
+import java.io.Closeable
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
@@ -14,6 +15,7 @@ object Pcm16StereoFlacEncoder {
         flacFile: File,
         expectedSampleRate: Int,
         expectedFrameCount: Int,
+        writeFrameIndex: Boolean = true,
     ): Pcm16StereoFlacEncodeResult {
         require(expectedSampleRate > 0) { "Expected sample rate must be positive." }
         require(expectedFrameCount >= 0) { "Expected frame count must not be negative." }
@@ -33,6 +35,7 @@ object Pcm16StereoFlacEncoder {
         if (tempFile.exists()) {
             tempFile.delete()
         }
+        var frameIndex: Pcm16StereoFlacFrameIndex? = null
         try {
             tempFile.outputStream().buffered().use { output ->
                 output.write(FLAC_MAGIC)
@@ -43,10 +46,13 @@ object Pcm16StereoFlacEncoder {
                 )
                 wavFile.inputStream().buffered().use { input ->
                     skipFully(input, wavInfo.dataOffset)
-                    encodeFrames(
+                    frameIndex = encodeFrames(
                         input = input,
                         output = output,
                         frameCount = wavInfo.frameCount,
+                        sampleRate = wavInfo.sampleRate,
+                        pcmMd5Hex = pcmMd5.toHexString(),
+                        firstFrameByteOffset = FLAC_MAGIC.size + STREAMINFO_METADATA_HEADER.size + STREAMINFO_LENGTH,
                     )
                 }
             }
@@ -58,6 +64,10 @@ object Pcm16StereoFlacEncoder {
                 tempFile.copyTo(flacFile, overwrite = true)
                 tempFile.delete()
             }
+            val finalIndex = frameIndex?.copy(flacBytes = flacFile.length())
+            if (writeFrameIndex && finalIndex != null) {
+                writeFrameIndexFile(finalIndex, frameIndexFileFor(flacFile))
+            }
 
             return Pcm16StereoFlacEncodeResult(
                 sampleRate = wavInfo.sampleRate,
@@ -66,9 +76,12 @@ object Pcm16StereoFlacEncoder {
                 frameCount = wavInfo.frameCount,
                 pcmMd5Hex = pcmMd5.toHexString(),
                 outputBytes = flacFile.length(),
+                frameIndexEntries = finalIndex?.frames?.size ?: 0,
+                frameIndexPath = frameIndexFileFor(flacFile).takeIf { it.isFile }?.absolutePath,
             )
         } catch (error: Throwable) {
             tempFile.delete()
+            frameIndexFileFor(flacFile).delete()
             throw error
         }
     }
@@ -191,16 +204,69 @@ object Pcm16StereoFlacEncoder {
         }
     }
 
+    fun frameIndexFileFor(flacFile: File): File {
+        return File(flacFile.absolutePath + FRAME_INDEX_EXTENSION)
+    }
+
+    fun openIndexedPcmReader(
+        flacFile: File,
+        traceSink: ((String) -> Unit)? = null,
+    ): Pcm16StereoFlacPcmReader? {
+        val indexFile = frameIndexFileFor(flacFile)
+        if (!indexFile.isFile) {
+            traceSink?.invoke("indexedOpen skipped reason=missingIndex file=${flacFile.name}")
+            return null
+        }
+        return runCatching {
+            val index = readFrameIndexFile(indexFile)
+            require(index.flacBytes == flacFile.length()) {
+                "FLAC index byte length does not match file length."
+            }
+            val streamInfo = readStreamInfo(flacFile)
+            require(streamInfo.sampleRate == index.sampleRate) {
+                "FLAC index sample rate does not match STREAMINFO."
+            }
+            require(streamInfo.channelCount == index.channelCount) {
+                "FLAC index channel count does not match STREAMINFO."
+            }
+            require(streamInfo.bitsPerSample == index.bitsPerSample) {
+                "FLAC index bit depth does not match STREAMINFO."
+            }
+            require(streamInfo.totalSamples == index.frameCount.toLong()) {
+                "FLAC index frame count does not match STREAMINFO."
+            }
+            require(streamInfo.pcmMd5Hex == index.pcmMd5Hex) {
+                "FLAC index PCM MD5 does not match STREAMINFO."
+            }
+            IndexedFlacPcmReader(
+                flacFile = flacFile,
+                index = index,
+                traceSink = traceSink,
+            )
+        }.getOrElse { error ->
+            traceSink?.invoke(
+                "indexedOpen failed file=${flacFile.name} error=${error.message ?: error::class.java.name}"
+            )
+            null
+        }
+    }
+
     private fun encodeFrames(
         input: InputStream,
         output: OutputStream,
         frameCount: Int,
-    ) {
+        sampleRate: Int,
+        pcmMd5Hex: String,
+        firstFrameByteOffset: Int,
+    ): Pcm16StereoFlacFrameIndex {
         val pcmBuffer = ByteArray(MAX_BLOCK_SIZE * BYTES_PER_FRAME)
         val left = IntArray(MAX_BLOCK_SIZE)
         val right = IntArray(MAX_BLOCK_SIZE)
+        val frameIndexEntries = ArrayList<Pcm16StereoFlacFrameIndexEntry>()
         var remainingFrames = frameCount
         var frameNumber = 0L
+        var pcmStartFrame = 0L
+        var outputByteOffset = firstFrameByteOffset.toLong()
 
         while (remainingFrames > 0) {
             val blockFrames = min(MAX_BLOCK_SIZE, remainingFrames)
@@ -211,17 +277,35 @@ object Pcm16StereoFlacEncoder {
                 left[frame] = pcmBuffer.readLittleEndianShort(offset)
                 right[frame] = pcmBuffer.readLittleEndianShort(offset + BYTES_PER_SAMPLE)
             }
-            output.write(
-                encodeFrame(
-                    frameNumber = frameNumber,
-                    blockFrames = blockFrames,
-                    left = left,
-                    right = right,
-                )
+            val encodedFrame = encodeFrame(
+                frameNumber = frameNumber,
+                blockFrames = blockFrames,
+                left = left,
+                right = right,
+            )
+            output.write(encodedFrame)
+            frameIndexEntries += Pcm16StereoFlacFrameIndexEntry(
+                frameNumber = frameNumber,
+                startPcmFrame = pcmStartFrame,
+                pcmFrameCount = blockFrames,
+                byteOffset = outputByteOffset,
+                byteCount = encodedFrame.size,
             )
             frameNumber += 1L
+            pcmStartFrame += blockFrames
+            outputByteOffset += encodedFrame.size
             remainingFrames -= blockFrames
         }
+        return Pcm16StereoFlacFrameIndex(
+            sampleRate = sampleRate,
+            channelCount = CHANNEL_COUNT_STEREO,
+            bitsPerSample = BITS_PER_SAMPLE,
+            frameCount = frameCount,
+            maxBlockSize = MAX_BLOCK_SIZE,
+            flacBytes = outputByteOffset,
+            pcmMd5Hex = pcmMd5Hex,
+            frames = frameIndexEntries,
+        )
     }
 
     private fun encodeFrame(
@@ -305,6 +389,13 @@ object Pcm16StereoFlacEncoder {
             }
         }
         return streamInfo ?: error("FLAC stream has no STREAMINFO metadata block.")
+    }
+
+    private fun readStreamInfo(flacFile: File): FlacStreamInfo {
+        flacFile.inputStream().buffered().use { input ->
+            require(input.readAscii(FLAC_MAGIC.size) == "fLaC") { "Missing FLAC stream marker." }
+            return readStreamInfo(input)
+        }
     }
 
     private fun readAndDecodeFrame(
@@ -786,6 +877,289 @@ object Pcm16StereoFlacEncoder {
         }
     }
 
+    private fun writeFrameIndexFile(
+        index: Pcm16StereoFlacFrameIndex,
+        indexFile: File,
+    ) {
+        val parent = indexFile.parentFile
+        parent?.mkdirs()
+        val tempFile = File(parent ?: File("."), "${indexFile.name}.tmp")
+        if (tempFile.exists()) {
+            tempFile.delete()
+        }
+        val text = buildString {
+            appendLine(FRAME_INDEX_MAGIC)
+            appendLine("sampleRate=${index.sampleRate}")
+            appendLine("channelCount=${index.channelCount}")
+            appendLine("bitsPerSample=${index.bitsPerSample}")
+            appendLine("frameCount=${index.frameCount}")
+            appendLine("maxBlockSize=${index.maxBlockSize}")
+            appendLine("flacBytes=${index.flacBytes}")
+            appendLine("pcmMd5Hex=${index.pcmMd5Hex}")
+            appendLine("frames=${index.frames.size}")
+            appendLine("frameNumber,startPcmFrame,pcmFrameCount,byteOffset,byteCount")
+            index.frames.forEach { frame ->
+                append(frame.frameNumber)
+                append(',')
+                append(frame.startPcmFrame)
+                append(',')
+                append(frame.pcmFrameCount)
+                append(',')
+                append(frame.byteOffset)
+                append(',')
+                append(frame.byteCount)
+                appendLine()
+            }
+        }
+        try {
+            tempFile.writeText(text, Charsets.UTF_8)
+            if (indexFile.exists() && !indexFile.delete()) {
+                error("Could not replace FLAC frame index: ${indexFile.absolutePath}")
+            }
+            if (!tempFile.renameTo(indexFile)) {
+                tempFile.copyTo(indexFile, overwrite = true)
+                tempFile.delete()
+            }
+        } catch (error: Throwable) {
+            tempFile.delete()
+            throw error
+        }
+    }
+
+    private fun readFrameIndexFile(indexFile: File): Pcm16StereoFlacFrameIndex {
+        val lines = indexFile.readLines(Charsets.UTF_8)
+        require(lines.firstOrNull() == FRAME_INDEX_MAGIC) { "Unsupported FLAC frame index." }
+        var cursor = 1
+        fun readValue(key: String): String {
+            require(cursor < lines.size) { "Missing FLAC frame index field: $key" }
+            val line = lines[cursor++]
+            val prefix = "$key="
+            require(line.startsWith(prefix)) { "Unexpected FLAC frame index field: $line" }
+            return line.removePrefix(prefix)
+        }
+        val sampleRate = readValue("sampleRate").toInt()
+        val channelCount = readValue("channelCount").toInt()
+        val bitsPerSample = readValue("bitsPerSample").toInt()
+        val frameCount = readValue("frameCount").toInt()
+        val maxBlockSize = readValue("maxBlockSize").toInt()
+        val flacBytes = readValue("flacBytes").toLong()
+        val pcmMd5Hex = readValue("pcmMd5Hex")
+        val frameEntryCount = readValue("frames").toInt()
+        require(cursor < lines.size && lines[cursor++] == "frameNumber,startPcmFrame,pcmFrameCount,byteOffset,byteCount") {
+            "Missing FLAC frame index table header."
+        }
+        val frames = ArrayList<Pcm16StereoFlacFrameIndexEntry>(frameEntryCount)
+        while (cursor < lines.size) {
+            val line = lines[cursor++]
+            if (line.isBlank()) continue
+            val parts = line.split(',')
+            require(parts.size == 5) { "Invalid FLAC frame index row: $line" }
+            frames += Pcm16StereoFlacFrameIndexEntry(
+                frameNumber = parts[0].toLong(),
+                startPcmFrame = parts[1].toLong(),
+                pcmFrameCount = parts[2].toInt(),
+                byteOffset = parts[3].toLong(),
+                byteCount = parts[4].toInt(),
+            )
+        }
+        require(frames.size == frameEntryCount) { "FLAC frame index row count mismatch." }
+        require(sampleRate > 0) { "Invalid FLAC frame index sample rate." }
+        require(channelCount == CHANNEL_COUNT_STEREO) { "Only stereo FLAC indexes are supported." }
+        require(bitsPerSample == BITS_PER_SAMPLE) { "Only 16-bit FLAC indexes are supported." }
+        require(frameCount >= 0) { "Invalid FLAC frame index frame count." }
+        require(maxBlockSize == MAX_BLOCK_SIZE) { "Unsupported FLAC frame index block size." }
+        validateFrameIndexEntries(frames, frameCount)
+        return Pcm16StereoFlacFrameIndex(
+            sampleRate = sampleRate,
+            channelCount = channelCount,
+            bitsPerSample = bitsPerSample,
+            frameCount = frameCount,
+            maxBlockSize = maxBlockSize,
+            flacBytes = flacBytes,
+            pcmMd5Hex = pcmMd5Hex,
+            frames = frames,
+        )
+    }
+
+    private fun validateFrameIndexEntries(
+        frames: List<Pcm16StereoFlacFrameIndexEntry>,
+        totalFrameCount: Int,
+    ) {
+        var expectedFrameNumber = 0L
+        var expectedPcmFrame = 0L
+        frames.forEach { frame ->
+            require(frame.frameNumber == expectedFrameNumber) { "Unexpected FLAC frame number." }
+            require(frame.startPcmFrame == expectedPcmFrame) { "Unexpected FLAC PCM frame start." }
+            require(frame.pcmFrameCount > 0) { "Invalid FLAC frame sample count." }
+            require(frame.pcmFrameCount <= MAX_BLOCK_SIZE) { "FLAC frame exceeds max block size." }
+            require(frame.byteOffset >= FLAC_MAGIC.size + STREAMINFO_METADATA_HEADER.size + STREAMINFO_LENGTH) {
+                "Invalid FLAC frame byte offset."
+            }
+            require(frame.byteCount > 0) { "Invalid FLAC frame byte count." }
+            expectedFrameNumber += 1L
+            expectedPcmFrame += frame.pcmFrameCount
+        }
+        require(expectedPcmFrame == totalFrameCount.toLong()) {
+            "FLAC frame index does not cover the full stream."
+        }
+    }
+
+    private class IndexedFlacPcmReader(
+        flacFile: File,
+        private val index: Pcm16StereoFlacFrameIndex,
+        private val traceSink: ((String) -> Unit)?,
+    ) : Pcm16StereoFlacPcmReader {
+        private val input = RandomAccessFile(flacFile, "r")
+        private val inputStream = RandomAccessFileInputStream(input)
+        private val left = IntArray(MAX_BLOCK_SIZE)
+        private val right = IntArray(MAX_BLOCK_SIZE)
+        private val pcmBlock = ByteArray(MAX_BLOCK_SIZE * BYTES_PER_FRAME)
+        private var currentFrameIndex = -1
+        private var currentBlockBytes = 0
+        private var pcmBytePosition = 0L
+
+        override val frameCount: Int = index.frameCount
+        override val sampleRate: Int = index.sampleRate
+
+        init {
+            traceSink?.invoke(
+                "indexedOpen success sampleRate=${index.sampleRate} frames=${index.frameCount} " +
+                        "indexFrames=${index.frames.size}"
+            )
+        }
+
+        override fun read(buffer: ByteArray, byteCount: Int): Int {
+            if (pcmBytePosition >= totalPcmBytes()) return -1
+            var copied = 0
+            while (copied < byteCount && pcmBytePosition < totalPcmBytes()) {
+                val frameIndex = frameIndexForPcmByte(pcmBytePosition) ?: break
+                ensureFrameDecoded(frameIndex)
+                val entry = index.frames[frameIndex]
+                val blockStartByte = entry.startPcmFrame * BYTES_PER_FRAME
+                val blockOffset = (pcmBytePosition - blockStartByte).toInt()
+                val streamBytesRemaining = (totalPcmBytes() - pcmBytePosition)
+                    .coerceAtMost(Int.MAX_VALUE.toLong())
+                    .toInt()
+                val available = min(
+                    min(currentBlockBytes - blockOffset, byteCount - copied),
+                    streamBytesRemaining,
+                )
+                if (available <= 0) break
+                pcmBlock.copyInto(
+                    destination = buffer,
+                    destinationOffset = copied,
+                    startIndex = blockOffset,
+                    endIndex = blockOffset + available,
+                )
+                copied += available
+                pcmBytePosition += available
+            }
+            return if (copied > 0) copied else -1
+        }
+
+        override fun seekToPcmByte(bytePosition: Long) {
+            pcmBytePosition = bytePosition
+                .coerceAtLeast(0L)
+                .coerceAtMost(totalPcmBytes())
+            traceSink?.invoke("indexedSeek byte=$pcmBytePosition")
+        }
+
+        override fun close() {
+            input.close()
+        }
+
+        private fun ensureFrameDecoded(frameIndex: Int) {
+            if (currentFrameIndex == frameIndex) return
+            val entry = index.frames[frameIndex]
+            val startedAtNs = if (TRACE_INDEXED_FRAME_DECODE_TIMING) {
+                System.nanoTime()
+            } else {
+                0L
+            }
+            input.seek(entry.byteOffset)
+            val blockFrames = readAndDecodeFrame(
+                input = inputStream,
+                left = left,
+                right = right,
+            )
+            require(blockFrames == entry.pcmFrameCount) {
+                "Decoded FLAC frame size does not match index."
+            }
+            require(input.filePointer == entry.byteOffset + entry.byteCount) {
+                "Decoded FLAC frame byte span does not match index."
+            }
+            writeInterleavedPcm16(
+                left = left,
+                right = right,
+                frameCount = blockFrames,
+                output = pcmBlock,
+                outputOffset = 0,
+            )
+            currentFrameIndex = frameIndex
+            currentBlockBytes = blockFrames * BYTES_PER_FRAME
+            traceFrameDecodeIfNeeded(
+                frameIndex = frameIndex,
+                byteOffset = entry.byteOffset,
+                elapsedNs = if (TRACE_INDEXED_FRAME_DECODE_TIMING) {
+                    System.nanoTime() - startedAtNs
+                } else {
+                    0L
+                },
+            )
+        }
+
+        private fun traceFrameDecodeIfNeeded(
+            frameIndex: Int,
+            byteOffset: Long,
+            elapsedNs: Long,
+        ) {
+            if (!TRACE_INDEXED_FRAME_DECODE_TIMING) return
+            traceSink?.invoke(
+                "indexedDecode frame=$frameIndex byteOffset=$byteOffset " +
+                        "decodeMs=${elapsedNs / NANOS_PER_MILLISECOND.toFloat()}"
+            )
+        }
+
+        private fun frameIndexForPcmByte(bytePosition: Long): Int? {
+            val targetFrame = bytePosition / BYTES_PER_FRAME
+            if (targetFrame >= index.frameCount) return null
+            var low = 0
+            var high = index.frames.lastIndex
+            while (low <= high) {
+                val mid = (low + high) ushr 1
+                val frame = index.frames[mid]
+                val start = frame.startPcmFrame
+                val end = start + frame.pcmFrameCount
+                when {
+                    targetFrame < start -> high = mid - 1
+                    targetFrame >= end -> low = mid + 1
+                    else -> return mid
+                }
+            }
+            return null
+        }
+
+        private fun totalPcmBytes(): Long {
+            return index.frameCount.toLong() * BYTES_PER_FRAME
+        }
+    }
+
+    private class RandomAccessFileInputStream(
+        private val input: RandomAccessFile,
+    ) : InputStream() {
+        override fun read(): Int {
+            return input.read()
+        }
+
+        override fun read(
+            buffer: ByteArray,
+            byteOffset: Int,
+            byteCount: Int,
+        ): Int {
+            return input.read(buffer, byteOffset, byteCount)
+        }
+    }
+
     private fun Int.toRiceUnsigned(): Long {
         val longValue = toLong()
         return if (longValue >= 0L) {
@@ -838,6 +1212,8 @@ object Pcm16StereoFlacEncoder {
     private const val PCM_FMT_CHUNK_MIN_BYTES = 16L
     private const val CHUNK_HEADER_BYTES = 8L
     private const val PCM_MD5_BUFFER_BYTES = 256 * 1024
+    private const val NANOS_PER_MILLISECOND = 1_000_000L
+    private const val TRACE_INDEXED_FRAME_DECODE_TIMING = false
 
     private const val BLOCK_SIZE_CODE_16_BIT = 7
     private const val BLOCK_SIZE_CODE_4096 = 12
@@ -876,6 +1252,8 @@ object Pcm16StereoFlacEncoder {
     private const val STREAMINFO_BITS_PER_SAMPLE_MASK = 0x1FL
     private const val STREAMINFO_TOTAL_SAMPLES_MASK = 0xFFFFFFFFFL
     private const val STREAMINFO_MD5_OFFSET = 18
+    private const val FRAME_INDEX_MAGIC = "BoomingPcm16StereoFlacIndexV1"
+    private const val FRAME_INDEX_EXTENSION = ".idx"
 
     private val FLAC_MAGIC = byteArrayOf('f'.code.toByte(), 'L'.code.toByte(), 'a'.code.toByte(), 'C'.code.toByte())
     private val STREAMINFO_METADATA_HEADER = byteArrayOf(0x80.toByte(), 0x00, 0x00, STREAMINFO_LENGTH.toByte())
@@ -888,6 +1266,8 @@ data class Pcm16StereoFlacEncodeResult(
     val frameCount: Int,
     val pcmMd5Hex: String,
     val outputBytes: Long,
+    val frameIndexEntries: Int,
+    val frameIndexPath: String?,
 )
 
 data class Pcm16StereoFlacVerifyResult(
@@ -908,6 +1288,14 @@ data class Pcm16StereoFlacDecodeResult(
     val pcmMd5Hex: String,
 )
 
+interface Pcm16StereoFlacPcmReader : Closeable {
+    val sampleRate: Int
+    val frameCount: Int
+
+    fun read(buffer: ByteArray, byteCount: Int): Int
+    fun seekToPcmByte(bytePosition: Long)
+}
+
 private data class FlacStreamInfo(
     val sampleRate: Int,
     val channelCount: Int,
@@ -921,6 +1309,25 @@ private data class Pcm16StereoWavInfo(
     val dataSize: Long,
     val sampleRate: Int,
     val frameCount: Int,
+)
+
+private data class Pcm16StereoFlacFrameIndex(
+    val sampleRate: Int,
+    val channelCount: Int,
+    val bitsPerSample: Int,
+    val frameCount: Int,
+    val maxBlockSize: Int,
+    val flacBytes: Long,
+    val pcmMd5Hex: String,
+    val frames: List<Pcm16StereoFlacFrameIndexEntry>,
+)
+
+private data class Pcm16StereoFlacFrameIndexEntry(
+    val frameNumber: Long,
+    val startPcmFrame: Long,
+    val pcmFrameCount: Int,
+    val byteOffset: Long,
+    val byteCount: Int,
 )
 
 private data class FixedSubframe(
