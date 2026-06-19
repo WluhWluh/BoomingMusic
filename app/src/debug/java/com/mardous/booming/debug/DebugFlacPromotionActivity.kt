@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.mardous.booming.separation.audio.AudioPcmDecoder
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
+import com.mardous.booming.separation.audio.Pcm16StereoFlacStereoMode
 import com.mardous.booming.separation.audio.WavFileWriter
 import java.io.File
 import java.security.MessageDigest
@@ -25,16 +26,19 @@ class DebugFlacPromotionActivity : Activity() {
             ?.sanitizePathSegment()
             ?.ifBlank { null }
             ?: "flac-promotion-${System.currentTimeMillis()}"
+        val runTag = "${outputTag}-${System.currentTimeMillis()}"
         val inputDirPath = intent.getStringExtra(EXTRA_INPUT_DIR)
         val maxFiles = intent.getIntExtra(EXTRA_MAX_FILES, DEFAULT_MAX_FILES)
             .coerceAtLeast(0)
+        val includeSynthetic = intent.getBooleanExtra(EXTRA_INCLUDE_SYNTHETIC, true)
 
         thread(name = "DebugFlacPromotion") {
             try {
                 runFlacPromotionTest(
-                    outputTag = outputTag,
+                    outputTag = runTag,
                     inputDirPath = inputDirPath,
                     maxFiles = maxFiles,
+                    includeSynthetic = includeSynthetic,
                 )
             } catch (error: Throwable) {
                 Log.e(TAG, "FLAC promotion debug test failed.", error)
@@ -48,6 +52,7 @@ class DebugFlacPromotionActivity : Activity() {
         outputTag: String,
         inputDirPath: String?,
         maxFiles: Int,
+        includeSynthetic: Boolean,
     ) {
         val reportRoot = File(
             File(
@@ -66,12 +71,15 @@ class DebugFlacPromotionActivity : Activity() {
             "FLAC promotion debug test\n" +
                     "Output: ${reportRoot.absolutePath}\n" +
                     "Input override: ${inputDirPath.orEmpty()}\n" +
-                    "Max files: $maxFiles\n\n",
+                    "Max files: $maxFiles\n" +
+                    "Include synthetic: $includeSynthetic\n\n",
             Charsets.UTF_8,
         )
 
         val cases = buildList {
-            add(createSyntheticCase(outputDir))
+            if (includeSynthetic) {
+                add(createSyntheticCase(outputDir))
+            }
             addAll(findCompletedStemCases(inputDirPath, maxFiles))
         }
 
@@ -113,7 +121,9 @@ class DebugFlacPromotionActivity : Activity() {
         outputDir: File,
         elapsedMsProvider: () -> Long,
     ): FlacPromotionRow {
-        val flacFile = File(outputDir, "${case.label.sanitizePathSegment()}.flac")
+        val baseName = case.label.sanitizePathSegment()
+        val flacFile = File(outputDir, "$baseName.independent.flac")
+        val decorrelatedFlacFile = File(outputDir, "$baseName.decorrelated.flac")
         val wavMd5 = case.wavFile.pcmDataMd5Hex()
         val encodeStartedAtMs = SystemClock.elapsedRealtime()
         val encodeResult = Pcm16StereoFlacEncoder.encodeWavToFlac(
@@ -121,8 +131,19 @@ class DebugFlacPromotionActivity : Activity() {
             flacFile = flacFile,
             expectedSampleRate = case.sampleRate,
             expectedFrameCount = case.frameCount,
+            stereoMode = Pcm16StereoFlacStereoMode.INDEPENDENT,
         )
         val encodeMs = SystemClock.elapsedRealtime() - encodeStartedAtMs
+
+        val decorrelatedEncodeStartedAtMs = SystemClock.elapsedRealtime()
+        val decorrelatedEncodeResult = Pcm16StereoFlacEncoder.encodeWavToFlac(
+            wavFile = case.wavFile,
+            flacFile = decorrelatedFlacFile,
+            expectedSampleRate = case.sampleRate,
+            expectedFrameCount = case.frameCount,
+            stereoMode = Pcm16StereoFlacStereoMode.ADAPTIVE_STEREO_DECORRELATION,
+        )
+        val decorrelatedEncodeMs = SystemClock.elapsedRealtime() - decorrelatedEncodeStartedAtMs
 
         val verifyStartedAtMs = SystemClock.elapsedRealtime()
         val verifyResult = Pcm16StereoFlacEncoder.verifyFlacFile(
@@ -132,6 +153,15 @@ class DebugFlacPromotionActivity : Activity() {
             expectedPcmMd5Hex = wavMd5,
         )
         val verifyMs = SystemClock.elapsedRealtime() - verifyStartedAtMs
+
+        val decorrelatedVerifyStartedAtMs = SystemClock.elapsedRealtime()
+        val decorrelatedVerifyResult = Pcm16StereoFlacEncoder.verifyFlacFile(
+            flacFile = decorrelatedFlacFile,
+            expectedSampleRate = case.sampleRate,
+            expectedFrameCount = case.frameCount,
+            expectedPcmMd5Hex = wavMd5,
+        )
+        val decorrelatedVerifyMs = SystemClock.elapsedRealtime() - decorrelatedVerifyStartedAtMs
 
         val platformDecodeStartedAtMs = SystemClock.elapsedRealtime()
         val platformDecodeResult = runCatching {
@@ -157,6 +187,13 @@ class DebugFlacPromotionActivity : Activity() {
             frameIndexEntries = encodeResult.frameIndexEntries,
             frameIndexPath = encodeResult.frameIndexPath,
             verifiedMd5 = verifyResult.pcmMd5Hex,
+            decorrelatedEncodeMs = decorrelatedEncodeMs,
+            decorrelatedVerifyMs = decorrelatedVerifyMs,
+            decorrelatedFlacFile = decorrelatedFlacFile,
+            decorrelatedMd5 = decorrelatedVerifyResult.pcmMd5Hex,
+            decorrelatedFrameIndexEntries = decorrelatedEncodeResult.frameIndexEntries,
+            decorrelatedFrameIndexPath = decorrelatedEncodeResult.frameIndexPath,
+            decorrelatedAssignmentSummary = decorrelatedEncodeResult.channelAssignmentSummary,
             flacFile = flacFile,
         )
     }
@@ -207,16 +244,24 @@ class DebugFlacPromotionActivity : Activity() {
         if (!root.isDirectory) return emptyList()
 
         return root.walkTopDown()
-            .filter { it.isFile && it.extension.equals("wav", ignoreCase = true) }
-            .filter { it.name.equals("vocals.wav", ignoreCase = true) ||
-                    it.name.equals("instrumental.wav", ignoreCase = true)
+            .filter { file ->
+                file.isFile &&
+                        (file.extension.equals("wav", ignoreCase = true) ||
+                                file.extension.equals("flac", ignoreCase = true))
+            }
+            .filter { file ->
+                file.name.equals("vocals.wav", ignoreCase = true) ||
+                        file.name.equals("instrumental.wav", ignoreCase = true) ||
+                        file.name.equals("vocals.flac", ignoreCase = true) ||
+                        file.name.equals("instrumental.flac", ignoreCase = true)
             }
             .mapNotNull { file ->
                 runCatching {
-                    val info = file.readPcm16StereoWavInfo()
+                    val wavFile = file.asDebugWavInput(root)
+                    val info = wavFile.readPcm16StereoWavInfo()
                     FlacPromotionCase(
                         label = file.relativeTo(root).invariantSeparatorsPath,
-                        wavFile = file,
+                        wavFile = wavFile,
                         sampleRate = info.sampleRate,
                         frameCount = info.frameCount,
                     )
@@ -228,6 +273,29 @@ class DebugFlacPromotionActivity : Activity() {
             .sortedBy { it.label }
             .take(maxFiles)
             .toList()
+    }
+
+    private fun File.asDebugWavInput(root: File): File {
+        if (extension.equals("wav", ignoreCase = true)) {
+            return this
+        }
+        val decoded = Pcm16StereoFlacEncoder.decodeFlacFile(this)
+        val outputDir = File(
+            File(
+                getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir,
+                "source-separation/debug/flac-promotion/_decoded-inputs",
+            ),
+            relativeTo(root).invariantSeparatorsPath.sanitizePathSegment(),
+        ).apply { mkdirs() }
+        val wavFile = File(outputDir, nameWithoutExtension + ".wav")
+        WavFileWriter(
+            file = wavFile,
+            sampleRate = decoded.sampleRate,
+            channelCount = decoded.channelCount,
+        ).use { writer ->
+            writer.writePcm16(decoded.pcm16)
+        }
+        return wavFile
     }
 
     private fun File.readPcm16StereoWavInfo(): DebugWavInfo {
@@ -313,6 +381,7 @@ class DebugFlacPromotionActivity : Activity() {
         const val EXTRA_INPUT_DIR = "input_dir"
         const val EXTRA_OUTPUT_TAG = "output_tag"
         const val EXTRA_MAX_FILES = "max_files"
+        const val EXTRA_INCLUDE_SYNTHETIC = "include_synthetic"
         const val DEFAULT_MAX_FILES = 12
         const val CHANNEL_COUNT_STEREO = 2
         const val WAV_HEADER_BYTES = 44
@@ -349,6 +418,16 @@ private data class FlacPromotionRow(
     val compressionRatio: Double?,
     val frameIndexEntries: Int?,
     val frameIndexPath: String?,
+    val decorrelatedEncodeMs: Long?,
+    val decorrelatedVerifyMs: Long?,
+    val decorrelatedFlacPath: String?,
+    val decorrelatedFlacBytes: Long?,
+    val decorrelatedCompressionRatio: Double?,
+    val decorrelatedSavingsRatio: Double?,
+    val decorrelatedFrameIndexEntries: Int?,
+    val decorrelatedFrameIndexPath: String?,
+    val decorrelatedAssignmentSummary: String?,
+    val decorrelatedPcmMd5: String?,
     val encodePcmMd5: String?,
     val verifiedPcmMd5: String?,
     val errorMessage: String?,
@@ -371,6 +450,16 @@ private data class FlacPromotionRow(
             compressionRatio,
             frameIndexEntries,
             frameIndexPath,
+            decorrelatedEncodeMs,
+            decorrelatedVerifyMs,
+            decorrelatedFlacPath,
+            decorrelatedFlacBytes,
+            decorrelatedCompressionRatio,
+            decorrelatedSavingsRatio,
+            decorrelatedFrameIndexEntries,
+            decorrelatedFrameIndexPath,
+            decorrelatedAssignmentSummary,
+            decorrelatedPcmMd5,
             encodePcmMd5,
             verifiedPcmMd5,
             errorMessage,
@@ -396,6 +485,16 @@ private data class FlacPromotionRow(
                 "compressionRatio",
                 "frameIndexEntries",
                 "frameIndexPath",
+                "decorrelatedEncodeMs",
+                "decorrelatedVerifyMs",
+                "decorrelatedFlacPath",
+                "decorrelatedFlacBytes",
+                "decorrelatedCompressionRatio",
+                "decorrelatedSavingsRatio",
+                "decorrelatedFrameIndexEntries",
+                "decorrelatedFrameIndexPath",
+                "decorrelatedAssignmentSummary",
+                "decorrelatedPcmMd5",
                 "encodePcmMd5",
                 "verifiedPcmMd5",
                 "errorMessage",
@@ -413,8 +512,17 @@ private data class FlacPromotionRow(
             frameIndexEntries: Int,
             frameIndexPath: String?,
             verifiedMd5: String,
+            decorrelatedEncodeMs: Long,
+            decorrelatedVerifyMs: Long,
+            decorrelatedFlacFile: File,
+            decorrelatedMd5: String,
+            decorrelatedFrameIndexEntries: Int,
+            decorrelatedFrameIndexPath: String?,
+            decorrelatedAssignmentSummary: String,
             flacFile: File,
         ): FlacPromotionRow {
+            val flacBytes = flacFile.length()
+            val decorrelatedBytes = decorrelatedFlacFile.length()
             return FlacPromotionRow(
                 label = case.label,
                 status = "success",
@@ -428,10 +536,22 @@ private data class FlacPromotionRow(
                 platformDecodeMs = platformDecodeMs,
                 platformDecodeResult = platformDecodeResult,
                 flacPath = flacFile.absolutePath,
-                flacBytes = flacFile.length(),
-                compressionRatio = flacFile.length().toDouble() / case.wavFile.length().coerceAtLeast(1L),
+                flacBytes = flacBytes,
+                compressionRatio = flacBytes.toDouble() / case.wavFile.length().coerceAtLeast(1L),
                 frameIndexEntries = frameIndexEntries,
                 frameIndexPath = frameIndexPath,
+                decorrelatedEncodeMs = decorrelatedEncodeMs,
+                decorrelatedVerifyMs = decorrelatedVerifyMs,
+                decorrelatedFlacPath = decorrelatedFlacFile.absolutePath,
+                decorrelatedFlacBytes = decorrelatedBytes,
+                decorrelatedCompressionRatio = decorrelatedBytes.toDouble() /
+                        case.wavFile.length().coerceAtLeast(1L),
+                decorrelatedSavingsRatio = (flacBytes - decorrelatedBytes).toDouble() /
+                        flacBytes.coerceAtLeast(1L),
+                decorrelatedFrameIndexEntries = decorrelatedFrameIndexEntries,
+                decorrelatedFrameIndexPath = decorrelatedFrameIndexPath,
+                decorrelatedAssignmentSummary = decorrelatedAssignmentSummary,
+                decorrelatedPcmMd5 = decorrelatedMd5,
                 encodePcmMd5 = encodeResultMd5,
                 verifiedPcmMd5 = verifiedMd5,
                 errorMessage = null,
@@ -460,6 +580,16 @@ private data class FlacPromotionRow(
                 compressionRatio = null,
                 frameIndexEntries = null,
                 frameIndexPath = null,
+                decorrelatedEncodeMs = null,
+                decorrelatedVerifyMs = null,
+                decorrelatedFlacPath = null,
+                decorrelatedFlacBytes = null,
+                decorrelatedCompressionRatio = null,
+                decorrelatedSavingsRatio = null,
+                decorrelatedFrameIndexEntries = null,
+                decorrelatedFrameIndexPath = null,
+                decorrelatedAssignmentSummary = null,
+                decorrelatedPcmMd5 = null,
                 encodePcmMd5 = null,
                 verifiedPcmMd5 = null,
                 errorMessage = error.stackTraceToString(),
