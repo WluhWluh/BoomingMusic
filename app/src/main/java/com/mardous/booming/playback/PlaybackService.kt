@@ -1560,7 +1560,7 @@ class PlaybackService :
         val shouldPlayAfterSwitch = resumeWhenReady || playWhenReady
         val originalMediaItem = song.toMediaItem(mediaItem.mediaId)
         val isRunningCache = manifest.state == SourceSeparationCacheState.Running
-        val useOriginalClock = isRunningCache || manifest.canUseOriginalSourceSeparationClock(output)
+        val useOriginalClock = manifest.canUseOriginalSourceSeparationClock(output)
         val queueReplacementToken = if (useOriginalClock) {
             null
         } else {
