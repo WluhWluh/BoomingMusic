@@ -106,12 +106,15 @@ import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.separation.cache.SourceSeparationOutput
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor.InputMode
 import com.mardous.booming.ui.screen.MainActivity
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.CLEAR_QUEUE_ON_COMPLETION
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.ENABLE_HISTORY
 import com.mardous.booming.util.IGNORE_AUDIO_FOCUS
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.MP3_INDEX_SEEKING
 import com.mardous.booming.util.PAUSE_ON_ZERO_VOLUME
 import com.mardous.booming.util.PLAY_ON_STARTUP_MODE
@@ -124,6 +127,7 @@ import com.mardous.booming.util.SEEK_INTERVAL
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.STOP_WHEN_CLOSED_FROM_RECENTS
 import com.mardous.booming.util.SongPlayCountHelper
 import com.mardous.booming.util.WIDGET_DYNAMIC_COLORS
@@ -787,6 +791,9 @@ class PlaybackService :
                             SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
                             true,
                         ),
+                        playbackReadyWindowCountProvider = {
+                            sourceSeparationPlaybackReadyWindowCount
+                        },
                     )
                     cleanupCompletedSourceSeparationTemporaryDirs()
                     SessionResult(
@@ -1359,12 +1366,17 @@ class PlaybackService :
                         sourceSeparationEngine.playableCacheStatusForSong(
                             song = song,
                             playbackPositionMs = positionMs,
+                            readyWindowCount = sourceSeparationPlaybackReadyWindowCount,
                         )
                     }.getOrDefault(SourceSeparationPlayableCacheStatus.Unavailable)
                 }
                 val debugInfo = withContext(IO) {
                     runCatching {
-                        sourceSeparationEngine.playableCacheDebugInfoForSong(song, positionMs)
+                        sourceSeparationEngine.playableCacheDebugInfoForSong(
+                            song = song,
+                            playbackPositionMs = positionMs,
+                            readyWindowCount = sourceSeparationPlaybackReadyWindowCount,
+                        )
                     }.getOrNull()
                 }
                 if (!isSourceSeparationPlaybackCheckCurrent(
@@ -1461,12 +1473,20 @@ class PlaybackService :
         val positionMs = player.currentPosition.coerceAtLeast(0)
         val status = withContext(IO) {
             runCatching {
-                sourceSeparationEngine.playableCacheStatusForSong(song, positionMs)
+                sourceSeparationEngine.playableCacheStatusForSong(
+                    song = song,
+                    playbackPositionMs = positionMs,
+                    readyWindowCount = sourceSeparationPlaybackReadyWindowCount,
+                )
             }.getOrDefault(SourceSeparationPlayableCacheStatus.Unavailable)
         }
         val debugInfo = withContext(IO) {
             runCatching {
-                sourceSeparationEngine.playableCacheDebugInfoForSong(song, positionMs)
+                sourceSeparationEngine.playableCacheDebugInfoForSong(
+                    song = song,
+                    playbackPositionMs = positionMs,
+                    readyWindowCount = sourceSeparationPlaybackReadyWindowCount,
+                )
             }.getOrNull()
         }
         if (!isSourceSeparationPlaybackCheckCurrent(
@@ -1829,6 +1849,15 @@ class PlaybackService :
             SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS,
             DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS,
         ).coerceIn(0L, MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS)
+
+    private val sourceSeparationPlaybackReadyWindowCount: Int
+        get() = preferences.getInt(
+            SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+            DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+        ).coerceIn(
+            MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+            MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+        )
 
     private fun maybeStartSourceSeparationPcmHydration(session: SourceSeparationPlaybackSession) {
         if (session.requiresReadinessGate || session.usesHydratedPcm || session.hasPendingHydration) {
