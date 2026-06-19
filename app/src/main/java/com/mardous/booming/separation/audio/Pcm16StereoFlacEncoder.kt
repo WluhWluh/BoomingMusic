@@ -15,6 +15,7 @@ object Pcm16StereoFlacEncoder {
         flacFile: File,
         expectedSampleRate: Int,
         expectedFrameCount: Int,
+        stereoMode: Pcm16StereoFlacStereoMode = Pcm16StereoFlacStereoMode.INDEPENDENT,
         writeFrameIndex: Boolean = true,
     ): Pcm16StereoFlacEncodeResult {
         require(expectedSampleRate > 0) { "Expected sample rate must be positive." }
@@ -53,6 +54,7 @@ object Pcm16StereoFlacEncoder {
                         sampleRate = wavInfo.sampleRate,
                         pcmMd5Hex = pcmMd5.toHexString(),
                         firstFrameByteOffset = FLAC_MAGIC.size + STREAMINFO_METADATA_HEADER.size + STREAMINFO_LENGTH,
+                        stereoMode = stereoMode,
                     )
                 }
             }
@@ -78,6 +80,8 @@ object Pcm16StereoFlacEncoder {
                 outputBytes = flacFile.length(),
                 frameIndexEntries = finalIndex?.frames?.size ?: 0,
                 frameIndexPath = frameIndexFileFor(flacFile).takeIf { it.isFile }?.absolutePath,
+                stereoMode = stereoMode,
+                channelAssignmentSummary = finalIndex?.channelAssignmentSummary().orEmpty(),
             )
         } catch (error: Throwable) {
             tempFile.delete()
@@ -258,10 +262,13 @@ object Pcm16StereoFlacEncoder {
         sampleRate: Int,
         pcmMd5Hex: String,
         firstFrameByteOffset: Int,
+        stereoMode: Pcm16StereoFlacStereoMode,
     ): Pcm16StereoFlacFrameIndex {
         val pcmBuffer = ByteArray(MAX_BLOCK_SIZE * BYTES_PER_FRAME)
         val left = IntArray(MAX_BLOCK_SIZE)
         val right = IntArray(MAX_BLOCK_SIZE)
+        val scratchA = IntArray(MAX_BLOCK_SIZE)
+        val scratchB = IntArray(MAX_BLOCK_SIZE)
         val frameIndexEntries = ArrayList<Pcm16StereoFlacFrameIndexEntry>()
         var remainingFrames = frameCount
         var frameNumber = 0L
@@ -282,18 +289,22 @@ object Pcm16StereoFlacEncoder {
                 blockFrames = blockFrames,
                 left = left,
                 right = right,
+                scratchA = scratchA,
+                scratchB = scratchB,
+                stereoMode = stereoMode,
             )
-            output.write(encodedFrame)
+            output.write(encodedFrame.bytes)
             frameIndexEntries += Pcm16StereoFlacFrameIndexEntry(
                 frameNumber = frameNumber,
                 startPcmFrame = pcmStartFrame,
                 pcmFrameCount = blockFrames,
                 byteOffset = outputByteOffset,
-                byteCount = encodedFrame.size,
+                byteCount = encodedFrame.bytes.size,
+                channelAssignment = encodedFrame.channelAssignment,
             )
             frameNumber += 1L
             pcmStartFrame += blockFrames
-            outputByteOffset += encodedFrame.size
+            outputByteOffset += encodedFrame.bytes.size
             remainingFrames -= blockFrames
         }
         return Pcm16StereoFlacFrameIndex(
@@ -313,7 +324,65 @@ object Pcm16StereoFlacEncoder {
         blockFrames: Int,
         left: IntArray,
         right: IntArray,
-    ): ByteArray {
+        scratchA: IntArray,
+        scratchB: IntArray,
+        stereoMode: Pcm16StereoFlacStereoMode,
+    ): EncodedFlacFrame {
+        val independentFrame = encodeFrameWithAssignment(
+            frameNumber = frameNumber,
+            blockFrames = blockFrames,
+            channelAssignment = CHANNEL_ASSIGNMENT_STEREO,
+            first = left,
+            second = right,
+        )
+        if (stereoMode != Pcm16StereoFlacStereoMode.ADAPTIVE_STEREO_DECORRELATION) {
+            return independentFrame
+        }
+
+        var bestFrame = independentFrame
+        prepareLeftSide(left, right, scratchA, scratchB, blockFrames)
+        bestFrame = bestFrame.chooseSmaller(
+            other = encodeFrameWithAssignment(
+                frameNumber = frameNumber,
+                blockFrames = blockFrames,
+                channelAssignment = CHANNEL_ASSIGNMENT_LEFT_SIDE,
+                first = scratchA,
+                second = scratchB,
+            ),
+        )
+        prepareRightSide(left, right, scratchA, scratchB, blockFrames)
+        bestFrame = bestFrame.chooseSmaller(
+            other = encodeFrameWithAssignment(
+                frameNumber = frameNumber,
+                blockFrames = blockFrames,
+                channelAssignment = CHANNEL_ASSIGNMENT_RIGHT_SIDE,
+                first = scratchA,
+                second = scratchB,
+            ),
+        )
+        prepareMidSide(left, right, scratchA, scratchB, blockFrames)
+        return bestFrame.chooseSmaller(
+            other = encodeFrameWithAssignment(
+                frameNumber = frameNumber,
+                blockFrames = blockFrames,
+                channelAssignment = CHANNEL_ASSIGNMENT_MID_SIDE,
+                first = scratchA,
+                second = scratchB,
+            ),
+        )
+    }
+
+    private fun EncodedFlacFrame.chooseSmaller(other: EncodedFlacFrame): EncodedFlacFrame {
+        return if (other.bytes.size < bytes.size) other else this
+    }
+
+    private fun encodeFrameWithAssignment(
+        frameNumber: Long,
+        blockFrames: Int,
+        channelAssignment: Int,
+        first: IntArray,
+        second: IntArray,
+    ): EncodedFlacFrame {
         val frame = ByteArrayOutputStream(blockFrames * BYTES_PER_FRAME)
         val header = ByteArrayOutputStream()
         val blockSizeCode = if (blockFrames == MAX_BLOCK_SIZE) {
@@ -323,7 +392,7 @@ object Pcm16StereoFlacEncoder {
         }
         header.writeUInt16(0xFFF8)
         header.write((blockSizeCode shl 4) or SAMPLE_RATE_FROM_STREAMINFO)
-        header.write((CHANNEL_ASSIGNMENT_STEREO shl 4) or (SAMPLE_SIZE_16_BIT shl 1))
+        header.write((channelAssignment shl 4) or (SAMPLE_SIZE_16_BIT shl 1))
         header.writeFlacUtf8UInt(frameNumber)
         if (blockSizeCode == BLOCK_SIZE_CODE_16_BIT) {
             header.writeUInt16(blockFrames - 1)
@@ -333,22 +402,77 @@ object Pcm16StereoFlacEncoder {
         frame.write(crc8(headerBytes))
 
         val bitWriter = FlacBitWriter(frame)
-        bitWriter.writeBestSubframe(left, blockFrames)
-        bitWriter.writeBestSubframe(right, blockFrames)
+        val firstBitsPerSample = bitsPerSampleForChannel(
+            channelAssignment = channelAssignment,
+            channelIndex = 0,
+        )
+        val secondBitsPerSample = bitsPerSampleForChannel(
+            channelAssignment = channelAssignment,
+            channelIndex = 1,
+        )
+        bitWriter.writeBestSubframe(first, blockFrames, firstBitsPerSample)
+        bitWriter.writeBestSubframe(second, blockFrames, secondBitsPerSample)
         bitWriter.alignToByte()
 
         val frameWithoutCrc = frame.toByteArray()
         frame.writeUInt16(crc16(frameWithoutCrc))
-        return frame.toByteArray()
+        return EncodedFlacFrame(
+            bytes = frame.toByteArray(),
+            channelAssignment = channelAssignment,
+        )
     }
 
-    private fun FlacBitWriter.writeBestSubframe(samples: IntArray, count: Int) {
-        val fixedSubframe = bestFixedSubframe(samples, count)
-        val verbatimBits = VERBATIM_HEADER_BITS + count * BITS_PER_SAMPLE
+    private fun prepareLeftSide(
+        left: IntArray,
+        right: IntArray,
+        first: IntArray,
+        second: IntArray,
+        count: Int,
+    ) {
+        for (index in 0 until count) {
+            first[index] = left[index]
+            second[index] = left[index] - right[index]
+        }
+    }
+
+    private fun prepareRightSide(
+        left: IntArray,
+        right: IntArray,
+        first: IntArray,
+        second: IntArray,
+        count: Int,
+    ) {
+        for (index in 0 until count) {
+            first[index] = left[index] - right[index]
+            second[index] = right[index]
+        }
+    }
+
+    private fun prepareMidSide(
+        left: IntArray,
+        right: IntArray,
+        first: IntArray,
+        second: IntArray,
+        count: Int,
+    ) {
+        for (index in 0 until count) {
+            val side = left[index] - right[index]
+            first[index] = (left[index] + right[index]) shr 1
+            second[index] = side
+        }
+    }
+
+    private fun FlacBitWriter.writeBestSubframe(
+        samples: IntArray,
+        count: Int,
+        bitsPerSample: Int,
+    ) {
+        val fixedSubframe = bestFixedSubframe(samples, count, bitsPerSample)
+        val verbatimBits = VERBATIM_HEADER_BITS + count * bitsPerSample
         if (fixedSubframe != null && fixedSubframe.estimatedBits < verbatimBits) {
             writeBits(((FIXED_SUBFRAME_TYPE_BASE + fixedSubframe.order) shl 1).toLong(), SUBFRAME_HEADER_BITS)
             for (index in 0 until fixedSubframe.order) {
-                writeSignedPcm16(samples[index])
+                writeSignedSample(samples[index], bitsPerSample)
             }
             writeBits(RESIDUAL_CODING_METHOD_RICE.toLong(), RESIDUAL_CODING_METHOD_BITS)
             writeBits(RESIDUAL_PARTITION_ORDER_ZERO.toLong(), RESIDUAL_PARTITION_ORDER_BITS)
@@ -359,7 +483,7 @@ object Pcm16StereoFlacEncoder {
         } else {
             writeBits((VERBATIM_SUBFRAME_TYPE shl 1).toLong(), SUBFRAME_HEADER_BITS)
             for (index in 0 until count) {
-                writeSignedPcm16(samples[index])
+                writeSignedSample(samples[index], bitsPerSample)
             }
         }
     }
@@ -417,8 +541,13 @@ object Pcm16StereoFlacEncoder {
         require(sampleRateCode == SAMPLE_RATE_FROM_STREAMINFO) {
             "Only FLAC frames using STREAMINFO sample rate are supported."
         }
-        require(channelAssignment == CHANNEL_ASSIGNMENT_STEREO) {
-            "Only independent stereo FLAC frames are supported."
+        require(
+            channelAssignment == CHANNEL_ASSIGNMENT_STEREO ||
+                    channelAssignment == CHANNEL_ASSIGNMENT_LEFT_SIDE ||
+                    channelAssignment == CHANNEL_ASSIGNMENT_RIGHT_SIDE ||
+                    channelAssignment == CHANNEL_ASSIGNMENT_MID_SIDE
+        ) {
+            "Only independent stereo and stereo decorrelation FLAC frames are supported."
         }
         require(sampleSizeCode == SAMPLE_SIZE_16_BIT) {
             "Only 16-bit FLAC frames are supported."
@@ -434,26 +563,81 @@ object Pcm16StereoFlacEncoder {
         input.readRequiredByte()
 
         val bitReader = FlacBitReader(input)
-        bitReader.readSubframe(left, blockFrames)
-        bitReader.readSubframe(right, blockFrames)
+        bitReader.readSubframe(
+            samples = left,
+            blockFrames = blockFrames,
+            bitsPerSample = bitsPerSampleForChannel(
+                channelAssignment = channelAssignment,
+                channelIndex = 0,
+            ),
+        )
+        bitReader.readSubframe(
+            samples = right,
+            blockFrames = blockFrames,
+            bitsPerSample = bitsPerSampleForChannel(
+                channelAssignment = channelAssignment,
+                channelIndex = 1,
+            ),
+        )
         bitReader.alignToByte()
         input.readUInt16()
+        restoreStereoChannels(
+            channelAssignment = channelAssignment,
+            left = left,
+            right = right,
+            frameCount = blockFrames,
+        )
         return blockFrames
     }
 
-    private fun FlacBitReader.readSubframe(samples: IntArray, blockFrames: Int) {
+    private fun restoreStereoChannels(
+        channelAssignment: Int,
+        left: IntArray,
+        right: IntArray,
+        frameCount: Int,
+    ) {
+        when (channelAssignment) {
+            CHANNEL_ASSIGNMENT_STEREO -> Unit
+            CHANNEL_ASSIGNMENT_LEFT_SIDE -> {
+                for (index in 0 until frameCount) {
+                    right[index] = left[index] - right[index]
+                }
+            }
+            CHANNEL_ASSIGNMENT_RIGHT_SIDE -> {
+                for (index in 0 until frameCount) {
+                    left[index] += right[index]
+                }
+            }
+            CHANNEL_ASSIGNMENT_MID_SIDE -> {
+                for (index in 0 until frameCount) {
+                    val mid = left[index]
+                    val side = right[index]
+                    val reconstructedLeft = (mid shl 1) or (side and 1)
+                    left[index] = (reconstructedLeft + side) shr 1
+                    right[index] = (reconstructedLeft - side) shr 1
+                }
+            }
+            else -> error("Unsupported FLAC channel assignment: $channelAssignment")
+        }
+    }
+
+    private fun FlacBitReader.readSubframe(
+        samples: IntArray,
+        blockFrames: Int,
+        bitsPerSample: Int,
+    ) {
         val header = readBits(SUBFRAME_HEADER_BITS).toInt()
         require((header and 1) == 0) { "Wasted bits-per-sample are not supported." }
         when (val type = (header ushr 1) and 0x3F) {
             VERBATIM_SUBFRAME_TYPE -> {
                 for (index in 0 until blockFrames) {
-                    samples[index] = readSignedPcm16()
+                    samples[index] = readSignedSample(bitsPerSample)
                 }
             }
             in FIXED_SUBFRAME_TYPE_BASE..(FIXED_SUBFRAME_TYPE_BASE + MAX_FIXED_PREDICTOR_ORDER) -> {
                 val order = type - FIXED_SUBFRAME_TYPE_BASE
                 for (index in 0 until order) {
-                    samples[index] = readSignedPcm16()
+                    samples[index] = readSignedSample(bitsPerSample)
                 }
                 val residualCodingMethod = readBits(RESIDUAL_CODING_METHOD_BITS).toInt()
                 val partitionOrder = readBits(RESIDUAL_PARTITION_ORDER_BITS).toInt()
@@ -476,11 +660,23 @@ object Pcm16StereoFlacEncoder {
         }
     }
 
-    private fun bestFixedSubframe(samples: IntArray, count: Int): FixedSubframe? {
+    private fun bestFixedSubframe(
+        samples: IntArray,
+        count: Int,
+        bitsPerSample: Int,
+    ): FixedSubframe? {
         if (count <= 0) return null
         val maxOrder = min(MAX_FIXED_PREDICTOR_ORDER, count - 1)
         var best: FixedSubframe? = null
         for (order in 0..maxOrder) {
+            var warmupSamplesFit = true
+            for (index in 0 until order) {
+                if (!samples[index].fitsSignedBits(bitsPerSample)) {
+                    warmupSamplesFit = false
+                    break
+                }
+            }
+            if (!warmupSamplesFit) continue
             val residualCount = count - order
             val residuals = IntArray(residualCount)
             for (index in order until count) {
@@ -488,7 +684,7 @@ object Pcm16StereoFlacEncoder {
             }
             val rice = bestRiceParameter(residuals, residualCount) ?: continue
             val estimatedBits = FIXED_SUBFRAME_HEADER_BITS +
-                    order * BITS_PER_SAMPLE +
+                    order * bitsPerSample +
                     RESIDUAL_HEADER_BITS +
                     residualCount.estimateRiceBits(residuals, rice.parameter)
             if (best == null || estimatedBits < best.estimatedBits) {
@@ -502,6 +698,18 @@ object Pcm16StereoFlacEncoder {
             }
         }
         return best
+    }
+
+    private fun bitsPerSampleForChannel(
+        channelAssignment: Int,
+        channelIndex: Int,
+    ): Int {
+        return when (channelAssignment) {
+            CHANNEL_ASSIGNMENT_LEFT_SIDE -> if (channelIndex == 1) BITS_PER_SAMPLE + 1 else BITS_PER_SAMPLE
+            CHANNEL_ASSIGNMENT_RIGHT_SIDE -> if (channelIndex == 0) BITS_PER_SAMPLE + 1 else BITS_PER_SAMPLE
+            CHANNEL_ASSIGNMENT_MID_SIDE -> if (channelIndex == 1) BITS_PER_SAMPLE + 1 else BITS_PER_SAMPLE
+            else -> BITS_PER_SAMPLE
+        }
     }
 
     private fun bestRiceParameter(
@@ -792,8 +1000,20 @@ object Pcm16StereoFlacEncoder {
         write(bytes)
     }
 
-    private fun FlacBitWriter.writeSignedPcm16(sample: Int) {
-        writeBits((sample and 0xFFFF).toLong(), BITS_PER_SAMPLE)
+    private fun FlacBitWriter.writeSignedSample(
+        sample: Int,
+        bitsPerSample: Int,
+    ) {
+        require(bitsPerSample in 1..Int.SIZE_BITS) { "Invalid FLAC sample bit depth." }
+        require(sample.fitsSignedBits(bitsPerSample)) {
+            "FLAC sample does not fit declared bit depth."
+        }
+        val mask = if (bitsPerSample == Long.SIZE_BITS) {
+            -1L
+        } else {
+            (1L shl bitsPerSample) - 1L
+        }
+        writeBits(sample.toLong() and mask, bitsPerSample)
     }
 
     private fun FlacBitWriter.writeRiceSigned(value: Int, parameter: Int) {
@@ -805,8 +1025,16 @@ object Pcm16StereoFlacEncoder {
         }
     }
 
-    private fun FlacBitReader.readSignedPcm16(): Int {
-        return readBits(BITS_PER_SAMPLE).toInt().toShort().toInt()
+    private fun FlacBitReader.readSignedSample(bitsPerSample: Int): Int {
+        require(bitsPerSample in 1..Int.SIZE_BITS) { "Invalid FLAC sample bit depth." }
+        val unsigned = readBits(bitsPerSample)
+        val signBit = 1L shl (bitsPerSample - 1)
+        val signed = if ((unsigned and signBit) != 0L) {
+            unsigned - (1L shl bitsPerSample)
+        } else {
+            unsigned
+        }
+        return signed.toInt()
     }
 
     private fun FlacBitReader.readRiceSigned(parameter: Int): Int {
@@ -897,7 +1125,7 @@ object Pcm16StereoFlacEncoder {
             appendLine("flacBytes=${index.flacBytes}")
             appendLine("pcmMd5Hex=${index.pcmMd5Hex}")
             appendLine("frames=${index.frames.size}")
-            appendLine("frameNumber,startPcmFrame,pcmFrameCount,byteOffset,byteCount")
+            appendLine("frameNumber,startPcmFrame,pcmFrameCount,byteOffset,byteCount,channelAssignment")
             index.frames.forEach { frame ->
                 append(frame.frameNumber)
                 append(',')
@@ -908,6 +1136,8 @@ object Pcm16StereoFlacEncoder {
                 append(frame.byteOffset)
                 append(',')
                 append(frame.byteCount)
+                append(',')
+                append(frame.channelAssignment.channelAssignmentName())
                 appendLine()
             }
         }
@@ -924,6 +1154,15 @@ object Pcm16StereoFlacEncoder {
             tempFile.delete()
             throw error
         }
+    }
+
+    private fun Pcm16StereoFlacFrameIndex.channelAssignmentSummary(): String {
+        return frames
+            .groupingBy { frame -> frame.channelAssignment.channelAssignmentName() }
+            .eachCount()
+            .entries
+            .sortedBy { entry -> entry.key }
+            .joinToString(";") { entry -> "${entry.key}=${entry.value}" }
     }
 
     private fun readFrameIndexFile(indexFile: File): Pcm16StereoFlacFrameIndex {
@@ -945,7 +1184,14 @@ object Pcm16StereoFlacEncoder {
         val flacBytes = readValue("flacBytes").toLong()
         val pcmMd5Hex = readValue("pcmMd5Hex")
         val frameEntryCount = readValue("frames").toInt()
-        require(cursor < lines.size && lines[cursor++] == "frameNumber,startPcmFrame,pcmFrameCount,byteOffset,byteCount") {
+        require(cursor < lines.size) {
+            "Missing FLAC frame index table header."
+        }
+        val tableHeader = lines[cursor++]
+        require(
+            tableHeader == "frameNumber,startPcmFrame,pcmFrameCount,byteOffset,byteCount" ||
+                    tableHeader == "frameNumber,startPcmFrame,pcmFrameCount,byteOffset,byteCount,channelAssignment"
+        ) {
             "Missing FLAC frame index table header."
         }
         val frames = ArrayList<Pcm16StereoFlacFrameIndexEntry>(frameEntryCount)
@@ -953,13 +1199,15 @@ object Pcm16StereoFlacEncoder {
             val line = lines[cursor++]
             if (line.isBlank()) continue
             val parts = line.split(',')
-            require(parts.size == 5) { "Invalid FLAC frame index row: $line" }
+            require(parts.size == 5 || parts.size == 6) { "Invalid FLAC frame index row: $line" }
             frames += Pcm16StereoFlacFrameIndexEntry(
                 frameNumber = parts[0].toLong(),
                 startPcmFrame = parts[1].toLong(),
                 pcmFrameCount = parts[2].toInt(),
                 byteOffset = parts[3].toLong(),
                 byteCount = parts[4].toInt(),
+                channelAssignment = parts.getOrNull(5)?.channelAssignmentValue()
+                    ?: CHANNEL_ASSIGNMENT_STEREO,
             )
         }
         require(frames.size == frameEntryCount) { "FLAC frame index row count mismatch." }
@@ -996,6 +1244,14 @@ object Pcm16StereoFlacEncoder {
                 "Invalid FLAC frame byte offset."
             }
             require(frame.byteCount > 0) { "Invalid FLAC frame byte count." }
+            require(
+                frame.channelAssignment == CHANNEL_ASSIGNMENT_STEREO ||
+                        frame.channelAssignment == CHANNEL_ASSIGNMENT_LEFT_SIDE ||
+                        frame.channelAssignment == CHANNEL_ASSIGNMENT_RIGHT_SIDE ||
+                        frame.channelAssignment == CHANNEL_ASSIGNMENT_MID_SIDE
+            ) {
+                "Unsupported FLAC frame channel assignment."
+            }
             expectedFrameNumber += 1L
             expectedPcmFrame += frame.pcmFrameCount
         }
@@ -1169,6 +1425,32 @@ object Pcm16StereoFlacEncoder {
         }
     }
 
+    private fun Int.fitsSignedBits(bits: Int): Boolean {
+        val minValue = -(1L shl (bits - 1))
+        val maxValue = (1L shl (bits - 1)) - 1L
+        return toLong() in minValue..maxValue
+    }
+
+    private fun Int.channelAssignmentName(): String {
+        return when (this) {
+            CHANNEL_ASSIGNMENT_STEREO -> "independent"
+            CHANNEL_ASSIGNMENT_LEFT_SIDE -> "left_side"
+            CHANNEL_ASSIGNMENT_RIGHT_SIDE -> "right_side"
+            CHANNEL_ASSIGNMENT_MID_SIDE -> "mid_side"
+            else -> "unknown_$this"
+        }
+    }
+
+    private fun String.channelAssignmentValue(): Int {
+        return when (this) {
+            "independent" -> CHANNEL_ASSIGNMENT_STEREO
+            "left_side" -> CHANNEL_ASSIGNMENT_LEFT_SIDE
+            "right_side" -> CHANNEL_ASSIGNMENT_RIGHT_SIDE
+            "mid_side" -> CHANNEL_ASSIGNMENT_MID_SIDE
+            else -> toInt()
+        }
+    }
+
     private fun crc8(bytes: ByteArray): Int {
         var crc = 0
         for (byte in bytes) {
@@ -1219,6 +1501,9 @@ object Pcm16StereoFlacEncoder {
     private const val BLOCK_SIZE_CODE_4096 = 12
     private const val SAMPLE_RATE_FROM_STREAMINFO = 0
     private const val CHANNEL_ASSIGNMENT_STEREO = 1
+    private const val CHANNEL_ASSIGNMENT_LEFT_SIDE = 8
+    private const val CHANNEL_ASSIGNMENT_RIGHT_SIDE = 9
+    private const val CHANNEL_ASSIGNMENT_MID_SIDE = 10
     private const val SAMPLE_SIZE_16_BIT = 4
 
     private const val SUBFRAME_HEADER_BITS = 8
@@ -1268,7 +1553,14 @@ data class Pcm16StereoFlacEncodeResult(
     val outputBytes: Long,
     val frameIndexEntries: Int,
     val frameIndexPath: String?,
+    val stereoMode: Pcm16StereoFlacStereoMode,
+    val channelAssignmentSummary: String,
 )
+
+enum class Pcm16StereoFlacStereoMode {
+    INDEPENDENT,
+    ADAPTIVE_STEREO_DECORRELATION,
+}
 
 data class Pcm16StereoFlacVerifyResult(
     val sampleRate: Int,
@@ -1328,6 +1620,12 @@ private data class Pcm16StereoFlacFrameIndexEntry(
     val pcmFrameCount: Int,
     val byteOffset: Long,
     val byteCount: Int,
+    val channelAssignment: Int,
+)
+
+private data class EncodedFlacFrame(
+    val bytes: ByteArray,
+    val channelAssignment: Int,
 )
 
 private data class FixedSubframe(
