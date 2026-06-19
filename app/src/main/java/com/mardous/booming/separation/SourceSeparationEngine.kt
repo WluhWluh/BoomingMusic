@@ -161,8 +161,8 @@ class SourceSeparationEngine(
                 note = "manifestMissing",
             )
         val output = manifest.output
-        val vocalsFile = output?.vocalsPath?.let(::File)
-        val instrumentalFile = output?.instrumentalPath?.let(::File)
+        val vocalsFile = output?.playbackVocalsPath()?.let(::File)
+        val instrumentalFile = output?.playbackInstrumentalPath()?.let(::File)
         val outputReady = vocalsFile?.isFile == true && instrumentalFile?.isFile == true
 
         if (manifest.state == SourceSeparationCacheState.Completed) {
@@ -394,7 +394,8 @@ data class SourceSeparationSegmentDebugInfo(
 
 private fun SourceSeparationManifest.hasUsableOutputFiles(): Boolean {
     val output = output ?: return false
-    return File(output.vocalsPath).isFile && File(output.instrumentalPath).isFile
+    return File(output.playbackVocalsPath()).isFile &&
+            File(output.playbackInstrumentalPath()).isFile
 }
 
 private fun com.mardous.booming.separation.cache.SourceSeparationSegmentFileState.toDebugInfo(): SourceSeparationSegmentDebugInfo {

@@ -61,13 +61,38 @@ data class SourceFileDiagnostics(
 data class SourceSeparationOutput(
     val vocalsPath: String,
     val instrumentalPath: String,
+    val format: SourceSeparationOutputFormat = SourceSeparationOutputFormat.WAV,
+    val promotedVocalsPath: String? = null,
+    val promotedInstrumentalPath: String? = null,
+    val promotedFormat: SourceSeparationOutputFormat? = null,
+    val promotionValidated: Boolean = false,
     val timingPath: String? = null,
     val outputSampleRate: Int,
     val outputFrameCount: Int,
     val windowCount: Int,
     val elapsedMs: Long,
     val totalBytes: Long,
-)
+) {
+    fun playbackVocalsPath(): String {
+        return promotedVocalsPath.takeIf { canUsePromotedFlac() && !it.isNullOrBlank() }
+            ?: vocalsPath
+    }
+
+    fun playbackInstrumentalPath(): String {
+        return promotedInstrumentalPath.takeIf { canUsePromotedFlac() && !it.isNullOrBlank() }
+            ?: instrumentalPath
+    }
+
+    fun canUsePromotedFlac(): Boolean {
+        return promotionValidated && promotedFormat == SourceSeparationOutputFormat.FLAC
+    }
+}
+
+@Serializable
+enum class SourceSeparationOutputFormat {
+    WAV,
+    FLAC,
+}
 
 @Serializable
 data class SourceSeparationError(
