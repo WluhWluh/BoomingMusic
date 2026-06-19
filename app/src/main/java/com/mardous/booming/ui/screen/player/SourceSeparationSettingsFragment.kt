@@ -1,11 +1,15 @@
 package com.mardous.booming.ui.screen.player
 
 import android.app.Dialog
+import android.os.SystemClock
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +28,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -34,6 +39,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -68,6 +74,9 @@ import com.mardous.booming.ui.component.compose.TitledCard
 import com.mardous.booming.ui.theme.BoomingMusicTheme
 import com.mardous.booming.ui.theme.SliderTokens
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
+import kotlinx.coroutines.delay
+import kotlin.math.ceil
+import kotlin.math.max
 
 class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
 
@@ -131,6 +140,9 @@ private fun SourceSeparationSettingsSheet(
         .collectAsState()
     val hydratedMixedOutputPrerollMs by viewModel
         .sourceSeparationHydratedMixedOutputPrerollMsFlow
+        .collectAsState()
+    val playbackReadyWindowCount by viewModel
+        .sourceSeparationPlaybackReadyWindowCountFlow
         .collectAsState()
 
     val separatedPlaybackEnabled = blendMode != SourceSeparationBlendMode.Off
@@ -303,10 +315,9 @@ private fun SourceSeparationSettingsSheet(
                             AnimatedVisibility(
                                 visible = playbackState.processing
                             ) {
-                                Text(
-                                    text = stringResource(R.string.source_separation_playback_processing),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    style = MaterialTheme.typography.bodyMedium
+                                SourceSeparationPlaybackProcessingProgress(
+                                    separationState = separationState,
+                                    processingGeneration = playbackState.processingGeneration,
                                 )
                             }
 
@@ -474,6 +485,21 @@ private fun SourceSeparationSettingsSheet(
                                 onValueChange =
                                     viewModel::setSourceSeparationHydratedMixedOutputPrerollMs
                             )
+
+                            NumberSettingField(
+                                value = playbackReadyWindowCount,
+                                title = stringResource(
+                                    R.string.source_separation_playback_ready_windows_title
+                                ),
+                                description = stringResource(
+                                    R.string.source_separation_playback_ready_windows_description
+                                ),
+                                suffix = stringResource(
+                                    R.string.source_separation_playback_ready_windows_suffix
+                                ),
+                                onValueChange =
+                                    viewModel::setSourceSeparationPlaybackReadyWindowCount
+                            )
                         }
                     }
                 }
@@ -499,6 +525,152 @@ private fun SourceSeparationDecodeDiagnosticsText(
 }
 
 @Composable
+private fun SourceSeparationPlaybackProcessingProgress(
+    separationState: SourceSeparationUiState,
+    processingGeneration: Long,
+) {
+    val runningState = separationState as? SourceSeparationUiState.Running
+    val scheduler = runningState?.scheduler
+    val pendingWindows = scheduler?.playbackReadyWindowPendingCount?.coerceAtLeast(0) ?: 0
+    val readyWindows = scheduler?.playbackReadyWindowReadyCount?.coerceAtLeast(0) ?: 0
+    val targetWindows = scheduler?.readyWindowCount?.coerceAtLeast(1)
+        ?: runningState?.initialProcessingWindowCount()
+        ?: 0
+    val averageWindowMs = runningState?.averageWindowMs?.coerceAtLeast(1L) ?: 3000L
+    val estimateKey = listOf(
+        processingGeneration,
+        scheduler?.playbackSegmentIndex,
+        scheduler?.processingSegmentIndex,
+        pendingWindows,
+        readyWindows,
+        targetWindows,
+    )
+    var elapsedInEstimateMs by remember(estimateKey) {
+        mutableStateOf(0L)
+    }
+    LaunchedEffect(estimateKey, averageWindowMs) {
+        val startedAt = SystemClock.elapsedRealtime()
+        while (true) {
+            elapsedInEstimateMs = SystemClock.elapsedRealtime() - startedAt
+            delay(100L)
+        }
+    }
+    val estimatedRemainingSeconds = ceil(
+        (((pendingWindows.takeIf { it > 0 } ?: targetWindows).coerceAtLeast(1) *
+                averageWindowMs) - elapsedInEstimateMs)
+            .coerceAtLeast(0L) / 1000.0
+    ).toInt()
+    val progressTarget = if (targetWindows > 0) {
+        val baseCompletedWindows = if (scheduler != null) {
+            readyWindows.toFloat()
+        } else {
+            runningState?.initialProcessingCompletedUnits()?.toFloat() ?: 0f
+        }
+        val estimatedCompletedWindows = elapsedInEstimateMs.toFloat() / averageWindowMs.toFloat()
+        ((baseCompletedWindows + estimatedCompletedWindows) / targetWindows.toFloat())
+            .coerceIn(0f, 0.98f)
+    } else {
+        0f
+    }
+    val progressResetKey = listOf(
+        processingGeneration,
+        scheduler?.playbackSegmentIndex,
+        targetWindows,
+    )
+    var displayedProgressTarget by remember(progressResetKey) {
+        mutableFloatStateOf(0f)
+    }
+    LaunchedEffect(progressResetKey, progressTarget) {
+        displayedProgressTarget = max(displayedProgressTarget, progressTarget)
+    }
+    val animatedProgress = remember(progressResetKey) {
+        Animatable(0f)
+    }
+    LaunchedEffect(progressResetKey, displayedProgressTarget, averageWindowMs) {
+        animatedProgress.animateTo(
+            targetValue = displayedProgressTarget,
+            animationSpec = tween(
+                durationMillis = 120,
+                easing = LinearEasing,
+            ),
+        )
+    }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = if (scheduler != null && targetWindows > 0) {
+                stringResource(
+                    R.string.source_separation_playback_processing_estimate,
+                    readyWindows,
+                    targetWindows,
+                    pendingWindows,
+                    estimatedRemainingSeconds,
+                )
+            } else if (runningState != null && targetWindows > 0) {
+                stringResource(
+                    R.string.source_separation_playback_initial_processing_estimate,
+                    runningState.initialProcessingLabel(),
+                    estimatedRemainingSeconds,
+                )
+            } else {
+                stringResource(R.string.source_separation_playback_processing)
+            },
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        LinearProgressIndicator(
+            progress = { animatedProgress.value },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+private fun SourceSeparationUiState.Running.initialProcessingWindowCount(): Int {
+    return when (sourceDecodeMode) {
+        SourceSeparationDecodeModeUiState.FullSong -> 3
+        SourceSeparationDecodeModeUiState.Window -> 2
+        null -> 0
+    }
+}
+
+private fun SourceSeparationUiState.Running.initialProcessingCompletedUnits(): Int {
+    val stageText = stage.orEmpty()
+    return when (sourceDecodeMode) {
+        SourceSeparationDecodeModeUiState.FullSong -> when {
+            stageText.contains("Processed window 2", ignoreCase = true) -> 3
+            stageText.contains("Preparing window 2", ignoreCase = true) ||
+                    stageText.contains("Processed window 1", ignoreCase = true) -> 2
+            stageText.contains("Preparing window 1", ignoreCase = true) -> 1
+            else -> 0
+        }
+        SourceSeparationDecodeModeUiState.Window -> when {
+            stageText.contains("Processed window 2", ignoreCase = true) -> 2
+            stageText.contains("Preparing window 2", ignoreCase = true) ||
+                    stageText.contains("Processed window 1", ignoreCase = true) -> 1
+            else -> 0
+        }
+        null -> 0
+    }
+}
+
+private fun SourceSeparationUiState.Running.initialProcessingLabel(): String {
+    val stageText = stage.orEmpty()
+    return when (sourceDecodeMode) {
+        SourceSeparationDecodeModeUiState.FullSong -> when {
+            stageText.contains("Preparing window", ignoreCase = true) -> stageText
+            else -> "Full decode"
+        }
+        SourceSeparationDecodeModeUiState.Window -> when {
+            stageText.contains("Preparing window", ignoreCase = true) -> stageText
+            else -> "Window decode"
+        }
+        null -> stage ?: ""
+    }.ifBlank { "Processing" }
+}
+
+@Composable
 private fun SourceSeparationSchedulerText(
     state: SourceSeparationUiState
 ) {
@@ -516,11 +688,12 @@ private fun SourceSeparationSchedulerText(
     } ?: "next=none"
     val processingText = "processing=${scheduler.processingSegmentIndex}/${scheduler.priority ?: "?"}"
     val readyText = "ready=${scheduler.readySegments}/${scheduler.totalSegments}"
+    val bufferText = "buffer=${scheduler.playbackReadyWindowReadyCount}/${scheduler.readyWindowCount}"
 
     Text(
         text = stringResource(
             R.string.source_separation_scheduler_status,
-            "$playbackSegmentText  $nextSegmentText  $processingText  $readyText",
+            "$playbackSegmentText  $nextSegmentText  $processingText  $readyText  $bufferText",
         ),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.bodySmall
@@ -706,8 +879,42 @@ private fun PrerollMsField(
     description: String,
     onValueChange: (Long) -> Unit,
 ) {
-    var text by remember(valueMs) {
-        mutableStateOf(valueMs.toString())
+    NumberSettingField(
+        value = valueMs,
+        title = title,
+        description = description,
+        suffix = stringResource(R.string.source_separation_preroll_ms_suffix),
+        onValueChange = onValueChange,
+    )
+}
+
+@Composable
+private fun NumberSettingField(
+    value: Int,
+    title: String,
+    description: String,
+    suffix: String,
+    onValueChange: (Int) -> Unit,
+) {
+    NumberSettingField(
+        value = value.toLong(),
+        title = title,
+        description = description,
+        suffix = suffix,
+        onValueChange = { onValueChange(it.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()) },
+    )
+}
+
+@Composable
+private fun NumberSettingField(
+    value: Long,
+    title: String,
+    description: String,
+    suffix: String,
+    onValueChange: (Long) -> Unit,
+) {
+    var text by remember(value) {
+        mutableStateOf(value.toString())
     }
 
     Column(
@@ -739,7 +946,7 @@ private fun PrerollMsField(
             },
             singleLine = true,
             suffix = {
-                Text(stringResource(R.string.source_separation_preroll_ms_suffix))
+                Text(suffix)
             },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()

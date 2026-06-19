@@ -604,9 +604,19 @@ const val SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS = "source_separation.show_sna
 const val SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = "source_separation.mixed_output_preroll_ms"
 const val SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS =
     "source_separation.hydrated_mixed_output_preroll_ms"
+const val SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT =
+    "source_separation.playback_ready_window_count"
+const val SOURCE_SEPARATION_AVERAGE_WINDOW_MS = "source_separation.average_window_ms"
+const val SOURCE_SEPARATION_AVERAGE_WINDOW_SAMPLE_COUNT =
+    "source_separation.average_window_sample_count"
 const val DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 400L
 const val DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS = 0L
 const val MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 5000L
+const val DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT = 2
+const val MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT = 2
+const val MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT = 8
+const val DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS = 3000L
+const val MAX_SOURCE_SEPARATION_AVERAGE_WINDOW_SAMPLE_COUNT = 32
 const val ALBUM_SHUFFLE_MODE = "album_shuffle_mode"
 const val ARTIST_SHUFFLE_MODE = "artist_shuffle_mode"
 const val RESUME_ON_CONNECT = "resume_on_connect"

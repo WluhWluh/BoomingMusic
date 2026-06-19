@@ -44,16 +44,23 @@ import com.mardous.booming.playback.shuffle.ShuffleManager
 import com.mardous.booming.playback.toMediaItems
 import com.mardous.booming.separation.SourceSeparationCacheStatus
 import com.mardous.booming.separation.SourceSeparationEngine
+import com.mardous.booming.separation.SourceSeparationPerformanceStats
 import com.mardous.booming.separation.SourceSeparationPausedException
+import com.mardous.booming.separation.model.MdxSourceDecodeMode
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
 import com.mardous.booming.util.Preferences
 import com.mardous.booming.util.REMEMBER_SHUFFLE_MODE
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Dispatchers.IO
@@ -89,6 +96,7 @@ class PlayerViewModel(
     private val sourceSeparationEngine: SourceSeparationEngine
 ) : ViewModel(), Player.Listener {
 
+    private val sourceSeparationPerformanceStats = SourceSeparationPerformanceStats(preferences)
     private val queueMutex = Mutex()
     private val progressObserver = ProgressObserver(intervalMs = 100)
     private val shuffleManager = ShuffleManager()
@@ -221,6 +229,11 @@ class PlayerViewModel(
         MutableStateFlow(readSourceSeparationHydratedMixedOutputPrerollMs())
     val sourceSeparationHydratedMixedOutputPrerollMsFlow =
         _sourceSeparationHydratedMixedOutputPrerollMsFlow.asStateFlow()
+
+    private val _sourceSeparationPlaybackReadyWindowCountFlow =
+        MutableStateFlow(readSourceSeparationPlaybackReadyWindowCount())
+    val sourceSeparationPlaybackReadyWindowCountFlow =
+        _sourceSeparationPlaybackReadyWindowCountFlow.asStateFlow()
 
     private val internalJobs = mutableListOf<Job>()
 
@@ -523,6 +536,9 @@ class PlayerViewModel(
                     song = song,
                     promoteCompletedStems = autoFlacCompressionEnabled,
                     onProgress = { progress ->
+                        val averageWindowMs = progress.completedWindowElapsedMs
+                            ?.let(sourceSeparationPerformanceStats::recordWindowElapsed)
+                            ?: sourceSeparationPerformanceStats.averageWindowMs()
                         _sourceSeparationStateFlow.value = SourceSeparationUiState.Running(
                             songId = song.id,
                             songTitle = song.title,
@@ -531,6 +547,10 @@ class PlayerViewModel(
                             percent = progress.percent,
                             stage = progress.stage,
                             sourceDecodeDiagnostics = progress.sourceDecodeDiagnostics?.toDisplayText(),
+                            sourceDecodeMode = progress.sourceDecodeDiagnostics
+                                ?.mode
+                                ?.toUiState(),
+                            averageWindowMs = averageWindowMs,
                             scheduler = progress.scheduler?.let { scheduler ->
                                 SourceSeparationSchedulerUiState(
                                     playbackSegmentIndex = scheduler.playbackSegmentIndex,
@@ -541,6 +561,11 @@ class PlayerViewModel(
                                     priority = scheduler.priority,
                                     readySegments = scheduler.readySegments,
                                     totalSegments = scheduler.totalSegments,
+                                    readyWindowCount = scheduler.readyWindowCount,
+                                    playbackReadyWindowReadyCount =
+                                        scheduler.playbackReadyWindowReadyCount,
+                                    playbackReadyWindowPendingCount =
+                                        scheduler.playbackReadyWindowPendingCount,
                                 )
                             },
                         )
@@ -560,6 +585,9 @@ class PlayerViewModel(
                         progress.takeIf {
                             currentSong.id == song.id && it != C.TIME_UNSET
                         }
+                    },
+                    playbackReadyWindowCountProvider = {
+                        _sourceSeparationPlaybackReadyWindowCountFlow.value
                     },
                     shouldPause = {
                         sourceSeparationPauseRequested.get() ||
@@ -940,6 +968,14 @@ class PlayerViewModel(
         _sourceSeparationHydratedMixedOutputPrerollMsFlow.value = normalized
     }
 
+    fun setSourceSeparationPlaybackReadyWindowCount(value: Int) {
+        val normalized = normalizeSourceSeparationPlaybackReadyWindowCount(value)
+        preferences.edit {
+            putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, normalized)
+        }
+        _sourceSeparationPlaybackReadyWindowCountFlow.value = normalized
+    }
+
     private fun applySourceSeparationSettingsForSong(
         song: Song,
         showMessage: Boolean,
@@ -1173,6 +1209,22 @@ class PlayerViewModel(
         return valueMs.coerceIn(0L, MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS)
     }
 
+    private fun readSourceSeparationPlaybackReadyWindowCount(): Int {
+        return normalizeSourceSeparationPlaybackReadyWindowCount(
+            preferences.getInt(
+                SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+                DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+            )
+        )
+    }
+
+    private fun normalizeSourceSeparationPlaybackReadyWindowCount(value: Int): Int {
+        return value.coerceIn(
+            MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+            MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+        )
+    }
+
     private fun sourceSeparationBlendMode(
         playbackEnabled: Boolean,
         rememberPerSong: Boolean,
@@ -1225,31 +1277,41 @@ class PlayerViewModel(
             ?: if (result.resultCode == SessionResult.RESULT_SUCCESS) null
             else "Source separation playback is unavailable."
 
+        val enabled = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_ENABLED)) {
+            extras.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED)
+        } else {
+            current.enabled
+        }
+        val processing = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_PROCESSING)) {
+            extras.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_PROCESSING)
+        } else {
+            current.processing
+        }
+        val blend = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_BLEND)) {
+            extras.getFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND)
+        } else {
+            current.blend
+        }
+        val songId = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_SONG_ID)) {
+            extras.getLong(Playback.EXTRA_SOURCE_SEPARATION_SONG_ID)
+        } else if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_ENABLED) &&
+            !extras.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED)
+        ) {
+            null
+        } else {
+            current.songId
+        }
+
         _sourceSeparationPlaybackStateFlow.value = SourceSeparationPlaybackUiState(
-            enabled = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_ENABLED)) {
-                extras.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED)
+            enabled = enabled,
+            processing = processing,
+            processingGeneration = if (processing && !current.processing) {
+                current.processingGeneration + 1L
             } else {
-                current.enabled
+                current.processingGeneration
             },
-            processing = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_PROCESSING)) {
-                extras.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_PROCESSING)
-            } else {
-                current.processing
-            },
-            blend = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_BLEND)) {
-                extras.getFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND)
-            } else {
-                current.blend
-            },
-            songId = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_SONG_ID)) {
-                extras.getLong(Playback.EXTRA_SOURCE_SEPARATION_SONG_ID)
-            } else if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_ENABLED) &&
-                !extras.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED)
-            ) {
-                null
-            } else {
-                current.songId
-            },
+            blend = blend,
+            songId = songId,
             message = message,
         )
     }
@@ -1594,6 +1656,8 @@ sealed class SourceSeparationUiState {
         val percent: Int = 0,
         val stage: String? = null,
         val sourceDecodeDiagnostics: String? = null,
+        val sourceDecodeMode: SourceSeparationDecodeModeUiState? = null,
+        val averageWindowMs: Long = DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS,
         val scheduler: SourceSeparationSchedulerUiState? = null,
     ) : SourceSeparationUiState()
 
@@ -1659,10 +1723,16 @@ private fun SourceSeparationCacheStatus.toUiState(): SourceSeparationCacheUiStat
 data class SourceSeparationPlaybackUiState(
     val enabled: Boolean = false,
     val processing: Boolean = false,
+    val processingGeneration: Long = 0L,
     val blend: Float = 0.5f,
     val songId: Long? = null,
     val message: String? = null,
 )
+
+enum class SourceSeparationDecodeModeUiState {
+    FullSong,
+    Window,
+}
 
 data class SourceSeparationSchedulerUiState(
     val playbackSegmentIndex: Int?,
@@ -1673,6 +1743,9 @@ data class SourceSeparationSchedulerUiState(
     val priority: String?,
     val readySegments: Int,
     val totalSegments: Int,
+    val readyWindowCount: Int,
+    val playbackReadyWindowReadyCount: Int,
+    val playbackReadyWindowPendingCount: Int,
 )
 
 sealed class SourceSeparationWindowDecodeExperimentUiState {
@@ -1702,4 +1775,11 @@ enum class SourceSeparationBlendMode {
     Off,
     Global,
     PerSong
+}
+
+private fun MdxSourceDecodeMode.toUiState(): SourceSeparationDecodeModeUiState {
+    return when (this) {
+        MdxSourceDecodeMode.FullSong -> SourceSeparationDecodeModeUiState.FullSong
+        MdxSourceDecodeMode.Window -> SourceSeparationDecodeModeUiState.Window
+    }
 }
