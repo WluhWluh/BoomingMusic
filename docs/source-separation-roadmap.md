@@ -727,7 +727,7 @@ Implementation notes:
 - Running stem WAV files are preallocated to the full output duration, so completed windows can be written into a song-aligned timeline while future regions remain silent.
 - The separator can now choose the next unprocessed segment from `SourceSeparationSegmentScheduler` after each completed model window. This lets the active playback position and next segment move to the front of the current song's work when the user seeks.
 - Whole-song work WAVs support frame-addressed writes for preallocated files, so out-of-order segment processing does not corrupt the final song timeline.
-- Completed runs currently copy final WAV files into `completed/` while leaving the running `work/` files in place, allowing an active experimental playback session to keep using the same file paths after final promotion.
+- Completed runs copy final WAV files into `completed/` and mark the full-duration `work/` WAV timeline for deferred cleanup.
 
 Current limitations:
 
@@ -758,6 +758,17 @@ Partial-cache restart recovery prototype:
 - Ready segments are only skipped when the full-duration running work WAV files are also present and valid, because those files are the live playback and final-promotion timeline.
 - Stale `Running`, `Queued`, `Failed`, or incomplete segments are normalized back to `Queued` and processed again.
 - If the full-duration work WAVs are missing or invalid, all segments are queued again so old segment files cannot make playback trust an empty or mismatched stem timeline.
+
+Completed temporary-cache cleanup prototype:
+
+- Completed manifests now record pending cleanup entries for the `work/` and `segments/` directories after final WAVs are promoted to `completed/`.
+- The playback service owns the actual deletion decision because it knows which stem files are still referenced by the active mixer session.
+- Pending temporary cleanup is attempted on service startup, after source-separation playback sessions are cleared, after service-side offline separation completes, and when the UI asks the service to clean after a ViewModel-side separation run finishes.
+- Cleanup skips any `work/` directory whose files are still referenced by the active source-separation playback session, so live running-cache playback can finish its transition before storage is reclaimed.
+- Completed `segments/` directories are deleted as soon as the cleanup pass can safely verify that they are inside the cache entry directory, because completed playback uses the promoted full-track stems.
+- If the current playback session is still using the running `work/` stem timeline after final promotion, a manual seek upgrades that session to the promoted `completed/` full-track WAV files and then retries temporary cleanup. This keeps uninterrupted playback stable while still giving the user an immediate cleanup trigger.
+- The source separation sheet now reports idle cache state explicitly: not started, partial cache present, completed with temporary artifacts pending cleanup, or completed and cleaned.
+- Manual device testing confirmed that active playback remains stable after full-song completion, manual seek can switch playback to the promoted full-track files, and both `work/` and `segments/` temporary directories can be reclaimed without breaking the current session.
 
 ### Phase 6: Play While Processing
 
@@ -802,7 +813,6 @@ Current limitations:
 
 - A newly selected segment priority takes effect between model windows. Seeking to an unready position can now move that position's segment and its next segment ahead of remaining backfill work, but it cannot interrupt an active ONNX inference call.
 - The settings sheet still uses the old coarse progress text instead of a dedicated current/next segment readiness model.
-- Running `work/` WAV files are retained after completion for active playback-session stability; a later cleanup strategy should remove them once playback no longer references them.
 
 ### Phase 7: Background and Thermal Behavior
 
@@ -823,7 +833,7 @@ Done criteria:
 
 ### Phase 8: Compression and Final Cache Files
 
-Status: pending
+Status: next recommended step
 
 Goals:
 
@@ -841,6 +851,13 @@ Done criteria:
 - Compression does not introduce audible or measurable stem desync.
 - Temporary segment files are cleaned up safely after promotion.
 - Playback can still use partial segment caches while a song is not fully complete.
+
+Implementation recommendation:
+
+- Start with FLAC promotion for completed full-track stems only. Keep running `work/` and `segments/` as PCM WAV during processing so partial playback and restart recovery stay unchanged.
+- Add manifest output metadata that records codec, path, expected frame count, sample rate, channel count, and whether the promoted files have passed a local decode validation.
+- Promote atomically: encode `completed/vocals.flac` and `completed/instrumental.flac` beside the existing WAV files, decode-probe both FLAC files for frame count/alignment, update the manifest only after validation, then let the temporary cleanup path delete superseded WAV process artifacts.
+- Keep a WAV fallback path for promotion failures or devices without reliable FLAC encoder/decoder behavior.
 
 ### Phase 9: Cache Management and Full Settings UX
 
