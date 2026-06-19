@@ -153,6 +153,12 @@ class SourceSeparationCache(
                 totalBytes = totalBytes,
             ),
             segmentPlan = result.segmentPlan,
+            cleanup = SourceSeparationCleanup(
+                workDirPath = run.workDir.absolutePath,
+                workDirCleanupState = SourceSeparationCleanupState.Pending,
+                segmentsDirPath = run.segmentsDir.absolutePath,
+                segmentsDirCleanupState = SourceSeparationCleanupState.Pending,
+            ),
             createdAtEpochMs = readManifest(run.rootDir)?.createdAtEpochMs ?: now,
             updatedAtEpochMs = now,
         )
@@ -413,6 +419,109 @@ class SourceSeparationCache(
         return !dir.exists() || dir.deleteRecursively()
     }
 
+    fun cleanCompletedTemporaryDirs(
+        manifest: SourceSeparationManifest,
+        activeFiles: Set<String> = emptySet(),
+    ): Boolean {
+        if (manifest.state != SourceSeparationCacheState.Completed) return false
+        val entryDir = entryDir(
+            songId = manifest.songLocator.songId,
+            modelVariant = manifest.audioIdentity.modelVariant,
+            pipelineVersion = manifest.pipelineVersion,
+        )
+        val workDir = File(entryDir, WORK_DIR_NAME)
+        val segmentsDir = File(entryDir, SEGMENTS_DIR_NAME)
+        val cleanup = manifest.cleanup ?: SourceSeparationCleanup(
+            workDirPath = workDir.absolutePath,
+            workDirCleanupState = if (workDir.exists()) {
+                SourceSeparationCleanupState.Pending
+            } else {
+                SourceSeparationCleanupState.NotNeeded
+            },
+            segmentsDirPath = segmentsDir.absolutePath,
+            segmentsDirCleanupState = if (segmentsDir.exists()) {
+                SourceSeparationCleanupState.Pending
+            } else {
+                SourceSeparationCleanupState.NotNeeded
+            },
+        )
+
+        var updatedCleanup = cleanup
+        var cleanedAny = false
+
+        val workCleanupState = cleanup.workWavCleanupState ?: cleanup.workDirCleanupState
+        if (workCleanupState == SourceSeparationCleanupState.Pending) {
+            val workDir = cleanup.workDirPath?.let(::File)
+            val workCleaned = workDir != null &&
+                    workDir.isWithin(entryDir) &&
+                    !workDir.hasActiveFile(activeFiles) &&
+                    (!workDir.exists() || workDir.deleteRecursively())
+            if (workCleaned) {
+                updatedCleanup = updatedCleanup.copy(
+                    workDirCleanupState = SourceSeparationCleanupState.Completed,
+                    workWavCleanupState = cleanup.workWavCleanupState
+                        ?.let { SourceSeparationCleanupState.Completed },
+                )
+                cleanedAny = true
+            }
+        }
+
+        if (cleanup.segmentsDirCleanupState == SourceSeparationCleanupState.Pending) {
+            val segmentsDir = cleanup.segmentsDirPath?.let(::File)
+            val segmentsCleaned = segmentsDir != null &&
+                    segmentsDir.isWithin(entryDir) &&
+                    (!segmentsDir.exists() || segmentsDir.deleteRecursively())
+            if (segmentsCleaned) {
+                updatedCleanup = updatedCleanup.copy(
+                    segmentsDirCleanupState = SourceSeparationCleanupState.Completed,
+                )
+                cleanedAny = true
+            }
+        }
+
+        if (cleanedAny) {
+            val totalBytes = entryDir.directorySize()
+            writeManifest(
+                entryDir,
+                manifest.copy(
+                    output = manifest.output?.copy(totalBytes = totalBytes),
+                    cleanup = updatedCleanup,
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                )
+            )
+        }
+        return cleanedAny
+    }
+
+    fun cleanPendingCompletedTemporaryDirs(activeFiles: Set<String> = emptySet()): Int {
+        return listManifests()
+            .count { manifest ->
+                cleanCompletedTemporaryDirs(
+                    manifest = manifest,
+                    activeFiles = activeFiles,
+                )
+            }
+    }
+
+    fun hasPendingCompletedTemporaryDirs(manifest: SourceSeparationManifest): Boolean {
+        if (manifest.state != SourceSeparationCacheState.Completed) return false
+        val cleanup = manifest.cleanup
+        if (cleanup != null) {
+            val workPending = (cleanup.workWavCleanupState ?: cleanup.workDirCleanupState) ==
+                    SourceSeparationCleanupState.Pending
+            val segmentsPending = cleanup.segmentsDirCleanupState == SourceSeparationCleanupState.Pending
+            if (workPending || segmentsPending) return true
+        }
+
+        val entryDir = entryDir(
+            songId = manifest.songLocator.songId,
+            modelVariant = manifest.audioIdentity.modelVariant,
+            pipelineVersion = manifest.pipelineVersion,
+        )
+        return File(entryDir, WORK_DIR_NAME).exists() ||
+                File(entryDir, SEGMENTS_DIR_NAME).exists()
+    }
+
     fun readPlaybackSettings(
         song: Song,
         modelVariant: MdxModelVariant,
@@ -591,6 +700,25 @@ class SourceSeparationCache(
         return walkTopDown()
             .filter { it.isFile }
             .sumOf { it.length() }
+    }
+
+    private fun File.isWithin(parent: File): Boolean {
+        return runCatching {
+            val canonicalParent = parent.canonicalFile
+            var current: File? = canonicalFile
+            while (current != null) {
+                if (current == canonicalParent) return@runCatching true
+                current = current.parentFile
+            }
+            false
+        }.getOrDefault(false)
+    }
+
+    private fun File.hasActiveFile(activeFiles: Set<String>): Boolean {
+        if (activeFiles.isEmpty() || !exists()) return false
+        return walkTopDown()
+            .filter { it.isFile }
+            .any { it.absolutePath in activeFiles }
     }
 
     private fun Song.toLocator(): SourceSongLocator {

@@ -12,6 +12,7 @@ data class SourceSeparationManifest(
     val diagnostics: SourceFileDiagnostics,
     val output: SourceSeparationOutput? = null,
     val segmentPlan: SourceSeparationSegmentPlan? = null,
+    val cleanup: SourceSeparationCleanup? = null,
     val error: SourceSeparationError? = null,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
@@ -73,6 +74,24 @@ data class SourceSeparationError(
     val type: String,
     val message: String?,
 )
+
+@Serializable
+data class SourceSeparationCleanup(
+    val workDirPath: String? = null,
+    val workDirCleanupState: SourceSeparationCleanupState =
+        SourceSeparationCleanupState.NotNeeded,
+    val workWavCleanupState: SourceSeparationCleanupState? = null,
+    val segmentsDirPath: String? = null,
+    val segmentsDirCleanupState: SourceSeparationCleanupState =
+        SourceSeparationCleanupState.NotNeeded,
+)
+
+@Serializable
+enum class SourceSeparationCleanupState {
+    NotNeeded,
+    Pending,
+    Completed,
+}
 
 @Serializable
 data class SourceSeparationPlaybackSettings(

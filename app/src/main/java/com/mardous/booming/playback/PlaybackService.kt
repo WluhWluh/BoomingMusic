@@ -100,6 +100,7 @@ import com.mardous.booming.playback.renderer.BoomingMusicRenderersFactory
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.SourceSeparationPlayableCacheStatus
 import com.mardous.booming.separation.cache.SourceSeparationCacheState
+import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor.InputMode
 import com.mardous.booming.ui.screen.MainActivity
 import com.mardous.booming.util.CLEAR_QUEUE_ON_COMPLETION
@@ -272,6 +273,7 @@ class PlaybackService :
             }
         }
         traceSourceSeparationPlayback("service.onCreate")
+        cleanupCompletedSourceSeparationTemporaryDirs()
 
         customCommands = listOf(
             CommandButton.Builder(CommandButton.ICON_SHUFFLE_OFF)
@@ -475,6 +477,7 @@ class PlaybackService :
         availableCommands.add(SessionCommand(Playback.SEPARATE_CURRENT_SONG_OFFLINE, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SYNC_SOURCE_SEPARATION_PLAYBACK, Bundle.EMPTY))
+        availableCommands.add(SessionCommand(Playback.CLEAN_SOURCE_SEPARATION_TEMPORARY_CACHE, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SET_SOURCE_SEPARATION_BLEND, Bundle.EMPTY))
 
         return MediaSession.ConnectionResult.accept(
@@ -762,6 +765,7 @@ class PlaybackService :
                 serviceScope.future(IO) {
                     val song = repository.songByMediaItem(mediaItem)
                     val result = sourceSeparationEngine.separateSongToWav(song)
+                    cleanupCompletedSourceSeparationTemporaryDirs()
                     SessionResult(
                         SessionResult.RESULT_SUCCESS,
                         Bundle().apply {
@@ -832,6 +836,14 @@ class PlaybackService :
                 )
                 serviceScope.future {
                     syncSourceSeparationPlayback(allowNewSession = allowNewSession)
+                }
+            }
+
+            Playback.CLEAN_SOURCE_SEPARATION_TEMPORARY_CACHE -> {
+                traceSourceSeparationPlayback("command.cleanTemporaryCache")
+                serviceScope.future(IO) {
+                    cleanCompletedSourceSeparationTemporaryDirsNow()
+                    SessionResult(SessionResult.RESULT_SUCCESS)
                 }
             }
 
@@ -1068,6 +1080,7 @@ class PlaybackService :
                     showUnavailableMessage = false,
                     allowPauseForProcessing = true,
                     resumeWhenReady = sourceSeparationPlaybackResumeWhenReady || player.playWhenReady,
+                    preferCompletedCache = true,
                 )
             }
         } else if (sourceSeparationPlaybackSession != null) {
@@ -1234,6 +1247,7 @@ class PlaybackService :
         allowPauseForProcessing: Boolean = true,
         resumeWhenReady: Boolean = sourceSeparationPlaybackResumeWhenReady,
         allowNewSession: Boolean = true,
+        preferCompletedCache: Boolean = false,
     ): SessionResult {
         return sourceSeparationPlaybackReadinessMutex.withLock {
             val checkId = ++sourceSeparationPlaybackCheckSeq
@@ -1243,6 +1257,7 @@ class PlaybackService :
                 allowPauseForProcessing = allowPauseForProcessing,
                 resumeWhenReady = resumeWhenReady,
                 allowNewSession = allowNewSession,
+                preferCompletedCache = preferCompletedCache,
             )
         }
     }
@@ -1253,11 +1268,13 @@ class PlaybackService :
         allowPauseForProcessing: Boolean,
         resumeWhenReady: Boolean,
         allowNewSession: Boolean,
+        preferCompletedCache: Boolean,
     ): SessionResult {
         traceSourceSeparationPlayback(
             "check.start",
             "id=$checkId showMessage=$showUnavailableMessage allowPause=$allowPauseForProcessing " +
-                    "resumeWhenReady=$resumeWhenReady allowNewSession=$allowNewSession"
+                    "resumeWhenReady=$resumeWhenReady allowNewSession=$allowNewSession " +
+                    "preferCompletedCache=$preferCompletedCache"
         )
         if (!sourceSeparationPlaybackRequested) {
             clearSourceSeparationPlaybackProcessing()
@@ -1350,6 +1367,19 @@ class PlaybackService :
                             "check.activeSession.ready",
                             "id=$checkId manifestState=${status.manifest.state}"
                         )
+                        if (preferCompletedCache &&
+                            shouldUpgradeActiveSourceSeparationSession(it, status.manifest)
+                        ) {
+                            return switchActiveSourceSeparationSessionToCompletedCache(
+                                checkId = checkId,
+                                song = song,
+                                activeSession = it,
+                                manifest = status.manifest,
+                                positionMs = positionMs,
+                                resumeWhenReady = resumeWhenReady,
+                                showUnavailableMessage = showUnavailableMessage,
+                            )
+                        }
                         val wasProcessing = sourceSeparationPlaybackIsProcessing
                         val resumeAfterProcessing = sourceSeparationPlaybackResumeWhenReady
                         sourceSeparationPlaybackIsProcessing = false
@@ -1560,6 +1590,111 @@ class PlaybackService :
         return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
     }
 
+    private fun shouldUpgradeActiveSourceSeparationSession(
+        session: SourceSeparationPlaybackSession,
+        manifest: SourceSeparationManifest,
+    ): Boolean {
+        if (manifest.state != SourceSeparationCacheState.Completed) return false
+        val output = manifest.output ?: return false
+        return session.requiresReadinessGate ||
+                session.inputMode != InputMode.InstrumentalStem ||
+                session.vocalsFile.absolutePath != output.vocalsPath ||
+                session.instrumentalFile.absolutePath != output.instrumentalPath ||
+                !session.replacesQueueMediaItem
+    }
+
+    private fun switchActiveSourceSeparationSessionToCompletedCache(
+        checkId: Long,
+        song: Song,
+        activeSession: SourceSeparationPlaybackSession,
+        manifest: SourceSeparationManifest,
+        positionMs: Long,
+        resumeWhenReady: Boolean,
+        showUnavailableMessage: Boolean,
+    ): SessionResult {
+        val output = manifest.output
+            ?: return sourceSeparationPlaybackUnavailable(
+                showMessage = showUnavailableMessage,
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = "No separated cache found for this song.",
+            )
+        val vocalsFile = File(output.vocalsPath)
+        val instrumentalFile = File(output.instrumentalPath)
+        if (!vocalsFile.isFile || !instrumentalFile.isFile) {
+            traceSourceSeparationPlayback(
+                "check.activeSession.completedFilesMissing",
+                "id=$checkId vocals=${vocalsFile.isFile} instrumental=${instrumentalFile.isFile}"
+            )
+            return sourceSeparationPlaybackUnavailable(
+                showMessage = showUnavailableMessage,
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = "Separated stem files are missing.",
+            )
+        }
+
+        val index = player.currentMediaItemIndex
+        if (index == C.INDEX_UNSET) {
+            clearSourceSeparationPlaybackProcessing()
+            traceSourceSeparationPlayback("check.activeSession.completedInvalidIndex", "id=$checkId")
+            return sourceSeparationPlaybackUnavailable(
+                showMessage = showUnavailableMessage,
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = "No playable song is selected.",
+            )
+        }
+
+        val playWhenReady = player.playWhenReady
+        val shouldPlayAfterSwitch = resumeWhenReady || playWhenReady
+        val originalMediaItem = activeSession.originalMediaItem
+        val queueReplacementToken = "source-separation:${song.id}:$checkId:${SystemClock.elapsedRealtime()}"
+        val playbackMediaItem = originalMediaItem.buildUpon()
+            .setUri(Uri.fromFile(instrumentalFile))
+            .setMediaId(song.id.toString())
+            .build()
+            .withSourceSeparationQueueReplacementToken(queueReplacementToken)
+        val session = SourceSeparationPlaybackSession(
+            songId = song.id,
+            mediaItemIndex = index,
+            originalMediaItem = originalMediaItem,
+            queueReplacementToken = queueReplacementToken,
+            vocalsFile = vocalsFile,
+            instrumentalFile = instrumentalFile,
+            inputMode = InputMode.InstrumentalStem,
+            stemSampleRate = output.outputSampleRate,
+            stemChannelCount = SOURCE_SEPARATION_STEM_CHANNEL_COUNT,
+            requiresReadinessGate = false,
+        )
+        traceSourceSeparationPlayback(
+            "check.activeSession.upgradeCompleted",
+            "id=$checkId index=$index position=$positionMs shouldPlayAfterSwitch=$shouldPlayAfterSwitch"
+        )
+        val resumeAfterSwitch = pauseSourceSeparationOutputForSwitch(
+            reason = "completedCacheUpgrade",
+            waitForMixedOutput = true,
+        ) || resumeWhenReady
+        sourceSeparationPlaybackIsProcessing = false
+        sourceSeparationPlaybackResumeWhenReady = false
+        sourceSeparationPlaybackSession = session
+        enableSourceSeparationMixProcessor(session, positionMs)
+        withSourceSeparationInternalMediaItemChange {
+            player.replaceMediaItem(index, playbackMediaItem)
+            player.seekTo(index, positionMs)
+            player.prepare()
+            setSourceSeparationPlayWhenReady(false)
+        }
+        sourceSeparationMixProcessor.seekTo(positionMs)
+        resumeSourceSeparationOutputAfterSwitch(
+            reason = "completedCacheUpgrade",
+            resume = shouldPlayAfterSwitch || resumeAfterSwitch,
+        )
+        broadcastSourceSeparationPlaybackChanged()
+        cleanupCompletedSourceSeparationTemporaryDirs(activeSession = session)
+        sourceSeparationPlaybackGateJob?.cancel()
+        sourceSeparationPlaybackGateJob = null
+        traceSourceSeparationPlayback("check.end", "id=$checkId result=success completedCacheUpgrade")
+        return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+    }
+
     private fun setSourceSeparationBlend(blend: Float): SessionResult {
         sourceSeparationMixProcessor.setBlend(blend)
         broadcastSourceSeparationPlaybackChanged()
@@ -1633,6 +1768,7 @@ class PlaybackService :
         sourceSeparationPlaybackSession = null
         sourceSeparationMixProcessor.disable()
         sourceSeparationPlaybackIsProcessing = false
+        cleanupCompletedSourceSeparationTemporaryDirs(activeSession = session)
 
         if (restoreOriginalItem && session != null) {
             val restored = restoreOriginalMediaItem(session, resumePlayback = resumeAfterSwitch)
@@ -2020,10 +2156,38 @@ class PlaybackService :
     }
 
     private fun broadcastSourceSeparationPlaybackChanged(message: String? = null) {
+        cleanupCompletedSourceSeparationTemporaryDirs()
         mediaSession?.broadcastCustomCommand(
             SessionCommand(Playback.EVENT_SOURCE_SEPARATION_PLAYBACK_CHANGED, Bundle.EMPTY),
             sourceSeparationPlaybackBundle(message),
         )
+    }
+
+    private fun cleanupCompletedSourceSeparationTemporaryDirs(
+        activeSession: SourceSeparationPlaybackSession? = sourceSeparationPlaybackSession,
+    ) {
+        val activeFiles = activeSession
+            ?.activeStemFiles()
+            .orEmpty()
+        serviceScope.launch(IO) {
+            cleanCompletedSourceSeparationTemporaryDirsNow(activeFiles)
+        }
+    }
+
+    private fun cleanCompletedSourceSeparationTemporaryDirsNow(
+        activeFiles: Set<String> = sourceSeparationPlaybackSession
+            ?.activeStemFiles()
+            .orEmpty(),
+    ) {
+        val cleanedCount = runCatching {
+            sourceSeparationEngine.cleanPendingCompletedTemporaryDirs(activeFiles)
+        }.getOrDefault(0)
+        if (cleanedCount > 0) {
+            traceSourceSeparationPlayback(
+                "cleanup.completedTemporaryDirs",
+                "count=$cleanedCount"
+            )
+        }
     }
 
     private fun cycleRepeat() {
@@ -2590,6 +2754,10 @@ private data class SourceSeparationPlaybackSession(
 ) {
     val replacesQueueMediaItem: Boolean
         get() = queueReplacementToken != null
+
+    fun activeStemFiles(): Set<String> {
+        return setOf(vocalsFile.absolutePath, instrumentalFile.absolutePath)
+    }
 }
 
 private fun MediaItem.isSourceSeparationStemMediaItem(): Boolean {

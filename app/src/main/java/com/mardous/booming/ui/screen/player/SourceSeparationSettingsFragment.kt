@@ -109,6 +109,9 @@ private fun SourceSeparationSettingsSheet(
     val currentSongCacheAvailable by viewModel
         .currentSourceSeparationCacheAvailableFlow
         .collectAsState()
+    val currentSongCacheState by viewModel
+        .currentSourceSeparationCacheStateFlow
+        .collectAsState()
     val pendingAction by viewModel.sourceSeparationPendingActionFlow.collectAsState()
     val windowDecodeExperimentState by viewModel
         .sourceSeparationWindowDecodeExperimentStateFlow
@@ -278,7 +281,7 @@ private fun SourceSeparationSettingsSheet(
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.padding(cardContentPadding)
                         ) {
-                            SourceSeparationStatusText(separationState)
+                            SourceSeparationStatusText(separationState, currentSongCacheState)
                             SourceSeparationSchedulerText(separationState)
                             SourceSeparationDecodeDiagnosticsText(separationState)
                             AnimatedVisibility(
@@ -478,10 +481,28 @@ private fun SourceSeparationWindowDecodeExperimentStatusText(
 
 @Composable
 private fun SourceSeparationStatusText(
-    state: SourceSeparationUiState
+    state: SourceSeparationUiState,
+    cacheState: SourceSeparationCacheUiState,
 ) {
     val text = when (state) {
-        SourceSeparationUiState.Idle -> stringResource(R.string.source_separation_status_idle)
+        SourceSeparationUiState.Idle -> when (cacheState) {
+            SourceSeparationCacheUiState.NotStarted -> {
+                stringResource(R.string.source_separation_status_not_started)
+            }
+            is SourceSeparationCacheUiState.Partial -> {
+                stringResource(
+                    R.string.source_separation_status_partial_cache,
+                    cacheState.readySegments,
+                    cacheState.totalSegments,
+                )
+            }
+            SourceSeparationCacheUiState.CompletedWithTemporaryFiles -> {
+                stringResource(R.string.source_separation_status_completed_cleanup_pending)
+            }
+            SourceSeparationCacheUiState.Completed -> {
+                stringResource(R.string.source_separation_status_completed_cache)
+            }
+        }
         is SourceSeparationUiState.Running -> {
             if (state.totalWindows > 0) {
                 stringResource(
