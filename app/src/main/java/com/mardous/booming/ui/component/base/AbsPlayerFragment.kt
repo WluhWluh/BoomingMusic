@@ -313,12 +313,6 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                 true
             }
 
-            R.id.action_source_separation -> {
-                playerViewModel.startSourceSeparationForCurrentSong()
-                true
-            }
-
-            R.id.action_source_separation_playback,
             R.id.action_source_separation_settings -> {
                 onQuickActionEvent(NowPlayingAction.SourceSeparationSettings)
                 true
