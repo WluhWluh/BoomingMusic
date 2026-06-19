@@ -63,6 +63,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private var notifyMixedOutputStarted = false
 
     private var mixedOutputPrerollFramesRemaining = 0L
+    private var mixedOutputReadyPrerollMs = DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS
 
     fun enable(
         vocalsFile: File,
@@ -72,6 +73,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         inputMode: InputMode = InputMode.InstrumentalStem,
         stemSampleRate: Int = DEFAULT_SAMPLE_RATE,
         stemChannelCount: Int = CHANNEL_COUNT_STEREO,
+        mixedOutputReadyPrerollMs: Long = DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS,
     ) {
         setBlend(initialBlend)
         synchronized(lock) {
@@ -83,6 +85,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             this.inputMode = inputMode
             this.stemSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
             this.stemChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
+            this.mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs.coerceAtLeast(0L)
             vocalsInput = openStemInput(vocalsFile)
             instrumentalInput = instrumentalFile?.let(::openStemInput)
             active = true
@@ -91,6 +94,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 "enable",
                 "session=$debugSessionId mode=$inputMode positionMs=$positionMs " +
                         "blend=$blend stemRate=${this.stemSampleRate} stemChannels=${this.stemChannelCount} " +
+                        "mixedPrerollMs=${this.mixedOutputReadyPrerollMs} " +
                         "vocals=${vocalsFile.length()} instrumental=${instrumentalFile?.length()}"
             )
         }
@@ -332,10 +336,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         if (mixedOutputPrerollFramesRemaining < 0L) {
             val sampleRate = inputAudioFormat.sampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
             mixedOutputPrerollFramesRemaining =
-                sampleRate * MIXED_OUTPUT_READY_PREROLL_MS / MILLIS_PER_SECOND
+                sampleRate * mixedOutputReadyPrerollMs / MILLIS_PER_SECOND
             traceDebug(
                 "mixedOutputPreroll.start",
-                "session=$debugSessionId sampleRate=$sampleRate frames=$mixedOutputPrerollFramesRemaining"
+                "session=$debugSessionId sampleRate=$sampleRate ms=$mixedOutputReadyPrerollMs " +
+                        "frames=$mixedOutputPrerollFramesRemaining"
             )
         }
         mixedOutputPrerollFramesRemaining -= frames.toLong()
@@ -382,21 +387,28 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     private fun openStemInput(file: File): StemPcmInput {
-        return if (file.extension.equals("flac", ignoreCase = true)) {
-            FlacStemPcmInput(file) { detail ->
-                traceDebug("flac", detail)
+        return when {
+            file.extension.equals("flac", ignoreCase = true) -> {
+                FlacStemPcmInput(file) { detail ->
+                    traceDebug("flac", detail)
+                }
             }
-        } else {
-            WavStemPcmInput(file)
+            file.extension.equals("pcm", ignoreCase = true) -> {
+                RawPcmStemInput(file)
+            }
+            else -> {
+                WavStemPcmInput(file)
+            }
         }
     }
 
     companion object {
         const val CENTER_BLEND = 0.5f
+        const val DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS = 800L
+        const val HYDRATED_MIXED_OUTPUT_READY_PREROLL_MS = 80L
 
         private const val DEBUG_INITIAL_QUEUE_TRACE_COUNT = 80
         private const val DEBUG_QUEUE_TRACE_INTERVAL = 200L
-        private const val MIXED_OUTPUT_READY_PREROLL_MS = 800L
         private const val CHANNEL_COUNT_STEREO = 2
         private const val BYTES_PER_SAMPLE = 2
         private const val DEFAULT_SAMPLE_RATE = 44_100
@@ -424,6 +436,22 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
         override fun seekToPcmByte(bytePosition: Long) {
             input.seek(WAV_HEADER_SIZE + bytePosition.coerceAtLeast(0L))
+        }
+
+        override fun close() {
+            input.close()
+        }
+    }
+
+    private class RawPcmStemInput(file: File) : StemPcmInput {
+        private val input = RandomAccessFile(file, "r")
+
+        override fun read(buffer: ByteArray, byteCount: Int): Int {
+            return input.read(buffer, 0, byteCount)
+        }
+
+        override fun seekToPcmByte(bytePosition: Long) {
+            input.seek(bytePosition.coerceAtLeast(0L))
         }
 
         override fun close() {

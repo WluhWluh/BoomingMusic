@@ -7,6 +7,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.io.RandomAccessFile
 import java.security.MessageDigest
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.min
 
 object Pcm16StereoFlacEncoder {
@@ -205,6 +206,87 @@ object Pcm16StereoFlacEncoder {
                 pcm16 = pcm,
                 pcmMd5Hex = decodedMd5Hex,
             )
+        }
+    }
+
+    fun decodeFlacFileToPcmFile(
+        flacFile: File,
+        pcmFile: File,
+        shouldCancel: () -> Boolean = { false },
+    ): Pcm16StereoFlacDecodeToFileResult {
+        require(flacFile.isFile) { "FLAC file does not exist: ${flacFile.absolutePath}" }
+        val targetDir = pcmFile.parentFile
+        targetDir?.mkdirs()
+        val tempFile = File(targetDir ?: File("."), "${pcmFile.name}.tmp")
+        if (tempFile.exists()) {
+            tempFile.delete()
+        }
+        return try {
+            flacFile.inputStream().buffered().use { input ->
+                tempFile.outputStream().buffered().use { output ->
+                    require(input.readAscii(FLAC_MAGIC.size) == "fLaC") { "Missing FLAC stream marker." }
+                    val streamInfo = readStreamInfo(input)
+                    require(streamInfo.channelCount == CHANNEL_COUNT_STEREO) {
+                        "Only stereo FLAC output is supported."
+                    }
+                    require(streamInfo.bitsPerSample == BITS_PER_SAMPLE) {
+                        "Only 16-bit FLAC output is supported."
+                    }
+
+                    val digest = MessageDigest.getInstance("MD5")
+                    val pcm = ByteArray(MAX_BLOCK_SIZE * BYTES_PER_FRAME)
+                    val left = IntArray(MAX_BLOCK_SIZE)
+                    val right = IntArray(MAX_BLOCK_SIZE)
+                    var decodedFrames = 0L
+                    while (decodedFrames < streamInfo.totalSamples) {
+                        if (shouldCancel()) {
+                            throw CancellationException("FLAC decode canceled.")
+                        }
+                        val blockFrames = readAndDecodeFrame(
+                            input = input,
+                            left = left,
+                            right = right,
+                        )
+                        require(decodedFrames + blockFrames <= streamInfo.totalSamples) {
+                            "FLAC frame output exceeds STREAMINFO total samples."
+                        }
+                        val blockBytes = blockFrames * BYTES_PER_FRAME
+                        writeInterleavedPcm16(
+                            left = left,
+                            right = right,
+                            frameCount = blockFrames,
+                            output = pcm,
+                            outputOffset = 0,
+                        )
+                        output.write(pcm, 0, blockBytes)
+                        digest.update(pcm, 0, blockBytes)
+                        decodedFrames += blockFrames
+                    }
+
+                    val decodedMd5Hex = digest.digest().toHexString()
+                    require(decodedMd5Hex == streamInfo.pcmMd5Hex) {
+                        "Decoded FLAC PCM does not match STREAMINFO MD5."
+                    }
+                    output.flush()
+                    if (pcmFile.exists()) {
+                        pcmFile.delete()
+                    }
+                    require(tempFile.renameTo(pcmFile)) {
+                        "Could not replace PCM output: ${pcmFile.absolutePath}"
+                    }
+                    Pcm16StereoFlacDecodeToFileResult(
+                        sampleRate = streamInfo.sampleRate,
+                        channelCount = streamInfo.channelCount,
+                        bitsPerSample = streamInfo.bitsPerSample,
+                        frameCount = decodedFrames.toInt(),
+                        pcmMd5Hex = decodedMd5Hex,
+                        fileBytes = pcmFile.length(),
+                    )
+                }
+            }
+        } catch (error: Throwable) {
+            tempFile.delete()
+            throw error
         }
     }
 
@@ -1578,6 +1660,15 @@ data class Pcm16StereoFlacDecodeResult(
     val frameCount: Int,
     val pcm16: ByteArray,
     val pcmMd5Hex: String,
+)
+
+data class Pcm16StereoFlacDecodeToFileResult(
+    val sampleRate: Int,
+    val channelCount: Int,
+    val bitsPerSample: Int,
+    val frameCount: Int,
+    val pcmMd5Hex: String,
+    val fileBytes: Long,
 )
 
 interface Pcm16StereoFlacPcmReader : Closeable {
