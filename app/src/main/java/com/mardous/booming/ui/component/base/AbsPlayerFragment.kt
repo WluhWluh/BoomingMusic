@@ -158,6 +158,14 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
             }
         }
         viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationShowSnackbarProgressFlow.collect { showProgress ->
+                if (!showProgress) {
+                    sourceSeparationSnackbar?.dismiss()
+                    sourceSeparationSnackbar = null
+                }
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
             playerViewModel.sourceSeparationPlaybackStateFlow.collect { state ->
                 onSourceSeparationPlaybackStateChanged(view, state)
             }
@@ -664,6 +672,11 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                 sourceSeparationSnackbar = null
             }
             is SourceSeparationUiState.Running -> {
+                if (!playerViewModel.sourceSeparationShowSnackbarProgressFlow.value) {
+                    sourceSeparationSnackbar?.dismiss()
+                    sourceSeparationSnackbar = null
+                    return
+                }
                 val message = if (state.totalWindows > 0) {
                     getString(
                         R.string.source_separation_progress,
@@ -693,13 +706,19 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
             is SourceSeparationUiState.Completed -> {
                 sourceSeparationSnackbar?.dismiss()
                 sourceSeparationSnackbar = null
-                Snackbar.make(view, R.string.source_separation_complete, Snackbar.LENGTH_SHORT).show()
+                if (playerViewModel.sourceSeparationShowSnackbarProgressFlow.value) {
+                    Snackbar.make(view, R.string.source_separation_complete, Snackbar.LENGTH_SHORT)
+                        .show()
+                }
                 playerViewModel.clearSourceSeparationStatus()
             }
             is SourceSeparationUiState.Canceled -> {
                 sourceSeparationSnackbar?.dismiss()
                 sourceSeparationSnackbar = null
-                Snackbar.make(view, R.string.source_separation_canceled, Snackbar.LENGTH_SHORT).show()
+                if (playerViewModel.sourceSeparationShowSnackbarProgressFlow.value) {
+                    Snackbar.make(view, R.string.source_separation_canceled, Snackbar.LENGTH_SHORT)
+                        .show()
+                }
                 playerViewModel.clearSourceSeparationStatus()
             }
             is SourceSeparationUiState.Paused -> {
@@ -709,7 +728,10 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
             is SourceSeparationUiState.Failed -> {
                 sourceSeparationSnackbar?.dismiss()
                 sourceSeparationSnackbar = null
-                Snackbar.make(view, R.string.source_separation_failed, Snackbar.LENGTH_SHORT).show()
+                if (playerViewModel.sourceSeparationShowSnackbarProgressFlow.value) {
+                    Snackbar.make(view, R.string.source_separation_failed, Snackbar.LENGTH_SHORT)
+                        .show()
+                }
                 playerViewModel.clearSourceSeparationStatus()
             }
         }

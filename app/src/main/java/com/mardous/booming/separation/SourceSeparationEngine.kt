@@ -54,15 +54,39 @@ class SourceSeparationEngine(
                 )
             }
             SourceSeparationCacheState.Completed -> {
+                val canPromoteCompletedStems = cache.canPromoteCompletedStemsForSong(
+                    song = song,
+                    modelVariant = modelVariant,
+                )
                 if (cache.hasPendingCompletedTemporaryDirs(manifest)) {
-                    SourceSeparationCacheStatus.CompletedWithTemporaryFiles
+                    SourceSeparationCacheStatus.CompletedWithTemporaryFiles(
+                        canPromoteCompletedStems = canPromoteCompletedStems,
+                    )
                 } else {
-                    SourceSeparationCacheStatus.Completed
+                    SourceSeparationCacheStatus.Completed(
+                        canPromoteCompletedStems = canPromoteCompletedStems,
+                    )
                 }
             }
             SourceSeparationCacheState.Canceled,
             SourceSeparationCacheState.Failed -> SourceSeparationCacheStatus.NotStarted
         }
+    }
+
+    fun canPromoteCompletedStemsForSong(
+        song: Song,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): Boolean {
+        require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
+        return cache.canPromoteCompletedStemsForSong(song, modelVariant)
+    }
+
+    fun promoteCompletedStemsForSong(
+        song: Song,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): SourceSeparationManifest? {
+        require(song != Song.emptySong) { "Cannot promote separated cache for an empty song." }
+        return cache.promoteCompletedStemsForSong(song, modelVariant)
     }
 
     fun deleteCacheForSong(
@@ -246,6 +270,7 @@ class SourceSeparationEngine(
         song: Song,
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
         modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+        promoteCompletedStems: Boolean = true,
         onProgress: (MdxRangeProgress) -> Unit = {},
         onPrepared: (SourceSeparationManifest) -> Unit = {},
         playbackPositionMsProvider: () -> Long? = { null },
@@ -282,7 +307,11 @@ class SourceSeparationEngine(
                     if (shouldCancel()) {
                         throw CancellationException("Source separation canceled.")
                     }
-                    cache.completeRun(run, result).result
+                    cache.completeRun(
+                        run = run,
+                        result = result,
+                        shouldPromoteCompletedStems = promoteCompletedStems,
+                    ).result
                 }
         } catch (error: CancellationException) {
             if (error is SourceSeparationPausedException) {
@@ -330,8 +359,12 @@ sealed class SourceSeparationCacheStatus {
         val readySegments: Int,
         val totalSegments: Int,
     ) : SourceSeparationCacheStatus()
-    data object CompletedWithTemporaryFiles : SourceSeparationCacheStatus()
-    data object Completed : SourceSeparationCacheStatus()
+    data class CompletedWithTemporaryFiles(
+        val canPromoteCompletedStems: Boolean,
+    ) : SourceSeparationCacheStatus()
+    data class Completed(
+        val canPromoteCompletedStems: Boolean,
+    ) : SourceSeparationCacheStatus()
 }
 
 sealed class SourceSeparationPlayableCacheStatus {
