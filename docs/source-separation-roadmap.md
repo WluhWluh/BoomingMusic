@@ -869,13 +869,14 @@ Initial implementation notes:
 - Separate S25 ExoPlayer testing confirmed that `instrumental.flac` can be used directly as the completed-cache media item: tested files reached `READY`, advanced playback position for the probe window, and produced no playback errors.
 - Completed-cache playback with both stems retained only as FLAC was manually tested on several songs. Blend playback sounded correct and remained stable.
 - After successful promotion, both `completed/vocals.wav` and `completed/instrumental.wav` are superseded and can be deleted. The temporary cleanup path also removes legacy completed WAV stems when a manifest has validated promoted FLAC paths.
-- The current FLAC vocal-stem reader decodes the whole `vocals.flac` into PCM memory when the mixer session opens. This is acceptable for the first dual-FLAC validation pass, but it should be replaced by an indexed/streaming reader before treating FLAC promotion as fully hardened.
+- The committed first validation pass decoded `vocals.flac` into PCM memory when the mixer session opened. That proved the dual-FLAC playback route but was not suitable as the final reader.
+- The current hardening pass writes a small sidecar frame index (`*.flac.idx`) during project-local FLAC promotion. The mixer can use this index to seek to the containing FLAC frame and decode only bounded 4096-frame blocks on demand.
+- Existing promoted FLAC caches without a sidecar index remain playable through the old whole-file decode fallback, so this hardening does not invalidate already-tested caches.
+- Playback-gate traces keep indexed FLAC open, fallback, and seek events visible. Per-frame decode timing remains behind a local debug constant because it is useful for targeted profiling but too noisy for normal playback testing.
 
 Next FLAC hardening steps:
 
-- Build a frame index for the project-local FLAC stem format so the mixer can seek to the frame containing the requested playback position.
-- Replace whole-file in-memory vocal FLAC decode with bounded on-demand frame decoding.
-- Add debug timing for FLAC stem open, seek, frame decode, and mixer queue reads.
+- Validate the indexed reader on S25 with freshly promoted caches and confirm playback-gate logs show `indexedOpen success` instead of `fallbackWholeFileDecode`.
 - Stress test long songs, repeated seeks, rapid song changes, background playback, and completed-cache upgrade from running playback.
 
 ### Phase 9: Cache Management and Full Settings UX

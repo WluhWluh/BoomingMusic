@@ -507,6 +507,7 @@ class SourceSeparationCache(
         if (output?.canUsePromotedFlac() == true) {
             listOf(output.vocalsPath, output.instrumentalPath)
                 .map(::File)
+                .flatMap { file -> listOf(file, Pcm16StereoFlacEncoder.frameIndexFileFor(file)) }
                 .filter { file ->
                     file.isFile &&
                             file.isWithin(entryDir) &&
@@ -705,6 +706,8 @@ class SourceSeparationCache(
         }.getOrElse {
             vocalsFlac.delete()
             instrumentalFlac.delete()
+            Pcm16StereoFlacEncoder.frameIndexFileFor(vocalsFlac).delete()
+            Pcm16StereoFlacEncoder.frameIndexFileFor(instrumentalFlac).delete()
             null
         }
     }
