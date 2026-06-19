@@ -3,6 +3,7 @@ package com.mardous.booming.separation.cache
 import android.content.Context
 import android.os.Environment
 import com.mardous.booming.data.model.Song
+import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import com.mardous.booming.separation.model.MdxModelVariant
 import com.mardous.booming.separation.model.MdxRangePreparation
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
@@ -12,7 +13,7 @@ import java.io.File
 import java.security.MessageDigest
 
 class SourceSeparationCache(
-    context: Context,
+    private val context: Context,
 ) {
     private val rootDir: File = File(
         context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir,
@@ -131,15 +132,36 @@ class SourceSeparationCache(
         val vocalsFile = copyIntoDirectory(result.vocalsFile, completedDir, VOCALS_WAV)
         val instrumentalFile = copyIntoDirectory(result.instrumentalFile, completedDir, INSTRUMENTAL_WAV)
         val timingFile = copyIntoDirectory(result.timingFile, completedDir, TIMING_TXT)
+        val promotedOutput = promoteCompletedStems(
+            vocalsFile = vocalsFile,
+            instrumentalFile = instrumentalFile,
+            outputSampleRate = result.outputSampleRate,
+            outputFrameCount = result.frames,
+        )
+        val now = System.currentTimeMillis()
+        val initialOutput = SourceSeparationOutput(
+            vocalsPath = vocalsFile.absolutePath,
+            instrumentalPath = instrumentalFile.absolutePath,
+            format = SourceSeparationOutputFormat.WAV,
+            promotedVocalsPath = promotedOutput?.vocalsFile?.absolutePath,
+            promotedInstrumentalPath = promotedOutput?.instrumentalFile?.absolutePath,
+            promotedFormat = promotedOutput?.format,
+            promotionValidated = promotedOutput != null,
+            timingPath = timingFile.absolutePath,
+            outputSampleRate = result.outputSampleRate,
+            outputFrameCount = result.frames,
+            windowCount = result.windowCount,
+            elapsedMs = result.elapsedMs,
+            totalBytes = run.rootDir.directorySize(),
+        )
         timingFile.writeText(
             result.timingReport.toFileText(
-                vocalsFile = vocalsFile,
-                instrumentalFile = instrumentalFile,
+                vocalsFile = File(initialOutput.playbackVocalsPath()),
+                instrumentalFile = File(initialOutput.playbackInstrumentalPath()),
             ),
             Charsets.UTF_8,
         )
-        val totalBytes = run.rootDir.directorySize()
-        val now = System.currentTimeMillis()
+        val output = initialOutput.copy(totalBytes = run.rootDir.directorySize())
         val manifest = SourceSeparationManifest(
             pipelineVersion = run.pipelineVersion,
             state = SourceSeparationCacheState.Completed,
@@ -153,16 +175,7 @@ class SourceSeparationCache(
                 pipelineVersion = run.pipelineVersion,
             ),
             diagnostics = run.song.toDiagnostics(),
-            output = SourceSeparationOutput(
-                vocalsPath = vocalsFile.absolutePath,
-                instrumentalPath = instrumentalFile.absolutePath,
-                timingPath = timingFile.absolutePath,
-                outputSampleRate = result.outputSampleRate,
-                outputFrameCount = result.frames,
-                windowCount = result.windowCount,
-                elapsedMs = result.elapsedMs,
-                totalBytes = totalBytes,
-            ),
+            output = output,
             segmentPlan = result.segmentPlan,
             cleanup = SourceSeparationCleanup(
                 workDirPath = run.workDir.absolutePath,
@@ -177,8 +190,8 @@ class SourceSeparationCache(
         return SourceSeparationCompletion(
             manifest = manifest,
             result = result.copy(
-                vocalsFile = vocalsFile,
-                instrumentalFile = instrumentalFile,
+                vocalsFile = File(output.playbackVocalsPath()),
+                instrumentalFile = File(output.playbackInstrumentalPath()),
                 timingFile = timingFile,
             )
         )
@@ -344,7 +357,7 @@ class SourceSeparationCache(
             ?.takeIf { it.state == SourceSeparationCacheState.Completed }
             ?.takeIf { manifest ->
                 val output = manifest.output ?: return@takeIf false
-                File(output.vocalsPath).isFile && File(output.instrumentalPath).isFile
+                output.hasPlayableStemFiles()
             }
     }
 
@@ -360,7 +373,7 @@ class SourceSeparationCache(
             }
             ?.takeIf { manifest ->
                 val output = manifest.output ?: return@takeIf false
-                File(output.vocalsPath).isFile && File(output.instrumentalPath).isFile
+                output.hasPlayableStemFiles()
             }
     }
 
@@ -488,6 +501,22 @@ class SourceSeparationCache(
                 )
                 cleanedAny = true
             }
+        }
+
+        val output = manifest.output
+        if (output?.canUsePromotedFlac() == true) {
+            listOf(output.vocalsPath, output.instrumentalPath)
+                .map(::File)
+                .filter { file ->
+                    file.isFile &&
+                            file.isWithin(entryDir) &&
+                            !activeFiles.contains(file.absolutePath)
+                }
+                .forEach { file ->
+                    if (file.delete()) {
+                        cleanedAny = true
+                    }
+                }
         }
 
         if (cleanedAny) {
@@ -625,6 +654,100 @@ class SourceSeparationCache(
                     expectedDataSizeBytes = expectedDataSizeBytes,
                     expectedSampleRate = outputSampleRate,
                 )
+    }
+
+    private fun SourceSeparationOutput.hasPlayableStemFiles(): Boolean {
+        return File(playbackVocalsPath()).isFile && File(playbackInstrumentalPath()).isFile
+    }
+
+    private fun promoteCompletedStems(
+        vocalsFile: File,
+        instrumentalFile: File,
+        outputSampleRate: Int,
+        outputFrameCount: Int,
+    ): PromotedCompletedStems? {
+        val completedDir = vocalsFile.parentFile ?: return null
+        val vocalsFlac = File(completedDir, VOCALS_FLAC)
+        val instrumentalFlac = File(completedDir, INSTRUMENTAL_FLAC)
+        return runCatching {
+            Pcm16StereoFlacEncoder.encodeWavToFlac(
+                wavFile = vocalsFile,
+                flacFile = vocalsFlac,
+                expectedSampleRate = outputSampleRate,
+                expectedFrameCount = outputFrameCount,
+            )
+            Pcm16StereoFlacEncoder.encodeWavToFlac(
+                wavFile = instrumentalFile,
+                flacFile = instrumentalFlac,
+                expectedSampleRate = outputSampleRate,
+                expectedFrameCount = outputFrameCount,
+            )
+            validatePromotedFlac(
+                flacFile = vocalsFlac,
+                sourceWavFile = vocalsFile,
+                outputSampleRate = outputSampleRate,
+                outputFrameCount = outputFrameCount,
+            )
+            validatePromotedFlac(
+                flacFile = instrumentalFlac,
+                sourceWavFile = instrumentalFile,
+                outputSampleRate = outputSampleRate,
+                outputFrameCount = outputFrameCount,
+            )
+            // Completed separated playback can now read both promoted stems.
+            vocalsFile.delete()
+            instrumentalFile.delete()
+            PromotedCompletedStems(
+                vocalsFile = vocalsFlac,
+                instrumentalFile = instrumentalFlac,
+                format = SourceSeparationOutputFormat.FLAC,
+            )
+        }.getOrElse {
+            vocalsFlac.delete()
+            instrumentalFlac.delete()
+            null
+        }
+    }
+
+    private fun validatePromotedFlac(
+        flacFile: File,
+        sourceWavFile: File,
+        outputSampleRate: Int,
+        outputFrameCount: Int,
+    ) {
+        require(flacFile.isFile) { "Promoted FLAC file is missing." }
+        Pcm16StereoFlacEncoder.verifyFlacFile(
+            flacFile = flacFile,
+            expectedSampleRate = outputSampleRate,
+            expectedFrameCount = outputFrameCount,
+            expectedPcmMd5Hex = sourceWavFile.pcmDataMd5Hex(),
+        )
+    }
+
+    private fun File.pcmDataMd5Hex(): String {
+        inputStream().buffered().use { input ->
+            val header = ByteArray(WAV_HEADER_BYTES.toInt())
+            var headerBytesRead = 0
+            while (headerBytesRead < header.size) {
+                val count = input.read(header, headerBytesRead, header.size - headerBytesRead)
+                if (count < 0) error("Unexpected end of WAV header.")
+                headerBytesRead += count
+            }
+            val digest = MessageDigest.getInstance("MD5")
+            val buffer = ByteArray(PROMOTION_HASH_BUFFER_BYTES)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (count > 0) {
+                    digest.update(buffer, 0, count)
+                }
+            }
+            return digest.digest().toHexString()
+        }
+    }
+
+    private fun ByteArray.toHexString(): String {
+        return joinToString("") { "%02x".format(it) }
     }
 
     private fun SourceSeparationSegment.expectedPcm16DataSizeBytes(): Long {
@@ -839,10 +962,13 @@ class SourceSeparationCache(
         private const val PLAYBACK_SETTINGS_FILE_NAME = "playback-settings.json"
         private const val VOCALS_WAV = "vocals.wav"
         private const val INSTRUMENTAL_WAV = "instrumental.wav"
+        private const val VOCALS_FLAC = "vocals.flac"
+        private const val INSTRUMENTAL_FLAC = "instrumental.flac"
         private const val TIMING_TXT = "timing.txt"
         private const val WAV_HEADER_BYTES = 44L
         private const val SOURCE_SEPARATION_STEM_CHANNEL_COUNT = 2
         private const val PCM16_BYTES_PER_SAMPLE = 2
+        private const val PROMOTION_HASH_BUFFER_BYTES = 256 * 1024
 
         fun sha256Hex(bytes: ByteArray): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
@@ -865,6 +991,12 @@ data class SourceSeparationRun(
 data class SourceSeparationCompletion(
     val manifest: SourceSeparationManifest,
     val result: MdxRangeSeparationResult,
+)
+
+private data class PromotedCompletedStems(
+    val vocalsFile: File,
+    val instrumentalFile: File,
+    val format: SourceSeparationOutputFormat,
 )
 
 enum class SourceSeparationSegmentStem {

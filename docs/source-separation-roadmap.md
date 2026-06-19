@@ -833,7 +833,7 @@ Done criteria:
 
 ### Phase 8: Compression and Final Cache Files
 
-Status: next recommended step
+Status: in progress
 
 Goals:
 
@@ -858,6 +858,25 @@ Implementation recommendation:
 - Add manifest output metadata that records codec, path, expected frame count, sample rate, channel count, and whether the promoted files have passed a local decode validation.
 - Promote atomically: encode `completed/vocals.flac` and `completed/instrumental.flac` beside the existing WAV files, decode-probe both FLAC files for frame count/alignment, update the manifest only after validation, then let the temporary cleanup path delete superseded WAV process artifacts.
 - Keep a WAV fallback path for promotion failures or devices without reliable FLAC encoder/decoder behavior.
+
+Initial implementation notes:
+
+- The first FLAC promotion pass uses a project-local encoder that only supports the app's own completed 16-bit stereo PCM stem WAV files.
+- The encoder writes standard FLAC with fixed predictors plus Rice residual coding, falling back to verbatim subframes when that is smaller for a block. No external encoder dependency is used.
+- Promotion is non-critical: if encoding or decode validation fails, the completed cache remains WAV-backed and separation still succeeds.
+- The manifest records validated promoted FLAC paths. Completed separated playback now prefers validated `instrumental.flac` as the ExoPlayer source and validated `vocals.flac` as the mixer stem.
+- S25 debug testing showed that Android `MediaExtractor` does not recognize the generated raw FLAC files as audio tracks, so platform decode validation is not a suitable promotion gate. The project-local verifier is used instead and checks STREAMINFO, frame count, and decoded PCM MD5.
+- Separate S25 ExoPlayer testing confirmed that `instrumental.flac` can be used directly as the completed-cache media item: tested files reached `READY`, advanced playback position for the probe window, and produced no playback errors.
+- Completed-cache playback with both stems retained only as FLAC was manually tested on several songs. Blend playback sounded correct and remained stable.
+- After successful promotion, both `completed/vocals.wav` and `completed/instrumental.wav` are superseded and can be deleted. The temporary cleanup path also removes legacy completed WAV stems when a manifest has validated promoted FLAC paths.
+- The current FLAC vocal-stem reader decodes the whole `vocals.flac` into PCM memory when the mixer session opens. This is acceptable for the first dual-FLAC validation pass, but it should be replaced by an indexed/streaming reader before treating FLAC promotion as fully hardened.
+
+Next FLAC hardening steps:
+
+- Build a frame index for the project-local FLAC stem format so the mixer can seek to the frame containing the requested playback position.
+- Replace whole-file in-memory vocal FLAC decode with bounded on-demand frame decoding.
+- Add debug timing for FLAC stem open, seek, frame decode, and mixer queue reads.
+- Stress test long songs, repeated seeks, rapid song changes, background playback, and completed-cache upgrade from running playback.
 
 ### Phase 9: Cache Management and Full Settings UX
 
