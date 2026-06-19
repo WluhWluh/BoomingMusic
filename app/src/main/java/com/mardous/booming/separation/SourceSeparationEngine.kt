@@ -112,8 +112,14 @@ class SourceSeparationEngine(
         song: Song,
         playbackPositionMs: Long,
         modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+        readyWindowCount: Int = DEFAULT_PLAYBACK_READY_WINDOW_COUNT,
     ): SourceSeparationManifest? {
-        return when (val status = playableCacheStatusForSong(song, playbackPositionMs, modelVariant)) {
+        return when (val status = playableCacheStatusForSong(
+            song = song,
+            playbackPositionMs = playbackPositionMs,
+            modelVariant = modelVariant,
+            readyWindowCount = readyWindowCount,
+        )) {
             is SourceSeparationPlayableCacheStatus.Ready -> status.manifest
             SourceSeparationPlayableCacheStatus.Processing,
             SourceSeparationPlayableCacheStatus.Unavailable -> null
@@ -141,6 +147,7 @@ class SourceSeparationEngine(
         song: Song,
         playbackPositionMs: Long,
         modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+        readyWindowCount: Int = DEFAULT_PLAYBACK_READY_WINDOW_COUNT,
     ): SourceSeparationPlayableCacheStatus {
         require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
         val manifest = cache.readEntry(song, modelVariant)
@@ -166,7 +173,7 @@ class SourceSeparationEngine(
         val frame = ((playbackPositionMs.coerceAtLeast(0L) * sampleRate) / 1000L)
             .coerceAtMost(Int.MAX_VALUE.toLong())
             .toInt()
-        return if (snapshot.hasReadyPlaybackWindowAtFrame(frame)) {
+        return if (snapshot.hasReadyPlaybackWindowAtFrame(frame, readyWindowCount)) {
             SourceSeparationPlayableCacheStatus.Ready(manifest)
         } else {
             SourceSeparationPlayableCacheStatus.Processing
@@ -177,6 +184,7 @@ class SourceSeparationEngine(
         song: Song,
         playbackPositionMs: Long,
         modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+        readyWindowCount: Int = DEFAULT_PLAYBACK_READY_WINDOW_COUNT,
     ): SourceSeparationPlayableCacheDebugInfo {
         require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
         val manifest = cache.readEntry(song, modelVariant)
@@ -247,7 +255,8 @@ class SourceSeparationEngine(
             .coerceAtMost(Int.MAX_VALUE.toLong())
             .toInt()
         val segmentIndex = snapshot.segmentPlan.segmentIndexForFrame(frame)
-        val ready = snapshot.hasReadyPlaybackWindowAtFrame(frame)
+        val playbackWindowStates = snapshot.playbackWindowStatesAt(segmentIndex, readyWindowCount)
+        val ready = playbackWindowStates.all { it.isReady }
         return SourceSeparationPlayableCacheDebugInfo(
             status = if (ready) "Ready" else "Processing",
             manifestState = manifest.state,
@@ -260,9 +269,11 @@ class SourceSeparationEngine(
             segmentIndex = segmentIndex,
             currentSegment = snapshot.segments.getOrNull(segmentIndex)?.toDebugInfo(),
             nextSegment = snapshot.segments.getOrNull(segmentIndex + 1)?.toDebugInfo(),
+            requiredWindowCount = playbackWindowStates.size,
+            requiredReadyCount = playbackWindowStates.count { it.isReady },
             readyCount = snapshot.readyCount,
             totalCount = snapshot.totalCount,
-            note = if (ready) "currentAndNextReady" else "currentOrNextNotReady",
+            note = if (ready) "requiredPlaybackWindowsReady" else "requiredPlaybackWindowsNotReady",
         )
     }
 
@@ -274,6 +285,7 @@ class SourceSeparationEngine(
         onProgress: (MdxRangeProgress) -> Unit = {},
         onPrepared: (SourceSeparationManifest) -> Unit = {},
         playbackPositionMsProvider: () -> Long? = { null },
+        playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
     ): MdxRangeSeparationResult {
@@ -299,6 +311,7 @@ class SourceSeparationEngine(
                         cache.updateSegmentState(run, segmentIndex, state)
                     },
                     playbackPositionMsProvider = playbackPositionMsProvider,
+                    playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
                     resumeManifest = run.resumeManifest,
                     shouldPause = shouldPause,
                     shouldCancel = shouldCancel,
@@ -385,6 +398,8 @@ data class SourceSeparationPlayableCacheDebugInfo(
     val segmentIndex: Int? = null,
     val currentSegment: SourceSeparationSegmentDebugInfo? = null,
     val nextSegment: SourceSeparationSegmentDebugInfo? = null,
+    val requiredWindowCount: Int? = null,
+    val requiredReadyCount: Int? = null,
     val readyCount: Int? = null,
     val totalCount: Int? = null,
     val note: String? = null,
@@ -401,6 +416,7 @@ data class SourceSeparationPlayableCacheDebugInfo(
             append(" segmentIndex=").append(segmentIndex)
             append(" current=").append(currentSegment?.toTraceString())
             append(" next=").append(nextSegment?.toTraceString())
+            append(" requiredReady=").append(requiredReadyCount).append('/').append(requiredWindowCount)
             append(" ready=").append(readyCount).append('/').append(totalCount)
             append(" updatedAt=").append(manifestUpdatedAtEpochMs)
             append(" note=").append(note)
@@ -443,3 +459,5 @@ private fun com.mardous.booming.separation.cache.SourceSeparationSegmentFileStat
         instrumentalLength = instrumentalFile.length(),
     )
 }
+
+private const val DEFAULT_PLAYBACK_READY_WINDOW_COUNT = 2

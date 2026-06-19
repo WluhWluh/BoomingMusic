@@ -18,6 +18,7 @@ object SourceSeparationSegmentScheduler {
     fun prioritize(
         snapshot: SourceSeparationSegmentSnapshot,
         playbackFrame: Int,
+        readyWindowCount: Int = DEFAULT_READY_WINDOW_COUNT,
         nearFutureCount: Int = DEFAULT_NEAR_FUTURE_COUNT,
     ): List<SourceSeparationSegmentWorkItem> {
         val pendingSegments = snapshot.segments
@@ -31,7 +32,11 @@ object SourceSeparationSegmentScheduler {
             .map { segmentState ->
                 SourceSeparationSegmentWorkItem(
                     segment = segmentState.segment,
-                    priority = segmentState.segment.priorityFor(currentIndex, nearFutureCount),
+                    priority = segmentState.segment.priorityFor(
+                        currentIndex = currentIndex,
+                        readyWindowCount = readyWindowCount,
+                        nearFutureCount = nearFutureCount,
+                    ),
                     state = segmentState.state,
                 )
             }
@@ -41,6 +46,7 @@ object SourceSeparationSegmentScheduler {
     fun prioritize(
         segmentPlan: SourceSeparationSegmentPlan,
         playbackFrame: Int,
+        readyWindowCount: Int = DEFAULT_READY_WINDOW_COUNT,
         nearFutureCount: Int = DEFAULT_NEAR_FUTURE_COUNT,
     ): List<SourceSeparationSegmentWorkItem> {
         val pendingSegments = segmentPlan.segments
@@ -54,7 +60,11 @@ object SourceSeparationSegmentScheduler {
             .map { segment ->
                 SourceSeparationSegmentWorkItem(
                     segment = segment,
-                    priority = segment.priorityFor(currentIndex, nearFutureCount),
+                    priority = segment.priorityFor(
+                        currentIndex = currentIndex,
+                        readyWindowCount = readyWindowCount,
+                        nearFutureCount = nearFutureCount,
+                    ),
                     state = segment.state,
                 )
             }
@@ -73,12 +83,15 @@ object SourceSeparationSegmentScheduler {
 
     private fun SourceSeparationSegment.priorityFor(
         currentIndex: Int,
+        readyWindowCount: Int,
         nearFutureCount: Int,
     ): SourceSeparationSegmentPriority {
+        val lastPlaybackBufferIndex = currentIndex + readyWindowCount.coerceAtLeast(1) - 1
         return when {
             index == currentIndex -> SourceSeparationSegmentPriority.CurrentPlayback
-            index == currentIndex + 1 -> SourceSeparationSegmentPriority.NextPlayback
-            index > currentIndex + 1 && index <= currentIndex + nearFutureCount ->
+            index in (currentIndex + 1)..lastPlaybackBufferIndex ->
+                SourceSeparationSegmentPriority.NextPlayback
+            index > lastPlaybackBufferIndex && index <= currentIndex + nearFutureCount ->
                 SourceSeparationSegmentPriority.NearFuture
             index < currentIndex -> SourceSeparationSegmentPriority.EarlierMissing
             else -> SourceSeparationSegmentPriority.IdleBackfill
@@ -94,4 +107,5 @@ object SourceSeparationSegmentScheduler {
     }
 
     private const val DEFAULT_NEAR_FUTURE_COUNT = 4
+    private const val DEFAULT_READY_WINDOW_COUNT = 2
 }
