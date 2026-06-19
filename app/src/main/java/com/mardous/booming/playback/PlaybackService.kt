@@ -1485,8 +1485,8 @@ class PlaybackService :
                 )
             }
 
-        val vocalsFile = File(output.vocalsPath)
-        val instrumentalFile = File(output.instrumentalPath)
+        val vocalsFile = File(output.playbackVocalsPath())
+        val instrumentalFile = File(output.playbackInstrumentalPath())
         if (!vocalsFile.isFile || !instrumentalFile.isFile) {
             traceSourceSeparationPlayback(
                 "check.newSession.missingFiles",
@@ -1598,8 +1598,8 @@ class PlaybackService :
         val output = manifest.output ?: return false
         return session.requiresReadinessGate ||
                 session.inputMode != InputMode.InstrumentalStem ||
-                session.vocalsFile.absolutePath != output.vocalsPath ||
-                session.instrumentalFile.absolutePath != output.instrumentalPath ||
+                session.vocalsFile.absolutePath != output.playbackVocalsPath() ||
+                session.instrumentalFile.absolutePath != output.playbackInstrumentalPath() ||
                 !session.replacesQueueMediaItem
     }
 
@@ -1618,8 +1618,8 @@ class PlaybackService :
                 resultCode = SessionError.ERROR_INVALID_STATE,
                 message = "No separated cache found for this song.",
             )
-        val vocalsFile = File(output.vocalsPath)
-        val instrumentalFile = File(output.instrumentalPath)
+        val vocalsFile = File(output.playbackVocalsPath())
+        val instrumentalFile = File(output.playbackInstrumentalPath())
         if (!vocalsFile.isFile || !instrumentalFile.isFile) {
             traceSourceSeparationPlayback(
                 "check.activeSession.completedFilesMissing",
