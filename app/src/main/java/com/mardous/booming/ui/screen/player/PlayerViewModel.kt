@@ -48,6 +48,8 @@ import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
 import com.mardous.booming.util.Preferences
 import com.mardous.booming.util.REMEMBER_SHUFFLE_MODE
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
+import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.FlowPreview
@@ -149,6 +151,7 @@ class PlayerViewModel(
     private var sourceSeparationSettingsApplyJob: Job? = null
     private var sourceSeparationPlaybackSyncJob: Job? = null
     private var sourceSeparationWindowDecodeExperimentJob: Job? = null
+    private var sourceSeparationFlacPromotionJob: Job? = null
 
     private val _sourceSeparationStateFlow =
         MutableStateFlow<SourceSeparationUiState>(SourceSeparationUiState.Idle)
@@ -192,6 +195,16 @@ class PlayerViewModel(
         MutableStateFlow(readSourceSeparationBlendMode())
     val sourceSeparationBlendModeFlow = _sourceSeparationBlendModeFlow.asStateFlow()
 
+    private val _sourceSeparationAutoFlacCompressionFlow =
+        MutableStateFlow(readSourceSeparationAutoFlacCompression())
+    val sourceSeparationAutoFlacCompressionFlow =
+        _sourceSeparationAutoFlacCompressionFlow.asStateFlow()
+
+    private val _sourceSeparationShowSnackbarProgressFlow =
+        MutableStateFlow(readSourceSeparationShowSnackbarProgress())
+    val sourceSeparationShowSnackbarProgressFlow =
+        _sourceSeparationShowSnackbarProgressFlow.asStateFlow()
+
     private val internalJobs = mutableListOf<Job>()
 
     override fun onCleared() {
@@ -199,6 +212,7 @@ class PlayerViewModel(
         cancelSourceSeparation()
         sourceSeparationSettingsApplyJob?.cancel()
         sourceSeparationWindowDecodeExperimentJob?.cancel()
+        sourceSeparationFlacPromotionJob?.cancel()
         cancelInternalJobs()
         super.onCleared()
     }
@@ -476,6 +490,7 @@ class PlayerViewModel(
         sourceSeparationCancelRequested.set(false)
         sourceSeparationPauseRequested.set(false)
         sourceSeparationSongId = song.id
+        val autoFlacCompressionEnabled = _sourceSeparationAutoFlacCompressionFlow.value
         sourceSeparationJob = viewModelScope.launch(IO) {
             val activeJob = coroutineContext[Job]
             _sourceSeparationStateFlow.value = SourceSeparationUiState.Running(
@@ -485,6 +500,7 @@ class PlayerViewModel(
             try {
                 sourceSeparationEngine.separateSongToWav(
                     song = song,
+                    promoteCompletedStems = autoFlacCompressionEnabled,
                     onProgress = { progress ->
                         _sourceSeparationStateFlow.value = SourceSeparationUiState.Running(
                             songId = song.id,
@@ -610,6 +626,33 @@ class PlayerViewModel(
                     syncSourceSeparationPlaybackIfRequested(force = true)
                 }
                 _sourceSeparationPendingActionFlow.value = null
+            }
+        }
+    }
+
+    fun tryFlacCompressionForCurrentSong() {
+        if (sourceSeparationFlacPromotionJob?.isActive == true) return
+        val song = currentSong
+        if (song == Song.emptySong) return
+
+        sourceSeparationFlacPromotionJob = viewModelScope.launch(IO) {
+            _sourceSeparationPendingActionFlow.value = SourceSeparationPendingAction.PromoteFlac
+            try {
+                runCatching {
+                    sourceSeparationEngine.promoteCompletedStemsForSong(song)
+                }.onSuccess { manifest ->
+                    if (manifest != null && currentSong.id == song.id) {
+                        refreshCurrentSourceSeparationCacheAvailable(song)
+                        syncSourceSeparationPlaybackIfRequested(force = true)
+                    }
+                }.onFailure { error ->
+                    Log.w(TAG, "Failed to promote source separation stems to FLAC", error)
+                }
+            } finally {
+                if (currentSong.id == song.id) {
+                    _sourceSeparationPendingActionFlow.value = null
+                }
+                sourceSeparationFlacPromotionJob = null
             }
         }
     }
@@ -846,6 +889,20 @@ class PlayerViewModel(
         }
     }
 
+    fun setSourceSeparationAutoFlacCompressionEnabled(enabled: Boolean) {
+        preferences.edit {
+            putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, enabled)
+        }
+        _sourceSeparationAutoFlacCompressionFlow.value = enabled
+    }
+
+    fun setSourceSeparationShowSnackbarProgressEnabled(enabled: Boolean) {
+        preferences.edit {
+            putBoolean(SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS, enabled)
+        }
+        _sourceSeparationShowSnackbarProgressFlow.value = enabled
+    }
+
     private fun applySourceSeparationSettingsForSong(
         song: Song,
         showMessage: Boolean,
@@ -1047,6 +1104,14 @@ class PlayerViewModel(
             KEY_SOURCE_SEPARATION_GLOBAL_BLEND,
             DEFAULT_SOURCE_SEPARATION_BLEND,
         ).coerceIn(0f, 1f)
+    }
+
+    private fun readSourceSeparationAutoFlacCompression(): Boolean {
+        return preferences.getBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, true)
+    }
+
+    private fun readSourceSeparationShowSnackbarProgress(): Boolean {
+        return preferences.getBoolean(SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS, false)
     }
 
     private fun sourceSeparationBlendMode(
@@ -1504,6 +1569,7 @@ sealed class SourceSeparationUiState {
 enum class SourceSeparationPendingAction {
     Pause,
     DeleteCache,
+    PromoteFlac,
 }
 
 sealed class SourceSeparationCacheUiState {
@@ -1512,8 +1578,12 @@ sealed class SourceSeparationCacheUiState {
         val readySegments: Int,
         val totalSegments: Int,
     ) : SourceSeparationCacheUiState()
-    data object CompletedWithTemporaryFiles : SourceSeparationCacheUiState()
-    data object Completed : SourceSeparationCacheUiState()
+    data class CompletedWithTemporaryFiles(
+        val canPromoteCompletedStems: Boolean,
+    ) : SourceSeparationCacheUiState()
+    data class Completed(
+        val canPromoteCompletedStems: Boolean,
+    ) : SourceSeparationCacheUiState()
 }
 
 private fun SourceSeparationCacheStatus.toUiState(): SourceSeparationCacheUiState {
@@ -1523,9 +1593,13 @@ private fun SourceSeparationCacheStatus.toUiState(): SourceSeparationCacheUiStat
             readySegments = readySegments,
             totalSegments = totalSegments,
         )
-        SourceSeparationCacheStatus.CompletedWithTemporaryFiles ->
-            SourceSeparationCacheUiState.CompletedWithTemporaryFiles
-        SourceSeparationCacheStatus.Completed -> SourceSeparationCacheUiState.Completed
+        is SourceSeparationCacheStatus.CompletedWithTemporaryFiles ->
+            SourceSeparationCacheUiState.CompletedWithTemporaryFiles(
+                canPromoteCompletedStems = canPromoteCompletedStems,
+            )
+        is SourceSeparationCacheStatus.Completed -> SourceSeparationCacheUiState.Completed(
+            canPromoteCompletedStems = canPromoteCompletedStems,
+        )
     }
 }
 

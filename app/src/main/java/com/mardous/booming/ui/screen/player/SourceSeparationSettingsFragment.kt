@@ -116,6 +116,12 @@ private fun SourceSeparationSettingsSheet(
     val windowDecodeExperimentState by viewModel
         .sourceSeparationWindowDecodeExperimentStateFlow
         .collectAsState()
+    val autoFlacCompression by viewModel
+        .sourceSeparationAutoFlacCompressionFlow
+        .collectAsState()
+    val showSnackbarProgress by viewModel
+        .sourceSeparationShowSnackbarProgressFlow
+        .collectAsState()
 
     val separatedPlaybackEnabled = blendMode != SourceSeparationBlendMode.Off
     var blend by remember(playbackState.blend) {
@@ -362,6 +368,31 @@ private fun SourceSeparationSettingsSheet(
                                 }
                             }
 
+                            AnimatedVisibility(
+                                visible = currentSongCacheState.canPromoteCompletedStems
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
+                                        viewModel.tryFlacCompressionForCurrentSong()
+                                    },
+                                    enabled = pendingAction == null,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = if (pendingAction == SourceSeparationPendingAction.PromoteFlac) {
+                                            stringResource(
+                                                R.string.source_separation_flac_compression_working
+                                            )
+                                        } else {
+                                            stringResource(
+                                                R.string.source_separation_try_flac_compression
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+
                             OutlinedButton(
                                 onClick = {
                                     hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
@@ -375,6 +406,41 @@ private fun SourceSeparationSettingsSheet(
                             }
 
                             SourceSeparationWindowDecodeExperimentStatusText(windowDecodeExperimentState)
+                        }
+                    }
+                }
+
+                item {
+                    TitledCard(
+                        title = stringResource(R.string.source_separation_advanced_title),
+                        modifier = Modifier.fillMaxWidth()
+                    ) { cardContentPadding ->
+                        Column(
+                            modifier = Modifier.padding(cardContentPadding)
+                        ) {
+                            LabeledSwitch(
+                                checked = autoFlacCompression,
+                                title = stringResource(
+                                    R.string.source_separation_auto_flac_compression_title
+                                ),
+                                description = stringResource(
+                                    R.string.source_separation_auto_flac_compression_description
+                                )
+                            ) { checked ->
+                                viewModel.setSourceSeparationAutoFlacCompressionEnabled(checked)
+                            }
+
+                            LabeledSwitch(
+                                checked = showSnackbarProgress,
+                                title = stringResource(
+                                    R.string.source_separation_show_snackbar_progress_title
+                                ),
+                                description = stringResource(
+                                    R.string.source_separation_show_snackbar_progress_description
+                                )
+                            ) { checked ->
+                                viewModel.setSourceSeparationShowSnackbarProgressEnabled(checked)
+                            }
                         }
                     }
                 }
@@ -496,10 +562,10 @@ private fun SourceSeparationStatusText(
                     cacheState.totalSegments,
                 )
             }
-            SourceSeparationCacheUiState.CompletedWithTemporaryFiles -> {
+            is SourceSeparationCacheUiState.CompletedWithTemporaryFiles -> {
                 stringResource(R.string.source_separation_status_completed_cleanup_pending)
             }
-            SourceSeparationCacheUiState.Completed -> {
+            is SourceSeparationCacheUiState.Completed -> {
                 stringResource(R.string.source_separation_status_completed_cache)
             }
         }
@@ -605,4 +671,12 @@ private val SourceSeparationBlendMode.titleRes: Int
         SourceSeparationBlendMode.Off -> R.string.source_separation_blend_mode_off
         SourceSeparationBlendMode.Global -> R.string.source_separation_blend_mode_global
         SourceSeparationBlendMode.PerSong -> R.string.source_separation_blend_mode_per_song
+    }
+
+private val SourceSeparationCacheUiState.canPromoteCompletedStems: Boolean
+    get() = when (this) {
+        is SourceSeparationCacheUiState.Completed -> canPromoteCompletedStems
+        is SourceSeparationCacheUiState.CompletedWithTemporaryFiles -> canPromoteCompletedStems
+        SourceSeparationCacheUiState.NotStarted,
+        is SourceSeparationCacheUiState.Partial -> false
     }
