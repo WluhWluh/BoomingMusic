@@ -43,7 +43,8 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
 
 - Android-only, fully on-device separation.
 - Two stems only: vocals and instrumental.
-- Personal builds may bundle or locally load the ONNX model.
+- User-provided local ONNX model storage, starting with `UVR_MDXNET_9482.onnx`.
+- First-use model acquisition by downloading the preset model URL, downloading from a user-provided URL, or importing a local file.
 - Integration with the existing Booming Music playback UI.
 - Current-song separation from the player screen.
 - Playback-position-prioritized chunk scheduling.
@@ -58,10 +59,10 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
 - Cloud processing.
 - Batch separation.
 - Four-stem models.
-- Model download marketplace or model management UX.
+- Multi-model marketplace, automatic model selection, and model update management beyond the single supported `UVR_MDXNET_9482.onnx` acquisition flow.
 - Perfect gapless behavior across every codec/device combination.
 - Android Auto-specific source separation controls.
-- Public redistribution until model licensing is clarified.
+- Bundled model redistribution. The app should not ship UVR model weights in the APK while model licensing and redistribution remain sensitive.
 
 ## Key Technical Assumptions
 
@@ -74,6 +75,9 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
 - Completed stem storage should default to FLAC because it preserves sample-accurate alignment while saving space compared with WAV.
 - Opus can be evaluated later as an optional small-size mode. MP3 should not be a first target because Android does not provide a reliable platform MP3 encoder and external encoders add size, delay, and licensing complexity.
 - App-private storage is the safest first cache location.
+- The APK should not bundle the ONNX model. The first supported acquisition flow should manage a single `UVR_MDXNET_9482.onnx` file in app-private storage.
+- The preset model source should be the k2-fsa/sherpa-onnx `source-separation-models` release asset with expected SHA-256 `9d78f8566fa8198065214ab628be1de966a500c57786695aa4b13e2b27a7727d`.
+- Model hash mismatch should be visible to the user but should not block advanced/manual use. Cache identity should eventually include the actual model hash so custom or mismatched models do not silently reuse incompatible stems.
 
 ## Proposed Architecture
 
@@ -82,6 +86,9 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
 - `separation/model`
   - model variant metadata,
   - ONNX model loading,
+  - local model repository and acquisition state,
+  - preset/custom URL download and local-file import,
+  - model hash calculation and attribution metadata,
   - runtime settings,
   - session lifecycle.
 - `separation/dsp`
@@ -142,11 +149,14 @@ Audio identity fields decide whether separated stems remain valid:
 - decoded sample rate,
 - decoded channel layout,
 - model variant,
+- model hash once runtime model acquisition is introduced,
 - pipeline version.
 
 The current implementation computes `audioFingerprint` from the selected encoded audio track samples through `MediaExtractor`, plus decoder-relevant track fields such as MIME type, sample rate, channel count, duration, encoder delay, and encoder padding. This skips container metadata such as cover art, lyrics, and tags, so metadata-only rewrites should not invalidate separated caches. A decoded PCM hash remains a possible fallback strategy if a platform extractor proves unreliable for a specific format.
 
 File size and raw modified timestamp should be stored as diagnostic fields in the manifest, but they should not be used as mandatory cache invalidation inputs.
+
+When locally downloaded or imported models replace bundled model assets, the cache identity should include the actual model SHA-256. Existing cache entries without a model hash can be treated as legacy entries for `UVR_MDXNET_9482.onnx` only when the active model matches the expected preset hash; otherwise they should be considered incompatible and recomputed.
 
 ### Segment Model
 
@@ -288,9 +298,109 @@ The existing overflow actions should be removed only after the sheet can replace
 - `Separate vocals`,
 - `Separated playback`.
 
-The existing separation progress Snackbar should also be removed only after the settings sheet can display progress. Brief completion, failure, or recovery messages may still use Snackbar or another short transient surface, but detailed progress should live in the sheet.
+The settings sheet should be the primary progress surface. Legacy source-separation Snackbar messages, including preparation, window progress, completion, cancellation, and failure, are retained only behind the advanced `Show separation progress Snackbar` setting. Short separated-playback notices, such as unavailable playback or missing cache messages, are controlled separately by the advanced `Show playback notices` setting. Both default off.
 
 True pause should not be exposed until partial segment manifests can preserve completed work. The current full-song WAV job can be canceled, but cancellation deletes temporary work; labeling that action as "Pause" would be misleading.
+
+### Cover Lyrics Quick Blend Control
+
+The lyrics-on-cover surface can host a compact source-separation quick control above the existing full-lyrics button. This should not replace the full source separation settings sheet; it is a fast path for the most common listening adjustment while lyrics are visible.
+
+The implementation should live in the shared Compose cover lyrics layer, not in each player style layout:
+
+- `CoverLyricsScreen` already owns the full-lyrics circular button and is reused by the player styles that support cover lyrics.
+- The quick control should be stacked with the full-lyrics button in one bottom-end overlay column.
+- Player styles that do not support cover lyrics, such as FullCover and Peek, do not need this control in the first pass.
+
+The closed state should be a circular `FilledIconButton` matching the existing full-lyrics button style:
+
+- icon: `ic_stem_blend_outline_24dp`,
+- size and bottom/end margin: match the full-lyrics button,
+- click behavior: enable separated playback using the current active blend, then morph or swap into the expanded vertical blend control.
+
+The expanded state should be a dedicated custom Compose control rather than a rotated Material `Slider`:
+
+- width: the same as the circular full-lyrics button,
+- height: three times that width,
+- shape: two separated vertical capsule segments with a small center gap at the neutral blend point,
+- the center cut ends should use a small corner radius so the split track still feels polished,
+- no Material slider thumb and no current-position handle,
+- the neutral 50% blend state should show no active fill,
+- progress fill should start at the center gap and extend toward the vocals end or instrumental end depending on the active blend,
+- the inactive track should match Material Slider inactive color behavior by using the same base color at low alpha,
+- top and bottom endpoint icons should currently reuse `ic_person_24dp` and `ic_speaker_24dp`,
+- colors should follow the active `PlayerTheme`; the first visual prototype uses `onSurface` as the base track color for both filled and inactive segments.
+
+Reason for a custom control:
+
+- The settings sheet's Stem blend slider uses a horizontal Material3 `Slider` plus `SliderDefaults.CenteredTrack`.
+- The quick control needs a vertical track, no thumb, custom tap zones, custom drag snapping, and overlaid endpoint icons.
+- Rotating the existing slider would make pointer mapping, thumb removal, semantics, and layout harder than a small purpose-built Canvas/pointer-input control.
+
+Current implementation status:
+
+- The cover lyrics overlay now uses a bottom-end column that stacks the source-separation quick control above the full-lyrics button.
+- The quick control switches visually with `sourceSeparationBlendModeFlow`: `Off` shows a circular outline stem-blend button, and enabled modes show the expanded vertical preview.
+- The expanded control is 40dp wide and 120dp tall, split into two 58dp track segments with a 4dp neutral center gap.
+- The outer ends are capsule-rounded; the center cut ends use 2dp corner radii.
+- The closed-to-expanded transition is implemented as a custom morph on the source-separation quick control only; other circular player buttons still use their original Material button implementation.
+- The control now renders the actual blend value: the neutral 50% state has no active fill, vocals-only fills upward from the center gap, and instrumental-only fills downward from the center gap.
+- The closed state click enables separated playback through `PlayerViewModel.setSourceSeparationPlaybackEnabled`.
+- The expanded state supports drag-to-blend with a small midpoint snap region and three-zone tap handling: top sets vocals-only, middle turns separated playback off without changing the stored blend, and bottom sets instrumental-only.
+- Drag rendering uses a local in-control blend value for immediate visual feedback. Audio preview updates are throttled through a lightweight ViewModel path, while drag finish and tap endpoints still use the formal persisted blend path.
+- The midpoint snap region now gives the same haptic feedback used by the settings sheet's blend reset action when a drag first enters the neutral snap band.
+- The endpoint icons are rendered with fixed geometry and split coloring so the portion over the active fill stays visible while the unfilled portion uses the inactive icon color.
+- While separated playback is waiting for playback-ready segment cache, the expanded quick control shows a small Material3 determinate circular progress indicator above the vertical slider. It uses the same processing-progress estimator as the source separation settings sheet.
+- The lyrics bottom avoidance is already content-padding based and changes with the quick-control visual height, so the lyrics viewport is not shortened.
+- The source-separation quick button and full-lyrics button have been aligned in the shared overlay column so the closed quick-control state visually lines up with the existing full-lyrics circular button.
+
+State synchronization should use the same source of truth as the settings sheet:
+
+- collect `sourceSeparationBlendModeFlow` to decide whether the quick control is closed or expanded,
+- collect `sourceSeparationPlaybackStateFlow.blend` for the current displayed blend value,
+- call `setSourceSeparationPlaybackEnabled(true, blend)` when the closed button is pressed,
+- call `previewSourceSeparationBlend(value)` for throttled playback updates while dragging,
+- call `setSourceSeparationBlend(value)` at drag finish and for discrete tap endpoints,
+- call `setSourceSeparationPlaybackEnabled(false)` when the center tap zone is pressed,
+- do not create an independent quick-control blend setting.
+
+Interaction rules:
+
+- Dragging inside the expanded vertical control continuously maps pointer Y to blend.
+- The top maps to the vocals-only end and the bottom maps to the instrumental-only end, matching the horizontal sheet labels.
+- A small snap region around the vertical midpoint should snap the value to the neutral center blend.
+- Tapping is handled differently from dragging:
+  - top third: set blend to vocals-only,
+  - middle third: turn separated playback off without changing the stored blend,
+  - bottom third: set blend to instrumental-only.
+- The control should distinguish tap vs drag with touch slop so a slight finger movement does not accidentally invoke the three-zone tap behavior.
+
+Lyrics bottom spacing should remain content-padding based:
+
+- Do not shrink the lyrics viewport by adding outer bottom padding to `LyricsSurface`.
+- Instead, increase only the scrollable lyrics content's bottom padding so the last line can scroll above the overlay.
+- The extra bottom padding should be dynamic:
+  - closed quick button + full-lyrics button: enough for two stacked circular buttons plus spacing and margin,
+  - expanded quick blend control + full-lyrics button: enough for the vertical control, full-lyrics button, spacing, and margin.
+- The same padding override should apply to both plain lyrics and synced lyrics.
+
+Implemented path:
+
+1. Keep the current content-padding-based lyrics-bottom-avoidance experiment and parameterize the extra bottom padding by overlay height.
+2. Replace the single full-lyrics button overlay with a bottom-end column that contains a placeholder quick source-separation button above the full-lyrics button.
+3. Wire the closed button to `PlayerViewModel` separated-playback state and verify it opens/closes in sync with the settings sheet.
+4. Add the custom vertical blend control with Canvas drawing and pointer-input handling.
+5. Add center snapping for drag only.
+6. Add top/middle/bottom tap zones.
+7. Add endpoint stem icons using existing `ic_person_24dp` and `ic_speaker_24dp` assets.
+8. Smooth drag responsiveness with local visual state plus throttled playback preview updates.
+9. Add compact processing progress above the quick slider.
+10. Verify on supported player styles and with both plain and synced lyrics.
+
+Open polish decisions:
+
+- Whether the quick control should show per-song/global mode distinction visually or remain a simple separated-playback quick blend regardless of memory mode.
+- Whether the custom quick-control drawing should eventually replace the existing full-lyrics button drawing as well, or remain a special-case control now that the two buttons are visually aligned.
 
 ### Boundary and Finalization Strategy
 
@@ -533,6 +643,9 @@ Implementation notes:
 - Added a cache-owned playback settings sidecar for per-song blend memory. The sidecar is ignored if its fingerprint does not match the current manifest audio fingerprint.
 - Added a temporary per-song blend store keyed by a hash of the current library song id, URI, and file path. When the separation manifest receives a real encoded-audio fingerprint, the temporary value is migrated to the cache-owned sidecar and removed.
 - Added a playback-service gate so global blend can auto-sync on song transitions, while per-song blend waits for the target song's explicit blend command before creating a new separated playback session.
+- `Remember blend per song` now defaults on for new installs, so the primary separated-playback behavior follows per-song listening adjustments unless the user opts out.
+- Added Now playing > Controls settings that independently control source-separation entry visibility and cover-lyrics quick-control visibility. The full source-separation panel entry defaults hidden, while the lyrics-layer quick control defaults visible.
+- The source-separation panel entry visibility setting applies to both icon-button player styles and overflow-menu text entries, and the player action provider refreshes immediately so enabling the setting no longer leaves a temporary blank icon.
 
 Current limitations:
 
@@ -720,20 +833,19 @@ Implementation notes:
 - Added segment-relative stem file layout metadata to the cache model.
 - The full-song offline separation path now also writes segment WAV outputs under the entry's `segments/` directory so the segment layout is real and inspectable before live playback uses it.
 - Manifest output now records the generated segment plan alongside the completed full-song cache.
-- Added segment snapshots that derive real `Ready`/`Missing` availability from the presence of both stem files instead of trusting manifest state alone.
+- Added segment snapshots that derive real availability from the manifest state plus exact segment stem WAV validation, so stale or partial files are not treated as playable.
 - Added a cache helper for updating individual segment states, preparing for queued/running/failed partial processing.
 - The running separation path now writes the segment plan to the manifest before model-window processing starts.
 - Each model window updates its manifest segment state from `Queued` to `Running` to `Ready` as work progresses.
 - Running stem WAV files are preallocated to the full output duration, so completed windows can be written into a song-aligned timeline while future regions remain silent.
 - The separator can now choose the next unprocessed segment from `SourceSeparationSegmentScheduler` after each completed model window. This lets the active playback position and next segment move to the front of the current song's work when the user seeks.
 - Whole-song work WAVs support frame-addressed writes for preallocated files, so out-of-order segment processing does not corrupt the final song timeline.
-- Completed runs currently copy final WAV files into `completed/` while leaving the running `work/` files in place, allowing an active experimental playback session to keep using the same file paths after final promotion.
+- Completed runs copy final WAV files into `completed/` and mark the full-duration `work/` WAV timeline for deferred cleanup.
 
 Current limitations:
 
 - Reprioritization is currently scoped to the active song's in-flight separation run. It does not yet provide a global multi-song work queue.
 - A model window that is already inside ONNX inference still runs to completion before the new playback-head priority can take effect.
-- Partial-cache resume after app restart or cancellation still needs a stable manifest recovery path.
 
 Next scheduler refinement steps:
 
@@ -741,7 +853,7 @@ Next scheduler refinement steps:
 2. Trigger playback readiness sync immediately after seeks so the processing gate and scheduler target update together.
 3. Add light debounce or segment-change gating so continuous scrubbing does not churn scheduler intent more often than useful.
 4. Add active-song ownership to processing: after song changes, preserve completed segments for the old song but pause or downgrade its remaining work once the current ONNX window finishes.
-5. Add partial-cache resume so a new run can skip already ready segments after cancellation, app restart, or process death.
+5. Move from the current single active task to a real background queue only after the foreground current-song path stays stable.
 
 Active-song pause prototype:
 
@@ -751,6 +863,26 @@ Active-song pause prototype:
 - Starting separation for that song again reuses the existing `Running` manifest, verifies segment files on disk, preserves ready segment states, and skips ready segments.
 - Manual testing confirmed that changing songs pauses the old song after the current window, and returning to that song resumes from the preserved partial segment cache.
 - This is still a player-scoped single active task, not a background multi-song queue. A future worker layer can resume old songs as low-priority idle work after current-song needs are satisfied.
+
+Partial-cache restart recovery prototype:
+
+- A new separation run can now resume from a previous `Running` manifest after app restart or process death.
+- Recovery only preserves segments that were already marked `Ready` in the manifest and whose vocals/instrumental segment WAV files exactly match the expected 44-byte PCM16 WAV layout and data size.
+- Ready segments are only skipped when the full-duration running work WAV files are also present and valid, because those files are the live playback and final-promotion timeline.
+- Stale `Running`, `Queued`, `Failed`, or incomplete segments are normalized back to `Queued` and processed again.
+- If the full-duration work WAVs are missing or invalid, all segments are queued again so old segment files cannot make playback trust an empty or mismatched stem timeline.
+
+Completed temporary-cache cleanup prototype:
+
+- Completed manifests now record pending cleanup entries for the `work/` and `segments/` directories after final WAVs are promoted to `completed/`.
+- The playback service owns the actual deletion decision because it knows which stem files are still referenced by the active mixer session.
+- Pending temporary cleanup is attempted on service startup, after source-separation playback sessions are cleared, after service-side offline separation completes, and when the UI asks the service to clean after a ViewModel-side separation run finishes.
+- Cleanup skips any `work/` directory whose files are still referenced by the active source-separation playback session, so live running-cache playback can finish its transition before storage is reclaimed.
+- Completed `segments/` directories are deleted as soon as the cleanup pass can safely verify that they are inside the cache entry directory, because completed playback uses the promoted full-track stems.
+- If the current playback session is still using the running `work/` stem timeline after final promotion, a manual seek upgrades that session to the promoted `completed/` full-track WAV files and then retries temporary cleanup. This keeps uninterrupted playback stable while still giving the user an immediate cleanup trigger.
+- A user-initiated pause is also treated as a settled point where a finished song can switch from the running `work/` stem timeline to the promoted `completed/` full-track stems.
+- The source separation sheet now reports idle cache state explicitly: not started, partial cache present, completed with temporary artifacts pending cleanup, or completed and cleaned.
+- Manual device testing confirmed that active playback remains stable after full-song completion, manual seek can switch playback to the promoted full-track files, and both `work/` and `segments/` temporary directories can be reclaimed without breaking the current session.
 
 ### Phase 6: Play While Processing
 
@@ -786,6 +918,10 @@ Implementation notes:
 - Verified `:app:assembleNormalDebug` succeeds after the first play-while-processing experiment.
 - Seeks during running separated playback now re-check current and next segment readiness. If the target window is not ready, playback restores the original media item, pauses, reports a processing state, and automatically switches back to separated playback when the window becomes ready.
 - Starting a separation while separated playback is requested now uses the same processing gate: playback pauses while the initial playable window is unavailable instead of continuing with the original audio.
+- Automatic separation now runs earlier during song changes when separated playback is enabled and the active blend requires separated output, preventing a short original-audio leak before the processing gate pauses for cache readiness.
+- Running separated playback now uses a configurable ready horizon instead of trusting only the immediate segment, reducing repeat pause/resume loops when playback is close to the edge of the ready cache.
+- Partial running caches are preserved across lifecycle changes and resumed from verified ready segment state, avoiding unnecessary restarts after repeated seeking or task recreation.
+- Processing progress is shared by the settings sheet and the cover-lyrics quick control's circular indicator. The estimator starts cleanly for each wait session, pre-runs from 0% with a conservative prediction, and uses recent per-window timing when available.
 - Completed separated playback uses the instrumental stem WAV as the ExoPlayer media item and mixes the vocals stem from the same completed stem timeline.
 - Running separated playback keeps the original source as the ExoPlayer clock input while the mixer reads both work-in-progress stem WAVs directly. This avoids ExoPlayer pre-buffering unwritten zero-filled ranges from the instrumental work WAV while still suppressing original-source leakage.
 - Separated playback transitions pause output while replacing media items, seeking, preparing, and realigning the stem processor, then restore playback only after the new timeline is ready.
@@ -795,7 +931,6 @@ Current limitations:
 
 - A newly selected segment priority takes effect between model windows. Seeking to an unready position can now move that position's segment and its next segment ahead of remaining backfill work, but it cannot interrupt an active ONNX inference call.
 - The settings sheet still uses the old coarse progress text instead of a dedicated current/next segment readiness model.
-- Running `work/` WAV files are retained after completion for active playback-session stability; a later cleanup strategy should remove them once playback no longer references them.
 
 ### Phase 7: Background and Thermal Behavior
 
@@ -816,7 +951,7 @@ Done criteria:
 
 ### Phase 8: Compression and Final Cache Files
 
-Status: pending
+Status: in progress
 
 Goals:
 
@@ -835,29 +970,123 @@ Done criteria:
 - Temporary segment files are cleaned up safely after promotion.
 - Playback can still use partial segment caches while a song is not fully complete.
 
+Implementation recommendation:
+
+- Start with FLAC promotion for completed full-track stems only. Keep running `work/` and `segments/` as PCM WAV during processing so partial playback and restart recovery stay unchanged.
+- Add manifest output metadata that records codec, path, expected frame count, sample rate, channel count, and whether the promoted files have passed a local decode validation.
+- Promote atomically: encode `completed/vocals.flac` and `completed/instrumental.flac` beside the existing WAV files, decode-probe both FLAC files for frame count/alignment, update the manifest only after validation, then let the temporary cleanup path delete superseded WAV process artifacts.
+- Keep a WAV fallback path for promotion failures or devices without reliable FLAC encoder/decoder behavior.
+
+Initial implementation notes:
+
+- The first FLAC promotion pass uses a project-local encoder that only supports the app's own completed 16-bit stereo PCM stem WAV files.
+- The encoder writes standard FLAC with fixed predictors plus Rice residual coding, falling back to verbatim subframes when that is smaller for a block. No external encoder dependency is used.
+- Promotion is non-critical: if encoding or decode validation fails, the completed cache remains WAV-backed and separation still succeeds.
+- The manifest records validated promoted FLAC paths. Completed separated playback now prefers validated `instrumental.flac` as the ExoPlayer source and validated `vocals.flac` as the mixer stem.
+- Automatic FLAC promotion is now an advanced source-separation setting. It defaults on for new separation tasks, is captured when the task starts, and can be disabled so completed WAV stems remain WAV-backed.
+- Current-song manual FLAC promotion is available from the settings sheet only when a completed cache still has both WAV stems and no validated FLAC promotion.
+- S25 debug testing showed that Android `MediaExtractor` does not recognize the generated raw FLAC files as audio tracks, so platform decode validation is not a suitable promotion gate. The project-local verifier is used instead and checks STREAMINFO, frame count, and decoded PCM MD5.
+- Separate S25 ExoPlayer testing confirmed that `instrumental.flac` can be used directly as the completed-cache media item: tested files reached `READY`, advanced playback position for the probe window, and produced no playback errors.
+- Completed-cache playback with both stems retained only as FLAC was manually tested on several songs. Blend playback sounded correct and remained stable.
+- After successful promotion, both `completed/vocals.wav` and `completed/instrumental.wav` are superseded and can be deleted. The temporary cleanup path also removes legacy completed WAV stems when a manifest has validated promoted FLAC paths.
+- The committed first validation pass decoded `vocals.flac` into PCM memory when the mixer session opened. That proved the dual-FLAC playback route but was not suitable as the final reader.
+- The current hardening pass writes a small sidecar frame index (`*.flac.idx`) during project-local FLAC promotion. The mixer can use this index to seek to the containing FLAC frame and decode only bounded 4096-frame blocks on demand.
+- Existing promoted FLAC caches without a sidecar index remain playable through the old whole-file decode fallback, so this hardening does not invalidate already-tested caches.
+- Playback-gate traces keep indexed FLAC open, fallback, and seek events visible. Per-frame decode timing remains behind a local debug constant because it is useful for targeted profiling but too noisy for normal playback testing.
+- A debug-only stereo decorrelation experiment compared the current independent-stereo encoder against adaptive independent/left-side/right-side/mid-side frame selection on S25. On three real completed-cache song pairs, vocals saved about 8.3% total, instrumentals saved about 2.5% total, and the combined stem set saved about 5.2%. All decorrelated outputs passed local PCM MD5 verification, but adaptive encoding was substantially slower because each block must encode multiple candidates. Keep production promotion on independent stereo for now unless the extra post-processing time becomes acceptable.
+- Completed-cache FLAC playback remains on the indexed-reader path, but the current hardening pass reduces startup and seek instability by prefetching bounded decoded blocks off the realtime path and by keeping full-song PCM hydration as a transparent upgrade when it finishes.
+- More invasive FLAC temporary-playback redesigns were tested and rejected because they increased startup latency, seek blanking, and repeated audio risk. The stable direction is to keep the indexed reader simple, feed it modest prefetch, and let hydration remove remaining decoder pressure when available.
+- Recent multi-song S25 testing of fully promoted FLAC caches did not reproduce the earlier probabilistic stutter. Initial decode wait was short enough for daily use, and playback/seek behavior stayed normal.
+
+Next FLAC hardening steps:
+
+- If smaller completed caches become more important than promotion time, consider enabling adaptive stereo decorrelation only as an optional/background promotion mode, not on the critical playback path.
+
 ### Phase 9: Cache Management and Full Settings UX
 
-Status: pending
+Status: in progress
 
 Goals:
 
 - Finish the source separation settings sheet as the main control surface.
 - Remove the old overflow actions once the sheet fully replaces them.
-- Remove the long-running progress Snackbar once progress is represented in the sheet.
+- Keep source-separation Snackbar messages optional now that progress is represented in the sheet.
 - Add a way to list songs with separated caches.
 - Show cache size and model/pipeline information.
 - Allow deleting a single song's separated cache.
 - Allow deleting the current song's separated cache from the settings sheet.
+- Add a compact cover-lyrics quick control for enabling separated playback and adjusting the active stem blend without opening the full settings sheet.
 - Consider an optional "delete all separated tracks" action.
 
 Done criteria:
 
-- The source separation sheet contains the master switch, per-song memory switch, blend slider, current song progress, pause/resume or stop controls, and current-song cache deletion.
+- The source separation sheet contains the master switch, per-song memory switch, blend slider, current song progress, pause/resume or stop controls, current-song cache deletion, manual FLAC promotion, and advanced diagnostic settings.
+- The cover-lyrics quick control appears above the full-lyrics button on player styles that support cover lyrics, stays synchronized with the settings sheet, and adjusts separated playback/blend without introducing stem desync or source leakage.
 - The old `Separate vocals` and `Separated playback` overflow actions have been removed.
-- Detailed processing progress no longer depends on an indefinite Snackbar.
+- Detailed processing progress no longer depends on an indefinite Snackbar. Progress Snackbars are hidden by default behind `Show separation progress Snackbar`, and short separated-playback notices are hidden by default behind `Show playback notices`.
 - The user can find all cached separated songs.
 - Deleting cache does not delete original music.
 - Storage usage is visible enough for personal maintenance.
+
+Implementation notes:
+
+- Current-song cache operations remain in the source separation sheet's `Current song` area: status, clear cache, and manual FLAC compression.
+- The sheet's `Advanced` area now includes a `Manage separated caches` entry that opens an in-sheet cache management page.
+- The cache management page lists all usable partial and completed separated caches, excluding failed/canceled leftovers so they are not presented as playable cache.
+- Each cache row is collapsed by default with the song title, cache size, per-entry delete action, and expand affordance visible. Expanding the row shows artist, state, ready-window count for partial caches, format, updated time, model variant, and pipeline version.
+- Cache rows are grouped into `Partial` and `Completed` sections, and each section is sorted by last-used time from newest to oldest.
+- The page shows total cached-song count and aggregate cache size, supports refresh, allows deleting individual cache entries, and exposes a top-level delete-all action.
+- Global cache deletion uses the same safety as current-song deletion: it pauses an active separation for that song at a safe boundary, cancels/waits for FLAC promotion for that song, deletes the cache entry, and refreshes the current-song playback/cache state when relevant.
+- If the deleted cache belongs to the current song, playback/cache UI state is refreshed, `Separated playback` is turned off, and the playback service is notified to recheck the active separation session so output returns to the original audio immediately.
+- The cache management page now includes automatic cache cleanup controls. The feature defaults on, keeps at least one entry per cache class, and defaults to at most 5 partial-cache songs and 10 completed-cache songs.
+- Cache manifests track `lastAccessedAtEpochMs`; existing manifests fall back to `updatedAtEpochMs`. Completed caches are touched when they are selected for separated playback, and the management UI displays both updated and last-used timestamps.
+- Automatic cleanup prunes partial and completed caches separately by least-recently-used order. It protects the current song, active/pending separation songs, active separated playback song, and queued/running FLAC promotion songs from pruning.
+
+### Phase 9.5: External Model Acquisition and Local Model Repository
+
+Status: planned, high priority
+
+Goals:
+
+- Stop shipping `UVR_MDXNET_9482.onnx` inside the APK.
+- Replace bundled-asset lookup with an app-private local model repository.
+- Support the single current model first: `UVR_MDXNET_9482.onnx`.
+- When no local model is available, guide the user to download the preset URL, download from a custom URL, or import a local ONNX file.
+- Show model source, size, expected SHA-256, actual SHA-256, and whether the hash matches the known preset.
+- Treat a hash mismatch as a visible warning only; do not block loading or using the model.
+- Preserve existing source-separation behavior once a usable local model exists.
+
+Licensing and attribution notes:
+
+- The k2-fsa/sherpa-onnx repository is Apache-2.0, but its `source-separation-models` release states that the UVR models were converted from TRvlvr's public UVR model release.
+- TRvlvr's model repository does not expose a separate GitHub license. The UVR GUI repository is MIT and asks third-party application developers using its models to credit UVR and its developers.
+- The safest product direction is therefore to remove model weights from the packaged APK, link to the preset upstream asset, and show clear UVR/k2-fsa source attribution in the model acquisition UI and/or app notices.
+
+Preset model metadata:
+
+- Name: `UVR_MDXNET_9482.onnx`
+- URL: `https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/UVR_MDXNET_9482.onnx`
+- Size: `29,704,738` bytes
+- SHA-256: `9d78f8566fa8198065214ab628be1de966a500c57786695aa4b13e2b27a7727d`
+
+Implementation recommendation:
+
+- Remove `assets.directories.add("../models/uvr-mdx")` from the Android source set so local debug models are no longer packaged automatically.
+- Replace `MdxModelFile.get()` with a `SourceSeparationModelRepository` that returns explicit availability states such as `Missing`, `Available`, `HashMismatch`, `Corrupt`, `Downloading`, and `Importing`.
+- Store the managed model under app-private storage, for example `filesDir/source-separation/models/mdxnet_9482/UVR_MDXNET_9482.onnx`, with a sidecar metadata file containing source URL/import name, size, actual hash, expected hash, hash-match state, and timestamps.
+- Download to a temporary file, calculate SHA-256 while streaming, then atomically move into the active model location after the write succeeds.
+- Import through Android's document picker, copy into private storage, calculate SHA-256, and then forget the source URI unless the user imports again.
+- If separation is requested while the model is missing, surface a model-acquisition state instead of failing as a generic processing error.
+- Add the actual model hash to new cache identities/manifests so custom or mismatched models do not silently reuse stems generated by a different model.
+- Treat legacy caches with no model hash as compatible only when the active model hash matches the preset SHA-256.
+
+Done criteria:
+
+- A clean build can be produced without `models/uvr-mdx/UVR_MDXNET_9482.onnx` present on disk.
+- First use of source separation with no local model opens or points to the model acquisition UI instead of throwing a bundled-asset error.
+- Preset download, custom URL download, and local-file import each produce a local model file and visible hash comparison.
+- Hash mismatch is shown clearly but does not prevent the user from starting separation.
+- Existing completed and partial cache behavior remains stable when the active model hash matches the preset model.
 
 ### Phase 10: Polish and Hardening
 
@@ -868,7 +1097,7 @@ Goals:
 - Improve error messages.
 - Handle unsupported source codecs.
 - Handle low storage.
-- Handle model missing/corrupt cases.
+- Harden corrupt or incompatible local model cases after Phase 9.5 adds the primary model acquisition flow.
 - Add logging around scheduler decisions.
 - Add focused tests for DSP math, cache keys, and scheduler priority.
 
@@ -880,8 +1109,8 @@ Done criteria:
 
 ## Major Risks
 
-- Model licensing is unclear for redistribution.
-- ONNX Runtime and bundled models will significantly increase APK size.
+- Model licensing is unclear for bundled redistribution, so the APK should not ship UVR weights.
+- ONNX Runtime increases APK size; removing bundled model weights keeps the source-separation feature from adding another large binary asset.
 - MP3 encoding would require native libraries or third-party encoders and is not planned for the first implementation.
 - Lossy compressed stems may drift because of encoder delay or padding; FLAC avoids this and should be the default completed-cache format.
 - Two independent players are likely to drift and should be avoided unless the Media3 custom-source path proves too expensive.
@@ -903,11 +1132,11 @@ The early milestone ordering was deliberately modest:
 7. Only then attempt play-while-processing.
 8. Finish the full settings sheet and remove the older temporary menu/Snackbar surfaces.
 
-The first seven items now exist in prototype form. The current preferred order is:
+The first seven items, FLAC completed-cache promotion, cache management, automatic cleanup, entry visibility preferences, and the cover-lyrics quick blend control now exist in prototype form. The current preferred order is:
 
-1. Harden playback-head-driven segment scheduling for seek and song-change behavior.
-2. Define partial-cache pause/resume/recovery semantics.
-3. Feed current/next segment readiness and scheduler priority into the source separation sheet.
-4. Promote completed segment timelines to FLAC and clean temporary WAV work files safely.
-5. Finish cache management and remove the older temporary menu/Snackbar surfaces.
-6. Expand window-decode profiles only after the core live playback path is stable.
+1. Remove bundled model distribution and add the single-model local repository plus download/import acquisition flow.
+2. Add model hash to new source-separation cache identities and handle legacy caches conservatively.
+3. Continue hardening live running-cache playback around boundary readiness, lifecycle recovery, and completed-stem promotion points.
+4. Feed richer current/next segment readiness and scheduler priority details into the source separation sheet.
+5. Revisit background and thermal behavior after the foreground quick-control and settings-sheet UX stay stable in daily use.
+6. Expand window-decode or compression profiles only after the core live playback path remains stable.

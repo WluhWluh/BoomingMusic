@@ -14,6 +14,8 @@ object Playback {
         "com.mardous.booming.command.source_separation.playback_enabled"
     const val SYNC_SOURCE_SEPARATION_PLAYBACK =
         "com.mardous.booming.command.source_separation.sync_playback"
+    const val CLEAN_SOURCE_SEPARATION_TEMPORARY_CACHE =
+        "com.mardous.booming.command.source_separation.clean_temporary_cache"
     const val SET_SOURCE_SEPARATION_BLEND = "com.mardous.booming.command.source_separation.blend"
 
     // Custom events

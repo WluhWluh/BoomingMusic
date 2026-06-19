@@ -43,6 +43,7 @@ import com.mardous.booming.playback.ProgressObserver
 import com.mardous.booming.playback.getQueueItems
 import com.mardous.booming.playback.shuffle.ShuffleManager
 import com.mardous.booming.playback.toMediaItems
+import com.mardous.booming.separation.SourceSeparationCacheStatus
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
@@ -160,6 +161,11 @@ class PlayerViewModel(
     private val _currentSourceSeparationCacheAvailableFlow = MutableStateFlow(false)
     val currentSourceSeparationCacheAvailableFlow =
         _currentSourceSeparationCacheAvailableFlow.asStateFlow()
+
+    private val _currentSourceSeparationCacheStateFlow =
+        MutableStateFlow<SourceSeparationCacheUiState>(SourceSeparationCacheUiState.NotStarted)
+    val currentSourceSeparationCacheStateFlow =
+        _currentSourceSeparationCacheStateFlow.asStateFlow()
 
     private val _sourceSeparationPendingActionFlow =
         MutableStateFlow<SourceSeparationPendingAction?>(null)
@@ -548,6 +554,7 @@ class PlayerViewModel(
                 if (currentSong.id == song.id) {
                     refreshCurrentSourceSeparationCacheAvailable(song)
                 }
+                requestSourceSeparationTemporaryCacheCleanup()
             } catch (_: SourceSeparationPausedException) {
                 _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
                 if (currentSong.id == song.id) {
@@ -624,15 +631,17 @@ class PlayerViewModel(
 
     private fun refreshCurrentSourceSeparationCacheAvailable(song: Song = currentSong) {
         viewModelScope.launch(IO) {
-            val available = if (song == Song.emptySong) {
-                false
+            val cacheState = if (song == Song.emptySong) {
+                SourceSeparationCacheUiState.NotStarted
             } else {
                 runCatching {
-                    sourceSeparationEngine.hasCacheForSong(song)
-                }.getOrDefault(false)
+                    sourceSeparationEngine.cacheStatusForSong(song).toUiState()
+                }.getOrDefault(SourceSeparationCacheUiState.NotStarted)
             }
             if (currentSong.id == song.id) {
-                _currentSourceSeparationCacheAvailableFlow.value = available
+                _currentSourceSeparationCacheStateFlow.value = cacheState
+                _currentSourceSeparationCacheAvailableFlow.value =
+                    cacheState != SourceSeparationCacheUiState.NotStarted
             }
         }
     }
@@ -913,6 +922,23 @@ class PlayerViewModel(
         }
     }
 
+    private fun requestSourceSeparationTemporaryCacheCleanup() {
+        val song = currentSong
+        viewModelScope.launch {
+            runCatching {
+                sendSourceSeparationPlaybackCommand(
+                    action = Playback.CLEAN_SOURCE_SEPARATION_TEMPORARY_CACHE,
+                    args = Bundle.EMPTY,
+                )
+                if (currentSong.id == song.id) {
+                    refreshCurrentSourceSeparationCacheAvailable(song)
+                }
+            }.onFailure { error ->
+                Log.w(TAG, "Failed to clean source separation temporary cache", error)
+            }
+        }
+    }
+
     private suspend fun sendSourceSeparationPlaybackEnabledCommand(
         enabled: Boolean,
         blend: Float?,
@@ -1046,6 +1072,7 @@ class PlayerViewModel(
         updateSourceSeparationPlaybackState(
             SessionResult(SessionResult.RESULT_SUCCESS, args)
         )
+        refreshCurrentSourceSeparationCacheAvailable()
     }
 
     private suspend fun sendSourceSeparationPlaybackCommand(
@@ -1485,6 +1512,29 @@ sealed class SourceSeparationUiState {
 enum class SourceSeparationPendingAction {
     Pause,
     DeleteCache,
+}
+
+sealed class SourceSeparationCacheUiState {
+    data object NotStarted : SourceSeparationCacheUiState()
+    data class Partial(
+        val readySegments: Int,
+        val totalSegments: Int,
+    ) : SourceSeparationCacheUiState()
+    data object CompletedWithTemporaryFiles : SourceSeparationCacheUiState()
+    data object Completed : SourceSeparationCacheUiState()
+}
+
+private fun SourceSeparationCacheStatus.toUiState(): SourceSeparationCacheUiState {
+    return when (this) {
+        SourceSeparationCacheStatus.NotStarted -> SourceSeparationCacheUiState.NotStarted
+        is SourceSeparationCacheStatus.Partial -> SourceSeparationCacheUiState.Partial(
+            readySegments = readySegments,
+            totalSegments = totalSegments,
+        )
+        SourceSeparationCacheStatus.CompletedWithTemporaryFiles ->
+            SourceSeparationCacheUiState.CompletedWithTemporaryFiles
+        SourceSeparationCacheStatus.Completed -> SourceSeparationCacheUiState.Completed
+    }
 }
 
 data class SourceSeparationPlaybackUiState(

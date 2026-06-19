@@ -38,12 +38,50 @@ class SourceSeparationEngine(
         return cache.hasEntry(song, modelVariant)
     }
 
+    fun cacheStatusForSong(
+        song: Song,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): SourceSeparationCacheStatus {
+        require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
+        val manifest = cache.readEntry(song, modelVariant)
+            ?: return SourceSeparationCacheStatus.NotStarted
+        return when (manifest.state) {
+            SourceSeparationCacheState.Running -> {
+                val snapshot = cache.readSegmentSnapshot(manifest)
+                SourceSeparationCacheStatus.Partial(
+                    readySegments = snapshot?.readyCount ?: 0,
+                    totalSegments = snapshot?.totalCount ?: manifest.segmentPlan?.segmentCount ?: 0,
+                )
+            }
+            SourceSeparationCacheState.Completed -> {
+                if (cache.hasPendingCompletedTemporaryDirs(manifest)) {
+                    SourceSeparationCacheStatus.CompletedWithTemporaryFiles
+                } else {
+                    SourceSeparationCacheStatus.Completed
+                }
+            }
+            SourceSeparationCacheState.Canceled,
+            SourceSeparationCacheState.Failed -> SourceSeparationCacheStatus.NotStarted
+        }
+    }
+
     fun deleteCacheForSong(
         song: Song,
         modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
     ): Boolean {
         require(song != Song.emptySong) { "Cannot delete separated cache for an empty song." }
         return cache.deleteEntry(song, modelVariant)
+    }
+
+    fun cleanCompletedTemporaryDirs(
+        manifest: SourceSeparationManifest,
+        activeFiles: Set<String> = emptySet(),
+    ): Boolean {
+        return cache.cleanCompletedTemporaryDirs(manifest, activeFiles)
+    }
+
+    fun cleanPendingCompletedTemporaryDirs(activeFiles: Set<String> = emptySet()): Int {
+        return cache.cleanPendingCompletedTemporaryDirs(activeFiles)
     }
 
     fun playableCacheForSong(
@@ -285,6 +323,16 @@ class SourceSeparationEngine(
 }
 
 class SourceSeparationPausedException : CancellationException("Source separation paused.")
+
+sealed class SourceSeparationCacheStatus {
+    data object NotStarted : SourceSeparationCacheStatus()
+    data class Partial(
+        val readySegments: Int,
+        val totalSegments: Int,
+    ) : SourceSeparationCacheStatus()
+    data object CompletedWithTemporaryFiles : SourceSeparationCacheStatus()
+    data object Completed : SourceSeparationCacheStatus()
+}
 
 sealed class SourceSeparationPlayableCacheStatus {
     data class Ready(val manifest: SourceSeparationManifest) : SourceSeparationPlayableCacheStatus()
