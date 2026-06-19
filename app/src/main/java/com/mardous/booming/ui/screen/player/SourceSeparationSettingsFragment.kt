@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -35,6 +37,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -50,6 +53,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
@@ -121,6 +125,12 @@ private fun SourceSeparationSettingsSheet(
         .collectAsState()
     val showSnackbarProgress by viewModel
         .sourceSeparationShowSnackbarProgressFlow
+        .collectAsState()
+    val mixedOutputPrerollMs by viewModel
+        .sourceSeparationMixedOutputPrerollMsFlow
+        .collectAsState()
+    val hydratedMixedOutputPrerollMs by viewModel
+        .sourceSeparationHydratedMixedOutputPrerollMsFlow
         .collectAsState()
 
     val separatedPlaybackEnabled = blendMode != SourceSeparationBlendMode.Off
@@ -441,6 +451,29 @@ private fun SourceSeparationSettingsSheet(
                             ) { checked ->
                                 viewModel.setSourceSeparationShowSnackbarProgressEnabled(checked)
                             }
+
+                            PrerollMsField(
+                                valueMs = mixedOutputPrerollMs,
+                                title = stringResource(
+                                    R.string.source_separation_mixed_output_preroll_title
+                                ),
+                                description = stringResource(
+                                    R.string.source_separation_mixed_output_preroll_description
+                                ),
+                                onValueChange = viewModel::setSourceSeparationMixedOutputPrerollMs
+                            )
+
+                            PrerollMsField(
+                                valueMs = hydratedMixedOutputPrerollMs,
+                                title = stringResource(
+                                    R.string.source_separation_hydrated_mixed_output_preroll_title
+                                ),
+                                description = stringResource(
+                                    R.string.source_separation_hydrated_mixed_output_preroll_description
+                                ),
+                                onValueChange =
+                                    viewModel::setSourceSeparationHydratedMixedOutputPrerollMs
+                            )
                         }
                     }
                 }
@@ -662,6 +695,54 @@ private fun LabeledSwitch(
                     )
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun PrerollMsField(
+    valueMs: Long,
+    title: String,
+    description: String,
+    onValueChange: (Long) -> Unit,
+) {
+    var text by remember(valueMs) {
+        mutableStateOf(valueMs.toString())
+    }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMediumEmphasized,
+                fontWeight = FontWeight.Medium
+            )
+
+            Text(
+                text = description,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        OutlinedTextField(
+            value = text,
+            onValueChange = { input ->
+                val digits = input.filter(Char::isDigit)
+                text = digits
+                digits
+                    .toLongOrNull()
+                    ?.let(onValueChange)
+            },
+            singleLine = true,
+            suffix = {
+                Text(stringResource(R.string.source_separation_preroll_ms_suffix))
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }

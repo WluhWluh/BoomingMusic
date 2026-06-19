@@ -107,8 +107,11 @@ import com.mardous.booming.separation.cache.SourceSeparationOutput
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor.InputMode
 import com.mardous.booming.ui.screen.MainActivity
 import com.mardous.booming.util.CLEAR_QUEUE_ON_COMPLETION
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.ENABLE_HISTORY
 import com.mardous.booming.util.IGNORE_AUDIO_FOCUS
+import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.MP3_INDEX_SEEKING
 import com.mardous.booming.util.PAUSE_ON_ZERO_VOLUME
 import com.mardous.booming.util.PLAY_ON_STARTUP_MODE
@@ -119,6 +122,8 @@ import com.mardous.booming.util.QUEUE_NEXT_MODE
 import com.mardous.booming.util.REWIND_WITH_BACK
 import com.mardous.booming.util.SEEK_INTERVAL
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
+import com.mardous.booming.util.SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.STOP_WHEN_CLOSED_FROM_RECENTS
 import com.mardous.booming.util.SongPlayCountHelper
 import com.mardous.booming.util.WIDGET_DYNAMIC_COLORS
@@ -1805,13 +1810,25 @@ class PlaybackService :
             stemSampleRate = session.stemSampleRate,
             stemChannelCount = session.stemChannelCount,
             mixedOutputReadyPrerollMs = if (session.usesHydratedPcm) {
-                SourceSeparationMixAudioProcessor.HYDRATED_MIXED_OUTPUT_READY_PREROLL_MS
+                sourceSeparationHydratedMixedOutputPrerollMs
             } else {
-                SourceSeparationMixAudioProcessor.DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS
+                sourceSeparationMixedOutputPrerollMs
             },
         )
         traceSourceSeparationPlayback("processor.enable.done", "songId=${session.songId}")
     }
+
+    private val sourceSeparationMixedOutputPrerollMs: Long
+        get() = preferences.getLong(
+            SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS,
+            DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS,
+        ).coerceIn(0L, MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS)
+
+    private val sourceSeparationHydratedMixedOutputPrerollMs: Long
+        get() = preferences.getLong(
+            SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS,
+            DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS,
+        ).coerceIn(0L, MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS)
 
     private fun maybeStartSourceSeparationPcmHydration(session: SourceSeparationPlaybackSession) {
         if (session.requiresReadinessGate || session.usesHydratedPcm || session.hasPendingHydration) {
