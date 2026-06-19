@@ -99,6 +99,7 @@ import com.mardous.booming.playback.renderer.AlacWorkaroundCodecSelector
 import com.mardous.booming.playback.renderer.BoomingMusicRenderersFactory
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.SourceSeparationPlayableCacheStatus
+import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import com.mardous.booming.separation.cache.SourceSeparationCacheState
 import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.separation.cache.SourceSeparationOutput
@@ -129,6 +130,7 @@ import kotlinx.coroutines.Dispatchers.Main
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -137,10 +139,12 @@ import kotlinx.coroutines.withContext
 import org.koin.android.ext.android.inject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
 
 private const val SOURCE_SEPARATION_QUEUE_REPLACEMENT_TOKEN_KEY =
@@ -203,6 +207,9 @@ class PlaybackService :
     private var sourceSeparationPlaybackTraceFile: File? = null
     private var sourceSeparationPlaybackTraceFlushJob: Job? = null
     private var sourceSeparationOutputMuteJob: Job? = null
+    private var sourceSeparationHydrationJob: Job? = null
+    private var sourceSeparationHydrationJobKey: SourceSeparationHydrationKey? = null
+    private var sourceSeparationWarmHydration: SourceSeparationWarmHydration? = null
     private val sourceSeparationPlaybackTraceLock = Any()
     private val sourceSeparationPlaybackTraceBuffer = mutableListOf<String>()
     private val sourceSeparationPlaybackTraceSeq = AtomicLong()
@@ -415,6 +422,7 @@ class PlaybackService :
     override fun onDestroy() {
         traceSourceSeparationPlayback("service.onDestroy")
         flushSourceSeparationPlaybackTrace()
+        cancelSourceSeparationPcmHydrationJob(deletePartial = false)
         super.onDestroy()
         if (bluetoothConnectedRegistered) {
             unregisterReceiver(bluetoothReceiver)
@@ -983,6 +991,9 @@ class PlaybackService :
                 )
             }
         }
+        if (!isInternalMediaItemChange) {
+            clearWarmSourceSeparationHydrationIfSongChanged(mediaItem)
+        }
         if (isInternalMediaItemChange &&
             activeSession != null &&
             mediaItem?.mediaId != activeSession.songId.toString()
@@ -1083,7 +1094,9 @@ class PlaybackService :
         if ((sourceSeparationPlaybackSession != null || sourceSeparationPlaybackIsProcessing) &&
             reason == Player.DISCONTINUITY_REASON_SEEK
         ) {
-            sourceSeparationMixProcessor.seekTo(newPosition.positionMs)
+            if (!applySourceSeparationHydrationOnSeekIfReady(newPosition.positionMs)) {
+                sourceSeparationMixProcessor.seekTo(newPosition.positionMs)
+            }
             serviceScope.launch {
                 ensureSourceSeparationPlaybackReady(
                     showUnavailableMessage = false,
@@ -1539,23 +1552,33 @@ class PlaybackService :
                 .withSourceSeparationQueueReplacementToken(queueReplacementToken!!)
         }
 
+        val warmHydration = findWarmSourceSeparationHydration(
+            songId = song.id,
+            vocalsFile = vocalsFile,
+            instrumentalFile = instrumentalFile,
+        )
         val session = SourceSeparationPlaybackSession(
             songId = song.id,
+            sessionId = checkId,
             mediaItemIndex = index,
             originalMediaItem = originalMediaItem,
             queueReplacementToken = queueReplacementToken,
-            vocalsFile = vocalsFile,
-            instrumentalFile = instrumentalFile,
+            vocalsFile = warmHydration?.vocalsPcm ?: vocalsFile,
+            instrumentalFile = warmHydration?.instrumentalPcm ?: instrumentalFile,
+            cacheVocalsFile = vocalsFile,
+            cacheInstrumentalFile = instrumentalFile,
             inputMode = InputMode.OriginalSource,
             stemSampleRate = output.outputSampleRate,
             stemChannelCount = SOURCE_SEPARATION_STEM_CHANNEL_COUNT,
             requiresReadinessGate = isRunningCache,
+            hydratedCacheDir = warmHydration?.hydrationDir,
         )
         traceSourceSeparationPlayback(
             "check.newSession.applyStem",
             "id=$checkId index=$index position=$positionMs resumeWhenReady=$resumeWhenReady " +
                     "previousPlayWhenReady=$playWhenReady manifestState=${manifest.state} " +
-                    "clock=${if (useOriginalClock) "original" else "instrumentalStem"}"
+                    "clock=${if (useOriginalClock) "original" else "instrumentalStem"} " +
+                    "warmHydration=${warmHydration != null}"
         )
         if (!isSourceSeparationPlaybackCheckCurrent(
                 checkId = checkId,
@@ -1593,6 +1616,7 @@ class PlaybackService :
         )
         sourceSeparationMixProcessor.seekTo(positionMs)
         resumeSourceSeparationOutputAfterSwitch("newSession", shouldPlayAfterSwitch || resumeAfterSwitch)
+        maybeStartSourceSeparationPcmHydration(session)
 
         broadcastSourceSeparationPlaybackChanged()
         sourceSeparationPlaybackGateJob?.cancel()
@@ -1609,8 +1633,8 @@ class PlaybackService :
         val output = manifest.output ?: return false
         return session.requiresReadinessGate ||
                 session.inputMode != InputMode.OriginalSource ||
-                session.vocalsFile.absolutePath != output.playbackVocalsPath() ||
-                session.instrumentalFile.absolutePath != output.playbackInstrumentalPath()
+                session.cacheVocalsFile.absolutePath != output.playbackVocalsPath() ||
+                session.cacheInstrumentalFile.absolutePath != output.playbackInstrumentalPath()
     }
 
     private fun switchActiveSourceSeparationSessionToCompletedCache(
@@ -1671,22 +1695,32 @@ class PlaybackService :
                 .build()
                 .withSourceSeparationQueueReplacementToken(queueReplacementToken!!)
         }
+        val warmHydration = findWarmSourceSeparationHydration(
+            songId = song.id,
+            vocalsFile = vocalsFile,
+            instrumentalFile = instrumentalFile,
+        )
         val session = SourceSeparationPlaybackSession(
             songId = song.id,
+            sessionId = checkId,
             mediaItemIndex = index,
             originalMediaItem = originalMediaItem,
             queueReplacementToken = queueReplacementToken,
-            vocalsFile = vocalsFile,
-            instrumentalFile = instrumentalFile,
+            vocalsFile = warmHydration?.vocalsPcm ?: vocalsFile,
+            instrumentalFile = warmHydration?.instrumentalPcm ?: instrumentalFile,
+            cacheVocalsFile = vocalsFile,
+            cacheInstrumentalFile = instrumentalFile,
             inputMode = InputMode.OriginalSource,
             stemSampleRate = output.outputSampleRate,
             stemChannelCount = SOURCE_SEPARATION_STEM_CHANNEL_COUNT,
             requiresReadinessGate = false,
+            hydratedCacheDir = warmHydration?.hydrationDir,
         )
         traceSourceSeparationPlayback(
             "check.activeSession.upgradeCompleted",
             "id=$checkId index=$index position=$positionMs shouldPlayAfterSwitch=$shouldPlayAfterSwitch " +
-                    "clock=${if (useOriginalClock) "original" else "instrumentalStem"}"
+                    "clock=${if (useOriginalClock) "original" else "instrumentalStem"} " +
+                    "warmHydration=${warmHydration != null}"
         )
         val resumeAfterSwitch = pauseSourceSeparationOutputForSwitch(
             reason = "completedCacheUpgrade",
@@ -1709,6 +1743,7 @@ class PlaybackService :
             reason = "completedCacheUpgrade",
             resume = shouldPlayAfterSwitch || resumeAfterSwitch,
         )
+        maybeStartSourceSeparationPcmHydration(session)
         broadcastSourceSeparationPlaybackChanged()
         cleanupCompletedSourceSeparationTemporaryDirs(activeSession = session)
         sourceSeparationPlaybackGateJob?.cancel()
@@ -1770,8 +1805,405 @@ class PlaybackService :
             inputMode = session.inputMode,
             stemSampleRate = session.stemSampleRate,
             stemChannelCount = session.stemChannelCount,
+            mixedOutputReadyPrerollMs = if (session.usesHydratedPcm) {
+                SourceSeparationMixAudioProcessor.HYDRATED_MIXED_OUTPUT_READY_PREROLL_MS
+            } else {
+                SourceSeparationMixAudioProcessor.DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS
+            },
         )
         traceSourceSeparationPlayback("processor.enable.done", "songId=${session.songId}")
+    }
+
+    private fun maybeStartSourceSeparationPcmHydration(session: SourceSeparationPlaybackSession) {
+        if (session.requiresReadinessGate || session.usesHydratedPcm || session.hasPendingHydration) {
+            traceSourceSeparationPlayback(
+                "hydration.skip",
+                "songId=${session.songId} reason=gateOrAlreadyHydrated gate=${session.requiresReadinessGate} " +
+                        "hydrated=${session.usesHydratedPcm} pending=${session.hasPendingHydration}"
+            )
+            return
+        }
+        if (!session.cacheVocalsFile.extension.equals("flac", ignoreCase = true) ||
+            !session.cacheInstrumentalFile.extension.equals("flac", ignoreCase = true)
+        ) {
+            traceSourceSeparationPlayback(
+                "hydration.skip",
+                "songId=${session.songId} reason=notFlac vocals=${session.cacheVocalsFile.extension} " +
+                        "instrumental=${session.cacheInstrumentalFile.extension}"
+            )
+            return
+        }
+        val hydrationKey = SourceSeparationHydrationKey.forSession(session)
+        val warmHydration = findWarmSourceSeparationHydration(
+            songId = session.songId,
+            vocalsFile = session.cacheVocalsFile,
+            instrumentalFile = session.cacheInstrumentalFile,
+        )
+        if (warmHydration != null) {
+            traceSourceSeparationPlayback(
+                "hydration.skip",
+                "songId=${session.songId} reason=warmReady"
+            )
+            return
+        }
+        if (sourceSeparationHydrationJob?.isActive == true &&
+            sourceSeparationHydrationJobKey == hydrationKey
+        ) {
+            traceSourceSeparationPlayback(
+                "hydration.skip",
+                "songId=${session.songId} reason=jobAlreadyRunning"
+            )
+            return
+        }
+
+        cancelSourceSeparationPcmHydrationJob(deletePartial = true)
+        sourceSeparationHydrationJobKey = hydrationKey
+        sourceSeparationHydrationJob = serviceScope.launch(IO) {
+            val activeJob = coroutineContext[Job]
+            val hydrationDir = sourceSeparationHydrationDir(hydrationKey)
+            runCatching {
+                hydrationDir.deleteRecursively()
+                hydrationDir.mkdirs()
+                val vocalsPcm = File(hydrationDir, "vocals.pcm")
+                val instrumentalPcm = File(hydrationDir, "instrumental.pcm")
+                traceSourceSeparationPlayback(
+                    "hydration.start",
+                    "songId=${session.songId} session=${session.sessionId} dir=${hydrationDir.absolutePath}"
+                )
+                decodeFlacStemToPcmFile(
+                    flacFile = session.cacheVocalsFile,
+                    pcmFile = vocalsPcm,
+                    shouldCancel = { activeJob?.isActive != true },
+                )
+                ensureActive()
+                decodeFlacStemToPcmFile(
+                    flacFile = session.cacheInstrumentalFile,
+                    pcmFile = instrumentalPcm,
+                    shouldCancel = { activeJob?.isActive != true },
+                )
+                ensureActive()
+                writeSourceSeparationHydrationReadyMarker(hydrationKey, hydrationDir)
+                withContext(Main) {
+                    markSourceSeparationHydrationReadyIfCurrent(
+                        session = session,
+                        hydrationKey = hydrationKey,
+                        vocalsPcm = vocalsPcm,
+                        instrumentalPcm = instrumentalPcm,
+                        hydrationDir = hydrationDir,
+                    )
+                }
+            }.onFailure { error ->
+                val canceled = error is kotlinx.coroutines.CancellationException
+                if (!canceled) {
+                    hydrationDir.deleteRecursively()
+                }
+                if (error is kotlinx.coroutines.CancellationException) {
+                    traceSourceSeparationPlayback(
+                        "hydration.canceled",
+                        "songId=${session.songId} session=${session.sessionId}"
+                    )
+                } else {
+                    traceSourceSeparationPlayback(
+                        "hydration.failed",
+                        "songId=${session.songId} session=${session.sessionId} " +
+                                "error=${error.message ?: error::class.java.name}"
+                    )
+                }
+            }.also {
+                withContext(Main) {
+                    if (sourceSeparationHydrationJobKey == hydrationKey) {
+                        sourceSeparationHydrationJob = null
+                        sourceSeparationHydrationJobKey = null
+                    }
+                }
+            }
+        }
+    }
+
+    private fun markSourceSeparationHydrationReadyIfCurrent(
+        session: SourceSeparationPlaybackSession,
+        hydrationKey: SourceSeparationHydrationKey,
+        vocalsPcm: File,
+        instrumentalPcm: File,
+        hydrationDir: File,
+    ) {
+        val currentSession = sourceSeparationPlaybackSession
+        if (sourceSeparationHydrationJobKey != hydrationKey &&
+            currentSession?.songId != session.songId &&
+            player.currentMediaItem?.mediaId != session.songId.toString()
+        ) {
+            hydrationDir.deleteRecursively()
+            traceSourceSeparationPlayback(
+                "hydration.apply.skip",
+                "songId=${session.songId} session=${session.sessionId} reason=staleJob"
+            )
+            return
+        }
+        val hydration = rememberWarmSourceSeparationHydration(
+            hydrationKey = hydrationKey,
+            vocalsPcm = vocalsPcm,
+            instrumentalPcm = instrumentalPcm,
+            hydrationDir = hydrationDir,
+        )
+        if (hydration == null) {
+            hydrationDir.deleteRecursively()
+            traceSourceSeparationPlayback(
+                "hydration.apply.skip",
+                "songId=${session.songId} session=${session.sessionId} reason=invalidFiles"
+            )
+            return
+        }
+
+        if (currentSession == null) {
+            traceSourceSeparationPlayback(
+                "hydration.ready.warmOnly",
+                "songId=${session.songId} session=${session.sessionId} reason=noActiveSession " +
+                        "vocalsBytes=${vocalsPcm.length()} instrumentalBytes=${instrumentalPcm.length()}"
+            )
+            return
+        }
+        if (currentSession.songId != session.songId ||
+            SourceSeparationHydrationKey.forSession(currentSession) != hydrationKey ||
+            !vocalsPcm.isFile ||
+            !instrumentalPcm.isFile
+        ) {
+            traceSourceSeparationPlayback(
+                "hydration.apply.skip",
+                "songId=${session.songId} session=${session.sessionId} " +
+                        "current=${currentSession.sessionId} vocals=${vocalsPcm.isFile} " +
+                        "instrumental=${instrumentalPcm.isFile}"
+            )
+            return
+        }
+
+        sourceSeparationPlaybackSession = currentSession.copy(
+            pendingHydratedVocalsFile = vocalsPcm,
+            pendingHydratedInstrumentalFile = instrumentalPcm,
+            pendingHydratedCacheDir = hydrationDir,
+        )
+        traceSourceSeparationPlayback(
+            "hydration.ready",
+            "songId=${session.songId} session=${session.sessionId} " +
+                    "vocalsBytes=${vocalsPcm.length()} instrumentalBytes=${instrumentalPcm.length()}"
+        )
+    }
+
+    private fun applySourceSeparationHydrationOnSeekIfReady(positionMs: Long): Boolean {
+        val currentSession = sourceSeparationPlaybackSession ?: return false
+        if (!currentSession.hasPendingHydration || currentSession.usesHydratedPcm) return false
+        val vocalsPcm = currentSession.pendingHydratedVocalsFile ?: return false
+        val instrumentalPcm = currentSession.pendingHydratedInstrumentalFile ?: return false
+        val hydrationDir = currentSession.pendingHydratedCacheDir ?: return false
+        val resumeAfterSwitch = pauseSourceSeparationOutputForSwitch(
+            reason = "hydrationSeekApply",
+            waitForMixedOutput = true,
+        )
+        val hydratedSession = currentSession.copy(
+            vocalsFile = vocalsPcm,
+            instrumentalFile = instrumentalPcm,
+            hydratedCacheDir = hydrationDir,
+            pendingHydratedVocalsFile = null,
+            pendingHydratedInstrumentalFile = null,
+            pendingHydratedCacheDir = null,
+        )
+        sourceSeparationPlaybackSession = hydratedSession
+        enableSourceSeparationMixProcessor(hydratedSession, positionMs)
+        sourceSeparationMixProcessor.seekTo(positionMs)
+        resumeSourceSeparationOutputAfterSwitch(
+            reason = "hydrationSeekApply",
+            resume = resumeAfterSwitch || player.playWhenReady,
+        )
+        traceSourceSeparationPlayback(
+            "hydration.seekApply",
+            "songId=${hydratedSession.songId} session=${hydratedSession.sessionId} position=$positionMs " +
+                    "vocalsBytes=${vocalsPcm.length()} instrumentalBytes=${instrumentalPcm.length()}"
+        )
+        return true
+    }
+
+    private fun findWarmSourceSeparationHydration(
+        songId: Long,
+        vocalsFile: File,
+        instrumentalFile: File,
+    ): SourceSeparationWarmHydration? {
+        val hydrationKey = SourceSeparationHydrationKey.forFiles(
+            songId = songId,
+            vocalsFile = vocalsFile,
+            instrumentalFile = instrumentalFile,
+        )
+        sourceSeparationWarmHydration
+            ?.takeIf { it.matches(hydrationKey) }
+            ?.let { return it }
+
+        val hydrationDir = sourceSeparationHydrationDir(hydrationKey)
+        val vocalsPcm = File(hydrationDir, "vocals.pcm")
+        val instrumentalPcm = File(hydrationDir, "instrumental.pcm")
+        if (!isSourceSeparationHydrationReady(hydrationKey, hydrationDir, vocalsPcm, instrumentalPcm)) {
+            return null
+        }
+
+        return rememberWarmSourceSeparationHydration(
+            hydrationKey = hydrationKey,
+            vocalsPcm = vocalsPcm,
+            instrumentalPcm = instrumentalPcm,
+            hydrationDir = hydrationDir,
+        )?.also {
+            traceSourceSeparationPlayback(
+                "hydration.warmRestore",
+                "songId=$songId dir=${hydrationDir.absolutePath}"
+            )
+        }
+    }
+
+    private fun rememberWarmSourceSeparationHydration(
+        session: SourceSeparationPlaybackSession?,
+    ) {
+        if (session == null) return
+        when {
+            session.usesHydratedPcm -> rememberWarmSourceSeparationHydration(
+                hydrationKey = SourceSeparationHydrationKey.forSession(session),
+                vocalsPcm = session.vocalsFile,
+                instrumentalPcm = session.instrumentalFile,
+                hydrationDir = session.hydratedCacheDir ?: return,
+            )
+            session.hasPendingHydration -> rememberWarmSourceSeparationHydration(
+                hydrationKey = SourceSeparationHydrationKey.forSession(session),
+                vocalsPcm = session.pendingHydratedVocalsFile ?: return,
+                instrumentalPcm = session.pendingHydratedInstrumentalFile ?: return,
+                hydrationDir = session.pendingHydratedCacheDir ?: return,
+            )
+        }
+    }
+
+    private fun rememberWarmSourceSeparationHydration(
+        hydrationKey: SourceSeparationHydrationKey,
+        vocalsPcm: File,
+        instrumentalPcm: File,
+        hydrationDir: File,
+    ): SourceSeparationWarmHydration? {
+        if (!isSourceSeparationHydrationReady(hydrationKey, hydrationDir, vocalsPcm, instrumentalPcm)) {
+            return null
+        }
+        return SourceSeparationWarmHydration(
+            key = hydrationKey,
+            vocalsPcm = vocalsPcm,
+            instrumentalPcm = instrumentalPcm,
+            hydrationDir = hydrationDir,
+        ).also {
+            sourceSeparationWarmHydration = it
+        }
+    }
+
+    private fun clearWarmSourceSeparationHydrationIfSongChanged(mediaItem: MediaItem?) {
+        val currentSongId = mediaItem?.mediaId?.toLongOrNull()
+        if (currentSongId == null) {
+            traceSourceSeparationPlayback(
+                "hydration.warmKeep",
+                "reason=unknownMediaId mediaId=${mediaItem?.mediaId}"
+            )
+        } else {
+            clearWarmSourceSeparationHydrationIfSongChanged(currentSongId)
+        }
+    }
+
+    private fun clearWarmSourceSeparationHydrationIfSongChanged(currentSongId: Long) {
+        sourceSeparationWarmHydration
+            ?.takeIf { it.songId != currentSongId }
+            ?.let { clearWarmSourceSeparationHydration(it, "songChanged") }
+        if (sourceSeparationHydrationJobKey?.songId != currentSongId) {
+            cancelSourceSeparationPcmHydrationJob(deletePartial = true)
+        }
+    }
+
+    private fun clearWarmSourceSeparationHydration(
+        hydration: SourceSeparationWarmHydration,
+        reason: String,
+    ) {
+        if (sourceSeparationWarmHydration == hydration) {
+            sourceSeparationWarmHydration = null
+        }
+        serviceScope.launch(IO) {
+            hydration.hydrationDir.deleteRecursively()
+        }
+        traceSourceSeparationPlayback(
+            "hydration.warmClear",
+            "songId=${hydration.songId} reason=$reason"
+        )
+    }
+
+    private fun cancelSourceSeparationPcmHydrationJob(deletePartial: Boolean) {
+        val hydrationKey = sourceSeparationHydrationJobKey
+        sourceSeparationHydrationJob?.cancel()
+        sourceSeparationHydrationJob = null
+        sourceSeparationHydrationJobKey = null
+        if (deletePartial && hydrationKey != null) {
+            serviceScope.launch(IO) {
+                val hydrationDir = sourceSeparationHydrationDir(hydrationKey)
+                if (!isSourceSeparationHydrationReady(
+                        hydrationKey = hydrationKey,
+                        hydrationDir = hydrationDir,
+                        vocalsPcm = File(hydrationDir, "vocals.pcm"),
+                        instrumentalPcm = File(hydrationDir, "instrumental.pcm"),
+                    )
+                ) {
+                    hydrationDir.deleteRecursively()
+                }
+            }
+        }
+    }
+
+    private fun sourceSeparationHydrationDir(hydrationKey: SourceSeparationHydrationKey): File {
+        return File(
+            sourceSeparationHydrationRootDir(),
+            hydrationKey.directoryName,
+        )
+    }
+
+    private fun sourceSeparationHydrationRootDir(): File {
+        return File(cacheDir, "source-separation/playback-hydration")
+    }
+
+    private fun isSourceSeparationHydrationReady(
+        hydrationKey: SourceSeparationHydrationKey,
+        hydrationDir: File,
+        vocalsPcm: File,
+        instrumentalPcm: File,
+    ): Boolean {
+        return hydrationDir.isDirectory &&
+                vocalsPcm.isFile &&
+                instrumentalPcm.isFile &&
+                sourceSeparationHydrationReadyFile(hydrationDir).isFile &&
+                runCatching {
+                    sourceSeparationHydrationIdentityFile(hydrationDir).readText() == hydrationKey.identity
+                }.getOrDefault(false)
+    }
+
+    private fun writeSourceSeparationHydrationReadyMarker(
+        hydrationKey: SourceSeparationHydrationKey,
+        hydrationDir: File,
+    ) {
+        sourceSeparationHydrationIdentityFile(hydrationDir).writeText(hydrationKey.identity)
+        sourceSeparationHydrationReadyFile(hydrationDir).writeText("ready")
+    }
+
+    private fun sourceSeparationHydrationIdentityFile(hydrationDir: File): File {
+        return File(hydrationDir, "identity.txt")
+    }
+
+    private fun sourceSeparationHydrationReadyFile(hydrationDir: File): File {
+        return File(hydrationDir, "ready")
+    }
+
+    private fun decodeFlacStemToPcmFile(
+        flacFile: File,
+        pcmFile: File,
+        shouldCancel: () -> Boolean,
+    ) {
+        Pcm16StereoFlacEncoder.decodeFlacFileToPcmFile(
+            flacFile = flacFile,
+            pcmFile = pcmFile,
+            shouldCancel = shouldCancel,
+        )
     }
 
     private fun clearSourceSeparationPlayback(
@@ -1790,6 +2222,7 @@ class PlaybackService :
         sourceSeparationPlaybackSession = null
         sourceSeparationMixProcessor.disable()
         sourceSeparationPlaybackIsProcessing = false
+        rememberWarmSourceSeparationHydration(session)
         cleanupCompletedSourceSeparationTemporaryDirs(activeSession = session)
 
         if (restoreOriginalItem && session != null) {
@@ -2763,22 +3196,113 @@ class PlaybackService :
 
 private data class SourceSeparationPlaybackSession(
     val songId: Long,
+    val sessionId: Long,
     val mediaItemIndex: Int,
     val originalMediaItem: MediaItem,
     val queueReplacementToken: String?,
     val vocalsFile: File,
     val instrumentalFile: File,
+    val cacheVocalsFile: File = vocalsFile,
+    val cacheInstrumentalFile: File = instrumentalFile,
     val inputMode: InputMode,
     val stemSampleRate: Int,
     val stemChannelCount: Int,
     val requiresReadinessGate: Boolean,
+    val hydratedCacheDir: File? = null,
+    val pendingHydratedVocalsFile: File? = null,
+    val pendingHydratedInstrumentalFile: File? = null,
+    val pendingHydratedCacheDir: File? = null,
 ) {
     val replacesQueueMediaItem: Boolean
         get() = queueReplacementToken != null
 
+    val usesHydratedPcm: Boolean
+        get() = hydratedCacheDir != null
+
+    val hasPendingHydration: Boolean
+        get() = pendingHydratedVocalsFile?.isFile == true &&
+                pendingHydratedInstrumentalFile?.isFile == true &&
+                pendingHydratedCacheDir?.isDirectory == true
+
     fun activeStemFiles(): Set<String> {
-        return setOf(vocalsFile.absolutePath, instrumentalFile.absolutePath)
+        return setOf(
+            vocalsFile.absolutePath,
+            instrumentalFile.absolutePath,
+            cacheVocalsFile.absolutePath,
+            cacheInstrumentalFile.absolutePath,
+        )
     }
+}
+
+private data class SourceSeparationHydrationKey(
+    val songId: Long,
+    val cacheVocalsPath: String,
+    val cacheInstrumentalPath: String,
+    val cacheVocalsBytes: Long,
+    val cacheInstrumentalBytes: Long,
+    val cacheVocalsModifiedMs: Long,
+    val cacheInstrumentalModifiedMs: Long,
+) {
+    val identity: String = listOf(
+        "pcm-hydration-v1",
+        songId.toString(),
+        cacheVocalsPath,
+        cacheInstrumentalPath,
+        cacheVocalsBytes.toString(),
+        cacheInstrumentalBytes.toString(),
+        cacheVocalsModifiedMs.toString(),
+        cacheInstrumentalModifiedMs.toString(),
+    ).joinToString(separator = "|")
+
+    val directoryName: String = "$songId-${identity.sha256Hex().take(24)}"
+
+    companion object {
+        fun forSession(session: SourceSeparationPlaybackSession): SourceSeparationHydrationKey {
+            return forFiles(
+                songId = session.songId,
+                vocalsFile = session.cacheVocalsFile,
+                instrumentalFile = session.cacheInstrumentalFile,
+            )
+        }
+
+        fun forFiles(
+            songId: Long,
+            vocalsFile: File,
+            instrumentalFile: File,
+        ): SourceSeparationHydrationKey {
+            return SourceSeparationHydrationKey(
+                songId = songId,
+                cacheVocalsPath = vocalsFile.absolutePath,
+                cacheInstrumentalPath = instrumentalFile.absolutePath,
+                cacheVocalsBytes = vocalsFile.length(),
+                cacheInstrumentalBytes = instrumentalFile.length(),
+                cacheVocalsModifiedMs = vocalsFile.lastModified(),
+                cacheInstrumentalModifiedMs = instrumentalFile.lastModified(),
+            )
+        }
+    }
+}
+
+private data class SourceSeparationWarmHydration(
+    val key: SourceSeparationHydrationKey,
+    val vocalsPcm: File,
+    val instrumentalPcm: File,
+    val hydrationDir: File,
+) {
+    val songId: Long
+        get() = key.songId
+
+    fun matches(hydrationKey: SourceSeparationHydrationKey): Boolean {
+        return key == hydrationKey &&
+                vocalsPcm.isFile &&
+                instrumentalPcm.isFile &&
+                hydrationDir.isDirectory
+    }
+}
+
+private fun String.sha256Hex(): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(toByteArray())
+    return digest.joinToString("") { "%02x".format(it) }
 }
 
 private fun MediaItem.isSourceSeparationStemMediaItem(): Boolean {
