@@ -24,14 +24,32 @@ data class SourceSeparationSegmentSnapshot(
         return segments.getOrNull(segmentPlan.segmentIndexForFrame(frame))
     }
 
-    fun hasReadyPlaybackWindowAtFrame(frame: Int): Boolean {
+    fun hasReadyPlaybackWindowAtFrame(
+        frame: Int,
+        readyWindowCount: Int = DEFAULT_READY_WINDOW_COUNT,
+    ): Boolean {
         if (segments.isEmpty()) return false
         val segmentIndex = segmentPlan.segmentIndexForFrame(frame)
-        val current = segments.getOrNull(segmentIndex) ?: return false
-        if (!current.isReady) return false
+        return playbackWindowStatesAt(
+            segmentIndex = segmentIndex,
+            readyWindowCount = readyWindowCount,
+        ).all { it.isReady }
+    }
 
-        val next = segments.getOrNull(segmentIndex + 1)
-        return next == null || next.isReady
+    fun playbackWindowStatesAt(
+        segmentIndex: Int,
+        readyWindowCount: Int = DEFAULT_READY_WINDOW_COUNT,
+    ): List<SourceSeparationSegmentFileState> {
+        if (segments.isEmpty()) return emptyList()
+        val safeReadyWindowCount = readyWindowCount.coerceAtLeast(1)
+        val safeSegmentIndex = segmentIndex.coerceIn(segments.indices)
+        val endExclusive = (safeSegmentIndex + safeReadyWindowCount)
+            .coerceAtMost(segments.size)
+        return segments.subList(safeSegmentIndex, endExclusive)
+    }
+
+    companion object {
+        const val DEFAULT_READY_WINDOW_COUNT = 2
     }
 }
 

@@ -37,6 +37,7 @@ class MdxRangeSeparator(
         onPrepared: (MdxRangePreparation) -> Unit = {},
         onSegmentStateChanged: (segmentIndex: Int, state: SourceSeparationSegmentState) -> Unit = { _, _ -> },
         playbackPositionMsProvider: () -> Long? = { null },
+        playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
         resumeManifest: SourceSeparationManifest? = null,
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
@@ -164,10 +165,13 @@ class MdxRangeSeparator(
                     val processedSegments = mutableSetOf<Int>()
                     var schedulerTargetSegmentIndex: Int? = null
                     while (processedWindowCount < windowCount) {
+                        val windowStartedAt = SystemClock.elapsedRealtime()
                         throwIfPaused(shouldPause)
                         throwIfCanceled(shouldCancel)
                         var requestedPlaybackSegmentIndex: Int? = null
                         var selectedPriority: SourceSeparationSegmentPriority? = null
+                        val readyWindowCount = playbackReadyWindowCountProvider()
+                            .coerceAtLeast(DEFAULT_PLAYBACK_READY_WINDOW_COUNT)
                         val readySegmentCount = currentSegmentPlan.segments
                             .count { it.state == SourceSeparationSegmentState.Ready }
                         val segment = if (canWriteWindowsByFrame) {
@@ -185,7 +189,11 @@ class MdxRangeSeparator(
                                 ?.let { index -> currentSegmentPlan.segments.getOrNull(index)?.playbackStartFrame }
                                 ?: (startFrame + processedWindowCount * config.generationSize)
                             SourceSeparationSegmentScheduler
-                                .prioritize(currentSegmentPlan, playbackFrame)
+                                .prioritize(
+                                    segmentPlan = currentSegmentPlan,
+                                    playbackFrame = playbackFrame,
+                                    readyWindowCount = readyWindowCount,
+                                )
                                 .firstOrNull { it.segment.index !in processedSegments }
                                 ?.also { selectedPriority = it.priority }
                                 ?.segment
@@ -213,6 +221,18 @@ class MdxRangeSeparator(
                             priority = selectedPriority.name,
                             readySegments = readySegmentCount,
                             totalSegments = windowCount,
+                            readyWindowCount = readyWindowCount,
+                            playbackReadyWindowReadyCount = currentSegmentPlan
+                                .playbackReadyWindowReadyCount(
+                                    playbackSegmentIndex = requestedPlaybackSegmentIndex,
+                                    readyWindowCount = readyWindowCount,
+                                ),
+                            playbackReadyWindowPendingCount = currentSegmentPlan
+                                .playbackReadyWindowPendingCount(
+                                    playbackSegmentIndex = requestedPlaybackSegmentIndex,
+                                    readyWindowCount = readyWindowCount,
+                                    processingSegmentIndex = segment.index,
+                                ),
                         )
                         currentSegmentPlan = currentSegmentPlan.withSegmentState(
                             segmentIndex = segment.index,
@@ -292,18 +312,31 @@ class MdxRangeSeparator(
                         processedWindowCount = currentSegmentPlan.segments
                             .count { it.state == SourceSeparationSegmentState.Ready }
                         onSegmentStateChanged(segment.index, SourceSeparationSegmentState.Ready)
+                        val windowElapsedMs = SystemClock.elapsedRealtime() - windowStartedAt
                         onProgress(
                             MdxRangeProgress(
                                 processedWindowCount,
                                 windowCount,
                                 stage = "Processed window ${windowIndex + 1}/${windowCount}",
                                 sourceDecodeDiagnostics = sourceInput.diagnostics,
+                                completedWindowElapsedMs = windowElapsedMs,
                                 scheduler = schedulerProgress.copy(
                                     playbackSegmentState = requestedPlaybackSegmentIndex
                                         ?.let { currentSegmentPlan.segments.getOrNull(it)?.state?.name },
                                     nextSegmentState = requestedPlaybackSegmentIndex?.plus(1)
                                         ?.let { currentSegmentPlan.segments.getOrNull(it)?.state?.name },
                                     readySegments = processedWindowCount,
+                                    playbackReadyWindowReadyCount = currentSegmentPlan
+                                        .playbackReadyWindowReadyCount(
+                                            playbackSegmentIndex = requestedPlaybackSegmentIndex,
+                                            readyWindowCount = readyWindowCount,
+                                        ),
+                                    playbackReadyWindowPendingCount = currentSegmentPlan
+                                        .playbackReadyWindowPendingCount(
+                                            playbackSegmentIndex = requestedPlaybackSegmentIndex,
+                                            readyWindowCount = readyWindowCount,
+                                            processingSegmentIndex = null,
+                                        ),
                                 ),
                             )
                         )
@@ -498,6 +531,42 @@ class MdxRangeSeparator(
         }
         return candidate
     }
+
+    private fun SourceSeparationSegmentPlan.playbackReadyWindowReadyCount(
+        playbackSegmentIndex: Int?,
+        readyWindowCount: Int,
+    ): Int {
+        return playbackReadyWindowStates(playbackSegmentIndex, readyWindowCount)
+            .count { it.state == SourceSeparationSegmentState.Ready }
+    }
+
+    private fun SourceSeparationSegmentPlan.playbackReadyWindowPendingCount(
+        playbackSegmentIndex: Int?,
+        readyWindowCount: Int,
+        processingSegmentIndex: Int?,
+    ): Int {
+        val playbackWindowStates = playbackReadyWindowStates(
+            playbackSegmentIndex = playbackSegmentIndex,
+            readyWindowCount = readyWindowCount,
+        )
+        val pendingPlaybackWindows = playbackWindowStates
+            .count { it.state != SourceSeparationSegmentState.Ready }
+        val processingOutsidePlaybackWindow = processingSegmentIndex != null &&
+                playbackWindowStates.none { it.index == processingSegmentIndex } &&
+                segments.getOrNull(processingSegmentIndex)?.state != SourceSeparationSegmentState.Ready
+        return pendingPlaybackWindows + if (processingOutsidePlaybackWindow) 1 else 0
+    }
+
+    private fun SourceSeparationSegmentPlan.playbackReadyWindowStates(
+        playbackSegmentIndex: Int?,
+        readyWindowCount: Int,
+    ): List<com.mardous.booming.separation.cache.SourceSeparationSegment> {
+        if (playbackSegmentIndex == null || segments.isEmpty()) return emptyList()
+        val startIndex = playbackSegmentIndex.coerceIn(segments.indices)
+        val endIndex = (startIndex + readyWindowCount.coerceAtLeast(1))
+            .coerceAtMost(segments.size)
+        return segments.subList(startIndex, endIndex)
+    }
 }
 
 data class MdxRangeProgress(
@@ -505,6 +574,7 @@ data class MdxRangeProgress(
     val totalWindows: Int,
     val stage: String? = null,
     val sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics? = null,
+    val completedWindowElapsedMs: Long? = null,
     val scheduler: MdxSegmentSchedulerProgress? = null,
 ) {
     val percent: Int = if (totalWindows > 0) {
@@ -537,6 +607,9 @@ data class MdxSegmentSchedulerProgress(
     val priority: String?,
     val readySegments: Int,
     val totalSegments: Int,
+    val readyWindowCount: Int,
+    val playbackReadyWindowReadyCount: Int,
+    val playbackReadyWindowPendingCount: Int,
 )
 
 data class MdxRangePreparation(
@@ -580,3 +653,4 @@ data class MdxRangeSeparationResult(
 }
 
 private const val PENDING_SOURCE_AUDIO_FINGERPRINT = "pending"
+private const val DEFAULT_PLAYBACK_READY_WINDOW_COUNT = 2
