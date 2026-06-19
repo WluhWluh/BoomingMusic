@@ -6,6 +6,7 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import java.io.File
 import java.io.Closeable
 import java.io.RandomAccessFile
@@ -404,8 +405,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
     companion object {
         const val CENTER_BLEND = 0.5f
-        const val DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS = 800L
-        const val HYDRATED_MIXED_OUTPUT_READY_PREROLL_MS = 80L
+        const val DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS =
+            DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 
         private const val DEBUG_INITIAL_QUEUE_TRACE_COUNT = 80
         private const val DEBUG_QUEUE_TRACE_INTERVAL = 200L

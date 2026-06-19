@@ -601,6 +601,12 @@ const val CLEAR_QUEUE_ON_COMPLETION = "clear_queue_on_completion"
 const val REMEMBER_SHUFFLE_MODE = "remember_shuffle_mode"
 const val SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION = "source_separation.auto_flac_compression"
 const val SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS = "source_separation.show_snackbar_progress"
+const val SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = "source_separation.mixed_output_preroll_ms"
+const val SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS =
+    "source_separation.hydrated_mixed_output_preroll_ms"
+const val DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 400L
+const val DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS = 0L
+const val MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 5000L
 const val ALBUM_SHUFFLE_MODE = "album_shuffle_mode"
 const val ARTIST_SHUFFLE_MODE = "artist_shuffle_mode"
 const val RESUME_ON_CONNECT = "resume_on_connect"
