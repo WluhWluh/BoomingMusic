@@ -48,7 +48,12 @@ import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
 import com.mardous.booming.util.Preferences
 import com.mardous.booming.util.REMEMBER_SHUFFLE_MODE
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
+import com.mardous.booming.util.SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Dispatchers.IO
@@ -204,6 +209,16 @@ class PlayerViewModel(
         MutableStateFlow(readSourceSeparationShowSnackbarProgress())
     val sourceSeparationShowSnackbarProgressFlow =
         _sourceSeparationShowSnackbarProgressFlow.asStateFlow()
+
+    private val _sourceSeparationMixedOutputPrerollMsFlow =
+        MutableStateFlow(readSourceSeparationMixedOutputPrerollMs())
+    val sourceSeparationMixedOutputPrerollMsFlow =
+        _sourceSeparationMixedOutputPrerollMsFlow.asStateFlow()
+
+    private val _sourceSeparationHydratedMixedOutputPrerollMsFlow =
+        MutableStateFlow(readSourceSeparationHydratedMixedOutputPrerollMs())
+    val sourceSeparationHydratedMixedOutputPrerollMsFlow =
+        _sourceSeparationHydratedMixedOutputPrerollMsFlow.asStateFlow()
 
     private val internalJobs = mutableListOf<Job>()
 
@@ -899,6 +914,22 @@ class PlayerViewModel(
         _sourceSeparationShowSnackbarProgressFlow.value = enabled
     }
 
+    fun setSourceSeparationMixedOutputPrerollMs(valueMs: Long) {
+        val normalized = normalizeSourceSeparationMixedOutputPrerollMs(valueMs)
+        preferences.edit {
+            putLong(SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS, normalized)
+        }
+        _sourceSeparationMixedOutputPrerollMsFlow.value = normalized
+    }
+
+    fun setSourceSeparationHydratedMixedOutputPrerollMs(valueMs: Long) {
+        val normalized = normalizeSourceSeparationMixedOutputPrerollMs(valueMs)
+        preferences.edit {
+            putLong(SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS, normalized)
+        }
+        _sourceSeparationHydratedMixedOutputPrerollMsFlow.value = normalized
+    }
+
     private fun applySourceSeparationSettingsForSong(
         song: Song,
         showMessage: Boolean,
@@ -1108,6 +1139,28 @@ class PlayerViewModel(
 
     private fun readSourceSeparationShowSnackbarProgress(): Boolean {
         return preferences.getBoolean(SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS, false)
+    }
+
+    private fun readSourceSeparationMixedOutputPrerollMs(): Long {
+        return normalizeSourceSeparationMixedOutputPrerollMs(
+            preferences.getLong(
+                SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS,
+                DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS,
+            )
+        )
+    }
+
+    private fun readSourceSeparationHydratedMixedOutputPrerollMs(): Long {
+        return normalizeSourceSeparationMixedOutputPrerollMs(
+            preferences.getLong(
+                SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS,
+                DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS,
+            )
+        )
+    }
+
+    private fun normalizeSourceSeparationMixedOutputPrerollMs(valueMs: Long): Long {
+        return valueMs.coerceIn(0L, MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS)
     }
 
     private fun sourceSeparationBlendMode(
