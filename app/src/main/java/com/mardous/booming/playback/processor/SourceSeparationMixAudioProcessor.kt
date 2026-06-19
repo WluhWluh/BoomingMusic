@@ -224,7 +224,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private fun canMixCurrentFormat(): Boolean {
         return active &&
                 inputAudioFormat.encoding == C.ENCODING_PCM_16BIT &&
-                inputAudioFormat.channelCount == CHANNEL_COUNT_STEREO
+                inputAudioFormat.channelCount == CHANNEL_COUNT_STEREO &&
+                inputAudioFormat.sampleRate == stemSampleRate
     }
 
     private fun queueUnmixedInput(
@@ -370,7 +371,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             "queueInput",
             "session=$debugSessionId seq=$queueSeq branch=$branch active=$active mode=$inputMode " +
                     "inputEncoding=${inputAudioFormat.encoding} inputRate=${inputAudioFormat.sampleRate} " +
-                    "inputChannels=${inputAudioFormat.channelCount} remaining=$remaining " +
+                    "stemRate=$stemSampleRate inputChannels=${inputAudioFormat.channelCount} " +
+                    "remaining=$remaining " +
                     "vocalsBytes=$bytesRead instrumentalBytes=$instrumentalBytesRead"
         )
     }
