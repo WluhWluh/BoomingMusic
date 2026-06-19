@@ -873,11 +873,13 @@ Initial implementation notes:
 - The current hardening pass writes a small sidecar frame index (`*.flac.idx`) during project-local FLAC promotion. The mixer can use this index to seek to the containing FLAC frame and decode only bounded 4096-frame blocks on demand.
 - Existing promoted FLAC caches without a sidecar index remain playable through the old whole-file decode fallback, so this hardening does not invalidate already-tested caches.
 - Playback-gate traces keep indexed FLAC open, fallback, and seek events visible. Per-frame decode timing remains behind a local debug constant because it is useful for targeted profiling but too noisy for normal playback testing.
+- A debug-only stereo decorrelation experiment compared the current independent-stereo encoder against adaptive independent/left-side/right-side/mid-side frame selection on S25. On three real completed-cache song pairs, vocals saved about 8.3% total, instrumentals saved about 2.5% total, and the combined stem set saved about 5.2%. All decorrelated outputs passed local PCM MD5 verification, but adaptive encoding was substantially slower because each block must encode multiple candidates. Keep production promotion on independent stereo for now unless the extra post-processing time becomes acceptable.
 
 Next FLAC hardening steps:
 
 - Validate the indexed reader on S25 with freshly promoted caches and confirm playback-gate logs show `indexedOpen success` instead of `fallbackWholeFileDecode`.
 - Stress test long songs, repeated seeks, rapid song changes, background playback, and completed-cache upgrade from running playback.
+- If smaller completed caches become more important than promotion time, consider enabling adaptive stereo decorrelation only as an optional/background promotion mode, not on the critical playback path.
 
 ### Phase 9: Cache Management and Full Settings UX
 
