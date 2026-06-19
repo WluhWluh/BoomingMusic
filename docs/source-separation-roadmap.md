@@ -288,7 +288,7 @@ The existing overflow actions should be removed only after the sheet can replace
 - `Separate vocals`,
 - `Separated playback`.
 
-The existing separation progress Snackbar should also be removed only after the settings sheet can display progress. Brief completion, failure, or recovery messages may still use Snackbar or another short transient surface, but detailed progress should live in the sheet.
+The settings sheet should be the primary progress surface. Legacy source-separation Snackbar messages, including preparation, window progress, completion, cancellation, and failure, may be retained only behind an explicit advanced debug setting.
 
 True pause should not be exposed until partial segment manifests can preserve completed work. The current full-song WAV job can be canceled, but cancellation deletes temporary work; labeling that action as "Pause" would be misleading.
 
@@ -865,6 +865,8 @@ Initial implementation notes:
 - The encoder writes standard FLAC with fixed predictors plus Rice residual coding, falling back to verbatim subframes when that is smaller for a block. No external encoder dependency is used.
 - Promotion is non-critical: if encoding or decode validation fails, the completed cache remains WAV-backed and separation still succeeds.
 - The manifest records validated promoted FLAC paths. Completed separated playback now prefers validated `instrumental.flac` as the ExoPlayer source and validated `vocals.flac` as the mixer stem.
+- Automatic FLAC promotion is now an advanced source-separation setting. It defaults on for new separation tasks, is captured when the task starts, and can be disabled so completed WAV stems remain WAV-backed.
+- Current-song manual FLAC promotion is available from the settings sheet only when a completed cache still has both WAV stems and no validated FLAC promotion.
 - S25 debug testing showed that Android `MediaExtractor` does not recognize the generated raw FLAC files as audio tracks, so platform decode validation is not a suitable promotion gate. The project-local verifier is used instead and checks STREAMINFO, frame count, and decoded PCM MD5.
 - Separate S25 ExoPlayer testing confirmed that `instrumental.flac` can be used directly as the completed-cache media item: tested files reached `READY`, advanced playback position for the probe window, and produced no playback errors.
 - Completed-cache playback with both stems retained only as FLAC was manually tested on several songs. Blend playback sounded correct and remained stable.
@@ -877,19 +879,17 @@ Initial implementation notes:
 
 Next FLAC hardening steps:
 
-- Validate the indexed reader on S25 with freshly promoted caches and confirm playback-gate logs show `indexedOpen success` instead of `fallbackWholeFileDecode`.
-- Stress test long songs, repeated seeks, rapid song changes, background playback, and completed-cache upgrade from running playback.
 - If smaller completed caches become more important than promotion time, consider enabling adaptive stereo decorrelation only as an optional/background promotion mode, not on the critical playback path.
 
 ### Phase 9: Cache Management and Full Settings UX
 
-Status: pending
+Status: in progress
 
 Goals:
 
 - Finish the source separation settings sheet as the main control surface.
 - Remove the old overflow actions once the sheet fully replaces them.
-- Remove the long-running progress Snackbar once progress is represented in the sheet.
+- Keep source-separation Snackbar messages optional now that progress is represented in the sheet.
 - Add a way to list songs with separated caches.
 - Show cache size and model/pipeline information.
 - Allow deleting a single song's separated cache.
@@ -898,9 +898,9 @@ Goals:
 
 Done criteria:
 
-- The source separation sheet contains the master switch, per-song memory switch, blend slider, current song progress, pause/resume or stop controls, and current-song cache deletion.
+- The source separation sheet contains the master switch, per-song memory switch, blend slider, current song progress, pause/resume or stop controls, current-song cache deletion, manual FLAC promotion, and advanced diagnostic settings.
 - The old `Separate vocals` and `Separated playback` overflow actions have been removed.
-- Detailed processing progress no longer depends on an indefinite Snackbar.
+- Detailed processing progress no longer depends on an indefinite Snackbar, and all source-separation Snackbar messages are hidden by default behind an advanced setting.
 - The user can find all cached separated songs.
 - Deleting cache does not delete original music.
 - Storage usage is visible enough for personal maintenance.

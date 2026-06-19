@@ -41,6 +41,8 @@
     <string name="source_separation_start_current_song">Separate current song</string>
     <string name="source_separation_clear_current_cache">Clear separated cache</string>
     <string name="source_separation_wait_current_window">Waiting for current window...</string>
+    <string name="source_separation_try_flac_compression">Try FLAC compression</string>
+    <string name="source_separation_flac_compression_working">Compressing FLAC...</string>
     <string name="source_separation_window_decode_experiment">Test window decode</string>
     <string name="source_separation_window_decode_running">Testing local window decode (%1$d%%, step %2$d/%3$d): %4$s\nCurrent stage: %5$s</string>
     <string name="source_separation_window_decode_probe_progress">Probe %1$d/%2$d</string>
@@ -59,6 +61,11 @@
     <string name="source_separation_status_failed_with_message">Separation failed for \"%1$s\": %2$s</string>
     <string name="source_separation_playback_processing">Processing separated audio for the current position...</string>
     <string name="source_separation_active_mode">Mode: %1$s</string>
+    <string name="source_separation_advanced_title">Advanced</string>
+    <string name="source_separation_auto_flac_compression_title">Automatically try FLAC compression</string>
+    <string name="source_separation_auto_flac_compression_description">Compress completed WAV stems to FLAC for new separation tasks.</string>
+    <string name="source_separation_show_snackbar_progress_title">Show source separation Snackbar messages</string>
+    <string name="source_separation_show_snackbar_progress_description">Show the player-screen preparation, progress, completion, cancel, and failure messages.</string>
     <string name="source_separation_preparing">Preparing source separation...</string>
     <string name="source_separation_processing_windows">Processing audio windows</string>
     <string name="source_separation_stage">Source separation: %1$s</string>

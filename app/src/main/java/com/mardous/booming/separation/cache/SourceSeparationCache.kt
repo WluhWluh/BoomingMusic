@@ -127,17 +127,22 @@ class SourceSeparationCache(
     fun completeRun(
         run: SourceSeparationRun,
         result: MdxRangeSeparationResult,
+        shouldPromoteCompletedStems: Boolean = true,
     ): SourceSeparationCompletion {
         val completedDir = run.completedDir.apply { mkdirs() }
         val vocalsFile = copyIntoDirectory(result.vocalsFile, completedDir, VOCALS_WAV)
         val instrumentalFile = copyIntoDirectory(result.instrumentalFile, completedDir, INSTRUMENTAL_WAV)
         val timingFile = copyIntoDirectory(result.timingFile, completedDir, TIMING_TXT)
-        val promotedOutput = promoteCompletedStems(
-            vocalsFile = vocalsFile,
-            instrumentalFile = instrumentalFile,
-            outputSampleRate = result.outputSampleRate,
-            outputFrameCount = result.frames,
-        )
+        val promotedOutput = if (shouldPromoteCompletedStems) {
+            promoteCompletedStems(
+                vocalsFile = vocalsFile,
+                instrumentalFile = instrumentalFile,
+                outputSampleRate = result.outputSampleRate,
+                outputFrameCount = result.frames,
+            )
+        } else {
+            null
+        }
         val now = System.currentTimeMillis()
         val initialOutput = SourceSeparationOutput(
             vocalsPath = vocalsFile.absolutePath,
@@ -195,6 +200,56 @@ class SourceSeparationCache(
                 timingFile = timingFile,
             )
         )
+    }
+
+    fun promoteCompletedStemsForSong(
+        song: Song,
+        modelVariant: MdxModelVariant,
+        pipelineVersion: Int = PIPELINE_VERSION,
+    ): SourceSeparationManifest? {
+        val entryDir = entryDir(song, modelVariant, pipelineVersion)
+        val manifest = readManifest(entryDir)
+            ?.takeIf { it.state == SourceSeparationCacheState.Completed }
+            ?: return null
+        val output = manifest.output ?: return null
+        if (output.canUsePromotedFlac()) return manifest
+
+        val vocalsFile = File(output.vocalsPath)
+        val instrumentalFile = File(output.instrumentalPath)
+        if (!vocalsFile.isFile || !instrumentalFile.isFile) return null
+
+        val promotedOutput = promoteCompletedStems(
+            vocalsFile = vocalsFile,
+            instrumentalFile = instrumentalFile,
+            outputSampleRate = output.outputSampleRate,
+            outputFrameCount = output.outputFrameCount,
+        ) ?: return null
+
+        val updatedOutput = output.copy(
+            promotedVocalsPath = promotedOutput.vocalsFile.absolutePath,
+            promotedInstrumentalPath = promotedOutput.instrumentalFile.absolutePath,
+            promotedFormat = promotedOutput.format,
+            promotionValidated = true,
+            totalBytes = entryDir.directorySize(),
+        )
+        output.timingPath
+            ?.let(::File)
+            ?.takeIf { it.isFile && it.isWithin(entryDir) }
+            ?.let { timingFile ->
+                runCatching {
+                    rewriteTimingPlaybackPaths(
+                        timingFile = timingFile,
+                        vocalsFile = File(updatedOutput.playbackVocalsPath()),
+                        instrumentalFile = File(updatedOutput.playbackInstrumentalPath()),
+                    )
+                }
+            }
+        val updatedManifest = manifest.copy(
+            output = updatedOutput.copy(totalBytes = entryDir.directorySize()),
+            updatedAtEpochMs = System.currentTimeMillis(),
+        )
+        writeManifest(entryDir, updatedManifest)
+        return updatedManifest
     }
 
     fun updateRunPreparation(
@@ -359,6 +414,20 @@ class SourceSeparationCache(
                 val output = manifest.output ?: return@takeIf false
                 output.hasPlayableStemFiles()
             }
+    }
+
+    fun canPromoteCompletedStemsForSong(
+        song: Song,
+        modelVariant: MdxModelVariant,
+        pipelineVersion: Int = PIPELINE_VERSION,
+    ): Boolean {
+        val output = readEntry(song, modelVariant, pipelineVersion)
+            ?.takeIf { it.state == SourceSeparationCacheState.Completed }
+            ?.output
+            ?: return false
+        return !output.canUsePromotedFlac() &&
+                File(output.vocalsPath).isFile &&
+                File(output.instrumentalPath).isFile
     }
 
     fun readPlayableForSong(
@@ -725,6 +794,24 @@ class SourceSeparationCache(
             expectedFrameCount = outputFrameCount,
             expectedPcmMd5Hex = sourceWavFile.pcmDataMd5Hex(),
         )
+    }
+
+    private fun rewriteTimingPlaybackPaths(
+        timingFile: File,
+        vocalsFile: File,
+        instrumentalFile: File,
+    ) {
+        val updatedText = timingFile
+            .readLines(Charsets.UTF_8)
+            .joinToString(separator = System.lineSeparator(), postfix = System.lineSeparator()) { line ->
+                when {
+                    line.startsWith("Vocals: ") -> "Vocals: ${vocalsFile.absolutePath}"
+                    line.startsWith("Instrumental: ") ->
+                        "Instrumental: ${instrumentalFile.absolutePath}"
+                    else -> line
+                }
+            }
+        timingFile.writeText(updatedText, Charsets.UTF_8)
     }
 
     private fun File.pcmDataMd5Hex(): String {

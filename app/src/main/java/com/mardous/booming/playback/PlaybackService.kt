@@ -116,6 +116,7 @@ import com.mardous.booming.util.Preferences.requireString
 import com.mardous.booming.util.QUEUE_NEXT_MODE
 import com.mardous.booming.util.REWIND_WITH_BACK
 import com.mardous.booming.util.SEEK_INTERVAL
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.STOP_WHEN_CLOSED_FROM_RECENTS
 import com.mardous.booming.util.SongPlayCountHelper
 import com.mardous.booming.util.WIDGET_DYNAMIC_COLORS
@@ -765,7 +766,13 @@ class PlaybackService :
                 )
                 serviceScope.future(IO) {
                     val song = repository.songByMediaItem(mediaItem)
-                    val result = sourceSeparationEngine.separateSongToWav(song)
+                    val result = sourceSeparationEngine.separateSongToWav(
+                        song = song,
+                        promoteCompletedStems = preferences.getBoolean(
+                            SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+                            true,
+                        ),
+                    )
                     cleanupCompletedSourceSeparationTemporaryDirs()
                     SessionResult(
                         SessionResult.RESULT_SUCCESS,
