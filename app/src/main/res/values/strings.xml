@@ -64,6 +64,8 @@
     <string name="source_separation_playback_initial_processing_estimate">%1$s. About %2$d s remaining.</string>
     <string name="source_separation_active_mode">Mode: %1$s</string>
     <string name="source_separation_advanced_title">Advanced</string>
+    <string name="source_separation_auto_start_title">Automatically start separation</string>
+    <string name="source_separation_auto_start_description">Start separating the current song when separated playback is enabled and the active blend is not centered.</string>
     <string name="source_separation_auto_flac_compression_title">Automatically try FLAC compression</string>
     <string name="source_separation_auto_flac_compression_description">Compress completed WAV stems to FLAC for new separation tasks.</string>
     <string name="source_separation_show_snackbar_progress_title">Show source separation Snackbar messages</string>
