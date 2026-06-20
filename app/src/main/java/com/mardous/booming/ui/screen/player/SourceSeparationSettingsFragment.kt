@@ -144,6 +144,9 @@ private fun SourceSeparationSettingsSheet(
     val playbackReadyWindowCount by viewModel
         .sourceSeparationPlaybackReadyWindowCountFlow
         .collectAsState()
+    val autoStartSeparation by viewModel
+        .sourceSeparationAutoStartFlow
+        .collectAsState()
 
     val separatedPlaybackEnabled = blendMode != SourceSeparationBlendMode.Off
     var blend by remember(playbackState.blend) {
@@ -439,6 +442,18 @@ private fun SourceSeparationSettingsSheet(
                         Column(
                             modifier = Modifier.padding(cardContentPadding)
                         ) {
+                            LabeledSwitch(
+                                checked = autoStartSeparation,
+                                title = stringResource(
+                                    R.string.source_separation_auto_start_title
+                                ),
+                                description = stringResource(
+                                    R.string.source_separation_auto_start_description
+                                )
+                            ) { checked ->
+                                viewModel.setSourceSeparationAutoStartEnabled(checked)
+                            }
+
                             LabeledSwitch(
                                 checked = autoFlacCompression,
                                 title = stringResource(

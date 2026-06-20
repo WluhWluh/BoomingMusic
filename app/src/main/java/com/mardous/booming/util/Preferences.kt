@@ -599,6 +599,7 @@ const val PLAY_OPTION_ALWAYS_VISIBLE = "play_option_always_visible"
 const val PLAY_OPTION_PLAYS_WHOLE_LIST = "play_option_whole_list"
 const val CLEAR_QUEUE_ON_COMPLETION = "clear_queue_on_completion"
 const val REMEMBER_SHUFFLE_MODE = "remember_shuffle_mode"
+const val SOURCE_SEPARATION_AUTO_START = "source_separation.auto_start"
 const val SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION = "source_separation.auto_flac_compression"
 const val SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS = "source_separation.show_snackbar_progress"
 const val SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = "source_separation.mixed_output_preroll_ms"
@@ -609,6 +610,7 @@ const val SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT =
 const val SOURCE_SEPARATION_AVERAGE_WINDOW_MS = "source_separation.average_window_ms"
 const val SOURCE_SEPARATION_AVERAGE_WINDOW_SAMPLE_COUNT =
     "source_separation.average_window_sample_count"
+const val DEFAULT_SOURCE_SEPARATION_AUTO_START = true
 const val DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 400L
 const val DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS = 0L
 const val MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 5000L
