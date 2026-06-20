@@ -18,6 +18,7 @@ object Pcm16StereoFlacEncoder {
         expectedFrameCount: Int,
         stereoMode: Pcm16StereoFlacStereoMode = Pcm16StereoFlacStereoMode.INDEPENDENT,
         writeFrameIndex: Boolean = true,
+        shouldCancel: () -> Boolean = { false },
     ): Pcm16StereoFlacEncodeResult {
         require(expectedSampleRate > 0) { "Expected sample rate must be positive." }
         require(expectedFrameCount >= 0) { "Expected frame count must not be negative." }
@@ -30,7 +31,7 @@ object Pcm16StereoFlacEncoder {
             "WAV frame count does not match expected output length."
         }
 
-        val pcmMd5 = wavFile.pcmMd5(wavInfo)
+        val pcmMd5 = wavFile.pcmMd5(wavInfo, shouldCancel)
         val targetDir = flacFile.parentFile
         targetDir?.mkdirs()
         val tempFile = File(targetDir ?: File("."), "${flacFile.name}.tmp")
@@ -56,9 +57,11 @@ object Pcm16StereoFlacEncoder {
                         pcmMd5Hex = pcmMd5.toHexString(),
                         firstFrameByteOffset = FLAC_MAGIC.size + STREAMINFO_METADATA_HEADER.size + STREAMINFO_LENGTH,
                         stereoMode = stereoMode,
+                        shouldCancel = shouldCancel,
                     )
                 }
             }
+            throwIfCanceled(shouldCancel)
 
             if (flacFile.exists() && !flacFile.delete()) {
                 error("Could not replace FLAC output: ${flacFile.absolutePath}")
@@ -96,6 +99,7 @@ object Pcm16StereoFlacEncoder {
         expectedSampleRate: Int,
         expectedFrameCount: Int,
         expectedPcmMd5Hex: String? = null,
+        shouldCancel: () -> Boolean = { false },
     ): Pcm16StereoFlacVerifyResult {
         require(flacFile.isFile) { "FLAC file does not exist: ${flacFile.absolutePath}" }
         flacFile.inputStream().buffered().use { input ->
@@ -119,6 +123,7 @@ object Pcm16StereoFlacEncoder {
             val right = IntArray(MAX_BLOCK_SIZE)
             var decodedFrames = 0L
             while (decodedFrames < streamInfo.totalSamples) {
+                throwIfCanceled(shouldCancel)
                 val blockFrames = readAndDecodeFrame(
                     input = input,
                     left = left,
@@ -345,6 +350,7 @@ object Pcm16StereoFlacEncoder {
         pcmMd5Hex: String,
         firstFrameByteOffset: Int,
         stereoMode: Pcm16StereoFlacStereoMode,
+        shouldCancel: () -> Boolean,
     ): Pcm16StereoFlacFrameIndex {
         val pcmBuffer = ByteArray(MAX_BLOCK_SIZE * BYTES_PER_FRAME)
         val left = IntArray(MAX_BLOCK_SIZE)
@@ -358,6 +364,7 @@ object Pcm16StereoFlacEncoder {
         var outputByteOffset = firstFrameByteOffset.toLong()
 
         while (remainingFrames > 0) {
+            throwIfCanceled(shouldCancel)
             val blockFrames = min(MAX_BLOCK_SIZE, remainingFrames)
             val blockBytes = blockFrames * BYTES_PER_FRAME
             input.readFully(pcmBuffer, blockBytes)
@@ -925,13 +932,17 @@ object Pcm16StereoFlacEncoder {
         }
     }
 
-    private fun File.pcmMd5(info: Pcm16StereoWavInfo): ByteArray {
+    private fun File.pcmMd5(
+        info: Pcm16StereoWavInfo,
+        shouldCancel: () -> Boolean,
+    ): ByteArray {
         val digest = MessageDigest.getInstance("MD5")
         val buffer = ByteArray(PCM_MD5_BUFFER_BYTES)
         inputStream().buffered().use { input ->
             skipFully(input, info.dataOffset)
             var remaining = info.dataSize
             while (remaining > 0L) {
+                throwIfCanceled(shouldCancel)
                 val count = input.read(buffer, 0, min(buffer.size.toLong(), remaining).toInt())
                 if (count < 0) error("Unexpected end of WAV PCM data.")
                 digest.update(buffer, 0, count)
@@ -939,6 +950,12 @@ object Pcm16StereoFlacEncoder {
             }
         }
         return digest.digest()
+    }
+
+    private fun throwIfCanceled(shouldCancel: () -> Boolean) {
+        if (shouldCancel()) {
+            throw CancellationException("FLAC encode canceled.")
+        }
     }
 
     private fun InputStream.readFully(buffer: ByteArray, byteCount: Int) {

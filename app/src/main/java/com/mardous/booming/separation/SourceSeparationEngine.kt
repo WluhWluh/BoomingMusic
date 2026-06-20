@@ -84,9 +84,14 @@ class SourceSeparationEngine(
     fun promoteCompletedStemsForSong(
         song: Song,
         modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+        shouldCancel: () -> Boolean = { false },
     ): SourceSeparationManifest? {
         require(song != Song.emptySong) { "Cannot promote separated cache for an empty song." }
-        return cache.promoteCompletedStemsForSong(song, modelVariant)
+        return cache.promoteCompletedStemsForSong(
+            song = song,
+            modelVariant = modelVariant,
+            shouldCancel = shouldCancel,
+        )
     }
 
     fun deleteCacheForSong(
