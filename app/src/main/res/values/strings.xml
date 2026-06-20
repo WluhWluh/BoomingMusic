@@ -40,9 +40,12 @@
     <string name="source_separation_scheduler_status">Scheduler: %1$s</string>
     <string name="source_separation_start_current_song">Separate current song</string>
     <string name="source_separation_clear_current_cache">Clear separated cache</string>
+    <string name="source_separation_clearing_current_cache">Clearing separated cache...</string>
     <string name="source_separation_wait_current_window">Waiting for current window...</string>
+    <string name="source_separation_wait_flac_compression">Waiting for FLAC compression...</string>
     <string name="source_separation_try_flac_compression">Try FLAC compression</string>
     <string name="source_separation_flac_compression_working">Compressing FLAC...</string>
+    <string name="source_separation_flac_compression_queued">FLAC compression queued...</string>
     <string name="source_separation_window_decode_experiment">Test window decode</string>
     <string name="source_separation_window_decode_running">Testing local window decode (%1$d%%, step %2$d/%3$d): %4$s\nCurrent stage: %5$s</string>
     <string name="source_separation_window_decode_probe_progress">Probe %1$d/%2$d</string>

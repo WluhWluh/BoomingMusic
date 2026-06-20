@@ -11,6 +11,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.security.MessageDigest
+import kotlin.coroutines.cancellation.CancellationException
 
 class SourceSeparationCache(
     private val context: Context,
@@ -206,6 +207,7 @@ class SourceSeparationCache(
         song: Song,
         modelVariant: MdxModelVariant,
         pipelineVersion: Int = PIPELINE_VERSION,
+        shouldCancel: () -> Boolean = { false },
     ): SourceSeparationManifest? {
         val entryDir = entryDir(song, modelVariant, pipelineVersion)
         val manifest = readManifest(entryDir)
@@ -213,6 +215,7 @@ class SourceSeparationCache(
             ?: return null
         val output = manifest.output ?: return null
         if (output.canUsePromotedFlac()) return manifest
+        throwIfCanceled(shouldCancel)
 
         val vocalsFile = File(output.vocalsPath)
         val instrumentalFile = File(output.instrumentalPath)
@@ -223,7 +226,10 @@ class SourceSeparationCache(
             instrumentalFile = instrumentalFile,
             outputSampleRate = output.outputSampleRate,
             outputFrameCount = output.outputFrameCount,
+            shouldCancel = shouldCancel,
         ) ?: return null
+        throwIfCanceled(shouldCancel)
+        if (!entryDir.isDirectory || readManifest(entryDir) == null) return null
 
         val updatedOutput = output.copy(
             promotedVocalsPath = promotedOutput.vocalsFile.absolutePath,
@@ -248,6 +254,7 @@ class SourceSeparationCache(
             output = updatedOutput.copy(totalBytes = entryDir.directorySize()),
             updatedAtEpochMs = System.currentTimeMillis(),
         )
+        throwIfCanceled(shouldCancel)
         writeManifest(entryDir, updatedManifest)
         return updatedManifest
     }
@@ -735,6 +742,7 @@ class SourceSeparationCache(
         instrumentalFile: File,
         outputSampleRate: Int,
         outputFrameCount: Int,
+        shouldCancel: () -> Boolean = { false },
     ): PromotedCompletedStems? {
         val completedDir = vocalsFile.parentFile ?: return null
         val vocalsFlac = File(completedDir, VOCALS_FLAC)
@@ -745,28 +753,32 @@ class SourceSeparationCache(
                 flacFile = vocalsFlac,
                 expectedSampleRate = outputSampleRate,
                 expectedFrameCount = outputFrameCount,
+                shouldCancel = shouldCancel,
             )
+            throwIfCanceled(shouldCancel)
             Pcm16StereoFlacEncoder.encodeWavToFlac(
                 wavFile = instrumentalFile,
                 flacFile = instrumentalFlac,
                 expectedSampleRate = outputSampleRate,
                 expectedFrameCount = outputFrameCount,
+                shouldCancel = shouldCancel,
             )
+            throwIfCanceled(shouldCancel)
             validatePromotedFlac(
                 flacFile = vocalsFlac,
                 sourceWavFile = vocalsFile,
                 outputSampleRate = outputSampleRate,
                 outputFrameCount = outputFrameCount,
+                shouldCancel = shouldCancel,
             )
+            throwIfCanceled(shouldCancel)
             validatePromotedFlac(
                 flacFile = instrumentalFlac,
                 sourceWavFile = instrumentalFile,
                 outputSampleRate = outputSampleRate,
                 outputFrameCount = outputFrameCount,
+                shouldCancel = shouldCancel,
             )
-            // Completed separated playback can now read both promoted stems.
-            vocalsFile.delete()
-            instrumentalFile.delete()
             PromotedCompletedStems(
                 vocalsFile = vocalsFlac,
                 instrumentalFile = instrumentalFlac,
@@ -781,18 +793,26 @@ class SourceSeparationCache(
         }
     }
 
+    private fun throwIfCanceled(shouldCancel: () -> Boolean) {
+        if (shouldCancel()) {
+            throw CancellationException("FLAC promotion canceled.")
+        }
+    }
+
     private fun validatePromotedFlac(
         flacFile: File,
         sourceWavFile: File,
         outputSampleRate: Int,
         outputFrameCount: Int,
+        shouldCancel: () -> Boolean,
     ) {
         require(flacFile.isFile) { "Promoted FLAC file is missing." }
         Pcm16StereoFlacEncoder.verifyFlacFile(
             flacFile = flacFile,
             expectedSampleRate = outputSampleRate,
             expectedFrameCount = outputFrameCount,
-            expectedPcmMd5Hex = sourceWavFile.pcmDataMd5Hex(),
+            expectedPcmMd5Hex = sourceWavFile.pcmDataMd5Hex(shouldCancel),
+            shouldCancel = shouldCancel,
         )
     }
 
@@ -814,7 +834,7 @@ class SourceSeparationCache(
         timingFile.writeText(updatedText, Charsets.UTF_8)
     }
 
-    private fun File.pcmDataMd5Hex(): String {
+    private fun File.pcmDataMd5Hex(shouldCancel: () -> Boolean): String {
         inputStream().buffered().use { input ->
             val header = ByteArray(WAV_HEADER_BYTES.toInt())
             var headerBytesRead = 0
@@ -826,6 +846,7 @@ class SourceSeparationCache(
             val digest = MessageDigest.getInstance("MD5")
             val buffer = ByteArray(PROMOTION_HASH_BUFFER_BYTES)
             while (true) {
+                throwIfCanceled(shouldCancel)
                 val count = input.read(buffer)
                 if (count < 0) break
                 if (count > 0) {
