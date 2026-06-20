@@ -125,7 +125,11 @@ private fun SourceSeparationSettingsSheet(
     val currentSongCacheState by viewModel
         .currentSourceSeparationCacheStateFlow
         .collectAsState()
+    val currentSong by viewModel.currentSongFlow.collectAsState()
     val pendingAction by viewModel.sourceSeparationPendingActionFlow.collectAsState()
+    val flacPromotionState by viewModel
+        .sourceSeparationFlacPromotionStateFlow
+        .collectAsState()
     val windowDecodeExperimentState by viewModel
         .sourceSeparationWindowDecodeExperimentStateFlow
         .collectAsState()
@@ -149,6 +153,11 @@ private fun SourceSeparationSettingsSheet(
         .collectAsState()
 
     val separatedPlaybackEnabled = blendMode != SourceSeparationBlendMode.Off
+    val currentSongId = currentSong.id
+    val currentSongFlacPromotionQueued = flacPromotionState.isQueued(currentSongId)
+    val currentSongFlacPromotionRunning = flacPromotionState.isRunning(currentSongId)
+    val currentSongFlacPromotionActive =
+        currentSongFlacPromotionQueued || currentSongFlacPromotionRunning
     var blend by remember(playbackState.blend) {
         mutableFloatStateOf(playbackState.blend.coerceIn(0f, 1f))
     }
@@ -348,7 +357,8 @@ private fun SourceSeparationSettingsSheet(
                             }
 
                             AnimatedVisibility(
-                                visible = separationState !is SourceSeparationUiState.Running
+                                visible = separationState !is SourceSeparationUiState.Running &&
+                                        !currentSongCacheState.isCompleted
                             ) {
                                 Button(
                                     onClick = {
@@ -378,14 +388,23 @@ private fun SourceSeparationSettingsSheet(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Text(
-                                        text = if (pendingAction == SourceSeparationPendingAction.DeleteCache) {
-                                            stringResource(
-                                                R.string.source_separation_wait_current_window
-                                            )
-                                        } else {
-                                            stringResource(
-                                                R.string.source_separation_clear_current_cache
-                                            )
+                                        text = when (pendingAction) {
+                                            SourceSeparationPendingAction.DeleteCache ->
+                                                stringResource(
+                                                    R.string.source_separation_clearing_current_cache
+                                                )
+                                            SourceSeparationPendingAction.DeleteCacheWaitingWindow ->
+                                                stringResource(
+                                                    R.string.source_separation_wait_current_window
+                                                )
+                                            SourceSeparationPendingAction.DeleteCacheWaitingFlac ->
+                                                stringResource(
+                                                    R.string.source_separation_wait_flac_compression
+                                                )
+                                            else ->
+                                                stringResource(
+                                                    R.string.source_separation_clear_current_cache
+                                                )
                                         },
                                         modifier = Modifier.padding(start = 8.dp)
                                     )
@@ -393,25 +412,32 @@ private fun SourceSeparationSettingsSheet(
                             }
 
                             AnimatedVisibility(
-                                visible = currentSongCacheState.canPromoteCompletedStems
+                                visible = currentSongCacheState.canPromoteCompletedStems ||
+                                        currentSongFlacPromotionActive
                             ) {
                                 OutlinedButton(
                                     onClick = {
                                         hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
                                         viewModel.tryFlacCompressionForCurrentSong()
                                     },
-                                    enabled = pendingAction == null,
+                                    enabled = pendingAction == null &&
+                                            !currentSongFlacPromotionActive,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(
-                                        text = if (pendingAction == SourceSeparationPendingAction.PromoteFlac) {
-                                            stringResource(
-                                                R.string.source_separation_flac_compression_working
-                                            )
-                                        } else {
-                                            stringResource(
-                                                R.string.source_separation_try_flac_compression
-                                            )
+                                        text = when {
+                                            currentSongFlacPromotionRunning ->
+                                                stringResource(
+                                                    R.string.source_separation_flac_compression_working
+                                                )
+                                            currentSongFlacPromotionQueued ->
+                                                stringResource(
+                                                    R.string.source_separation_flac_compression_queued
+                                                )
+                                            else ->
+                                                stringResource(
+                                                    R.string.source_separation_try_flac_compression
+                                                )
                                         }
                                     )
                                 }
@@ -983,3 +1009,7 @@ private val SourceSeparationCacheUiState.canPromoteCompletedStems: Boolean
         SourceSeparationCacheUiState.NotStarted,
         is SourceSeparationCacheUiState.Partial -> false
     }
+
+private val SourceSeparationCacheUiState.isCompleted: Boolean
+    get() = this is SourceSeparationCacheUiState.Completed ||
+            this is SourceSeparationCacheUiState.CompletedWithTemporaryFiles
