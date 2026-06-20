@@ -57,6 +57,8 @@ import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_START
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
@@ -207,6 +209,11 @@ class PlayerViewModel(
     private val _sourceSeparationBlendModeFlow =
         MutableStateFlow(readSourceSeparationBlendMode())
     val sourceSeparationBlendModeFlow = _sourceSeparationBlendModeFlow.asStateFlow()
+
+    private val _sourceSeparationAutoStartFlow =
+        MutableStateFlow(readSourceSeparationAutoStart())
+    val sourceSeparationAutoStartFlow =
+        _sourceSeparationAutoStartFlow.asStateFlow()
 
     private val _sourceSeparationAutoFlacCompressionFlow =
         MutableStateFlow(readSourceSeparationAutoFlacCompression())
@@ -866,6 +873,7 @@ class PlayerViewModel(
                 args = args,
             )
             updateSourceSeparationPlaybackState(result)
+            maybeAutoStartSourceSeparationForCurrentSong(normalizedBlend)
         }
     }
 
@@ -935,6 +943,18 @@ class PlayerViewModel(
         _sourceSeparationAutoFlacCompressionFlow.value = enabled
     }
 
+    fun setSourceSeparationAutoStartEnabled(enabled: Boolean) {
+        preferences.edit {
+            putBoolean(SOURCE_SEPARATION_AUTO_START, enabled)
+        }
+        _sourceSeparationAutoStartFlow.value = enabled
+        if (enabled) {
+            maybeAutoStartSourceSeparationForCurrentSong(
+                blend = _sourceSeparationPlaybackStateFlow.value.blend,
+            )
+        }
+    }
+
     fun setSourceSeparationShowSnackbarProgressEnabled(enabled: Boolean) {
         preferences.edit {
             putBoolean(SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS, enabled)
@@ -991,6 +1011,36 @@ class PlayerViewModel(
                 showMessage = showMessage,
             )
             updateSourceSeparationPlaybackState(result)
+            maybeAutoStartSourceSeparationForCurrentSong(blend)
+        }
+    }
+
+    private fun maybeAutoStartSourceSeparationForCurrentSong(blend: Float) {
+        val song = currentSong
+        val mode = _sourceSeparationBlendModeFlow.value
+        if (!_sourceSeparationAutoStartFlow.value ||
+            mode == SourceSeparationBlendMode.Off ||
+            song == Song.emptySong ||
+            isDefaultSourceSeparationBlend(blend)
+        ) {
+            return
+        }
+        if (sourceSeparationSongId == song.id || sourceSeparationPendingStartSongId == song.id) {
+            return
+        }
+
+        viewModelScope.launch(IO) {
+            val hasCompletedCache = runCatching {
+                when (sourceSeparationEngine.cacheStatusForSong(song)) {
+                    is SourceSeparationCacheStatus.Completed,
+                    is SourceSeparationCacheStatus.CompletedWithTemporaryFiles -> true
+                    SourceSeparationCacheStatus.NotStarted,
+                    is SourceSeparationCacheStatus.Partial -> false
+                }
+            }.getOrDefault(false)
+            if (!hasCompletedCache && currentSong.id == song.id) {
+                startSourceSeparationForCurrentSong()
+            }
         }
     }
 
@@ -1169,6 +1219,13 @@ class PlayerViewModel(
         ).coerceIn(0f, 1f)
     }
 
+    private fun readSourceSeparationAutoStart(): Boolean {
+        return preferences.getBoolean(
+            SOURCE_SEPARATION_AUTO_START,
+            DEFAULT_SOURCE_SEPARATION_AUTO_START,
+        )
+    }
+
     private fun readSourceSeparationAutoFlacCompression(): Boolean {
         return preferences.getBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, true)
     }
@@ -1224,6 +1281,11 @@ class PlayerViewModel(
             rememberPerSong -> SourceSeparationBlendMode.PerSong
             else -> SourceSeparationBlendMode.Global
         }
+    }
+
+    private fun isDefaultSourceSeparationBlend(blend: Float): Boolean {
+        return kotlin.math.abs(blend.coerceIn(0f, 1f) - DEFAULT_SOURCE_SEPARATION_BLEND) <
+                SOURCE_SEPARATION_BLEND_EPSILON
     }
 
     fun updateSourceSeparationPlaybackState(args: Bundle) {
@@ -1638,6 +1700,7 @@ class PlayerViewModel(
             "source_separation.global_blend"
         private const val KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND =
             "source_separation.per_song_blend.pending"
+        private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
     }
 }
 
