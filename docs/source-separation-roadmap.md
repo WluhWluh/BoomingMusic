@@ -327,13 +327,16 @@ Reason for a custom control:
 - The quick control needs a vertical track, no thumb, custom tap zones, custom drag snapping, and overlaid endpoint icons.
 - Rotating the existing slider would make pointer mapping, thumb removal, semantics, and layout harder than a small purpose-built Canvas/pointer-input control.
 
-Current visual prototype status:
+Current implementation status:
 
 - The cover lyrics overlay now uses a bottom-end column that stacks the source-separation quick control above the full-lyrics button.
 - The quick control switches visually with `sourceSeparationBlendModeFlow`: `Off` shows a circular outline stem-blend button, and enabled modes show the expanded vertical preview.
-- The expanded preview is 40dp wide and 120dp tall, split into two 58dp track segments with a 4dp neutral center gap.
+- The expanded control is 40dp wide and 120dp tall, split into two 58dp track segments with a 4dp neutral center gap.
 - The outer ends are capsule-rounded; the center cut ends use 2dp corner radii.
-- The current prototype intentionally has no click, drag, or real blend-position rendering yet. It displays the neutral 50% state as two inactive segments with no active fill.
+- The closed-to-expanded transition is implemented as a custom morph on the source-separation quick control only; other circular player buttons still use their original Material button implementation.
+- The control now renders the actual blend value: the neutral 50% state has no active fill, vocals-only fills upward from the center gap, and instrumental-only fills downward from the center gap.
+- The closed state click enables separated playback through `PlayerViewModel.setSourceSeparationPlaybackEnabled`.
+- The expanded state supports drag-to-blend with a small midpoint snap region and three-zone tap handling: top sets vocals-only, middle turns separated playback off without changing the stored blend, and bottom sets instrumental-only.
 - The lyrics bottom avoidance is already content-padding based and changes with the quick-control visual height, so the lyrics viewport is not shortened.
 
 State synchronization should use the same source of truth as the settings sheet:
