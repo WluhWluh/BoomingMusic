@@ -69,6 +69,7 @@ import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -166,6 +167,8 @@ class PlayerViewModel(
     private var sourceSeparationPendingStartSongId: Long? = null
     private var sourceSeparationSettingsApplyJob: Job? = null
     private var sourceSeparationPlaybackSyncJob: Job? = null
+    private var sourceSeparationBlendPreviewJob: Job? = null
+    private var sourceSeparationBlendPreviewPending: Float? = null
     private var sourceSeparationWindowDecodeExperimentJob: Job? = null
     private var sourceSeparationFlacPromotionJob: Job? = null
     private var sourceSeparationFlacPromotionRunningSongId: Long? = null
@@ -257,6 +260,7 @@ class PlayerViewModel(
         progressObserver.stop()
         cancelSourceSeparation()
         sourceSeparationSettingsApplyJob?.cancel()
+        sourceSeparationBlendPreviewJob?.cancel()
         sourceSeparationWindowDecodeExperimentJob?.cancel()
         sourceSeparationFlacPromotionJob?.cancel()
         synchronized(sourceSeparationFlacPromotionLock) {
@@ -995,6 +999,9 @@ class PlayerViewModel(
 
     fun setSourceSeparationBlend(blend: Float) {
         val normalizedBlend = blend.coerceIn(0f, 1f)
+        sourceSeparationBlendPreviewJob?.cancel()
+        sourceSeparationBlendPreviewJob = null
+        sourceSeparationBlendPreviewPending = null
         updateSourceSeparationBlendState(normalizedBlend)
         when (_sourceSeparationBlendModeFlow.value) {
             SourceSeparationBlendMode.PerSong -> {
@@ -1022,6 +1029,36 @@ class PlayerViewModel(
             )
             updateSourceSeparationPlaybackState(result)
             maybeAutoStartSourceSeparationForCurrentSong(normalizedBlend)
+        }
+    }
+
+    fun previewSourceSeparationBlend(blend: Float) {
+        if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off) return
+        sourceSeparationBlendPreviewPending = blend.coerceIn(0f, 1f)
+        if (sourceSeparationBlendPreviewJob?.isActive == true) return
+
+        sourceSeparationBlendPreviewJob = viewModelScope.launch {
+            while (true) {
+                val previewBlend = sourceSeparationBlendPreviewPending ?: break
+                sourceSeparationBlendPreviewPending = null
+                val args = Bundle().apply {
+                    putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, previewBlend)
+                }
+                runCatching {
+                    sendSourceSeparationPlaybackCommand(
+                        action = Playback.SET_SOURCE_SEPARATION_BLEND,
+                        args = args,
+                    )
+                }.onSuccess { result ->
+                    if (result.extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_ENABLED)) {
+                        updateSourceSeparationPlaybackState(result)
+                    }
+                }.onFailure { error ->
+                    Log.w(TAG, "Failed to preview source separation blend", error)
+                }
+                delay(SOURCE_SEPARATION_BLEND_PREVIEW_THROTTLE_MS)
+            }
+            sourceSeparationBlendPreviewJob = null
         }
     }
 
@@ -1849,6 +1886,7 @@ class PlayerViewModel(
         private const val KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND =
             "source_separation.per_song_blend.pending"
         private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
+        private const val SOURCE_SEPARATION_BLEND_PREVIEW_THROTTLE_MS = 33L
     }
 }
 
