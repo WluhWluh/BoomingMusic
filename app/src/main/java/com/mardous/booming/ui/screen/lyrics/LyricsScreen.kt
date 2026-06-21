@@ -2,6 +2,10 @@ package com.mardous.booming.ui.screen.lyrics
 
 import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -18,6 +22,7 @@ import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
@@ -328,11 +334,7 @@ fun CoverLyricsScreen(
                     .align(Alignment.BottomEnd)
                     .padding(CoverLyricsOverlayPadding)
             ) {
-                if (quickBlendExpanded) {
-                    CoverLyricsQuickBlendPreview()
-                } else {
-                    CoverLyricsQuickBlendButton()
-                }
+                CoverLyricsQuickBlendControl(expanded = quickBlendExpanded)
 
                 FilledIconButton(
                     modifier = Modifier.size(CoverLyricsButtonSize),
@@ -353,49 +355,96 @@ fun CoverLyricsScreen(
 }
 
 @Composable
-private fun CoverLyricsQuickBlendButton() {
-    val containerColor = MaterialTheme.colorScheme.onSurface
-    val contentColor = MaterialTheme.colorScheme.surface
-    FilledIconButton(
-        modifier = Modifier.size(CoverLyricsButtonSize),
-        enabled = false,
-        colors = IconButtonDefaults.filledIconButtonColors(
-            containerColor = containerColor,
-            contentColor = contentColor,
-            disabledContainerColor = containerColor,
-            disabledContentColor = contentColor
-        ),
-        onClick = {}
-    ) {
-        Icon(
-            painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
-            contentDescription = stringResource(R.string.action_source_separation_playback)
-        )
+private fun CoverLyricsQuickBlendControl(expanded: Boolean) {
+    val transition = updateTransition(expanded, label = "CoverLyricsQuickBlend")
+    val height by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "height"
+    ) { isExpanded ->
+        if (isExpanded) CoverLyricsQuickBlendSliderHeight else CoverLyricsButtonSize
     }
-}
-
-@Composable
-private fun CoverLyricsQuickBlendPreview() {
+    val centerGap by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "centerGap"
+    ) { isExpanded ->
+        if (isExpanded) CoverLyricsQuickBlendCenterGap else 0.dp
+    }
+    val innerCornerRadius by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "innerCornerRadius"
+    ) { isExpanded ->
+        if (isExpanded) CoverLyricsQuickBlendInnerCornerRadius else 0.dp
+    }
+    val buttonBackgroundAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "buttonBackgroundAlpha"
+    ) { isExpanded ->
+        if (isExpanded) 0f else 1f
+    }
+    val trackAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "trackAlpha"
+    ) { isExpanded ->
+        if (isExpanded) 0.1f else 0f
+    }
+    val stemIconAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "stemIconAlpha"
+    ) { isExpanded ->
+        if (isExpanded) 0f else 1f
+    }
+    val endpointIconAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "endpointIconAlpha"
+    ) { isExpanded ->
+        if (isExpanded) 1f else 0f
+    }
+    val endpointIconOffset by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "endpointIconOffset"
+    ) { isExpanded ->
+        if (isExpanded) CoverLyricsQuickBlendEndpointIconOffset else 0.dp
+    }
     val colorScheme = MaterialTheme.colorScheme
     val progressColor = colorScheme.onSurface
-    val inactiveColor = progressColor.copy(alpha = 0.1f)
+    val trackHeight = ((height - centerGap) / 2).coerceAtLeast(0.dp)
+    val buttonBackgroundShape = RoundedCornerShape(CoverLyricsButtonSize / 2)
+    val topTrackShape = RoundedCornerShape(
+        topStart = CoverLyricsButtonSize / 2,
+        topEnd = CoverLyricsButtonSize / 2,
+        bottomStart = innerCornerRadius,
+        bottomEnd = innerCornerRadius,
+    )
+    val bottomTrackShape = RoundedCornerShape(
+        topStart = innerCornerRadius,
+        topEnd = innerCornerRadius,
+        bottomStart = CoverLyricsButtonSize / 2,
+        bottomEnd = CoverLyricsButtonSize / 2,
+    )
     Box(
         modifier = Modifier
             .size(
                 width = CoverLyricsButtonSize,
-                height = CoverLyricsQuickBlendSliderHeight
+                height = height
             )
     ) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clip(buttonBackgroundShape)
+                .background(progressColor.copy(alpha = buttonBackgroundAlpha))
+        )
+
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .size(
                     width = CoverLyricsButtonSize,
-                    height = CoverLyricsQuickBlendHalfTrackHeight
+                    height = trackHeight
                 )
-                .clip(CoverLyricsQuickBlendTopTrackShape)
-                .background(inactiveColor)
+                .clip(topTrackShape)
+                .background(progressColor.copy(alpha = trackAlpha))
         )
 
         Box(
@@ -404,10 +453,19 @@ private fun CoverLyricsQuickBlendPreview() {
                 .fillMaxWidth()
                 .size(
                     width = CoverLyricsButtonSize,
-                    height = CoverLyricsQuickBlendHalfTrackHeight
+                    height = trackHeight
                 )
-                .clip(CoverLyricsQuickBlendBottomTrackShape)
-                .background(inactiveColor)
+                .clip(bottomTrackShape)
+                .background(progressColor.copy(alpha = trackAlpha))
+        )
+
+        Icon(
+            painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
+            contentDescription = stringResource(R.string.action_source_separation_playback),
+            tint = colorScheme.surface,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .alpha(stemIconAlpha)
         )
 
         Icon(
@@ -416,7 +474,8 @@ private fun CoverLyricsQuickBlendPreview() {
             tint = progressColor,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 8.dp)
+                .offset(y = endpointIconOffset)
+                .alpha(endpointIconAlpha)
                 .size(CoverLyricsQuickBlendIconSize)
         )
 
@@ -426,7 +485,8 @@ private fun CoverLyricsQuickBlendPreview() {
             tint = colorScheme.surface,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 8.dp)
+                .offset(y = -endpointIconOffset)
+                .alpha(endpointIconAlpha)
                 .size(CoverLyricsQuickBlendIconSize)
         )
     }
@@ -558,22 +618,20 @@ private fun PaddingValues.withAdditionalBottom(additionalBottom: Dp): PaddingVal
 private val CoverLyricsButtonSize = 40.dp
 private val CoverLyricsQuickBlendSliderHeight = 120.dp
 private val CoverLyricsQuickBlendCenterGap = 4.dp
-private val CoverLyricsQuickBlendHalfTrackHeight =
-    (CoverLyricsQuickBlendSliderHeight - CoverLyricsQuickBlendCenterGap) / 2
 private val CoverLyricsQuickBlendIconSize = 24.dp
+private val CoverLyricsQuickBlendEndpointIconOffset = 8.dp
 private val CoverLyricsButtonSpacing = 12.dp
 private val CoverLyricsOverlayPadding = 16.dp
 private val CoverLyricsBottomSpacing = 16.dp
 private val CoverLyricsQuickBlendInnerCornerRadius = 2.dp
-private val CoverLyricsQuickBlendTopTrackShape = RoundedCornerShape(
-    topStart = CoverLyricsButtonSize / 2,
-    topEnd = CoverLyricsButtonSize / 2,
-    bottomStart = CoverLyricsQuickBlendInnerCornerRadius,
-    bottomEnd = CoverLyricsQuickBlendInnerCornerRadius,
-)
-private val CoverLyricsQuickBlendBottomTrackShape = RoundedCornerShape(
-    topStart = CoverLyricsQuickBlendInnerCornerRadius,
-    topEnd = CoverLyricsQuickBlendInnerCornerRadius,
-    bottomStart = CoverLyricsButtonSize / 2,
-    bottomEnd = CoverLyricsButtonSize / 2,
-)
+private fun coverLyricsQuickBlendDpTransitionSpec() =
+    tween<Dp>(
+        durationMillis = 260,
+        easing = FastOutSlowInEasing
+    )
+
+private fun coverLyricsQuickBlendFloatTransitionSpec() =
+    tween<Float>(
+        durationMillis = 220,
+        easing = FastOutSlowInEasing
+    )
