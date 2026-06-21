@@ -337,6 +337,7 @@ Current implementation status:
 - The control now renders the actual blend value: the neutral 50% state has no active fill, vocals-only fills upward from the center gap, and instrumental-only fills downward from the center gap.
 - The closed state click enables separated playback through `PlayerViewModel.setSourceSeparationPlaybackEnabled`.
 - The expanded state supports drag-to-blend with a small midpoint snap region and three-zone tap handling: top sets vocals-only, middle turns separated playback off without changing the stored blend, and bottom sets instrumental-only.
+- Drag rendering uses a local in-control blend value for immediate visual feedback. Audio preview updates are throttled through a lightweight ViewModel path, while drag finish and tap endpoints still use the formal persisted blend path.
 - The lyrics bottom avoidance is already content-padding based and changes with the quick-control visual height, so the lyrics viewport is not shortened.
 
 State synchronization should use the same source of truth as the settings sheet:
