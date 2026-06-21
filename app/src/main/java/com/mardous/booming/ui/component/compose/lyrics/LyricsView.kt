@@ -87,6 +87,7 @@ fun LyricsView(
     isPowerSaveMode: Boolean,
     hasBackgroundEffects: Boolean,
     modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = settings.contentPadding,
     onLineClick: (SyncedLyrics.Line) -> Unit
 ) {
     val density = LocalDensity.current
@@ -147,7 +148,7 @@ fun LyricsView(
 
     LazyColumn(
         state = listState,
-        contentPadding = settings.contentPadding,
+        contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(settings.lineSpacing.dp),
         modifier = modifier
             .nestedScroll(rememberNestedScrollInteropConnection())

@@ -5,16 +5,22 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -36,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -43,10 +50,12 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.keepScreenOn
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.rememberNestedScrollInteropConnection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.SingletonImageLoader
@@ -72,6 +81,7 @@ import com.mardous.booming.ui.component.compose.lyrics.LyricsView
 import com.mardous.booming.ui.component.views.PlaceholderDrawable
 import com.mardous.booming.ui.screen.library.LibraryViewModel
 import com.mardous.booming.ui.screen.player.PlayerViewModel
+import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
 import com.mardous.booming.ui.theme.PlayerTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -241,11 +251,24 @@ fun CoverLyricsScreen(
     )
 
     PlayerTheme(playerColorScheme) {
+        val sourceSeparationBlendMode by playerViewModel
+            .sourceSeparationBlendModeFlow
+            .collectAsStateWithLifecycle()
+        val quickBlendExpanded = sourceSeparationBlendMode != SourceSeparationBlendMode.Off
+        val quickBlendHeight = if (quickBlendExpanded) {
+            CoverLyricsQuickBlendSliderHeight
+        } else {
+            CoverLyricsButtonSize
+        }
+        val lyricsContentPadding = lyricsViewSettings.contentPadding.withAdditionalBottom(
+            quickBlendHeight + CoverLyricsButtonSpacing + CoverLyricsBottomSpacing
+        )
         Box(modifier = modifier.fillMaxSize()) {
             LyricsSurface(
                 uiState = uiState,
                 playerViewModel = playerViewModel,
                 settings = lyricsViewSettings,
+                contentPadding = lyricsContentPadding,
                 fadingEdges = FadingEdges(top = 72.dp, bottom = 64.dp),
                 textAlign = TextAlign.Center,
                 isPlaying = isPlaying,
@@ -255,23 +278,114 @@ fun CoverLyricsScreen(
                 modifier = Modifier.fillMaxSize(),
             )
 
-            FilledIconButton(
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(CoverLyricsButtonSpacing),
                 modifier = Modifier
-                    .wrapContentSize()
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.onSurface,
-                    contentColor = MaterialTheme.colorScheme.surface
-                ),
-                onClick = onExpandClick
+                    .padding(CoverLyricsOverlayPadding)
             ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_open_in_full_24dp),
-                    contentDescription = stringResource(R.string.action_lyrics_editor)
-                )
+                if (quickBlendExpanded) {
+                    CoverLyricsQuickBlendPreview()
+                } else {
+                    CoverLyricsQuickBlendButton()
+                }
+
+                FilledIconButton(
+                    modifier = Modifier.size(CoverLyricsButtonSize),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.onSurface,
+                        contentColor = MaterialTheme.colorScheme.surface
+                    ),
+                    onClick = onExpandClick
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_open_in_full_24dp),
+                        contentDescription = stringResource(R.string.action_lyrics_editor)
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun CoverLyricsQuickBlendButton() {
+    val containerColor = MaterialTheme.colorScheme.onSurface
+    val contentColor = MaterialTheme.colorScheme.surface
+    FilledIconButton(
+        modifier = Modifier.size(CoverLyricsButtonSize),
+        enabled = false,
+        colors = IconButtonDefaults.filledIconButtonColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+            disabledContainerColor = containerColor,
+            disabledContentColor = contentColor
+        ),
+        onClick = {}
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
+            contentDescription = stringResource(R.string.action_source_separation_playback)
+        )
+    }
+}
+
+@Composable
+private fun CoverLyricsQuickBlendPreview() {
+    val colorScheme = MaterialTheme.colorScheme
+    val progressColor = colorScheme.onSurface
+    val inactiveColor = progressColor.copy(alpha = 0.1f)
+    Box(
+        modifier = Modifier
+            .size(
+                width = CoverLyricsButtonSize,
+                height = CoverLyricsQuickBlendSliderHeight
+            )
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .size(
+                    width = CoverLyricsButtonSize,
+                    height = CoverLyricsQuickBlendHalfTrackHeight
+                )
+                .clip(CoverLyricsQuickBlendTopTrackShape)
+                .background(inactiveColor)
+        )
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .size(
+                    width = CoverLyricsButtonSize,
+                    height = CoverLyricsQuickBlendHalfTrackHeight
+                )
+                .clip(CoverLyricsQuickBlendBottomTrackShape)
+                .background(inactiveColor)
+        )
+
+        Icon(
+            painter = painterResource(R.drawable.ic_person_24dp),
+            contentDescription = null,
+            tint = progressColor,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 8.dp)
+                .size(CoverLyricsQuickBlendIconSize)
+        )
+
+        Icon(
+            painter = painterResource(R.drawable.ic_speaker_24dp),
+            contentDescription = null,
+            tint = colorScheme.surface,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 8.dp)
+                .size(CoverLyricsQuickBlendIconSize)
+        )
     }
 }
 
@@ -281,6 +395,7 @@ private fun LyricsSurface(
     playerViewModel: PlayerViewModel,
     uiState: LyricsUiState,
     settings: LyricsViewSettings,
+    contentPadding: PaddingValues = settings.contentPadding,
     fadingEdges: FadingEdges,
     textAlign: TextAlign?,
     isPlaying: Boolean,
@@ -342,7 +457,7 @@ private fun LyricsSurface(
                         .nestedScroll(rememberNestedScrollInteropConnection())
                         .fadingEdges(fadingEdges)
                         .verticalScroll(scrollState)
-                        .padding(settings.contentPadding)
+                        .padding(contentPadding)
                 ) {
                     Text(
                         text = uiState.lyrics,
@@ -369,9 +484,44 @@ private fun LyricsSurface(
                     contentColor = contentColor,
                     isPowerSaveMode = isPowerSaveMode,
                     hasBackgroundEffects = hasBackgroundEffects,
+                    contentPadding = contentPadding,
                     onLineClick = { onSeekToLine(it) }
                 )
             }
         }
     }
 }
+
+@Composable
+private fun PaddingValues.withAdditionalBottom(additionalBottom: Dp): PaddingValues {
+    val layoutDirection = LocalLayoutDirection.current
+    return PaddingValues(
+        start = calculateStartPadding(layoutDirection),
+        top = calculateTopPadding(),
+        end = calculateEndPadding(layoutDirection),
+        bottom = calculateBottomPadding() + additionalBottom
+    )
+}
+
+private val CoverLyricsButtonSize = 40.dp
+private val CoverLyricsQuickBlendSliderHeight = 120.dp
+private val CoverLyricsQuickBlendCenterGap = 4.dp
+private val CoverLyricsQuickBlendHalfTrackHeight =
+    (CoverLyricsQuickBlendSliderHeight - CoverLyricsQuickBlendCenterGap) / 2
+private val CoverLyricsQuickBlendIconSize = 24.dp
+private val CoverLyricsButtonSpacing = 12.dp
+private val CoverLyricsOverlayPadding = 16.dp
+private val CoverLyricsBottomSpacing = 16.dp
+private val CoverLyricsQuickBlendInnerCornerRadius = 2.dp
+private val CoverLyricsQuickBlendTopTrackShape = RoundedCornerShape(
+    topStart = CoverLyricsButtonSize / 2,
+    topEnd = CoverLyricsButtonSize / 2,
+    bottomStart = CoverLyricsQuickBlendInnerCornerRadius,
+    bottomEnd = CoverLyricsQuickBlendInnerCornerRadius,
+)
+private val CoverLyricsQuickBlendBottomTrackShape = RoundedCornerShape(
+    topStart = CoverLyricsQuickBlendInnerCornerRadius,
+    topEnd = CoverLyricsQuickBlendInnerCornerRadius,
+    bottomStart = CoverLyricsButtonSize / 2,
+    bottomEnd = CoverLyricsButtonSize / 2,
+)

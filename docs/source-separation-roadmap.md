@@ -292,6 +292,96 @@ The settings sheet should be the primary progress surface. Legacy source-separat
 
 True pause should not be exposed until partial segment manifests can preserve completed work. The current full-song WAV job can be canceled, but cancellation deletes temporary work; labeling that action as "Pause" would be misleading.
 
+### Cover Lyrics Quick Blend Control
+
+The lyrics-on-cover surface can host a compact source-separation quick control above the existing full-lyrics button. This should not replace the full source separation settings sheet; it is a fast path for the most common listening adjustment while lyrics are visible.
+
+The implementation should live in the shared Compose cover lyrics layer, not in each player style layout:
+
+- `CoverLyricsScreen` already owns the full-lyrics circular button and is reused by the player styles that support cover lyrics.
+- The quick control should be stacked with the full-lyrics button in one bottom-end overlay column.
+- Player styles that do not support cover lyrics, such as FullCover and Peek, do not need this control in the first pass.
+
+The closed state should be a circular `FilledIconButton` matching the existing full-lyrics button style:
+
+- icon: `ic_stem_blend_outline_24dp`,
+- size and bottom/end margin: match the full-lyrics button,
+- click behavior: enable separated playback using the current active blend, then morph or swap into the expanded vertical blend control.
+
+The expanded state should be a dedicated custom Compose control rather than a rotated Material `Slider`:
+
+- width: the same as the circular full-lyrics button,
+- height: three times that width,
+- shape: two separated vertical capsule segments with a small center gap at the neutral blend point,
+- the center cut ends should use a small corner radius so the split track still feels polished,
+- no Material slider thumb and no current-position handle,
+- the neutral 50% blend state should show no active fill,
+- progress fill should start at the center gap and extend toward the vocals end or instrumental end depending on the active blend,
+- the inactive track should match Material Slider inactive color behavior by using the same base color at low alpha,
+- top and bottom endpoint icons should currently reuse `ic_person_24dp` and `ic_speaker_24dp`,
+- colors should follow the active `PlayerTheme`; the first visual prototype uses `onSurface` as the base track color for both filled and inactive segments.
+
+Reason for a custom control:
+
+- The settings sheet's Stem blend slider uses a horizontal Material3 `Slider` plus `SliderDefaults.CenteredTrack`.
+- The quick control needs a vertical track, no thumb, custom tap zones, custom drag snapping, and overlaid endpoint icons.
+- Rotating the existing slider would make pointer mapping, thumb removal, semantics, and layout harder than a small purpose-built Canvas/pointer-input control.
+
+Current visual prototype status:
+
+- The cover lyrics overlay now uses a bottom-end column that stacks the source-separation quick control above the full-lyrics button.
+- The quick control switches visually with `sourceSeparationBlendModeFlow`: `Off` shows a circular outline stem-blend button, and enabled modes show the expanded vertical preview.
+- The expanded preview is 40dp wide and 120dp tall, split into two 58dp track segments with a 4dp neutral center gap.
+- The outer ends are capsule-rounded; the center cut ends use 2dp corner radii.
+- The current prototype intentionally has no click, drag, or real blend-position rendering yet. It displays the neutral 50% state as two inactive segments with no active fill.
+- The lyrics bottom avoidance is already content-padding based and changes with the quick-control visual height, so the lyrics viewport is not shortened.
+
+State synchronization should use the same source of truth as the settings sheet:
+
+- collect `sourceSeparationBlendModeFlow` to decide whether the quick control is closed or expanded,
+- collect `sourceSeparationPlaybackStateFlow.blend` for the current displayed blend value,
+- call `setSourceSeparationPlaybackEnabled(true, blend)` when the closed button is pressed,
+- call `setSourceSeparationBlend(value)` during drag updates and at drag finish,
+- call `setSourceSeparationPlaybackEnabled(false)` when the center tap zone is pressed,
+- do not create an independent quick-control blend setting.
+
+Interaction rules:
+
+- Dragging inside the expanded vertical control continuously maps pointer Y to blend.
+- The top maps to the vocals-only end and the bottom maps to the instrumental-only end, matching the horizontal sheet labels.
+- A small snap region around the vertical midpoint should snap the value to the neutral center blend.
+- Tapping is handled differently from dragging:
+  - top third: set blend to vocals-only,
+  - middle third: turn separated playback off without changing the stored blend,
+  - bottom third: set blend to instrumental-only.
+- The control should distinguish tap vs drag with touch slop so a slight finger movement does not accidentally invoke the three-zone tap behavior.
+
+Lyrics bottom spacing should remain content-padding based:
+
+- Do not shrink the lyrics viewport by adding outer bottom padding to `LyricsSurface`.
+- Instead, increase only the scrollable lyrics content's bottom padding so the last line can scroll above the overlay.
+- The extra bottom padding should be dynamic:
+  - closed quick button + full-lyrics button: enough for two stacked circular buttons plus spacing and margin,
+  - expanded quick blend control + full-lyrics button: enough for the vertical control, full-lyrics button, spacing, and margin.
+- The same padding override should apply to both plain lyrics and synced lyrics.
+
+Suggested first implementation steps:
+
+1. Keep the current content-padding-based lyrics-bottom-avoidance experiment and parameterize the extra bottom padding by overlay height.
+2. Replace the single full-lyrics button overlay with a bottom-end column that contains a placeholder quick source-separation button above the full-lyrics button.
+3. Wire the closed button to `PlayerViewModel` separated-playback state and verify it opens/closes in sync with the settings sheet.
+4. Add the custom vertical blend control with Canvas drawing and pointer-input handling.
+5. Add center snapping for drag only.
+6. Add top/middle/bottom tap zones.
+7. Add endpoint stem icons after the final icon assets are drawn.
+8. Verify on supported player styles and with both plain and synced lyrics.
+
+Open polish decisions:
+
+- Whether the closed-to-expanded transition should be an `AnimatedContent` size transform or a simple state swap for the first prototype.
+- Exact middle snap threshold; start conservatively around a few percent of the track height and tune by device testing.
+- Whether the quick control should show per-song/global mode distinction visually or remain a simple separated-playback quick blend regardless of memory mode.
+
 ### Boundary and Finalization Strategy
 
 There are three separate boundary concerns:
@@ -894,11 +984,13 @@ Goals:
 - Show cache size and model/pipeline information.
 - Allow deleting a single song's separated cache.
 - Allow deleting the current song's separated cache from the settings sheet.
+- Add a compact cover-lyrics quick control for enabling separated playback and adjusting the active stem blend without opening the full settings sheet.
 - Consider an optional "delete all separated tracks" action.
 
 Done criteria:
 
 - The source separation sheet contains the master switch, per-song memory switch, blend slider, current song progress, pause/resume or stop controls, current-song cache deletion, manual FLAC promotion, and advanced diagnostic settings.
+- The cover-lyrics quick control appears above the full-lyrics button on player styles that support cover lyrics, stays synchronized with the settings sheet, and adjusts separated playback/blend without introducing stem desync or source leakage.
 - The old `Separate vocals` and `Separated playback` overflow actions have been removed.
 - Detailed processing progress no longer depends on an indefinite Snackbar, and all source-separation Snackbar messages are hidden by default behind an advanced setting.
 - The user can find all cached separated songs.
@@ -951,9 +1043,8 @@ The early milestone ordering was deliberately modest:
 
 The first seven items now exist in prototype form. The current preferred order is:
 
-1. Harden playback-head-driven segment scheduling for seek and song-change behavior.
-2. Define partial-cache pause/resume/recovery semantics.
-3. Feed current/next segment readiness and scheduler priority into the source separation sheet.
-4. Promote completed segment timelines to FLAC and clean temporary WAV work files safely.
-5. Finish cache management and remove the older temporary menu/Snackbar surfaces.
-6. Expand window-decode profiles only after the core live playback path is stable.
+1. Implement the cover-lyrics quick blend control as the next UX step, using content-padding-based lyric avoidance and a custom vertical Canvas/pointer-input control.
+2. Feed current/next segment readiness and scheduler priority into the source separation sheet.
+3. Finish cache management and remove the older temporary menu/Snackbar surfaces.
+4. Revisit background and thermal behavior after the foreground quick-control and settings-sheet UX are stable.
+5. Expand window-decode profiles only after the core live playback path remains stable in daily use.
