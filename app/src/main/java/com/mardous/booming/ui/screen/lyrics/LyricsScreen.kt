@@ -10,6 +10,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
@@ -52,11 +55,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.keepScreenOn
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.rememberNestedScrollInteropConnection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -91,6 +96,7 @@ import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
 import com.mardous.booming.ui.theme.PlayerTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 sealed class LyricsUiState(open val id: Long) {
     data class Loading(override val id: Long) : LyricsUiState(id)
@@ -266,6 +272,9 @@ fun CoverLyricsScreen(
         val sourceSeparationBlendMode by playerViewModel
             .sourceSeparationBlendModeFlow
             .collectAsStateWithLifecycle()
+        val sourceSeparationPlaybackState by playerViewModel
+            .sourceSeparationPlaybackStateFlow
+            .collectAsStateWithLifecycle()
         val quickBlendExpanded = sourceSeparationBlendMode != SourceSeparationBlendMode.Off
         val quickBlendHeight = if (quickBlendExpanded) {
             CoverLyricsQuickBlendSliderHeight
@@ -302,7 +311,21 @@ fun CoverLyricsScreen(
                     .align(Alignment.BottomEnd)
                     .padding(CoverLyricsOverlayPadding)
             ) {
-                CoverLyricsQuickBlendControl(expanded = quickBlendExpanded)
+                CoverLyricsQuickBlendControl(
+                    expanded = quickBlendExpanded,
+                    blend = sourceSeparationPlaybackState.blend,
+                    onEnableSeparatedPlayback = {
+                        playerViewModel.setSourceSeparationPlaybackEnabled(
+                            enabled = true,
+                            blend = sourceSeparationPlaybackState.blend
+                        )
+                    },
+                    onDisableSeparatedPlayback = {
+                        playerViewModel.setSourceSeparationPlaybackEnabled(false)
+                    },
+                    onBlendChange = playerViewModel::setSourceSeparationBlend,
+                    onBlendChangeFinished = playerViewModel::setSourceSeparationBlend
+                )
 
                 FilledIconButton(
                     modifier = Modifier.size(CoverLyricsButtonSize),
@@ -323,7 +346,14 @@ fun CoverLyricsScreen(
 }
 
 @Composable
-private fun CoverLyricsQuickBlendControl(expanded: Boolean) {
+private fun CoverLyricsQuickBlendControl(
+    expanded: Boolean,
+    blend: Float,
+    onEnableSeparatedPlayback: () -> Unit,
+    onDisableSeparatedPlayback: () -> Unit,
+    onBlendChange: (Float) -> Unit,
+    onBlendChangeFinished: (Float) -> Unit,
+) {
     val transition = updateTransition(expanded, label = "CoverLyricsQuickBlend")
     val height by transition.animateDp(
         transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
@@ -375,7 +405,14 @@ private fun CoverLyricsQuickBlendControl(expanded: Boolean) {
     }
     val colorScheme = MaterialTheme.colorScheme
     val progressColor = colorScheme.onSurface
+    val normalizedBlend = blend.coerceIn(0f, 1f)
     val trackHeight = ((height - centerGap) / 2).coerceAtLeast(0.dp)
+    val vocalsFillHeight = trackHeight *
+            ((CoverLyricsQuickBlendNeutralBlend - normalizedBlend) /
+                    CoverLyricsQuickBlendNeutralBlend).coerceIn(0f, 1f)
+    val instrumentalFillHeight = trackHeight *
+            ((normalizedBlend - CoverLyricsQuickBlendNeutralBlend) /
+                    CoverLyricsQuickBlendNeutralBlend).coerceIn(0f, 1f)
     val buttonBackgroundShape = RoundedCornerShape(CoverLyricsButtonSize / 2)
     val topTrackShape = RoundedCornerShape(
         topStart = CoverLyricsButtonSize / 2,
@@ -389,12 +426,63 @@ private fun CoverLyricsQuickBlendControl(expanded: Boolean) {
         bottomStart = CoverLyricsButtonSize / 2,
         bottomEnd = CoverLyricsButtonSize / 2,
     )
+    val viewConfiguration = LocalViewConfiguration.current
+    val touchSlop = viewConfiguration.touchSlop
+    val interactionModifier = if (expanded) {
+        Modifier.pointerInput(touchSlop) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val pointerId = down.id
+                var dragging = false
+                var latestBlend = normalizedBlend
+
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == pointerId } ?: continue
+
+                    if (!change.pressed) {
+                        if (dragging) {
+                            onBlendChangeFinished(latestBlend)
+                            change.consume()
+                        } else {
+                            coverLyricsQuickBlendHandleTap(
+                                y = change.position.y,
+                                heightPx = size.height.toFloat(),
+                                onVocalsOnly = { onBlendChangeFinished(0f) },
+                                onCenter = onDisableSeparatedPlayback,
+                                onInstrumentalOnly = { onBlendChangeFinished(1f) }
+                            )
+                        }
+                        break
+                    }
+
+                    if (!dragging &&
+                        (change.position - down.position).getDistance() > touchSlop
+                    ) {
+                        dragging = true
+                    }
+
+                    if (dragging) {
+                        latestBlend = coverLyricsQuickBlendValueForY(
+                            y = change.position.y,
+                            heightPx = size.height.toFloat()
+                        )
+                        onBlendChange(latestBlend)
+                        change.consume()
+                    }
+                }
+            }
+        }
+    } else {
+        Modifier.clickable(onClick = onEnableSeparatedPlayback)
+    }
     Box(
         modifier = Modifier
             .size(
                 width = CoverLyricsButtonSize,
                 height = height
             )
+            .then(interactionModifier)
     ) {
         Box(
             modifier = Modifier
@@ -413,7 +501,18 @@ private fun CoverLyricsQuickBlendControl(expanded: Boolean) {
                 )
                 .clip(topTrackShape)
                 .background(progressColor.copy(alpha = trackAlpha))
-        )
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .size(
+                        width = CoverLyricsButtonSize,
+                        height = vocalsFillHeight
+                    )
+                    .background(progressColor.copy(alpha = endpointIconAlpha))
+            )
+        }
 
         Box(
             modifier = Modifier
@@ -425,7 +524,18 @@ private fun CoverLyricsQuickBlendControl(expanded: Boolean) {
                 )
                 .clip(bottomTrackShape)
                 .background(progressColor.copy(alpha = trackAlpha))
-        )
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .size(
+                        width = CoverLyricsButtonSize,
+                        height = instrumentalFillHeight
+                    )
+                    .background(progressColor.copy(alpha = endpointIconAlpha))
+            )
+        }
 
         Icon(
             painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
@@ -457,6 +567,34 @@ private fun CoverLyricsQuickBlendControl(expanded: Boolean) {
                 .alpha(endpointIconAlpha)
                 .size(CoverLyricsQuickBlendIconSize)
         )
+    }
+}
+
+private fun coverLyricsQuickBlendValueForY(y: Float, heightPx: Float): Float {
+    if (heightPx <= 0f) return CoverLyricsQuickBlendNeutralBlend
+    val rawBlend = (y / heightPx).coerceIn(0f, 1f)
+    return if (abs(rawBlend - CoverLyricsQuickBlendNeutralBlend) <=
+        CoverLyricsQuickBlendNeutralSnapThreshold
+    ) {
+        CoverLyricsQuickBlendNeutralBlend
+    } else {
+        rawBlend
+    }
+}
+
+private fun coverLyricsQuickBlendHandleTap(
+    y: Float,
+    heightPx: Float,
+    onVocalsOnly: () -> Unit,
+    onCenter: () -> Unit,
+    onInstrumentalOnly: () -> Unit,
+) {
+    val topThird = heightPx / 3f
+    val bottomThird = topThird * 2f
+    when {
+        y < topThird -> onVocalsOnly()
+        y > bottomThird -> onInstrumentalOnly()
+        else -> onCenter()
     }
 }
 
@@ -584,6 +722,8 @@ private val CoverLyricsButtonSpacing = 12.dp
 private val CoverLyricsOverlayPadding = 16.dp
 private val CoverLyricsBottomSpacing = 16.dp
 private val CoverLyricsQuickBlendInnerCornerRadius = 2.dp
+private const val CoverLyricsQuickBlendNeutralBlend = 0.5f
+private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.05f
 private fun coverLyricsQuickBlendDpTransitionSpec() =
     tween<Dp>(
         durationMillis = 260,
