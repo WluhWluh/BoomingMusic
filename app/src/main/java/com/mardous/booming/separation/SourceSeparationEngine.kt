@@ -185,6 +185,64 @@ class SourceSeparationEngine(
         }
     }
 
+    fun runningCacheReadyHorizonForSong(
+        song: Song,
+        playbackPositionMs: Long,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): SourceSeparationReadyHorizonStatus {
+        require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
+        val manifest = cache.readEntry(song, modelVariant)
+            ?: return SourceSeparationReadyHorizonStatus.Unavailable
+        if (manifest.state == SourceSeparationCacheState.Completed) {
+            return SourceSeparationReadyHorizonStatus.Completed(manifest)
+        }
+        if (manifest.state != SourceSeparationCacheState.Running) {
+            return SourceSeparationReadyHorizonStatus.Unavailable
+        }
+        if (!manifest.hasUsableOutputFiles()) {
+            return SourceSeparationReadyHorizonStatus.Processing
+        }
+
+        val snapshot = cache.readSegmentSnapshot(manifest)
+            ?: return SourceSeparationReadyHorizonStatus.Processing
+        val sampleRate = snapshot.segmentPlan.sampleRate.takeIf { it > 0 }
+            ?: return SourceSeparationReadyHorizonStatus.Processing
+        if (snapshot.segments.isEmpty()) {
+            return SourceSeparationReadyHorizonStatus.Processing
+        }
+
+        val positionMs = playbackPositionMs.coerceAtLeast(0L)
+        val frame = ((positionMs * sampleRate) / 1000L)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+        val segmentIndex = snapshot.segmentPlan.segmentIndexForFrame(frame)
+        val currentSegment = snapshot.segments.getOrNull(segmentIndex)
+            ?: return SourceSeparationReadyHorizonStatus.Processing
+        if (!currentSegment.isReady) {
+            return SourceSeparationReadyHorizonStatus.Processing
+        }
+
+        var readyThroughSegmentIndex = segmentIndex
+        var readyUntilFrame = currentSegment.segment.playbackEndFrame
+        for (index in (segmentIndex + 1)..snapshot.segments.lastIndex) {
+            val segment = snapshot.segments[index]
+            if (!segment.isReady) break
+            readyThroughSegmentIndex = index
+            readyUntilFrame = segment.segment.playbackEndFrame
+        }
+
+        val readyUntilMs = (readyUntilFrame.toLong() * 1000L) / sampleRate
+        return SourceSeparationReadyHorizonStatus.Ready(
+            manifest = manifest,
+            positionMs = positionMs,
+            readyUntilMs = readyUntilMs,
+            readyAheadMs = (readyUntilMs - positionMs).coerceAtLeast(0L),
+            segmentIndex = segmentIndex,
+            readyThroughSegmentIndex = readyThroughSegmentIndex,
+            readyThroughEnd = readyThroughSegmentIndex == snapshot.segments.lastIndex,
+        )
+    }
+
     fun playableCacheDebugInfoForSong(
         song: Song,
         playbackPositionMs: Long,
@@ -389,6 +447,22 @@ sealed class SourceSeparationPlayableCacheStatus {
     data class Ready(val manifest: SourceSeparationManifest) : SourceSeparationPlayableCacheStatus()
     data object Processing : SourceSeparationPlayableCacheStatus()
     data object Unavailable : SourceSeparationPlayableCacheStatus()
+}
+
+sealed class SourceSeparationReadyHorizonStatus {
+    data class Ready(
+        val manifest: SourceSeparationManifest,
+        val positionMs: Long,
+        val readyUntilMs: Long,
+        val readyAheadMs: Long,
+        val segmentIndex: Int,
+        val readyThroughSegmentIndex: Int,
+        val readyThroughEnd: Boolean,
+    ) : SourceSeparationReadyHorizonStatus()
+
+    data class Completed(val manifest: SourceSeparationManifest) : SourceSeparationReadyHorizonStatus()
+    data object Processing : SourceSeparationReadyHorizonStatus()
+    data object Unavailable : SourceSeparationReadyHorizonStatus()
 }
 
 data class SourceSeparationPlayableCacheDebugInfo(

@@ -100,6 +100,7 @@ import com.mardous.booming.playback.renderer.AlacWorkaroundCodecSelector
 import com.mardous.booming.playback.renderer.BoomingMusicRenderersFactory
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.SourceSeparationPlayableCacheStatus
+import com.mardous.booming.separation.SourceSeparationReadyHorizonStatus
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import com.mardous.booming.separation.cache.SourceSeparationCacheState
 import com.mardous.booming.separation.cache.SourceSeparationManifest
@@ -217,6 +218,8 @@ class PlaybackService :
     private var sourceSeparationPlaybackInternalPlayWhenReady: Boolean? = null
     private val sourceSeparationPlaybackReadinessMutex = Mutex()
     private var sourceSeparationPlaybackGateJob: Job? = null
+    private var sourceSeparationPlaybackReadinessMonitorJob: Job? = null
+    private var sourceSeparationPlaybackReadinessMonitorSessionId: Long? = null
     private var sourceSeparationPlaybackTraceFile: File? = null
     private var sourceSeparationPlaybackTraceFlushJob: Job? = null
     private var sourceSeparationOutputMuteJob: Job? = null
@@ -436,6 +439,7 @@ class PlaybackService :
     override fun onDestroy() {
         traceSourceSeparationPlayback("service.onDestroy")
         flushSourceSeparationPlaybackTrace()
+        cancelSourceSeparationPlaybackReadinessMonitor("serviceDestroy")
         cancelSourceSeparationPcmHydrationJob(deletePartial = false)
         super.onDestroy()
         if (bluetoothConnectedRegistered) {
@@ -1490,6 +1494,7 @@ class PlaybackService :
                             requiresReadinessGate = status.manifest.state == SourceSeparationCacheState.Running,
                         )
                         sourceSeparationPlaybackSession = updatedSession
+                        updateSourceSeparationPlaybackReadinessMonitor(updatedSession)
                         if (wasProcessing) {
                             realignSourceSeparationPlaybackAfterProcessing(
                                 session = updatedSession,
@@ -1703,6 +1708,7 @@ class PlaybackService :
         setSourceSeparationPlaybackExpectProcessing(false)
         sourceSeparationPlaybackSession = session
         enableSourceSeparationMixProcessor(session, positionMs)
+        updateSourceSeparationPlaybackReadinessMonitor(session)
         withSourceSeparationInternalMediaItemChange {
             if (session.replacesQueueMediaItem) {
                 player.replaceMediaItem(index, playbackMediaItem)
@@ -1832,6 +1838,7 @@ class PlaybackService :
         sourceSeparationPlaybackResumeWhenReady = false
         sourceSeparationPlaybackSession = session
         enableSourceSeparationMixProcessor(session, positionMs)
+        updateSourceSeparationPlaybackReadinessMonitor(session)
         withSourceSeparationInternalMediaItemChange {
             if (session.replacesQueueMediaItem) {
                 player.replaceMediaItem(index, playbackMediaItem)
@@ -2344,6 +2351,7 @@ class PlaybackService :
             pauseSourceSeparationOutputForSwitch("clear")
         }
         sourceSeparationPlaybackSession = null
+        cancelSourceSeparationPlaybackReadinessMonitor("clear")
         sourceSeparationMixProcessor.disable()
         sourceSeparationPlaybackIsProcessing = false
         rememberWarmSourceSeparationHydration(session)
@@ -2460,6 +2468,152 @@ class PlaybackService :
             resultCode = SessionResult.RESULT_SUCCESS,
             message = message,
         )
+    }
+
+    private fun updateSourceSeparationPlaybackReadinessMonitor(
+        session: SourceSeparationPlaybackSession?,
+    ) {
+        if (session?.requiresReadinessGate != true || !sourceSeparationPlaybackRequested) {
+            cancelSourceSeparationPlaybackReadinessMonitor("notRunningCache")
+            return
+        }
+        if (sourceSeparationPlaybackReadinessMonitorJob?.isActive == true &&
+            sourceSeparationPlaybackReadinessMonitorSessionId == session.sessionId
+        ) {
+            return
+        }
+        cancelSourceSeparationPlaybackReadinessMonitor("restart")
+        sourceSeparationPlaybackReadinessMonitorSessionId = session.sessionId
+        sourceSeparationPlaybackReadinessMonitorJob = serviceScope.launch {
+            val monitorJob = coroutineContext[Job]
+            traceSourceSeparationPlayback(
+                "playback.readinessMonitor.start",
+                "songId=${session.songId} session=${session.sessionId}"
+            )
+            var lowHorizonCount = 0
+            try {
+                while (true) {
+                    delay(SOURCE_SEPARATION_READINESS_MONITOR_DELAY_MS)
+                    val activeSession = sourceSeparationPlaybackSession
+                    if (!sourceSeparationPlaybackRequested ||
+                        activeSession?.sessionId != session.sessionId ||
+                        !activeSession.requiresReadinessGate
+                    ) {
+                        break
+                    }
+                    if (sourceSeparationPlaybackIsProcessing || !player.playWhenReady) {
+                        continue
+                    }
+                    val positionMs = player.currentPosition.coerceAtLeast(0)
+                    val horizon = withContext(IO) {
+                        runCatching {
+                            sourceSeparationEngine.runningCacheReadyHorizonForSong(
+                                song = repository.songById(activeSession.songId),
+                                playbackPositionMs = positionMs,
+                            )
+                        }.getOrDefault(SourceSeparationReadyHorizonStatus.Unavailable)
+                    }
+                    if (sourceSeparationPlaybackSession?.sessionId != session.sessionId ||
+                        !sourceSeparationPlaybackRequested
+                    ) {
+                        break
+                    }
+                    when (horizon) {
+                        is SourceSeparationReadyHorizonStatus.Ready -> {
+                            if (horizon.readyThroughEnd ||
+                                horizon.readyAheadMs > SOURCE_SEPARATION_READY_HORIZON_GATE_MARGIN_MS
+                            ) {
+                                lowHorizonCount = 0
+                            } else {
+                                lowHorizonCount += 1
+                                traceSourceSeparationPlayback(
+                                    "playback.readinessMonitor.lowHorizon",
+                                    "songId=${session.songId} session=${session.sessionId} " +
+                                            "position=$positionMs readyAhead=${horizon.readyAheadMs} " +
+                                            "readyUntil=${horizon.readyUntilMs} " +
+                                            "segment=${horizon.segmentIndex} " +
+                                            "readyThrough=${horizon.readyThroughSegmentIndex} " +
+                                            "count=$lowHorizonCount"
+                                )
+                                if (lowHorizonCount >=
+                                    SOURCE_SEPARATION_READY_HORIZON_GATE_CONFIRM_COUNT
+                                ) {
+                                    waitForSourceSeparationPlayback(
+                                        source = "readinessMonitor",
+                                        restoreOriginalItem = false,
+                                        allowPause = true,
+                                        resumeWhenReady = true,
+                                        showMessage = false,
+                                    )
+                                    break
+                                }
+                            }
+                        }
+                        is SourceSeparationReadyHorizonStatus.Completed -> {
+                            traceSourceSeparationPlayback(
+                                "playback.readinessMonitor.completed",
+                                "songId=${session.songId} session=${session.sessionId} position=$positionMs"
+                            )
+                            serviceScope.launch {
+                                ensureSourceSeparationPlaybackReady(
+                                    showUnavailableMessage = false,
+                                    preferCompletedCache = true,
+                                )
+                            }
+                            break
+                        }
+                        SourceSeparationReadyHorizonStatus.Processing -> {
+                            lowHorizonCount += 1
+                            traceSourceSeparationPlayback(
+                                "playback.readinessMonitor.processing",
+                                "songId=${session.songId} session=${session.sessionId} " +
+                                        "position=$positionMs count=$lowHorizonCount"
+                            )
+                            if (lowHorizonCount >=
+                                SOURCE_SEPARATION_READY_HORIZON_GATE_CONFIRM_COUNT
+                            ) {
+                                waitForSourceSeparationPlayback(
+                                    source = "readinessMonitor",
+                                    restoreOriginalItem = false,
+                                    allowPause = true,
+                                    resumeWhenReady = true,
+                                    showMessage = false,
+                                )
+                                break
+                            }
+                        }
+                        SourceSeparationReadyHorizonStatus.Unavailable -> {
+                            traceSourceSeparationPlayback(
+                                "playback.readinessMonitor.unavailable",
+                                "songId=${session.songId} session=${session.sessionId} position=$positionMs"
+                            )
+                            break
+                        }
+                    }
+                }
+            } finally {
+                if (sourceSeparationPlaybackReadinessMonitorJob == monitorJob) {
+                    sourceSeparationPlaybackReadinessMonitorSessionId = null
+                    sourceSeparationPlaybackReadinessMonitorJob = null
+                }
+                traceSourceSeparationPlayback(
+                    "playback.readinessMonitor.stop",
+                    "songId=${session.songId} session=${session.sessionId}"
+                )
+            }
+        }
+    }
+
+    private fun cancelSourceSeparationPlaybackReadinessMonitor(reason: String) {
+        if (sourceSeparationPlaybackReadinessMonitorJob != null) {
+            traceSourceSeparationPlayback(
+                "playback.readinessMonitor.cancel",
+                "reason=$reason session=$sourceSeparationPlaybackReadinessMonitorSessionId"
+            )
+        }
+        sourceSeparationPlaybackReadinessMonitorJob?.cancel()
+        sourceSeparationPlaybackReadinessMonitorJob = null
+        sourceSeparationPlaybackReadinessMonitorSessionId = null
     }
 
     private fun gateSourceSeparationPlaybackTransition(
@@ -3375,6 +3529,9 @@ class PlaybackService :
         private const val REWIND_INSTEAD_PREVIOUS_MILLIS = 5000L
         private const val SOURCE_SEPARATION_PROCESSING_RETRY_DELAY_MS = 500L
         private const val SOURCE_SEPARATION_READY_RETRY_DELAY_MS = 2000L
+        private const val SOURCE_SEPARATION_READINESS_MONITOR_DELAY_MS = 250L
+        private const val SOURCE_SEPARATION_READY_HORIZON_GATE_MARGIN_MS = 250L
+        private const val SOURCE_SEPARATION_READY_HORIZON_GATE_CONFIRM_COUNT = 2
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_DELAY_MS = 120L
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_FALLBACK_DELAY_MS = 1500L
         private const val SOURCE_SEPARATION_INTERNAL_MEDIA_ITEM_CHANGE_MS = 500L
