@@ -96,10 +96,10 @@ fun rememberSourceSeparationPlaybackProcessingProgressState(
     val estimatedWindowMs = (averageWindowMs * PROGRESS_WINDOW_ESTIMATE_SCALE)
         .toLong()
         .coerceAtLeast(MIN_SOURCE_SEPARATION_PROGRESS_WINDOW_MS)
+    val effectiveProgressSongId = processingSongId ?: runningState?.songId
     val progressSessionKey = listOf(
         processingGeneration,
-        processingSongId,
-        runningState?.songId,
+        effectiveProgressSongId,
     )
     val progressPhaseKey = progressSessionKey + listOf(
         scheduler?.playbackSegmentIndex,
