@@ -160,6 +160,15 @@ private fun SourceSeparationSettingsSheet(
     val autoStartSeparation by viewModel
         .sourceSeparationAutoStartFlow
         .collectAsState()
+    val autoCacheCleanup by viewModel
+        .sourceSeparationAutoCacheCleanupFlow
+        .collectAsState()
+    val autoCacheCleanupPartialLimit by viewModel
+        .sourceSeparationAutoCacheCleanupPartialLimitFlow
+        .collectAsState()
+    val autoCacheCleanupCompletedLimit by viewModel
+        .sourceSeparationAutoCacheCleanupCompletedLimitFlow
+        .collectAsState()
     val cacheManagementState by viewModel
         .sourceSeparationCacheManagementStateFlow
         .collectAsState()
@@ -206,10 +215,16 @@ private fun SourceSeparationSettingsSheet(
             if (page == SourceSeparationSettingsPage.CacheManagement) {
                 SourceSeparationCacheManagementPage(
                     state = cacheManagementState,
+                    autoCleanupEnabled = autoCacheCleanup,
+                    partialLimit = autoCacheCleanupPartialLimit,
+                    completedLimit = autoCacheCleanupCompletedLimit,
                     onBack = { page = SourceSeparationSettingsPage.Main },
                     onRefresh = viewModel::refreshSourceSeparationCacheManagement,
                     onDeleteAll = viewModel::deleteAllSourceSeparationCaches,
                     onDelete = viewModel::deleteSourceSeparationCacheEntry,
+                    onAutoCleanupChange = viewModel::setSourceSeparationAutoCacheCleanupEnabled,
+                    onPartialLimitChange = viewModel::setSourceSeparationAutoCacheCleanupPartialLimit,
+                    onCompletedLimitChange = viewModel::setSourceSeparationAutoCacheCleanupCompletedLimit,
                 )
                 return@Column
             }
@@ -634,11 +649,24 @@ private fun SourceSeparationSettingsSheet(
 @Composable
 private fun SourceSeparationCacheManagementPage(
     state: SourceSeparationCacheManagementUiState,
+    autoCleanupEnabled: Boolean,
+    partialLimit: Int,
+    completedLimit: Int,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onDeleteAll: () -> Unit,
     onDelete: (String) -> Unit,
+    onAutoCleanupChange: (Boolean) -> Unit,
+    onPartialLimitChange: (Int) -> Unit,
+    onCompletedLimitChange: (Int) -> Unit,
 ) {
+    val partialItems = state.items
+        .filter { item -> item.state == SourceSeparationCacheManagementItemState.Partial }
+        .sortedByDescending { item -> item.lastAccessedAtEpochMs }
+    val completedItems = state.items
+        .filter { item -> item.state == SourceSeparationCacheManagementItemState.Completed }
+        .sortedByDescending { item -> item.lastAccessedAtEpochMs }
+
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -689,6 +717,59 @@ private fun SourceSeparationCacheManagementPage(
                             MaterialTheme.colorScheme.onSurfaceVariant
                         }
                     )
+                }
+            }
+        }
+
+        item {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(
+                        alpha = SurfaceColorTokens.SurfaceVariantAlpha
+                    )
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column {
+                    LabeledSwitch(
+                        checked = autoCleanupEnabled,
+                        title = stringResource(R.string.source_separation_auto_cache_cleanup_title),
+                        description = stringResource(
+                            R.string.source_separation_auto_cache_cleanup_description
+                        ),
+                        onStateChange = onAutoCleanupChange,
+                    )
+
+                    AnimatedVisibility(visible = autoCleanupEnabled) {
+                        Column {
+                            NumberSettingField(
+                                value = partialLimit,
+                                title = stringResource(
+                                    R.string.source_separation_auto_cache_cleanup_partial_limit_title
+                                ),
+                                description = stringResource(
+                                    R.string.source_separation_auto_cache_cleanup_partial_limit_description
+                                ),
+                                suffix = stringResource(
+                                    R.string.source_separation_cache_song_limit_suffix
+                                ),
+                                onValueChange = onPartialLimitChange,
+                            )
+                            NumberSettingField(
+                                value = completedLimit,
+                                title = stringResource(
+                                    R.string.source_separation_auto_cache_cleanup_completed_limit_title
+                                ),
+                                description = stringResource(
+                                    R.string.source_separation_auto_cache_cleanup_completed_limit_description
+                                ),
+                                suffix = stringResource(
+                                    R.string.source_separation_cache_song_limit_suffix
+                                ),
+                                onValueChange = onCompletedLimitChange,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -751,17 +832,55 @@ private fun SourceSeparationCacheManagementPage(
             }
         }
 
-        items(
-            items = state.items,
-            key = { item -> item.id },
-        ) { item ->
-            SourceSeparationCacheManagementRow(
-                item = item,
-                deleting = item.id in state.deletingEntryIds,
-                onDelete = { onDelete(item.id) },
-            )
+        if (partialItems.isNotEmpty()) {
+            item {
+                SourceSeparationCacheSectionHeader(
+                    title = stringResource(R.string.source_separation_cache_section_partial)
+                )
+            }
+            items(
+                items = partialItems,
+                key = { item -> item.id },
+            ) { item ->
+                SourceSeparationCacheManagementRow(
+                    item = item,
+                    deleting = item.id in state.deletingEntryIds,
+                    onDelete = { onDelete(item.id) },
+                )
+            }
+        }
+
+        if (completedItems.isNotEmpty()) {
+            item {
+                SourceSeparationCacheSectionHeader(
+                    title = stringResource(R.string.source_separation_cache_section_completed)
+                )
+            }
+            items(
+                items = completedItems,
+                key = { item -> item.id },
+            ) { item ->
+                SourceSeparationCacheManagementRow(
+                    item = item,
+                    deleting = item.id in state.deletingEntryIds,
+                    onDelete = { onDelete(item.id) },
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun SourceSeparationCacheSectionHeader(
+    title: String,
+) {
+    Text(
+        text = title,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp),
+    )
 }
 
 @Composable
@@ -869,6 +988,10 @@ private fun SourceSeparationCacheManagementRow(
                 SourceSeparationCacheMetadataRow(
                     label = stringResource(R.string.source_separation_cache_updated_label),
                     value = context.dateStr(item.updatedAtEpochMs),
+                )
+                SourceSeparationCacheMetadataRow(
+                    label = stringResource(R.string.source_separation_cache_accessed_label),
+                    value = context.dateStr(item.lastAccessedAtEpochMs),
                 )
                 SourceSeparationCacheMetadataRow(
                     label = stringResource(R.string.source_separation_cache_model_label),

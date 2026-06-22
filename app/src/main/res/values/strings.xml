@@ -84,9 +84,18 @@
     <string name="source_separation_playback_ready_windows_description">Require this many consecutive separated windows before resuming paused separated playback.</string>
     <string name="source_separation_playback_ready_windows_suffix">windows</string>
     <string name="source_separation_manage_caches">Manage separated caches</string>
+    <string name="source_separation_auto_cache_cleanup_title">Automatically clean separated caches</string>
+    <string name="source_separation_auto_cache_cleanup_description">Keep cache counts under the limits below, deleting least recently used songs first.</string>
+    <string name="source_separation_auto_cache_cleanup_partial_limit_title">Partial cache song limit</string>
+    <string name="source_separation_auto_cache_cleanup_partial_limit_description">Maximum number of partially separated songs to keep.</string>
+    <string name="source_separation_auto_cache_cleanup_completed_limit_title">Completed cache song limit</string>
+    <string name="source_separation_auto_cache_cleanup_completed_limit_description">Maximum number of completed separated songs to keep.</string>
+    <string name="source_separation_cache_song_limit_suffix">songs</string>
     <string name="source_separation_cache_management_summary">%1$d cached songs, %2$s total.</string>
     <string name="source_separation_cache_management_empty">No separated caches yet.</string>
     <string name="source_separation_cache_management_load_failed">Couldn\'t load separated caches: %1$s</string>
+    <string name="source_separation_cache_section_partial">Partial</string>
+    <string name="source_separation_cache_section_completed">Completed</string>
     <string name="source_separation_delete_all_caches">Delete all separated caches</string>
     <string name="source_separation_deleting_all_caches">Deleting all separated caches...</string>
     <string name="source_separation_cache_state_label">State</string>
@@ -99,6 +108,7 @@
     <string name="source_separation_cache_format_unknown">Unknown</string>
     <string name="source_separation_cache_size_label">Size</string>
     <string name="source_separation_cache_updated_label">Updated</string>
+    <string name="source_separation_cache_accessed_label">Last used</string>
     <string name="source_separation_cache_model_label">Model</string>
     <string name="source_separation_preparing">Preparing source separation...</string>
     <string name="source_separation_processing_windows">Processing audio windows</string>

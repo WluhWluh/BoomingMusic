@@ -51,6 +51,9 @@ import com.mardous.booming.separation.cache.SourceSeparationCacheEntryFormat
 import com.mardous.booming.separation.cache.SourceSeparationCacheEntryState
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
 import com.mardous.booming.util.Preferences
 import com.mardous.booming.util.REMEMBER_SHUFFLE_MODE
@@ -59,8 +62,12 @@ import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_M
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.MIN_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_LIMIT
 import com.mardous.booming.util.MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_START
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
@@ -268,6 +275,21 @@ class PlayerViewModel(
         MutableStateFlow(readSourceSeparationPlaybackReadyWindowCount())
     val sourceSeparationPlaybackReadyWindowCountFlow =
         _sourceSeparationPlaybackReadyWindowCountFlow.asStateFlow()
+
+    private val _sourceSeparationAutoCacheCleanupFlow =
+        MutableStateFlow(readSourceSeparationAutoCacheCleanup())
+    val sourceSeparationAutoCacheCleanupFlow =
+        _sourceSeparationAutoCacheCleanupFlow.asStateFlow()
+
+    private val _sourceSeparationAutoCacheCleanupPartialLimitFlow =
+        MutableStateFlow(readSourceSeparationAutoCacheCleanupPartialLimit())
+    val sourceSeparationAutoCacheCleanupPartialLimitFlow =
+        _sourceSeparationAutoCacheCleanupPartialLimitFlow.asStateFlow()
+
+    private val _sourceSeparationAutoCacheCleanupCompletedLimitFlow =
+        MutableStateFlow(readSourceSeparationAutoCacheCleanupCompletedLimit())
+    val sourceSeparationAutoCacheCleanupCompletedLimitFlow =
+        _sourceSeparationAutoCacheCleanupCompletedLimitFlow.asStateFlow()
 
     private val internalJobs = mutableListOf<Job>()
 
@@ -659,6 +681,7 @@ class PlayerViewModel(
                 if (currentSong.id == song.id) {
                     refreshCurrentSourceSeparationCacheAvailable(song)
                 }
+                pruneSourceSeparationCachesAndRefresh()
                 requestSourceSeparationTemporaryCacheCleanup()
                 if (shouldPromoteCompletedStems) {
                     startSourceSeparationFlacPromotion(song)
@@ -837,36 +860,7 @@ class PlayerViewModel(
 
     fun refreshSourceSeparationCacheManagement() {
         viewModelScope.launch(IO) {
-            _sourceSeparationCacheManagementStateFlow.value =
-                _sourceSeparationCacheManagementStateFlow.value.copy(
-                    loading = true,
-                    errorMessage = null,
-                )
-            val result = runCatching {
-                sourceSeparationEngine.listCacheEntries()
-                    .map { entry -> entry.toUiItem() }
-            }
-            _sourceSeparationCacheManagementStateFlow.value = result.fold(
-                onSuccess = { items ->
-                    SourceSeparationCacheManagementUiState(
-                        loading = false,
-                        items = items,
-                        deletingAll = _sourceSeparationCacheManagementStateFlow
-                            .value
-                            .deletingAll,
-                        deletingEntryIds = _sourceSeparationCacheManagementStateFlow
-                            .value
-                            .deletingEntryIds
-                            .intersect(items.mapTo(mutableSetOf()) { it.id }),
-                    )
-                },
-                onFailure = { error ->
-                    SourceSeparationCacheManagementUiState(
-                        loading = false,
-                        errorMessage = error.message,
-                    )
-                },
-            )
+            loadSourceSeparationCacheManagement(pruneFirst = true)
         }
     }
 
@@ -1337,6 +1331,34 @@ class PlayerViewModel(
         _sourceSeparationPlaybackReadyWindowCountFlow.value = normalized
     }
 
+    fun setSourceSeparationAutoCacheCleanupEnabled(enabled: Boolean) {
+        preferences.edit {
+            putBoolean(SOURCE_SEPARATION_AUTO_CACHE_CLEANUP, enabled)
+        }
+        _sourceSeparationAutoCacheCleanupFlow.value = enabled
+        if (enabled) {
+            pruneSourceSeparationCachesAndRefresh()
+        }
+    }
+
+    fun setSourceSeparationAutoCacheCleanupPartialLimit(value: Int) {
+        val normalized = normalizeSourceSeparationAutoCacheCleanupLimit(value)
+        preferences.edit {
+            putInt(SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT, normalized)
+        }
+        _sourceSeparationAutoCacheCleanupPartialLimitFlow.value = normalized
+        pruneSourceSeparationCachesAndRefresh()
+    }
+
+    fun setSourceSeparationAutoCacheCleanupCompletedLimit(value: Int) {
+        val normalized = normalizeSourceSeparationAutoCacheCleanupLimit(value)
+        preferences.edit {
+            putInt(SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT, normalized)
+        }
+        _sourceSeparationAutoCacheCleanupCompletedLimitFlow.value = normalized
+        pruneSourceSeparationCachesAndRefresh()
+    }
+
     private fun applySourceSeparationSettingsForSong(
         song: Song,
         showMessage: Boolean,
@@ -1729,6 +1751,105 @@ class PlayerViewModel(
             MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
             MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
         )
+    }
+
+    private fun readSourceSeparationAutoCacheCleanup(): Boolean {
+        return preferences.getBoolean(
+            SOURCE_SEPARATION_AUTO_CACHE_CLEANUP,
+            DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP,
+        )
+    }
+
+    private fun readSourceSeparationAutoCacheCleanupPartialLimit(): Int {
+        return normalizeSourceSeparationAutoCacheCleanupLimit(
+            preferences.getInt(
+                SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT,
+                DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT,
+            )
+        )
+    }
+
+    private fun readSourceSeparationAutoCacheCleanupCompletedLimit(): Int {
+        return normalizeSourceSeparationAutoCacheCleanupLimit(
+            preferences.getInt(
+                SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT,
+                DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT,
+            )
+        )
+    }
+
+    private fun normalizeSourceSeparationAutoCacheCleanupLimit(value: Int): Int {
+        return value.coerceAtLeast(MIN_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_LIMIT)
+    }
+
+    private fun pruneSourceSeparationCachesAndRefresh() {
+        viewModelScope.launch(IO) {
+            pruneSourceSeparationCachesIfEnabled()
+            loadSourceSeparationCacheManagement(pruneFirst = false)
+        }
+    }
+
+    private fun loadSourceSeparationCacheManagement(pruneFirst: Boolean) {
+        _sourceSeparationCacheManagementStateFlow.value =
+            _sourceSeparationCacheManagementStateFlow.value.copy(
+                loading = true,
+                errorMessage = null,
+            )
+        val result = runCatching {
+            if (pruneFirst) {
+                pruneSourceSeparationCachesIfEnabled()
+            }
+            sourceSeparationEngine.listCacheEntries()
+                .map { entry -> entry.toUiItem() }
+        }
+        _sourceSeparationCacheManagementStateFlow.value = result.fold(
+            onSuccess = { items ->
+                SourceSeparationCacheManagementUiState(
+                    loading = false,
+                    items = items,
+                    deletingAll = _sourceSeparationCacheManagementStateFlow
+                        .value
+                        .deletingAll,
+                    deletingEntryIds = _sourceSeparationCacheManagementStateFlow
+                        .value
+                        .deletingEntryIds
+                        .intersect(items.mapTo(mutableSetOf()) { it.id }),
+                )
+            },
+            onFailure = { error ->
+                SourceSeparationCacheManagementUiState(
+                    loading = false,
+                    errorMessage = error.message,
+                )
+            },
+        )
+    }
+
+    private fun pruneSourceSeparationCachesIfEnabled() {
+        if (!_sourceSeparationAutoCacheCleanupFlow.value) return
+        runCatching {
+            sourceSeparationEngine.pruneCache(
+                partialLimit = _sourceSeparationAutoCacheCleanupPartialLimitFlow.value,
+                completedLimit = _sourceSeparationAutoCacheCleanupCompletedLimitFlow.value,
+                protectedSongIds = protectedSourceSeparationCacheSongIds(),
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "Failed to prune source separation caches", error)
+        }
+    }
+
+    private fun protectedSourceSeparationCacheSongIds(): Set<Long> {
+        return buildSet {
+            currentSong.id
+                .takeIf { it != Song.emptySong.id }
+                ?.let(::add)
+            sourceSeparationSongId?.let(::add)
+            sourceSeparationPendingStartSongId?.let(::add)
+            _sourceSeparationPlaybackStateFlow.value.songId?.let(::add)
+            val flacPromotionState = _sourceSeparationFlacPromotionStateFlow.value
+            flacPromotionState.runningSongId?.let(::add)
+            addAll(flacPromotionState.queuedSongIds)
+        }
     }
 
     private fun sourceSeparationBlendMode(
@@ -2260,6 +2381,7 @@ data class SourceSeparationCacheManagementItem(
     val format: SourceSeparationCacheManagementItemFormat,
     val sizeBytes: Long,
     val updatedAtEpochMs: Long,
+    val lastAccessedAtEpochMs: Long,
     val modelVariant: String,
     val pipelineVersion: Int,
     val temporaryFilesPending: Boolean,
@@ -2315,6 +2437,7 @@ private fun SourceSeparationCacheEntry.toUiItem(): SourceSeparationCacheManageme
         },
         sizeBytes = sizeBytes,
         updatedAtEpochMs = updatedAtEpochMs,
+        lastAccessedAtEpochMs = lastAccessedAtEpochMs,
         modelVariant = modelVariant,
         pipelineVersion = pipelineVersion,
         temporaryFilesPending = temporaryFilesPending,
