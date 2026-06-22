@@ -688,8 +688,8 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                 val snackbar = sourceSeparationSnackbar
                     ?.takeIf { it.isShownOrQueued }
                     ?: Snackbar.make(view, message, Snackbar.LENGTH_INDEFINITE)
-                        .setAction(R.string.action_cancel) {
-                            playerViewModel.cancelSourceSeparation()
+                        .setAction(R.string.action_pause) {
+                            playerViewModel.pauseSourceSeparation()
                         }
                         .also {
                             sourceSeparationSnackbar = it
