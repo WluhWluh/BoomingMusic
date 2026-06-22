@@ -551,13 +551,14 @@ class SourceSeparationCache(
 
         var updatedCleanup = cleanup
         var cleanedAny = false
+        val workingCacheInUse = workDir.hasActiveFile(activeFiles)
 
         val workCleanupState = cleanup.workWavCleanupState ?: cleanup.workDirCleanupState
         if (workCleanupState == SourceSeparationCleanupState.Pending) {
             val workDir = cleanup.workDirPath?.let(::File)
             val workCleaned = workDir != null &&
                     workDir.isWithin(entryDir) &&
-                    !workDir.hasActiveFile(activeFiles) &&
+                    !workingCacheInUse &&
                     (!workDir.exists() || workDir.deleteRecursively())
             if (workCleaned) {
                 updatedCleanup = updatedCleanup.copy(
@@ -573,6 +574,7 @@ class SourceSeparationCache(
             val segmentsDir = cleanup.segmentsDirPath?.let(::File)
             val segmentsCleaned = segmentsDir != null &&
                     segmentsDir.isWithin(entryDir) &&
+                    !workingCacheInUse &&
                     (!segmentsDir.exists() || segmentsDir.deleteRecursively())
             if (segmentsCleaned) {
                 updatedCleanup = updatedCleanup.copy(
