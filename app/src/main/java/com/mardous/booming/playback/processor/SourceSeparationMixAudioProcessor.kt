@@ -132,6 +132,61 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         }
     }
 
+    fun hotSwapToPcmInputs(
+        vocalsFile: File,
+        instrumentalFile: File,
+    ): Boolean {
+        val newVocalsInput = runCatching { RawPcmStemInput(vocalsFile) }
+            .getOrElse { error ->
+                traceDebug("hotSwapPcm.failed", "session=$debugSessionId stem=vocals error=${error.message}")
+                return false
+            }
+        val newInstrumentalInput = runCatching { RawPcmStemInput(instrumentalFile) }
+            .getOrElse { error ->
+                newVocalsInput.close()
+                traceDebug(
+                    "hotSwapPcm.failed",
+                    "session=$debugSessionId stem=instrumental error=${error.message}"
+                )
+                return false
+            }
+
+        synchronized(lock) {
+            val oldVocalsInput = vocalsInput
+            val oldInstrumentalInput = instrumentalInput
+            if (!active ||
+                inputMode != InputMode.OriginalSource ||
+                oldVocalsInput == null ||
+                oldInstrumentalInput == null
+            ) {
+                newVocalsInput.close()
+                newInstrumentalInput.close()
+                traceDebug(
+                    "hotSwapPcm.skip",
+                    "session=$debugSessionId active=$active mode=$inputMode " +
+                            "vocals=${oldVocalsInput != null} instrumental=${oldInstrumentalInput != null}"
+                )
+                return false
+            }
+
+            val vocalsPosition = oldVocalsInput.pcmBytePosition
+            val instrumentalPosition = oldInstrumentalInput.pcmBytePosition
+            val bytePosition = minOf(vocalsPosition, instrumentalPosition)
+            newVocalsInput.seekToPcmByte(bytePosition)
+            newInstrumentalInput.seekToPcmByte(bytePosition)
+            vocalsInput = newVocalsInput
+            instrumentalInput = newInstrumentalInput
+            oldVocalsInput.close()
+            oldInstrumentalInput.close()
+            traceDebug(
+                "hotSwapPcm",
+                "session=$debugSessionId byte=$bytePosition vocalsByte=$vocalsPosition " +
+                        "instrumentalByte=$instrumentalPosition"
+            )
+            return true
+        }
+    }
+
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         traceDebug(
             "onConfigure",
@@ -167,8 +222,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         val frameSize = inputAudioFormat.channelCount * BYTES_PER_SAMPLE
         val frames = remaining / frameSize
         val bytesToRead = frames * frameSize
-        val bytesRead = readVocals(bytesToRead)
-        val instrumentalBytesRead = readInstrumental(bytesToRead)
+        val stemReadResult = readStems(bytesToRead)
+        val bytesRead = stemReadResult.vocalsBytesRead
+        val instrumentalBytesRead = stemReadResult.instrumentalBytesRead
 
         if (bytesRead == null) {
             queueUnmixedInput(inputBuffer, buffer, remaining, "vocals-null")
@@ -245,31 +301,27 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         outputBuffer.flip()
     }
 
-    private fun readVocals(byteCount: Int): Int? {
+    private fun readStems(byteCount: Int): StemReadResult {
         return synchronized(lock) {
-            val input = vocalsInput
-            if (!active || input == null) {
+            val activeVocalsInput = vocalsInput
+            val activeInstrumentalInput = instrumentalInput
+            val vocalsBytesRead = if (!active || activeVocalsInput == null) {
                 null
             } else {
                 if (scratch.size < byteCount) {
                     scratch = ByteArray(byteCount)
                 }
-                input.read(scratch, byteCount).coerceAtLeast(0)
+                activeVocalsInput.read(scratch, byteCount).coerceAtLeast(0)
             }
-        }
-    }
-
-    private fun readInstrumental(byteCount: Int): Int? {
-        return synchronized(lock) {
-            val input = instrumentalInput
-            if (!active || input == null) {
+            val instrumentalBytesRead = if (!active || activeInstrumentalInput == null) {
                 null
             } else {
                 if (instrumentalScratch.size < byteCount) {
                     instrumentalScratch = ByteArray(byteCount)
                 }
-                input.read(instrumentalScratch, byteCount).coerceAtLeast(0)
+                activeInstrumentalInput.read(instrumentalScratch, byteCount).coerceAtLeast(0)
             }
+            StemReadResult(vocalsBytesRead, instrumentalBytesRead)
         }
     }
 
@@ -426,12 +478,17 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     private interface StemPcmInput : Closeable {
+        val pcmBytePosition: Long
+
         fun read(buffer: ByteArray, byteCount: Int): Int
         fun seekToPcmByte(bytePosition: Long)
     }
 
     private class WavStemPcmInput(file: File) : StemPcmInput {
         private val input = RandomAccessFile(file, "r")
+
+        override val pcmBytePosition: Long
+            get() = (input.filePointer - WAV_HEADER_SIZE).coerceAtLeast(0L)
 
         override fun read(buffer: ByteArray, byteCount: Int): Int {
             return input.read(buffer, 0, byteCount)
@@ -448,6 +505,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
     private class RawPcmStemInput(file: File) : StemPcmInput {
         private val input = RandomAccessFile(file, "r")
+
+        override val pcmBytePosition: Long
+            get() = input.filePointer.coerceAtLeast(0L)
 
         override fun read(buffer: ByteArray, byteCount: Int): Int {
             return input.read(buffer, 0, byteCount)
@@ -473,17 +533,25 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         } else {
             null
         }
-        private var position = 0
+        private var position = 0L
+
+        override val pcmBytePosition: Long
+            get() = position
 
         override fun read(buffer: ByteArray, byteCount: Int): Int {
             val activeReader = reader
             if (activeReader != null) {
-                return activeReader.read(buffer, byteCount)
+                val count = activeReader.read(buffer, byteCount)
+                if (count > 0) {
+                    position += count
+                }
+                return count
             }
             val pcm = fallbackPcm ?: return -1
             if (position >= pcm.size) return -1
-            val count = minOf(byteCount, pcm.size - position)
-            pcm.copyInto(buffer, destinationOffset = 0, startIndex = position, endIndex = position + count)
+            val start = position.toInt()
+            val count = minOf(byteCount, pcm.size - start)
+            pcm.copyInto(buffer, destinationOffset = 0, startIndex = start, endIndex = start + count)
             position += count
             return count
         }
@@ -492,17 +560,22 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             val activeReader = reader
             if (activeReader != null) {
                 activeReader.seekToPcmByte(bytePosition)
-                return
             }
-            val pcm = fallbackPcm ?: return
+            val maxBytes = fallbackPcm?.size?.toLong()
             position = bytePosition
                 .coerceAtLeast(0L)
-                .coerceAtMost(pcm.size.toLong())
-                .toInt()
+                .let { position ->
+                    maxBytes?.let(position::coerceAtMost) ?: position
+                }
         }
 
         override fun close() {
             reader?.close()
         }
     }
+
+    private data class StemReadResult(
+        val vocalsBytesRead: Int?,
+        val instrumentalBytesRead: Int?,
+    )
 }
