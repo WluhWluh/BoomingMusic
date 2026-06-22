@@ -2641,6 +2641,12 @@ class PlaybackService :
                                 "playback.readinessMonitor.unavailable",
                                 "songId=${session.songId} session=${session.sessionId} position=$positionMs"
                             )
+                            if (sourceSeparationPlaybackSession?.sessionId == session.sessionId) {
+                                sourceSeparationPlaybackReadinessMonitorSessionId = null
+                                sourceSeparationPlaybackReadinessMonitorJob = null
+                                clearSourceSeparationPlayback(restoreOriginalItem = true)
+                                clearSourceSeparationPlaybackProcessing()
+                            }
                             break
                         }
                     }
