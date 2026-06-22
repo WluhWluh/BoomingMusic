@@ -1626,6 +1626,7 @@ class PlaybackService :
                     message = "No separated cache found for this song.",
                 )
             }
+        touchCompletedSourceSeparationCacheIfNeeded(manifest)
 
         val vocalsFile = File(output.playbackVocalsPath())
         val instrumentalFile = File(output.playbackInstrumentalPath())
@@ -1775,6 +1776,7 @@ class PlaybackService :
                 resultCode = SessionError.ERROR_INVALID_STATE,
                 message = "No separated cache found for this song.",
             )
+        touchCompletedSourceSeparationCacheIfNeeded(manifest)
         val vocalsFile = File(output.playbackVocalsPath())
         val instrumentalFile = File(output.playbackInstrumentalPath())
         if (!vocalsFile.isFile || !instrumentalFile.isFile) {
@@ -1936,6 +1938,22 @@ class PlaybackService :
             },
         )
         traceSourceSeparationPlayback("processor.enable.done", "songId=${session.songId}")
+    }
+
+    private fun touchCompletedSourceSeparationCacheIfNeeded(
+        manifest: SourceSeparationManifest,
+    ) {
+        if (manifest.state != SourceSeparationCacheState.Completed) return
+        serviceScope.launch(IO) {
+            runCatching {
+                sourceSeparationEngine.touchCacheEntry(manifest)
+            }.onFailure { error ->
+                traceSourceSeparationPlayback(
+                    "cache.touch.failed",
+                    "songId=${manifest.songLocator.songId} error=${error.message ?: error::class.java.name}"
+                )
+            }
+        }
     }
 
     private val sourceSeparationMixedOutputPrerollMs: Long

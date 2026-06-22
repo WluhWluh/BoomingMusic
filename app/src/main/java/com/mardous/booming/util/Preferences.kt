@@ -608,10 +608,19 @@ const val SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS =
     "source_separation.hydrated_mixed_output_preroll_ms"
 const val SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT =
     "source_separation.playback_ready_window_count"
+const val SOURCE_SEPARATION_AUTO_CACHE_CLEANUP = "source_separation.auto_cache_cleanup"
+const val SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT =
+    "source_separation.auto_cache_cleanup_partial_limit"
+const val SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT =
+    "source_separation.auto_cache_cleanup_completed_limit"
 const val SOURCE_SEPARATION_AVERAGE_WINDOW_MS = "source_separation.average_window_ms"
 const val SOURCE_SEPARATION_AVERAGE_WINDOW_SAMPLE_COUNT =
     "source_separation.average_window_sample_count"
 const val DEFAULT_SOURCE_SEPARATION_AUTO_START = true
+const val DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP = true
+const val DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT = 5
+const val DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT = 10
+const val MIN_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_LIMIT = 1
 const val DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 400L
 const val DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS = 0L
 const val MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 5000L
