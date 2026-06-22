@@ -265,7 +265,7 @@ class PlayerViewModel(
 
     override fun onCleared() {
         progressObserver.stop()
-        cancelSourceSeparation()
+        pauseSourceSeparationForLifecycle()
         sourceSeparationSettingsApplyJob?.cancel()
         sourceSeparationAutoStartJob?.cancel()
         sourceSeparationBlendPreviewJob?.cancel()
@@ -627,7 +627,9 @@ class PlayerViewModel(
                                 activeJob?.isActive != true
                     },
                     shouldCancel = {
-                        sourceSeparationCancelRequested.get() || activeJob?.isActive != true
+                        sourceSeparationCancelRequested.get() ||
+                                (!sourceSeparationPauseRequested.get() &&
+                                        activeJob?.isActive != true)
                     },
                 )
                 if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.PerSong) {
@@ -691,6 +693,11 @@ class PlayerViewModel(
             _sourceSeparationPendingActionFlow.value = SourceSeparationPendingAction.Pause
         }
         sourceSeparationPauseRequested.set(true)
+    }
+
+    private fun pauseSourceSeparationForLifecycle() {
+        sourceSeparationPauseRequested.set(true)
+        sourceSeparationJob?.cancel()
     }
 
     fun deleteSourceSeparationCacheForCurrentSong() {

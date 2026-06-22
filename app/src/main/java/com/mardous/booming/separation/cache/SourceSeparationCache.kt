@@ -10,6 +10,9 @@ import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -929,21 +932,25 @@ class SourceSeparationCache(
     private fun writeManifest(dir: File, manifest: SourceSeparationManifest) {
         dir.mkdirs()
         val target = File(dir, MANIFEST_FILE_NAME)
-        val temp = File(dir, "$MANIFEST_FILE_NAME.tmp")
+        val temp = uniqueTempFile(dir, MANIFEST_FILE_NAME)
         temp.writeText(json.encodeToString(SourceSeparationManifest.serializer(), manifest), Charsets.UTF_8)
-        if (target.exists() && !target.delete()) {
-            temp.delete()
-            error("Could not replace manifest: ${target.absolutePath}")
-        }
-        if (!temp.renameTo(target)) {
-            temp.copyTo(target, overwrite = true)
-            temp.delete()
-        }
+        replaceFile(temp, target)
     }
 
     private fun readManifest(dir: File): SourceSeparationManifest? {
         val file = File(dir, MANIFEST_FILE_NAME)
-        if (!file.isFile) return null
+        if (!file.isFile) {
+            val legacyTemp = File(dir, "$MANIFEST_FILE_NAME.tmp")
+            if (!legacyTemp.isFile) return null
+            readManifestFile(legacyTemp)?.also { manifest ->
+                runCatching { replaceFile(legacyTemp, file) }
+            }?.let { return it }
+            return null
+        }
+        return readManifestFile(file)
+    }
+
+    private fun readManifestFile(file: File): SourceSeparationManifest? {
         return try {
             json.decodeFromString(SourceSeparationManifest.serializer(), file.readText(Charsets.UTF_8))
         } catch (_: SerializationException) {
@@ -982,18 +989,35 @@ class SourceSeparationCache(
     ) {
         dir.mkdirs()
         val target = File(dir, PLAYBACK_SETTINGS_FILE_NAME)
-        val temp = File(dir, "$PLAYBACK_SETTINGS_FILE_NAME.tmp")
+        val temp = uniqueTempFile(dir, PLAYBACK_SETTINGS_FILE_NAME)
         temp.writeText(
             json.encodeToString(SourceSeparationPlaybackSettings.serializer(), settings),
             Charsets.UTF_8,
         )
-        if (target.exists() && !target.delete()) {
+        replaceFile(temp, target)
+    }
+
+    private fun uniqueTempFile(dir: File, targetName: String): File {
+        return File.createTempFile("$targetName.", ".tmp", dir)
+    }
+
+    private fun replaceFile(temp: File, target: File) {
+        try {
+            Files.move(
+                temp.toPath(),
+                target.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(
+                temp.toPath(),
+                target.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (error: Throwable) {
             temp.delete()
-            error("Could not replace playback settings: ${target.absolutePath}")
-        }
-        if (!temp.renameTo(target)) {
-            temp.copyTo(target, overwrite = true)
-            temp.delete()
+            throw error
         }
     }
 
