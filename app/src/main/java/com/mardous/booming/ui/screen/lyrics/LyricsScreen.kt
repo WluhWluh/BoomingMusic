@@ -30,15 +30,14 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -394,20 +393,40 @@ fun CoverLyricsScreen(
                     onBlendChangeFinished = playerViewModel::setSourceSeparationBlend
                 )
 
-                FilledIconButton(
-                    modifier = Modifier.size(CoverLyricsButtonSize),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.onSurface,
-                        contentColor = MaterialTheme.colorScheme.surface
-                    ),
+                CoverLyricsCircularIconButton(
+                    painter = painterResource(R.drawable.ic_open_in_full_24dp),
+                    contentDescription = stringResource(R.string.action_lyrics_editor),
                     onClick = onExpandClick
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_open_in_full_24dp),
-                        contentDescription = stringResource(R.string.action_lyrics_editor)
-                    )
-                }
+                )
             }
+        }
+    }
+}
+
+@Composable
+private fun CoverLyricsCircularIconButton(
+    painter: Painter,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier.size(CoverLyricsControlSlotSize)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(CoverLyricsButtonSize)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.onSurface)
+                .clickable(onClick = onClick)
+        ) {
+            Icon(
+                painter = painter,
+                contentDescription = contentDescription,
+                tint = MaterialTheme.colorScheme.surface
+            )
         }
     }
 }
@@ -504,7 +523,7 @@ private fun CoverLyricsQuickBlendControl(
             CoverLyricsQuickBlendIconSize
     val bottomIconFillHeight = (instrumentalFillHeight - bottomIconTopInTrack)
         .coerceIn(0.dp, CoverLyricsQuickBlendIconSize)
-    val buttonBackgroundShape = RoundedCornerShape(CoverLyricsButtonSize / 2)
+    val buttonBackgroundShape = CircleShape
     val topTrackShape = RoundedCornerShape(
         topStart = CoverLyricsButtonSize / 2,
         topEnd = CoverLyricsButtonSize / 2,
@@ -588,98 +607,107 @@ private fun CoverLyricsQuickBlendControl(
         Modifier.clickable(onClick = onEnableSeparatedPlayback)
     }
     Box(
+        contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(
-                width = CoverLyricsButtonSize,
+                width = CoverLyricsControlSlotSize,
                 height = height
             )
-            .then(interactionModifier)
     ) {
         Box(
             modifier = Modifier
-                .matchParentSize()
-                .clip(buttonBackgroundShape)
-                .background(progressColor.copy(alpha = buttonBackgroundAlpha))
-        )
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
                 .size(
                     width = CoverLyricsButtonSize,
-                    height = trackHeight
+                    height = height
                 )
-                .clip(topTrackShape)
-                .background(progressColor.copy(alpha = trackAlpha))
+                .then(interactionModifier)
         ) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .size(
-                        width = CoverLyricsButtonSize,
-                        height = vocalsFillHeight
-                    )
-                    .background(progressColor.copy(alpha = endpointIconAlpha))
+                    .matchParentSize()
+                    .clip(buttonBackgroundShape)
+                    .background(progressColor.copy(alpha = buttonBackgroundAlpha))
             )
-        }
 
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .size(
-                    width = CoverLyricsButtonSize,
-                    height = trackHeight
-                )
-                .clip(bottomTrackShape)
-                .background(progressColor.copy(alpha = trackAlpha))
-        ) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .size(
                         width = CoverLyricsButtonSize,
-                        height = instrumentalFillHeight
+                        height = trackHeight
                     )
-                    .background(progressColor.copy(alpha = endpointIconAlpha))
+                    .clip(topTrackShape)
+                    .background(progressColor.copy(alpha = trackAlpha))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .size(
+                            width = CoverLyricsButtonSize,
+                            height = vocalsFillHeight
+                        )
+                        .background(progressColor.copy(alpha = endpointIconAlpha))
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .size(
+                        width = CoverLyricsButtonSize,
+                        height = trackHeight
+                    )
+                    .clip(bottomTrackShape)
+                    .background(progressColor.copy(alpha = trackAlpha))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .size(
+                            width = CoverLyricsButtonSize,
+                            height = instrumentalFillHeight
+                        )
+                        .background(progressColor.copy(alpha = endpointIconAlpha))
+                )
+            }
+
+            Icon(
+                painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
+                contentDescription = stringResource(R.string.action_source_separation_playback),
+                tint = colorScheme.surface,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .alpha(stemIconAlpha)
+            )
+
+            CoverLyricsQuickBlendEndpointIcon(
+                painter = painterResource(R.drawable.ic_person_24dp),
+                unfilledColor = progressColor,
+                filledColor = colorScheme.surface,
+                filledHeight = topIconFillHeight,
+                fillFromTop = false,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = endpointIconOffset)
+                    .alpha(endpointIconAlpha)
+            )
+
+            CoverLyricsQuickBlendEndpointIcon(
+                painter = painterResource(R.drawable.ic_speaker_24dp),
+                unfilledColor = progressColor,
+                filledColor = colorScheme.surface,
+                filledHeight = bottomIconFillHeight,
+                fillFromTop = true,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -endpointIconOffset)
+                    .alpha(endpointIconAlpha)
             )
         }
-
-        Icon(
-            painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
-            contentDescription = stringResource(R.string.action_source_separation_playback),
-            tint = colorScheme.surface,
-            modifier = Modifier
-                .align(Alignment.Center)
-                .alpha(stemIconAlpha)
-        )
-
-        CoverLyricsQuickBlendEndpointIcon(
-            painter = painterResource(R.drawable.ic_person_24dp),
-            unfilledColor = progressColor,
-            filledColor = colorScheme.surface,
-            filledHeight = topIconFillHeight,
-            fillFromTop = false,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = endpointIconOffset)
-                .alpha(endpointIconAlpha)
-        )
-
-        CoverLyricsQuickBlendEndpointIcon(
-            painter = painterResource(R.drawable.ic_speaker_24dp),
-            unfilledColor = progressColor,
-            filledColor = colorScheme.surface,
-            filledHeight = bottomIconFillHeight,
-            fillFromTop = true,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = -endpointIconOffset)
-                .alpha(endpointIconAlpha)
-        )
 
         if (processingProgressState != null) {
             val progressModifier = Modifier
@@ -901,6 +929,7 @@ private fun PaddingValues.withAdditionalBottom(additionalBottom: Dp): PaddingVal
 }
 
 private val CoverLyricsButtonSize = 40.dp
+private val CoverLyricsControlSlotSize = 48.dp
 private val CoverLyricsQuickBlendSliderHeight = 120.dp
 private val CoverLyricsQuickBlendCenterGap = 4.dp
 private val CoverLyricsQuickBlendIconSize = 24.dp
