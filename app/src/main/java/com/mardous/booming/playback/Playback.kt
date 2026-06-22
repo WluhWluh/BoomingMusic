@@ -37,4 +37,6 @@ object Playback {
         "source_separation_auto_sync_on_transition"
     const val EXTRA_SOURCE_SEPARATION_ALLOW_NEW_SESSION =
         "source_separation_allow_new_session"
+    const val EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING =
+        "source_separation_expect_processing"
 }
