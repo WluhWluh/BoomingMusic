@@ -66,12 +66,14 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.keepScreenOn
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.rememberNestedScrollInteropConnection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -484,13 +486,18 @@ private fun CoverLyricsQuickBlendControl(
     )
     val viewConfiguration = LocalViewConfiguration.current
     val touchSlop = viewConfiguration.touchSlop
+    val hapticFeedback = LocalHapticFeedback.current
     val interactionModifier = if (expanded) {
-        Modifier.pointerInput(touchSlop) {
+        Modifier.pointerInput(touchSlop, hapticFeedback) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 val pointerId = down.id
                 var gestureDragging = false
                 var latestBlend = displayedBlend
+                var wasInNeutralSnapZone = coverLyricsQuickBlendIsInNeutralSnapZone(
+                    y = down.position.y,
+                    heightPx = size.height.toFloat()
+                )
 
                 try {
                     while (true) {
@@ -526,6 +533,14 @@ private fun CoverLyricsQuickBlendControl(
                                 y = change.position.y,
                                 heightPx = size.height.toFloat()
                             )
+                            val isInNeutralSnapZone = coverLyricsQuickBlendIsInNeutralSnapZone(
+                                y = change.position.y,
+                                heightPx = size.height.toFloat()
+                            )
+                            if (!wasInNeutralSnapZone && isInNeutralSnapZone) {
+                                hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
+                            }
+                            wasInNeutralSnapZone = isInNeutralSnapZone
                             dragBlend = latestBlend
                             onBlendPreview(latestBlend)
                             change.consume()
@@ -681,6 +696,16 @@ private fun CoverLyricsQuickBlendEndpointIcon(
             }
         }
     }
+}
+
+private fun coverLyricsQuickBlendIsInNeutralSnapZone(y: Float, heightPx: Float): Boolean {
+    if (heightPx <= 0f) return false
+    val rawBlend = (y / heightPx).coerceIn(0f, 1f)
+    val snapStart = CoverLyricsQuickBlendNeutralBlend -
+            CoverLyricsQuickBlendNeutralSnapThreshold
+    val snapEnd = CoverLyricsQuickBlendNeutralBlend +
+            CoverLyricsQuickBlendNeutralSnapThreshold
+    return rawBlend in snapStart..snapEnd
 }
 
 private fun coverLyricsQuickBlendValueForY(y: Float, heightPx: Float): Float {
@@ -847,7 +872,7 @@ private val CoverLyricsOverlayPadding = 16.dp
 private val CoverLyricsBottomSpacing = 16.dp
 private val CoverLyricsQuickBlendInnerCornerRadius = 2.dp
 private const val CoverLyricsQuickBlendNeutralBlend = 0.5f
-private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.05f
+private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.10f
 private fun coverLyricsQuickBlendDpTransitionSpec() =
     tween<Dp>(
         durationMillis = 260,
