@@ -7,6 +7,7 @@ import com.mardous.booming.separation.audio.AudioWindowDecodeExperiment
 import com.mardous.booming.separation.audio.AudioWindowDecodeExperimentProgress
 import com.mardous.booming.separation.audio.AudioWindowDecodeExperimentResult
 import com.mardous.booming.separation.cache.SourceSeparationCache
+import com.mardous.booming.separation.cache.SourceSeparationCacheEntry
 import com.mardous.booming.separation.cache.SourceSeparationCacheState
 import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.separation.model.MdxModelVariant
@@ -111,6 +112,14 @@ class SourceSeparationEngine(
 
     fun cleanPendingCompletedTemporaryDirs(activeFiles: Set<String> = emptySet()): Int {
         return cache.cleanPendingCompletedTemporaryDirs(activeFiles)
+    }
+
+    fun listCacheEntries(): List<SourceSeparationCacheEntry> {
+        return cache.listCacheEntries()
+    }
+
+    fun deleteCacheEntry(entryId: String): Boolean {
+        return cache.deleteEntry(entryId)
     }
 
     fun playableCacheForSong(
