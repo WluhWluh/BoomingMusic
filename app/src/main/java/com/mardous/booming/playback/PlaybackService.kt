@@ -970,6 +970,20 @@ class PlaybackService :
             !sourceSeparationPlaybackIsProcessing
         ) {
             sourceSeparationPlaybackResumeWhenReady = false
+            if (sourceSeparationPlaybackSession != null &&
+                isManualPlayWhenReadyPauseReason(reason)
+            ) {
+                serviceScope.launch {
+                    ensureSourceSeparationPlaybackReady(
+                        showUnavailableMessage = false,
+                        allowPauseForProcessing = false,
+                        resumeWhenReady = false,
+                        allowNewSession = false,
+                        preferCompletedCache = true,
+                        expectProcessing = sourceSeparationPlaybackExpectProcessing,
+                    )
+                }
+            }
         }
     }
 
@@ -2554,10 +2568,12 @@ class PlaybackService :
                                 "playback.readinessMonitor.completed",
                                 "songId=${session.songId} session=${session.sessionId} position=$positionMs"
                             )
-                            serviceScope.launch {
-                                ensureSourceSeparationPlaybackReady(
-                                    showUnavailableMessage = false,
-                                    preferCompletedCache = true,
+                            val activeSession = sourceSeparationPlaybackSession
+                            if (activeSession?.sessionId == session.sessionId &&
+                                activeSession.requiresReadinessGate
+                            ) {
+                                sourceSeparationPlaybackSession = activeSession.copy(
+                                    requiresReadinessGate = false,
                                 )
                             }
                             break
@@ -3420,6 +3436,11 @@ class PlaybackService :
             Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM -> "END_OF_MEDIA_ITEM"
             else -> "UNKNOWN_$reason"
         }
+    }
+
+    private fun isManualPlayWhenReadyPauseReason(reason: Int): Boolean {
+        return reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST ||
+                reason == Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE
     }
 
     private fun mediaItemTransitionReasonName(reason: Int): String {
