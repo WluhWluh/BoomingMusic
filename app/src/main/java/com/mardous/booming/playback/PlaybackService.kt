@@ -2121,13 +2121,33 @@ class PlaybackService :
             return
         }
 
-        sourceSeparationPlaybackSession = currentSession.copy(
-            pendingHydratedVocalsFile = vocalsPcm,
-            pendingHydratedInstrumentalFile = instrumentalPcm,
-            pendingHydratedCacheDir = hydrationDir,
+        val hydratedSession = currentSession.copy(
+            vocalsFile = vocalsPcm,
+            instrumentalFile = instrumentalPcm,
+            hydratedCacheDir = hydrationDir,
+            pendingHydratedVocalsFile = null,
+            pendingHydratedInstrumentalFile = null,
+            pendingHydratedCacheDir = null,
         )
+        val hotSwapApplied = sourceSeparationMixProcessor.hotSwapToPcmInputs(
+            vocalsFile = vocalsPcm,
+            instrumentalFile = instrumentalPcm,
+        )
+        sourceSeparationPlaybackSession = if (hotSwapApplied) {
+            hydratedSession
+        } else {
+            currentSession.copy(
+                pendingHydratedVocalsFile = vocalsPcm,
+                pendingHydratedInstrumentalFile = instrumentalPcm,
+                pendingHydratedCacheDir = hydrationDir,
+            )
+        }
         traceSourceSeparationPlayback(
-            "hydration.ready",
+            if (hotSwapApplied) {
+                "hydration.ready.hotSwap"
+            } else {
+                "hydration.ready.pending"
+            },
             "songId=${session.songId} session=${session.sessionId} " +
                     "vocalsBytes=${vocalsPcm.length()} instrumentalBytes=${instrumentalPcm.length()}"
         )
