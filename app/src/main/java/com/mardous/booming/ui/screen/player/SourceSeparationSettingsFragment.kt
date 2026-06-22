@@ -151,8 +151,19 @@ private fun SourceSeparationSettingsSheet(
     val currentSongFlacPromotionRunning = flacPromotionState.isRunning(currentSongId)
     val currentSongFlacPromotionActive =
         currentSongFlacPromotionQueued || currentSongFlacPromotionRunning
-    var blend by remember(playbackState.blend) {
+    var blend by remember {
         mutableFloatStateOf(playbackState.blend.coerceIn(0f, 1f))
+    }
+    var blendDragging by remember {
+        mutableStateOf(false)
+    }
+    LaunchedEffect(playbackState.blend, separatedPlaybackEnabled) {
+        if (!blendDragging) {
+            blend = playbackState.blend.coerceIn(0f, 1f)
+        }
+        if (!separatedPlaybackEnabled) {
+            blendDragging = false
+        }
     }
 
     BottomSheetDialogSurface {
@@ -225,6 +236,7 @@ private fun SourceSeparationSettingsSheet(
                                         HapticFeedbackType.Confirm
                                     )
                                     blend = 0.5f
+                                    blendDragging = false
                                     viewModel.setSourceSeparationBlend(0.5f)
                                 },
                                 enabled = separatedPlaybackEnabled,
@@ -253,15 +265,18 @@ private fun SourceSeparationSettingsSheet(
                                     valueRange = 0f..1f,
                                     enabled = separatedPlaybackEnabled,
                                     onValueChange = { value ->
-                                        blend = value
+                                        val previewBlend = value.coerceIn(0f, 1f)
+                                        blendDragging = true
+                                        blend = previewBlend
                                         if (playbackState.enabled) {
-                                            viewModel.setSourceSeparationBlend(value)
+                                            viewModel.previewSourceSeparationBlend(previewBlend)
                                         }
                                     },
                                     onValueChangeFinished = {
                                         hapticFeedback.performHapticFeedback(
                                             HapticFeedbackType.SegmentFrequentTick
                                         )
+                                        blendDragging = false
                                         viewModel.setSourceSeparationBlend(blend)
                                     },
                                     track = {
