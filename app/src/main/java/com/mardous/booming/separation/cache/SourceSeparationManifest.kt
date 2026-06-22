@@ -16,6 +16,7 @@ data class SourceSeparationManifest(
     val error: SourceSeparationError? = null,
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
+    val lastAccessedAtEpochMs: Long = updatedAtEpochMs,
 ) {
     companion object {
         const val SCHEMA_VERSION = 1

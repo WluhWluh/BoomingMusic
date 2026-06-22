@@ -830,6 +830,76 @@ class SourceSeparationCache(
         return result
     }
 
+    fun touchEntry(manifest: SourceSeparationManifest): SourceSeparationManifest? {
+        val dir = entryDir(
+            songId = manifest.songLocator.songId,
+            modelVariant = manifest.audioIdentity.modelVariant,
+            pipelineVersion = manifest.pipelineVersion,
+        )
+        val current = readManifest(dir) ?: return null
+        val now = System.currentTimeMillis()
+        val updatedManifest = current.copy(
+            lastAccessedAtEpochMs = now,
+        )
+        writeManifest(dir, updatedManifest)
+        return updatedManifest
+    }
+
+    fun pruneCache(
+        partialLimit: Int,
+        completedLimit: Int,
+        protectedSongIds: Set<Long> = emptySet(),
+    ): SourceSeparationCachePruneResult {
+        val entriesDir = File(rootDir, ENTRIES_DIR_NAME)
+        if (!entriesDir.isDirectory) return SourceSeparationCachePruneResult()
+        val partialLimitNormalized = partialLimit.coerceAtLeast(1)
+        val completedLimitNormalized = completedLimit.coerceAtLeast(1)
+        val candidates = entriesDir.listFiles()
+            ?.mapNotNull { entryDir ->
+                val manifest = readManifest(entryDir) ?: return@mapNotNull null
+                val state = when (manifest.state) {
+                    SourceSeparationCacheState.Running -> SourceSeparationCacheEntryState.Partial
+                    SourceSeparationCacheState.Completed -> SourceSeparationCacheEntryState.Completed
+                    SourceSeparationCacheState.Canceled,
+                    SourceSeparationCacheState.Failed -> return@mapNotNull null
+                }
+                SourceSeparationCachePruneCandidate(
+                    dir = entryDir,
+                    songId = manifest.songLocator.songId,
+                    state = state,
+                    lastAccessedAtEpochMs = manifest.lastAccessedAtEpochMs,
+                    sizeBytes = entryDir.directorySize(),
+                )
+            }
+            .orEmpty()
+
+        var deletedEntries = 0
+        var deletedBytes = 0L
+        fun pruneGroup(
+            state: SourceSeparationCacheEntryState,
+            limit: Int,
+        ) {
+            candidates
+                .filter { it.state == state }
+                .sortedByDescending { it.lastAccessedAtEpochMs }
+                .drop(limit)
+                .forEach { candidate ->
+                    if (candidate.songId in protectedSongIds) return@forEach
+                    if (candidate.dir.deleteRecursively()) {
+                        deletedEntries += 1
+                        deletedBytes += candidate.sizeBytes
+                    }
+                }
+        }
+
+        pruneGroup(SourceSeparationCacheEntryState.Partial, partialLimitNormalized)
+        pruneGroup(SourceSeparationCacheEntryState.Completed, completedLimitNormalized)
+        return SourceSeparationCachePruneResult(
+            deletedEntries = deletedEntries,
+            deletedBytes = deletedBytes,
+        )
+    }
+
     fun delete(manifest: SourceSeparationManifest): Boolean {
         val dir = entryDir(
             songId = manifest.songLocator.songId,
