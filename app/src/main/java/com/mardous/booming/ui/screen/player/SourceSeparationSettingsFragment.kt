@@ -1,15 +1,11 @@
 package com.mardous.booming.ui.screen.player
 
 import android.app.Dialog
-import android.os.SystemClock
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
@@ -74,9 +70,6 @@ import com.mardous.booming.ui.component.compose.TitledCard
 import com.mardous.booming.ui.theme.BoomingMusicTheme
 import com.mardous.booming.ui.theme.SliderTokens
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
-import kotlinx.coroutines.delay
-import kotlin.math.ceil
-import kotlin.math.max
 
 class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
 
@@ -330,6 +323,7 @@ private fun SourceSeparationSettingsSheet(
                                 SourceSeparationPlaybackProcessingProgress(
                                     separationState = separationState,
                                     processingGeneration = playbackState.processingGeneration,
+                                    processingSongId = currentSongId,
                                 )
                             }
 
@@ -569,91 +563,33 @@ private fun SourceSeparationDecodeDiagnosticsText(
 private fun SourceSeparationPlaybackProcessingProgress(
     separationState: SourceSeparationUiState,
     processingGeneration: Long,
+    processingSongId: Long?,
 ) {
-    val runningState = separationState as? SourceSeparationUiState.Running
-    val scheduler = runningState?.scheduler
-    val pendingWindows = scheduler?.playbackReadyWindowPendingCount?.coerceAtLeast(0) ?: 0
-    val readyWindows = scheduler?.playbackReadyWindowReadyCount?.coerceAtLeast(0) ?: 0
-    val targetWindows = scheduler?.readyWindowCount?.coerceAtLeast(1)
-        ?: runningState?.initialProcessingWindowCount()
-        ?: 0
-    val averageWindowMs = runningState?.averageWindowMs?.coerceAtLeast(1L) ?: 3000L
-    val estimateKey = listOf(
-        processingGeneration,
-        scheduler?.playbackSegmentIndex,
-        scheduler?.processingSegmentIndex,
-        pendingWindows,
-        readyWindows,
-        targetWindows,
+    val progressState = rememberSourceSeparationPlaybackProcessingProgressState(
+        separationState = separationState,
+        processingGeneration = processingGeneration,
+        processingSongId = processingSongId,
     )
-    var elapsedInEstimateMs by remember(estimateKey) {
-        mutableStateOf(0L)
-    }
-    LaunchedEffect(estimateKey, averageWindowMs) {
-        val startedAt = SystemClock.elapsedRealtime()
-        while (true) {
-            elapsedInEstimateMs = SystemClock.elapsedRealtime() - startedAt
-            delay(100L)
-        }
-    }
-    val estimatedRemainingSeconds = ceil(
-        (((pendingWindows.takeIf { it > 0 } ?: targetWindows).coerceAtLeast(1) *
-                averageWindowMs) - elapsedInEstimateMs)
-            .coerceAtLeast(0L) / 1000.0
-    ).toInt()
-    val progressTarget = if (targetWindows > 0) {
-        val baseCompletedWindows = if (scheduler != null) {
-            readyWindows.toFloat()
-        } else {
-            runningState?.initialProcessingCompletedUnits()?.toFloat() ?: 0f
-        }
-        val estimatedCompletedWindows = elapsedInEstimateMs.toFloat() / averageWindowMs.toFloat()
-        ((baseCompletedWindows + estimatedCompletedWindows) / targetWindows.toFloat())
-            .coerceIn(0f, 0.98f)
-    } else {
-        0f
-    }
-    val progressResetKey = listOf(
-        processingGeneration,
-        scheduler?.playbackSegmentIndex,
-        targetWindows,
-    )
-    var displayedProgressTarget by remember(progressResetKey) {
-        mutableFloatStateOf(0f)
-    }
-    LaunchedEffect(progressResetKey, progressTarget) {
-        displayedProgressTarget = max(displayedProgressTarget, progressTarget)
-    }
-    val animatedProgress = remember(progressResetKey) {
-        Animatable(0f)
-    }
-    LaunchedEffect(progressResetKey, displayedProgressTarget, averageWindowMs) {
-        animatedProgress.animateTo(
-            targetValue = displayedProgressTarget,
-            animationSpec = tween(
-                durationMillis = 120,
-                easing = LinearEasing,
-            ),
-        )
-    }
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = if (scheduler != null && targetWindows > 0) {
+            text = if (progressState.hasScheduler && progressState.targetWindows > 0) {
                 stringResource(
                     R.string.source_separation_playback_processing_estimate,
-                    readyWindows,
-                    targetWindows,
-                    pendingWindows,
-                    estimatedRemainingSeconds,
+                    progressState.readyWindows,
+                    progressState.targetWindows,
+                    progressState.pendingWindows,
+                    progressState.estimatedRemainingSeconds,
                 )
-            } else if (runningState != null && targetWindows > 0) {
+            } else if (separationState is SourceSeparationUiState.Running &&
+                progressState.targetWindows > 0
+            ) {
                 stringResource(
                     R.string.source_separation_playback_initial_processing_estimate,
-                    runningState.initialProcessingLabel(),
-                    estimatedRemainingSeconds,
+                    progressState.initialProcessingLabel,
+                    progressState.estimatedRemainingSeconds,
                 )
             } else {
                 stringResource(R.string.source_separation_playback_processing)
@@ -662,53 +598,10 @@ private fun SourceSeparationPlaybackProcessingProgress(
             style = MaterialTheme.typography.bodyMedium
         )
         LinearProgressIndicator(
-            progress = { animatedProgress.value },
+            progress = { progressState.progress },
             modifier = Modifier.fillMaxWidth()
         )
     }
-}
-
-private fun SourceSeparationUiState.Running.initialProcessingWindowCount(): Int {
-    return when (sourceDecodeMode) {
-        SourceSeparationDecodeModeUiState.FullSong -> 3
-        SourceSeparationDecodeModeUiState.Window -> 2
-        null -> 0
-    }
-}
-
-private fun SourceSeparationUiState.Running.initialProcessingCompletedUnits(): Int {
-    val stageText = stage.orEmpty()
-    return when (sourceDecodeMode) {
-        SourceSeparationDecodeModeUiState.FullSong -> when {
-            stageText.contains("Processed window 2", ignoreCase = true) -> 3
-            stageText.contains("Preparing window 2", ignoreCase = true) ||
-                    stageText.contains("Processed window 1", ignoreCase = true) -> 2
-            stageText.contains("Preparing window 1", ignoreCase = true) -> 1
-            else -> 0
-        }
-        SourceSeparationDecodeModeUiState.Window -> when {
-            stageText.contains("Processed window 2", ignoreCase = true) -> 2
-            stageText.contains("Preparing window 2", ignoreCase = true) ||
-                    stageText.contains("Processed window 1", ignoreCase = true) -> 1
-            else -> 0
-        }
-        null -> 0
-    }
-}
-
-private fun SourceSeparationUiState.Running.initialProcessingLabel(): String {
-    val stageText = stage.orEmpty()
-    return when (sourceDecodeMode) {
-        SourceSeparationDecodeModeUiState.FullSong -> when {
-            stageText.contains("Preparing window", ignoreCase = true) -> stageText
-            else -> "Full decode"
-        }
-        SourceSeparationDecodeModeUiState.Window -> when {
-            stageText.contains("Preparing window", ignoreCase = true) -> stageText
-            else -> "Window decode"
-        }
-        null -> stage ?: ""
-    }.ifBlank { "Processing" }
 }
 
 @Composable
