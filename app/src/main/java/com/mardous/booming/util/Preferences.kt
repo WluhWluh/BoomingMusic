@@ -602,6 +602,7 @@ const val REMEMBER_SHUFFLE_MODE = "remember_shuffle_mode"
 const val SOURCE_SEPARATION_AUTO_START = "source_separation.auto_start"
 const val SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION = "source_separation.auto_flac_compression"
 const val SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS = "source_separation.show_snackbar_progress"
+const val SOURCE_SEPARATION_SHOW_SNACKBAR_MESSAGES = "source_separation.show_snackbar_messages"
 const val SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = "source_separation.mixed_output_preroll_ms"
 const val SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS =
     "source_separation.hydrated_mixed_output_preroll_ms"
