@@ -32,6 +32,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingActionButton
@@ -98,6 +99,7 @@ import com.mardous.booming.ui.component.views.PlaceholderDrawable
 import com.mardous.booming.ui.screen.library.LibraryViewModel
 import com.mardous.booming.ui.screen.player.PlayerViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
+import com.mardous.booming.ui.screen.player.rememberSourceSeparationPlaybackProcessingProgressState
 import com.mardous.booming.ui.theme.PlayerTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -273,20 +275,44 @@ fun CoverLyricsScreen(
     )
 
     PlayerTheme(playerColorScheme) {
+        val currentSong by playerViewModel.currentSongFlow.collectAsStateWithLifecycle()
         val sourceSeparationBlendMode by playerViewModel
             .sourceSeparationBlendModeFlow
             .collectAsStateWithLifecycle()
         val sourceSeparationPlaybackState by playerViewModel
             .sourceSeparationPlaybackStateFlow
             .collectAsStateWithLifecycle()
+        val sourceSeparationState by playerViewModel
+            .sourceSeparationStateFlow
+            .collectAsStateWithLifecycle()
         val quickBlendExpanded = sourceSeparationBlendMode != SourceSeparationBlendMode.Off
+        val quickBlendProcessingProgress = if (
+            quickBlendExpanded &&
+            sourceSeparationPlaybackState.processing
+        ) {
+            rememberSourceSeparationPlaybackProcessingProgressState(
+                separationState = sourceSeparationState,
+                processingGeneration = sourceSeparationPlaybackState.processingGeneration,
+                processingSongId = currentSong.id,
+            ).progress
+        } else {
+            null
+        }
         val quickBlendHeight = if (quickBlendExpanded) {
             CoverLyricsQuickBlendSliderHeight
         } else {
             CoverLyricsButtonSize
         }
+        val quickBlendProgressExtraHeight = if (quickBlendProcessingProgress != null) {
+            CoverLyricsQuickBlendProgressOffset
+        } else {
+            0.dp
+        }
         val lyricsContentPadding = lyricsViewSettings.contentPadding.withAdditionalBottom(
-            quickBlendHeight + CoverLyricsButtonSpacing + CoverLyricsBottomSpacing
+            quickBlendHeight +
+                    quickBlendProgressExtraHeight +
+                    CoverLyricsButtonSpacing +
+                    CoverLyricsBottomSpacing
         )
         Box(modifier = modifier.fillMaxSize()) {
             LyricsSurface(
@@ -318,6 +344,7 @@ fun CoverLyricsScreen(
                 CoverLyricsQuickBlendControl(
                     expanded = quickBlendExpanded,
                     blend = sourceSeparationPlaybackState.blend,
+                    processingProgress = quickBlendProcessingProgress,
                     onEnableSeparatedPlayback = {
                         playerViewModel.setSourceSeparationPlaybackEnabled(
                             enabled = true,
@@ -353,6 +380,7 @@ fun CoverLyricsScreen(
 private fun CoverLyricsQuickBlendControl(
     expanded: Boolean,
     blend: Float,
+    processingProgress: Float?,
     onEnableSeparatedPlayback: () -> Unit,
     onDisableSeparatedPlayback: () -> Unit,
     onBlendPreview: (Float) -> Unit,
@@ -603,6 +631,20 @@ private fun CoverLyricsQuickBlendControl(
                 .offset(y = -endpointIconOffset)
                 .alpha(endpointIconAlpha)
         )
+
+        if (processingProgress != null) {
+            CircularProgressIndicator(
+                progress = { processingProgress },
+                color = progressColor,
+                trackColor = progressColor.copy(alpha = 0.1f),
+                strokeWidth = CoverLyricsQuickBlendProgressStrokeWidth,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = -CoverLyricsQuickBlendProgressOffset)
+                    .size(CoverLyricsQuickBlendProgressSize)
+                    .alpha(endpointIconAlpha)
+            )
+        }
     }
 }
 
@@ -795,6 +837,9 @@ private val CoverLyricsQuickBlendSliderHeight = 120.dp
 private val CoverLyricsQuickBlendCenterGap = 4.dp
 private val CoverLyricsQuickBlendIconSize = 24.dp
 private val CoverLyricsQuickBlendEndpointIconOffset = 8.dp
+private val CoverLyricsQuickBlendProgressSize = 24.dp
+private val CoverLyricsQuickBlendProgressStrokeWidth = 3.dp
+private val CoverLyricsQuickBlendProgressOffset = 32.dp
 private val CoverLyricsButtonSpacing = 12.dp
 private val CoverLyricsOverlayPadding = 16.dp
 private val CoverLyricsBottomSpacing = 16.dp
