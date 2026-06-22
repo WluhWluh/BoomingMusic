@@ -168,6 +168,7 @@ class PlayerViewModel(
     private var sourceSeparationSongId: Long? = null
     private var sourceSeparationPendingStartSongId: Long? = null
     private var sourceSeparationSettingsApplyJob: Job? = null
+    private var sourceSeparationAutoStartJob: Job? = null
     private var sourceSeparationPlaybackSyncJob: Job? = null
     private var sourceSeparationBlendPreviewJob: Job? = null
     private var sourceSeparationBlendPreviewPending: Float? = null
@@ -258,10 +259,17 @@ class PlayerViewModel(
 
     private val internalJobs = mutableListOf<Job>()
 
+    private data class SourceSeparationAutoStartDecision(
+        val shouldStart: Boolean,
+        val shouldWaitForProcessingCache: Boolean,
+        val hasCompletedCache: Boolean,
+    )
+
     override fun onCleared() {
         progressObserver.stop()
         cancelSourceSeparation()
         sourceSeparationSettingsApplyJob?.cancel()
+        sourceSeparationAutoStartJob?.cancel()
         sourceSeparationBlendPreviewJob?.cancel()
         sourceSeparationWindowDecodeExperimentJob?.cancel()
         sourceSeparationFlacPromotionJob?.cancel()
@@ -300,10 +308,8 @@ class PlayerViewModel(
 
             internalJobs += combine(queueFlow, positionFlow)
             { queue, position -> Pair(queue, position) }
-                .debounce(QUEUE_DEBOUNCE)
                 .onEach { (queue, position) ->
-                    _currentSongFlow.value = queue.getOrElse(position.current) { Song.emptySong }
-                    _nextSongFlow.value = queue.getOrElse(position.next) { Song.emptySong }
+                    updateCurrentAndNextSong(queue, position)
                 }
                 .launchIn(viewModelScope)
 
@@ -316,6 +322,7 @@ class PlayerViewModel(
                         song = song,
                         showMessage = false,
                     )
+                    maybeAutoStartSourceSeparationForSong(song)
                 }
                 .launchIn(viewModelScope)
 
@@ -338,6 +345,14 @@ class PlayerViewModel(
     private fun cancelInternalJobs() {
         internalJobs.forEach { it.cancel() }
         internalJobs.clear()
+    }
+
+    private fun updateCurrentAndNextSong(
+        queue: List<Song> = _queueFlow.value,
+        position: QueuePosition = _positionFlow.value,
+    ) {
+        _currentSongFlow.value = queue.getOrElse(position.current) { Song.emptySong }
+        _nextSongFlow.value = queue.getOrElse(position.next) { Song.emptySong }
     }
 
     private fun onSetIsPlaying(isPlaying: Boolean) {
@@ -1103,6 +1118,10 @@ class PlayerViewModel(
                             Playback.EXTRA_SOURCE_SEPARATION_ALLOW_NEW_SESSION,
                             true,
                         )
+                        putBoolean(
+                            Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING,
+                            shouldExpectSourceSeparationProcessingForSync(),
+                        )
                     },
                 )
             }.onSuccess { result ->
@@ -1111,6 +1130,17 @@ class PlayerViewModel(
                 Log.w(TAG, "Failed to sync source separation playback", error)
             }
         }
+    }
+
+    private fun shouldExpectSourceSeparationProcessingForSync(): Boolean {
+        if (!_sourceSeparationAutoStartFlow.value ||
+            _sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off
+        ) {
+            return false
+        }
+        return !isDefaultSourceSeparationBlend(
+            _sourceSeparationPlaybackStateFlow.value.blend,
+        )
     }
 
     fun setSourceSeparationBlendMode(mode: SourceSeparationBlendMode) {
@@ -1186,6 +1216,7 @@ class PlayerViewModel(
         val mode = _sourceSeparationBlendModeFlow.value
         if (mode == SourceSeparationBlendMode.Off || song == Song.emptySong) {
             sourceSeparationSettingsApplyJob = null
+            sourceSeparationAutoStartJob?.cancel()
             return
         }
 
@@ -1196,42 +1227,122 @@ class PlayerViewModel(
                 fallbackBlend = fallbackBlend,
             )
             updateSourceSeparationBlendState(blend)
+            val autoStartDecision = sourceSeparationAutoStartDecision(song, blend)
+            if (autoStartDecision.shouldStart && currentSong.id == song.id) {
+                startSourceSeparationForCurrentSong()
+            }
+            if ((autoStartDecision.shouldStart ||
+                        autoStartDecision.shouldWaitForProcessingCache) &&
+                currentSong.id == song.id
+            ) {
+                waitForSourceSeparationProcessingCache(song)
+            }
             val result = sendSourceSeparationPlaybackEnabledCommand(
                 enabled = true,
                 blend = blend,
                 showMessage = showMessage,
+                expectProcessing = autoStartDecision.shouldStart ||
+                        autoStartDecision.shouldWaitForProcessingCache,
             )
             updateSourceSeparationPlaybackState(result)
-            maybeAutoStartSourceSeparationForCurrentSong(blend)
+            if (!autoStartDecision.shouldStart && !autoStartDecision.hasCompletedCache) {
+                maybeAutoStartSourceSeparationForCurrentSong(blend)
+            }
         }
     }
 
     private fun maybeAutoStartSourceSeparationForCurrentSong(blend: Float) {
         val song = currentSong
+        maybeAutoStartSourceSeparationForSong(song, blend)
+    }
+
+    private fun maybeAutoStartSourceSeparationForSong(
+        song: Song,
+        knownBlend: Float? = null,
+    ) {
         val mode = _sourceSeparationBlendModeFlow.value
         if (!_sourceSeparationAutoStartFlow.value ||
             mode == SourceSeparationBlendMode.Off ||
-            song == Song.emptySong ||
-            isDefaultSourceSeparationBlend(blend)
+            song == Song.emptySong
         ) {
+            sourceSeparationAutoStartJob?.cancel()
             return
         }
         if (sourceSeparationSongId == song.id || sourceSeparationPendingStartSongId == song.id) {
             return
         }
 
-        viewModelScope.launch(IO) {
-            val hasCompletedCache = runCatching {
+        sourceSeparationAutoStartJob?.cancel()
+        sourceSeparationAutoStartJob = viewModelScope.launch {
+            val blend = knownBlend ?: sourceSeparationBlendForSong(
+                mode = mode,
+                song = song,
+                fallbackBlend = null,
+            )
+            if (sourceSeparationAutoStartDecision(song, blend).shouldStart &&
+                currentSong.id == song.id
+            ) {
+                startSourceSeparationForCurrentSong()
+            }
+        }
+    }
+
+    private suspend fun sourceSeparationAutoStartDecision(
+        song: Song,
+        blend: Float,
+    ): SourceSeparationAutoStartDecision {
+        if (!_sourceSeparationAutoStartFlow.value ||
+            _sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
+            song == Song.emptySong ||
+            isDefaultSourceSeparationBlend(blend)
+        ) {
+            return SourceSeparationAutoStartDecision(
+                shouldStart = false,
+                shouldWaitForProcessingCache = false,
+                hasCompletedCache = false,
+            )
+        }
+        if (sourceSeparationSongId == song.id || sourceSeparationPendingStartSongId == song.id) {
+            return SourceSeparationAutoStartDecision(
+                shouldStart = false,
+                shouldWaitForProcessingCache = true,
+                hasCompletedCache = false,
+            )
+        }
+
+        val hasCompletedCache = runCatching {
+            withContext(IO) {
                 when (sourceSeparationEngine.cacheStatusForSong(song)) {
                     is SourceSeparationCacheStatus.Completed,
                     is SourceSeparationCacheStatus.CompletedWithTemporaryFiles -> true
                     SourceSeparationCacheStatus.NotStarted,
                     is SourceSeparationCacheStatus.Partial -> false
                 }
-            }.getOrDefault(false)
-            if (!hasCompletedCache && currentSong.id == song.id) {
-                startSourceSeparationForCurrentSong()
             }
+        }.getOrDefault(false)
+
+        return SourceSeparationAutoStartDecision(
+            shouldStart = !hasCompletedCache && currentSong.id == song.id,
+            shouldWaitForProcessingCache = false,
+            hasCompletedCache = hasCompletedCache,
+        )
+    }
+
+    private suspend fun waitForSourceSeparationProcessingCache(song: Song) {
+        repeat(SOURCE_SEPARATION_AUTO_START_PROCESSING_CACHE_WAIT_ATTEMPTS) {
+            if (currentSong.id != song.id) return
+            val processingCacheAvailable = runCatching {
+                withContext(IO) {
+                    when (sourceSeparationEngine.cacheStatusForSong(song)) {
+                        SourceSeparationCacheStatus.NotStarted -> false
+                        is SourceSeparationCacheStatus.Partial,
+                        is SourceSeparationCacheStatus.Completed,
+                        is SourceSeparationCacheStatus.CompletedWithTemporaryFiles -> true
+                    }
+                }
+            }.getOrDefault(false)
+            if (processingCacheAvailable) return
+            delay(SOURCE_SEPARATION_AUTO_START_PROCESSING_CACHE_WAIT_MS)
         }
     }
 
@@ -1270,6 +1381,7 @@ class PlayerViewModel(
                 enabled = enabled,
                 blend = blend,
                 showMessage = showMessage,
+                expectProcessing = false,
             )
             updateSourceSeparationPlaybackState(result)
         }
@@ -1296,10 +1408,12 @@ class PlayerViewModel(
         enabled: Boolean,
         blend: Float?,
         showMessage: Boolean,
+        expectProcessing: Boolean = false,
     ): SessionResult {
         val args = Bundle().apply {
             putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, enabled)
             putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, showMessage)
+            putBoolean(Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING, expectProcessing)
             putBoolean(
                 Playback.EXTRA_SOURCE_SEPARATION_AUTO_SYNC_ON_TRANSITION,
                 _sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.PerSong,
@@ -1887,6 +2001,8 @@ class PlayerViewModel(
             "source_separation.per_song_blend.pending"
         private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
         private const val SOURCE_SEPARATION_BLEND_PREVIEW_THROTTLE_MS = 33L
+        private const val SOURCE_SEPARATION_AUTO_START_PROCESSING_CACHE_WAIT_ATTEMPTS = 10
+        private const val SOURCE_SEPARATION_AUTO_START_PROCESSING_CACHE_WAIT_MS = 50L
     }
 }
 
