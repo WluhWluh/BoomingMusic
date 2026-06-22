@@ -63,6 +63,7 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_MESSAGES
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Dispatchers.IO
@@ -239,6 +240,11 @@ class PlayerViewModel(
         MutableStateFlow(readSourceSeparationShowSnackbarProgress())
     val sourceSeparationShowSnackbarProgressFlow =
         _sourceSeparationShowSnackbarProgressFlow.asStateFlow()
+
+    private val _sourceSeparationShowSnackbarMessagesFlow =
+        MutableStateFlow(readSourceSeparationShowSnackbarMessages())
+    val sourceSeparationShowSnackbarMessagesFlow =
+        _sourceSeparationShowSnackbarMessagesFlow.asStateFlow()
 
     private val _sourceSeparationMixedOutputPrerollMsFlow =
         MutableStateFlow(readSourceSeparationMixedOutputPrerollMs())
@@ -1180,6 +1186,13 @@ class PlayerViewModel(
         _sourceSeparationShowSnackbarProgressFlow.value = enabled
     }
 
+    fun setSourceSeparationShowSnackbarMessagesEnabled(enabled: Boolean) {
+        preferences.edit {
+            putBoolean(SOURCE_SEPARATION_SHOW_SNACKBAR_MESSAGES, enabled)
+        }
+        _sourceSeparationShowSnackbarMessagesFlow.value = enabled
+    }
+
     fun setSourceSeparationMixedOutputPrerollMs(valueMs: Long) {
         val normalized = normalizeSourceSeparationMixedOutputPrerollMs(valueMs)
         preferences.edit {
@@ -1534,6 +1547,10 @@ class PlayerViewModel(
 
     private fun readSourceSeparationShowSnackbarProgress(): Boolean {
         return preferences.getBoolean(SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS, false)
+    }
+
+    private fun readSourceSeparationShowSnackbarMessages(): Boolean {
+        return preferences.getBoolean(SOURCE_SEPARATION_SHOW_SNACKBAR_MESSAGES, false)
     }
 
     private fun readSourceSeparationMixedOutputPrerollMs(): Long {

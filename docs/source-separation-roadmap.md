@@ -288,7 +288,7 @@ The existing overflow actions should be removed only after the sheet can replace
 - `Separate vocals`,
 - `Separated playback`.
 
-The settings sheet should be the primary progress surface. Legacy source-separation Snackbar messages, including preparation, window progress, completion, cancellation, and failure, may be retained only behind an explicit advanced debug setting.
+The settings sheet should be the primary progress surface. Legacy source-separation Snackbar messages, including preparation, window progress, completion, cancellation, and failure, are retained only behind the advanced `Show separation progress Snackbar` setting. Short separated-playback notices, such as unavailable playback or missing cache messages, are controlled separately by the advanced `Show playback notices` setting. Both default off.
 
 True pause should not be exposed until partial segment manifests can preserve completed work. The current full-song WAV job can be canceled, but cancellation deletes temporary work; labeling that action as "Pause" would be misleading.
 
@@ -338,15 +338,19 @@ Current implementation status:
 - The closed state click enables separated playback through `PlayerViewModel.setSourceSeparationPlaybackEnabled`.
 - The expanded state supports drag-to-blend with a small midpoint snap region and three-zone tap handling: top sets vocals-only, middle turns separated playback off without changing the stored blend, and bottom sets instrumental-only.
 - Drag rendering uses a local in-control blend value for immediate visual feedback. Audio preview updates are throttled through a lightweight ViewModel path, while drag finish and tap endpoints still use the formal persisted blend path.
+- The midpoint snap region now gives the same haptic feedback used by the settings sheet's blend reset action when a drag first enters the neutral snap band.
+- The endpoint icons are rendered with fixed geometry and split coloring so the portion over the active fill stays visible while the unfilled portion uses the inactive icon color.
 - While separated playback is waiting for playback-ready segment cache, the expanded quick control shows a small Material3 determinate circular progress indicator above the vertical slider. It uses the same processing-progress estimator as the source separation settings sheet.
 - The lyrics bottom avoidance is already content-padding based and changes with the quick-control visual height, so the lyrics viewport is not shortened.
+- The source-separation quick button and full-lyrics button have been aligned in the shared overlay column so the closed quick-control state visually lines up with the existing full-lyrics circular button.
 
 State synchronization should use the same source of truth as the settings sheet:
 
 - collect `sourceSeparationBlendModeFlow` to decide whether the quick control is closed or expanded,
 - collect `sourceSeparationPlaybackStateFlow.blend` for the current displayed blend value,
 - call `setSourceSeparationPlaybackEnabled(true, blend)` when the closed button is pressed,
-- call `setSourceSeparationBlend(value)` during drag updates and at drag finish,
+- call `previewSourceSeparationBlend(value)` for throttled playback updates while dragging,
+- call `setSourceSeparationBlend(value)` at drag finish and for discrete tap endpoints,
 - call `setSourceSeparationPlaybackEnabled(false)` when the center tap zone is pressed,
 - do not create an independent quick-control blend setting.
 
@@ -370,7 +374,7 @@ Lyrics bottom spacing should remain content-padding based:
   - expanded quick blend control + full-lyrics button: enough for the vertical control, full-lyrics button, spacing, and margin.
 - The same padding override should apply to both plain lyrics and synced lyrics.
 
-Suggested first implementation steps:
+Implemented path:
 
 1. Keep the current content-padding-based lyrics-bottom-avoidance experiment and parameterize the extra bottom padding by overlay height.
 2. Replace the single full-lyrics button overlay with a bottom-end column that contains a placeholder quick source-separation button above the full-lyrics button.
@@ -378,14 +382,15 @@ Suggested first implementation steps:
 4. Add the custom vertical blend control with Canvas drawing and pointer-input handling.
 5. Add center snapping for drag only.
 6. Add top/middle/bottom tap zones.
-7. Add endpoint stem icons after the final icon assets are drawn.
-8. Verify on supported player styles and with both plain and synced lyrics.
+7. Add endpoint stem icons using existing `ic_person_24dp` and `ic_speaker_24dp` assets.
+8. Smooth drag responsiveness with local visual state plus throttled playback preview updates.
+9. Add compact processing progress above the quick slider.
+10. Verify on supported player styles and with both plain and synced lyrics.
 
 Open polish decisions:
 
-- Whether the closed-to-expanded transition should be an `AnimatedContent` size transform or a simple state swap for the first prototype.
-- Exact middle snap threshold; start conservatively around a few percent of the track height and tune by device testing.
 - Whether the quick control should show per-song/global mode distinction visually or remain a simple separated-playback quick blend regardless of memory mode.
+- Whether the custom quick-control drawing should eventually replace the existing full-lyrics button drawing as well, or remain a special-case control now that the two buttons are visually aligned.
 
 ### Boundary and Finalization Strategy
 
@@ -862,6 +867,7 @@ Completed temporary-cache cleanup prototype:
 - Cleanup skips any `work/` directory whose files are still referenced by the active source-separation playback session, so live running-cache playback can finish its transition before storage is reclaimed.
 - Completed `segments/` directories are deleted as soon as the cleanup pass can safely verify that they are inside the cache entry directory, because completed playback uses the promoted full-track stems.
 - If the current playback session is still using the running `work/` stem timeline after final promotion, a manual seek upgrades that session to the promoted `completed/` full-track WAV files and then retries temporary cleanup. This keeps uninterrupted playback stable while still giving the user an immediate cleanup trigger.
+- A user-initiated pause is also treated as a settled point where a finished song can switch from the running `work/` stem timeline to the promoted `completed/` full-track stems.
 - The source separation sheet now reports idle cache state explicitly: not started, partial cache present, completed with temporary artifacts pending cleanup, or completed and cleaned.
 - Manual device testing confirmed that active playback remains stable after full-song completion, manual seek can switch playback to the promoted full-track files, and both `work/` and `segments/` temporary directories can be reclaimed without breaking the current session.
 
@@ -899,6 +905,10 @@ Implementation notes:
 - Verified `:app:assembleNormalDebug` succeeds after the first play-while-processing experiment.
 - Seeks during running separated playback now re-check current and next segment readiness. If the target window is not ready, playback restores the original media item, pauses, reports a processing state, and automatically switches back to separated playback when the window becomes ready.
 - Starting a separation while separated playback is requested now uses the same processing gate: playback pauses while the initial playable window is unavailable instead of continuing with the original audio.
+- Automatic separation now runs earlier during song changes when separated playback is enabled and the active blend requires separated output, preventing a short original-audio leak before the processing gate pauses for cache readiness.
+- Running separated playback now uses a configurable ready horizon instead of trusting only the immediate segment, reducing repeat pause/resume loops when playback is close to the edge of the ready cache.
+- Partial running caches are preserved across lifecycle changes and resumed from verified ready segment state, avoiding unnecessary restarts after repeated seeking or task recreation.
+- Processing progress is shared by the settings sheet and the cover-lyrics quick control's circular indicator. The estimator starts cleanly for each wait session, pre-runs from 0% with a conservative prediction, and uses recent per-window timing when available.
 - Completed separated playback uses the instrumental stem WAV as the ExoPlayer media item and mixes the vocals stem from the same completed stem timeline.
 - Running separated playback keeps the original source as the ExoPlayer clock input while the mixer reads both work-in-progress stem WAVs directly. This avoids ExoPlayer pre-buffering unwritten zero-filled ranges from the instrumental work WAV while still suppressing original-source leakage.
 - Separated playback transitions pause output while replacing media items, seeking, preparing, and realigning the stem processor, then restore playback only after the new timeline is ready.
@@ -997,7 +1007,7 @@ Done criteria:
 - The source separation sheet contains the master switch, per-song memory switch, blend slider, current song progress, pause/resume or stop controls, current-song cache deletion, manual FLAC promotion, and advanced diagnostic settings.
 - The cover-lyrics quick control appears above the full-lyrics button on player styles that support cover lyrics, stays synchronized with the settings sheet, and adjusts separated playback/blend without introducing stem desync or source leakage.
 - The old `Separate vocals` and `Separated playback` overflow actions have been removed.
-- Detailed processing progress no longer depends on an indefinite Snackbar, and all source-separation Snackbar messages are hidden by default behind an advanced setting.
+- Detailed processing progress no longer depends on an indefinite Snackbar. Progress Snackbars are hidden by default behind `Show separation progress Snackbar`, and short separated-playback notices are hidden by default behind `Show playback notices`.
 - The user can find all cached separated songs.
 - Deleting cache does not delete original music.
 - Storage usage is visible enough for personal maintenance.
@@ -1046,10 +1056,10 @@ The early milestone ordering was deliberately modest:
 7. Only then attempt play-while-processing.
 8. Finish the full settings sheet and remove the older temporary menu/Snackbar surfaces.
 
-The first seven items now exist in prototype form. The current preferred order is:
+The first seven items and the cover-lyrics quick blend control now exist in prototype form. The current preferred order is:
 
-1. Implement the cover-lyrics quick blend control as the next UX step, using content-padding-based lyric avoidance and a custom vertical Canvas/pointer-input control.
-2. Feed current/next segment readiness and scheduler priority into the source separation sheet.
-3. Finish cache management and remove the older temporary menu/Snackbar surfaces.
-4. Revisit background and thermal behavior after the foreground quick-control and settings-sheet UX are stable.
-5. Expand window-decode profiles only after the core live playback path remains stable in daily use.
+1. Feed current/next segment readiness and scheduler priority into the source separation sheet.
+2. Finish broader cache management, including a list of separated-cache songs and storage usage.
+3. Continue hardening live running-cache playback around boundary readiness, lifecycle recovery, and completed-stem promotion points.
+4. Revisit background and thermal behavior after the foreground quick-control and settings-sheet UX stay stable in daily use.
+5. Expand window-decode or compression profiles only after the core live playback path remains stable.

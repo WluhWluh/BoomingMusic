@@ -132,6 +132,9 @@ private fun SourceSeparationSettingsSheet(
     val showSnackbarProgress by viewModel
         .sourceSeparationShowSnackbarProgressFlow
         .collectAsState()
+    val showSnackbarMessages by viewModel
+        .sourceSeparationShowSnackbarMessagesFlow
+        .collectAsState()
     val mixedOutputPrerollMs by viewModel
         .sourceSeparationMixedOutputPrerollMsFlow
         .collectAsState()
@@ -511,6 +514,18 @@ private fun SourceSeparationSettingsSheet(
                                 )
                             ) { checked ->
                                 viewModel.setSourceSeparationShowSnackbarProgressEnabled(checked)
+                            }
+
+                            LabeledSwitch(
+                                checked = showSnackbarMessages,
+                                title = stringResource(
+                                    R.string.source_separation_show_snackbar_messages_title
+                                ),
+                                description = stringResource(
+                                    R.string.source_separation_show_snackbar_messages_description
+                                )
+                            ) { checked ->
+                                viewModel.setSourceSeparationShowSnackbarMessagesEnabled(checked)
                             }
 
                             PrerollMsField(

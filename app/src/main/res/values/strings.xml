@@ -71,8 +71,10 @@
     <string name="source_separation_auto_start_description">Start separating the current song when separated playback is enabled and the active blend is not centered.</string>
     <string name="source_separation_auto_flac_compression_title">Automatically try FLAC compression</string>
     <string name="source_separation_auto_flac_compression_description">Compress completed WAV stems to FLAC for new separation tasks.</string>
-    <string name="source_separation_show_snackbar_progress_title">Show source separation Snackbar messages</string>
+    <string name="source_separation_show_snackbar_progress_title">Show separation progress Snackbar</string>
     <string name="source_separation_show_snackbar_progress_description">Show the player-screen preparation, progress, completion, cancel, and failure messages.</string>
+    <string name="source_separation_show_snackbar_messages_title">Show playback notices</string>
+    <string name="source_separation_show_snackbar_messages_description">Show short player-screen notices such as separated cache not found or separated playback unavailable.</string>
     <string name="source_separation_mixed_output_preroll_title">Mixed output preroll</string>
     <string name="source_separation_mixed_output_preroll_description">Delay before unmuting regular separated playback after mixed audio starts.</string>
     <string name="source_separation_hydrated_mixed_output_preroll_title">Hydrated PCM mixed output preroll</string>

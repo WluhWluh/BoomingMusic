@@ -169,6 +169,13 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
             }
         }
         viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationShowSnackbarMessagesFlow.collect { showMessages ->
+                if (!showMessages) {
+                    lastSourceSeparationPlaybackMessage = null
+                }
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
             playerViewModel.sourceSeparationPlaybackStateFlow.collect { state ->
                 onSourceSeparationPlaybackStateChanged(view, state)
             }
@@ -743,6 +750,9 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
         view: View,
         state: SourceSeparationPlaybackUiState,
     ) {
+        if (!playerViewModel.sourceSeparationShowSnackbarMessagesFlow.value) {
+            return
+        }
         val message = state.message?.takeIf { it != lastSourceSeparationPlaybackMessage }
             ?: return
         lastSourceSeparationPlaybackMessage = message
