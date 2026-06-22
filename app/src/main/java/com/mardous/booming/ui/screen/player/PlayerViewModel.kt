@@ -47,6 +47,9 @@ import com.mardous.booming.separation.SourceSeparationCacheStatus
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.SourceSeparationPerformanceStats
 import com.mardous.booming.separation.SourceSeparationPausedException
+import com.mardous.booming.separation.cache.SourceSeparationCacheEntry
+import com.mardous.booming.separation.cache.SourceSeparationCacheEntryFormat
+import com.mardous.booming.separation.cache.SourceSeparationCacheEntryState
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
@@ -200,6 +203,11 @@ class PlayerViewModel(
         MutableStateFlow<SourceSeparationPendingAction?>(null)
     val sourceSeparationPendingActionFlow =
         _sourceSeparationPendingActionFlow.asStateFlow()
+
+    private val _sourceSeparationCacheManagementStateFlow =
+        MutableStateFlow(SourceSeparationCacheManagementUiState())
+    val sourceSeparationCacheManagementStateFlow =
+        _sourceSeparationCacheManagementStateFlow.asStateFlow()
 
     private val _sourceSeparationFlacPromotionStateFlow =
         MutableStateFlow(SourceSeparationFlacPromotionUiState())
@@ -744,7 +752,7 @@ class PlayerViewModel(
                 if (currentSong.id == song.id && deleted) {
                     _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
                     refreshCurrentSourceSeparationCacheAvailable(song)
-                    syncSourceSeparationPlaybackIfRequested(force = true)
+                    handleCurrentSourceSeparationCacheDeleted()
                 }
             } finally {
                 if (_sourceSeparationPendingActionFlow.value.isDeleteCacheAction) {
@@ -837,6 +845,118 @@ class PlayerViewModel(
         if (shouldCancelWorker) {
             sourceSeparationFlacPromotionJob?.cancel()
         }
+    }
+
+    fun refreshSourceSeparationCacheManagement() {
+        viewModelScope.launch(IO) {
+            _sourceSeparationCacheManagementStateFlow.value =
+                _sourceSeparationCacheManagementStateFlow.value.copy(
+                    loading = true,
+                    errorMessage = null,
+                )
+            val result = runCatching {
+                sourceSeparationEngine.listCacheEntries()
+                    .map { entry -> entry.toUiItem() }
+            }
+            _sourceSeparationCacheManagementStateFlow.value = result.fold(
+                onSuccess = { items ->
+                    SourceSeparationCacheManagementUiState(
+                        loading = false,
+                        items = items,
+                        deletingAll = _sourceSeparationCacheManagementStateFlow
+                            .value
+                            .deletingAll,
+                        deletingEntryIds = _sourceSeparationCacheManagementStateFlow
+                            .value
+                            .deletingEntryIds
+                            .intersect(items.mapTo(mutableSetOf()) { it.id }),
+                    )
+                },
+                onFailure = { error ->
+                    SourceSeparationCacheManagementUiState(
+                        loading = false,
+                        errorMessage = error.message,
+                    )
+                },
+            )
+        }
+    }
+
+    fun deleteAllSourceSeparationCaches() {
+        val entries = _sourceSeparationCacheManagementStateFlow.value.items
+        if (entries.isEmpty()) return
+        viewModelScope.launch(IO) {
+            _sourceSeparationCacheManagementStateFlow.value =
+                _sourceSeparationCacheManagementStateFlow.value.copy(
+                    deletingAll = true,
+                    deletingEntryIds = entries.mapTo(mutableSetOf()) { it.id },
+                )
+            try {
+                entries.forEach { entry ->
+                    deleteSourceSeparationCacheEntryInternal(entry)
+                }
+            } finally {
+                _sourceSeparationCacheManagementStateFlow.value =
+                    _sourceSeparationCacheManagementStateFlow.value.copy(
+                        deletingAll = false,
+                        deletingEntryIds = emptySet(),
+                    )
+                refreshSourceSeparationCacheManagement()
+            }
+        }
+    }
+
+    fun deleteSourceSeparationCacheEntry(entryId: String) {
+        val entry = _sourceSeparationCacheManagementStateFlow
+            .value
+            .items
+            .firstOrNull { it.id == entryId }
+            ?: return
+        viewModelScope.launch(IO) {
+            markSourceSeparationCacheEntryDeleting(entryId, deleting = true)
+            try {
+                deleteSourceSeparationCacheEntryInternal(entry)
+            } finally {
+                markSourceSeparationCacheEntryDeleting(entryId, deleting = false)
+                refreshSourceSeparationCacheManagement()
+            }
+        }
+    }
+
+    private suspend fun deleteSourceSeparationCacheEntryInternal(
+        entry: SourceSeparationCacheManagementItem,
+    ) {
+        if (sourceSeparationSongId == entry.songId) {
+            sourceSeparationPauseRequested.set(true)
+            sourceSeparationJob?.join()
+        }
+        val waitsForFlacPromotion = isSourceSeparationFlacPromotionActive(entry.songId)
+        cancelSourceSeparationFlacPromotionForSong(entry.songId)
+        if (waitsForFlacPromotion) {
+            waitForSourceSeparationFlacPromotionToStop(entry.songId)
+        }
+        val deleted = runCatching {
+            sourceSeparationEngine.deleteCacheEntry(entry.id)
+        }.getOrDefault(false)
+        if (deleted && currentSong.id == entry.songId) {
+            _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
+            refreshCurrentSourceSeparationCacheAvailable(currentSong)
+            handleCurrentSourceSeparationCacheDeleted()
+        }
+    }
+
+    private fun markSourceSeparationCacheEntryDeleting(
+        entryId: String,
+        deleting: Boolean,
+    ) {
+        val current = _sourceSeparationCacheManagementStateFlow.value
+        _sourceSeparationCacheManagementStateFlow.value = current.copy(
+            deletingEntryIds = if (deleting) {
+                current.deletingEntryIds + entryId
+            } else {
+                current.deletingEntryIds - entryId
+            },
+        )
     }
 
     private suspend fun waitForSourceSeparationFlacPromotionToStop(songId: Long) {
@@ -1407,6 +1527,26 @@ class PlayerViewModel(
             )
             updateSourceSeparationPlaybackState(result)
         }
+    }
+
+    private suspend fun handleCurrentSourceSeparationCacheDeleted() {
+        if (!_sourceSeparationAutoStartFlow.value) {
+            syncSourceSeparationPlaybackIfRequested(force = true)
+            return
+        }
+        sourceSeparationSettingsApplyJob?.cancel()
+        sourceSeparationSettingsApplyJob = null
+        preferences.edit {
+            putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
+        }
+        _sourceSeparationBlendModeFlow.value = SourceSeparationBlendMode.Off
+        val result = sendSourceSeparationPlaybackEnabledCommand(
+            enabled = false,
+            blend = _sourceSeparationPlaybackStateFlow.value.blend,
+            showMessage = true,
+            expectProcessing = false,
+        )
+        updateSourceSeparationPlaybackState(result)
     }
 
     private fun requestSourceSeparationTemporaryCacheCleanup() {
@@ -2109,6 +2249,45 @@ data class SourceSeparationFlacPromotionUiState(
     }
 }
 
+data class SourceSeparationCacheManagementUiState(
+    val loading: Boolean = false,
+    val items: List<SourceSeparationCacheManagementItem> = emptyList(),
+    val deletingAll: Boolean = false,
+    val deletingEntryIds: Set<String> = emptySet(),
+    val errorMessage: String? = null,
+) {
+    val totalSizeBytes: Long
+        get() = items.sumOf { it.sizeBytes }
+}
+
+data class SourceSeparationCacheManagementItem(
+    val id: String,
+    val songId: Long,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val state: SourceSeparationCacheManagementItemState,
+    val readySegments: Int?,
+    val totalSegments: Int?,
+    val format: SourceSeparationCacheManagementItemFormat,
+    val sizeBytes: Long,
+    val updatedAtEpochMs: Long,
+    val modelVariant: String,
+    val pipelineVersion: Int,
+    val temporaryFilesPending: Boolean,
+)
+
+enum class SourceSeparationCacheManagementItemState {
+    Partial,
+    Completed,
+}
+
+enum class SourceSeparationCacheManagementItemFormat {
+    WAV,
+    FLAC,
+    Unknown,
+}
+
 sealed class SourceSeparationCacheUiState {
     data object NotStarted : SourceSeparationCacheUiState()
     data class Partial(
@@ -2121,6 +2300,37 @@ sealed class SourceSeparationCacheUiState {
     data class Completed(
         val canPromoteCompletedStems: Boolean,
     ) : SourceSeparationCacheUiState()
+}
+
+private fun SourceSeparationCacheEntry.toUiItem(): SourceSeparationCacheManagementItem {
+    return SourceSeparationCacheManagementItem(
+        id = id,
+        songId = songId,
+        title = title,
+        artist = artist,
+        album = album,
+        state = when (state) {
+            SourceSeparationCacheEntryState.Partial ->
+                SourceSeparationCacheManagementItemState.Partial
+            SourceSeparationCacheEntryState.Completed ->
+                SourceSeparationCacheManagementItemState.Completed
+        },
+        readySegments = readySegments,
+        totalSegments = totalSegments,
+        format = when (format) {
+            SourceSeparationCacheEntryFormat.WAV ->
+                SourceSeparationCacheManagementItemFormat.WAV
+            SourceSeparationCacheEntryFormat.FLAC ->
+                SourceSeparationCacheManagementItemFormat.FLAC
+            SourceSeparationCacheEntryFormat.Unknown ->
+                SourceSeparationCacheManagementItemFormat.Unknown
+        },
+        sizeBytes = sizeBytes,
+        updatedAtEpochMs = updatedAtEpochMs,
+        modelVariant = modelVariant,
+        pipelineVersion = pipelineVersion,
+        temporaryFilesPending = temporaryFilesPending,
+    )
 }
 
 private fun SourceSeparationCacheStatus.toUiState(): SourceSeparationCacheUiState {
