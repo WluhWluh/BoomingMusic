@@ -99,6 +99,7 @@ import com.mardous.booming.ui.component.views.PlaceholderDrawable
 import com.mardous.booming.ui.screen.library.LibraryViewModel
 import com.mardous.booming.ui.screen.player.PlayerViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
+import com.mardous.booming.ui.screen.player.SourceSeparationPlaybackProcessingProgressState
 import com.mardous.booming.ui.screen.player.rememberSourceSeparationPlaybackProcessingProgressState
 import com.mardous.booming.ui.theme.PlayerTheme
 import kotlinx.coroutines.Dispatchers
@@ -286,7 +287,7 @@ fun CoverLyricsScreen(
             .sourceSeparationStateFlow
             .collectAsStateWithLifecycle()
         val quickBlendExpanded = sourceSeparationBlendMode != SourceSeparationBlendMode.Off
-        val quickBlendProcessingProgress = if (
+        val quickBlendProcessingProgressState = if (
             quickBlendExpanded &&
             sourceSeparationPlaybackState.processing
         ) {
@@ -294,7 +295,7 @@ fun CoverLyricsScreen(
                 separationState = sourceSeparationState,
                 processingGeneration = sourceSeparationPlaybackState.processingGeneration,
                 processingSongId = currentSong.id,
-            ).progress
+            )
         } else {
             null
         }
@@ -303,7 +304,7 @@ fun CoverLyricsScreen(
         } else {
             CoverLyricsButtonSize
         }
-        val quickBlendProgressExtraHeight = if (quickBlendProcessingProgress != null) {
+        val quickBlendProgressExtraHeight = if (quickBlendProcessingProgressState != null) {
             CoverLyricsQuickBlendProgressOffset
         } else {
             0.dp
@@ -344,7 +345,7 @@ fun CoverLyricsScreen(
                 CoverLyricsQuickBlendControl(
                     expanded = quickBlendExpanded,
                     blend = sourceSeparationPlaybackState.blend,
-                    processingProgress = quickBlendProcessingProgress,
+                    processingProgressState = quickBlendProcessingProgressState,
                     onEnableSeparatedPlayback = {
                         playerViewModel.setSourceSeparationPlaybackEnabled(
                             enabled = true,
@@ -380,7 +381,7 @@ fun CoverLyricsScreen(
 private fun CoverLyricsQuickBlendControl(
     expanded: Boolean,
     blend: Float,
-    processingProgress: Float?,
+    processingProgressState: SourceSeparationPlaybackProcessingProgressState?,
     onEnableSeparatedPlayback: () -> Unit,
     onDisableSeparatedPlayback: () -> Unit,
     onBlendPreview: (Float) -> Unit,
@@ -632,17 +633,18 @@ private fun CoverLyricsQuickBlendControl(
                 .alpha(endpointIconAlpha)
         )
 
-        if (processingProgress != null) {
+        if (processingProgressState != null) {
+            val progressModifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = -CoverLyricsQuickBlendProgressOffset)
+                .size(CoverLyricsQuickBlendProgressSize)
+                .alpha(endpointIconAlpha)
             CircularProgressIndicator(
-                progress = { processingProgress },
+                progress = { processingProgressState.progress },
                 color = progressColor,
                 trackColor = progressColor.copy(alpha = 0.1f),
                 strokeWidth = CoverLyricsQuickBlendProgressStrokeWidth,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .offset(y = -CoverLyricsQuickBlendProgressOffset)
-                    .size(CoverLyricsQuickBlendProgressSize)
-                    .alpha(endpointIconAlpha)
+                modifier = progressModifier
             )
         }
     }
