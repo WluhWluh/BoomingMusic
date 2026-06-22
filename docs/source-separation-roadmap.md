@@ -1012,6 +1012,16 @@ Done criteria:
 - Deleting cache does not delete original music.
 - Storage usage is visible enough for personal maintenance.
 
+Implementation notes:
+
+- Current-song cache operations remain in the source separation sheet's `Current song` area: status, clear cache, and manual FLAC compression.
+- The sheet's `Advanced` area now includes a `Manage separated caches` entry that opens an in-sheet cache management page.
+- The cache management page lists all usable partial and completed separated caches, excluding failed/canceled leftovers so they are not presented as playable cache.
+- Each cache row is collapsed by default with the song title, cache size, per-entry delete action, and expand affordance visible. Expanding the row shows artist, state, ready-window count for partial caches, format, updated time, model variant, and pipeline version.
+- The page shows total cached-song count and aggregate cache size, supports refresh, allows deleting individual cache entries, and exposes a top-level delete-all action.
+- Global cache deletion uses the same safety as current-song deletion: it pauses an active separation for that song at a safe boundary, cancels/waits for FLAC promotion for that song, deletes the cache entry, and refreshes the current-song playback/cache state when relevant.
+- If the deleted cache belongs to the current song, playback/cache UI state is refreshed. When `Automatically start separation` is enabled, deleting that current-song cache also turns `Separated playback` off so the player does not immediately start a new automatic separation for the just-cleared song. When automatic start is disabled, the selected separated-playback mode is preserved and the normal playback sync path handles the missing-cache state.
+
 ### Phase 10: Polish and Hardening
 
 Status: pending

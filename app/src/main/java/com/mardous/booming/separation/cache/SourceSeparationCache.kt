@@ -504,11 +504,67 @@ class SourceSeparationCache(
             .orEmpty()
     }
 
+    fun listCacheEntries(): List<SourceSeparationCacheEntry> {
+        val entriesDir = File(rootDir, ENTRIES_DIR_NAME)
+        if (!entriesDir.isDirectory) return emptyList()
+        return entriesDir.listFiles()
+            ?.mapNotNull { entryDir ->
+                val manifest = readManifest(entryDir) ?: return@mapNotNull null
+                val state = when (manifest.state) {
+                    SourceSeparationCacheState.Running -> SourceSeparationCacheEntryState.Partial
+                    SourceSeparationCacheState.Completed -> SourceSeparationCacheEntryState.Completed
+                    SourceSeparationCacheState.Canceled,
+                    SourceSeparationCacheState.Failed -> return@mapNotNull null
+                }
+                val snapshot = if (manifest.state == SourceSeparationCacheState.Running) {
+                    manifest.segmentPlan?.let { segmentPlan ->
+                        manifest.toSegmentSnapshot(entryDir, segmentPlan)
+                    }
+                } else {
+                    null
+                }
+                val output = manifest.output
+                SourceSeparationCacheEntry(
+                    id = SourceSeparationCacheEntryId.encode(
+                        songId = manifest.songLocator.songId,
+                        modelVariant = manifest.audioIdentity.modelVariant,
+                        pipelineVersion = manifest.pipelineVersion,
+                    ),
+                    songId = manifest.songLocator.songId,
+                    title = manifest.songLocator.title,
+                    artist = manifest.songLocator.artist,
+                    album = manifest.songLocator.album,
+                    state = state,
+                    readySegments = snapshot?.readyCount,
+                    totalSegments = snapshot?.totalCount ?: manifest.segmentPlan?.segmentCount,
+                    format = output?.toCacheEntryFormat()
+                        ?: SourceSeparationCacheEntryFormat.Unknown,
+                    sizeBytes = entryDir.directorySize(),
+                    updatedAtEpochMs = manifest.updatedAtEpochMs,
+                    modelVariant = manifest.audioIdentity.modelVariant,
+                    pipelineVersion = manifest.pipelineVersion,
+                    temporaryFilesPending = hasPendingCompletedTemporaryDirs(manifest),
+                )
+            }
+            ?.sortedByDescending { it.updatedAtEpochMs }
+            .orEmpty()
+    }
+
     fun delete(manifest: SourceSeparationManifest): Boolean {
         val dir = entryDir(
             songId = manifest.songLocator.songId,
             modelVariant = manifest.audioIdentity.modelVariant,
             pipelineVersion = manifest.pipelineVersion,
+        )
+        return !dir.exists() || dir.deleteRecursively()
+    }
+
+    fun deleteEntry(entryId: String): Boolean {
+        val key = SourceSeparationCacheEntryId.decode(entryId) ?: return false
+        val dir = entryDir(
+            songId = key.songId,
+            modelVariant = key.modelVariant,
+            pipelineVersion = key.pipelineVersion,
         )
         return !dir.exists() || dir.deleteRecursively()
     }
@@ -1069,6 +1125,14 @@ class SourceSeparationCache(
             .any { it.absolutePath in activeFiles }
     }
 
+    private fun SourceSeparationOutput.toCacheEntryFormat(): SourceSeparationCacheEntryFormat {
+        return when {
+            canUsePromotedFlac() -> SourceSeparationCacheEntryFormat.FLAC
+            format == SourceSeparationOutputFormat.WAV -> SourceSeparationCacheEntryFormat.WAV
+            else -> SourceSeparationCacheEntryFormat.Unknown
+        }
+    }
+
     private fun Song.toLocator(): SourceSongLocator {
         return SourceSongLocator(
             songId = id,
@@ -1129,6 +1193,60 @@ data class SourceSeparationCompletion(
     val manifest: SourceSeparationManifest,
     val result: MdxRangeSeparationResult,
 )
+
+data class SourceSeparationCacheEntry(
+    val id: String,
+    val songId: Long,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val state: SourceSeparationCacheEntryState,
+    val readySegments: Int?,
+    val totalSegments: Int?,
+    val format: SourceSeparationCacheEntryFormat,
+    val sizeBytes: Long,
+    val updatedAtEpochMs: Long,
+    val modelVariant: String,
+    val pipelineVersion: Int,
+    val temporaryFilesPending: Boolean,
+)
+
+enum class SourceSeparationCacheEntryState {
+    Partial,
+    Completed,
+}
+
+enum class SourceSeparationCacheEntryFormat {
+    WAV,
+    FLAC,
+    Unknown,
+}
+
+private data class SourceSeparationCacheEntryKey(
+    val songId: Long,
+    val modelVariant: String,
+    val pipelineVersion: Int,
+)
+
+private object SourceSeparationCacheEntryId {
+    fun encode(
+        songId: Long,
+        modelVariant: String,
+        pipelineVersion: Int,
+    ): String {
+        return "$songId:$modelVariant:$pipelineVersion"
+    }
+
+    fun decode(id: String): SourceSeparationCacheEntryKey? {
+        val parts = id.split(':')
+        if (parts.size != 3) return null
+        return SourceSeparationCacheEntryKey(
+            songId = parts[0].toLongOrNull() ?: return null,
+            modelVariant = parts[1].takeIf { it.isNotBlank() } ?: return null,
+            pipelineVersion = parts[2].toIntOrNull() ?: return null,
+        )
+    }
+}
 
 private data class PromotedCompletedStems(
     val vocalsFile: File,

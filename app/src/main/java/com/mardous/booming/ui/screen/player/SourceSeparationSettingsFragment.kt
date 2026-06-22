@@ -18,10 +18,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -48,6 +52,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.platform.rememberNestedScrollInteropConnection
@@ -64,9 +69,12 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.mardous.booming.R
+import com.mardous.booming.extensions.files.asReadableFileSize
 import com.mardous.booming.extensions.isLandscape
+import com.mardous.booming.extensions.utilities.dateStr
 import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
 import com.mardous.booming.ui.component.compose.TitledCard
+import com.mardous.booming.ui.theme.SurfaceColorTokens
 import com.mardous.booming.ui.theme.BoomingMusicTheme
 import com.mardous.booming.ui.theme.SliderTokens
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
@@ -99,6 +107,11 @@ class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
             }
         }
     }
+}
+
+private enum class SourceSeparationSettingsPage {
+    Main,
+    CacheManagement,
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -147,6 +160,12 @@ private fun SourceSeparationSettingsSheet(
     val autoStartSeparation by viewModel
         .sourceSeparationAutoStartFlow
         .collectAsState()
+    val cacheManagementState by viewModel
+        .sourceSeparationCacheManagementStateFlow
+        .collectAsState()
+    var page by remember {
+        mutableStateOf(SourceSeparationSettingsPage.Main)
+    }
 
     val separatedPlaybackEnabled = blendMode != SourceSeparationBlendMode.Off
     val currentSongId = currentSong.id
@@ -168,6 +187,11 @@ private fun SourceSeparationSettingsSheet(
             blendDragging = false
         }
     }
+    LaunchedEffect(page) {
+        if (page == SourceSeparationSettingsPage.CacheManagement) {
+            viewModel.refreshSourceSeparationCacheManagement()
+        }
+    }
 
     BottomSheetDialogSurface {
         Column(
@@ -179,6 +203,16 @@ private fun SourceSeparationSettingsSheet(
             BottomSheetDefaults.DragHandle(
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )
+            if (page == SourceSeparationSettingsPage.CacheManagement) {
+                SourceSeparationCacheManagementPage(
+                    state = cacheManagementState,
+                    onBack = { page = SourceSeparationSettingsPage.Main },
+                    onRefresh = viewModel::refreshSourceSeparationCacheManagement,
+                    onDeleteAll = viewModel::deleteAllSourceSeparationCaches,
+                    onDelete = viewModel::deleteSourceSeparationCacheEntry,
+                )
+                return@Column
+            }
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -565,6 +599,30 @@ private fun SourceSeparationSettingsSheet(
                                 onValueChange =
                                     viewModel::setSourceSeparationPlaybackReadyWindowCount
                             )
+
+                            OutlinedButton(
+                                onClick = {
+                                    hapticFeedback.performHapticFeedback(
+                                        HapticFeedbackType.Confirm
+                                    )
+                                    page = SourceSeparationSettingsPage.CacheManagement
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_sd_card_24dp),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = stringResource(
+                                        R.string.source_separation_manage_caches
+                                    ),
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -573,6 +631,288 @@ private fun SourceSeparationSettingsSheet(
     }
 }
 
+@Composable
+private fun SourceSeparationCacheManagementPage(
+    state: SourceSeparationCacheManagementUiState,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onDeleteAll: () -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp)
+    ) {
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_back_24dp),
+                        contentDescription = stringResource(R.string.back_action)
+                    )
+                }
+
+                Text(
+                    text = stringResource(R.string.source_separation_manage_caches),
+                    style = MaterialTheme.typography.headlineSmallEmphasized,
+                    modifier = Modifier.weight(1f)
+                )
+
+                IconButton(
+                    onClick = onRefresh,
+                    enabled = !state.loading && !state.deletingAll,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_update_24dp),
+                        contentDescription = stringResource(R.string.refresh_action)
+                    )
+                }
+
+                IconButton(
+                    onClick = onDeleteAll,
+                    enabled = state.items.isNotEmpty() &&
+                            !state.loading &&
+                            !state.deletingAll,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_delete_24dp),
+                        contentDescription = stringResource(
+                            R.string.source_separation_delete_all_caches
+                        ),
+                        tint = if (state.items.isNotEmpty() && !state.deletingAll) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+            }
+        }
+
+        item {
+            Text(
+                text = stringResource(
+                    R.string.source_separation_cache_management_summary,
+                    state.items.size,
+                    state.totalSizeBytes.asReadableFileSize(),
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+
+        if (state.loading) {
+            item {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        }
+
+        if (state.deletingAll) {
+            item {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(
+                        text = stringResource(
+                            R.string.source_separation_deleting_all_caches
+                        ),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
+
+        state.errorMessage?.let { errorMessage ->
+            item {
+                Text(
+                    text = stringResource(
+                        R.string.source_separation_cache_management_load_failed,
+                        errorMessage,
+                    ),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+
+        if (!state.loading && state.items.isEmpty() && state.errorMessage == null) {
+            item {
+                Text(
+                    text = stringResource(R.string.source_separation_cache_management_empty),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+
+        items(
+            items = state.items,
+            key = { item -> item.id },
+        ) { item ->
+            SourceSeparationCacheManagementRow(
+                item = item,
+                deleting = item.id in state.deletingEntryIds,
+                onDelete = { onDelete(item.id) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SourceSeparationCacheManagementRow(
+    item: SourceSeparationCacheManagementItem,
+    deleting: Boolean,
+    onDelete: () -> Unit,
+) {
+    val context = LocalContext.current
+    val title = item.title.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.unknown_song)
+    val artist = item.artist.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.unknown_artist)
+    var expanded by remember(item.id) {
+        mutableStateOf(false)
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(
+                alpha = SurfaceColorTokens.SurfaceVariantAlpha
+            )
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(16.dp)
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_music_note_24dp),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+
+            Text(
+                text = title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+
+            Text(
+                text = item.sizeBytes.asReadableFileSize(),
+                maxLines = 1,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            IconButton(
+                onClick = onDelete,
+                enabled = !deleting,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_delete_24dp),
+                    contentDescription = stringResource(R.string.delete_action),
+                    tint = if (deleting) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
+
+            Icon(
+                painter = painterResource(
+                    if (expanded) {
+                        R.drawable.ic_keyboard_arrow_up_24dp
+                    } else {
+                        R.drawable.ic_keyboard_arrow_down_24dp
+                    }
+                ),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+            ) {
+                Text(
+                    text = artist,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                HorizontalDivider()
+
+                SourceSeparationCacheMetadataRow(
+                    label = stringResource(R.string.source_separation_cache_state_label),
+                    value = item.statusText(),
+                )
+                SourceSeparationCacheMetadataRow(
+                    label = stringResource(R.string.source_separation_cache_format_label),
+                    value = item.formatText(),
+                )
+                SourceSeparationCacheMetadataRow(
+                    label = stringResource(R.string.source_separation_cache_updated_label),
+                    value = context.dateStr(item.updatedAtEpochMs),
+                )
+                SourceSeparationCacheMetadataRow(
+                    label = stringResource(R.string.source_separation_cache_model_label),
+                    value = "${item.modelVariant} / v${item.pipelineVersion}",
+                )
+
+                if (deleting) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(
+                        text = stringResource(R.string.source_separation_clearing_current_cache),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourceSeparationCacheMetadataRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = label,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(0.42f),
+        )
+        Text(
+            text = value,
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(0.58f),
+        )
+    }
+}
 @Composable
 private fun SourceSeparationDecodeDiagnosticsText(
     state: SourceSeparationUiState
@@ -924,6 +1264,38 @@ private val SourceSeparationBlendMode.titleRes: Int
         SourceSeparationBlendMode.Global -> R.string.source_separation_blend_mode_global
         SourceSeparationBlendMode.PerSong -> R.string.source_separation_blend_mode_per_song
     }
+
+@Composable
+private fun SourceSeparationCacheManagementItem.statusText(): String {
+    val baseText = when (state) {
+        SourceSeparationCacheManagementItemState.Completed ->
+            stringResource(R.string.source_separation_cache_state_completed)
+        SourceSeparationCacheManagementItemState.Partial -> {
+            val ready = readySegments ?: 0
+            val total = totalSegments ?: 0
+            stringResource(R.string.source_separation_cache_state_partial, ready, total)
+        }
+    }
+    return if (temporaryFilesPending &&
+        state == SourceSeparationCacheManagementItemState.Completed
+    ) {
+        stringResource(R.string.source_separation_cache_state_cleanup_pending, baseText)
+    } else {
+        baseText
+    }
+}
+
+@Composable
+private fun SourceSeparationCacheManagementItem.formatText(): String {
+    return when (format) {
+        SourceSeparationCacheManagementItemFormat.WAV ->
+            stringResource(R.string.source_separation_cache_format_wav)
+        SourceSeparationCacheManagementItemFormat.FLAC ->
+            stringResource(R.string.source_separation_cache_format_flac)
+        SourceSeparationCacheManagementItemFormat.Unknown ->
+            stringResource(R.string.source_separation_cache_format_unknown)
+    }
+}
 
 private val SourceSeparationCacheUiState.canPromoteCompletedStems: Boolean
     get() = when (this) {
