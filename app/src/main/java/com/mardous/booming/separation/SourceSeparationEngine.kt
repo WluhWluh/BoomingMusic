@@ -46,33 +46,47 @@ class SourceSeparationEngine(
     ): SourceSeparationCacheStatus {
         require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
         val manifest = cache.readEntry(song, modelVariant)
-            ?: return SourceSeparationCacheStatus.NotStarted
-        return when (manifest.state) {
-            SourceSeparationCacheState.Running -> {
-                val snapshot = cache.readSegmentSnapshot(manifest)
-                SourceSeparationCacheStatus.Partial(
-                    readySegments = snapshot?.readyCount ?: 0,
-                    totalSegments = snapshot?.totalCount ?: manifest.segmentPlan?.segmentCount ?: 0,
-                )
-            }
-            SourceSeparationCacheState.Completed -> {
-                val canPromoteCompletedStems = cache.canPromoteCompletedStemsForSong(
-                    song = song,
-                    modelVariant = modelVariant,
-                )
-                if (cache.hasPendingCompletedTemporaryDirs(manifest)) {
-                    SourceSeparationCacheStatus.CompletedWithTemporaryFiles(
-                        canPromoteCompletedStems = canPromoteCompletedStems,
-                    )
-                } else {
-                    SourceSeparationCacheStatus.Completed(
-                        canPromoteCompletedStems = canPromoteCompletedStems,
+        val status = manifest?.let { manifest ->
+            when (manifest.state) {
+                SourceSeparationCacheState.Running -> {
+                    val snapshot = cache.readSegmentSnapshot(manifest)
+                    SourceSeparationCacheStatus.Partial(
+                        readySegments = snapshot?.readyCount ?: 0,
+                        totalSegments = snapshot?.totalCount ?: manifest.segmentPlan?.segmentCount ?: 0,
                     )
                 }
+                SourceSeparationCacheState.Completed -> {
+                    val canPromoteCompletedStems = cache.canPromoteCompletedStemsForSong(
+                        song = song,
+                        modelVariant = modelVariant,
+                    )
+                    if (cache.hasPendingCompletedTemporaryDirs(manifest)) {
+                        SourceSeparationCacheStatus.CompletedWithTemporaryFiles(
+                            canPromoteCompletedStems = canPromoteCompletedStems,
+                        )
+                    } else {
+                        SourceSeparationCacheStatus.Completed(
+                            canPromoteCompletedStems = canPromoteCompletedStems,
+                        )
+                    }
+                }
+                SourceSeparationCacheState.Canceled,
+                SourceSeparationCacheState.Failed -> SourceSeparationCacheStatus.NotStarted
             }
-            SourceSeparationCacheState.Canceled,
-            SourceSeparationCacheState.Failed -> SourceSeparationCacheStatus.NotStarted
-        }
+        } ?: SourceSeparationCacheStatus.NotStarted
+        SourceSeparationDiagnostics.recordCacheEvent(
+            context = context,
+            event = "cacheStatusForSong",
+            fields = SourceSeparationDiagnostics.songFields(song) + mapOf(
+                "modelVariant" to modelVariant.name,
+                "status" to status.diagnosticName(),
+                "manifestState" to manifest?.state?.name,
+                "manifestSongId" to manifest?.songLocator?.songId,
+                "manifestPath" to manifest?.songLocator?.filePath,
+                "manifestAudioFingerprint" to manifest?.audioIdentity?.audioFingerprint,
+            ),
+        )
+        return status
     }
 
     fun canPromoteCompletedStemsForSong(
@@ -563,6 +577,15 @@ private fun com.mardous.booming.separation.cache.SourceSeparationSegmentFileStat
         vocalsLength = vocalsFile.length(),
         instrumentalLength = instrumentalFile.length(),
     )
+}
+
+private fun SourceSeparationCacheStatus.diagnosticName(): String {
+    return when (this) {
+        SourceSeparationCacheStatus.NotStarted -> "NotStarted"
+        is SourceSeparationCacheStatus.Partial -> "Partial($readySegments/$totalSegments)"
+        is SourceSeparationCacheStatus.CompletedWithTemporaryFiles -> "CompletedWithTemporaryFiles"
+        is SourceSeparationCacheStatus.Completed -> "Completed"
+    }
 }
 
 private const val DEFAULT_PLAYBACK_READY_WINDOW_COUNT = 2
