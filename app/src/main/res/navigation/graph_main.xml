@@ -201,6 +201,11 @@
         android:name="com.mardous.booming.ui.screen.player.SourceSeparationSettingsFragment"
         android:label="SourceSeparationSettingsFragment"/>
 
+    <dialog
+        android:id="@+id/nav_source_separation_model_management"
+        android:name="com.mardous.booming.ui.screen.player.SourceSeparationModelManagementFragment"
+        android:label="SourceSeparationModelManagementFragment"/>
+
     <fragment
         android:id="@+id/nav_about"
         android:name="com.mardous.booming.ui.screen.about.AboutFragment"

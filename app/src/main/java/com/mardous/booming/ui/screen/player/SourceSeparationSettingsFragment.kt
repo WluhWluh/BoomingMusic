@@ -620,6 +620,30 @@ private fun SourceSeparationSettingsSheet(
                                     hapticFeedback.performHapticFeedback(
                                         HapticFeedbackType.Confirm
                                     )
+                                    viewModel.openSourceSeparationModelManagement()
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_file_open_24dp),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = stringResource(
+                                        R.string.source_separation_manage_model
+                                    ),
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    hapticFeedback.performHapticFeedback(
+                                        HapticFeedbackType.Confirm
+                                    )
                                     page = SourceSeparationSettingsPage.CacheManagement
                                 },
                                 modifier = Modifier
