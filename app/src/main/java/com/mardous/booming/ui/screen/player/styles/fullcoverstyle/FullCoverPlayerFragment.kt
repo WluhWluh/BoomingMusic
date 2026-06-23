@@ -163,7 +163,8 @@ class FullCoverPlayerFragment : AbsPlayerFragment(R.layout.fragment_full_cover_p
         _binding = null
     }
 
-    override fun onSharedPreferenceChanged(preferences: SharedPreferences, key: String?) {
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
+        super.onSharedPreferenceChanged(sharedPreferences, key)
         if (key == DISPLAY_NEXT_SONG) {
             setupNextSongVisibility()
         }

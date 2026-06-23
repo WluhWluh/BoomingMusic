@@ -27,6 +27,7 @@ import androidx.appcompat.widget.Toolbar
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsCompat.Type
+import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import com.mardous.booming.R
 import com.mardous.booming.core.model.action.NowPlayingAction
@@ -89,6 +90,9 @@ class M3PlayerFragment : AbsPlayerFragment(R.layout.fragment_m3_player) {
         setViewAction(binding.sourceSeparationSettingsButton, NowPlayingAction.SourceSeparationSettings)
         setViewAction(binding.sleepTimerAction, NowPlayingAction.SleepTimer)
         setViewAction(binding.addToPlaylistAction, NowPlayingAction.AddToPlaylist)
+        onSourceSeparationPanelEntryVisibilityChanged(
+            Preferences.sourceSeparationPanelEntryVisible
+        )
     }
 
     private fun setupToolbar() {
@@ -142,6 +146,10 @@ class M3PlayerFragment : AbsPlayerFragment(R.layout.fragment_m3_player) {
     override fun onSourceSeparationSettingsStateChanged(mode: SourceSeparationBlendMode) {
         super.onSourceSeparationSettingsStateChanged(mode)
         setSourceSeparationBlendButtonState(_binding?.sourceSeparationSettingsButton, mode)
+    }
+
+    override fun onSourceSeparationPanelEntryVisibilityChanged(visible: Boolean) {
+        _binding?.sourceSeparationSettingsButton?.isVisible = visible
     }
 
     override fun onIsFavoriteChanged(isFavorite: Boolean, withAnimation: Boolean) {

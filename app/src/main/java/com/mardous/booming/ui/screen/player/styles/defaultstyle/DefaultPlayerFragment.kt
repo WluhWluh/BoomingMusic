@@ -122,6 +122,7 @@ class DefaultPlayerFragment : AbsPlayerFragment(R.layout.fragment_default_player
     }
 
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
+        super.onSharedPreferenceChanged(sharedPreferences, key)
         if (key == DISPLAY_NEXT_SONG) {
             setupQueueMenuItem()
         }
