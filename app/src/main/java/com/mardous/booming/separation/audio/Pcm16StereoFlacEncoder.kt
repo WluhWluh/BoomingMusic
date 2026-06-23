@@ -7,6 +7,9 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.io.RandomAccessFile
 import java.security.MessageDigest
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.ThreadFactory
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.min
 
@@ -1366,12 +1369,30 @@ object Pcm16StereoFlacEncoder {
     ) : Pcm16StereoFlacPcmReader {
         private val input = RandomAccessFile(flacFile, "r")
         private val inputStream = RandomAccessFileInputStream(input)
+        private val prefetchInput = RandomAccessFile(flacFile, "r")
+        private val prefetchInputStream = RandomAccessFileInputStream(prefetchInput)
+        private val prefetchExecutor = Executors.newSingleThreadExecutor(
+            ThreadFactory { runnable ->
+                Thread(runnable, "BoomingFlacPrefetch").apply {
+                    isDaemon = true
+                    priority = (Thread.NORM_PRIORITY - 1).coerceAtLeast(Thread.MIN_PRIORITY)
+                }
+            }
+        )
+        private val prefetchLock = Any()
         private val left = IntArray(MAX_BLOCK_SIZE)
         private val right = IntArray(MAX_BLOCK_SIZE)
-        private val pcmBlock = ByteArray(MAX_BLOCK_SIZE * BYTES_PER_FRAME)
+        private val prefetchLeft = IntArray(MAX_BLOCK_SIZE)
+        private val prefetchRight = IntArray(MAX_BLOCK_SIZE)
+        private var pcmBlock = ByteArray(MAX_BLOCK_SIZE * BYTES_PER_FRAME)
         private var currentFrameIndex = -1
         private var currentBlockBytes = 0
         private var pcmBytePosition = 0L
+        private var prefetchedBlock: DecodedPcmBlock? = null
+        private var prefetchTask: Future<DecodedPcmBlock?>? = null
+        private var prefetchTaskFrameIndex = -1
+        @Volatile
+        private var closed = false
 
         override val frameCount: Int = index.frameCount
         override val sampleRate: Int = index.sampleRate
@@ -1416,21 +1437,86 @@ object Pcm16StereoFlacEncoder {
             pcmBytePosition = bytePosition
                 .coerceAtLeast(0L)
                 .coerceAtMost(totalPcmBytes())
+            currentFrameIndex = -1
+            synchronized(prefetchLock) {
+                prefetchedBlock = null
+                prefetchTask?.cancel(true)
+                prefetchTask = null
+                prefetchTaskFrameIndex = -1
+            }
+            frameIndexForPcmByte(pcmBytePosition)?.let(::schedulePrefetch)
             traceSink?.invoke("indexedSeek byte=$pcmBytePosition")
         }
 
         override fun close() {
+            closed = true
+            synchronized(prefetchLock) {
+                prefetchTask?.cancel(true)
+                prefetchTask = null
+                prefetchedBlock = null
+            }
+            prefetchExecutor.shutdownNow()
             input.close()
+            prefetchInput.close()
         }
 
         private fun ensureFrameDecoded(frameIndex: Int) {
             if (currentFrameIndex == frameIndex) return
-            val entry = index.frames[frameIndex]
             val startedAtNs = if (TRACE_INDEXED_FRAME_DECODE_TIMING) {
                 System.nanoTime()
             } else {
                 0L
             }
+            val prefetched = takePrefetchedFrame(frameIndex)
+            if (prefetched != null) {
+                pcmBlock = prefetched.pcm
+                currentFrameIndex = prefetched.frameIndex
+                currentBlockBytes = prefetched.byteCount
+                traceFrameDecodeIfNeeded(
+                    frameIndex = frameIndex,
+                    byteOffset = index.frames[frameIndex].byteOffset,
+                    elapsedNs = if (TRACE_INDEXED_FRAME_DECODE_TIMING) {
+                        System.nanoTime() - startedAtNs
+                    } else {
+                        0L
+                    },
+                    prefetched = true,
+                )
+                schedulePrefetch(frameIndex + 1)
+                return
+            }
+
+            currentBlockBytes = decodeFrameInto(
+                frameIndex = frameIndex,
+                input = input,
+                inputStream = inputStream,
+                left = left,
+                right = right,
+                output = pcmBlock,
+            )
+            currentFrameIndex = frameIndex
+            traceFrameDecodeIfNeeded(
+                frameIndex = frameIndex,
+                byteOffset = index.frames[frameIndex].byteOffset,
+                elapsedNs = if (TRACE_INDEXED_FRAME_DECODE_TIMING) {
+                    System.nanoTime() - startedAtNs
+                } else {
+                    0L
+                },
+                prefetched = false,
+            )
+            schedulePrefetch(frameIndex + 1)
+        }
+
+        private fun decodeFrameInto(
+            frameIndex: Int,
+            input: RandomAccessFile,
+            inputStream: RandomAccessFileInputStream,
+            left: IntArray,
+            right: IntArray,
+            output: ByteArray,
+        ): Int {
+            val entry = index.frames[frameIndex]
             input.seek(entry.byteOffset)
             val blockFrames = readAndDecodeFrame(
                 input = inputStream,
@@ -1447,31 +1533,100 @@ object Pcm16StereoFlacEncoder {
                 left = left,
                 right = right,
                 frameCount = blockFrames,
-                output = pcmBlock,
+                output = output,
                 outputOffset = 0,
             )
-            currentFrameIndex = frameIndex
-            currentBlockBytes = blockFrames * BYTES_PER_FRAME
-            traceFrameDecodeIfNeeded(
-                frameIndex = frameIndex,
-                byteOffset = entry.byteOffset,
-                elapsedNs = if (TRACE_INDEXED_FRAME_DECODE_TIMING) {
-                    System.nanoTime() - startedAtNs
-                } else {
-                    0L
-                },
-            )
+            return blockFrames * BYTES_PER_FRAME
+        }
+
+        private fun takePrefetchedFrame(frameIndex: Int): DecodedPcmBlock? {
+            synchronized(prefetchLock) {
+                harvestPrefetchLocked()
+                val block = prefetchedBlock
+                if (block?.frameIndex == frameIndex) {
+                    prefetchedBlock = null
+                    return block
+                }
+                if (block != null && block.frameIndex < frameIndex) {
+                    prefetchedBlock = null
+                }
+                if (prefetchTaskFrameIndex <= frameIndex) {
+                    prefetchTask?.cancel(true)
+                    prefetchTask = null
+                    prefetchTaskFrameIndex = -1
+                }
+                return null
+            }
+        }
+
+        private fun schedulePrefetch(frameIndex: Int) {
+            if (closed || frameIndex !in index.frames.indices) return
+            synchronized(prefetchLock) {
+                harvestPrefetchLocked()
+                if (closed ||
+                    currentFrameIndex == frameIndex ||
+                    prefetchedBlock?.frameIndex == frameIndex ||
+                    (prefetchTaskFrameIndex == frameIndex && prefetchTask != null)
+                ) {
+                    return
+                }
+                if (prefetchTask != null) return
+                prefetchTaskFrameIndex = frameIndex
+                prefetchTask = prefetchExecutor.submit<DecodedPcmBlock?> {
+                    if (closed) return@submit null
+                    val block = ByteArray(MAX_BLOCK_SIZE * BYTES_PER_FRAME)
+                    val byteCount = decodeFrameInto(
+                        frameIndex = frameIndex,
+                        input = prefetchInput,
+                        inputStream = prefetchInputStream,
+                        left = prefetchLeft,
+                        right = prefetchRight,
+                        output = block,
+                    )
+                    if (closed) {
+                        null
+                    } else {
+                        DecodedPcmBlock(
+                            frameIndex = frameIndex,
+                            byteCount = byteCount,
+                            pcm = block,
+                        )
+                    }
+                }
+            }
+        }
+
+        private fun harvestPrefetchLocked() {
+            val task = prefetchTask ?: return
+            if (!task.isDone) return
+            runCatching {
+                task.get()
+            }.onSuccess { block ->
+                if (block != null && block.frameIndex > currentFrameIndex) {
+                    prefetchedBlock = block
+                }
+            }.onFailure { error ->
+                if (TRACE_INDEXED_FRAME_DECODE_TIMING) {
+                    traceSink?.invoke(
+                        "indexedPrefetch failed frame=$prefetchTaskFrameIndex " +
+                                "error=${error.message ?: error::class.java.name}"
+                    )
+                }
+            }
+            prefetchTask = null
+            prefetchTaskFrameIndex = -1
         }
 
         private fun traceFrameDecodeIfNeeded(
             frameIndex: Int,
             byteOffset: Long,
             elapsedNs: Long,
+            prefetched: Boolean,
         ) {
             if (!TRACE_INDEXED_FRAME_DECODE_TIMING) return
             traceSink?.invoke(
                 "indexedDecode frame=$frameIndex byteOffset=$byteOffset " +
-                        "decodeMs=${elapsedNs / NANOS_PER_MILLISECOND.toFloat()}"
+                        "decodeMs=${elapsedNs / NANOS_PER_MILLISECOND.toFloat()} prefetched=$prefetched"
             )
         }
 
@@ -1497,6 +1652,12 @@ object Pcm16StereoFlacEncoder {
         private fun totalPcmBytes(): Long {
             return index.frameCount.toLong() * BYTES_PER_FRAME
         }
+
+        private data class DecodedPcmBlock(
+            val frameIndex: Int,
+            val byteCount: Int,
+            val pcm: ByteArray,
+        )
     }
 
     private class RandomAccessFileInputStream(
