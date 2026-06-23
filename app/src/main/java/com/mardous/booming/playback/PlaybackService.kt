@@ -1105,6 +1105,11 @@ class PlaybackService :
             val expectProcessingOnTransition = gateSourceSeparationPlaybackTransition(
                 reason = "transition",
                 wasPlaying = isPlaying,
+                expectProcessing = if (sourceSeparationPlaybackAutoSyncOnTransition) {
+                    null
+                } else {
+                    true
+                },
             )
             if (sourceSeparationPlaybackAutoSyncOnTransition) {
                 serviceScope.launch {
@@ -1116,9 +1121,15 @@ class PlaybackService :
                 }
             } else {
                 traceSourceSeparationPlayback(
-                    "player.onMediaItemTransition.deferAutoSync",
+                    "player.onMediaItemTransition.resolveClientBlend",
                     "reason=clientBlendRequired"
                 )
+                serviceScope.launch {
+                    resolveClientSourceSeparationPlaybackTransition(
+                        mediaItem = mediaItem,
+                        contextGeneration = sourceSeparationPlaybackContextGeneration,
+                    )
+                }
             }
         } else if (!isInternalMediaItemChange &&
             !sourceSeparationPlaybackRequested &&
@@ -1200,6 +1211,11 @@ class PlaybackService :
             gateSourceSeparationPlaybackTransition(
                 reason = "positionDiscontinuity",
                 wasPlaying = player.isPlaying,
+                expectProcessing = if (sourceSeparationPlaybackAutoSyncOnTransition) {
+                    null
+                } else {
+                    true
+                },
             )
         }
         if ((sourceSeparationPlaybackSession != null || sourceSeparationPlaybackIsProcessing) &&
@@ -1603,16 +1619,124 @@ class PlaybackService :
     private fun shouldServiceSourceSeparationAutoStart(song: Song): Boolean {
         if (song == Song.emptySong) return false
         if (!sourceSeparationPlaybackRequested) return false
-        if (!sourceSeparationPlaybackAutoSyncOnTransition) return false
-        if (!preferences.getBoolean(
-                SOURCE_SEPARATION_AUTO_START,
-                DEFAULT_SOURCE_SEPARATION_AUTO_START,
-            )
-        ) {
-            return false
-        }
+        if (!isSourceSeparationAutoStartEnabled()) return false
         if (isDefaultSourceSeparationBlend(sourceSeparationMixProcessor.blend)) return false
         return player.currentMediaItem?.mediaId == song.id.toString()
+    }
+
+    private suspend fun resolveClientSourceSeparationPlaybackTransition(
+        mediaItem: MediaItem,
+        contextGeneration: Long,
+    ) {
+        traceSourceSeparationPlayback(
+            "playback.transitionClientBlend.start",
+            "mediaId=${mediaItem.mediaId} generation=$contextGeneration"
+        )
+        val song = withContext(IO) {
+            repository.songByMediaItem(mediaItem)
+        }
+        if (!isClientSourceSeparationPlaybackTransitionCurrent(
+                mediaItem = mediaItem,
+                contextGeneration = contextGeneration,
+                stage = "after song lookup",
+            )
+        ) {
+            return
+        }
+        if (song == Song.emptySong) {
+            traceSourceSeparationPlayback(
+                "playback.transitionClientBlend.skip",
+                "reason=emptySong mediaId=${mediaItem.mediaId}"
+            )
+            clearSourceSeparationPlaybackProcessing()
+            return
+        }
+
+        val blend = serviceSeparatedPlaybackBlendForSong(song)
+        if (!isClientSourceSeparationPlaybackTransitionCurrent(
+                mediaItem = mediaItem,
+                contextGeneration = contextGeneration,
+                stage = "after blend lookup",
+            )
+        ) {
+            return
+        }
+
+        sourceSeparationMixProcessor.setBlend(blend)
+        val shouldExpectProcessing = isSourceSeparationAutoStartEnabled()
+        traceSourceSeparationPlayback(
+            "playback.transitionClientBlend.resolved",
+            "songId=${song.id} blend=$blend autoStart=$shouldExpectProcessing"
+        )
+        if (isDefaultSourceSeparationBlend(blend)) {
+            clearSourceSeparationPlaybackProcessing()
+            broadcastSourceSeparationPlaybackChanged()
+            return
+        }
+
+        setSourceSeparationPlaybackExpectProcessing(shouldExpectProcessing)
+        ensureSourceSeparationPlaybackReady(
+            showUnavailableMessage = false,
+            allowPauseForProcessing = true,
+            resumeWhenReady = sourceSeparationPlaybackResumeWhenReady || player.playWhenReady,
+            allowNewSession = true,
+            expectProcessing = shouldExpectProcessing,
+        )
+    }
+
+    private fun isClientSourceSeparationPlaybackTransitionCurrent(
+        mediaItem: MediaItem,
+        contextGeneration: Long,
+        stage: String,
+    ): Boolean {
+        val currentMediaItem = player.currentMediaItem
+        val isCurrent = sourceSeparationPlaybackRequested &&
+                !sourceSeparationPlaybackAutoSyncOnTransition &&
+                contextGeneration == sourceSeparationPlaybackContextGeneration &&
+                currentMediaItem?.mediaId == mediaItem.mediaId
+        if (!isCurrent) {
+            traceSourceSeparationPlayback(
+                "playback.transitionClientBlend.stale",
+                "stage=$stage startGeneration=$contextGeneration " +
+                        "currentGeneration=$sourceSeparationPlaybackContextGeneration " +
+                        "startMediaId=${mediaItem.mediaId} currentMediaId=${currentMediaItem?.mediaId} " +
+                        "requested=$sourceSeparationPlaybackRequested " +
+                        "autoSync=$sourceSeparationPlaybackAutoSyncOnTransition"
+            )
+        }
+        return isCurrent
+    }
+
+    private suspend fun serviceSeparatedPlaybackBlendForSong(song: Song): Float {
+        return withContext(IO) {
+            val persistedBlend = runCatching {
+                sourceSeparationEngine.separatedPlaybackBlendForSong(song)
+            }.getOrNull()
+            persistedBlend
+                ?: readTemporaryPerSongSourceSeparationBlend(song)
+                ?: DEFAULT_SOURCE_SEPARATION_BLEND
+        }.coerceIn(0f, 1f)
+    }
+
+    private fun readTemporaryPerSongSourceSeparationBlend(song: Song): Float? {
+        val key = temporaryPerSongSourceSeparationBlendKey(song)
+        return if (preferences.contains(key)) {
+            preferences.getFloat(key, DEFAULT_SOURCE_SEPARATION_BLEND).coerceIn(0f, 1f)
+        } else {
+            null
+        }
+    }
+
+    private fun temporaryPerSongSourceSeparationBlendKey(song: Song): String {
+        val identity = "${song.id}|${song.uri}|${song.data}"
+        return "$KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND.${identity.sha256Hex()}"
+    }
+
+    private fun isSourceSeparationAutoStartEnabled(): Boolean {
+        return preferences.getBoolean(
+            SOURCE_SEPARATION_AUTO_START,
+            DEFAULT_SOURCE_SEPARATION_AUTO_START,
+        )
     }
 
     private fun pauseServiceSourceSeparationAutoStartIfSongChanged(mediaItem: MediaItem?) {
@@ -3031,9 +3155,10 @@ class PlaybackService :
     private fun gateSourceSeparationPlaybackTransition(
         reason: String,
         wasPlaying: Boolean,
+        expectProcessing: Boolean? = null,
     ): Boolean {
         val expectProcessingOnTransition =
-            shouldExpectSourceSeparationProcessingOnTransition()
+            expectProcessing ?: shouldExpectSourceSeparationProcessingOnTransition()
         val resumeAfterTransitionGate = pauseSourceSeparationOutputForSwitch(
             reason = reason,
             waitForMixedOutput = true,
@@ -3972,6 +4097,8 @@ class PlaybackService :
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_FALLBACK_DELAY_MS = 1500L
         private const val SOURCE_SEPARATION_INTERNAL_MEDIA_ITEM_CHANGE_MS = 500L
         private const val DEFAULT_SOURCE_SEPARATION_BLEND = 0.5f
+        private const val KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND =
+            "source_separation.per_song_blend.pending"
         private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
         private const val SOURCE_SEPARATION_EXPECT_PROCESSING_TIMEOUT_MS = 10_000L
         private const val SERVICE_SOURCE_SEPARATION_AUTO_START_DEBOUNCE_MS = 150L
