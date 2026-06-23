@@ -118,9 +118,6 @@ android {
     }
 
     sourceSets {
-        named("main") {
-            assets.directories.add("../models/uvr-mdx")
-        }
         named("normal") {
             kotlin.directories.add("src/shared/java")
         }
