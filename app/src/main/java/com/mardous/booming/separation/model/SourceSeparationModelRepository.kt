@@ -471,6 +471,15 @@ class SourceSeparationModelUnavailableException(
     val variant: MdxModelVariant,
 ) : IllegalStateException("Source separation model is not installed: ${variant.fileName}")
 
+class SourceSeparationModelLoadException(
+    val variant: MdxModelVariant,
+    cause: Throwable,
+) : IllegalStateException(
+    "The installed source separation model could not be loaded. " +
+            "Import or download a valid ONNX model, then try again.",
+    cause,
+)
+
 sealed class SourceSeparationModelState {
     abstract val variant: MdxModelVariant
     val isUsable: Boolean
