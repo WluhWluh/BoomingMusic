@@ -89,6 +89,7 @@
     <string name="source_separation_model_missing">No local model is installed. Import a model file before enabling separated playback.</string>
     <string name="source_separation_model_importing">Importing model...</string>
     <string name="source_separation_model_downloading">Downloading model...</string>
+    <string name="source_separation_model_downloading_mirror">Downloading model via mirror...</string>
     <string name="source_separation_model_deleting">Deleting model...</string>
     <string name="source_separation_model_error">Model operation failed: %1$s</string>
     <string name="source_separation_model_file_label">File</string>
