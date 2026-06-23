@@ -154,7 +154,11 @@ class MdxRangeSeparator(
                 onProgress(MdxRangeProgress.preparing("Creating ONNX session"))
                 val session = measureElapsed(timing, "Session setup") {
                     runtimeSettings.createSessionOptions().use { options ->
-                        environment.createSession(modelFile.absolutePath, options)
+                        try {
+                            environment.createSession(modelFile.absolutePath, options)
+                        } catch (error: Exception) {
+                            throw SourceSeparationModelLoadException(modelVariant, error)
+                        }
                     }
                 }
                 session.use {
