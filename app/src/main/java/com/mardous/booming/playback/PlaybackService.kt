@@ -3081,13 +3081,31 @@ class PlaybackService :
         }
         traceSourceSeparationPlayback("playback.scheduleRetry", "delayMs=$delayMs")
         sourceSeparationPlaybackGateJob = serviceScope.launch {
-            delay(delayMs)
-            sourceSeparationPlaybackGateJob = null
-            traceSourceSeparationPlayback("playback.retry")
-            ensureSourceSeparationPlaybackReady(
-                showUnavailableMessage = false,
-                expectProcessing = sourceSeparationPlaybackExpectProcessing,
-            )
+            try {
+                delay(delayMs)
+                sourceSeparationPlaybackGateJob = null
+                traceSourceSeparationPlayback("playback.retry")
+                ensureSourceSeparationPlaybackReady(
+                    showUnavailableMessage = false,
+                    expectProcessing = sourceSeparationPlaybackExpectProcessing,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                sourceSeparationPlaybackGateJob = null
+                traceSourceSeparationPlayback(
+                    "playback.retry.failed",
+                    "error=${error::class.java.simpleName}:${error.message}"
+                )
+            } finally {
+                if (sourceSeparationPlaybackIsProcessing &&
+                    sourceSeparationPlaybackRequested &&
+                    sourceSeparationPlaybackGateJob == null
+                ) {
+                    traceSourceSeparationPlayback("playback.retry.reschedule")
+                    scheduleSourceSeparationPlaybackGateRetry()
+                }
+            }
         }
     }
 
