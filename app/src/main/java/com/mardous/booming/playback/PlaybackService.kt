@@ -207,6 +207,7 @@ class PlaybackService :
     private lateinit var persistentStorage: PersistentStorage
     private lateinit var customCommands: List<CommandButton>
     private lateinit var player: AdvancedForwardingPlayer
+    private lateinit var mediaSessionPlayer: SourceSeparationMediaSessionPlayer
     private var mediaSession: MediaLibrarySession? = null
 
     private var eqStateHandler: Handler? = Handler(Looper.getMainLooper())
@@ -382,8 +383,13 @@ class PlaybackService :
         player.exoPlayer.shuffleOrder = ImprovedShuffleOrder(0, 0, Random.nextLong())
         player.setSequentialTimelineEnabled(sequentialTimeline)
         player.addListener(this)
+        mediaSessionPlayer = SourceSeparationMediaSessionPlayer(player) {
+            sourceSeparationPlaybackResumeWhenReady = false
+            updateSourceSeparationMediaSessionBuffering()
+            broadcastSourceSeparationPlaybackChanged()
+        }
 
-        mediaSession = with(MediaLibrarySession.Builder(this, player, this)) {
+        mediaSession = with(MediaLibrarySession.Builder(this, mediaSessionPlayer, this)) {
             setId(packageName)
             setSessionActivity(createSessionActivityIntent())
             setBitmapLoader(CacheBitmapLoader(CoilBitmapLoader(this@PlaybackService)))
@@ -1000,6 +1006,7 @@ class PlaybackService :
             sourceSeparationPlaybackIsProcessing
         ) {
             sourceSeparationPlaybackResumeWhenReady = true
+            updateSourceSeparationMediaSessionBuffering()
             muteSourceSeparationOutputForSwitch(
                 reason = "processingUserPlay",
                 waitForMixedOutput = true,
@@ -1011,6 +1018,7 @@ class PlaybackService :
             !sourceSeparationPlaybackIsProcessing
         ) {
             sourceSeparationPlaybackResumeWhenReady = false
+            updateSourceSeparationMediaSessionBuffering()
             if (sourceSeparationPlaybackSession != null &&
                 isManualPlayWhenReadyPauseReason(reason)
             ) {
@@ -1338,6 +1346,7 @@ class PlaybackService :
             pauseServiceSourceSeparationAutoStart("playbackDisabled", clearPending = true)
             setSourceSeparationPlaybackExpectProcessing(false)
             sourceSeparationPlaybackResumeWhenReady = false
+            updateSourceSeparationMediaSessionBuffering()
             sourceSeparationPlaybackGateJob?.cancel()
             sourceSeparationPlaybackGateJob = null
             if (sourceSeparationPlaybackSession != null ||
@@ -1818,6 +1827,7 @@ class PlaybackService :
                         val resumeAfterProcessing = sourceSeparationPlaybackResumeWhenReady
                         sourceSeparationPlaybackIsProcessing = false
                         sourceSeparationPlaybackResumeWhenReady = false
+                        updateSourceSeparationMediaSessionBuffering()
                         val updatedSession = it.copy(
                             requiresReadinessGate = status.manifest.state == SourceSeparationCacheState.Running,
                         )
@@ -2046,6 +2056,7 @@ class PlaybackService :
         clearSourceSeparationPlayback(restoreOriginalItem = false, broadcast = false)
         sourceSeparationPlaybackIsProcessing = false
         sourceSeparationPlaybackResumeWhenReady = false
+        updateSourceSeparationMediaSessionBuffering()
         setSourceSeparationPlaybackExpectProcessing(false)
         sourceSeparationPlaybackSession = session
         enableSourceSeparationMixProcessor(session, positionMs)
@@ -2178,6 +2189,7 @@ class PlaybackService :
         ) || resumeWhenReady
         sourceSeparationPlaybackIsProcessing = false
         sourceSeparationPlaybackResumeWhenReady = false
+        updateSourceSeparationMediaSessionBuffering()
         sourceSeparationPlaybackSession = session
         enableSourceSeparationMixProcessor(session, positionMs)
         updateSourceSeparationPlaybackReadinessMonitor(session)
@@ -2734,6 +2746,7 @@ class PlaybackService :
         cancelSourceSeparationPlaybackReadinessMonitor("clear")
         sourceSeparationMixProcessor.disable()
         sourceSeparationPlaybackIsProcessing = false
+        updateSourceSeparationMediaSessionBuffering()
         rememberWarmSourceSeparationHydration(session)
         cleanupCompletedSourceSeparationTemporaryDirs(activeSession = session)
 
@@ -2784,6 +2797,15 @@ class PlaybackService :
         broadcastSourceSeparationPlaybackChanged()
     }
 
+    private fun updateSourceSeparationMediaSessionBuffering() {
+        if (!::mediaSessionPlayer.isInitialized) return
+
+        mediaSessionPlayer.setSourceSeparationVirtualBuffering(
+            sourceSeparationPlaybackIsProcessing &&
+                    sourceSeparationPlaybackResumeWhenReady
+        )
+    }
+
     private fun clearSourceSeparationPlaybackProcessing(broadcast: Boolean = true) {
         val changed = sourceSeparationPlaybackIsProcessing || sourceSeparationPlaybackResumeWhenReady
         val shouldResume = sourceSeparationPlaybackResumeWhenReady && player.playWhenReady.not()
@@ -2798,6 +2820,7 @@ class PlaybackService :
         if (!sourceSeparationPlaybackIsProcessing) {
             setSourceSeparationPlaybackExpectProcessing(false)
         }
+        updateSourceSeparationMediaSessionBuffering()
         if (sourceSeparationOutputMuted && sourceSeparationPlaybackSession == null) {
             restoreSourceSeparationOutputVolume("clearProcessing")
         }
@@ -2840,6 +2863,7 @@ class PlaybackService :
             clearSourceSeparationPlayback(restoreOriginalItem = true, broadcast = false)
             sourceSeparationPlaybackIsProcessing = true
         }
+        updateSourceSeparationMediaSessionBuffering()
         val message = getString(R.string.source_separation_playback_processing)
             .takeIf { showMessage }
         broadcastSourceSeparationPlaybackChanged(message)
@@ -3021,6 +3045,7 @@ class PlaybackService :
                     resumeAfterTransitionGate ||
                     player.playWhenReady ||
                     wasPlaying
+        updateSourceSeparationMediaSessionBuffering()
         flushSourceSeparationPausedOutput(reason)
         if (expectProcessingOnTransition) {
             broadcastSourceSeparationPlaybackChanged()
