@@ -322,7 +322,10 @@ private class WindowDecodeMdxSourceInput(
             MdxWindowDecodeProfile.Mp3_44100_MetadataQuantized,
             MdxWindowDecodeProfile.Mp3_44100_NoGaplessQuantized -> {
                 sourceWindowStartFrame + decodedWindow.mp3QuantizedPlacementOffsetFrames(
-                    requestedSourceFrameCount = sourceWindowEndFrame - sourceWindowStartFrame,
+                    requestedSourceFrameCount = mp3PlacementReferenceFrameCount(
+                        sourceWindowStartFrame = sourceWindowStartFrame,
+                        sourceWindowEndFrame = sourceWindowEndFrame,
+                    ),
                     sourceInfo = sourceInfo,
                 )
             }
@@ -336,6 +339,16 @@ private class WindowDecodeMdxSourceInput(
                 shouldCancel = shouldCancel,
             )
         }
+    }
+
+    private fun mp3PlacementReferenceFrameCount(
+        sourceWindowStartFrame: Int,
+        sourceWindowEndFrame: Int,
+    ): Int {
+        val boundedEndFrame = sourceWindowEndFrame
+            .coerceAtMost(safeSourceFrameCount)
+            .coerceAtLeast(sourceWindowStartFrame + 1)
+        return boundedEndFrame - sourceWindowStartFrame
     }
 }
 
