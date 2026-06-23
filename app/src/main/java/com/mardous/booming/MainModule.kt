@@ -62,6 +62,7 @@ import com.mardous.booming.playback.processor.BalanceAudioProcessor
 import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.separation.SourceSeparationEngine
+import com.mardous.booming.separation.model.SourceSeparationModelRepository
 import com.mardous.booming.ui.screen.about.AboutViewModel
 import com.mardous.booming.ui.screen.equalizer.EqualizerViewModel
 import com.mardous.booming.ui.screen.info.InfoViewModel
@@ -149,6 +150,9 @@ private val mainModule = module {
     }
     single {
         AudioOutputObserver(context = androidContext())
+    }
+    single {
+        SourceSeparationModelRepository(context = androidContext())
     }
     single {
         SourceSeparationEngine(context = androidContext())
@@ -289,7 +293,8 @@ private val viewModule = module {
             preferences = get(),
             repository = get(),
             albumCoverSaver = get(),
-            sourceSeparationEngine = get()
+            sourceSeparationEngine = get(),
+            sourceSeparationModelRepository = get()
         )
     }
 
