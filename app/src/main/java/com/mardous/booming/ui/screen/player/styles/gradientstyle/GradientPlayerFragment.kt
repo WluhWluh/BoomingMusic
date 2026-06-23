@@ -26,6 +26,7 @@ import android.view.View
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsCompat.Type
+import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import com.mardous.booming.R
 import com.mardous.booming.core.model.action.NowPlayingAction
@@ -69,6 +70,9 @@ class GradientPlayerFragment : AbsPlayerFragment(R.layout.fragment_gradient_play
         binding.showLyricsButton.setOnClickListener(this)
         binding.sourceSeparationSettingsButton.setOnClickListener(this)
         binding.soundSettingsButton.setOnClickListener(this)
+        onSourceSeparationPanelEntryVisibilityChanged(
+            Preferences.sourceSeparationPanelEntryVisible
+        )
     }
 
     override fun onClick(v: View) {
@@ -123,6 +127,10 @@ class GradientPlayerFragment : AbsPlayerFragment(R.layout.fragment_gradient_play
     override fun onSourceSeparationSettingsStateChanged(mode: SourceSeparationBlendMode) {
         super.onSourceSeparationSettingsStateChanged(mode)
         setSourceSeparationBlendButtonState(_binding?.sourceSeparationSettingsButton, mode)
+    }
+
+    override fun onSourceSeparationPanelEntryVisibilityChanged(visible: Boolean) {
+        _binding?.sourceSeparationSettingsButton?.isVisible = visible
     }
 
     override fun onLyricsVisibilityChange(animatorSet: AnimatorSet, lyricsVisible: Boolean) {
