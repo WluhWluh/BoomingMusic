@@ -43,7 +43,8 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
 
 - Android-only, fully on-device separation.
 - Two stems only: vocals and instrumental.
-- Personal builds may bundle or locally load the ONNX model.
+- User-provided local ONNX model storage, starting with `UVR_MDXNET_9482.onnx`.
+- First-use model acquisition by downloading the preset model URL, downloading from a user-provided URL, or importing a local file.
 - Integration with the existing Booming Music playback UI.
 - Current-song separation from the player screen.
 - Playback-position-prioritized chunk scheduling.
@@ -58,10 +59,10 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
 - Cloud processing.
 - Batch separation.
 - Four-stem models.
-- Model download marketplace or model management UX.
+- Multi-model marketplace, automatic model selection, and model update management beyond the single supported `UVR_MDXNET_9482.onnx` acquisition flow.
 - Perfect gapless behavior across every codec/device combination.
 - Android Auto-specific source separation controls.
-- Public redistribution until model licensing is clarified.
+- Bundled model redistribution. The app should not ship UVR model weights in the APK while model licensing and redistribution remain sensitive.
 
 ## Key Technical Assumptions
 
@@ -74,6 +75,9 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
 - Completed stem storage should default to FLAC because it preserves sample-accurate alignment while saving space compared with WAV.
 - Opus can be evaluated later as an optional small-size mode. MP3 should not be a first target because Android does not provide a reliable platform MP3 encoder and external encoders add size, delay, and licensing complexity.
 - App-private storage is the safest first cache location.
+- The APK should not bundle the ONNX model. The first supported acquisition flow should manage a single `UVR_MDXNET_9482.onnx` file in app-private storage.
+- The preset model source should be the k2-fsa/sherpa-onnx `source-separation-models` release asset with expected SHA-256 `9d78f8566fa8198065214ab628be1de966a500c57786695aa4b13e2b27a7727d`.
+- Model hash mismatch should be visible to the user but should not block advanced/manual use. Cache identity should eventually include the actual model hash so custom or mismatched models do not silently reuse incompatible stems.
 
 ## Proposed Architecture
 
@@ -82,6 +86,9 @@ The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing 
 - `separation/model`
   - model variant metadata,
   - ONNX model loading,
+  - local model repository and acquisition state,
+  - preset/custom URL download and local-file import,
+  - model hash calculation and attribution metadata,
   - runtime settings,
   - session lifecycle.
 - `separation/dsp`
@@ -142,11 +149,14 @@ Audio identity fields decide whether separated stems remain valid:
 - decoded sample rate,
 - decoded channel layout,
 - model variant,
+- model hash once runtime model acquisition is introduced,
 - pipeline version.
 
 The current implementation computes `audioFingerprint` from the selected encoded audio track samples through `MediaExtractor`, plus decoder-relevant track fields such as MIME type, sample rate, channel count, duration, encoder delay, and encoder padding. This skips container metadata such as cover art, lyrics, and tags, so metadata-only rewrites should not invalidate separated caches. A decoded PCM hash remains a possible fallback strategy if a platform extractor proves unreliable for a specific format.
 
 File size and raw modified timestamp should be stored as diagnostic fields in the manifest, but they should not be used as mandatory cache invalidation inputs.
+
+When locally downloaded or imported models replace bundled model assets, the cache identity should include the actual model SHA-256. Existing cache entries without a model hash can be treated as legacy entries for `UVR_MDXNET_9482.onnx` only when the active model matches the expected preset hash; otherwise they should be considered incompatible and recomputed.
 
 ### Segment Model
 
@@ -633,6 +643,9 @@ Implementation notes:
 - Added a cache-owned playback settings sidecar for per-song blend memory. The sidecar is ignored if its fingerprint does not match the current manifest audio fingerprint.
 - Added a temporary per-song blend store keyed by a hash of the current library song id, URI, and file path. When the separation manifest receives a real encoded-audio fingerprint, the temporary value is migrated to the cache-owned sidecar and removed.
 - Added a playback-service gate so global blend can auto-sync on song transitions, while per-song blend waits for the target song's explicit blend command before creating a new separated playback session.
+- `Remember blend per song` now defaults on for new installs, so the primary separated-playback behavior follows per-song listening adjustments unless the user opts out.
+- Added Now playing > Controls settings that independently control source-separation entry visibility and cover-lyrics quick-control visibility. The full source-separation panel entry defaults hidden, while the lyrics-layer quick control defaults visible.
+- The source-separation panel entry visibility setting applies to both icon-button player styles and overflow-menu text entries, and the player action provider refreshes immediately so enabling the setting no longer leaves a temporary blank icon.
 
 Current limitations:
 
@@ -981,6 +994,9 @@ Initial implementation notes:
 - Existing promoted FLAC caches without a sidecar index remain playable through the old whole-file decode fallback, so this hardening does not invalidate already-tested caches.
 - Playback-gate traces keep indexed FLAC open, fallback, and seek events visible. Per-frame decode timing remains behind a local debug constant because it is useful for targeted profiling but too noisy for normal playback testing.
 - A debug-only stereo decorrelation experiment compared the current independent-stereo encoder against adaptive independent/left-side/right-side/mid-side frame selection on S25. On three real completed-cache song pairs, vocals saved about 8.3% total, instrumentals saved about 2.5% total, and the combined stem set saved about 5.2%. All decorrelated outputs passed local PCM MD5 verification, but adaptive encoding was substantially slower because each block must encode multiple candidates. Keep production promotion on independent stereo for now unless the extra post-processing time becomes acceptable.
+- Completed-cache FLAC playback remains on the indexed-reader path, but the current hardening pass reduces startup and seek instability by prefetching bounded decoded blocks off the realtime path and by keeping full-song PCM hydration as a transparent upgrade when it finishes.
+- More invasive FLAC temporary-playback redesigns were tested and rejected because they increased startup latency, seek blanking, and repeated audio risk. The stable direction is to keep the indexed reader simple, feed it modest prefetch, and let hydration remove remaining decoder pressure when available.
+- Recent multi-song S25 testing of fully promoted FLAC caches did not reproduce the earlier probabilistic stutter. Initial decode wait was short enough for daily use, and playback/seek behavior stayed normal.
 
 Next FLAC hardening steps:
 
@@ -1026,6 +1042,52 @@ Implementation notes:
 - Cache manifests track `lastAccessedAtEpochMs`; existing manifests fall back to `updatedAtEpochMs`. Completed caches are touched when they are selected for separated playback, and the management UI displays both updated and last-used timestamps.
 - Automatic cleanup prunes partial and completed caches separately by least-recently-used order. It protects the current song, active/pending separation songs, active separated playback song, and queued/running FLAC promotion songs from pruning.
 
+### Phase 9.5: External Model Acquisition and Local Model Repository
+
+Status: planned, high priority
+
+Goals:
+
+- Stop shipping `UVR_MDXNET_9482.onnx` inside the APK.
+- Replace bundled-asset lookup with an app-private local model repository.
+- Support the single current model first: `UVR_MDXNET_9482.onnx`.
+- When no local model is available, guide the user to download the preset URL, download from a custom URL, or import a local ONNX file.
+- Show model source, size, expected SHA-256, actual SHA-256, and whether the hash matches the known preset.
+- Treat a hash mismatch as a visible warning only; do not block loading or using the model.
+- Preserve existing source-separation behavior once a usable local model exists.
+
+Licensing and attribution notes:
+
+- The k2-fsa/sherpa-onnx repository is Apache-2.0, but its `source-separation-models` release states that the UVR models were converted from TRvlvr's public UVR model release.
+- TRvlvr's model repository does not expose a separate GitHub license. The UVR GUI repository is MIT and asks third-party application developers using its models to credit UVR and its developers.
+- The safest product direction is therefore to remove model weights from the packaged APK, link to the preset upstream asset, and show clear UVR/k2-fsa source attribution in the model acquisition UI and/or app notices.
+
+Preset model metadata:
+
+- Name: `UVR_MDXNET_9482.onnx`
+- URL: `https://github.com/k2-fsa/sherpa-onnx/releases/download/source-separation-models/UVR_MDXNET_9482.onnx`
+- Size: `29,704,738` bytes
+- SHA-256: `9d78f8566fa8198065214ab628be1de966a500c57786695aa4b13e2b27a7727d`
+
+Implementation recommendation:
+
+- Remove `assets.directories.add("../models/uvr-mdx")` from the Android source set so local debug models are no longer packaged automatically.
+- Replace `MdxModelFile.get()` with a `SourceSeparationModelRepository` that returns explicit availability states such as `Missing`, `Available`, `HashMismatch`, `Corrupt`, `Downloading`, and `Importing`.
+- Store the managed model under app-private storage, for example `filesDir/source-separation/models/mdxnet_9482/UVR_MDXNET_9482.onnx`, with a sidecar metadata file containing source URL/import name, size, actual hash, expected hash, hash-match state, and timestamps.
+- Download to a temporary file, calculate SHA-256 while streaming, then atomically move into the active model location after the write succeeds.
+- Import through Android's document picker, copy into private storage, calculate SHA-256, and then forget the source URI unless the user imports again.
+- If separation is requested while the model is missing, surface a model-acquisition state instead of failing as a generic processing error.
+- Add the actual model hash to new cache identities/manifests so custom or mismatched models do not silently reuse stems generated by a different model.
+- Treat legacy caches with no model hash as compatible only when the active model hash matches the preset SHA-256.
+
+Done criteria:
+
+- A clean build can be produced without `models/uvr-mdx/UVR_MDXNET_9482.onnx` present on disk.
+- First use of source separation with no local model opens or points to the model acquisition UI instead of throwing a bundled-asset error.
+- Preset download, custom URL download, and local-file import each produce a local model file and visible hash comparison.
+- Hash mismatch is shown clearly but does not prevent the user from starting separation.
+- Existing completed and partial cache behavior remains stable when the active model hash matches the preset model.
+
 ### Phase 10: Polish and Hardening
 
 Status: pending
@@ -1035,7 +1097,7 @@ Goals:
 - Improve error messages.
 - Handle unsupported source codecs.
 - Handle low storage.
-- Handle model missing/corrupt cases.
+- Harden corrupt or incompatible local model cases after Phase 9.5 adds the primary model acquisition flow.
 - Add logging around scheduler decisions.
 - Add focused tests for DSP math, cache keys, and scheduler priority.
 
@@ -1047,8 +1109,8 @@ Done criteria:
 
 ## Major Risks
 
-- Model licensing is unclear for redistribution.
-- ONNX Runtime and bundled models will significantly increase APK size.
+- Model licensing is unclear for bundled redistribution, so the APK should not ship UVR weights.
+- ONNX Runtime increases APK size; removing bundled model weights keeps the source-separation feature from adding another large binary asset.
 - MP3 encoding would require native libraries or third-party encoders and is not planned for the first implementation.
 - Lossy compressed stems may drift because of encoder delay or padding; FLAC avoids this and should be the default completed-cache format.
 - Two independent players are likely to drift and should be avoided unless the Media3 custom-source path proves too expensive.
@@ -1070,10 +1132,11 @@ The early milestone ordering was deliberately modest:
 7. Only then attempt play-while-processing.
 8. Finish the full settings sheet and remove the older temporary menu/Snackbar surfaces.
 
-The first seven items and the cover-lyrics quick blend control now exist in prototype form. The current preferred order is:
+The first seven items, FLAC completed-cache promotion, cache management, automatic cleanup, entry visibility preferences, and the cover-lyrics quick blend control now exist in prototype form. The current preferred order is:
 
-1. Feed current/next segment readiness and scheduler priority into the source separation sheet.
-2. Finish broader cache management, including a list of separated-cache songs and storage usage.
+1. Remove bundled model distribution and add the single-model local repository plus download/import acquisition flow.
+2. Add model hash to new source-separation cache identities and handle legacy caches conservatively.
 3. Continue hardening live running-cache playback around boundary readiness, lifecycle recovery, and completed-stem promotion points.
-4. Revisit background and thermal behavior after the foreground quick-control and settings-sheet UX stay stable in daily use.
-5. Expand window-decode or compression profiles only after the core live playback path remains stable.
+4. Feed richer current/next segment readiness and scheduler priority details into the source separation sheet.
+5. Revisit background and thermal behavior after the foreground quick-control and settings-sheet UX stay stable in daily use.
+6. Expand window-decode or compression profiles only after the core live playback path remains stable.
