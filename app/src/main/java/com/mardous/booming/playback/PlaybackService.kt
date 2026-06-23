@@ -2068,6 +2068,8 @@ class PlaybackService :
             val activeJob = coroutineContext[Job]
             val hydrationDir = sourceSeparationHydrationDir(hydrationKey)
             runCatching {
+                delay(SOURCE_SEPARATION_HYDRATION_START_DELAY_MS)
+                ensureActive()
                 hydrationDir.deleteRecursively()
                 hydrationDir.mkdirs()
                 val vocalsPcm = File(hydrationDir, "vocals.pcm")
@@ -3657,6 +3659,7 @@ class PlaybackService :
         private const val SOURCE_SEPARATION_TRACE_FLUSH_DELAY_MS = 1000L
         private const val SOURCE_SEPARATION_TRACE_FLUSH_LINE_COUNT = 80
         private const val SOURCE_SEPARATION_TRACE_TIME_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS"
+        private const val SOURCE_SEPARATION_HYDRATION_START_DELAY_MS = 750L
     }
 }
 
