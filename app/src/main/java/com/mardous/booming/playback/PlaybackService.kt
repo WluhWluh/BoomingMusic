@@ -98,14 +98,18 @@ import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.playback.renderer.AlacWorkaroundCodecSelector
 import com.mardous.booming.playback.renderer.BoomingMusicRenderersFactory
+import com.mardous.booming.separation.SourceSeparationAlreadyRunningException
+import com.mardous.booming.separation.SourceSeparationCacheStatus
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.SourceSeparationPlayableCacheStatus
+import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationReadyHorizonStatus
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import com.mardous.booming.separation.cache.SourceSeparationCacheState
 import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.separation.cache.SourceSeparationOutput
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor.InputMode
+import com.mardous.booming.separation.model.SourceSeparationModelLoadException
 import com.mardous.booming.ui.screen.MainActivity
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
@@ -156,7 +160,9 @@ import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
 
@@ -216,6 +222,12 @@ class PlaybackService :
     private var sourceSeparationPlaybackExpectProcessing = false
     private var sourceSeparationPlaybackResumeWhenReady = false
     private var sourceSeparationPlaybackInternalPlayWhenReady: Boolean? = null
+    private var serviceSourceSeparationAutoStartJob: Job? = null
+    private var serviceSourceSeparationAutoStartSongId: Long? = null
+    private var serviceSourceSeparationPendingAutoStartSong: Song? = null
+    private val serviceSourceSeparationAutoStartPauseRequested = AtomicBoolean(false)
+    private val serviceSourceSeparationAutoStartCancelRequested = AtomicBoolean(false)
+    private val serviceSourceSeparationAutoStartPlaybackPositionMs = AtomicLong(C.TIME_UNSET)
     private val sourceSeparationPlaybackReadinessMutex = Mutex()
     private var sourceSeparationPlaybackGateJob: Job? = null
     private var sourceSeparationPlaybackReadinessMonitorJob: Job? = null
@@ -439,6 +451,10 @@ class PlaybackService :
     override fun onDestroy() {
         traceSourceSeparationPlayback("service.onDestroy")
         flushSourceSeparationPlaybackTrace()
+        serviceSourceSeparationAutoStartCancelRequested.set(true)
+        serviceSourceSeparationAutoStartJob?.cancel()
+        serviceSourceSeparationAutoStartJob = null
+        serviceSourceSeparationPendingAutoStartSong = null
         cancelSourceSeparationPlaybackReadinessMonitor("serviceDestroy")
         cancelSourceSeparationPcmHydrationJob(deletePartial = false)
         super.onDestroy()
@@ -795,16 +811,24 @@ class PlaybackService :
                 )
                 serviceScope.future(IO) {
                     val song = repository.songByMediaItem(mediaItem)
-                    val result = sourceSeparationEngine.separateSongToWav(
-                        song = song,
-                        promoteCompletedStems = preferences.getBoolean(
-                            SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
-                            true,
-                        ),
-                        playbackReadyWindowCountProvider = {
-                            sourceSeparationPlaybackReadyWindowCount
-                        },
-                    )
+                    val result = try {
+                        sourceSeparationEngine.separateSongToWav(
+                            song = song,
+                            promoteCompletedStems = preferences.getBoolean(
+                                SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+                                true,
+                            ),
+                            playbackReadyWindowCountProvider = {
+                                sourceSeparationPlaybackReadyWindowCount
+                            },
+                        )
+                    } catch (_: SourceSeparationAlreadyRunningException) {
+                        traceSourceSeparationPlayback(
+                            "command.separateCurrentSong.skip",
+                            "mediaId=${mediaItem.mediaId} reason=alreadyRunning"
+                        )
+                        return@future SessionResult(SessionResult.RESULT_SUCCESS)
+                    }
                     cleanupCompletedSourceSeparationTemporaryDirs()
                     SessionResult(
                         SessionResult.RESULT_SUCCESS,
@@ -1043,6 +1067,7 @@ class PlaybackService :
         )
         if (!isInternalMediaItemChange) {
             sourceSeparationPlaybackContextGeneration++
+            pauseServiceSourceSeparationAutoStartIfSongChanged(mediaItem)
         }
         if (activeSession != null) {
             if (mediaItem?.mediaId == activeSession.songId.toString()) {
@@ -1310,6 +1335,7 @@ class PlaybackService :
                 expectProcessing = expectProcessing,
             )
         } else {
+            pauseServiceSourceSeparationAutoStart("playbackDisabled", clearPending = true)
             setSourceSeparationPlaybackExpectProcessing(false)
             sourceSeparationPlaybackResumeWhenReady = false
             sourceSeparationPlaybackGateJob?.cancel()
@@ -1374,6 +1400,251 @@ class PlaybackService :
             "result=${result.resultCode}"
         )
         return result
+    }
+
+    private fun maybeStartServiceSourceSeparationAutoStart(
+        song: Song,
+        source: String,
+    ) {
+        if (!shouldServiceSourceSeparationAutoStart(song)) {
+            traceSourceSeparationPlayback(
+                "autoStart.skip",
+                "source=$source songId=${song.id} reason=disabledOrDefault"
+            )
+            return
+        }
+        if (sourceSeparationEngine.isSeparationActiveForSong(song)) {
+            traceSourceSeparationPlayback(
+                "autoStart.skip",
+                "source=$source songId=${song.id} reason=engineAlreadyRunning"
+            )
+            return
+        }
+        val runningSongId = serviceSourceSeparationAutoStartSongId
+        if (serviceSourceSeparationAutoStartJob?.isActive == true) {
+            if (runningSongId == song.id) {
+                traceSourceSeparationPlayback(
+                    "autoStart.skip",
+                    "source=$source songId=${song.id} reason=alreadyRunning"
+                )
+            } else {
+                serviceSourceSeparationPendingAutoStartSong = song
+                serviceSourceSeparationAutoStartPauseRequested.set(true)
+                traceSourceSeparationPlayback(
+                    "autoStart.defer",
+                    "source=$source songId=${song.id} runningSongId=$runningSongId"
+                )
+            }
+            return
+        }
+
+        serviceSourceSeparationPendingAutoStartSong = null
+        serviceSourceSeparationAutoStartPauseRequested.set(false)
+        serviceSourceSeparationAutoStartCancelRequested.set(false)
+        serviceSourceSeparationAutoStartPlaybackPositionMs.set(C.TIME_UNSET)
+        serviceSourceSeparationAutoStartSongId = song.id
+        serviceSourceSeparationAutoStartJob = serviceScope.launch(IO) {
+            runServiceSourceSeparationAutoStart(song, source)
+        }
+    }
+
+    private suspend fun runServiceSourceSeparationAutoStart(
+        song: Song,
+        source: String,
+    ) {
+        traceSourceSeparationPlayback(
+            "autoStart.start",
+            "source=$source songId=${song.id} title=${song.title}"
+        )
+        val playbackPositionJob = serviceScope.launch {
+            while (true) {
+                if (player.currentMediaItem?.mediaId == song.id.toString()) {
+                    serviceSourceSeparationAutoStartPlaybackPositionMs.set(
+                        player.currentPosition.coerceAtLeast(0),
+                    )
+                } else {
+                    serviceSourceSeparationAutoStartPauseRequested.set(true)
+                }
+                delay(SERVICE_SOURCE_SEPARATION_AUTO_START_POSITION_UPDATE_MS)
+            }
+        }
+        try {
+            delay(SERVICE_SOURCE_SEPARATION_AUTO_START_DEBOUNCE_MS)
+            if (!shouldServiceSourceSeparationAutoStartOnMain(song)) {
+                traceSourceSeparationPlayback(
+                    "autoStart.abort",
+                    "songId=${song.id} reason=noLongerNeeded"
+                )
+                return
+            }
+            val cacheStatus = runCatching {
+                sourceSeparationEngine.cacheStatusForSong(song)
+            }.getOrDefault(SourceSeparationCacheStatus.NotStarted)
+            val canResumeFromCache = cacheStatus == SourceSeparationCacheStatus.NotStarted ||
+                    cacheStatus is SourceSeparationCacheStatus.Partial
+            if (!canResumeFromCache) {
+                traceSourceSeparationPlayback(
+                    "autoStart.abort",
+                    "songId=${song.id} reason=cacheAlreadyExists status=${cacheStatus.traceName()}"
+                )
+                return
+            }
+
+            sourceSeparationEngine.separateSongToWav(
+                song = song,
+                promoteCompletedStems = preferences.getBoolean(
+                    SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+                    true,
+                ),
+                onProgress = {
+                    requestSourceSeparationPlaybackCheckAfterServiceAutoStart(song)
+                },
+                onPrepared = {
+                    requestSourceSeparationPlaybackCheckAfterServiceAutoStart(song)
+                },
+                playbackPositionMsProvider = {
+                    serviceSourceSeparationAutoStartPlaybackPositionMs
+                        .get()
+                        .takeIf { it != C.TIME_UNSET }
+                },
+                playbackReadyWindowCountProvider = {
+                    sourceSeparationPlaybackReadyWindowCount
+                },
+                shouldPause = {
+                    serviceSourceSeparationAutoStartPauseRequested.get() ||
+                            serviceSourceSeparationAutoStartSongId != song.id
+                },
+                shouldCancel = {
+                    serviceSourceSeparationAutoStartCancelRequested.get()
+                },
+            )
+            traceSourceSeparationPlayback(
+                "autoStart.completed",
+                "songId=${song.id}"
+            )
+            requestSourceSeparationPlaybackCheckAfterServiceAutoStart(song)
+            cleanupCompletedSourceSeparationTemporaryDirs()
+        } catch (_: SourceSeparationPausedException) {
+            traceSourceSeparationPlayback(
+                "autoStart.paused",
+                "songId=${song.id}"
+            )
+        } catch (_: SourceSeparationAlreadyRunningException) {
+            traceSourceSeparationPlayback(
+                "autoStart.alreadyRunning",
+                "songId=${song.id}"
+            )
+            requestSourceSeparationPlaybackCheckAfterServiceAutoStart(song)
+        } catch (error: SourceSeparationModelLoadException) {
+            Log.e(TAG, "Background source separation model failed to load", error)
+            traceSourceSeparationPlayback(
+                "autoStart.failed",
+                "songId=${song.id} error=${error::class.java.simpleName}:${error.message}"
+            )
+            serviceScope.launch {
+                setSourceSeparationPlaybackExpectProcessing(false)
+                clearSourceSeparationPlaybackProcessing()
+            }
+        } catch (error: CancellationException) {
+            traceSourceSeparationPlayback(
+                "autoStart.canceled",
+                "songId=${song.id} cancelRequested=${serviceSourceSeparationAutoStartCancelRequested.get()}"
+            )
+        } catch (error: Throwable) {
+            Log.e(TAG, "Background source separation failed", error)
+            traceSourceSeparationPlayback(
+                "autoStart.failed",
+                "songId=${song.id} error=${error::class.java.simpleName}:${error.message}"
+            )
+            serviceScope.launch {
+                setSourceSeparationPlaybackExpectProcessing(false)
+                clearSourceSeparationPlaybackProcessing()
+            }
+        } finally {
+            playbackPositionJob.cancel()
+            val activeJob = coroutineContext[Job]
+            withContext(Main.immediate) {
+                if (serviceSourceSeparationAutoStartSongId == song.id) {
+                    serviceSourceSeparationAutoStartSongId = null
+                }
+                if (serviceSourceSeparationAutoStartJob == activeJob) {
+                    serviceSourceSeparationAutoStartJob = null
+                }
+                serviceSourceSeparationAutoStartPauseRequested.set(false)
+                serviceSourceSeparationAutoStartCancelRequested.set(false)
+                serviceSourceSeparationAutoStartPlaybackPositionMs.set(C.TIME_UNSET)
+                val pendingSong = serviceSourceSeparationPendingAutoStartSong
+                serviceSourceSeparationPendingAutoStartSong = null
+                if (pendingSong != null) {
+                    maybeStartServiceSourceSeparationAutoStart(
+                        song = pendingSong,
+                        source = "pendingAfterPause",
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun shouldServiceSourceSeparationAutoStartOnMain(song: Song): Boolean {
+        return withContext(Main.immediate) {
+            shouldServiceSourceSeparationAutoStart(song)
+        }
+    }
+
+    private fun shouldServiceSourceSeparationAutoStart(song: Song): Boolean {
+        if (song == Song.emptySong) return false
+        if (!sourceSeparationPlaybackRequested) return false
+        if (!sourceSeparationPlaybackAutoSyncOnTransition) return false
+        if (!preferences.getBoolean(
+                SOURCE_SEPARATION_AUTO_START,
+                DEFAULT_SOURCE_SEPARATION_AUTO_START,
+            )
+        ) {
+            return false
+        }
+        if (isDefaultSourceSeparationBlend(sourceSeparationMixProcessor.blend)) return false
+        return player.currentMediaItem?.mediaId == song.id.toString()
+    }
+
+    private fun pauseServiceSourceSeparationAutoStartIfSongChanged(mediaItem: MediaItem?) {
+        val runningSongId = serviceSourceSeparationAutoStartSongId ?: return
+        val newSongId = mediaItem?.mediaId?.toLongOrNull()
+        if (newSongId == runningSongId) return
+        pauseServiceSourceSeparationAutoStart(
+            reason = "songChanged:$newSongId",
+            clearPending = false,
+        )
+    }
+
+    private fun pauseServiceSourceSeparationAutoStart(
+        reason: String,
+        clearPending: Boolean,
+    ) {
+        if (clearPending) {
+            serviceSourceSeparationPendingAutoStartSong = null
+        }
+        if (serviceSourceSeparationAutoStartJob?.isActive != true) return
+        serviceSourceSeparationAutoStartPauseRequested.set(true)
+        traceSourceSeparationPlayback(
+            "autoStart.pauseRequested",
+            "reason=$reason songId=$serviceSourceSeparationAutoStartSongId"
+        )
+    }
+
+    private fun requestSourceSeparationPlaybackCheckAfterServiceAutoStart(song: Song) {
+        serviceScope.launch {
+            if (!sourceSeparationPlaybackRequested ||
+                player.currentMediaItem?.mediaId != song.id.toString()
+            ) {
+                return@launch
+            }
+            ensureSourceSeparationPlaybackReady(
+                showUnavailableMessage = false,
+                allowPauseForProcessing = true,
+                resumeWhenReady = sourceSeparationPlaybackResumeWhenReady || player.playWhenReady,
+                expectProcessing = sourceSeparationPlaybackExpectProcessing,
+            )
+        }
     }
 
     private suspend fun ensureSourceSeparationPlaybackReady(
@@ -1567,6 +1838,10 @@ class PlaybackService :
                     }
                     SourceSeparationPlayableCacheStatus.Processing -> {
                         traceSourceSeparationPlayback("check.activeSession.processing", "id=$checkId")
+                        maybeStartServiceSourceSeparationAutoStart(
+                            song = song,
+                            source = "activeSession.processing",
+                        )
                         waitForSourceSeparationPlayback(
                             source = "activeSession",
                             restoreOriginalItem = false,
@@ -1638,6 +1913,10 @@ class PlaybackService :
         }
         if (status == SourceSeparationPlayableCacheStatus.Processing) {
             traceSourceSeparationPlayback("check.newSession.processing", "id=$checkId")
+            maybeStartServiceSourceSeparationAutoStart(
+                song = song,
+                source = "newSession.processing",
+            )
             return waitForSourceSeparationPlayback(
                 source = "newSession",
                 restoreOriginalItem = false,
@@ -1648,6 +1927,10 @@ class PlaybackService :
         }
         if (shouldWaitForExpectedProcessing && status == SourceSeparationPlayableCacheStatus.Unavailable) {
             traceSourceSeparationPlayback("check.newSession.expectProcessing", "id=$checkId")
+            maybeStartServiceSourceSeparationAutoStart(
+                song = song,
+                source = "newSession.expectProcessing",
+            )
             return waitForSourceSeparationPlayback(
                 source = "newSession.expectProcessing",
                 restoreOriginalItem = false,
@@ -3648,6 +3931,8 @@ class PlaybackService :
         private const val DEFAULT_SOURCE_SEPARATION_BLEND = 0.5f
         private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
         private const val SOURCE_SEPARATION_EXPECT_PROCESSING_TIMEOUT_MS = 10_000L
+        private const val SERVICE_SOURCE_SEPARATION_AUTO_START_DEBOUNCE_MS = 150L
+        private const val SERVICE_SOURCE_SEPARATION_AUTO_START_POSITION_UPDATE_MS = 250L
 
         private const val FOREGROUND_SERVICE_TIMEOUT = (60 * 1000) * 2L
 
@@ -3813,5 +4098,14 @@ private fun SourceSeparationPlayableCacheStatus.traceName(): String {
         is SourceSeparationPlayableCacheStatus.Ready -> "Ready(${manifest.state})"
         SourceSeparationPlayableCacheStatus.Processing -> "Processing"
         SourceSeparationPlayableCacheStatus.Unavailable -> "Unavailable"
+    }
+}
+
+private fun SourceSeparationCacheStatus.traceName(): String {
+    return when (this) {
+        SourceSeparationCacheStatus.NotStarted -> "NotStarted"
+        is SourceSeparationCacheStatus.Partial -> "Partial($readySegments/$totalSegments)"
+        is SourceSeparationCacheStatus.CompletedWithTemporaryFiles -> "CompletedWithTemporaryFiles"
+        is SourceSeparationCacheStatus.Completed -> "Completed"
     }
 }

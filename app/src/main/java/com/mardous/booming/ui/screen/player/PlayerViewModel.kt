@@ -43,6 +43,8 @@ import com.mardous.booming.playback.progress.ProgressObserver
 import com.mardous.booming.playback.shuffle.OpenShuffleMode
 import com.mardous.booming.playback.shuffle.ShuffleManager
 import com.mardous.booming.playback.toMediaItems
+import com.mardous.booming.separation.SourceSeparationActiveState
+import com.mardous.booming.separation.SourceSeparationAlreadyRunningException
 import com.mardous.booming.separation.SourceSeparationCacheStatus
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.SourceSeparationPerformanceStats
@@ -51,6 +53,7 @@ import com.mardous.booming.separation.cache.SourceSeparationCacheEntry
 import com.mardous.booming.separation.cache.SourceSeparationCacheEntryFormat
 import com.mardous.booming.separation.cache.SourceSeparationCacheEntryState
 import com.mardous.booming.separation.model.MdxModelVariant
+import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
 import com.mardous.booming.separation.model.SourceSeparationModelDownloadProgress
 import com.mardous.booming.separation.model.SourceSeparationModelLoadException
@@ -379,6 +382,19 @@ class PlayerViewModel(
                         showMessage = false,
                     )
                     maybeAutoStartSourceSeparationForSong(song)
+                }
+                .launchIn(viewModelScope)
+
+            internalJobs += combine(
+                currentSongFlow,
+                sourceSeparationEngine.activeSeparationStateFlow,
+            ) { song, activeStates ->
+                song to activeStates.firstOrNull { activeState ->
+                    activeState.songId == song.id
+                }
+            }
+                .onEach { (song, activeState) ->
+                    syncActiveSourceSeparationUiState(song, activeState)
                 }
                 .launchIn(viewModelScope)
 
@@ -716,6 +732,11 @@ class PlayerViewModel(
                 if (currentSong.id == song.id) {
                     refreshCurrentSourceSeparationCacheAvailable(song)
                 }
+            } catch (_: SourceSeparationAlreadyRunningException) {
+                _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
+                if (currentSong.id == song.id) {
+                    refreshCurrentSourceSeparationCacheAvailable(song)
+                }
             } catch (_: CancellationException) {
                 _sourceSeparationStateFlow.value = SourceSeparationUiState.Canceled(
                     songId = song.id,
@@ -788,10 +809,15 @@ class PlayerViewModel(
     }
 
     fun pauseSourceSeparation() {
+        val song = currentSong
+        if (song == Song.emptySong) return
         if (sourceSeparationJob?.isActive == true) {
+            _sourceSeparationPendingActionFlow.value = SourceSeparationPendingAction.Pause
+        } else if (sourceSeparationEngine.isSeparationActiveForSong(song)) {
             _sourceSeparationPendingActionFlow.value = SourceSeparationPendingAction.Pause
         }
         sourceSeparationPauseRequested.set(true)
+        sourceSeparationEngine.pauseSeparationForSong(song)
     }
 
     private fun pauseSourceSeparationForLifecycle() {
@@ -1092,6 +1118,66 @@ class PlayerViewModel(
         val runningSongId = sourceSeparationSongId ?: return
         if (song.id != runningSongId) {
             sourceSeparationPauseRequested.set(true)
+        }
+    }
+
+    private fun syncActiveSourceSeparationUiState(
+        song: Song,
+        activeState: SourceSeparationActiveState?,
+    ) {
+        if (song == Song.emptySong) return
+        val currentState = _sourceSeparationStateFlow.value
+        if (activeState == null &&
+            currentState is SourceSeparationUiState.Running &&
+            currentState.songId != song.id
+        ) {
+            _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
+            return
+        }
+        val localTaskRunning = sourceSeparationSongId == song.id &&
+                sourceSeparationJob?.isActive == true
+        if (activeState != null) {
+            if (!localTaskRunning) {
+                _sourceSeparationStateFlow.value = activeState.toUiState(
+                    averageWindowMs = sourceSeparationPerformanceStats.averageWindowMs(),
+                )
+            }
+            return
+        }
+
+        if (currentState !is SourceSeparationUiState.Running ||
+            currentState.songId != song.id ||
+            localTaskRunning
+        ) {
+            return
+        }
+
+        viewModelScope.launch(IO) {
+            val cacheState = runCatching {
+                sourceSeparationEngine.cacheStatusForSong(song)
+            }.getOrDefault(SourceSeparationCacheStatus.NotStarted)
+            if (currentSong.id != song.id ||
+                sourceSeparationEngine.isSeparationActiveForSong(song)
+            ) {
+                return@launch
+            }
+            _currentSourceSeparationCacheStateFlow.value = cacheState.toUiState()
+            _currentSourceSeparationCacheAvailableFlow.value =
+                cacheState != SourceSeparationCacheStatus.NotStarted
+            _sourceSeparationStateFlow.value = when (cacheState) {
+                is SourceSeparationCacheStatus.Completed,
+                is SourceSeparationCacheStatus.CompletedWithTemporaryFiles -> {
+                    SourceSeparationUiState.Completed(
+                        songId = song.id,
+                        songTitle = song.title,
+                    )
+                }
+                SourceSeparationCacheStatus.NotStarted,
+                is SourceSeparationCacheStatus.Partial -> SourceSeparationUiState.Idle
+            }
+            if (_sourceSeparationPendingActionFlow.value == SourceSeparationPendingAction.Pause) {
+                _sourceSeparationPendingActionFlow.value = null
+            }
         }
     }
 
@@ -2140,6 +2226,8 @@ class PlayerViewModel(
             sourceSeparationSongId?.let(::add)
             sourceSeparationPendingStartSongId?.let(::add)
             _sourceSeparationPlaybackStateFlow.value.songId?.let(::add)
+            sourceSeparationEngine.activeSeparationStateFlow.value
+                .mapTo(this) { it.songId }
             val flacPromotionState = _sourceSeparationFlacPromotionStateFlow.value
             flacPromotionState.runningSongId?.let(::add)
             addAll(flacPromotionState.queuedSongIds)
@@ -2791,6 +2879,53 @@ private fun SourceSeparationCacheStatus.toUiState(): SourceSeparationCacheUiStat
             canPromoteCompletedStems = canPromoteCompletedStems,
         )
     }
+}
+
+private fun SourceSeparationActiveState.toUiState(
+    averageWindowMs: Long,
+): SourceSeparationUiState.Running {
+    return progress.toRunningUiState(
+        songId = songId,
+        songTitle = songTitle,
+        averageWindowMs = averageWindowMs,
+    )
+}
+
+private fun MdxRangeProgress?.toRunningUiState(
+    songId: Long,
+    songTitle: String,
+    averageWindowMs: Long,
+): SourceSeparationUiState.Running {
+    return SourceSeparationUiState.Running(
+        songId = songId,
+        songTitle = songTitle,
+        completedWindows = this?.completedWindows ?: 0,
+        totalWindows = this?.totalWindows ?: 0,
+        percent = this?.percent ?: 0,
+        stage = this?.stage,
+        sourceDecodeDiagnostics = this?.sourceDecodeDiagnostics?.toDisplayText(),
+        sourceDecodeMode = this?.sourceDecodeDiagnostics
+            ?.mode
+            ?.toUiState(),
+        averageWindowMs = averageWindowMs,
+        scheduler = this?.scheduler?.let { scheduler ->
+            SourceSeparationSchedulerUiState(
+                playbackSegmentIndex = scheduler.playbackSegmentIndex,
+                playbackSegmentState = scheduler.playbackSegmentState,
+                nextSegmentIndex = scheduler.nextSegmentIndex,
+                nextSegmentState = scheduler.nextSegmentState,
+                processingSegmentIndex = scheduler.processingSegmentIndex,
+                priority = scheduler.priority,
+                readySegments = scheduler.readySegments,
+                totalSegments = scheduler.totalSegments,
+                readyWindowCount = scheduler.readyWindowCount,
+                playbackReadyWindowReadyCount =
+                    scheduler.playbackReadyWindowReadyCount,
+                playbackReadyWindowPendingCount =
+                    scheduler.playbackReadyWindowPendingCount,
+            )
+        },
+    )
 }
 
 private fun SourceSeparationModelState.toUiState(): SourceSeparationModelUiState {

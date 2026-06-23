@@ -16,13 +16,24 @@ import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import com.mardous.booming.separation.model.MdxRangeSeparator
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
 
 class SourceSeparationEngine(
     private val context: Context,
 ) {
     private val cache = SourceSeparationCache(context)
+    private val activeSeparationLock = Any()
+    private val activeSeparations =
+        mutableMapOf<ActiveSourceSeparationKey, ActiveSourceSeparationTask>()
+    private val _activeSeparationStateFlow =
+        MutableStateFlow<List<SourceSeparationActiveState>>(emptyList())
+    val activeSeparationStateFlow: StateFlow<List<SourceSeparationActiveState>> =
+        _activeSeparationStateFlow.asStateFlow()
 
     fun completedCacheForSong(
         song: Song,
@@ -38,6 +49,31 @@ class SourceSeparationEngine(
     ): Boolean {
         require(song != Song.emptySong) { "Cannot read separated cache for an empty song." }
         return cache.hasEntry(song, modelVariant)
+    }
+
+    fun isSeparationActiveForSong(
+        song: Song,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): Boolean {
+        require(song != Song.emptySong) { "Cannot read separation activity for an empty song." }
+        return synchronized(activeSeparationLock) {
+            ActiveSourceSeparationKey(song.id, modelVariant) in activeSeparations.keys
+        }
+    }
+
+    fun pauseSeparationForSong(
+        song: Song,
+        modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+    ): Boolean {
+        require(song != Song.emptySong) { "Cannot pause separation for an empty song." }
+        return synchronized(activeSeparationLock) {
+            activeSeparations[ActiveSourceSeparationKey(song.id, modelVariant)]
+                ?.also { task ->
+                    task.pauseRequested.set(true)
+                    task.state = task.state.copy(pauseRequested = true)
+                    publishActiveSeparationsLocked()
+                } != null
+        }
     }
 
     fun cacheStatusForSong(
@@ -393,9 +429,40 @@ class SourceSeparationEngine(
         shouldCancel: () -> Boolean = { false },
     ): MdxRangeSeparationResult {
         require(song != Song.emptySong) { "Cannot separate an empty song." }
-        val run = cache.beginOfflineRun(song, modelVariant)
+        val activeKey = ActiveSourceSeparationKey(song.id, modelVariant)
+        val activeTask = ActiveSourceSeparationTask(
+            state = SourceSeparationActiveState(
+                songId = song.id,
+                songTitle = song.title,
+                modelVariant = modelVariant,
+            ),
+        )
+        val registered = synchronized(activeSeparationLock) {
+            if (activeSeparations.containsKey(activeKey)) {
+                false
+            } else {
+                activeSeparations[activeKey] = activeTask
+                publishActiveSeparationsLocked()
+                true
+            }
+        }
+        if (!registered) {
+            throw SourceSeparationAlreadyRunningException()
+        }
+        val run = try {
+            cache.beginOfflineRun(song, modelVariant)
+        } catch (error: Throwable) {
+            synchronized(activeSeparationLock) {
+                activeSeparations.remove(activeKey)
+                publishActiveSeparationsLocked()
+            }
+            throw error
+        }
         return try {
-            if (shouldCancel()) {
+            if (activeTask.pauseRequested.get() || shouldPause()) {
+                throw SourceSeparationPausedException()
+            }
+            if (activeTask.cancelRequested.get() || shouldCancel()) {
                 throw CancellationException("Source separation canceled.")
             }
             MdxRangeSeparator(context)
@@ -406,7 +473,10 @@ class SourceSeparationEngine(
                     displayName = song.fileName,
                     runtimeSettings = runtimeSettings,
                     modelVariant = modelVariant,
-                    onProgress = onProgress,
+                    onProgress = { progress ->
+                        updateActiveSeparationProgress(activeKey, progress)
+                        onProgress(progress)
+                    },
                     onPrepared = { preparation ->
                         cache.updateRunPreparation(run, preparation)?.let(onPrepared)
                     },
@@ -416,11 +486,15 @@ class SourceSeparationEngine(
                     playbackPositionMsProvider = playbackPositionMsProvider,
                     playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
                     resumeManifest = run.resumeManifest,
-                    shouldPause = shouldPause,
-                    shouldCancel = shouldCancel,
+                    shouldPause = {
+                        activeTask.pauseRequested.get() || shouldPause()
+                    },
+                    shouldCancel = {
+                        activeTask.cancelRequested.get() || shouldCancel()
+                    },
                 )
                 .let { result ->
-                    if (shouldCancel()) {
+                    if (activeTask.cancelRequested.get() || shouldCancel()) {
                         throw CancellationException("Source separation canceled.")
                     }
                     cache.completeRun(
@@ -439,7 +513,27 @@ class SourceSeparationEngine(
         } catch (error: Throwable) {
             cache.failRun(run, error)
             throw error
+        } finally {
+            synchronized(activeSeparationLock) {
+                activeSeparations.remove(activeKey)
+                publishActiveSeparationsLocked()
+            }
         }
+    }
+
+    private fun updateActiveSeparationProgress(
+        activeKey: ActiveSourceSeparationKey,
+        progress: MdxRangeProgress,
+    ) {
+        synchronized(activeSeparationLock) {
+            val task = activeSeparations[activeKey] ?: return
+            task.state = task.state.copy(progress = progress)
+            publishActiveSeparationsLocked()
+        }
+    }
+
+    private fun publishActiveSeparationsLocked() {
+        _activeSeparationStateFlow.value = activeSeparations.values.map { it.state }
     }
 
     fun runWindowDecodeExperiment(
@@ -467,7 +561,28 @@ class SourceSeparationEngine(
     }
 }
 
+class SourceSeparationAlreadyRunningException : CancellationException("Source separation is already running.")
+
 class SourceSeparationPausedException : CancellationException("Source separation paused.")
+
+data class SourceSeparationActiveState(
+    val songId: Long,
+    val songTitle: String,
+    val modelVariant: MdxModelVariant,
+    val progress: MdxRangeProgress? = null,
+    val pauseRequested: Boolean = false,
+)
+
+private data class ActiveSourceSeparationKey(
+    val songId: Long,
+    val modelVariant: MdxModelVariant,
+)
+
+private data class ActiveSourceSeparationTask(
+    var state: SourceSeparationActiveState,
+    val pauseRequested: AtomicBoolean = AtomicBoolean(false),
+    val cancelRequested: AtomicBoolean = AtomicBoolean(false),
+)
 
 sealed class SourceSeparationCacheStatus {
     data object NotStarted : SourceSeparationCacheStatus()
