@@ -256,6 +256,7 @@ fun CoverLyricsScreen(
     lyricsViewModel: LyricsViewModel,
     playerViewModel: PlayerViewModel,
     onExpandClick: () -> Unit,
+    showSourceSeparationQuickControls: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -281,7 +282,8 @@ fun CoverLyricsScreen(
         val sourceSeparationState by playerViewModel
             .sourceSeparationStateFlow
             .collectAsStateWithLifecycle()
-        val quickBlendExpanded = sourceSeparationBlendMode != SourceSeparationBlendMode.Off
+        val quickBlendExpanded = showSourceSeparationQuickControls &&
+                sourceSeparationBlendMode != SourceSeparationBlendMode.Off
         val quickBlendProcessingProgressState = if (
             quickBlendExpanded &&
             sourceSeparationPlaybackState.processing
@@ -304,11 +306,13 @@ fun CoverLyricsScreen(
         } else {
             0.dp
         }
+        val sourceSeparationQuickControlsHeight = if (showSourceSeparationQuickControls) {
+            quickBlendHeight + quickBlendProgressExtraHeight + CoverLyricsButtonSpacing
+        } else {
+            CoverLyricsButtonSize
+        }
         val lyricsContentPadding = lyricsViewSettings.contentPadding.withAdditionalBottom(
-            quickBlendHeight +
-                    quickBlendProgressExtraHeight +
-                    CoverLyricsButtonSpacing +
-                    CoverLyricsBottomSpacing
+            sourceSeparationQuickControlsHeight + CoverLyricsBottomSpacing
         )
         Box(modifier = modifier.fillMaxSize()) {
             LyricsSurface(
@@ -332,22 +336,24 @@ fun CoverLyricsScreen(
                     .align(Alignment.BottomEnd)
                     .padding(CoverLyricsOverlayPadding)
             ) {
-                CoverLyricsQuickBlendControl(
-                    expanded = quickBlendExpanded,
-                    blend = sourceSeparationPlaybackState.blend,
-                    processingProgressState = quickBlendProcessingProgressState,
-                    onEnableSeparatedPlayback = {
-                        playerViewModel.setSourceSeparationPlaybackEnabled(
-                            enabled = true,
-                            blend = sourceSeparationPlaybackState.blend
-                        )
-                    },
-                    onDisableSeparatedPlayback = {
-                        playerViewModel.setSourceSeparationPlaybackEnabled(false)
-                    },
-                    onBlendPreview = playerViewModel::previewSourceSeparationBlend,
-                    onBlendChangeFinished = playerViewModel::setSourceSeparationBlend
-                )
+                if (showSourceSeparationQuickControls) {
+                    CoverLyricsQuickBlendControl(
+                        expanded = quickBlendExpanded,
+                        blend = sourceSeparationPlaybackState.blend,
+                        processingProgressState = quickBlendProcessingProgressState,
+                        onEnableSeparatedPlayback = {
+                            playerViewModel.setSourceSeparationPlaybackEnabled(
+                                enabled = true,
+                                blend = sourceSeparationPlaybackState.blend
+                            )
+                        },
+                        onDisableSeparatedPlayback = {
+                            playerViewModel.setSourceSeparationPlaybackEnabled(false)
+                        },
+                        onBlendPreview = playerViewModel::previewSourceSeparationBlend,
+                        onBlendChangeFinished = playerViewModel::setSourceSeparationBlend
+                    )
+                }
 
                 CoverLyricsCircularIconButton(
                     painter = painterResource(R.drawable.ic_open_in_full_24dp),

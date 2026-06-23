@@ -1743,7 +1743,7 @@ class PlayerViewModel(
     }
 
     private fun readSourceSeparationRememberPerSong(): Boolean {
-        return preferences.getBoolean(KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG, false)
+        return preferences.getBoolean(KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG, true)
     }
 
     private fun readSourceSeparationGlobalBlend(): Float {
