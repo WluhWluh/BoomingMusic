@@ -2,6 +2,7 @@ package com.mardous.booming.ui.screen.player
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import androidx.core.content.edit
@@ -49,7 +50,11 @@ import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.SourceSeparationCacheEntry
 import com.mardous.booming.separation.cache.SourceSeparationCacheEntryFormat
 import com.mardous.booming.separation.cache.SourceSeparationCacheEntryState
+import com.mardous.booming.separation.model.MdxModelVariant
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
+import com.mardous.booming.separation.model.SourceSeparationModelRepository
+import com.mardous.booming.separation.model.SourceSeparationModelSource
+import com.mardous.booming.separation.model.SourceSeparationModelState
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
@@ -109,7 +114,8 @@ class PlayerViewModel(
     private val preferences: SharedPreferences,
     private val repository: Repository,
     private val albumCoverSaver: AlbumCoverSaver,
-    private val sourceSeparationEngine: SourceSeparationEngine
+    private val sourceSeparationEngine: SourceSeparationEngine,
+    private val sourceSeparationModelRepository: SourceSeparationModelRepository
 ) : ViewModel(), Player.Listener {
 
     private val sourceSeparationPerformanceStats = SourceSeparationPerformanceStats(preferences)
@@ -211,6 +217,20 @@ class PlayerViewModel(
         MutableStateFlow(SourceSeparationCacheManagementUiState())
     val sourceSeparationCacheManagementStateFlow =
         _sourceSeparationCacheManagementStateFlow.asStateFlow()
+
+    private val _sourceSeparationModelStateFlow =
+        MutableStateFlow(sourceSeparationModelRepository.modelState().toUiState())
+    val sourceSeparationModelStateFlow =
+        _sourceSeparationModelStateFlow.asStateFlow()
+
+    private val _sourceSeparationModelManagementEventFlow =
+        MutableSharedFlow<Unit>(
+            replay = 0,
+            extraBufferCapacity = 1,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST
+        )
+    val sourceSeparationModelManagementEventFlow =
+        _sourceSeparationModelManagementEventFlow.asSharedFlow()
 
     private val _sourceSeparationFlacPromotionStateFlow =
         MutableStateFlow(SourceSeparationFlacPromotionUiState())
@@ -574,6 +594,9 @@ class PlayerViewModel(
     }
 
     fun startSourceSeparationForCurrentSong() {
+        if (!ensureSourceSeparationModelReady(openManagement = true)) {
+            return
+        }
         val song = currentSong
         val runningSongId = sourceSeparationSongId
         if (sourceSeparationJob != null) {
@@ -1118,6 +1141,20 @@ class PlayerViewModel(
     fun setSourceSeparationPlaybackEnabled(enabled: Boolean, blend: Float? = null) {
         val normalizedBlend = blend?.coerceIn(0f, 1f)
         val rememberPerSong = _sourceSeparationRememberPerSongFlow.value
+        if (enabled && !ensureSourceSeparationModelReady(openManagement = true)) {
+            preferences.edit {
+                putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
+                if (normalizedBlend != null && !rememberPerSong) {
+                    putFloat(KEY_SOURCE_SEPARATION_GLOBAL_BLEND, normalizedBlend)
+                }
+            }
+            _sourceSeparationBlendModeFlow.value = SourceSeparationBlendMode.Off
+            updateSourceSeparationBlendState(
+                normalizedBlend ?: _sourceSeparationPlaybackStateFlow.value.blend,
+            )
+            return
+        }
+
         preferences.edit {
             putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, enabled)
             if (normalizedBlend != null && !rememberPerSong) {
@@ -1145,6 +1182,118 @@ class PlayerViewModel(
                 blend = normalizedBlend,
                 showMessage = true,
             )
+        }
+    }
+
+    fun refreshSourceSeparationModelState() {
+        _sourceSeparationModelStateFlow.value =
+            sourceSeparationModelRepository.modelState().toUiState()
+    }
+
+    fun openSourceSeparationModelManagement() {
+        _sourceSeparationModelManagementEventFlow.tryEmit(Unit)
+    }
+
+    fun importSourceSeparationModel(uri: Uri) {
+        runSourceSeparationModelAcquisition(importing = true) {
+            sourceSeparationModelRepository.importModel(uri = uri)
+        }
+    }
+
+    fun downloadPresetSourceSeparationModel() {
+        runSourceSeparationModelAcquisition(downloading = true) {
+            sourceSeparationModelRepository.downloadPresetModel()
+        }
+    }
+
+    fun downloadSourceSeparationModel(url: String) {
+        val normalizedUrl = url.trim()
+        if (normalizedUrl.isBlank()) {
+            _sourceSeparationModelStateFlow.value =
+                _sourceSeparationModelStateFlow.value.copy(
+                    errorMessage = "Model URL cannot be empty.",
+                )
+            return
+        }
+        runSourceSeparationModelAcquisition(downloading = true) {
+            sourceSeparationModelRepository.downloadModel(normalizedUrl)
+        }
+    }
+
+    private fun runSourceSeparationModelAcquisition(
+        importing: Boolean = false,
+        downloading: Boolean = false,
+        block: () -> SourceSeparationModelState.Available,
+    ) {
+        _sourceSeparationModelStateFlow.value =
+            _sourceSeparationModelStateFlow.value.copy(
+                importing = importing,
+                downloading = downloading,
+                errorMessage = null,
+            )
+        viewModelScope.launch(IO) {
+            runCatching {
+                block()
+            }.onSuccess { state ->
+                _sourceSeparationModelStateFlow.value = state.toUiState()
+            }.onFailure { error ->
+                Log.w(TAG, "Failed to acquire source separation model", error)
+                _sourceSeparationModelStateFlow.value =
+                    sourceSeparationModelRepository.modelState().toUiState().copy(
+                        importing = false,
+                        downloading = false,
+                        errorMessage = error.message,
+                    )
+            }
+        }
+    }
+
+    private fun ensureSourceSeparationModelReady(openManagement: Boolean): Boolean {
+        val state = sourceSeparationModelRepository.modelState().toUiState()
+        _sourceSeparationModelStateFlow.value = state
+        if (state.available) return true
+
+        sourceSeparationSettingsApplyJob?.cancel()
+        sourceSeparationSettingsApplyJob = null
+        sourceSeparationAutoStartJob?.cancel()
+        sourceSeparationPlaybackSyncJob?.cancel()
+        sourceSeparationPlaybackSyncJob = null
+        preferences.edit {
+            putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
+        }
+        _sourceSeparationBlendModeFlow.value = SourceSeparationBlendMode.Off
+        if (_sourceSeparationPlaybackStateFlow.value.enabled) {
+            requestSourceSeparationPlaybackEnabled(
+                enabled = false,
+                showMessage = true,
+            )
+        }
+        if (openManagement) {
+            openSourceSeparationModelManagement()
+        }
+        return false
+    }
+
+    fun deleteSourceSeparationModel() {
+        _sourceSeparationModelStateFlow.value =
+            _sourceSeparationModelStateFlow.value.copy(deleting = true, errorMessage = null)
+        viewModelScope.launch(IO) {
+            runCatching {
+                sourceSeparationModelRepository.deleteModel()
+            }.onSuccess {
+                _sourceSeparationModelStateFlow.value =
+                    sourceSeparationModelRepository.modelState().toUiState()
+                if (_sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.Off) {
+                    setSourceSeparationPlaybackEnabled(false)
+                }
+            }.onFailure { error ->
+                Log.w(TAG, "Failed to delete source separation model", error)
+                _sourceSeparationModelStateFlow.value =
+                    sourceSeparationModelRepository.modelState().toUiState().copy(
+                        deleting = false,
+                        errorMessage = error.message,
+                    )
+            }
         }
     }
 
@@ -1250,6 +1399,9 @@ class PlayerViewModel(
         ) {
             return
         }
+        if (!ensureSourceSeparationModelReady(openManagement = true)) {
+            return
+        }
 
         sourceSeparationPlaybackSyncJob = viewModelScope.launch {
             val latestPlaybackState = _sourceSeparationPlaybackStateFlow.value
@@ -1298,6 +1450,11 @@ class PlayerViewModel(
     }
 
     fun setSourceSeparationBlendMode(mode: SourceSeparationBlendMode) {
+        if (mode != SourceSeparationBlendMode.Off &&
+            !ensureSourceSeparationModelReady(openManagement = true)
+        ) {
+            return
+        }
         when (mode) {
             SourceSeparationBlendMode.Off -> setSourceSeparationPlaybackEnabled(false)
             SourceSeparationBlendMode.Global -> {
@@ -1406,6 +1563,10 @@ class PlayerViewModel(
         if (mode == SourceSeparationBlendMode.Off || song == Song.emptySong) {
             sourceSeparationSettingsApplyJob = null
             sourceSeparationAutoStartJob?.cancel()
+            return
+        }
+        if (!ensureSourceSeparationModelReady(openManagement = true)) {
+            sourceSeparationSettingsApplyJob = null
             return
         }
 
@@ -1737,11 +1898,18 @@ class PlayerViewModel(
     }
 
     private fun readSourceSeparationBlendMode(): SourceSeparationBlendMode {
+        val playbackEnabled = preferences.getBoolean(
+            KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+            false,
+        )
+        if (playbackEnabled && !sourceSeparationModelRepository.isModelReady()) {
+            preferences.edit {
+                putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
+            }
+            return SourceSeparationBlendMode.Off
+        }
         return sourceSeparationBlendMode(
-            playbackEnabled = preferences.getBoolean(
-                KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED,
-                false,
-            ),
+            playbackEnabled = playbackEnabled,
             rememberPerSong = readSourceSeparationRememberPerSong(),
         )
     }
@@ -2430,6 +2598,27 @@ data class SourceSeparationCacheManagementUiState(
         get() = items.sumOf { it.sizeBytes }
 }
 
+data class SourceSeparationModelUiState(
+    val available: Boolean = false,
+    val modelName: String = MdxModelVariant.MDXNET_9482.displayName,
+    val fileName: String = MdxModelVariant.MDXNET_9482.fileName,
+    val presetUrl: String = SourceSeparationModelRepository.PRESET_MODEL_URL,
+    val expectedSha256: String = MdxModelVariant.MDXNET_9482.expectedSha256,
+    val actualSha256: String? = null,
+    val hashMatchesExpected: Boolean? = null,
+    val sizeBytes: Long = 0L,
+    val source: SourceSeparationModelSource = SourceSeparationModelSource.Unknown,
+    val importedDisplayName: String? = null,
+    val updatedAtEpochMs: Long? = null,
+    val importing: Boolean = false,
+    val downloading: Boolean = false,
+    val deleting: Boolean = false,
+    val errorMessage: String? = null,
+) {
+    val busy: Boolean
+        get() = importing || downloading || deleting
+}
+
 data class SourceSeparationCacheManagementItem(
     val id: String,
     val songId: Long,
@@ -2518,6 +2707,29 @@ private fun SourceSeparationCacheStatus.toUiState(): SourceSeparationCacheUiStat
             )
         is SourceSeparationCacheStatus.Completed -> SourceSeparationCacheUiState.Completed(
             canPromoteCompletedStems = canPromoteCompletedStems,
+        )
+    }
+}
+
+private fun SourceSeparationModelState.toUiState(): SourceSeparationModelUiState {
+    return when (this) {
+        is SourceSeparationModelState.Available -> SourceSeparationModelUiState(
+            available = true,
+            modelName = variant.displayName,
+            fileName = variant.fileName,
+            expectedSha256 = expectedSha256,
+            actualSha256 = actualSha256,
+            hashMatchesExpected = hashMatchesExpected,
+            sizeBytes = sizeBytes,
+            source = source,
+            importedDisplayName = importedDisplayName,
+            updatedAtEpochMs = updatedAtEpochMs,
+        )
+        is SourceSeparationModelState.Missing -> SourceSeparationModelUiState(
+            available = false,
+            modelName = variant.displayName,
+            fileName = variant.fileName,
+            expectedSha256 = variant.expectedSha256,
         )
     }
 }
