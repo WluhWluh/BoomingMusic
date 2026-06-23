@@ -20,6 +20,7 @@ package com.mardous.booming.ui.component.base
 import android.animation.AnimatorSet
 import android.app.Activity
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.drawable.AnimatedVectorDrawable
 import android.os.Bundle
@@ -100,6 +101,7 @@ import com.mardous.booming.ui.screen.player.cover.CoverPagerFragment
 import com.mardous.booming.ui.screen.tageditor.SongTagEditorActivity
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
 import com.mardous.booming.util.Preferences
+import com.mardous.booming.util.SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
@@ -110,6 +112,7 @@ import org.koin.androidx.viewmodel.ext.android.activityViewModel
 abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes),
     Toolbar.OnMenuItemClickListener,
     PlayerGesturesController.Listener,
+    SharedPreferences.OnSharedPreferenceChangeListener,
     CoverPagerFragment.Callbacks {
 
     val playerViewModel: PlayerViewModel by activityViewModel()
@@ -192,6 +195,7 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                     applyBlur(song, scheme)
                 }
         }
+        Preferences.registerOnSharedPreferenceChangeListener(this)
     }
 
     @CallSuper
@@ -229,6 +233,7 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                     popupMenu.menu.onSourceSeparationSettingsStateChanged(
                         playerViewModel.sourceSeparationBlendModeFlow.value
                     )
+                    popupMenu.menu.updateSourceSeparationPanelEntryVisibility()
                     popupMenu.show()
                 }
                 return popupMenu
@@ -240,6 +245,7 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
     @CallSuper
     protected open fun onMenuInflated(menu: Menu) {
         menu.onSourceSeparationSettingsStateChanged(playerViewModel.sourceSeparationBlendModeFlow.value)
+        menu.updateSourceSeparationPanelEntryVisibility()
     }
 
     protected fun Menu.setShowAsAction(itemId: Int, mode: Int = MenuItem.SHOW_AS_ACTION_IF_ROOM) {
@@ -480,7 +486,14 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
         gesturesController = null
         cancelColorAnimator()
         coverFragment = null
+        Preferences.unregisterOnSharedPreferenceChangeListener(this)
         super.onDestroyView()
+    }
+
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
+        if (key == SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE) {
+            updateSourceSeparationPanelEntryVisibility()
+        }
     }
 
     internal fun onQuickActionEvent(action: NowPlayingAction): Boolean {
@@ -774,6 +787,26 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
             setIcon(getSourceSeparationBlendDrawable(mode, iconColor))
             setTitle(R.string.action_source_separation_settings)
         }
+    }
+
+    protected open fun isSourceSeparationPanelMenuEntryAvailable(): Boolean = true
+
+    protected open fun onSourceSeparationPanelEntryVisibilityChanged(visible: Boolean) = Unit
+
+    protected fun Menu.updateSourceSeparationPanelEntryVisibility() {
+        findItem(R.id.action_source_separation_settings)?.isVisible =
+            Preferences.sourceSeparationPanelEntryVisible &&
+                    isSourceSeparationPanelMenuEntryAvailable()
+    }
+
+    protected fun updateSourceSeparationPanelEntryVisibility() {
+        onSourceSeparationSettingsStateChanged(
+            playerViewModel.sourceSeparationBlendModeFlow.value
+        )
+        playerToolbar?.menu?.updateSourceSeparationPanelEntryVisibility()
+        onSourceSeparationPanelEntryVisibilityChanged(
+            Preferences.sourceSeparationPanelEntryVisible
+        )
     }
 
     private fun getSourceSeparationBlendDrawable(mode: SourceSeparationBlendMode, color: Int) =

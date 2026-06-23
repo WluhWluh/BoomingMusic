@@ -134,6 +134,9 @@ class ExpressivePlayerFragment : AbsPlayerFragment(R.layout.fragment_expressive_
             setViewAction(it, NowPlayingAction.SourceSeparationSettings)
         }
         binding.soundSettingsButton?.let { setViewAction(it, NowPlayingAction.SoundSettings) }
+        onSourceSeparationPanelEntryVisibilityChanged(
+            Preferences.sourceSeparationPanelEntryVisible
+        )
     }
 
     private fun setupToolbar() {
@@ -170,6 +173,11 @@ class ExpressivePlayerFragment : AbsPlayerFragment(R.layout.fragment_expressive_
         } else {
             menu.findItem(R.id.action_source_separation_settings)?.isVisible = isLandscape()
         }
+        menu.updateSourceSeparationPanelEntryVisibility()
+    }
+
+    override fun isSourceSeparationPanelMenuEntryAvailable(): Boolean {
+        return _binding?.sourceSeparationSettingsButton == null && isLandscape()
     }
 
     override fun onCreateChildFragments() {
@@ -226,6 +234,10 @@ class ExpressivePlayerFragment : AbsPlayerFragment(R.layout.fragment_expressive_
     override fun onSourceSeparationSettingsStateChanged(mode: SourceSeparationBlendMode) {
         super.onSourceSeparationSettingsStateChanged(mode)
         setSourceSeparationBlendTonalButtonState(_binding?.sourceSeparationSettingsButton, mode)
+    }
+
+    override fun onSourceSeparationPanelEntryVisibilityChanged(visible: Boolean) {
+        _binding?.sourceSeparationSettingsButton?.isVisible = visible
     }
 
     override fun onIsFavoriteChanged(isFavorite: Boolean, withAnimation: Boolean) {

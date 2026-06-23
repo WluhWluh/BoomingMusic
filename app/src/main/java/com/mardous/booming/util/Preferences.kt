@@ -268,6 +268,18 @@ object Preferences : KoinComponent {
     val circularPlayButton: Boolean
         get() = preferences.getBoolean(CIRCLE_PLAY_BUTTON, false)
 
+    val sourceSeparationPanelEntryVisible: Boolean
+        get() = preferences.getBoolean(
+            SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE,
+            DEFAULT_SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE
+        )
+
+    val sourceSeparationQuickControlsVisible: Boolean
+        get() = preferences.getBoolean(
+            SOURCE_SEPARATION_QUICK_CONTROLS_VISIBLE,
+            DEFAULT_SOURCE_SEPARATION_QUICK_CONTROLS_VISIBLE
+        )
+
     val enableScrollingText: Boolean
         get() = preferences.getBoolean(ENABLE_SCROLLING_TEXT, false)
 
@@ -579,6 +591,8 @@ const val COVER_RIGHT_DOUBLE_TAP_ACTION = "cover_right_double_tap_action"
 const val COVER_LONG_PRESS_ACTION = "cover_long_press_action"
 const val ANIMATE_PLAYER_CONTROL = "animate_player_control"
 const val CIRCLE_PLAY_BUTTON = "circle_play_button"
+const val SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE = "source_separation.panel_entry_visible"
+const val SOURCE_SEPARATION_QUICK_CONTROLS_VISIBLE = "source_separation.quick_controls_visible"
 const val ENABLE_SCROLLING_TEXT = "enable_scrolling_text"
 const val DISPLAY_ALBUM_TITLE = "display_album_title"
 const val DISPLAY_EXTRA_INFO = "display_extra_info"
@@ -617,6 +631,8 @@ const val SOURCE_SEPARATION_AVERAGE_WINDOW_MS = "source_separation.average_windo
 const val SOURCE_SEPARATION_AVERAGE_WINDOW_SAMPLE_COUNT =
     "source_separation.average_window_sample_count"
 const val DEFAULT_SOURCE_SEPARATION_AUTO_START = true
+const val DEFAULT_SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE = false
+const val DEFAULT_SOURCE_SEPARATION_QUICK_CONTROLS_VISIBLE = true
 const val DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP = true
 const val DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT = 5
 const val DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT = 10
