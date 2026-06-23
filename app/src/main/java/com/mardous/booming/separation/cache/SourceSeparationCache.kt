@@ -3,6 +3,7 @@ package com.mardous.booming.separation.cache
 import android.content.Context
 import android.os.Environment
 import com.mardous.booming.data.model.Song
+import com.mardous.booming.separation.SourceSeparationDiagnostics
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import com.mardous.booming.separation.model.MdxModelVariant
 import com.mardous.booming.separation.model.MdxRangePreparation
@@ -70,6 +71,23 @@ class SourceSeparationCache(
                 )
             }
 
+        recordDiagnostics(
+            event = "beginOfflineRun",
+            fields = SourceSeparationDiagnostics.songFields(song) + mapOf(
+                "modelVariant" to modelVariant.name,
+                "pipelineVersion" to pipelineVersion,
+                "entryId" to runDir.name,
+                "entryDir" to runDir.absolutePath,
+                "existingState" to existingManifest?.state?.name,
+                "existingSongId" to existingManifest?.songLocator?.songId,
+                "existingPath" to existingManifest?.songLocator?.filePath,
+                "existingHasOutput" to (existingManifest?.output != null),
+                "existingHasSegmentPlan" to (existingManifest?.segmentPlan != null),
+                "existingAudioFingerprint" to existingManifest?.audioIdentity?.audioFingerprint,
+                "resume" to (resumeManifest != null),
+            ),
+        )
+
         if (resumeManifest != null) {
             workDir.mkdirs()
             completedDir.mkdirs()
@@ -115,6 +133,16 @@ class SourceSeparationCache(
             updatedAtEpochMs = now,
         )
         writeManifest(runDir, initialManifest)
+        recordDiagnostics(
+            event = "beginOfflineRun.newManifest",
+            fields = SourceSeparationDiagnostics.songFields(song) + mapOf(
+                "modelVariant" to modelVariant.name,
+                "pipelineVersion" to pipelineVersion,
+                "entryId" to runDir.name,
+                "entryDir" to runDir.absolutePath,
+                "state" to initialManifest.state.name,
+            ),
+        )
 
         return SourceSeparationRun(
             song = song,
@@ -196,6 +224,24 @@ class SourceSeparationCache(
             updatedAtEpochMs = now,
         )
         writeManifest(run.rootDir, manifest)
+        recordDiagnostics(
+            event = "completeRun",
+            fields = SourceSeparationDiagnostics.songFields(run.song) + mapOf(
+                "modelVariant" to run.modelVariant.name,
+                "pipelineVersion" to run.pipelineVersion,
+                "entryId" to run.rootDir.name,
+                "entryDir" to run.rootDir.absolutePath,
+                "audioFingerprint" to manifest.audioIdentity.audioFingerprint,
+                "sourceFrameCount" to result.sourceFrameCount,
+                "sourceSampleRate" to result.sourceSampleRate,
+                "outputFrameCount" to output.outputFrameCount,
+                "windowCount" to output.windowCount,
+                "outputFormat" to output.format.name,
+                "promotedFormat" to output.promotedFormat?.name,
+                "playbackVocalsExists" to File(output.playbackVocalsPath()).isFile,
+                "playbackInstrumentalExists" to File(output.playbackInstrumentalPath()).isFile,
+            ),
+        )
         return SourceSeparationCompletion(
             manifest = manifest,
             result = result.copy(
@@ -302,6 +348,20 @@ class SourceSeparationCache(
             updatedAtEpochMs = now,
         )
         writeManifest(run.rootDir, updatedManifest)
+        recordDiagnostics(
+            event = "updateRunPreparation",
+            fields = SourceSeparationDiagnostics.songFields(run.song) + mapOf(
+                "modelVariant" to run.modelVariant.name,
+                "pipelineVersion" to run.pipelineVersion,
+                "entryId" to run.rootDir.name,
+                "entryDir" to run.rootDir.absolutePath,
+                "audioFingerprint" to preparation.sourceAudioFingerprint,
+                "sourceFrameCount" to preparation.sourceFrameCount,
+                "sourceSampleRate" to preparation.sourceSampleRate,
+                "segmentCount" to preparation.segmentPlan.segmentCount,
+                "reusedSegmentPlan" to (existingSegmentPlan != null),
+            ),
+        )
         return updatedManifest
     }
 
@@ -350,6 +410,17 @@ class SourceSeparationCache(
             updatedAtEpochMs = now,
         )
         writeManifest(run.rootDir, updatedManifest)
+        recordDiagnostics(
+            event = "pauseRun",
+            fields = SourceSeparationDiagnostics.songFields(run.song) + mapOf(
+                "modelVariant" to run.modelVariant.name,
+                "pipelineVersion" to run.pipelineVersion,
+                "entryId" to run.rootDir.name,
+                "entryDir" to run.rootDir.absolutePath,
+                "previousState" to manifest?.state?.name,
+                "hadManifest" to (manifest != null),
+            ),
+        )
         return updatedManifest
     }
 
@@ -383,6 +454,18 @@ class SourceSeparationCache(
             updatedAtEpochMs = now,
         )
         writeManifest(run.rootDir, manifest)
+        recordDiagnostics(
+            event = "finishUnsuccessfulRun",
+            fields = SourceSeparationDiagnostics.songFields(run.song) + mapOf(
+                "modelVariant" to run.modelVariant.name,
+                "pipelineVersion" to run.pipelineVersion,
+                "entryId" to run.rootDir.name,
+                "entryDir" to run.rootDir.absolutePath,
+                "state" to state.name,
+                "errorType" to error::class.java.name,
+                "errorMessage" to error.message,
+            ),
+        )
         return manifest
     }
 
@@ -391,7 +474,24 @@ class SourceSeparationCache(
         modelVariant: MdxModelVariant,
         pipelineVersion: Int = PIPELINE_VERSION,
     ): SourceSeparationManifest? {
-        return readManifest(entryDir(song, modelVariant, pipelineVersion))
+        val dir = entryDir(song, modelVariant, pipelineVersion)
+        val manifest = readManifest(dir)
+        recordDiagnostics(
+            event = "readEntry",
+            fields = SourceSeparationDiagnostics.songFields(song) + mapOf(
+                "modelVariant" to modelVariant.name,
+                "pipelineVersion" to pipelineVersion,
+                "entryId" to dir.name,
+                "entryDir" to dir.absolutePath,
+                "entryDirExists" to dir.exists(),
+                "manifestFound" to (manifest != null),
+                "manifestState" to manifest?.state?.name,
+                "manifestSongId" to manifest?.songLocator?.songId,
+                "manifestPath" to manifest?.songLocator?.filePath,
+                "manifestAudioFingerprint" to manifest?.audioIdentity?.audioFingerprint,
+            ),
+        )
+        return manifest
     }
 
     fun hasEntry(
@@ -497,7 +597,16 @@ class SourceSeparationCache(
 
     fun listManifests(): List<SourceSeparationManifest> {
         val entriesDir = File(rootDir, ENTRIES_DIR_NAME)
-        if (!entriesDir.isDirectory) return emptyList()
+        if (!entriesDir.isDirectory) {
+            recordDiagnostics(
+                event = "listManifests",
+                fields = mapOf(
+                    "entriesDir" to entriesDir.absolutePath,
+                    "entriesDirExists" to false,
+                ),
+            )
+            return emptyList()
+        }
         return entriesDir.listFiles()
             ?.mapNotNull { readManifest(it) }
             ?.sortedByDescending { it.lastAccessedAtEpochMs }
@@ -506,15 +615,42 @@ class SourceSeparationCache(
 
     fun listCacheEntries(): List<SourceSeparationCacheEntry> {
         val entriesDir = File(rootDir, ENTRIES_DIR_NAME)
-        if (!entriesDir.isDirectory) return emptyList()
-        return entriesDir.listFiles()
+        if (!entriesDir.isDirectory) {
+            recordDiagnostics(
+                event = "listCacheEntries",
+                fields = mapOf(
+                    "entriesDir" to entriesDir.absolutePath,
+                    "entriesDirExists" to false,
+                ),
+            )
+            return emptyList()
+        }
+        val entries = entriesDir.listFiles()
             ?.mapNotNull { entryDir ->
-                val manifest = readManifest(entryDir) ?: return@mapNotNull null
+                val manifest = readManifest(entryDir)
+                if (manifest == null) {
+                    recordDiagnostics(
+                        event = "listCacheEntries.skip",
+                        fields = mapOf(
+                            "entryDir" to entryDir.absolutePath,
+                            "reason" to "manifestUnreadable",
+                        ),
+                    )
+                    return@mapNotNull null
+                }
                 val state = when (manifest.state) {
                     SourceSeparationCacheState.Running -> SourceSeparationCacheEntryState.Partial
                     SourceSeparationCacheState.Completed -> SourceSeparationCacheEntryState.Completed
                     SourceSeparationCacheState.Canceled,
-                    SourceSeparationCacheState.Failed -> return@mapNotNull null
+                    SourceSeparationCacheState.Failed -> {
+                        recordDiagnostics(
+                            event = "listCacheEntries.skip",
+                            fields = manifest.diagnosticFields(entryDir) + mapOf(
+                                "reason" to "hiddenState",
+                            ),
+                        )
+                        return@mapNotNull null
+                    }
                 }
                 val snapshot = if (manifest.state == SourceSeparationCacheState.Running) {
                     manifest.segmentPlan?.let { segmentPlan ->
@@ -549,6 +685,16 @@ class SourceSeparationCache(
             }
             ?.sortedByDescending { it.lastAccessedAtEpochMs }
             .orEmpty()
+        recordDiagnostics(
+            event = "listCacheEntries",
+            fields = mapOf(
+                "entriesDir" to entriesDir.absolutePath,
+                "totalDirs" to (entriesDir.listFiles()?.size ?: 0),
+                "visibleEntries" to entries.size,
+                "visibleIds" to entries.map { it.id },
+            ),
+        )
+        return entries
     }
 
     fun touchEntry(manifest: SourceSeparationManifest): SourceSeparationManifest? {
@@ -572,17 +718,46 @@ class SourceSeparationCache(
         protectedSongIds: Set<Long> = emptySet(),
     ): SourceSeparationCachePruneResult {
         val entriesDir = File(rootDir, ENTRIES_DIR_NAME)
-        if (!entriesDir.isDirectory) return SourceSeparationCachePruneResult()
+        if (!entriesDir.isDirectory) {
+            recordDiagnostics(
+                event = "pruneCache",
+                fields = mapOf(
+                    "entriesDir" to entriesDir.absolutePath,
+                    "entriesDirExists" to false,
+                    "partialLimit" to partialLimit,
+                    "completedLimit" to completedLimit,
+                ),
+            )
+            return SourceSeparationCachePruneResult()
+        }
         val partialLimitNormalized = partialLimit.coerceAtLeast(1)
         val completedLimitNormalized = completedLimit.coerceAtLeast(1)
         val candidates = entriesDir.listFiles()
             ?.mapNotNull { entryDir ->
-                val manifest = readManifest(entryDir) ?: return@mapNotNull null
+                val manifest = readManifest(entryDir)
+                if (manifest == null) {
+                    recordDiagnostics(
+                        event = "pruneCache.skip",
+                        fields = mapOf(
+                            "entryDir" to entryDir.absolutePath,
+                            "reason" to "manifestUnreadable",
+                        ),
+                    )
+                    return@mapNotNull null
+                }
                 val state = when (manifest.state) {
                     SourceSeparationCacheState.Running -> SourceSeparationCacheEntryState.Partial
                     SourceSeparationCacheState.Completed -> SourceSeparationCacheEntryState.Completed
                     SourceSeparationCacheState.Canceled,
-                    SourceSeparationCacheState.Failed -> return@mapNotNull null
+                    SourceSeparationCacheState.Failed -> {
+                        recordDiagnostics(
+                            event = "pruneCache.skip",
+                            fields = manifest.diagnosticFields(entryDir) + mapOf(
+                                "reason" to "hiddenState",
+                            ),
+                        )
+                        return@mapNotNull null
+                    }
                 }
                 SourceSeparationCachePruneCandidate(
                     dir = entryDir,
@@ -605,20 +780,54 @@ class SourceSeparationCache(
                 .sortedByDescending { it.lastAccessedAtEpochMs }
                 .drop(limit)
                 .forEach { candidate ->
-                    if (candidate.songId in protectedSongIds) return@forEach
+                    if (candidate.songId in protectedSongIds) {
+                        recordDiagnostics(
+                            event = "pruneCache.protected",
+                            fields = candidate.diagnosticFields() + mapOf(
+                                "limit" to limit,
+                            ),
+                        )
+                        return@forEach
+                    }
                     if (candidate.dir.deleteRecursively()) {
                         deletedEntries += 1
                         deletedBytes += candidate.sizeBytes
+                        recordDiagnostics(
+                            event = "pruneCache.delete",
+                            fields = candidate.diagnosticFields() + mapOf(
+                                "limit" to limit,
+                            ),
+                        )
+                    } else {
+                        recordDiagnostics(
+                            event = "pruneCache.deleteFailed",
+                            fields = candidate.diagnosticFields() + mapOf(
+                                "limit" to limit,
+                            ),
+                        )
                     }
                 }
         }
 
         pruneGroup(SourceSeparationCacheEntryState.Partial, partialLimitNormalized)
         pruneGroup(SourceSeparationCacheEntryState.Completed, completedLimitNormalized)
-        return SourceSeparationCachePruneResult(
+        val result = SourceSeparationCachePruneResult(
             deletedEntries = deletedEntries,
             deletedBytes = deletedBytes,
         )
+        recordDiagnostics(
+            event = "pruneCache",
+            fields = mapOf(
+                "entriesDir" to entriesDir.absolutePath,
+                "partialLimit" to partialLimitNormalized,
+                "completedLimit" to completedLimitNormalized,
+                "protectedSongIds" to protectedSongIds,
+                "candidateCount" to candidates.size,
+                "deletedEntries" to result.deletedEntries,
+                "deletedBytes" to result.deletedBytes,
+            ),
+        )
+        return result
     }
 
     fun delete(manifest: SourceSeparationManifest): Boolean {
@@ -627,17 +836,53 @@ class SourceSeparationCache(
             modelVariant = manifest.audioIdentity.modelVariant,
             pipelineVersion = manifest.pipelineVersion,
         )
-        return !dir.exists() || dir.deleteRecursively()
+        val existed = dir.exists()
+        val deleted = !existed || dir.deleteRecursively()
+        recordDiagnostics(
+            event = "deleteManifestEntry",
+            fields = manifest.diagnosticFields(dir) + mapOf(
+                "entryId" to dir.name,
+                "existed" to existed,
+                "deleted" to deleted,
+            ),
+        )
+        return deleted
     }
 
     fun deleteEntry(entryId: String): Boolean {
-        val key = SourceSeparationCacheEntryId.decode(entryId) ?: return false
+        val key = SourceSeparationCacheEntryId.decode(entryId)
+        if (key == null) {
+            recordDiagnostics(
+                event = "deleteEntry",
+                fields = mapOf(
+                    "entryId" to entryId,
+                    "decoded" to false,
+                    "deleted" to false,
+                ),
+            )
+            return false
+        }
         val dir = entryDir(
             songId = key.songId,
             modelVariant = key.modelVariant,
             pipelineVersion = key.pipelineVersion,
         )
-        return !dir.exists() || dir.deleteRecursively()
+        val existed = dir.exists()
+        val deleted = !existed || dir.deleteRecursively()
+        recordDiagnostics(
+            event = "deleteEntry",
+            fields = mapOf(
+                "entryId" to entryId,
+                "decoded" to true,
+                "songId" to key.songId,
+                "modelVariant" to key.modelVariant,
+                "pipelineVersion" to key.pipelineVersion,
+                "entryDir" to dir.absolutePath,
+                "existed" to existed,
+                "deleted" to deleted,
+            ),
+        )
+        return deleted
     }
 
     fun deleteEntry(
@@ -646,7 +891,20 @@ class SourceSeparationCache(
         pipelineVersion: Int = PIPELINE_VERSION,
     ): Boolean {
         val dir = entryDir(song, modelVariant, pipelineVersion)
-        return !dir.exists() || dir.deleteRecursively()
+        val existed = dir.exists()
+        val deleted = !existed || dir.deleteRecursively()
+        recordDiagnostics(
+            event = "deleteSongEntry",
+            fields = SourceSeparationDiagnostics.songFields(song) + mapOf(
+                "modelVariant" to modelVariant.name,
+                "pipelineVersion" to pipelineVersion,
+                "entryId" to dir.name,
+                "entryDir" to dir.absolutePath,
+                "existed" to existed,
+                "deleted" to deleted,
+            ),
+        )
+        return deleted
     }
 
     fun cleanCompletedTemporaryDirs(
@@ -1082,11 +1340,64 @@ class SourceSeparationCache(
     private fun readManifestFile(file: File): SourceSeparationManifest? {
         return try {
             json.decodeFromString(SourceSeparationManifest.serializer(), file.readText(Charsets.UTF_8))
-        } catch (_: SerializationException) {
+        } catch (error: SerializationException) {
+            recordDiagnostics(
+                event = "readManifestFile.failed",
+                fields = mapOf(
+                    "file" to file.absolutePath,
+                    "errorType" to error::class.java.name,
+                    "errorMessage" to error.message,
+                ),
+            )
             null
-        } catch (_: IllegalArgumentException) {
+        } catch (error: IllegalArgumentException) {
+            recordDiagnostics(
+                event = "readManifestFile.failed",
+                fields = mapOf(
+                    "file" to file.absolutePath,
+                    "errorType" to error::class.java.name,
+                    "errorMessage" to error.message,
+                ),
+            )
             null
         }
+    }
+
+    private fun recordDiagnostics(
+        event: String,
+        fields: Map<String, Any?> = emptyMap(),
+    ) {
+        SourceSeparationDiagnostics.recordCacheEvent(context, event, fields)
+    }
+
+    private fun SourceSeparationManifest.diagnosticFields(entryDir: File): Map<String, Any?> {
+        return mapOf(
+            "entryDir" to entryDir.absolutePath,
+            "entryId" to entryDir.name,
+            "songId" to songLocator.songId,
+            "title" to songLocator.title,
+            "path" to songLocator.filePath,
+            "state" to state.name,
+            "modelVariant" to audioIdentity.modelVariant,
+            "pipelineVersion" to pipelineVersion,
+            "audioFingerprint" to audioIdentity.audioFingerprint,
+            "hasOutput" to (output != null),
+            "hasSegmentPlan" to (segmentPlan != null),
+            "updatedAt" to updatedAtEpochMs,
+            "lastAccessedAt" to lastAccessedAtEpochMs,
+            "errorType" to error?.type,
+            "errorMessage" to error?.message,
+        )
+    }
+
+    private fun SourceSeparationCachePruneCandidate.diagnosticFields(): Map<String, Any?> {
+        return mapOf(
+            "entryDir" to dir.absolutePath,
+            "songId" to songId,
+            "state" to state.name,
+            "lastAccessedAt" to lastAccessedAtEpochMs,
+            "sizeBytes" to sizeBytes,
+        )
     }
 
     private fun readPlaybackSettings(
