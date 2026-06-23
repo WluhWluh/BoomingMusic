@@ -739,11 +739,20 @@ class PlayerViewModel(
 
     fun deleteSourceSeparationCacheForCurrentSong() {
         val song = currentSong
+        traceSourceSeparationPlaybackUserActionMarker(
+            "deleteCurrent.userAction songId=${song.id} title=${song.title}"
+        )
         if (song == Song.emptySong) return
         viewModelScope.launch(IO) {
             _sourceSeparationPendingActionFlow.value = SourceSeparationPendingAction.DeleteCache
+            traceSourceSeparationPlaybackTestMarker(
+                "deleteCurrent.request songId=${song.id} title=${song.title}"
+            )
             try {
                 if (sourceSeparationSongId == song.id) {
+                    traceSourceSeparationPlaybackTestMarker(
+                        "deleteCurrent.waitSeparation songId=${song.id}"
+                    )
                     _sourceSeparationPendingActionFlow.value =
                         SourceSeparationPendingAction.DeleteCacheWaitingWindow
                     sourceSeparationPauseRequested.set(true)
@@ -753,6 +762,9 @@ class PlayerViewModel(
                 val waitsForFlacPromotion = isSourceSeparationFlacPromotionActive(song.id)
                 cancelSourceSeparationFlacPromotionForSong(song.id)
                 if (waitsForFlacPromotion) {
+                    traceSourceSeparationPlaybackTestMarker(
+                        "deleteCurrent.waitFlac songId=${song.id}"
+                    )
                     _sourceSeparationPendingActionFlow.value =
                         SourceSeparationPendingAction.DeleteCacheWaitingFlac
                     waitForSourceSeparationFlacPromotionToStop(song.id)
@@ -760,6 +772,9 @@ class PlayerViewModel(
                 val deleted = runCatching {
                     sourceSeparationEngine.deleteCacheForSong(song)
                 }.getOrDefault(false)
+                traceSourceSeparationPlaybackTestMarker(
+                    "deleteCurrent.deleted songId=${song.id} deleted=$deleted"
+                )
                 if (currentSong.id == song.id && deleted) {
                     _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
                     refreshCurrentSourceSeparationCacheAvailable(song)
@@ -866,6 +881,9 @@ class PlayerViewModel(
 
     fun deleteAllSourceSeparationCaches() {
         val entries = _sourceSeparationCacheManagementStateFlow.value.items
+        traceSourceSeparationPlaybackUserActionMarker(
+            "deleteAll.userAction count=${entries.size} current=${currentSong.id}"
+        )
         if (entries.isEmpty()) return
         viewModelScope.launch(IO) {
             _sourceSeparationCacheManagementStateFlow.value =
@@ -889,6 +907,9 @@ class PlayerViewModel(
     }
 
     fun deleteSourceSeparationCacheEntry(entryId: String) {
+        traceSourceSeparationPlaybackUserActionMarker(
+            "deleteEntry.userAction id=$entryId current=${currentSong.id}"
+        )
         val entry = _sourceSeparationCacheManagementStateFlow
             .value
             .items
@@ -908,18 +929,30 @@ class PlayerViewModel(
     private suspend fun deleteSourceSeparationCacheEntryInternal(
         entry: SourceSeparationCacheManagementItem,
     ) {
+        traceSourceSeparationPlaybackTestMarker(
+            "deleteEntry.request id=${entry.id} songId=${entry.songId} current=${currentSong.id}"
+        )
         if (sourceSeparationSongId == entry.songId) {
+            traceSourceSeparationPlaybackTestMarker(
+                "deleteEntry.waitSeparation id=${entry.id} songId=${entry.songId}"
+            )
             sourceSeparationPauseRequested.set(true)
             sourceSeparationJob?.join()
         }
         val waitsForFlacPromotion = isSourceSeparationFlacPromotionActive(entry.songId)
         cancelSourceSeparationFlacPromotionForSong(entry.songId)
         if (waitsForFlacPromotion) {
+            traceSourceSeparationPlaybackTestMarker(
+                "deleteEntry.waitFlac id=${entry.id} songId=${entry.songId}"
+            )
             waitForSourceSeparationFlacPromotionToStop(entry.songId)
         }
         val deleted = runCatching {
             sourceSeparationEngine.deleteCacheEntry(entry.id)
         }.getOrDefault(false)
+        traceSourceSeparationPlaybackTestMarker(
+            "deleteEntry.deleted id=${entry.id} songId=${entry.songId} deleted=$deleted"
+        )
         if (deleted && currentSong.id == entry.songId) {
             _sourceSeparationStateFlow.value = SourceSeparationUiState.Idle
             refreshCurrentSourceSeparationCacheAvailable(currentSong)
@@ -1539,22 +1572,46 @@ class PlayerViewModel(
         }
     }
 
-    private suspend fun handleCurrentSourceSeparationCacheDeleted() {
-        if (!_sourceSeparationAutoStartFlow.value) {
-            syncSourceSeparationPlaybackIfRequested(force = true)
-            return
+    private fun traceSourceSeparationPlaybackUserActionMarker(marker: String) {
+        viewModelScope.launch {
+            traceSourceSeparationPlaybackTestMarker(marker)
         }
+    }
+
+    private suspend fun traceSourceSeparationPlaybackTestMarker(marker: String) {
+        runCatching {
+            sendSourceSeparationPlaybackCommand(
+                action = Playback.TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER,
+                args = Bundle().apply {
+                    putString(Playback.EXTRA_SOURCE_SEPARATION_TRACE_MARKER, marker)
+                },
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "Failed to write source separation playback trace marker", error)
+        }
+    }
+
+    private suspend fun handleCurrentSourceSeparationCacheDeleted() {
+        traceSourceSeparationPlaybackTestMarker(
+            "cacheDeleted.notify currentSongId=${currentSong.id}"
+        )
         sourceSeparationSettingsApplyJob?.cancel()
         sourceSeparationSettingsApplyJob = null
         preferences.edit {
             putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
         }
         _sourceSeparationBlendModeFlow.value = SourceSeparationBlendMode.Off
-        val result = sendSourceSeparationPlaybackEnabledCommand(
+        val disableResult = sendSourceSeparationPlaybackEnabledCommand(
             enabled = false,
             blend = _sourceSeparationPlaybackStateFlow.value.blend,
             showMessage = true,
             expectProcessing = false,
+        )
+        updateSourceSeparationPlaybackState(disableResult)
+
+        val result = sendSourceSeparationPlaybackCommand(
+            action = Playback.NOTIFY_SOURCE_SEPARATION_CACHE_DELETED,
+            args = Bundle.EMPTY,
         )
         updateSourceSeparationPlaybackState(result)
     }
@@ -1878,9 +1935,9 @@ class PlayerViewModel(
     private suspend fun sendSourceSeparationPlaybackCommand(
         action: String,
         args: Bundle,
-    ): SessionResult {
+    ): SessionResult = withContext(Dispatchers.Main.immediate) {
         val controller = mediaController
-            ?: return SessionResult(
+            ?: return@withContext SessionResult(
                 SessionError.ERROR_INVALID_STATE,
                 Bundle().apply {
                     putString(
@@ -1890,7 +1947,7 @@ class PlayerViewModel(
                 },
             )
 
-        return runCatching {
+        runCatching {
             controller.sendCustomCommand(SessionCommand(action, Bundle.EMPTY), args).await()
         }.getOrElse { error ->
             SessionResult(
