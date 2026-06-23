@@ -53,6 +53,7 @@ import com.mardous.booming.separation.cache.SourceSeparationCacheEntryState
 import com.mardous.booming.separation.model.MdxModelVariant
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
 import com.mardous.booming.separation.model.SourceSeparationModelDownloadProgress
+import com.mardous.booming.separation.model.SourceSeparationModelLoadException
 import com.mardous.booming.separation.model.SourceSeparationModelRepository
 import com.mardous.booming.separation.model.SourceSeparationModelSource
 import com.mardous.booming.separation.model.SourceSeparationModelState
@@ -720,6 +721,14 @@ class PlayerViewModel(
                     songId = song.id,
                     songTitle = song.title,
                 )
+            } catch (error: SourceSeparationModelLoadException) {
+                Log.e(TAG, "Source separation model failed to load", error)
+                handleSourceSeparationModelLoadFailure(error)
+                _sourceSeparationStateFlow.value = SourceSeparationUiState.Failed(
+                    songId = song.id,
+                    songTitle = song.title,
+                    message = error.message,
+                )
             } catch (error: Throwable) {
                 Log.e(TAG, "Source separation failed", error)
                 _sourceSeparationStateFlow.value = SourceSeparationUiState.Failed(
@@ -742,6 +751,35 @@ class PlayerViewModel(
                 }
             }
         }
+    }
+
+    private suspend fun handleSourceSeparationModelLoadFailure(
+        error: SourceSeparationModelLoadException,
+    ) {
+        val message = error.message ?: SOURCE_SEPARATION_MODEL_LOAD_ERROR_MESSAGE
+        sourceSeparationPendingStartSongId = null
+        sourceSeparationSettingsApplyJob?.cancel()
+        sourceSeparationSettingsApplyJob = null
+        sourceSeparationAutoStartJob?.cancel()
+        sourceSeparationAutoStartJob = null
+        sourceSeparationPlaybackSyncJob?.cancel()
+        sourceSeparationPlaybackSyncJob = null
+        preferences.edit {
+            putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
+        }
+        _sourceSeparationBlendModeFlow.value = SourceSeparationBlendMode.Off
+        _sourceSeparationModelStateFlow.value =
+            sourceSeparationModelRepository.modelState().toUiState().copy(
+                errorMessage = message,
+            )
+        val result = sendSourceSeparationPlaybackEnabledCommand(
+            enabled = false,
+            blend = _sourceSeparationPlaybackStateFlow.value.blend,
+            showMessage = false,
+            expectProcessing = false,
+        )
+        updateSourceSeparationPlaybackState(result)
+        openSourceSeparationModelManagement()
     }
 
     fun cancelSourceSeparation() {
@@ -2540,6 +2578,9 @@ class PlayerViewModel(
         private const val SOURCE_SEPARATION_BLEND_PREVIEW_THROTTLE_MS = 33L
         private const val SOURCE_SEPARATION_AUTO_START_PROCESSING_CACHE_WAIT_ATTEMPTS = 10
         private const val SOURCE_SEPARATION_AUTO_START_PROCESSING_CACHE_WAIT_MS = 50L
+        private const val SOURCE_SEPARATION_MODEL_LOAD_ERROR_MESSAGE =
+            "The installed source separation model could not be loaded. " +
+                    "Import or download a valid ONNX model, then try again."
     }
 }
 
