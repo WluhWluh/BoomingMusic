@@ -75,11 +75,13 @@ class SourceSeparationModelRepository(
 
     fun downloadPresetModel(
         variant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+        onProgress: (SourceSeparationModelDownloadProgress) -> Unit = {},
     ): SourceSeparationModelState.Available {
         return downloadModel(
             url = PRESET_MODEL_URL,
             source = SourceSeparationModelSource.PresetDownload,
             variant = variant,
+            onProgress = onProgress,
         )
     }
 
@@ -87,32 +89,97 @@ class SourceSeparationModelRepository(
         url: String,
         source: SourceSeparationModelSource = SourceSeparationModelSource.CustomDownload,
         variant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
+        onProgress: (SourceSeparationModelDownloadProgress) -> Unit = {},
     ): SourceSeparationModelState.Available {
         val uri = runCatching { URI(url.trim()) }.getOrElse {
             throw IllegalArgumentException("Model URL is invalid.")
         }
-        val scheme = uri.scheme?.lowercase(Locale.US)
-        require(scheme == "http" || scheme == "https") {
+        return downloadModelWithFallback(
+            primaryUri = uri,
+            source = source,
+            variant = variant,
+            onProgress = onProgress,
+        )
+    }
+
+    private fun downloadModelWithFallback(
+        primaryUri: URI,
+        source: SourceSeparationModelSource,
+        variant: MdxModelVariant,
+        onProgress: (SourceSeparationModelDownloadProgress) -> Unit,
+    ): SourceSeparationModelState.Available {
+        require(primaryUri.scheme?.equals("http", ignoreCase = true) == true ||
+                primaryUri.scheme?.equals("https", ignoreCase = true) == true) {
             "Model URL must start with http:// or https://."
         }
 
+        val attempts = buildList {
+            add(SourceSeparationDownloadAttempt(primaryUri, usingMirror = false))
+            primaryUri.toGhfastMirrorUriIfNeeded()?.let { mirrorUri ->
+                add(SourceSeparationDownloadAttempt(mirrorUri, usingMirror = true))
+            }
+        }
+
+        var lastError: Throwable? = null
+        for (attempt in attempts) {
+            try {
+                return downloadModelAttempt(
+                    uri = attempt.uri,
+                    source = source,
+                    variant = variant,
+                    usingMirror = attempt.usingMirror,
+                    onProgress = onProgress,
+                )
+            } catch (error: Throwable) {
+                lastError = error
+                if (!attempt.usingMirror && error.isRetryableDownloadError()) {
+                    onProgress(
+                        SourceSeparationModelDownloadProgress(
+                            sourceUrl = attempt.uri.toString(),
+                            usingMirror = true,
+                            downloadedBytes = 0L,
+                            totalBytes = null,
+                            message = "Retrying download via mirror...",
+                        ),
+                    )
+                    continue
+                }
+                throw error
+            }
+        }
+        throw lastError ?: IOException("Model download failed.")
+    }
+
+    private fun downloadModelAttempt(
+        uri: URI,
+        source: SourceSeparationModelSource,
+        variant: MdxModelVariant,
+        usingMirror: Boolean,
+        onProgress: (SourceSeparationModelDownloadProgress) -> Unit,
+    ): SourceSeparationModelState.Available {
         val connection = uri.toURL().openConnection() as? HttpURLConnection
             ?: throw IOException("Could not open model download connection.")
         connection.connectTimeout = DOWNLOAD_CONNECT_TIMEOUT_MS
         connection.readTimeout = DOWNLOAD_READ_TIMEOUT_MS
         connection.instanceFollowRedirects = true
         connection.requestMethod = "GET"
+        connection.setRequestProperty("Accept-Encoding", "identity")
         return try {
             val responseCode = connection.responseCode
             if (responseCode !in 200..299) {
                 throw IOException("Model download failed: HTTP $responseCode.")
             }
+            val totalBytes = connection.contentLengthLong.takeIf { it > 0L }
             connection.inputStream.use { input ->
                 installModel(
                     input = input,
                     displayName = displayNameForUrl(uri, variant),
                     source = source,
                     variant = variant,
+                    downloadUrl = uri.toString(),
+                    usingMirror = usingMirror,
+                    totalBytes = totalBytes,
+                    onProgress = onProgress,
                 )
             }
         } finally {
@@ -125,14 +192,34 @@ class SourceSeparationModelRepository(
         displayName: String?,
         source: SourceSeparationModelSource,
         variant: MdxModelVariant,
+        downloadUrl: String? = null,
+        usingMirror: Boolean = false,
+        totalBytes: Long? = null,
+        onProgress: (SourceSeparationModelDownloadProgress) -> Unit = {},
     ): SourceSeparationModelState.Available {
         val targetDir = modelDir(variant).also { it.mkdirs() }
         val target = modelFile(variant)
         val temp = File(targetDir, "${variant.fileName}.importing")
         val digest = MessageDigest.getInstance("SHA-256")
         var sizeBytes = 0L
+        val startedAtMs = System.currentTimeMillis()
 
         try {
+            if (downloadUrl != null) {
+                onProgress(
+                    SourceSeparationModelDownloadProgress(
+                        sourceUrl = downloadUrl,
+                        usingMirror = usingMirror,
+                        downloadedBytes = 0L,
+                        totalBytes = totalBytes,
+                        message = if (usingMirror) {
+                            "Downloading model from mirror..."
+                        } else {
+                            "Downloading model..."
+                        },
+                    ),
+                )
+            }
             temp.outputStream().use { output ->
                 val buffer = ByteArray(COPY_BUFFER_BYTES)
                 while (true) {
@@ -142,6 +229,24 @@ class SourceSeparationModelRepository(
                     output.write(buffer, 0, read)
                     digest.update(buffer, 0, read)
                     sizeBytes += read
+                    if (downloadUrl != null) {
+                        onProgress(
+                            SourceSeparationModelDownloadProgress(
+                                sourceUrl = downloadUrl,
+                                usingMirror = usingMirror,
+                                downloadedBytes = sizeBytes,
+                                totalBytes = totalBytes,
+                                message = if (usingMirror) {
+                                    "Downloading model from mirror..."
+                                } else {
+                                    "Downloading model..."
+                                },
+                            ),
+                        )
+                        if (!usingMirror && shouldFallbackToMirror(sizeBytes, totalBytes, startedAtMs)) {
+                            throw SlowDownloadException(downloadUrl, sizeBytes, totalBytes)
+                        }
+                    }
                 }
             }
         } catch (error: Throwable) {
@@ -308,6 +413,35 @@ class SourceSeparationModelRepository(
             ?: variant.fileName
     }
 
+    private fun URI.toGhfastMirrorUriIfNeeded(): URI? {
+        val host = host?.lowercase(Locale.US) ?: return null
+        if (host != "github.com" && host != "www.github.com") return null
+        if (host == "ghfast.top") return null
+        val rawPath = rawPath?.takeIf { it.isNotBlank() } ?: path ?: ""
+        val rawQuery = rawQuery?.let { "?$it" }.orEmpty()
+        val rawFragment = rawFragment?.let { "#$it" }.orEmpty()
+        return URI("https://ghfast.top/$host$rawPath$rawQuery$rawFragment")
+    }
+
+    private fun shouldFallbackToMirror(
+        downloadedBytes: Long,
+        totalBytes: Long?,
+        startedAtMs: Long,
+    ): Boolean {
+        val elapsedMs = (System.currentTimeMillis() - startedAtMs).coerceAtLeast(1L)
+        if (elapsedMs < MIRROR_FALLBACK_CHECK_AFTER_MS) return false
+        val bytesPerSecond = downloadedBytes * 1000L / elapsedMs
+        val minExpectedBytes = totalBytes?.let {
+            maxOf(MIRROR_FALLBACK_MIN_BYTES, it / MIRROR_FALLBACK_MIN_RATIO_DENOMINATOR)
+        } ?: MIRROR_FALLBACK_MIN_BYTES
+        return bytesPerSecond < MIRROR_FALLBACK_MIN_BYTES_PER_SECOND &&
+            downloadedBytes < minExpectedBytes
+    }
+
+    private fun Throwable.isRetryableDownloadError(): Boolean {
+        return this is IOException || this is SlowDownloadException
+    }
+
     private fun ByteArray.toHex(): String {
         return joinToString("") { "%02x".format(Locale.US, it) }
     }
@@ -321,8 +455,17 @@ class SourceSeparationModelRepository(
         private const val COPY_BUFFER_BYTES = 256 * 1024
         private const val DOWNLOAD_CONNECT_TIMEOUT_MS = 15_000
         private const val DOWNLOAD_READ_TIMEOUT_MS = 60_000
+        private const val MIRROR_FALLBACK_CHECK_AFTER_MS = 8_000L
+        private const val MIRROR_FALLBACK_MIN_BYTES_PER_SECOND = 64L * 1024L
+        private const val MIRROR_FALLBACK_MIN_BYTES = 512L * 1024L
+        private const val MIRROR_FALLBACK_MIN_RATIO_DENOMINATOR = 10L
     }
 }
+
+private data class SourceSeparationDownloadAttempt(
+    val uri: URI,
+    val usingMirror: Boolean,
+)
 
 class SourceSeparationModelUnavailableException(
     val variant: MdxModelVariant,
@@ -372,3 +515,17 @@ enum class SourceSeparationModelSource {
     LegacyLocal,
     Unknown,
 }
+
+data class SourceSeparationModelDownloadProgress(
+    val sourceUrl: String,
+    val usingMirror: Boolean,
+    val downloadedBytes: Long,
+    val totalBytes: Long?,
+    val message: String? = null,
+)
+
+private class SlowDownloadException(
+    val url: String,
+    val downloadedBytes: Long,
+    val totalBytes: Long?,
+) : IOException("Model download is too slow: $url")

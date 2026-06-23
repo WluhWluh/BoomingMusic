@@ -52,6 +52,7 @@ import com.mardous.booming.separation.cache.SourceSeparationCacheEntryFormat
 import com.mardous.booming.separation.cache.SourceSeparationCacheEntryState
 import com.mardous.booming.separation.model.MdxModelVariant
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
+import com.mardous.booming.separation.model.SourceSeparationModelDownloadProgress
 import com.mardous.booming.separation.model.SourceSeparationModelRepository
 import com.mardous.booming.separation.model.SourceSeparationModelSource
 import com.mardous.booming.separation.model.SourceSeparationModelState
@@ -1191,14 +1192,16 @@ class PlayerViewModel(
     }
 
     fun importSourceSeparationModel(uri: Uri) {
-        runSourceSeparationModelAcquisition(importing = true) {
+        runSourceSeparationModelAcquisition(importing = true) { _ ->
             sourceSeparationModelRepository.importModel(uri = uri)
         }
     }
 
     fun downloadPresetSourceSeparationModel() {
-        runSourceSeparationModelAcquisition(downloading = true) {
-            sourceSeparationModelRepository.downloadPresetModel()
+        runSourceSeparationModelAcquisition(downloading = true) { onProgress ->
+            sourceSeparationModelRepository.downloadPresetModel(
+                onProgress = onProgress,
+            )
         }
     }
 
@@ -1208,28 +1211,36 @@ class PlayerViewModel(
             _sourceSeparationModelStateFlow.value =
                 _sourceSeparationModelStateFlow.value.copy(
                     errorMessage = "Model URL cannot be empty.",
-                )
+            )
             return
         }
-        runSourceSeparationModelAcquisition(downloading = true) {
-            sourceSeparationModelRepository.downloadModel(normalizedUrl)
+        runSourceSeparationModelAcquisition(downloading = true) { onProgress ->
+            sourceSeparationModelRepository.downloadModel(
+                url = normalizedUrl,
+                onProgress = onProgress,
+            )
         }
     }
 
     private fun runSourceSeparationModelAcquisition(
         importing: Boolean = false,
         downloading: Boolean = false,
-        block: () -> SourceSeparationModelState.Available,
+        block: (onProgress: (SourceSeparationModelDownloadProgress) -> Unit) -> SourceSeparationModelState.Available,
     ) {
         _sourceSeparationModelStateFlow.value =
             _sourceSeparationModelStateFlow.value.copy(
                 importing = importing,
                 downloading = downloading,
+                downloadProgressBytes = 0L,
+                downloadTotalBytes = null,
+                downloadSourceUrl = null,
+                downloadUsingMirror = false,
+                downloadMessage = null,
                 errorMessage = null,
             )
         viewModelScope.launch(IO) {
             runCatching {
-                block()
+                block(::updateSourceSeparationModelDownloadProgress)
             }.onSuccess { state ->
                 _sourceSeparationModelStateFlow.value = state.toUiState()
             }.onFailure { error ->
@@ -1238,10 +1249,30 @@ class PlayerViewModel(
                     sourceSeparationModelRepository.modelState().toUiState().copy(
                         importing = false,
                         downloading = false,
+                        downloadProgressBytes = 0L,
+                        downloadTotalBytes = null,
+                        downloadSourceUrl = null,
+                        downloadUsingMirror = false,
+                        downloadMessage = null,
                         errorMessage = error.message,
                     )
             }
         }
+    }
+
+    private fun updateSourceSeparationModelDownloadProgress(
+        progress: SourceSeparationModelDownloadProgress,
+    ) {
+        _sourceSeparationModelStateFlow.value = _sourceSeparationModelStateFlow.value.copy(
+            downloading = true,
+            importing = false,
+            downloadProgressBytes = progress.downloadedBytes,
+            downloadTotalBytes = progress.totalBytes,
+            downloadSourceUrl = progress.sourceUrl,
+            downloadUsingMirror = progress.usingMirror,
+            downloadMessage = progress.message,
+            errorMessage = null,
+        )
     }
 
     private fun ensureSourceSeparationModelReady(openManagement: Boolean): Boolean {
@@ -2608,11 +2639,25 @@ data class SourceSeparationModelUiState(
     val updatedAtEpochMs: Long? = null,
     val importing: Boolean = false,
     val downloading: Boolean = false,
+    val downloadProgressBytes: Long = 0L,
+    val downloadTotalBytes: Long? = null,
+    val downloadSourceUrl: String? = null,
+    val downloadUsingMirror: Boolean = false,
+    val downloadMessage: String? = null,
     val deleting: Boolean = false,
     val errorMessage: String? = null,
 ) {
     val busy: Boolean
         get() = importing || downloading || deleting
+
+    val downloadProgressFraction: Float?
+        get() {
+            val total = downloadTotalBytes ?: return null
+            if (total <= 0L) return null
+            return (downloadProgressBytes.toDouble() / total.toDouble())
+                .coerceIn(0.0, 1.0)
+                .toFloat()
+        }
 }
 
 data class SourceSeparationCacheManagementItem(
@@ -2720,12 +2765,22 @@ private fun SourceSeparationModelState.toUiState(): SourceSeparationModelUiState
             source = source,
             importedDisplayName = importedDisplayName,
             updatedAtEpochMs = updatedAtEpochMs,
+            downloadProgressBytes = 0L,
+            downloadTotalBytes = null,
+            downloadSourceUrl = null,
+            downloadUsingMirror = false,
+            downloadMessage = null,
         )
         is SourceSeparationModelState.Missing -> SourceSeparationModelUiState(
             available = false,
             modelName = variant.displayName,
             fileName = variant.fileName,
             expectedSha256 = variant.expectedSha256,
+            downloadProgressBytes = 0L,
+            downloadTotalBytes = null,
+            downloadSourceUrl = null,
+            downloadUsingMirror = false,
+            downloadMessage = null,
         )
     }
 }
