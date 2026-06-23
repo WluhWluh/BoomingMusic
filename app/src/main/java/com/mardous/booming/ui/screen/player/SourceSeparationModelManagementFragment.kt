@@ -61,6 +61,7 @@ import com.mardous.booming.ui.component.compose.TitledCard
 import com.mardous.booming.ui.theme.BoomingMusicTheme
 import com.mardous.booming.ui.theme.SurfaceColorTokens
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
+import java.util.Locale
 
 class SourceSeparationModelManagementFragment : BottomSheetDialogFragment() {
 
@@ -163,13 +164,21 @@ private fun SourceSeparationModelManagementSheet(
                             SourceSeparationModelStatusHeader(state)
 
                             if (state.busy) {
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                val progressFraction = state.downloadProgressFraction
+                                if (progressFraction != null) {
+                                    LinearProgressIndicator(
+                                        progress = { progressFraction },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                } else {
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                }
                                 Text(
                                     text = when {
                                         state.importing ->
                                             stringResource(R.string.source_separation_model_importing)
                                         state.downloading ->
-                                            stringResource(R.string.source_separation_model_downloading)
+                                            downloadProgressText(state)
                                         else ->
                                             stringResource(R.string.source_separation_model_deleting)
                                     },
@@ -478,4 +487,64 @@ private fun SourceSeparationModelSource.label(): String {
         SourceSeparationModelSource.Unknown ->
             stringResource(R.string.source_separation_model_source_unknown)
     }
+}
+
+@Composable
+private fun downloadProgressText(state: SourceSeparationModelUiState): String {
+    val base = if (state.downloadUsingMirror) {
+        stringResource(R.string.source_separation_model_downloading_mirror)
+    } else {
+        stringResource(R.string.source_separation_model_downloading)
+    }
+    val body = when {
+        state.downloadProgressFraction != null -> {
+            val fraction = state.downloadProgressFraction ?: 0f
+            val percent = (fraction * 100f).coerceIn(0f, 100f)
+            val downloaded = state.downloadProgressBytes.asReadableFileSize()
+            val total = state.downloadTotalBytes?.asReadableFileSize()
+            if (total != null) {
+                String.format(Locale.US, "%s %.0f%% (%s / %s)", base, percent, downloaded, total)
+            } else {
+                String.format(Locale.US, "%s %.0f%% (%s)", base, percent, downloaded)
+            }
+        }
+        state.downloadProgressBytes > 0L -> {
+            String.format(
+                Locale.US,
+                "%s (%s)",
+                base,
+                state.downloadProgressBytes.asReadableFileSize(),
+            )
+        }
+        else -> base
+    }
+    val message = state.downloadMessage
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?.takeUnless { it.isRedundantDownloadMessage(base, state.downloadUsingMirror) }
+    return message?.let { "$body · $it" } ?: body
+}
+
+private fun String.isRedundantDownloadMessage(
+    base: String,
+    usingMirror: Boolean,
+): Boolean {
+    val normalizedMessage = normalizeDownloadMessage()
+    val redundantMessages = buildSet {
+        add(base.normalizeDownloadMessage())
+        add("Downloading model...".normalizeDownloadMessage())
+        if (usingMirror) {
+            add("Downloading model from mirror...".normalizeDownloadMessage())
+            add("Downloading model via mirror...".normalizeDownloadMessage())
+        }
+    }
+    return normalizedMessage in redundantMessages
+}
+
+private fun String.normalizeDownloadMessage(): String {
+    return lowercase(Locale.US)
+        .replace("...", "")
+        .replace("…", "")
+        .trim()
+        .trimEnd('.')
 }
