@@ -2946,11 +2946,8 @@ class PlaybackService :
         ) {
             return false
         }
-        return if (sourceSeparationPlaybackAutoSyncOnTransition) {
-            !isDefaultSourceSeparationBlend(sourceSeparationMixProcessor.blend)
-        } else {
-            true
-        }
+        if (!sourceSeparationPlaybackAutoSyncOnTransition) return false
+        return !isDefaultSourceSeparationBlend(sourceSeparationMixProcessor.blend)
     }
 
     private fun isDefaultSourceSeparationBlend(blend: Float): Boolean {
