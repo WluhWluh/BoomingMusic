@@ -507,6 +507,8 @@ class PlaybackService :
         availableCommands.add(SessionCommand(Playback.SYNC_SOURCE_SEPARATION_PLAYBACK, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.CLEAN_SOURCE_SEPARATION_TEMPORARY_CACHE, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SET_SOURCE_SEPARATION_BLEND, Bundle.EMPTY))
+        availableCommands.add(SessionCommand(Playback.NOTIFY_SOURCE_SEPARATION_CACHE_DELETED, Bundle.EMPTY))
+        availableCommands.add(SessionCommand(Playback.TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER, Bundle.EMPTY))
 
         return MediaSession.ConnectionResult.accept(
             availableCommands.build(),
@@ -895,6 +897,21 @@ class PlaybackService :
                     cleanCompletedSourceSeparationTemporaryDirsNow()
                     SessionResult(SessionResult.RESULT_SUCCESS)
                 }
+            }
+
+            Playback.NOTIFY_SOURCE_SEPARATION_CACHE_DELETED -> {
+                traceSourceSeparationPlayback("command.cacheDeleted")
+                serviceScope.future {
+                    handleSourceSeparationCacheDeleted()
+                }
+            }
+
+            Playback.TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER -> {
+                traceSourceSeparationPlayback(
+                    "test.marker",
+                    args.getString(Playback.EXTRA_SOURCE_SEPARATION_TRACE_MARKER).orEmpty()
+                )
+                Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
 
             else -> Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
@@ -1298,7 +1315,16 @@ class PlaybackService :
             sourceSeparationPlaybackResumeWhenReady = false
             sourceSeparationPlaybackGateJob?.cancel()
             sourceSeparationPlaybackGateJob = null
-            clearSourceSeparationPlayback(restoreOriginalItem = true)
+            if (sourceSeparationPlaybackSession != null ||
+                sourceSeparationPlaybackIsProcessing
+            ) {
+                clearSourceSeparationPlayback(restoreOriginalItem = true)
+            } else {
+                traceSourceSeparationPlayback(
+                    "playback.setEnabled.clear.skip",
+                    "reason=alreadyCleared"
+                )
+            }
             restoreCurrentSourceSeparationStemMediaItemIfNeeded()
             restoreSourceSeparationOutputVolume("playbackDisabled")
             sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
@@ -1331,6 +1357,23 @@ class PlaybackService :
             expectProcessing = effectiveExpectProcessing,
         )
         traceSourceSeparationPlayback("playback.sync.end", "result=${result.resultCode}")
+        return result
+    }
+
+    private suspend fun handleSourceSeparationCacheDeleted(): SessionResult {
+        traceSourceSeparationPlayback("playback.cacheDeleted.start")
+        val result = ensureSourceSeparationPlaybackReady(
+            showUnavailableMessage = false,
+            allowPauseForProcessing = false,
+            resumeWhenReady = player.playWhenReady || player.isPlaying,
+            allowNewSession = false,
+            preferCompletedCache = true,
+            expectProcessing = false,
+        )
+        traceSourceSeparationPlayback(
+            "playback.cacheDeleted.end",
+            "result=${result.resultCode}"
+        )
         return result
     }
 
@@ -3451,25 +3494,28 @@ class PlaybackService :
     }
 
     private fun sourceSeparationPlaybackTraceState(): String {
-        return if (::player.isInitialized) {
-            "requested=$sourceSeparationPlaybackRequested " +
-                    "processing=$sourceSeparationPlaybackIsProcessing " +
-                    "resumeWhenReady=$sourceSeparationPlaybackResumeWhenReady " +
-                    "internalPWR=$sourceSeparationPlaybackInternalPlayWhenReady " +
-                    "session=${sourceSeparationPlaybackSession?.songId} " +
-                    "gate=${sourceSeparationPlaybackSession?.requiresReadinessGate} " +
-                    "playWhenReady=${player.playWhenReady} " +
-                    "isPlaying=${player.isPlaying} " +
-                    "state=${playbackStateName(player.playbackState)} " +
-                    "position=${player.currentPosition} " +
-                    "index=${player.currentMediaItemIndex} " +
-                    "mediaId=${player.currentMediaItem?.mediaId} " +
-                    "stem=${player.currentMediaItem?.isSourceSeparationStemMediaItem()}"
-        } else {
-            "player=uninitialized requested=$sourceSeparationPlaybackRequested " +
-                    "processing=$sourceSeparationPlaybackIsProcessing " +
-                    "resumeWhenReady=$sourceSeparationPlaybackResumeWhenReady"
+        val session = sourceSeparationPlaybackSession
+        val base = "requested=$sourceSeparationPlaybackRequested " +
+                "processing=$sourceSeparationPlaybackIsProcessing " +
+                "resumeWhenReady=$sourceSeparationPlaybackResumeWhenReady " +
+                "internalPWR=$sourceSeparationPlaybackInternalPlayWhenReady " +
+                "session=${session?.songId} " +
+                "gate=${session?.requiresReadinessGate} " +
+                "thread=${Thread.currentThread().name}"
+        if (!::player.isInitialized) {
+            return "player=uninitialized $base"
         }
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            return "$base player=mainThreadOnly"
+        }
+        return "$base " +
+                "playWhenReady=${player.playWhenReady} " +
+                "isPlaying=${player.isPlaying} " +
+                "state=${playbackStateName(player.playbackState)} " +
+                "position=${player.currentPosition} " +
+                "index=${player.currentMediaItemIndex} " +
+                "mediaId=${player.currentMediaItem?.mediaId} " +
+                "stem=${player.currentMediaItem?.isSourceSeparationStemMediaItem()}"
     }
 
     private fun playWhenReadyReasonName(reason: Int): String {
