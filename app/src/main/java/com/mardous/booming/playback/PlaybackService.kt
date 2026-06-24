@@ -253,6 +253,7 @@ class PlaybackService :
     private var sourceSeparationPlaybackExpectProcessingStartedAtMs = 0L
     private var sourceSeparationProcessingWakeLock: PowerManager.WakeLock? = null
     private var sourceSeparationProcessingWakeLockJob: Job? = null
+    private var sourceSeparationProcessingHeartbeatJob: Job? = null
     private var sourceSeparationForegroundServiceType: Int? = null
 
     private var headsetClickCount = 0
@@ -1474,7 +1475,9 @@ class PlaybackService :
         serviceSourceSeparationAutoStartCancelRequested.set(false)
         serviceSourceSeparationAutoStartPlaybackPositionMs.set(C.TIME_UNSET)
         serviceSourceSeparationAutoStartSongId = song.id
-        updateSourceSeparationProcessingWakeLock("autoStart.beforeLaunch:${song.id}")
+        refreshSourceSeparationAutoStartExecutionLease(
+            "autoStart.beforeLaunch:${song.id}:$source"
+        )
         serviceSourceSeparationAutoStartJob = serviceScope.launch(IO) {
             runServiceSourceSeparationAutoStart(song, source)
         }
@@ -1530,10 +1533,21 @@ class PlaybackService :
                     true,
                 ),
                 onProgress = {
+                    traceSourceSeparationPlayback(
+                        "autoStart.progress",
+                        "source=$source songId=${song.id} completed=${it.completedWindows}/${it.totalWindows} " +
+                                "elapsed=${it.completedWindowElapsedMs} stage=${it.stage.orEmpty()}"
+                    )
+                    maybeRefreshPendingAutoStartExecutionLease(song, source, it.stage)
                     updateSourceSeparationProcessingWakeLock("autoStart.progress:${song.id}")
                     requestSourceSeparationPlaybackCheckAfterServiceAutoStart(song)
                 },
                 onPrepared = {
+                    maybeRefreshPendingAutoStartExecutionLease(
+                        song = song,
+                        source = source,
+                        stage = "prepared",
+                    )
                     requestSourceSeparationPlaybackCheckAfterServiceAutoStart(song)
                 },
                 playbackPositionMsProvider = {
@@ -1619,6 +1633,24 @@ class PlaybackService :
                 }
             }
         }
+    }
+
+    private fun maybeRefreshPendingAutoStartExecutionLease(
+        song: Song,
+        source: String,
+        stage: String?,
+    ) {
+        if (source != "pendingAfterPause") return
+        val stageText = stage.orEmpty()
+        val shouldRefresh = stageText == "prepared" ||
+                stageText.startsWith("Preparing window 1/") ||
+                stageText.startsWith("Processed window 1/") ||
+                stageText.startsWith("Preparing window 2/")
+        if (!shouldRefresh) return
+
+        refreshSourceSeparationAutoStartExecutionLease(
+            "autoStart.pendingLease:${song.id}:$stageText"
+        )
     }
 
     private suspend fun shouldServiceSourceSeparationAutoStartOnMain(song: Song): Boolean {
@@ -2947,6 +2979,14 @@ class PlaybackService :
                 (sourceSeparationPlaybackIsProcessing && sourceSeparationPlaybackResumeWhenReady)
     }
 
+    private fun isSourceSeparationProcessingHeartbeatNeeded(): Boolean {
+        return sourceSeparationPlaybackRequested &&
+                sourceSeparationPlaybackIsProcessing &&
+                sourceSeparationPlaybackResumeWhenReady &&
+                (serviceSourceSeparationAutoStartSongId != null ||
+                        serviceSourceSeparationAutoStartJob?.isActive == true)
+    }
+
     private fun updateSourceSeparationProcessingWakeLock(reason: String) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             serviceScope.launch {
@@ -2959,7 +2999,52 @@ class PlaybackService :
         } else {
             stopSourceSeparationProcessingWakeLockKeeper(reason)
         }
+        updateSourceSeparationProcessingHeartbeat(reason)
         updateSourceSeparationForegroundServiceType(reason)
+    }
+
+    private fun updateSourceSeparationProcessingHeartbeat(reason: String) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            serviceScope.launch {
+                updateSourceSeparationProcessingHeartbeat(reason)
+            }
+            return
+        }
+        if (isSourceSeparationProcessingHeartbeatNeeded()) {
+            startSourceSeparationProcessingHeartbeat(reason)
+        } else {
+            stopSourceSeparationProcessingHeartbeat(reason)
+        }
+    }
+
+    private fun startSourceSeparationProcessingHeartbeat(reason: String) {
+        if (sourceSeparationProcessingHeartbeatJob?.isActive == true) return
+
+        sourceSeparationProcessingHeartbeatJob = serviceScope.launch {
+            val heartbeatJob = coroutineContext[Job]
+            traceSourceSeparationPlayback("autoStart.heartbeat.start", "reason=$reason")
+            try {
+                while (isSourceSeparationProcessingHeartbeatNeeded()) {
+                    delay(SOURCE_SEPARATION_PROCESSING_HEARTBEAT_MS)
+                    if (isSourceSeparationProcessingHeartbeatNeeded()) {
+                        refreshSourceSeparationAutoStartExecutionLease("heartbeat")
+                        traceSourceSeparationPlayback("autoStart.heartbeat.tick")
+                    }
+                }
+            } finally {
+                if (sourceSeparationProcessingHeartbeatJob == heartbeatJob) {
+                    sourceSeparationProcessingHeartbeatJob = null
+                }
+                traceSourceSeparationPlayback("autoStart.heartbeat.stop", "reason=$reason")
+            }
+        }
+    }
+
+    private fun stopSourceSeparationProcessingHeartbeat(reason: String) {
+        val job = sourceSeparationProcessingHeartbeatJob ?: return
+        traceSourceSeparationPlayback("autoStart.heartbeat.cancel", "reason=$reason")
+        job.cancel()
+        sourceSeparationProcessingHeartbeatJob = null
     }
 
     private fun startSourceSeparationProcessingWakeLockKeeper(reason: String) {
@@ -2989,11 +3074,26 @@ class PlaybackService :
         }
     }
 
+    private fun refreshSourceSeparationAutoStartExecutionLease(reason: String) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            serviceScope.launch {
+                refreshSourceSeparationAutoStartExecutionLease(reason)
+            }
+            return
+        }
+        traceSourceSeparationPlayback("autoStart.leaseRefresh", "reason=$reason")
+        startSourceSeparationProcessingWakeLockKeeper(reason)
+        renewSourceSeparationProcessingWakeLock(reason)
+        updateSourceSeparationProcessingHeartbeat(reason)
+        updateSourceSeparationForegroundServiceType(reason, force = true)
+    }
+
     private fun stopSourceSeparationProcessingWakeLockKeeper(
         reason: String,
         force: Boolean = false,
     ) {
         if (!force && isSourceSeparationProcessingWakeLockNeeded()) return
+        stopSourceSeparationProcessingHeartbeat(reason)
         sourceSeparationProcessingWakeLockJob?.cancel()
         sourceSeparationProcessingWakeLockJob = null
         releaseSourceSeparationProcessingWakeLock(reason)
@@ -4263,6 +4363,9 @@ class PlaybackService :
         private const val SOURCE_SEPARATION_EXPECT_PROCESSING_TIMEOUT_MS = 10_000L
         private const val SERVICE_SOURCE_SEPARATION_AUTO_START_DEBOUNCE_MS = 150L
         private const val SERVICE_SOURCE_SEPARATION_AUTO_START_POSITION_UPDATE_MS = 250L
+        // Samsung Freecess can freeze the process while playback is paused waiting for
+        // real-time separated cache. Refresh the active execution lease only in that state.
+        private const val SOURCE_SEPARATION_PROCESSING_HEARTBEAT_MS = 1_000L
         private const val SOURCE_SEPARATION_PROCESSING_WAKE_LOCK_REFRESH_MS = 15_000L
 
         private const val FOREGROUND_SERVICE_TIMEOUT = (60 * 1000) * 2L
