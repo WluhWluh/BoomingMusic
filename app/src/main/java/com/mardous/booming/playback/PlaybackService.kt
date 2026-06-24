@@ -1474,6 +1474,7 @@ class PlaybackService :
         serviceSourceSeparationAutoStartCancelRequested.set(false)
         serviceSourceSeparationAutoStartPlaybackPositionMs.set(C.TIME_UNSET)
         serviceSourceSeparationAutoStartSongId = song.id
+        updateSourceSeparationProcessingWakeLock("autoStart.beforeLaunch:${song.id}")
         serviceSourceSeparationAutoStartJob = serviceScope.launch(IO) {
             runServiceSourceSeparationAutoStart(song, source)
         }
@@ -2941,7 +2942,8 @@ class PlaybackService :
     }
 
     private fun isSourceSeparationProcessingWakeLockNeeded(): Boolean {
-        return serviceSourceSeparationAutoStartJob?.isActive == true ||
+        return serviceSourceSeparationAutoStartSongId != null ||
+                serviceSourceSeparationAutoStartJob?.isActive == true ||
                 (sourceSeparationPlaybackIsProcessing && sourceSeparationPlaybackResumeWhenReady)
     }
 
