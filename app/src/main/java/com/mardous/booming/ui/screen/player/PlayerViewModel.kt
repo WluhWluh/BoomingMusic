@@ -120,7 +120,9 @@ class PlayerViewModel(
     private val repository: Repository,
     private val albumCoverSaver: AlbumCoverSaver,
     private val sourceSeparationEngine: SourceSeparationEngine,
-    private val sourceSeparationModelRepository: SourceSeparationModelRepository
+    private val sourceSeparationModelRepository: SourceSeparationModelRepository,
+    private val sourceSeparationForegroundWorkerCoordinator:
+    SourceSeparationForegroundWorkerCoordinator,
 ) : ViewModel(), Player.Listener {
 
     private val sourceSeparationPerformanceStats = SourceSeparationPerformanceStats(preferences)
@@ -330,6 +332,7 @@ class PlayerViewModel(
 
     init {
         SourceSeparationForegroundWorkerDebugBridge.register(this)
+        observeSourceSeparationForegroundWorkerCoordinator()
     }
 
     override fun onCleared() {
@@ -413,6 +416,70 @@ class PlayerViewModel(
     private fun cancelInternalJobs() {
         internalJobs.forEach { it.cancel() }
         internalJobs.clear()
+    }
+
+    private fun observeSourceSeparationForegroundWorkerCoordinator() {
+        sourceSeparationForegroundWorkerCoordinator.eventFlow
+            .onEach { event ->
+                when (event) {
+                    is SourceSeparationForegroundPlaybackEvent.SongChanged ->
+                        handleSourceSeparationForegroundSongChanged(
+                            song = event.song,
+                            positionMs = event.positionMs,
+                            durationMs = event.durationMs,
+                            isPlaying = event.isPlaying,
+                            sourceSeparationBlend = event.sourceSeparationBlend,
+                        )
+
+                    is SourceSeparationForegroundPlaybackEvent.PositionChanged ->
+                        handleSourceSeparationForegroundPositionChanged(
+                            positionMs = event.positionMs,
+                            durationMs = event.durationMs,
+                            isPlaying = event.isPlaying,
+                            sourceSeparationBlend = event.sourceSeparationBlend,
+                        )
+                }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun handleSourceSeparationForegroundSongChanged(
+        song: Song,
+        positionMs: Long,
+        durationMs: Long,
+        isPlaying: Boolean,
+        sourceSeparationBlend: Float,
+    ) {
+        if (song == Song.emptySong) return
+        _currentSongFlow.value = song
+        _progressFlow.value = positionMs
+        _durationFlow.value = durationMs
+        _isPlayingFlow.value = isPlaying
+        updateSourceSeparationBlendState(sourceSeparationBlend)
+        pauseSourceSeparationIfSongChanged(song)
+        refreshCurrentSourceSeparationCacheAvailable(song)
+        applySourceSeparationSettingsForSong(
+            song = song,
+            showMessage = false,
+            fallbackBlend = sourceSeparationBlend,
+        )
+        maybeAutoStartSourceSeparationForSong(song, sourceSeparationBlend)
+    }
+
+    private fun handleSourceSeparationForegroundPositionChanged(
+        positionMs: Long,
+        durationMs: Long,
+        isPlaying: Boolean,
+        sourceSeparationBlend: Float,
+    ) {
+        _progressFlow.value = positionMs
+        _durationFlow.value = durationMs
+        _isPlayingFlow.value = isPlaying
+        updateSourceSeparationBlendState(sourceSeparationBlend)
+        syncSourceSeparationPlaybackIfRequested(force = true)
+        maybeAutoStartSourceSeparationForCurrentSong(
+            blend = sourceSeparationBlend,
+        )
     }
 
     private fun updateCurrentAndNextSong(
@@ -754,7 +821,7 @@ class PlayerViewModel(
                         },
                     )
                     if (currentSong.id == song.id) {
-                        syncSourceSeparationPlaybackIfRequested()
+                        syncSourceSeparationPlaybackIfRequested(force = true)
                     }
                 },
                 onPrepared = {
@@ -768,7 +835,12 @@ class PlayerViewModel(
                 playbackPositionMsProvider = {
                     progress.takeIf {
                         currentSong.id == song.id && it != C.TIME_UNSET
-                    }
+                    } ?: sourceSeparationForegroundWorkerCoordinator
+                        .playbackStateFlow
+                        .value
+                        .takeIf { it.song.id == song.id }
+                        ?.estimatedPositionMs()
+                        ?.takeIf { it != C.TIME_UNSET }
                 },
                 playbackReadyWindowCountProvider = {
                     _sourceSeparationPlaybackReadyWindowCountFlow.value
