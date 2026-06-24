@@ -106,6 +106,7 @@ import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.separation.cache.SourceSeparationOutput
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor.InputMode
 import com.mardous.booming.ui.screen.MainActivity
+import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.CLEAR_QUEUE_ON_COMPLETION
@@ -181,6 +182,8 @@ class PlaybackService :
     private val audioOutputObserver: AudioOutputObserver by inject()
     private val repository: Repository by inject()
     private val sourceSeparationEngine: SourceSeparationEngine by inject()
+    private val sourceSeparationForegroundWorkerCoordinator:
+            SourceSeparationForegroundWorkerCoordinator by inject()
 
     private val libraryProvider = LibraryProvider(repository)
     private val songPlayCountHelper = SongPlayCountHelper()
@@ -215,6 +218,7 @@ class PlaybackService :
     private var sourceSeparationPlaybackExpectProcessing = false
     private var sourceSeparationPlaybackResumeWhenReady = false
     private var sourceSeparationPlaybackInternalPlayWhenReady: Boolean? = null
+    private var sourceSeparationPlaybackPlayIntent = false
     private val sourceSeparationPlaybackReadinessMutex = Mutex()
     private var sourceSeparationPlaybackGateJob: Job? = null
     private var sourceSeparationPlaybackReadinessMonitorJob: Job? = null
@@ -953,6 +957,26 @@ class PlaybackService :
         persistentStorage.saveState(true)
     }
 
+    private fun updateSourceSeparationForegroundWorkerSong(song: Song) {
+        if (song == Song.emptySong) return
+        sourceSeparationForegroundWorkerCoordinator.updateSong(
+            song = song,
+            positionMs = player.currentPosition,
+            durationMs = player.duration,
+            isPlaying = isSourceSeparationForegroundWorkerClockAdvancing(),
+            sourceSeparationBlend = sourceSeparationMixProcessor.blend,
+        )
+    }
+
+    private fun updateSourceSeparationForegroundWorkerPosition() {
+        sourceSeparationForegroundWorkerCoordinator.updatePosition(
+            positionMs = player.currentPosition,
+            durationMs = player.duration,
+            isPlaying = isSourceSeparationForegroundWorkerClockAdvancing(),
+            sourceSeparationBlend = sourceSeparationMixProcessor.blend,
+        )
+    }
+
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
         val isInternalPlayWhenReadyChange =
             sourceSeparationPlaybackInternalPlayWhenReady == playWhenReady
@@ -963,6 +987,13 @@ class PlaybackService :
             "player.onPlayWhenReadyChanged",
             "playWhenReady=$playWhenReady reason=${playWhenReadyReasonName(reason)} internal=$isInternalPlayWhenReadyChange"
         )
+        if (!isInternalPlayWhenReadyChange) {
+            if (playWhenReady) {
+                sourceSeparationPlaybackPlayIntent = true
+            } else if (shouldClearSourceSeparationPlaybackPlayIntent(reason)) {
+                sourceSeparationPlaybackPlayIntent = false
+            }
+        }
 
         if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
             player.exoPlayer.pauseAtEndOfMediaItems = false
@@ -1013,6 +1044,7 @@ class PlaybackService :
             }
         }
         songPlayCountHelper.notifyPlayStateChanged(isPlaying)
+        updateSourceSeparationForegroundWorkerPosition()
         updateWidgets()
     }
 
@@ -1103,6 +1135,9 @@ class PlaybackService :
             songPlayCountHelper.notifySongChanged(newSong, isPlaying)
 
             if (newSong != Song.emptySong) {
+                withContext(Main) {
+                    updateSourceSeparationForegroundWorkerSong(newSong)
+                }
                 replayGainProcessor.currentGain = ReplayGainTagExtractor.getReplayGain(newSong)
                 if (preferences.getBoolean(ENABLE_HISTORY, true)) {
                     repository.upsertSongInHistory(newSong)
@@ -1153,6 +1188,7 @@ class PlaybackService :
                     "new=${newPosition.positionMs} oldIndex=${oldPosition.mediaItemIndex} " +
                     "newIndex=${newPosition.mediaItemIndex}"
         )
+        updateSourceSeparationForegroundWorkerPosition()
         if (reason == Player.DISCONTINUITY_REASON_REMOVE &&
             sourceSeparationPlaybackSession != null &&
             isSourceSeparationInternalMediaItemChange()
@@ -1215,6 +1251,7 @@ class PlaybackService :
         if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) &&
             !events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
             updateEqualizerSessionState(player.isPlaying)
+            updateSourceSeparationForegroundWorkerPosition()
         }
         if (events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED) &&
             !events.contains(Player.EVENT_TIMELINE_CHANGED)) {
@@ -1301,18 +1338,22 @@ class PlaybackService :
         )
         sourceSeparationPlaybackRequested = enabled
         sourceSeparationPlaybackAutoSyncOnTransition = autoSyncOnTransition
+        if (enabled && (player.playWhenReady || player.isPlaying)) {
+            sourceSeparationPlaybackPlayIntent = true
+        }
         setSourceSeparationPlaybackExpectProcessing(enabled && expectProcessing)
         val result = if (enabled) {
             ensureSourceSeparationPlaybackReady(
                 showUnavailableMessage = showMessage,
                 allowPauseForProcessing = true,
-                resumeWhenReady = player.playWhenReady || player.isPlaying,
+                resumeWhenReady = shouldResumeSourceSeparationPlaybackWhenReady(),
                 allowNewSession = true,
                 expectProcessing = expectProcessing,
             )
         } else {
             setSourceSeparationPlaybackExpectProcessing(false)
             sourceSeparationPlaybackResumeWhenReady = false
+            sourceSeparationPlaybackPlayIntent = false
             sourceSeparationPlaybackGateJob?.cancel()
             sourceSeparationPlaybackGateJob = null
             if (sourceSeparationPlaybackSession != null ||
@@ -1354,6 +1395,7 @@ class PlaybackService :
         val result = ensureSourceSeparationPlaybackReady(
             showUnavailableMessage = false,
             allowNewSession = allowNewSession,
+            resumeWhenReady = shouldResumeSourceSeparationPlaybackWhenReady(),
             expectProcessing = effectiveExpectProcessing,
         )
         traceSourceSeparationPlayback("playback.sync.end", "result=${result.resultCode}")
@@ -1365,7 +1407,7 @@ class PlaybackService :
         val result = ensureSourceSeparationPlaybackReady(
             showUnavailableMessage = false,
             allowPauseForProcessing = false,
-            resumeWhenReady = player.playWhenReady || player.isPlaying,
+            resumeWhenReady = shouldResumeSourceSeparationPlaybackWhenReady(),
             allowNewSession = false,
             preferCompletedCache = true,
             expectProcessing = false,
@@ -2538,7 +2580,8 @@ class PlaybackService :
         val shouldResume = sourceSeparationPlaybackResumeWhenReady ||
                 resumeWhenReady ||
                 player.playWhenReady ||
-                player.isPlaying
+                player.isPlaying ||
+                sourceSeparationPlaybackPlayIntent
         traceSourceSeparationPlayback(
             "playback.waitForReady",
             "source=$source restoreOriginalItem=$restoreOriginalItem allowPause=$allowPause " +
@@ -2738,7 +2781,8 @@ class PlaybackService :
             sourceSeparationPlaybackResumeWhenReady ||
                     resumeAfterTransitionGate ||
                     player.playWhenReady ||
-                    wasPlaying
+                    wasPlaying ||
+                    sourceSeparationPlaybackPlayIntent
         flushSourceSeparationPausedOutput(reason)
         if (expectProcessingOnTransition) {
             broadcastSourceSeparationPlaybackChanged()
@@ -2966,6 +3010,30 @@ class PlaybackService :
         }
     }
 
+    private fun shouldResumeSourceSeparationPlaybackWhenReady(): Boolean {
+        return sourceSeparationPlaybackResumeWhenReady ||
+                player.playWhenReady ||
+                player.isPlaying ||
+                sourceSeparationPlaybackPlayIntent
+    }
+
+    private fun shouldClearSourceSeparationPlaybackPlayIntent(reason: Int): Boolean {
+        if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
+            return false
+        }
+        if (sourceSeparationPlaybackIsProcessing) {
+            return isManualPlayWhenReadyPauseReason(reason)
+        }
+        return isManualPlayWhenReadyPauseReason(reason) ||
+                !player.playWhenReady
+    }
+
+    private fun isSourceSeparationForegroundWorkerClockAdvancing(): Boolean {
+        return player.isPlaying ||
+                (sourceSeparationPlaybackIsProcessing &&
+                        shouldResumeSourceSeparationPlaybackWhenReady())
+    }
+
     private fun flushSourceSeparationPausedOutput(reason: String) {
         val index = player.currentMediaItemIndex
         if (index == C.INDEX_UNSET) {
@@ -3009,6 +3077,9 @@ class PlaybackService :
             "playback.setPlayWhenReady",
             "target=$playWhenReady current=${player.playWhenReady}"
         )
+        if (playWhenReady && sourceSeparationPlaybackRequested) {
+            sourceSeparationPlaybackPlayIntent = true
+        }
         if (player.playWhenReady != playWhenReady) {
             sourceSeparationPlaybackInternalPlayWhenReady = playWhenReady
         } else if (sourceSeparationPlaybackInternalPlayWhenReady == playWhenReady) {
@@ -3497,6 +3568,7 @@ class PlaybackService :
         val base = "requested=$sourceSeparationPlaybackRequested " +
                 "processing=$sourceSeparationPlaybackIsProcessing " +
                 "resumeWhenReady=$sourceSeparationPlaybackResumeWhenReady " +
+                "playIntent=$sourceSeparationPlaybackPlayIntent " +
                 "internalPWR=$sourceSeparationPlaybackInternalPlayWhenReady " +
                 "session=${session?.songId} " +
                 "gate=${session?.requiresReadinessGate} " +

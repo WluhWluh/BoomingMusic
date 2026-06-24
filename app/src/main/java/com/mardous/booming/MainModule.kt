@@ -74,6 +74,7 @@ import com.mardous.booming.ui.screen.library.search.SearchViewModel
 import com.mardous.booming.ui.screen.library.years.YearDetailViewModel
 import com.mardous.booming.ui.screen.lyrics.LyricsViewModel
 import com.mardous.booming.ui.screen.player.PlayerViewModel
+import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.sleeptimer.SleepTimerViewModel
 import com.mardous.booming.ui.screen.tageditor.TagEditorViewModel
 import com.mardous.booming.ui.screen.update.UpdateViewModel
@@ -279,6 +280,8 @@ private val dataModule = module {
 }
 
 private val viewModule = module {
+    single { SourceSeparationForegroundWorkerCoordinator() }
+
     viewModel {
         LibraryViewModel(repository = get(), inclExclDao = get(), customPlaylistImageManager = get())
     }
@@ -288,7 +291,8 @@ private val viewModule = module {
             preferences = get(),
             repository = get(),
             sourceSeparationEngine = get(),
-            sourceSeparationModelRepository = get()
+            sourceSeparationModelRepository = get(),
+            sourceSeparationForegroundWorkerCoordinator = get(),
         )
     }
 
