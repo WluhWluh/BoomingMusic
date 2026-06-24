@@ -23,7 +23,8 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
 @OptIn(ExperimentalAtomicApi::class)
 class MediaControllerOwner(
     private val context: Context,
-    private var listener: MediaController.Listener?
+    private var listener: MediaController.Listener?,
+    private val releaseOnStop: Boolean = true,
 ) : MediaController.Listener, DefaultLifecycleObserver {
 
     private val currentState = AtomicReference(State.Idle)
@@ -94,6 +95,18 @@ class MediaControllerOwner(
     }
 
     override fun onStop(owner: LifecycleOwner) {
+        if (!releaseOnStop) return
+        releaseController()
+    }
+
+    override fun onDestroy(owner: LifecycleOwner) {
+        if (!releaseOnStop) {
+            releaseController()
+        }
+        listener = null
+    }
+
+    private fun releaseController() {
         val oldState = currentState.exchange(State.Disconnected)
         if (oldState < State.Disconnected) {
             controller?.release()
@@ -101,10 +114,6 @@ class MediaControllerOwner(
             controllerFuture?.cancel(true)
             controllerFuture = null
         }
-    }
-
-    override fun onDestroy(owner: LifecycleOwner) {
-        listener = null
     }
 
     override fun onDisconnected(controller: MediaController) {

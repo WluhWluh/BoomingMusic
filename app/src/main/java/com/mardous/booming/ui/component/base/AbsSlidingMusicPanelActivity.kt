@@ -118,7 +118,13 @@ abstract class AbsSlidingMusicPanelActivity : AbsBaseActivity(),
 
     protected lateinit var binding: SlidingMusicPanelLayoutBinding
 
-    protected val mediaControllerOwner by lazy { MediaControllerOwner(this, this) }
+    protected val mediaControllerOwner by lazy {
+        MediaControllerOwner(
+            context = this,
+            listener = this,
+            releaseOnStop = false,
+        )
+    }
 
     protected val libraryViewModel: LibraryViewModel by viewModel()
     protected val playerViewModel: PlayerViewModel by viewModel()
@@ -177,6 +183,7 @@ abstract class AbsSlidingMusicPanelActivity : AbsBaseActivity(),
 
         binding = SlidingMusicPanelLayoutBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        playerViewModel
 
         ViewCompat.setOnApplyWindowInsetsListener(binding.sheetView) { _, insets ->
             insets.also { windowInsets = it }
