@@ -169,6 +169,17 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
                 controller.seekToPrevious()
                 null
             }
+            COMMAND_SET_REPEAT_MODE -> {
+                controller.repeatMode = when (
+                    intent.getStringExtra(EXTRA_REPEAT_MODE).orEmpty().lowercase()
+                ) {
+                    "one" -> Player.REPEAT_MODE_ONE
+                    "all" -> Player.REPEAT_MODE_ALL
+                    "off" -> Player.REPEAT_MODE_OFF
+                    else -> intent.getIntExtra(EXTRA_REPEAT_MODE_INT, Player.REPEAT_MODE_ALL)
+                }
+                null
+            }
             COMMAND_SEEK -> {
                 controller.seekTo(intent.getLongExtra(EXTRA_POSITION_MS, 0L).coerceAtLeast(0L))
                 null
@@ -348,11 +359,14 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
         private const val EXTRA_AUTO_START = "autoStart"
         private const val EXTRA_MODE = "mode"
         private const val EXTRA_INDEX = "index"
+        private const val EXTRA_REPEAT_MODE = "repeatMode"
+        private const val EXTRA_REPEAT_MODE_INT = "repeatModeInt"
 
         private const val COMMAND_PLAY = "play"
         private const val COMMAND_PAUSE = "pause"
         private const val COMMAND_NEXT = "next"
         private const val COMMAND_PREVIOUS = "previous"
+        private const val COMMAND_SET_REPEAT_MODE = "setRepeatMode"
         private const val COMMAND_SEEK = "seek"
         private const val COMMAND_SEEK_PERCENT = "seekPercent"
         private const val COMMAND_SEEK_TO_INDEX = "seekToIndex"
