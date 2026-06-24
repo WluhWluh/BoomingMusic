@@ -14,6 +14,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -22,6 +23,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.PowerManager
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
@@ -240,6 +242,10 @@ class PlaybackService :
     private var sourceSeparationOutputMuteStartedAtMs = 0L
     private var sourceSeparationPlaybackContextGeneration = 0L
     private var sourceSeparationPlaybackExpectProcessingStartedAtMs = 0L
+    private var sourceSeparationProcessingWakeLock: PowerManager.WakeLock? = null
+    private var sourceSeparationProcessingWakeLockJob: Job? = null
+    private var sourceSeparationProcessingHeartbeatJob: Job? = null
+    private var sourceSeparationForegroundServiceType: Int? = null
 
     private var headsetClickCount = 0
     private val headsetClickRunnable = Runnable {
@@ -445,6 +451,7 @@ class PlaybackService :
         flushSourceSeparationPlaybackTrace()
         cancelSourceSeparationPlaybackReadinessMonitor("serviceDestroy")
         cancelSourceSeparationPcmHydrationJob(deletePartial = false)
+        stopSourceSeparationProcessingLease("serviceDestroy", force = true)
         super.onDestroy()
         if (bluetoothConnectedRegistered) {
             unregisterReceiver(bluetoothReceiver)
@@ -1033,6 +1040,7 @@ class PlaybackService :
                 }
             }
         }
+        updateSourceSeparationProcessingLease("playWhenReadyChanged")
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -1355,6 +1363,7 @@ class PlaybackService :
             sourceSeparationPlaybackPlayIntent = false
             sourceSeparationPlaybackGateJob?.cancel()
             sourceSeparationPlaybackGateJob = null
+            updateSourceSeparationProcessingLease("playbackDisabled")
             if (sourceSeparationPlaybackSession != null ||
                 sourceSeparationPlaybackIsProcessing
             ) {
@@ -1605,6 +1614,7 @@ class PlaybackService :
                         broadcastSourceSeparationPlaybackChanged()
                         sourceSeparationPlaybackGateJob?.cancel()
                         sourceSeparationPlaybackGateJob = null
+                        updateSourceSeparationProcessingLease("activeSession.ready")
                         sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
                     }
                     SourceSeparationPlayableCacheStatus.Processing -> {
@@ -1829,6 +1839,7 @@ class PlaybackService :
         broadcastSourceSeparationPlaybackChanged()
         sourceSeparationPlaybackGateJob?.cancel()
         sourceSeparationPlaybackGateJob = null
+        updateSourceSeparationProcessingLease("newSession.ready")
         traceSourceSeparationPlayback("check.end", "id=$checkId result=success newSession")
         return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
     }
@@ -1958,6 +1969,7 @@ class PlaybackService :
         cleanupCompletedSourceSeparationTemporaryDirs(activeSession = session)
         sourceSeparationPlaybackGateJob?.cancel()
         sourceSeparationPlaybackGateJob = null
+        updateSourceSeparationProcessingLease("completedCacheUpgrade.ready")
         traceSourceSeparationPlayback("check.end", "id=$checkId result=success completedCacheUpgrade")
         return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
     }
@@ -2495,6 +2507,7 @@ class PlaybackService :
         sourceSeparationPlaybackIsProcessing = false
         rememberWarmSourceSeparationHydration(session)
         cleanupCompletedSourceSeparationTemporaryDirs(activeSession = session)
+        updateSourceSeparationProcessingLease("clear")
 
         if (restoreOriginalItem && session != null) {
             val restored = restoreOriginalMediaItem(session, resumePlayback = resumeAfterSwitch)
@@ -2557,6 +2570,7 @@ class PlaybackService :
         if (!sourceSeparationPlaybackIsProcessing) {
             setSourceSeparationPlaybackExpectProcessing(false)
         }
+        updateSourceSeparationProcessingLease("clearProcessing")
         if (sourceSeparationOutputMuted && sourceSeparationPlaybackSession == null) {
             restoreSourceSeparationOutputVolume("clearProcessing")
         }
@@ -2603,6 +2617,7 @@ class PlaybackService :
         val message = getString(R.string.source_separation_playback_processing)
             .takeIf { showMessage }
         broadcastSourceSeparationPlaybackChanged(message)
+        updateSourceSeparationProcessingLease("waitForReady:$source")
         scheduleSourceSeparationPlaybackGateRetry()
         return sourceSeparationPlaybackResult(
             resultCode = SessionResult.RESULT_SUCCESS,
@@ -2786,6 +2801,7 @@ class PlaybackService :
         if (expectProcessingOnTransition) {
             broadcastSourceSeparationPlaybackChanged()
         }
+        updateSourceSeparationProcessingLease("transition:$reason")
         traceSourceSeparationPlayback(
             "playback.transitionGate",
             "reason=$reason expectProcessing=$expectProcessingOnTransition"
@@ -3031,6 +3047,197 @@ class PlaybackService :
         return player.isPlaying ||
                 (sourceSeparationPlaybackIsProcessing &&
                         shouldResumeSourceSeparationPlaybackWhenReady())
+    }
+
+    private fun isSourceSeparationProcessingLeaseNeeded(): Boolean {
+        return sourceSeparationPlaybackRequested &&
+                sourceSeparationPlaybackIsProcessing &&
+                shouldResumeSourceSeparationPlaybackWhenReady()
+    }
+
+    private fun updateSourceSeparationProcessingLease(reason: String) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            serviceScope.launch {
+                updateSourceSeparationProcessingLease(reason)
+            }
+            return
+        }
+        if (isSourceSeparationProcessingLeaseNeeded()) {
+            startSourceSeparationProcessingLease(reason)
+        } else {
+            stopSourceSeparationProcessingLease(reason)
+        }
+        updateSourceSeparationForegroundServiceType(reason)
+    }
+
+    private fun startSourceSeparationProcessingLease(reason: String) {
+        startSourceSeparationProcessingWakeLockKeeper(reason)
+        updateSourceSeparationForegroundServiceType(reason, force = true)
+        if (sourceSeparationProcessingHeartbeatJob?.isActive == true) return
+
+        sourceSeparationProcessingHeartbeatJob = serviceScope.launch {
+            val heartbeatJob = coroutineContext[Job]
+            traceSourceSeparationPlayback("lease.heartbeat.start", "reason=$reason")
+            try {
+                while (isSourceSeparationProcessingLeaseNeeded()) {
+                    delay(SOURCE_SEPARATION_PROCESSING_LEASE_HEARTBEAT_MS)
+                    if (isSourceSeparationProcessingLeaseNeeded()) {
+                        refreshSourceSeparationProcessingLease("heartbeat")
+                    }
+                }
+            } finally {
+                if (sourceSeparationProcessingHeartbeatJob == heartbeatJob) {
+                    sourceSeparationProcessingHeartbeatJob = null
+                }
+                traceSourceSeparationPlayback("lease.heartbeat.stop", "reason=$reason")
+                if (!isSourceSeparationProcessingLeaseNeeded()) {
+                    stopSourceSeparationProcessingLease("heartbeat.stop")
+                }
+            }
+        }
+    }
+
+    private fun refreshSourceSeparationProcessingLease(reason: String) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            serviceScope.launch {
+                refreshSourceSeparationProcessingLease(reason)
+            }
+            return
+        }
+        if (!isSourceSeparationProcessingLeaseNeeded()) {
+            stopSourceSeparationProcessingLease(reason)
+            return
+        }
+        traceSourceSeparationPlayback("lease.refresh", "reason=$reason")
+        sourceSeparationPlaybackPlayIntent = true
+        updateSourceSeparationForegroundWorkerPosition()
+        renewSourceSeparationProcessingWakeLock(reason)
+        updateSourceSeparationForegroundServiceType(reason, force = true)
+        scheduleSourceSeparationPlaybackGateRetry()
+    }
+
+    private fun stopSourceSeparationProcessingLease(
+        reason: String,
+        force: Boolean = false,
+    ) {
+        if (!force && isSourceSeparationProcessingLeaseNeeded()) return
+        sourceSeparationProcessingHeartbeatJob?.cancel()
+        sourceSeparationProcessingHeartbeatJob = null
+        sourceSeparationProcessingWakeLockJob?.cancel()
+        sourceSeparationProcessingWakeLockJob = null
+        releaseSourceSeparationProcessingWakeLock(reason)
+        updateSourceSeparationForegroundServiceType(reason)
+    }
+
+    private fun startSourceSeparationProcessingWakeLockKeeper(reason: String) {
+        acquireSourceSeparationProcessingWakeLock(reason)
+        if (sourceSeparationProcessingWakeLockJob?.isActive == true) return
+
+        sourceSeparationProcessingWakeLockJob = serviceScope.launch {
+            val keeperJob = coroutineContext[Job]
+            traceSourceSeparationPlayback("lease.wakeLockKeeper.start", "reason=$reason")
+            try {
+                while (isSourceSeparationProcessingLeaseNeeded()) {
+                    delay(SOURCE_SEPARATION_PROCESSING_WAKE_LOCK_REFRESH_MS)
+                    if (isSourceSeparationProcessingLeaseNeeded()) {
+                        renewSourceSeparationProcessingWakeLock("keeper")
+                        updateSourceSeparationForegroundServiceType("keeper", force = true)
+                    }
+                }
+            } finally {
+                if (sourceSeparationProcessingWakeLockJob == keeperJob) {
+                    sourceSeparationProcessingWakeLockJob = null
+                }
+                if (!isSourceSeparationProcessingLeaseNeeded()) {
+                    releaseSourceSeparationProcessingWakeLock("keeper.stop")
+                }
+                traceSourceSeparationPlayback("lease.wakeLockKeeper.stop", "reason=$reason")
+            }
+        }
+    }
+
+    private fun updateSourceSeparationForegroundServiceType(
+        reason: String,
+        force: Boolean = false,
+    ) {
+        if (Build.VERSION.SDK_INT < 35) return
+        val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
+                if (isSourceSeparationProcessingLeaseNeeded()) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
+                } else {
+                    0
+                }
+        if (!force && sourceSeparationForegroundServiceType == type) return
+        val notification = getSystemService<NotificationManager>()
+            ?.activeNotifications
+            ?.firstOrNull { it.id == NOTIFICATION_ID }
+            ?.notification
+            ?: run {
+                traceSourceSeparationPlayback(
+                    "lease.fgsType.skip",
+                    "reason=$reason notificationMissing=true"
+                )
+                return
+            }
+        runCatching {
+            startForeground(NOTIFICATION_ID, notification, type)
+            sourceSeparationForegroundServiceType = type
+            traceSourceSeparationPlayback("lease.fgsType.update", "reason=$reason type=$type")
+        }.onFailure { error ->
+            Log.w(TAG_SOURCE_SEPARATION_PLAYBACK, "Unable to update foreground service type", error)
+            traceSourceSeparationPlayback(
+                "lease.fgsType.failed",
+                "reason=$reason error=${error::class.java.simpleName}:${error.message}"
+            )
+        }
+    }
+
+    private fun acquireSourceSeparationProcessingWakeLock(reason: String) {
+        val wakeLock = sourceSeparationProcessingWakeLock
+            ?: (getSystemService<PowerManager>()?.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "$PACKAGE_NAME:SourceSeparationProcessing",
+            )?.apply {
+                setReferenceCounted(false)
+            } ?: return).also {
+                sourceSeparationProcessingWakeLock = it
+            }
+        if (!wakeLock.isHeld) {
+            traceSourceSeparationPlayback("lease.wakeLock.acquire", "reason=$reason")
+            wakeLock.acquire()
+        }
+    }
+
+    private fun renewSourceSeparationProcessingWakeLock(reason: String) {
+        val wakeLock = sourceSeparationProcessingWakeLock
+        if (wakeLock?.isHeld == true) {
+            traceSourceSeparationPlayback("lease.wakeLock.renew", "reason=$reason")
+            runCatching {
+                wakeLock.release()
+            }.onFailure { error ->
+                Log.w(
+                    TAG_SOURCE_SEPARATION_PLAYBACK,
+                    "Unable to renew source separation wake lock",
+                    error,
+                )
+            }
+        }
+        acquireSourceSeparationProcessingWakeLock("$reason.renew")
+    }
+
+    private fun releaseSourceSeparationProcessingWakeLock(reason: String) {
+        val wakeLock = sourceSeparationProcessingWakeLock ?: return
+        if (!wakeLock.isHeld) return
+        traceSourceSeparationPlayback("lease.wakeLock.release", "reason=$reason")
+        runCatching {
+            wakeLock.release()
+        }.onFailure { error ->
+            Log.w(
+                TAG_SOURCE_SEPARATION_PLAYBACK,
+                "Unable to release source separation wake lock",
+                error,
+            )
+        }
     }
 
     private fun flushSourceSeparationPausedOutput(reason: String) {
@@ -3720,6 +3927,8 @@ class PlaybackService :
         private const val DEFAULT_SOURCE_SEPARATION_BLEND = 0.5f
         private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
         private const val SOURCE_SEPARATION_EXPECT_PROCESSING_TIMEOUT_MS = 10_000L
+        private const val SOURCE_SEPARATION_PROCESSING_LEASE_HEARTBEAT_MS = 1_000L
+        private const val SOURCE_SEPARATION_PROCESSING_WAKE_LOCK_REFRESH_MS = 15_000L
 
         private const val FOREGROUND_SERVICE_TIMEOUT = (60 * 1000) * 2L
 
