@@ -390,8 +390,23 @@ class SourceSeparationCache(
     fun pauseRun(run: SourceSeparationRun): SourceSeparationManifest {
         val manifest = readManifest(run.rootDir)
         val now = System.currentTimeMillis()
+        val runningSegmentIndexes = manifest?.segmentPlan
+            ?.segments
+            ?.filter { it.state == SourceSeparationSegmentState.Running }
+            ?.map { it.index }
+            .orEmpty()
+        val pausedSegmentPlan = manifest?.segmentPlan?.copy(
+            segments = manifest.segmentPlan.segments.map { segment ->
+                if (segment.state == SourceSeparationSegmentState.Running) {
+                    segment.copy(state = SourceSeparationSegmentState.Queued)
+                } else {
+                    segment
+                }
+            },
+        )
         val updatedManifest = manifest?.copy(
             state = SourceSeparationCacheState.Running,
+            segmentPlan = pausedSegmentPlan,
             updatedAtEpochMs = now,
         ) ?: SourceSeparationManifest(
             pipelineVersion = run.pipelineVersion,
@@ -419,6 +434,7 @@ class SourceSeparationCache(
                 "entryDir" to run.rootDir.absolutePath,
                 "previousState" to manifest?.state?.name,
                 "hadManifest" to (manifest != null),
+                "resetRunningSegments" to runningSegmentIndexes,
             ),
         )
         return updatedManifest

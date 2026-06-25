@@ -433,12 +433,11 @@ class SourceSeparationEngine(
                         shouldPromoteCompletedStems = promoteCompletedStems,
                     ).result
                 }
+        } catch (error: SourceSeparationPausedException) {
+            cache.pauseRun(run)
+            throw error
         } catch (error: CancellationException) {
-            if (error is SourceSeparationPausedException) {
-                cache.pauseRun(run)
-            } else {
-                cache.cancelRun(run, error)
-            }
+            cache.cancelRun(run, error)
             throw error
         } catch (error: Throwable) {
             cache.failRun(run, error)
@@ -471,7 +470,7 @@ class SourceSeparationEngine(
     }
 }
 
-class SourceSeparationPausedException : CancellationException("Source separation paused.")
+class SourceSeparationPausedException : RuntimeException("Source separation paused.")
 
 sealed class SourceSeparationCacheStatus {
     data object NotStarted : SourceSeparationCacheStatus()
