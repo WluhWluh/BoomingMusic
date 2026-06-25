@@ -29,6 +29,16 @@
 -dontwarn javax.annotation.**
 -dontwarn org.commonmark.ext.gfm.strikethrough.**
 
+# JTransforms/JLargeArrays references this JVM-only cleaner path from code that
+# is not used on Android, but R8 still sees the optional reference in release.
+-dontwarn sun.misc.Cleaner
+
+# ONNX Runtime's native JNI layer looks up Java wrapper classes, methods, and
+# constructors by their exact names. Obfuscating these classes can make release
+# builds abort in native code when creating or inspecting a session.
+-keep class ai.onnxruntime.** { *; }
+-dontwarn ai.onnxruntime.**
+
 -keep,allowobfuscation,allowshrinking class kotlin.coroutines.Continuation
 
 # With R8 full mode generic signatures are stripped for classes that are not

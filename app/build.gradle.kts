@@ -76,6 +76,7 @@ val currentVersion: Version = Version.Beta(
     versionPatch = 1,
     versionBuild = 2
 )
+val sourceSeparationVersionSuffix = "-ss.1"
 val currentVersionCode = currentVersion.code
 
 android {
@@ -86,9 +87,9 @@ android {
         minSdk = 26
         targetSdk = 36
 
-        applicationId = namespace
+        applicationId = "com.wluhwluh.booming.sourcesep"
         versionCode = 1310102
-        versionName = currentVersion.name
+        versionName = currentVersion.name + sourceSeparationVersionSuffix
         check(versionCode == currentVersionCode)
     }
 
