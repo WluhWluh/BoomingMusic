@@ -312,18 +312,22 @@ fun CoverLyricsScreen(
         } else {
             0.dp
         }
-        val sourceSeparationQuickControlsHeight = if (showSourceSeparationQuickControls) {
-            quickBlendHeight + quickBlendProgressExtraHeight + CoverLyricsButtonSpacing
+        val overlayControlsHeight = if (showSourceSeparationQuickControls) {
+            quickBlendHeight +
+                    quickBlendProgressExtraHeight +
+                    CoverLyricsButtonSpacing +
+                    CoverLyricsControlSlotSize
         } else {
-            CoverLyricsButtonSize
+            CoverLyricsControlSlotSize
         }
-        val sourceSeparationQuickControlsBottomSpacing = if (showSourceSeparationQuickControls) {
-            CoverLyricsBottomSpacing
-        } else {
-            0.dp
-        }
-        val lyricsContentPadding = lyricsViewSettings.contentPadding.withAdditionalBottom(
-            sourceSeparationQuickControlsHeight + sourceSeparationQuickControlsBottomSpacing
+        val overlayClearance = maxOf(
+            0.dp,
+            lyricsViewSettings.contentPadding.calculateBottomPadding() -
+                    CoverLyricsControlSlotSize -
+                    CoverLyricsOverlayPadding
+        )
+        val lyricsContentPadding = lyricsViewSettings.contentPadding.withMinimumBottom(
+            overlayControlsHeight + CoverLyricsOverlayPadding + overlayClearance
         )
         Box(modifier = modifier.fillMaxSize()) {
             LyricsSurface(
@@ -890,13 +894,13 @@ private fun LyricsSurface(
 }
 
 @Composable
-private fun PaddingValues.withAdditionalBottom(additionalBottom: Dp): PaddingValues {
+private fun PaddingValues.withMinimumBottom(minimumBottom: Dp): PaddingValues {
     val layoutDirection = LocalLayoutDirection.current
     return PaddingValues(
         start = calculateStartPadding(layoutDirection),
         top = calculateTopPadding(),
         end = calculateEndPadding(layoutDirection),
-        bottom = calculateBottomPadding() + additionalBottom
+        bottom = maxOf(calculateBottomPadding(), minimumBottom)
     )
 }
 
@@ -911,7 +915,6 @@ private val CoverLyricsQuickBlendProgressStrokeWidth = 3.dp
 private val CoverLyricsQuickBlendProgressOffset = 32.dp
 private val CoverLyricsButtonSpacing = 12.dp
 private val CoverLyricsOverlayPadding = 16.dp
-private val CoverLyricsBottomSpacing = 16.dp
 private val CoverLyricsQuickBlendInnerCornerRadius = 2.dp
 private const val CoverLyricsQuickBlendNeutralBlend = 0.5f
 private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.10f
