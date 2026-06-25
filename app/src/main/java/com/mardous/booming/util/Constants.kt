@@ -23,6 +23,7 @@ object Constants {
     // GitHub Links
     const val AUTHOR_GITHUB_URL = BuildConfig.AUTHOR_GITHUB_URL
     const val GITHUB_URL = BuildConfig.GITHUB_URL
+    const val UPSTREAM_GITHUB_URL = BuildConfig.UPSTREAM_GITHUB_URL
     const val RELEASES_LINK = BuildConfig.RELEASES_LINK
     const val ISSUE_TRACKER_LINK = BuildConfig.ISSUE_TRACKER_LINK
     const val COMMUNITY_LINK = BuildConfig.COMMUNITY_LINK

@@ -169,6 +169,10 @@ fun AboutScreen(
     val sections = getAboutSections(
         onTranslatorsClick = { showTranslatorsDialog = true }
     )
+    val forkItems = getForkItems(
+        onForkGitHubClick = { context.openUrl(GITHUB_URL) },
+        onUpstreamGitHubClick = { context.openUrl(Constants.UPSTREAM_GITHUB_URL) }
+    )
 
     CollapsibleAppBarScaffold(
         title = stringResource(R.string.about_title),
@@ -188,6 +192,16 @@ fun AboutScreen(
                     onForkClick = { context.openUrl(GITHUB_URL) },
                     onFAQClick = { context.openUrl(FAQ_LINK) },
                     onLicensesClick = { showLicensesDialog = true }
+                )
+            }
+
+            item { AboutSectionTitle(stringResource(R.string.about_booming_ss_title)) }
+
+            itemsIndexed(forkItems) { index, item ->
+                AboutListItem(
+                    index = index,
+                    itemCount = forkItems.size,
+                    data = item
                 )
             }
 
@@ -324,6 +338,37 @@ private fun BoomingMusicHeader(
         }
     }
 }
+
+@Composable
+private fun getForkItems(
+    onForkGitHubClick: () -> Unit,
+    onUpstreamGitHubClick: () -> Unit
+) = listOf(
+    AboutItemData(
+        icon = { AboutItemIcon(painterResource(R.drawable.ic_stem_blend_24dp)) },
+        title = stringResource(R.string.about_booming_ss_summary_title),
+        summary = stringResource(R.string.about_booming_ss_summary),
+        onClick = {}
+    ),
+    AboutItemData(
+        icon = { AboutItemIcon(painterResource(R.drawable.ic_info_24dp)) },
+        title = stringResource(R.string.about_booming_ss_model_title),
+        summary = stringResource(R.string.about_booming_ss_model_summary),
+        onClick = {}
+    ),
+    AboutItemData(
+        icon = { AboutItemIcon(painterResource(R.drawable.ic_github_circle_24dp)) },
+        title = stringResource(R.string.about_booming_ss_fork_title),
+        summary = stringResource(R.string.about_booming_ss_fork_summary),
+        onClick = onForkGitHubClick
+    ),
+    AboutItemData(
+        icon = { AboutItemIcon(painterResource(R.drawable.ic_open_in_new_24dp)) },
+        title = stringResource(R.string.about_booming_ss_upstream_title),
+        summary = stringResource(R.string.about_booming_ss_upstream_summary),
+        onClick = onUpstreamGitHubClick
+    )
+)
 
 @Composable
 private fun AuthorSection(
