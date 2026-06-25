@@ -502,7 +502,8 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
 
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
         if (key == SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE) {
-            updateSourceSeparationPanelEntryVisibility()
+            (activity as? AbsSlidingMusicPanelActivity)?.refreshPlayerUi()
+                ?: updateSourceSeparationPanelEntryVisibility()
         }
     }
 
