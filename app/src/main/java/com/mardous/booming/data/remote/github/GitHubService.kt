@@ -60,6 +60,6 @@ class GitHubService(private val context: Context, private val client: HttpClient
 
     companion object {
         private const val DEFAULT_USER = "WluhWluh"
-        private const val DEFAULT_REPO = "BoomingMusic"
+        private const val DEFAULT_REPO = "BoomingSS"
     }
 }
