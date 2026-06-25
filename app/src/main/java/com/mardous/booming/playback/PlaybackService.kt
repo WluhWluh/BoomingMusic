@@ -905,8 +905,11 @@ class PlaybackService :
 
             Playback.CLEAN_SOURCE_SEPARATION_TEMPORARY_CACHE -> {
                 traceSourceSeparationPlayback("command.cleanTemporaryCache")
+                val activeFiles = sourceSeparationPlaybackSession
+                    ?.activeStemFiles()
+                    .orEmpty()
                 serviceScope.future(IO) {
-                    cleanCompletedSourceSeparationTemporaryDirsNow()
+                    cleanCompletedSourceSeparationTemporaryDirsNow(activeFiles)
                     SessionResult(SessionResult.RESULT_SUCCESS)
                 }
             }
@@ -3382,9 +3385,7 @@ class PlaybackService :
     }
 
     private fun cleanCompletedSourceSeparationTemporaryDirsNow(
-        activeFiles: Set<String> = sourceSeparationPlaybackSession
-            ?.activeStemFiles()
-            .orEmpty(),
+        activeFiles: Set<String>,
     ) {
         val cleanedCount = runCatching {
             sourceSeparationEngine.cleanPendingCompletedTemporaryDirs(activeFiles)
