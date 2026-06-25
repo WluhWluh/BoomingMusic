@@ -553,10 +553,13 @@ class SourceSeparationForegroundWorkerCoordinator(
                             (!pauseRequested.get() && activeJob?.isActive != true)
                 },
             )
-            if (readBlendMode() == SourceSeparationBlendMode.PerSong) {
+            val playbackState = _playbackStateFlow.value
+            if (readBlendMode() == SourceSeparationBlendMode.PerSong &&
+                playbackState.song.id == song.id
+            ) {
                 savePerSongBlend(
                     song = song,
-                    blend = _playbackStateFlow.value.sourceSeparationBlend,
+                    blend = playbackState.sourceSeparationBlend,
                 )
             }
             _workerStateFlow.value = SourceSeparationUiState.Completed(
