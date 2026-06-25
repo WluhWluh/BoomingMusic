@@ -10,6 +10,7 @@ import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPerformanceStats
 import com.mardous.booming.separation.model.MdxRangeProgress
+import com.mardous.booming.separation.model.ReusableMdxOrtSessionProvider
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
 import com.mardous.booming.separation.model.SourceSeparationModelLoadException
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
@@ -45,6 +46,7 @@ class SourceSeparationForegroundWorkerCoordinator(
 ) {
     private val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val performanceStats = SourceSeparationPerformanceStats(preferences)
+    private val sessionProvider = ReusableMdxOrtSessionProvider()
     private val cancelRequested = AtomicBoolean(false)
     private val pauseRequested = AtomicBoolean(false)
     private val debugWindowSamples = ArrayDeque<SourceSeparationDebugWindowSample>()
@@ -356,6 +358,9 @@ class SourceSeparationForegroundWorkerCoordinator(
             if (workerJob == activeJob) {
                 workerJob = null
             }
+            if (!workerActivated) {
+                sessionProvider.close()
+            }
             workerSongId = null
             pendingStartSongId = null
             cancelRequested.set(false)
@@ -494,6 +499,7 @@ class SourceSeparationForegroundWorkerCoordinator(
                         DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
                     ).coerceAtLeast(1)
                 },
+                sessionProvider = sessionProvider,
                 shouldPause = {
                     pauseRequested.get() ||
                             _playbackStateFlow.value.song.id != song.id ||

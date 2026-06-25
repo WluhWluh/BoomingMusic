@@ -39,6 +39,7 @@ class MdxRangeSeparator(
         playbackPositionMsProvider: () -> Long? = { null },
         playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
         resumeManifest: SourceSeparationManifest? = null,
+        sessionProvider: MdxOrtSessionProvider = DefaultMdxOrtSessionProvider,
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
     ): MdxRangeSeparationResult {
@@ -128,7 +129,6 @@ class MdxRangeSeparator(
             )
         )
 
-        val environment = OrtEnvironment.getEnvironment()
         val spectrogram = MdxSpectrogram(config)
         val declaredOutputDataSizeBytes = if (segmentOutputDir != null) {
             targetFrames.toLong() * MdxDspConfig.STEREO_CHANNELS * Short.SIZE_BYTES
@@ -152,16 +152,15 @@ class MdxRangeSeparator(
                 preserveExistingData = resumeManifest != null,
             ).use { instrumentalWriter ->
                 onProgress(MdxRangeProgress.preparing("Creating ONNX session"))
-                val session = measureElapsed(timing, "Session setup") {
-                    runtimeSettings.createSessionOptions().use { options ->
-                        try {
-                            environment.createSession(modelFile.absolutePath, options)
-                        } catch (error: Exception) {
-                            throw SourceSeparationModelLoadException(modelVariant, error)
-                        }
-                    }
+                val sessionLease = measureElapsed(timing, "Session setup") {
+                    sessionProvider.acquire(
+                        modelFile = modelFile,
+                        runtimeSettings = runtimeSettings,
+                        modelVariant = modelVariant,
+                    )
                 }
-                session.use {
+                sessionLease.use { lease ->
+                    val session = lease.session
                     val inputName = session.inputInfo.keys.first()
                     val outputName = session.outputInfo.keys.first()
                     var processedWindowCount = currentSegmentPlan.segments
