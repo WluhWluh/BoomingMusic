@@ -441,7 +441,7 @@ class PlayerViewModel(
             showMessage = false,
             fallbackBlend = sourceSeparationBlend,
         )
-        maybeAutoStartSourceSeparationForSong(song, sourceSeparationBlend)
+        maybeAutoStartSourceSeparationForSong(song)
     }
 
     private fun handleSourceSeparationForegroundPositionChanged(
@@ -455,9 +455,7 @@ class PlayerViewModel(
         _isPlayingFlow.value = isPlaying
         updateSourceSeparationBlendState(sourceSeparationBlend)
         syncSourceSeparationPlaybackIfRequested(force = true)
-        maybeAutoStartSourceSeparationForCurrentSong(
-            blend = sourceSeparationBlend,
-        )
+        maybeAutoStartSourceSeparationForCurrentSong()
     }
 
     private fun updateCurrentAndNextSong(
@@ -1365,7 +1363,10 @@ class PlayerViewModel(
                 args = args,
             )
             updateSourceSeparationPlaybackState(result)
-            maybeAutoStartSourceSeparationForCurrentSong(normalizedBlend)
+            maybeAutoStartSourceSeparationForCurrentSong(
+                blend = normalizedBlend,
+                trustKnownBlend = true,
+            )
         }
     }
 
@@ -1451,15 +1452,24 @@ class PlayerViewModel(
         }
     }
 
-    private fun shouldExpectSourceSeparationProcessingForSync(): Boolean {
-        if (!_sourceSeparationAutoStartFlow.value ||
-            _sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off
-        ) {
+    private suspend fun shouldExpectSourceSeparationProcessingForSync(): Boolean {
+        if (!_sourceSeparationAutoStartFlow.value) {
             return false
         }
-        return !isDefaultSourceSeparationBlend(
-            _sourceSeparationPlaybackStateFlow.value.blend,
+        val mode = _sourceSeparationBlendModeFlow.value
+        if (mode == SourceSeparationBlendMode.Off) {
+            return false
+        }
+        val song = currentSong
+        if (song == Song.emptySong) {
+            return false
+        }
+        val blend = sourceSeparationForegroundWorkerCoordinator.blendForSong(
+            mode = mode,
+            song = song,
+            fallbackBlend = _sourceSeparationPlaybackStateFlow.value.blend,
         )
+        return !isDefaultSourceSeparationBlend(blend)
     }
 
     fun setSourceSeparationBlendMode(mode: SourceSeparationBlendMode) {
@@ -1615,14 +1625,22 @@ class PlayerViewModel(
         }
     }
 
-    private fun maybeAutoStartSourceSeparationForCurrentSong(blend: Float) {
+    private fun maybeAutoStartSourceSeparationForCurrentSong(
+        blend: Float? = null,
+        trustKnownBlend: Boolean = false,
+    ) {
         val song = currentSong
-        maybeAutoStartSourceSeparationForSong(song, blend)
+        maybeAutoStartSourceSeparationForSong(
+            song = song,
+            knownBlend = blend,
+            trustKnownBlend = trustKnownBlend,
+        )
     }
 
     private fun maybeAutoStartSourceSeparationForSong(
         song: Song,
         knownBlend: Float? = null,
+        trustKnownBlend: Boolean = false,
     ) {
         val mode = _sourceSeparationBlendModeFlow.value
         if (!_sourceSeparationAutoStartFlow.value ||
@@ -1640,11 +1658,17 @@ class PlayerViewModel(
 
         sourceSeparationAutoStartJob?.cancel()
         sourceSeparationAutoStartJob = viewModelScope.launch {
-            val blend = knownBlend ?: sourceSeparationForegroundWorkerCoordinator.blendForSong(
-                mode = mode,
-                song = song,
-                fallbackBlend = null,
-            )
+            val blend = if (knownBlend != null &&
+                (trustKnownBlend || mode != SourceSeparationBlendMode.PerSong)
+            ) {
+                knownBlend
+            } else {
+                sourceSeparationForegroundWorkerCoordinator.blendForSong(
+                    mode = mode,
+                    song = song,
+                    fallbackBlend = null,
+                )
+            }
             if (sourceSeparationForegroundWorkerCoordinator
                     .autoStartDecision(song, blend)
                     .shouldStart &&
