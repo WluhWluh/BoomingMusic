@@ -280,7 +280,12 @@ private val dataModule = module {
 }
 
 private val viewModule = module {
-    single { SourceSeparationForegroundWorkerCoordinator() }
+    single {
+        SourceSeparationForegroundWorkerCoordinator(
+            preferences = get(),
+            sourceSeparationEngine = get(),
+        )
+    }
 
     viewModel {
         LibraryViewModel(repository = get(), inclExclDao = get(), customPlaylistImageManager = get())
