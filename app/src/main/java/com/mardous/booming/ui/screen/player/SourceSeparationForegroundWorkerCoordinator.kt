@@ -9,6 +9,7 @@ import com.mardous.booming.separation.SourceSeparationCacheStatus
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPerformanceStats
+import com.mardous.booming.separation.SourceSeparationPlayableCacheStatus
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.ReusableMdxOrtSessionProvider
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
@@ -54,8 +55,8 @@ class SourceSeparationForegroundWorkerCoordinator(
     private var workerJob: Job? = null
     private var workerActivated = false
     private var workerSongId: Long? = null
-    private var pendingStartSongId: Long? = null
-    private var pendingStartReason: SourceSeparationPendingStartReason? = null
+    private var pendingStartRequest: SourceSeparationWorkerRequest? = null
+    private var activeWorkerRequest: SourceSeparationWorkerRequest? = null
     private var autoStartSuppressedSongId: Long? = null
     private var debugLastWindowSample: SourceSeparationDebugWindowSample? = null
     private var callbacks: SourceSeparationForegroundWorkerCallbacks? = null
@@ -161,11 +162,19 @@ class SourceSeparationForegroundWorkerCoordinator(
         autoStartSuppressedSongId = null
         if (workerJob?.isActive == true) {
             if (workerSongId == song.id) return
-            if (pendingStartSongId == song.id) {
-                pendingStartReason = SourceSeparationPendingStartReason.Manual
+            if (pendingStartRequest?.song?.id == song.id) {
+                pendingStartRequest = SourceSeparationWorkerRequest.Full(
+                    song = song,
+                    reason = SourceSeparationPendingStartReason.Manual,
+                )
                 return
             }
-            setPendingStart(song.id, SourceSeparationPendingStartReason.Manual)
+            setPendingStart(
+                SourceSeparationWorkerRequest.Full(
+                    song = song,
+                    reason = SourceSeparationPendingStartReason.Manual,
+                )
+            )
             if (workerSongId != null) {
                 pauseRequested.set(true)
             }
@@ -174,10 +183,43 @@ class SourceSeparationForegroundWorkerCoordinator(
 
         cancelRequested.set(false)
         pauseRequested.set(false)
-        setPendingStart(song.id, SourceSeparationPendingStartReason.Manual)
+        setPendingStart(
+            SourceSeparationWorkerRequest.Full(
+                song = song,
+                reason = SourceSeparationPendingStartReason.Manual,
+            )
+        )
         workerJob = workerScope.launch {
             runWorkerLoop()
         }
+    }
+
+    fun preStartSong(song: Song, readyWindowCount: Int): Boolean {
+        if (song == Song.emptySong || readyWindowCount <= 0) return false
+        if (workerSongId == song.id) return false
+        if (hasReadyPlaybackStartCache(song, readyWindowCount)) return false
+
+        workerActivated = true
+        val request = SourceSeparationWorkerRequest.StartWindowPreStart(
+            song = song,
+            readyWindowCount = readyWindowCount,
+        )
+        if (pendingStartRequest?.song?.id == song.id) {
+            pendingStartRequest = request
+            return true
+        }
+        if (workerJob?.isActive == true) {
+            setPendingStart(request)
+            return true
+        }
+
+        cancelRequested.set(false)
+        pauseRequested.set(false)
+        setPendingStart(request)
+        workerJob = workerScope.launch {
+            runWorkerLoop()
+        }
+        return true
     }
 
     fun pauseCurrentSong(currentSong: Song) {
@@ -202,7 +244,7 @@ class SourceSeparationForegroundWorkerCoordinator(
 
     fun suppressAndPauseSong(songId: Long) {
         autoStartSuppressedSongId = songId
-        if (pendingStartSongId == songId) {
+        if (pendingStartRequest?.song?.id == songId) {
             clearPendingStart()
         }
         pauseRequested.set(true)
@@ -224,7 +266,7 @@ class SourceSeparationForegroundWorkerCoordinator(
 
     fun runningSongId(): Long? = workerSongId
 
-    fun pendingSongId(): Long? = pendingStartSongId
+    fun pendingSongId(): Long? = pendingStartRequest?.song?.id
 
     fun protectedSongIds(): Set<Long> {
         return buildSet {
@@ -232,7 +274,7 @@ class SourceSeparationForegroundWorkerCoordinator(
                 .takeIf { it != Song.emptySong.id }
                 ?.let(::add)
             workerSongId?.let(::add)
-            pendingStartSongId?.let(::add)
+            pendingStartRequest?.song?.id?.let(::add)
         }
     }
 
@@ -251,7 +293,7 @@ class SourceSeparationForegroundWorkerCoordinator(
                 hasCompletedCache = false,
             )
         }
-        if (workerSongId == song.id || pendingStartSongId == song.id) {
+        if (workerSongId == song.id || pendingStartRequest?.song?.id == song.id) {
             return SourceSeparationAutoStartDecision(
                 shouldStart = false,
                 shouldWaitForProcessingCache = true,
@@ -308,6 +350,16 @@ class SourceSeparationForegroundWorkerCoordinator(
         }.coerceIn(0f, 1f)
     }
 
+    suspend fun recordedBlendForSong(song: Song): Float? {
+        if (song == Song.emptySong) return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                sourceSeparationEngine.separatedPlaybackBlendForSong(song)
+            }.getOrNull()
+                ?: readTemporaryPerSongBlend(song)
+        }?.coerceIn(0f, 1f)
+    }
+
     fun debugStatus(): String {
         val playbackState = _playbackStateFlow.value
         val state = _workerStateFlow.value
@@ -316,8 +368,8 @@ class SourceSeparationForegroundWorkerCoordinator(
             append(" title=").append(playbackState.song.title)
             append(" workerActive=").append(workerJob?.isActive == true)
             append(" workerSong=").append(workerSongId)
-            append(" pending=").append(pendingStartSongId)
-            append(" pendingReason=").append(pendingStartReason)
+            append(" pending=").append(pendingStartRequest?.song?.id)
+            append(" pendingReason=").append(pendingStartRequest?.debugReason)
             append(" suppressed=").append(autoStartSuppressedSongId)
             append(" pauseRequested=").append(pauseRequested.get())
             append(" cancelRequested=").append(cancelRequested.get())
@@ -350,15 +402,22 @@ class SourceSeparationForegroundWorkerCoordinator(
         val activeJob = coroutineContext[Job]
         try {
             while (activeJob?.isActive == true && !cancelRequested.get()) {
-                val song = nextWorkerSong()
-                if (song == null) {
+                val request = nextWorkerRequest()
+                if (request == null) {
                     workerSongId = null
                     delay(SOURCE_SEPARATION_FOREGROUND_WORKER_IDLE_MS)
                     continue
                 }
 
                 clearPendingStart()
-                runWorkerSong(song, activeJob)
+                activeWorkerRequest = request
+                try {
+                    runWorkerSong(request.song, activeJob)
+                } finally {
+                    if (activeWorkerRequest === request) {
+                        activeWorkerRequest = null
+                    }
+                }
             }
         } finally {
             if (workerJob == activeJob) {
@@ -368,55 +427,74 @@ class SourceSeparationForegroundWorkerCoordinator(
                 sessionProvider.close()
             }
             workerSongId = null
+            activeWorkerRequest = null
             clearPendingStart()
             cancelRequested.set(false)
             pauseRequested.set(false)
         }
     }
 
-    private suspend fun nextWorkerSong(): Song? {
-        val pendingStartSongId = pendingStartSongId
-        if (pendingStartSongId != null) {
-            val song = _playbackStateFlow.value.song.takeIf { song ->
-                song.id == pendingStartSongId && song != Song.emptySong
-            } ?: run {
-                clearPendingStart()
-                return null
-            }
-            if (pendingStartReason == SourceSeparationPendingStartReason.Manual) {
-                return song
-            }
-            val mode = readBlendMode()
-            if (!isAutoStartEnabled() || mode == SourceSeparationBlendMode.Off) {
-                clearPendingStart()
-                return null
-            }
-            val blend = blendForSong(
-                mode = mode,
-                song = song,
-                fallbackBlend = null,
-            )
-            return song.takeIf {
-                autoStartDecision(song, blend).shouldStart
-            } ?: run {
-                clearPendingStart()
-                null
+    private suspend fun nextWorkerRequest(): SourceSeparationWorkerRequest? {
+        pendingStartRequest?.let { request ->
+            return when (request) {
+                is SourceSeparationWorkerRequest.Full -> nextFullWorkerRequest(request)
+                is SourceSeparationWorkerRequest.StartWindowPreStart ->
+                    nextPreStartWorkerRequest(request)
             }
         }
 
         if (!workerActivated) return null
         val song = _playbackStateFlow.value.song.takeIf { it != Song.emptySong } ?: return null
         if (autoStartSuppressedSongId == song.id) return null
+        return nextFullWorkerRequest(
+            SourceSeparationWorkerRequest.Full(
+                song = song,
+                reason = SourceSeparationPendingStartReason.AutoHandoff,
+            )
+        )
+    }
+
+    private suspend fun nextFullWorkerRequest(
+        request: SourceSeparationWorkerRequest.Full,
+    ): SourceSeparationWorkerRequest.Full? {
+        val song = _playbackStateFlow.value.song.takeIf { song ->
+            song.id == request.song.id && song != Song.emptySong
+        } ?: run {
+            clearPendingStart()
+            return null
+        }
+        if (request.reason == SourceSeparationPendingStartReason.Manual) {
+            return request.copy(song = song)
+        }
         val mode = readBlendMode()
-        if (!isAutoStartEnabled() || mode == SourceSeparationBlendMode.Off) return null
+        if (!isAutoStartEnabled() || mode == SourceSeparationBlendMode.Off) {
+            clearPendingStart()
+            return null
+        }
         val blend = blendForSong(
             mode = mode,
             song = song,
             fallbackBlend = null,
         )
-        return song.takeIf {
+        return request.copy(song = song).takeIf {
             autoStartDecision(song, blend).shouldStart
+        } ?: run {
+            clearPendingStart()
+            null
         }
+    }
+
+    private fun nextPreStartWorkerRequest(
+        request: SourceSeparationWorkerRequest.StartWindowPreStart,
+    ): SourceSeparationWorkerRequest.StartWindowPreStart? {
+        if (!isAutoStartEnabled() ||
+            !songNeedsSeparatedOutputForCurrentMode(request.song) ||
+            hasReadyPlaybackStartCache(request.song, request.readyWindowCount)
+        ) {
+            clearPendingStart()
+            return null
+        }
+        return request
     }
 
     private fun pauseWorkerIfSongChanged(song: Song) {
@@ -427,11 +505,16 @@ class SourceSeparationForegroundWorkerCoordinator(
         }
         val runningSongId = workerSongId ?: return
         if (song.id != runningSongId) {
+            if (isRunningPreStartRequestFor(song)) {
+                return
+            }
             song.takeIf { it != Song.emptySong }
                 ?.let {
                     setPendingStart(
-                        it.id,
-                        SourceSeparationPendingStartReason.AutoHandoff,
+                        SourceSeparationWorkerRequest.Full(
+                            song = it,
+                            reason = SourceSeparationPendingStartReason.AutoHandoff,
+                        )
                     )
                 }
                 ?: clearPendingStart()
@@ -439,17 +522,17 @@ class SourceSeparationForegroundWorkerCoordinator(
         }
     }
 
-    private fun setPendingStart(
-        songId: Long,
-        reason: SourceSeparationPendingStartReason,
-    ) {
-        pendingStartSongId = songId
-        pendingStartReason = reason
+    private fun isRunningPreStartRequestFor(song: Song): Boolean {
+        return activeWorkerRequest is SourceSeparationWorkerRequest.StartWindowPreStart &&
+                workerSongId == song.id
+    }
+
+    private fun setPendingStart(request: SourceSeparationWorkerRequest) {
+        pendingStartRequest = request
     }
 
     private fun clearPendingStart() {
-        pendingStartSongId = null
-        pendingStartReason = null
+        pendingStartRequest = null
     }
 
     private fun ensureWorkerRunningIfActivated() {
@@ -465,6 +548,16 @@ class SourceSeparationForegroundWorkerCoordinator(
         song: Song,
         activeJob: Job?,
     ) {
+        val request = activeWorkerRequest
+            ?: SourceSeparationWorkerRequest.Full(
+                song = song,
+                reason = SourceSeparationPendingStartReason.AutoHandoff,
+            )
+        val preStartReadyWindowCount =
+            (request as? SourceSeparationWorkerRequest.StartWindowPreStart)
+                ?.readyWindowCount
+                ?.coerceAtLeast(1)
+        var preStartSatisfied = false
         pauseRequested.set(false)
         workerSongId = song.id
         val shouldPromoteCompletedStems = preferences.getBoolean(
@@ -491,6 +584,13 @@ class SourceSeparationForegroundWorkerCoordinator(
                         ?.let(performanceStats::recordWindowElapsed)
                         ?: performanceStats.averageWindowMs()
                     recordDebugWindowSample(song, progress)
+                    if (preStartReadyWindowCount != null &&
+                        progress.scheduler?.playbackSegmentIndex == 0 &&
+                        progress.scheduler.playbackReadyWindowReadyCount >=
+                        preStartReadyWindowCount
+                    ) {
+                        preStartSatisfied = true
+                    }
                     _workerStateFlow.value = SourceSeparationUiState.Running(
                         songId = song.id,
                         songTitle = song.title,
@@ -525,19 +625,25 @@ class SourceSeparationForegroundWorkerCoordinator(
                     callbacks?.onSourceSeparationWorkerProgress(song)
                 },
                 onPrepared = {
-                    if (readBlendMode() == SourceSeparationBlendMode.PerSong) {
+                    if (preStartReadyWindowCount == null &&
+                        readBlendMode() == SourceSeparationBlendMode.PerSong
+                    ) {
                         migrateTemporaryPerSongBlend(song)
                     }
                     callbacks?.onSourceSeparationWorkerPrepared(song)
                 },
                 playbackPositionMsProvider = {
-                    _playbackStateFlow.value
-                        .takeIf { it.song.id == song.id }
-                        ?.estimatedPositionMs()
-                        ?.takeIf { it != C.TIME_UNSET }
+                    if (preStartReadyWindowCount != null) {
+                        0L
+                    } else {
+                        _playbackStateFlow.value
+                            .takeIf { it.song.id == song.id }
+                            ?.estimatedPositionMs()
+                            ?.takeIf { it != C.TIME_UNSET }
+                    }
                 },
                 playbackReadyWindowCountProvider = {
-                    preferences.getInt(
+                    preStartReadyWindowCount ?: preferences.getInt(
                         SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
                         DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
                     ).coerceAtLeast(1)
@@ -545,7 +651,9 @@ class SourceSeparationForegroundWorkerCoordinator(
                 sessionProvider = sessionProvider,
                 shouldPause = {
                     pauseRequested.get() ||
-                            _playbackStateFlow.value.song.id != song.id ||
+                            preStartSatisfied ||
+                            (preStartReadyWindowCount == null &&
+                                    _playbackStateFlow.value.song.id != song.id) ||
                             activeJob?.isActive != true
                 },
                 shouldCancel = {
@@ -554,7 +662,8 @@ class SourceSeparationForegroundWorkerCoordinator(
                 },
             )
             val playbackState = _playbackStateFlow.value
-            if (readBlendMode() == SourceSeparationBlendMode.PerSong &&
+            if (preStartReadyWindowCount == null &&
+                readBlendMode() == SourceSeparationBlendMode.PerSong &&
                 playbackState.song.id == song.id
             ) {
                 savePerSongBlend(
@@ -573,7 +682,9 @@ class SourceSeparationForegroundWorkerCoordinator(
             )
         } catch (_: SourceSeparationPausedException) {
             _workerStateFlow.value = SourceSeparationUiState.Idle
-            callbacks?.onSourceSeparationWorkerPaused(song)
+            if (!preStartSatisfied) {
+                callbacks?.onSourceSeparationWorkerPaused(song)
+            }
         } catch (_: CancellationException) {
             _workerStateFlow.value = SourceSeparationUiState.Canceled(
                 songId = song.id,
@@ -614,6 +725,16 @@ class SourceSeparationForegroundWorkerCoordinator(
                 null -> false
             }
         }
+    }
+
+    private fun hasReadyPlaybackStartCache(song: Song, readyWindowCount: Int): Boolean {
+        return runCatching {
+            sourceSeparationEngine.playableCacheStatusForSong(
+                song = song,
+                playbackPositionMs = 0L,
+                readyWindowCount = readyWindowCount.coerceAtLeast(1),
+            ) is SourceSeparationPlayableCacheStatus.Ready
+        }.getOrDefault(false)
     }
 
     private fun recordDebugWindowSample(
@@ -695,6 +816,24 @@ class SourceSeparationForegroundWorkerCoordinator(
                 SOURCE_SEPARATION_BLEND_EPSILON
     }
 
+    private fun songNeedsSeparatedOutputForCurrentMode(song: Song): Boolean {
+        return when (readBlendMode()) {
+            SourceSeparationBlendMode.Off -> false
+            SourceSeparationBlendMode.Global -> !isDefaultBlend(readGlobalBlend())
+            SourceSeparationBlendMode.PerSong -> recordedBlendForSongBlocking(song)
+                ?.let { blend -> !isDefaultBlend(blend) }
+                ?: false
+        }
+    }
+
+    private fun recordedBlendForSongBlocking(song: Song): Float? {
+        if (song == Song.emptySong) return null
+        return runCatching {
+            sourceSeparationEngine.separatedPlaybackBlendForSong(song)
+        }.getOrNull()
+            ?: readTemporaryPerSongBlend(song)
+    }
+
     private fun savePerSongBlend(song: Song, blend: Float): Boolean {
         val saved = runCatching {
             sourceSeparationEngine.saveSeparatedPlaybackBlendForSong(
@@ -756,6 +895,25 @@ class SourceSeparationForegroundWorkerCoordinator(
 private enum class SourceSeparationPendingStartReason {
     Manual,
     AutoHandoff,
+}
+
+private sealed interface SourceSeparationWorkerRequest {
+    val song: Song
+    val debugReason: String
+
+    data class Full(
+        override val song: Song,
+        val reason: SourceSeparationPendingStartReason,
+    ) : SourceSeparationWorkerRequest {
+        override val debugReason: String = reason.name
+    }
+
+    data class StartWindowPreStart(
+        override val song: Song,
+        val readyWindowCount: Int,
+    ) : SourceSeparationWorkerRequest {
+        override val debugReason: String = "PreStart($readyWindowCount)"
+    }
 }
 
 interface SourceSeparationForegroundWorkerCallbacks {

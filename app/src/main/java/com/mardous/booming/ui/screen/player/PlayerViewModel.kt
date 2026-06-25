@@ -181,6 +181,7 @@ class PlayerViewModel(
 
     private var sourceSeparationSettingsApplyJob: Job? = null
     private var sourceSeparationAutoStartJob: Job? = null
+    private var sourceSeparationPreStartJob: Job? = null
     private var sourceSeparationPlaybackSyncJob: Job? = null
     private var sourceSeparationBlendPreviewJob: Job? = null
     private var sourceSeparationBlendPreviewPending: Float? = null
@@ -321,6 +322,7 @@ class PlayerViewModel(
         sourceSeparationForegroundWorkerCoordinator.detachCallbacks(this)
         sourceSeparationSettingsApplyJob?.cancel()
         sourceSeparationAutoStartJob?.cancel()
+        sourceSeparationPreStartJob?.cancel()
         sourceSeparationBlendPreviewJob?.cancel()
         sourceSeparationWindowDecodeExperimentJob?.cancel()
         sourceSeparationFlacPromotionJob?.cancel()
@@ -373,7 +375,13 @@ class PlayerViewModel(
                         showMessage = false,
                     )
                     maybeAutoStartSourceSeparationForSong(song)
+                    maybePreStartNextSourceSeparation()
                 }
+                .launchIn(viewModelScope)
+
+            internalJobs += nextSongFlow
+                .distinctUntilChangedBy { it.id }
+                .onEach { maybePreStartNextSourceSeparation() }
                 .launchIn(viewModelScope)
 
             internalJobs += currentSongFlow
@@ -667,6 +675,8 @@ class PlayerViewModel(
         sourceSeparationSettingsApplyJob = null
         sourceSeparationAutoStartJob?.cancel()
         sourceSeparationAutoStartJob = null
+        sourceSeparationPreStartJob?.cancel()
+        sourceSeparationPreStartJob = null
         sourceSeparationPlaybackSyncJob?.cancel()
         sourceSeparationPlaybackSyncJob = null
         preferences.edit {
@@ -1014,6 +1024,7 @@ class PlayerViewModel(
     override fun onSourceSeparationWorkerPrepared(song: Song) {
         if (currentSong.id == song.id) {
             refreshCurrentSourceSeparationCacheAvailable(song)
+            maybePreStartNextSourceSeparation()
         }
     }
 
@@ -1056,6 +1067,9 @@ class PlayerViewModel(
                 _currentSourceSeparationCacheStateFlow.value = cacheState
                 _currentSourceSeparationCacheAvailableFlow.value =
                     cacheState != SourceSeparationCacheUiState.NotStarted
+                if (cacheState.isCompleted) {
+                    maybePreStartNextSourceSeparation()
+                }
             }
         }
     }
@@ -1155,9 +1169,12 @@ class PlayerViewModel(
                 showMessage = true,
                 fallbackBlend = normalizedBlend,
             )
+            maybePreStartNextSourceSeparation()
         } else {
             sourceSeparationSettingsApplyJob?.cancel()
             sourceSeparationSettingsApplyJob = null
+            sourceSeparationPreStartJob?.cancel()
+            sourceSeparationPreStartJob = null
             requestSourceSeparationPlaybackEnabled(
                 enabled = false,
                 blend = normalizedBlend,
@@ -1267,6 +1284,8 @@ class PlayerViewModel(
         sourceSeparationSettingsApplyJob?.cancel()
         sourceSeparationSettingsApplyJob = null
         sourceSeparationAutoStartJob?.cancel()
+        sourceSeparationPreStartJob?.cancel()
+        sourceSeparationPreStartJob = null
         sourceSeparationPlaybackSyncJob?.cancel()
         sourceSeparationPlaybackSyncJob = null
         preferences.edit {
@@ -1329,6 +1348,7 @@ class PlayerViewModel(
                 song = currentSong,
                 showMessage = true,
             )
+            maybePreStartNextSourceSeparation()
         }
     }
 
@@ -1367,6 +1387,7 @@ class PlayerViewModel(
                 blend = normalizedBlend,
                 trustKnownBlend = true,
             )
+            maybePreStartNextSourceSeparation()
         }
     }
 
@@ -1507,6 +1528,10 @@ class PlayerViewModel(
             maybeAutoStartSourceSeparationForCurrentSong(
                 blend = _sourceSeparationPlaybackStateFlow.value.blend,
             )
+            maybePreStartNextSourceSeparation()
+        } else {
+            sourceSeparationPreStartJob?.cancel()
+            sourceSeparationPreStartJob = null
         }
     }
 
@@ -1546,6 +1571,7 @@ class PlayerViewModel(
             putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, normalized)
         }
         _sourceSeparationPlaybackReadyWindowCountFlow.value = normalized
+        maybePreStartNextSourceSeparation()
     }
 
     fun setSourceSeparationAutoCacheCleanupEnabled(enabled: Boolean) {
@@ -1676,6 +1702,75 @@ class PlayerViewModel(
             ) {
                 startSourceSeparationForCurrentSong()
             }
+        }
+    }
+
+    private fun maybePreStartNextSourceSeparation() {
+        val current = currentSong
+        val next = nextSong
+        val mode = _sourceSeparationBlendModeFlow.value
+        val readyWindowCount = _sourceSeparationPlaybackReadyWindowCountFlow.value
+        if (!_sourceSeparationAutoStartFlow.value ||
+            mode == SourceSeparationBlendMode.Off ||
+            current == Song.emptySong ||
+            next == Song.emptySong ||
+            current.id == next.id
+        ) {
+            sourceSeparationPreStartJob?.cancel()
+            sourceSeparationPreStartJob = null
+            return
+        }
+        if (sourceSeparationForegroundWorkerCoordinator.runningSongId() == next.id ||
+            sourceSeparationForegroundWorkerCoordinator.pendingSongId() == next.id
+        ) {
+            return
+        }
+
+        sourceSeparationPreStartJob?.cancel()
+        sourceSeparationPreStartJob = viewModelScope.launch(IO) {
+            val latestMode = _sourceSeparationBlendModeFlow.value
+            if (!_sourceSeparationAutoStartFlow.value ||
+                latestMode == SourceSeparationBlendMode.Off ||
+                currentSong.id != current.id ||
+                nextSong.id != next.id ||
+                !sourceSeparationModelRepository.isModelReady()
+            ) {
+                return@launch
+            }
+
+            val nextNeedsSeparatedOutput = when (latestMode) {
+                SourceSeparationBlendMode.Off -> false
+                SourceSeparationBlendMode.Global ->
+                    !isDefaultSourceSeparationBlend(readSourceSeparationGlobalBlend())
+                SourceSeparationBlendMode.PerSong ->
+                    sourceSeparationForegroundWorkerCoordinator
+                        .recordedBlendForSong(next)
+                        ?.let { blend -> !isDefaultSourceSeparationBlend(blend) }
+                        ?: false
+            }
+            if (!nextNeedsSeparatedOutput) return@launch
+
+            val currentCacheCompleted = runCatching {
+                when (sourceSeparationEngine.cacheStatusForSong(current)) {
+                    is SourceSeparationCacheStatus.Completed,
+                    is SourceSeparationCacheStatus.CompletedWithTemporaryFiles -> true
+                    SourceSeparationCacheStatus.NotStarted,
+                    is SourceSeparationCacheStatus.Partial -> false
+                }
+            }.getOrDefault(false)
+            if (!currentCacheCompleted ||
+                currentSong.id != current.id ||
+                nextSong.id != next.id ||
+                sourceSeparationForegroundWorkerCoordinator.runningSongId() == next.id ||
+                sourceSeparationForegroundWorkerCoordinator.pendingSongId() == next.id
+            ) {
+                return@launch
+            }
+
+            sourceSeparationForegroundWorkerCoordinator.preStartSong(
+                song = next,
+                readyWindowCount = readyWindowCount,
+            )
         }
     }
 
@@ -2624,6 +2719,10 @@ sealed class SourceSeparationCacheUiState {
         val canPromoteCompletedStems: Boolean,
     ) : SourceSeparationCacheUiState()
 }
+
+private val SourceSeparationCacheUiState.isCompleted: Boolean
+    get() = this is SourceSeparationCacheUiState.Completed ||
+        this is SourceSeparationCacheUiState.CompletedWithTemporaryFiles
 
 private fun SourceSeparationCacheEntry.toUiItem(): SourceSeparationCacheManagementItem {
     return SourceSeparationCacheManagementItem(
