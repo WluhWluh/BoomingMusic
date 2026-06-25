@@ -6,12 +6,12 @@
 
 ### A Booming Music fork with local source separation playback.
 
-[![Latest Release](https://img.shields.io/github/v/release/WluhWluh/BoomingMusic?style=for-the-badge&label=SS%20Release&logo=github)](https://github.com/WluhWluh/BoomingMusic/releases/latest)
+[![Latest Release](https://img.shields.io/github/v/release/WluhWluh/BoomingSS?style=for-the-badge&label=SS%20Release&logo=github)](https://github.com/WluhWluh/BoomingSS/releases/latest)
 [![Upstream](https://img.shields.io/badge/Upstream-Booming%20Music-blue?style=for-the-badge&logo=github)](https://github.com/mardous/BoomingMusic)
-[![License: GPL v3](https://img.shields.io/github/license/WluhWluh/BoomingMusic?style=for-the-badge&color=orange&label=License&logo=gnu)](LICENSE.txt)
+[![License: GPL v3](https://img.shields.io/github/license/WluhWluh/BoomingSS?style=for-the-badge&color=orange&label=License&logo=gnu)](LICENSE.txt)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor_Covenant-2.1-4baaaa.svg?style=for-the-badge&logo=contributorcovenant)](CODE_OF_CONDUCT.md)
 
-<a href="https://github.com/WluhWluh/BoomingMusic/releases"><img src="assets/badge-github.png" height="60" alt="Booming SS GitHub Release"></a>
+<a href="https://github.com/WluhWluh/BoomingSS/releases"><img src="assets/badge-github.png" height="60" alt="Booming SS GitHub Release"></a>
 
 </div>
 
