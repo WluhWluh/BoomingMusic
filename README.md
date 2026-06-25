@@ -1,24 +1,33 @@
 <div align="center">
 
-<img src="metadata/en-US/images/icon.png" width="160" height="160" alt="Booming Music icon">
+<img src="metadata/en-US/images/icon.png" width="160" height="160" alt="Booming SS icon">
 
-# 🎵 Booming Music
+# 🎵 Booming SS
 
-### Modern design. Pure sound. Fully yours.
+### A Booming Music fork with local source separation playback.
 
-[![Latest Release](https://img.shields.io/github/v/release/mardous/BoomingMusic?style=for-the-badge&label=Release&logo=github)](https://github.com/mardous/BoomingMusic/releases/latest)
-[![F-Droid version](https://img.shields.io/f-droid/v/com.mardous.booming?style=for-the-badge&label=F-Droid&logo=fdroid)](https://f-droid.org/packages/com.mardous.booming/)
-[![Downloads](https://img.shields.io/github/downloads/mardous/BoomingMusic/total?style=for-the-badge&logo=github&label=Downloads)](https://github.com/mardous/BoomingMusic/releases)
-[![License: GPL v3](https://img.shields.io/github/license/mardous/BoomingMusic?style=for-the-badge&color=orange&label=License&logo=gnu)](LICENSE.txt)
+[![Latest Release](https://img.shields.io/github/v/release/WluhWluh/BoomingMusic?style=for-the-badge&label=SS%20Release&logo=github)](https://github.com/WluhWluh/BoomingMusic/releases/latest)
+[![Upstream](https://img.shields.io/badge/Upstream-Booming%20Music-blue?style=for-the-badge&logo=github)](https://github.com/mardous/BoomingMusic)
+[![License: GPL v3](https://img.shields.io/github/license/WluhWluh/BoomingMusic?style=for-the-badge&color=orange&label=License&logo=gnu)](LICENSE.txt)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor_Covenant-2.1-4baaaa.svg?style=for-the-badge&logo=contributorcovenant)](CODE_OF_CONDUCT.md)
-[![Telegram Channel](https://img.shields.io/badge/Telegram-Join_Chat-blue?style=for-the-badge&logo=telegram)](https://t.me/mardousdev)
+
+<a href="https://github.com/WluhWluh/BoomingSS/releases"><img src="assets/badge-github.png" height="60" alt="Booming SS GitHub Release"></a>
 
 </div>
 
+> [!IMPORTANT]
+> Booming SS is an unofficial source-separation build based on
+> [Booming Music](https://github.com/mardous/BoomingMusic). It is not affiliated
+> with or endorsed by the upstream maintainers unless explicitly stated. The fork
+> keeps the original local music player experience and adds experimental local
+> stem separation features.
+
 ## 🗂️ Table of Contents
 
+- [🎚️ Source Separation Fork](#-source-separation-fork)
 - [✨ Key Features](#-key-features)
 - [📸 Screenshots](#-screenshots)
+- [📥 Download & Install](#-download--install)
 - [💻 Tech Stack](#-tech-stack)
 - [🧩 Roadmap](#-roadmap)
 - [🔗 Useful Links](#-useful-links)
@@ -26,8 +35,28 @@
 - [🙌 Credits](#-credits)
 - [⚖️ License](#-license)
 
+## 🎚️ Source Separation Fork
+
+Booming SS uses the package name `com.wluhwluh.booming.sourcesep`, so it can be
+installed alongside the original Booming Music app.
+
+What this fork adds:
+
+- **Separated playback** for local tracks, with vocals/instrumental blend controls.
+- **Per-song blend memory**, quick lyrics-overlay controls, and a dedicated source separation panel.
+- **On-device ONNX processing** for the currently supported UVR MDX-Net style model.
+- **Model management** inside the app: download from a preset URL, download from a custom URL, or import a local ONNX file.
+- **Separated cache management** with progress, reuse, cleanup, and fallback handling.
+
+Model files are **not bundled** in the APK. When no local model is installed, the
+app asks the user to download or import one. The app displays a SHA-256 comparison
+for the preset model as guidance; a mismatch is shown to the user but does not
+block use. Users are responsible for checking the license and suitability of any
+model file they download or import.
+
 ## ✨ Key Features
 
+- 🎚️ **Local Source Separation Playback** – Split supported songs into separated playback caches and blend between original/stem output.
 - 🎼 **Automatic Lyrics Download & Editing** – Automatically fetch, sync, and edit lyrics with ease.
 - 💬 **Word-by-Word Synced Lyrics** – Enjoy immersive real-time lyric playback with word-level timing.
 - 🌍 **Translated Lyrics Support** – Display dual-language lyrics via TTML or LRC with translations.
@@ -74,18 +103,14 @@
 
 ## 📥 Download & Install
 
-Booming Music is available for download from various sources:
+Booming SS builds are published from this fork only. Use the fork's GitHub
+releases for installable APKs, or GitHub Actions artifacts for CI builds.
 
 <div align="center">
 
-|                                                                                   Source                                                                                    | Details                                   |
-|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:------------------------------------------|
-|                               [<img src="assets/badge-playstore.png" alt="Play Store" height="35">](https://github.com/mardous/BoomingMusic)                                | Coming soon!                              |                                     |
-|                      [<img src="assets/badge-github.png" alt="GitHub Releases" height="35">](https://github.com/mardous/BoomingMusic/releases/latest)                       | Direct APK download                       |
-|                              [<img src="assets/badge-fdroid.png" alt="F-Droid" height="35">](https://f-droid.org/packages/com.mardous.booming)                              | Fully FOSS version                        |
-|                       [<img src="assets/badge-izzyondroid.png" alt="IzzyOnDroid" height="35">](https://apt.izzysoft.de/packages/com.mardous.booming/)                       | Just like F-Droid but with faster updates |                         |
-| [<img src="assets/badge-obtainium.png" alt="Obtainium" height="35">](https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/mardous/BoomingMusic/) | Automatic updates from GitHub             |
-|                         [<img src="assets/badge-openapk.png" alt="OpenAPK" height="35">](https://www.openapk.net/boomingmusic/com.mardous.booming/)                         | Alternative APK source                    |
+| Source | Details |
+|:------:|:--------|
+| [<img src="assets/badge-github.png" alt="GitHub Releases" height="35">](https://github.com/WluhWluh/BoomingSS/releases/latest) | Direct Booming SS APK downloads |
 
 </div>
 
@@ -101,6 +126,7 @@ Booming Music is available for download from various sources:
 | 🧩 UI                   | Android Views + Jetpack Compose (hybrid)                       |
 | 🖼️ Image Loading       | [Coil](https://coil-kt.github.io/coil/)                        |
 | 🎨 Design               | Material 3 / Material You                                      |
+| 🎚️ Source Separation    | [ONNX Runtime](https://onnxruntime.ai/)                        |
 | 🗣️ Language            | Kotlin                                                         |
 
 ## 🧩 Roadmap
@@ -134,6 +160,11 @@ Booming Music is available for download from various sources:
 
 ## 🤝 Contributing
 
+Booming SS is maintained as a source-separation flavored fork of Booming Music.
+Source-separation issues and pull requests should be opened in this fork. For
+bugs that reproduce in the original app without source-separation changes, please
+also consider reporting them upstream.
+
 Booming Music is open-source — contributions are **always welcome!**
 Check the [Contributing Guide](CONTRIBUTING.md) for details.
 
@@ -149,7 +180,7 @@ You can also:
 
 ## 💖 Support Development
 
-Booming Music is an open-source project developed and maintained with passion in my spare time.
+The original Booming Music project is an open-source app developed and maintained with passion in spare time.
 If you enjoy the app and the free features it offers, please consider supporting me to help cover
 development costs and dedicate more time to new features.
 
@@ -185,6 +216,9 @@ Your support is greatly appreciated and keeps me motivated to continue improving
 
 ## 🙌 Credits
 
+Booming SS is based on [Booming Music](https://github.com/mardous/BoomingMusic)
+by Christians Martínez Alvarado and contributors.
+
 Inspired by [Retro Music Player](https://github.com/RetroMusicPlayer/RetroMusicPlayer).
 Also thanks to:
 
@@ -192,6 +226,10 @@ Also thanks to:
 - [LRCLib](https://lrclib.net/)
 - [Better Lyrics](https://better-lyrics.boidu.dev/)
 - [Lyrically API](https://lyrics.paxsenix.org/) (by [Alex](https://github.com/Paxsenix0))
+
+The preset source separation model URL references the `UVR_MDXNET_9482.onnx`
+asset from the `k2-fsa/sherpa-onnx` source-separation-models release. The model
+file is not redistributed in this repository's APK builds.
 
 ## ⚖️ License
 
