@@ -285,30 +285,13 @@ private class WindowDecodeMdxSourceInput(
         val requestedStartUs = frameToUs(sourceWindowStartFrame, sourceInfo.sampleRate)
         val requestedEndUs = frameToUs(sourceWindowEndFrame, sourceInfo.sampleRate)
 
-        val decodedWindow = measureElapsed(timing, decodeStage) {
-            when (profile) {
-                MdxWindowDecodeProfile.WavPrerollSongTimeline,
-                MdxWindowDecodeProfile.OggVorbisPrerollSongTimeline -> {
-                    decoder.decodeWindowWithPrerollCursor(
-                        uri = uri,
-                        startUs = requestedStartUs,
-                        endUs = requestedEndUs,
-                        prerollUs = frameToUs(config.trim, config.sampleRate),
-                        shouldCancel = shouldCancel,
-                    )
-                }
-                MdxWindowDecodeProfile.Flac_44100_TimestampSongTimeline,
-                MdxWindowDecodeProfile.Mp3_44100_MetadataQuantized,
-                MdxWindowDecodeProfile.Mp3_44100_NoGaplessQuantized -> {
-                    decoder.decodeWindow(
-                        uri = uri,
-                        startUs = requestedStartUs,
-                        endUs = requestedEndUs,
-                        shouldCancel = shouldCancel,
-                    )
-                }
-            }
-        }
+        val decodedWindow = decodeWindowWithProfileFallback(
+            requestedStartUs = requestedStartUs,
+            requestedEndUs = requestedEndUs,
+            timing = timing,
+            shouldCancel = shouldCancel,
+            decodeStage = decodeStage,
+        )
 
         val placedSourceWindowStartFrame = when (profile) {
             MdxWindowDecodeProfile.WavPrerollSongTimeline,
@@ -349,6 +332,55 @@ private class WindowDecodeMdxSourceInput(
             .coerceAtMost(safeSourceFrameCount)
             .coerceAtLeast(sourceWindowStartFrame + 1)
         return boundedEndFrame - sourceWindowStartFrame
+    }
+
+    private fun decodeWindowWithProfileFallback(
+        requestedStartUs: Long,
+        requestedEndUs: Long,
+        timing: MdxRangeTimingAccumulator,
+        shouldCancel: () -> Boolean,
+        decodeStage: String,
+    ): WindowDecodedPcmAudio {
+        return when (profile) {
+            MdxWindowDecodeProfile.WavPrerollSongTimeline,
+            MdxWindowDecodeProfile.OggVorbisPrerollSongTimeline -> {
+                measureElapsed(timing, decodeStage) {
+                    decoder.decodeWindowWithPrerollCursor(
+                        uri = uri,
+                        startUs = requestedStartUs,
+                        endUs = requestedEndUs,
+                        prerollUs = frameToUs(config.trim, config.sampleRate),
+                        shouldCancel = shouldCancel,
+                    )
+                }
+            }
+            MdxWindowDecodeProfile.Flac_44100_TimestampSongTimeline,
+            MdxWindowDecodeProfile.Mp3_44100_MetadataQuantized,
+            MdxWindowDecodeProfile.Mp3_44100_NoGaplessQuantized -> {
+                try {
+                    measureElapsed(timing, decodeStage) {
+                        decoder.decodeWindow(
+                            uri = uri,
+                            startUs = requestedStartUs,
+                            endUs = requestedEndUs,
+                            shouldCancel = shouldCancel,
+                        )
+                    }
+                } catch (error: IllegalStateException) {
+                    if (error.message != DECODER_NO_PCM_OUTPUT_MESSAGE) throw error
+                    // Some codec/window boundaries can return no PCM without being a corrupt source.
+                    measureElapsed(timing, "$decodeStage fallback") {
+                        decoder.decodeWindowWithPrerollCursor(
+                            uri = uri,
+                            startUs = requestedStartUs,
+                            endUs = requestedEndUs,
+                            prerollUs = WINDOW_DECODE_FALLBACK_PREROLL_US,
+                            shouldCancel = shouldCancel,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -860,3 +892,5 @@ private const val CANCEL_CHECK_INTERVAL_FRAMES = 16_384
 private const val MP3_FINE_QUANTUM_FRAMES = 384
 private const val MP3_NO_GAPLESS_CALIBRATION_VERSION = 1
 private const val PCM_FLOAT_SCALE = 32768f
+private const val WINDOW_DECODE_FALLBACK_PREROLL_US = MICROS_PER_SECOND
+private const val DECODER_NO_PCM_OUTPUT_MESSAGE = "Decoder produced no PCM output."
