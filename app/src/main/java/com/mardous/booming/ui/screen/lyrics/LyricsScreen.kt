@@ -582,7 +582,9 @@ private fun CoverLyricsQuickBlendControl(
             }
         }
     } else {
-        Modifier.clickable(onClick = onEnableSeparatedPlayback)
+        Modifier
+            .clip(buttonBackgroundShape)
+            .clickable(onClick = onEnableSeparatedPlayback)
     }
     Box(
         contentAlignment = Alignment.Center,
