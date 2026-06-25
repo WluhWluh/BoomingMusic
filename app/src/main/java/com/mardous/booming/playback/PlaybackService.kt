@@ -958,6 +958,7 @@ class PlaybackService :
             preferences.getBoolean(CLEAR_QUEUE_ON_COMPLETION, false)) {
             player.exoPlayer.clearMediaItems()
         }
+        updateSourceSeparationProcessingLease("playbackStateChanged")
         refreshMediaButtonCustomLayout()
     }
 
@@ -1001,6 +1002,13 @@ class PlaybackService :
             } else if (shouldClearSourceSeparationPlaybackPlayIntent(reason)) {
                 sourceSeparationPlaybackPlayIntent = false
             }
+        }
+        if (!isInternalPlayWhenReadyChange &&
+            !playWhenReady &&
+            sourceSeparationPlaybackIsProcessing &&
+            isManualPlayWhenReadyPauseReason(reason)
+        ) {
+            sourceSeparationPlaybackResumeWhenReady = false
         }
 
         if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
@@ -1054,6 +1062,7 @@ class PlaybackService :
         }
         songPlayCountHelper.notifyPlayStateChanged(isPlaying)
         updateSourceSeparationForegroundWorkerPosition()
+        updateSourceSeparationProcessingLease("isPlayingChanged")
         updateWidgets()
     }
 
@@ -3050,9 +3059,24 @@ class PlaybackService :
     }
 
     private fun isSourceSeparationProcessingLeaseNeeded(): Boolean {
-        return sourceSeparationPlaybackRequested &&
-                sourceSeparationPlaybackIsProcessing &&
-                shouldResumeSourceSeparationPlaybackWhenReady()
+        return isSourceSeparationPlaybackWaitingForProcessingCache()
+    }
+
+    private fun isSourceSeparationPlaybackWaitingForProcessingCache(): Boolean {
+        if (!sourceSeparationPlaybackRequested ||
+            !sourceSeparationPlaybackIsProcessing ||
+            !shouldResumeSourceSeparationPlaybackWhenReady()
+        ) {
+            return false
+        }
+        if (player.isPlaying && player.playbackState == Player.STATE_READY) {
+            return false
+        }
+        return sourceSeparationPlaybackGateJob?.isActive == true ||
+                sourceSeparationPlaybackSession?.requiresReadinessGate == true ||
+                sourceSeparationPlaybackSession == null ||
+                player.playbackState == Player.STATE_BUFFERING ||
+                !player.playWhenReady
     }
 
     private fun updateSourceSeparationProcessingLease(reason: String) {

@@ -1,17 +1,69 @@
 package com.mardous.booming.ui.screen.player
 
+import android.content.SharedPreferences
 import android.os.SystemClock
 import androidx.media3.common.C
+import androidx.core.content.edit
 import com.mardous.booming.data.model.Song
+import com.mardous.booming.separation.SourceSeparationCacheStatus
+import com.mardous.booming.separation.SourceSeparationEngine
+import com.mardous.booming.separation.SourceSeparationPausedException
+import com.mardous.booming.separation.SourceSeparationPerformanceStats
+import com.mardous.booming.separation.model.MdxRangeProgress
+import com.mardous.booming.separation.model.MdxSourceDecodeMode
+import com.mardous.booming.separation.model.SourceSeparationModelLoadException
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_START
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
+import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.coroutineContext
 
-class SourceSeparationForegroundWorkerCoordinator {
+class SourceSeparationForegroundWorkerCoordinator(
+    private val preferences: SharedPreferences,
+    private val sourceSeparationEngine: SourceSeparationEngine,
+) {
+    private val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val performanceStats = SourceSeparationPerformanceStats(preferences)
+    private val cancelRequested = AtomicBoolean(false)
+    private val pauseRequested = AtomicBoolean(false)
+    private val debugWindowSamples = ArrayDeque<SourceSeparationDebugWindowSample>()
+
+    private var workerJob: Job? = null
+    private var workerActivated = false
+    private var workerSongId: Long? = null
+    private var pendingStartSongId: Long? = null
+    private var autoStartSuppressedSongId: Long? = null
+    private var debugLastWindowSample: SourceSeparationDebugWindowSample? = null
+    private var callbacks: SourceSeparationForegroundWorkerCallbacks? = null
+
     private val _playbackStateFlow =
         MutableStateFlow(SourceSeparationForegroundPlaybackState())
     val playbackStateFlow = _playbackStateFlow.asStateFlow()
+
+    private val _workerStateFlow =
+        MutableStateFlow<SourceSeparationUiState>(SourceSeparationUiState.Idle)
+    val workerStateFlow = _workerStateFlow.asStateFlow()
 
     private val _eventFlow =
         MutableSharedFlow<SourceSeparationForegroundPlaybackEvent>(
@@ -43,6 +95,8 @@ class SourceSeparationForegroundWorkerCoordinator {
                 sourceSeparationBlend = sourceSeparationBlend,
             )
         )
+        pauseWorkerIfSongChanged(song)
+        ensureWorkerRunningIfActivated()
     }
 
     fun updatePosition(
@@ -67,12 +121,583 @@ class SourceSeparationForegroundWorkerCoordinator {
                 sourceSeparationBlend = sourceSeparationBlend,
             )
         )
+        ensureWorkerRunningIfActivated()
     }
 
     fun estimatedPositionMs(): Long {
         return _playbackStateFlow.value.estimatedPositionMs()
     }
+
+    fun attachCallbacks(callbacks: SourceSeparationForegroundWorkerCallbacks) {
+        this.callbacks = callbacks
+    }
+
+    fun detachCallbacks(callbacks: SourceSeparationForegroundWorkerCallbacks) {
+        if (this.callbacks === callbacks) {
+            this.callbacks = null
+        }
+    }
+
+    fun startCurrentSong(): Boolean {
+        val song = _playbackStateFlow.value.song
+        if (song == Song.emptySong) {
+            _workerStateFlow.value = SourceSeparationUiState.Failed(
+                songId = song.id,
+                songTitle = song.title,
+                message = null,
+            )
+            return false
+        }
+        requestSong(song)
+        return true
+    }
+
+    fun requestSong(song: Song) {
+        if (song == Song.emptySong) return
+        workerActivated = true
+        autoStartSuppressedSongId = null
+        if (workerJob?.isActive == true) {
+            if (workerSongId == song.id || pendingStartSongId == song.id) return
+            pendingStartSongId = song.id
+            if (workerSongId != null) {
+                pauseRequested.set(true)
+            }
+            return
+        }
+
+        cancelRequested.set(false)
+        pauseRequested.set(false)
+        pendingStartSongId = song.id
+        workerJob = workerScope.launch {
+            runWorkerLoop()
+        }
+    }
+
+    fun pauseCurrentSong(currentSong: Song) {
+        if (workerJob?.isActive == true) {
+            _workerStateFlow.value = SourceSeparationUiState.Paused(
+                songId = currentSong.id,
+                songTitle = currentSong.title,
+            )
+        }
+        autoStartSuppressedSongId = currentSong
+            .takeIf { it != Song.emptySong }
+            ?.id
+        pendingStartSongId = null
+        pauseRequested.set(true)
+    }
+
+    fun cancel() {
+        workerActivated = false
+        cancelRequested.set(true)
+        workerJob?.cancel()
+    }
+
+    fun suppressAndPauseSong(songId: Long) {
+        autoStartSuppressedSongId = songId
+        if (pendingStartSongId == songId) {
+            pendingStartSongId = null
+        }
+        pauseRequested.set(true)
+    }
+
+    suspend fun waitForWorkerToLeaveSong(songId: Long) {
+        while (workerSongId == songId && workerJob?.isActive == true) {
+            delay(SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS)
+        }
+    }
+
+    fun clearStatusIfNotRunning() {
+        if (_workerStateFlow.value !is SourceSeparationUiState.Running) {
+            _workerStateFlow.value = SourceSeparationUiState.Idle
+        }
+    }
+
+    fun isWorkerActive(): Boolean = workerJob?.isActive == true
+
+    fun runningSongId(): Long? = workerSongId
+
+    fun pendingSongId(): Long? = pendingStartSongId
+
+    fun protectedSongIds(): Set<Long> {
+        return buildSet {
+            _playbackStateFlow.value.song.id
+                .takeIf { it != Song.emptySong.id }
+                ?.let(::add)
+            workerSongId?.let(::add)
+            pendingStartSongId?.let(::add)
+        }
+    }
+
+    suspend fun autoStartDecision(
+        song: Song,
+        blend: Float,
+    ): SourceSeparationAutoStartDecision {
+        if (!isAutoStartEnabled() ||
+            readBlendMode() == SourceSeparationBlendMode.Off ||
+            song == Song.emptySong ||
+            isDefaultBlend(blend)
+        ) {
+            return SourceSeparationAutoStartDecision(
+                shouldStart = false,
+                shouldWaitForProcessingCache = false,
+                hasCompletedCache = false,
+            )
+        }
+        if (workerSongId == song.id || pendingStartSongId == song.id) {
+            return SourceSeparationAutoStartDecision(
+                shouldStart = false,
+                shouldWaitForProcessingCache = true,
+                hasCompletedCache = false,
+            )
+        }
+        if (autoStartSuppressedSongId == song.id) {
+            return SourceSeparationAutoStartDecision(
+                shouldStart = false,
+                shouldWaitForProcessingCache = false,
+                hasCompletedCache = false,
+            )
+        }
+
+        val hasCompletedCache = runCatching {
+            withContext(Dispatchers.IO) {
+                when (sourceSeparationEngine.cacheStatusForSong(song)) {
+                    is SourceSeparationCacheStatus.Completed,
+                    is SourceSeparationCacheStatus.CompletedWithTemporaryFiles -> true
+                    SourceSeparationCacheStatus.NotStarted,
+                    is SourceSeparationCacheStatus.Partial -> false
+                }
+            }
+        }.getOrDefault(false)
+
+        return SourceSeparationAutoStartDecision(
+            shouldStart = !hasCompletedCache && _playbackStateFlow.value.song.id == song.id,
+            shouldWaitForProcessingCache = false,
+            hasCompletedCache = hasCompletedCache,
+        )
+    }
+
+    suspend fun blendForSong(
+        mode: SourceSeparationBlendMode,
+        song: Song,
+        fallbackBlend: Float?,
+    ): Float {
+        return when (mode) {
+            SourceSeparationBlendMode.Off,
+            SourceSeparationBlendMode.Global -> {
+                fallbackBlend ?: readGlobalBlend()
+            }
+            SourceSeparationBlendMode.PerSong -> {
+                withContext(Dispatchers.IO) {
+                    val persistedBlend = runCatching {
+                        sourceSeparationEngine.separatedPlaybackBlendForSong(song)
+                    }.getOrNull()
+                    persistedBlend
+                        ?: readTemporaryPerSongBlend(song)
+                            ?.also { blend -> migrateTemporaryPerSongBlend(song, blend) }
+                        ?: DEFAULT_SOURCE_SEPARATION_BLEND
+                }
+            }
+        }.coerceIn(0f, 1f)
+    }
+
+    fun debugStatus(): String {
+        val playbackState = _playbackStateFlow.value
+        val state = _workerStateFlow.value
+        return buildString {
+            append("currentSong=").append(playbackState.song.id)
+            append(" title=").append(playbackState.song.title)
+            append(" workerActive=").append(workerJob?.isActive == true)
+            append(" workerSong=").append(workerSongId)
+            append(" pending=").append(pendingStartSongId)
+            append(" suppressed=").append(autoStartSuppressedSongId)
+            append(" pauseRequested=").append(pauseRequested.get())
+            append(" cancelRequested=").append(cancelRequested.get())
+            append(" activated=").append(workerActivated)
+            append(" autoStart=").append(isAutoStartEnabled())
+            append(" mode=").append(readBlendMode())
+            append(" blend=").append(playbackState.sourceSeparationBlend)
+            append(" ui=").append(state.debugName())
+            append(" progress=").append(playbackState.estimatedPositionMs())
+            append(" duration=").append(playbackState.durationMs)
+            append(" lastSample=").append(debugLastWindowSample?.toDebugText())
+            append(" sampleCount=").append(debugWindowSamples.size)
+        }
+    }
+
+    fun windowSamples(): String {
+        return if (debugWindowSamples.isEmpty()) {
+            "samples=empty"
+        } else {
+            debugWindowSamples.joinToString(separator = "|") { it.toDebugText() }
+        }
+    }
+
+    fun clearWindowSamples() {
+        debugWindowSamples.clear()
+        debugLastWindowSample = null
+    }
+
+    private suspend fun runWorkerLoop() {
+        val activeJob = coroutineContext[Job]
+        try {
+            while (activeJob?.isActive == true && !cancelRequested.get()) {
+                val song = nextWorkerSong()
+                if (song == null) {
+                    workerSongId = null
+                    delay(SOURCE_SEPARATION_FOREGROUND_WORKER_IDLE_MS)
+                    continue
+                }
+
+                pendingStartSongId = null
+                runWorkerSong(song, activeJob)
+            }
+        } finally {
+            if (workerJob == activeJob) {
+                workerJob = null
+            }
+            workerSongId = null
+            pendingStartSongId = null
+            cancelRequested.set(false)
+            pauseRequested.set(false)
+        }
+    }
+
+    private suspend fun nextWorkerSong(): Song? {
+        val pendingStartSongId = pendingStartSongId
+        if (pendingStartSongId != null) {
+            return _playbackStateFlow.value.song.takeIf { song ->
+                song.id == pendingStartSongId && song != Song.emptySong
+            } ?: run {
+                this.pendingStartSongId = null
+                null
+            }
+        }
+
+        if (!workerActivated) return null
+        val song = _playbackStateFlow.value.song.takeIf { it != Song.emptySong } ?: return null
+        if (autoStartSuppressedSongId == song.id) return null
+        val mode = readBlendMode()
+        if (!isAutoStartEnabled() || mode == SourceSeparationBlendMode.Off) return null
+        val blend = blendForSong(
+            mode = mode,
+            song = song,
+            fallbackBlend = null,
+        )
+        return song.takeIf {
+            autoStartDecision(song, blend).shouldStart
+        }
+    }
+
+    private fun pauseWorkerIfSongChanged(song: Song) {
+        if (autoStartSuppressedSongId != null &&
+            autoStartSuppressedSongId != song.id
+        ) {
+            autoStartSuppressedSongId = null
+        }
+        val runningSongId = workerSongId ?: return
+        if (song.id != runningSongId) {
+            pendingStartSongId = song
+                .takeIf { it != Song.emptySong }
+                ?.id
+            pauseRequested.set(true)
+        }
+    }
+
+    private fun ensureWorkerRunningIfActivated() {
+        if (!workerActivated || workerJob?.isActive == true) return
+        cancelRequested.set(false)
+        pauseRequested.set(false)
+        workerJob = workerScope.launch {
+            runWorkerLoop()
+        }
+    }
+
+    private suspend fun runWorkerSong(
+        song: Song,
+        activeJob: Job?,
+    ) {
+        pauseRequested.set(false)
+        workerSongId = song.id
+        val shouldPromoteCompletedStems = preferences.getBoolean(
+            SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+            true,
+        )
+        _workerStateFlow.value = SourceSeparationUiState.Running(
+            songId = song.id,
+            songTitle = song.title,
+        )
+        try {
+            sourceSeparationEngine.separateSongToWav(
+                song = song,
+                promoteCompletedStems = false,
+                onProgress = { progress ->
+                    val averageWindowMs = progress.completedWindowElapsedMs
+                        ?.let(performanceStats::recordWindowElapsed)
+                        ?: performanceStats.averageWindowMs()
+                    recordDebugWindowSample(song, progress)
+                    _workerStateFlow.value = SourceSeparationUiState.Running(
+                        songId = song.id,
+                        songTitle = song.title,
+                        completedWindows = progress.completedWindows,
+                        totalWindows = progress.totalWindows,
+                        percent = progress.percent,
+                        stage = progress.stage,
+                        sourceDecodeDiagnostics = progress.sourceDecodeDiagnostics?.toDisplayText(),
+                        sourceDecodeMode = progress.sourceDecodeDiagnostics
+                            ?.mode
+                            ?.toUiState(),
+                        averageWindowMs = averageWindowMs,
+                        lastWindowMs = progress.completedWindowElapsedMs,
+                        scheduler = progress.scheduler?.let { scheduler ->
+                            SourceSeparationSchedulerUiState(
+                                playbackSegmentIndex = scheduler.playbackSegmentIndex,
+                                playbackSegmentState = scheduler.playbackSegmentState,
+                                nextSegmentIndex = scheduler.nextSegmentIndex,
+                                nextSegmentState = scheduler.nextSegmentState,
+                                processingSegmentIndex = scheduler.processingSegmentIndex,
+                                priority = scheduler.priority,
+                                readySegments = scheduler.readySegments,
+                                totalSegments = scheduler.totalSegments,
+                                readyWindowCount = scheduler.readyWindowCount,
+                                playbackReadyWindowReadyCount =
+                                    scheduler.playbackReadyWindowReadyCount,
+                                playbackReadyWindowPendingCount =
+                                    scheduler.playbackReadyWindowPendingCount,
+                            )
+                        },
+                    )
+                    callbacks?.onSourceSeparationWorkerProgress(song)
+                },
+                onPrepared = {
+                    if (readBlendMode() == SourceSeparationBlendMode.PerSong) {
+                        migrateTemporaryPerSongBlend(song)
+                    }
+                    callbacks?.onSourceSeparationWorkerPrepared(song)
+                },
+                playbackPositionMsProvider = {
+                    _playbackStateFlow.value
+                        .takeIf { it.song.id == song.id }
+                        ?.estimatedPositionMs()
+                        ?.takeIf { it != C.TIME_UNSET }
+                },
+                playbackReadyWindowCountProvider = {
+                    preferences.getInt(
+                        SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+                        DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+                    ).coerceAtLeast(1)
+                },
+                shouldPause = {
+                    pauseRequested.get() ||
+                            _playbackStateFlow.value.song.id != song.id ||
+                            activeJob?.isActive != true
+                },
+                shouldCancel = {
+                    cancelRequested.get() ||
+                            (!pauseRequested.get() && activeJob?.isActive != true)
+                },
+            )
+            if (readBlendMode() == SourceSeparationBlendMode.PerSong) {
+                savePerSongBlend(
+                    song = song,
+                    blend = _playbackStateFlow.value.sourceSeparationBlend,
+                )
+            }
+            _workerStateFlow.value = SourceSeparationUiState.Completed(
+                songId = song.id,
+                songTitle = song.title,
+            )
+            pruneCachesIfEnabled()
+            callbacks?.onSourceSeparationWorkerCompleted(
+                song = song,
+                shouldPromoteCompletedStems = shouldPromoteCompletedStems,
+            )
+        } catch (_: SourceSeparationPausedException) {
+            _workerStateFlow.value = SourceSeparationUiState.Idle
+            callbacks?.onSourceSeparationWorkerPaused(song)
+        } catch (_: CancellationException) {
+            _workerStateFlow.value = SourceSeparationUiState.Canceled(
+                songId = song.id,
+                songTitle = song.title,
+            )
+            cancelRequested.set(true)
+        } catch (error: SourceSeparationModelLoadException) {
+            val message = error.message ?: SOURCE_SEPARATION_MODEL_LOAD_ERROR_MESSAGE
+            _workerStateFlow.value = SourceSeparationUiState.Failed(
+                songId = song.id,
+                songTitle = song.title,
+                message = message,
+            )
+            callbacks?.onSourceSeparationWorkerModelLoadFailed(message)
+            cancelRequested.set(true)
+        } catch (error: Throwable) {
+            _workerStateFlow.value = SourceSeparationUiState.Failed(
+                songId = song.id,
+                songTitle = song.title,
+                message = error.message,
+            )
+            cancelRequested.set(true)
+        } finally {
+            if (workerSongId == song.id) {
+                workerSongId = null
+            }
+            pauseRequested.set(false)
+        }
+    }
+
+    private fun recordDebugWindowSample(
+        song: Song,
+        progress: MdxRangeProgress,
+    ) {
+        val elapsedMs = progress.completedWindowElapsedMs ?: return
+        val sample = SourceSeparationDebugWindowSample(
+            elapsedRealtimeMs = SystemClock.elapsedRealtime(),
+            songId = song.id,
+            songTitle = song.title,
+            completedWindows = progress.completedWindows,
+            totalWindows = progress.totalWindows,
+            elapsedMs = elapsedMs,
+            playbackPositionMs = _playbackStateFlow.value
+                .takeIf { it.song.id == song.id }
+                ?.estimatedPositionMs()
+                ?.takeIf { it != C.TIME_UNSET },
+        )
+        debugLastWindowSample = sample
+        debugWindowSamples.addLast(sample)
+        while (debugWindowSamples.size > SOURCE_SEPARATION_DEBUG_WINDOW_SAMPLE_LIMIT) {
+            debugWindowSamples.removeFirst()
+        }
+    }
+
+    private fun pruneCachesIfEnabled() {
+        if (!preferences.getBoolean(
+                SOURCE_SEPARATION_AUTO_CACHE_CLEANUP,
+                DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP,
+            )
+        ) {
+            return
+        }
+        runCatching {
+            sourceSeparationEngine.pruneCache(
+                partialLimit = preferences.getInt(
+                    SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT,
+                    DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT,
+                ).coerceAtLeast(1),
+                completedLimit = preferences.getInt(
+                    SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT,
+                    DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT,
+                ).coerceAtLeast(1),
+                protectedSongIds = protectedSongIds(),
+            )
+        }
+    }
+
+    private fun isAutoStartEnabled(): Boolean {
+        return preferences.getBoolean(
+            SOURCE_SEPARATION_AUTO_START,
+            DEFAULT_SOURCE_SEPARATION_AUTO_START,
+        )
+    }
+
+    private fun readBlendMode(): SourceSeparationBlendMode {
+        val playbackEnabled = preferences.getBoolean(
+            KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+            false,
+        )
+        return when {
+            !playbackEnabled -> SourceSeparationBlendMode.Off
+            preferences.getBoolean(KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG, true) ->
+                SourceSeparationBlendMode.PerSong
+            else -> SourceSeparationBlendMode.Global
+        }
+    }
+
+    private fun readGlobalBlend(): Float {
+        return preferences.getFloat(
+            KEY_SOURCE_SEPARATION_GLOBAL_BLEND,
+            DEFAULT_SOURCE_SEPARATION_BLEND,
+        ).coerceIn(0f, 1f)
+    }
+
+    private fun isDefaultBlend(blend: Float): Boolean {
+        return kotlin.math.abs(blend.coerceIn(0f, 1f) - DEFAULT_SOURCE_SEPARATION_BLEND) <
+                SOURCE_SEPARATION_BLEND_EPSILON
+    }
+
+    private fun savePerSongBlend(song: Song, blend: Float): Boolean {
+        val saved = runCatching {
+            sourceSeparationEngine.saveSeparatedPlaybackBlendForSong(
+                song = song,
+                blend = blend.coerceIn(0f, 1f),
+            )
+        }.getOrDefault(false)
+        if (saved) {
+            removeTemporaryPerSongBlend(song)
+        }
+        return saved
+    }
+
+    private fun migrateTemporaryPerSongBlend(song: Song): Boolean {
+        val blend = readTemporaryPerSongBlend(song) ?: return false
+        return migrateTemporaryPerSongBlend(song, blend)
+    }
+
+    private fun migrateTemporaryPerSongBlend(song: Song, blend: Float): Boolean {
+        val saved = runCatching {
+            sourceSeparationEngine.saveSeparatedPlaybackBlendForSong(
+                song = song,
+                blend = blend.coerceIn(0f, 1f),
+            )
+        }.getOrDefault(false)
+        if (saved) {
+            removeTemporaryPerSongBlend(song)
+        }
+        return saved
+    }
+
+    private fun readTemporaryPerSongBlend(song: Song): Float? {
+        val key = temporaryPerSongBlendKey(song)
+        return if (preferences.contains(key)) {
+            preferences.getFloat(key, DEFAULT_SOURCE_SEPARATION_BLEND).coerceIn(0f, 1f)
+        } else {
+            null
+        }
+    }
+
+    private fun removeTemporaryPerSongBlend(song: Song) {
+        preferences.edit {
+            remove(temporaryPerSongBlendKey(song))
+        }
+    }
+
+    private fun temporaryPerSongBlendKey(song: Song): String {
+        val identity = "${song.id}|${song.uri}|${song.data}"
+        return "$KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND.${sha256Hex(identity)}"
+    }
+
+    private fun sha256Hex(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(value.encodeToByteArray())
+        return digest.joinToString("") { "%02x".format(it) }
+    }
 }
+
+interface SourceSeparationForegroundWorkerCallbacks {
+    fun onSourceSeparationWorkerProgress(song: Song)
+    fun onSourceSeparationWorkerPrepared(song: Song)
+    fun onSourceSeparationWorkerCompleted(
+        song: Song,
+        shouldPromoteCompletedStems: Boolean,
+    )
+    fun onSourceSeparationWorkerPaused(song: Song)
+    fun onSourceSeparationWorkerModelLoadFailed(message: String)
+}
+
+data class SourceSeparationAutoStartDecision(
+    val shouldStart: Boolean,
+    val shouldWaitForProcessingCache: Boolean,
+    val hasCompletedCache: Boolean,
+)
 
 data class SourceSeparationForegroundPlaybackState(
     val song: Song = Song.emptySong,
@@ -113,3 +738,62 @@ sealed interface SourceSeparationForegroundPlaybackEvent {
         val sourceSeparationBlend: Float,
     ) : SourceSeparationForegroundPlaybackEvent
 }
+
+private data class SourceSeparationDebugWindowSample(
+    val elapsedRealtimeMs: Long,
+    val songId: Long,
+    val songTitle: String,
+    val completedWindows: Int,
+    val totalWindows: Int,
+    val elapsedMs: Long,
+    val playbackPositionMs: Long?,
+) {
+    fun toDebugText(): String {
+        return "t=$elapsedRealtimeMs,song=$songId,window=$completedWindows/$totalWindows," +
+                "elapsedMs=$elapsedMs,playbackMs=$playbackPositionMs,title=${songTitle.sanitizeDebugText()}"
+    }
+}
+
+private fun String.sanitizeDebugText(): String {
+    return replace('|', '/')
+        .replace('\n', ' ')
+        .replace('\r', ' ')
+}
+
+private fun SourceSeparationUiState.debugName(): String {
+    return when (this) {
+        SourceSeparationUiState.Idle -> "Idle"
+        is SourceSeparationUiState.Running ->
+            "Running(song=$songId windows=$completedWindows/$totalWindows percent=$percent " +
+                    "lastWindowMs=${lastWindowMs ?: "null"} averageWindowMs=$averageWindowMs " +
+                    "stage=${stage.orEmpty()})"
+        is SourceSeparationUiState.Completed -> "Completed(song=$songId)"
+        is SourceSeparationUiState.Canceled -> "Canceled(song=$songId)"
+        is SourceSeparationUiState.Paused -> "Paused(song=$songId)"
+        is SourceSeparationUiState.Failed -> "Failed(song=$songId message=${message.orEmpty()})"
+    }
+}
+
+private fun MdxSourceDecodeMode.toUiState(): SourceSeparationDecodeModeUiState {
+    return when (this) {
+        MdxSourceDecodeMode.FullSong -> SourceSeparationDecodeModeUiState.FullSong
+        MdxSourceDecodeMode.Window -> SourceSeparationDecodeModeUiState.Window
+    }
+}
+
+private const val DEFAULT_SOURCE_SEPARATION_BLEND = 0.5f
+private const val KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED =
+    "source_separation.playback_enabled"
+private const val KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG =
+    "source_separation.remember_per_song"
+private const val KEY_SOURCE_SEPARATION_GLOBAL_BLEND =
+    "source_separation.global_blend"
+private const val KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND =
+    "source_separation.per_song_blend.pending"
+private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
+private const val SOURCE_SEPARATION_FOREGROUND_WORKER_IDLE_MS = 250L
+private const val SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS = 50L
+private const val SOURCE_SEPARATION_DEBUG_WINDOW_SAMPLE_LIMIT = 128
+private const val SOURCE_SEPARATION_MODEL_LOAD_ERROR_MESSAGE =
+    "The installed source separation model could not be loaded. " +
+            "Import or download a valid ONNX model, then try again."
