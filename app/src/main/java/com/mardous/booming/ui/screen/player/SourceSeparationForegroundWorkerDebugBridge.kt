@@ -1,5 +1,6 @@
 package com.mardous.booming.ui.screen.player
 
+import org.koin.java.KoinJavaComponent.get
 import java.lang.ref.WeakReference
 
 object SourceSeparationForegroundWorkerDebugBridge {
@@ -42,18 +43,38 @@ object SourceSeparationForegroundWorkerDebugBridge {
     }
 
     fun status(): String {
-        return viewModelRef?.get()?.sourceSeparationDebugStatus() ?: "viewModel=null"
+        return runCatching {
+            val workerStatus = get<SourceSeparationForegroundWorkerCoordinator>(
+                SourceSeparationForegroundWorkerCoordinator::class.java,
+            ).debugStatus()
+            val viewModelStatus = viewModelRef?.get()?.sourceSeparationDebugStatus()
+            if (viewModelStatus == null) {
+                "$workerStatus viewModel=null"
+            } else {
+                viewModelStatus
+            }
+        }.getOrElse { error ->
+            "workerStatusError=${error::class.java.simpleName}:${error.message}"
+        }
     }
 
     fun windowSamples(): String {
-        return viewModelRef?.get()?.sourceSeparationDebugWindowSamples() ?: "viewModel=null"
+        return runCatching {
+            get<SourceSeparationForegroundWorkerCoordinator>(
+                SourceSeparationForegroundWorkerCoordinator::class.java,
+            ).windowSamples()
+        }.getOrElse { error ->
+            "workerSamplesError=${error::class.java.simpleName}:${error.message}"
+        }
     }
 
     fun clearWindowSamples(): Boolean {
-        return viewModelRef?.get()?.run {
-            clearSourceSeparationDebugWindowSamples()
+        return runCatching {
+            get<SourceSeparationForegroundWorkerCoordinator>(
+                SourceSeparationForegroundWorkerCoordinator::class.java,
+            ).clearWindowSamples()
             true
-        } == true
+        }.getOrDefault(false)
     }
 
     private fun blendModeFromName(name: String): SourceSeparationBlendMode? {
