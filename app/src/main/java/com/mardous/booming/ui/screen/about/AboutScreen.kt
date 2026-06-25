@@ -88,6 +88,7 @@ import com.mardous.booming.util.Constants.RELEASES_LINK
 import com.mardous.booming.util.Constants.SUPPORT_EMAIL
 import com.mardous.booming.util.Constants.TELEGRAM_COMMUNITY_LINK
 import com.mardous.booming.util.Constants.TRANSLATIONS_LINK
+import com.mardous.booming.util.Constants.UPSTREAM_GITHUB_URL
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import org.koin.androidx.compose.koinViewModel
 
@@ -146,6 +147,15 @@ fun AboutScreen(
                 },
                 onFAQClick = {
                     context.openUrl(FAQ_LINK)
+                }
+            )
+
+            AboutForkSection(
+                onForkGitHubClick = {
+                    context.openUrl(GITHUB_URL)
+                },
+                onUpstreamGitHubClick = {
+                    context.openUrl(UPSTREAM_GITHUB_URL)
                 }
             )
 
@@ -296,6 +306,41 @@ private fun AboutHeader(
                 label = stringResource(R.string.licenses),
                 modifier = Modifier.weight(1f),
                 onClick = onLicensesClick
+            )
+        }
+    }
+}
+
+@Composable
+private fun AboutForkSection(
+    onForkGitHubClick: () -> Unit,
+    onUpstreamGitHubClick: () -> Unit
+) {
+    AboutSection(title = stringResource(R.string.about_booming_ss_title)) {
+        AboutCard {
+            AboutListItem(
+                iconRes = R.drawable.ic_stem_blend_24dp,
+                title = stringResource(R.string.about_booming_ss_summary_title),
+                summary = stringResource(R.string.about_booming_ss_summary),
+                summaryMaxLines = 6
+            )
+            AboutListItem(
+                iconRes = R.drawable.ic_info_24dp,
+                title = stringResource(R.string.about_booming_ss_model_title),
+                summary = stringResource(R.string.about_booming_ss_model_summary),
+                summaryMaxLines = 5
+            )
+            AboutListItem(
+                iconRes = R.drawable.ic_github_circle_24dp,
+                title = stringResource(R.string.about_booming_ss_fork_title),
+                summary = stringResource(R.string.about_booming_ss_fork_summary),
+                onClick = onForkGitHubClick
+            )
+            AboutListItem(
+                iconRes = R.drawable.ic_open_in_new_24dp,
+                title = stringResource(R.string.about_booming_ss_upstream_title),
+                summary = stringResource(R.string.about_booming_ss_upstream_summary),
+                onClick = onUpstreamGitHubClick
             )
         }
     }
