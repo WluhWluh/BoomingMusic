@@ -890,9 +890,9 @@
     <string name="extra_controls_summary">Add extra controls for mini player</string>
     <string name="adaptive_controls_title">Adaptive controls</string>
     <string name="adaptive_controls_summary">The controls on the mini player change to suit the current player style.</string>
-    <string name="source_separation_panel_entry_title">Show source separation panel entry</string>
+    <string name="source_separation_panel_entry_title">Source separation panel entry</string>
     <string name="source_separation_panel_entry_summary">Show the source separation button and player menu item.</string>
-    <string name="source_separation_quick_controls_title">Show source separation quick controls</string>
+    <string name="source_separation_quick_controls_title">Source separation quick controls</string>
     <string name="source_separation_quick_controls_summary">Show the stem blend control over player lyrics.</string>
     <string name="swipe_to_dismiss_title">Swipe down to dismiss</string>
     <string name="swipe_to_dismiss_summary">Swipe down on the mini player to stop playback and clear the playing queue.</string>
