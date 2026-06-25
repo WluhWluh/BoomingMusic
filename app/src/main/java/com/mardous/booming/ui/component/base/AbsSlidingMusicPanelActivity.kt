@@ -612,6 +612,11 @@ abstract class AbsSlidingMusicPanelActivity : AbsBaseActivity(),
         miniPlayerFragment?.view?.setOnClickListener { expandPanel() }
     }
 
+    fun refreshPlayerUi() {
+        chooseFragmentForTheme()
+        miniPlayerFragment?.setupButtonStyle()
+    }
+
     private val bottomSheetCallback = object : BottomSheetCallback() {
         @SuppressLint("SwitchIntDef")
         override fun onStateChanged(bottomSheet: View, newState: Int) {

@@ -317,8 +317,13 @@ fun CoverLyricsScreen(
         } else {
             CoverLyricsButtonSize
         }
+        val sourceSeparationQuickControlsBottomSpacing = if (showSourceSeparationQuickControls) {
+            CoverLyricsBottomSpacing
+        } else {
+            0.dp
+        }
         val lyricsContentPadding = lyricsViewSettings.contentPadding.withAdditionalBottom(
-            sourceSeparationQuickControlsHeight + CoverLyricsBottomSpacing
+            sourceSeparationQuickControlsHeight + sourceSeparationQuickControlsBottomSpacing
         )
         Box(modifier = modifier.fillMaxSize()) {
             LyricsSurface(
