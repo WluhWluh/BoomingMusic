@@ -423,6 +423,13 @@ class SourceSeparationForegroundWorkerCoordinator(
             SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
             true,
         )
+        if (hasCompletedCache(song)) {
+            _workerStateFlow.value = SourceSeparationUiState.Completed(
+                songId = song.id,
+                songTitle = song.title,
+            )
+            return
+        }
         _workerStateFlow.value = SourceSeparationUiState.Running(
             songId = song.id,
             songTitle = song.title,
@@ -542,6 +549,18 @@ class SourceSeparationForegroundWorkerCoordinator(
                 workerSongId = null
             }
             pauseRequested.set(false)
+        }
+    }
+
+    private suspend fun hasCompletedCache(song: Song): Boolean {
+        return withContext(Dispatchers.IO) {
+            when (runCatching { sourceSeparationEngine.cacheStatusForSong(song) }.getOrNull()) {
+                is SourceSeparationCacheStatus.Completed,
+                is SourceSeparationCacheStatus.CompletedWithTemporaryFiles -> true
+                is SourceSeparationCacheStatus.Partial,
+                SourceSeparationCacheStatus.NotStarted,
+                null -> false
+            }
         }
     }
 
