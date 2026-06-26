@@ -166,16 +166,17 @@ You can also:
 
 ## 💖 Support Development
 
-The original Booming Music project is an open-source app developed and maintained with passion in spare time.
-If you enjoy the app and the free features it offers, please consider supporting me to help cover
-development costs and dedicate more time to new features.
+The original Booming Music project is an open-source app developed and maintained by
+Christians Martínez Alvarado with care in his spare time. If you enjoy Booming Music
+or this source-separation fork, please consider supporting the original author to help
+cover development costs and make continued work on Booming Music sustainable.
 
-Your support is greatly appreciated and keeps me motivated to continue improving Booming Music!
+Support for the original author is greatly appreciated and helps keep Booming Music moving forward.
 
 <div align="center">
 
 <a href="https://ko-fi.com/christiaam" target="_blank">
-<img src="https://storage.ko-fi.com/cdn/brandasset/v2/support_me_on_kofi_red.png" alt="Support me on Ko-fi" style="border: 0px; height: 40px;" />
+<img src="https://storage.ko-fi.com/cdn/brandasset/v2/support_me_on_kofi_red.png" alt="Support Christians Martínez Alvarado on Ko-fi" style="border: 0px; height: 40px;" />
 </a>
 
 ### ❤️ Supporters
