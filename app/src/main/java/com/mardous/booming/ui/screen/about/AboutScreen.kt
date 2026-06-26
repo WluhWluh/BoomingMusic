@@ -351,7 +351,7 @@ private fun AboutAuthorSection(
     onEmailClick: () -> Unit = {},
     onDonateClick: () -> Unit = {}
 ) {
-    AboutSection(title = stringResource(R.string.author)) {
+    AboutSection(title = stringResource(R.string.about_booming_music_original_author_title)) {
         AboutCard {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,

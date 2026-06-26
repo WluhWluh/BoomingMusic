@@ -1541,7 +1541,7 @@ class PlaybackService :
                 return sourceSeparationPlaybackUnavailable(
                     showMessage = showUnavailableMessage,
                     resultCode = SessionError.ERROR_INVALID_STATE,
-                    message = "No playable song is selected.",
+                    message = getString(R.string.source_separation_playback_no_song),
                 )
             }
 
@@ -1569,7 +1569,7 @@ class PlaybackService :
             return sourceSeparationPlaybackUnavailable(
                 showMessage = showUnavailableMessage,
                 resultCode = SessionError.ERROR_INVALID_STATE,
-                message = "No playable song is selected.",
+                message = getString(R.string.source_separation_playback_no_song),
             )
         }
 
@@ -1677,7 +1677,7 @@ class PlaybackService :
                         sourceSeparationPlaybackUnavailable(
                             showMessage = showUnavailableMessage,
                             resultCode = SessionError.ERROR_INVALID_STATE,
-                            message = "No separated cache found for this song.",
+                            message = getString(R.string.source_separation_playback_cache_not_found),
                         )
                     }
                 }
@@ -1759,7 +1759,7 @@ class PlaybackService :
                 return sourceSeparationPlaybackUnavailable(
                     showMessage = showUnavailableMessage,
                     resultCode = SessionError.ERROR_INVALID_STATE,
-                    message = "No separated cache found for this song.",
+                    message = getString(R.string.source_separation_playback_cache_not_found),
                 )
             }
         touchCompletedSourceSeparationCacheIfNeeded(manifest)
@@ -1774,7 +1774,7 @@ class PlaybackService :
             return sourceSeparationPlaybackUnavailable(
                 showMessage = showUnavailableMessage,
                 resultCode = SessionError.ERROR_INVALID_STATE,
-                message = "Separated stem files are missing.",
+                message = getString(R.string.source_separation_playback_stem_files_missing),
             )
         }
 
@@ -1785,7 +1785,7 @@ class PlaybackService :
             return sourceSeparationPlaybackUnavailable(
                 showMessage = showUnavailableMessage,
                 resultCode = SessionError.ERROR_INVALID_STATE,
-                message = "No playable song is selected.",
+                message = getString(R.string.source_separation_playback_no_song),
             )
         }
 
@@ -1911,7 +1911,7 @@ class PlaybackService :
             ?: return sourceSeparationPlaybackUnavailable(
                 showMessage = showUnavailableMessage,
                 resultCode = SessionError.ERROR_INVALID_STATE,
-                message = "No separated cache found for this song.",
+                message = getString(R.string.source_separation_playback_cache_not_found),
             )
         touchCompletedSourceSeparationCacheIfNeeded(manifest)
         val vocalsFile = File(output.playbackVocalsPath())
@@ -1924,7 +1924,7 @@ class PlaybackService :
             return sourceSeparationPlaybackUnavailable(
                 showMessage = showUnavailableMessage,
                 resultCode = SessionError.ERROR_INVALID_STATE,
-                message = "Separated stem files are missing.",
+                message = getString(R.string.source_separation_playback_stem_files_missing),
             )
         }
 
@@ -1935,7 +1935,7 @@ class PlaybackService :
             return sourceSeparationPlaybackUnavailable(
                 showMessage = showUnavailableMessage,
                 resultCode = SessionError.ERROR_INVALID_STATE,
-                message = "No playable song is selected.",
+                message = getString(R.string.source_separation_playback_no_song),
             )
         }
 

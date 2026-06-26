@@ -1,9 +1,11 @@
 package com.mardous.booming.ui.screen.player
 
+import android.content.Context
 import android.content.SharedPreferences
 import android.os.SystemClock
 import androidx.media3.common.C
 import androidx.core.content.edit
+import com.mardous.booming.R
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.SourceSeparationCacheStatus
 import com.mardous.booming.separation.SourceSeparationEngine
@@ -42,6 +44,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
 
 class SourceSeparationForegroundWorkerCoordinator(
+    private val context: Context,
     private val preferences: SharedPreferences,
     private val sourceSeparationEngine: SourceSeparationEngine,
 ) {
@@ -699,8 +702,8 @@ class SourceSeparationForegroundWorkerCoordinator(
                 songTitle = song.title,
             )
             cancelRequested.set(true)
-        } catch (error: SourceSeparationModelLoadException) {
-            val message = error.message ?: SOURCE_SEPARATION_MODEL_LOAD_ERROR_MESSAGE
+        } catch (_: SourceSeparationModelLoadException) {
+            val message = context.getString(R.string.source_separation_model_load_failed)
             _workerStateFlow.value = SourceSeparationUiState.Failed(
                 songId = song.id,
                 songTitle = song.title,
@@ -1036,6 +1039,3 @@ private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
 private const val SOURCE_SEPARATION_FOREGROUND_WORKER_IDLE_MS = 250L
 private const val SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS = 50L
 private const val SOURCE_SEPARATION_DEBUG_WINDOW_SAMPLE_LIMIT = 128
-private const val SOURCE_SEPARATION_MODEL_LOAD_ERROR_MESSAGE =
-    "The installed source separation model could not be loaded. " +
-            "Import or download a valid ONNX model, then try again."

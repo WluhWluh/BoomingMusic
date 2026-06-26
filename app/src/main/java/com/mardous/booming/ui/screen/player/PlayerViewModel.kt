@@ -19,6 +19,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
+import com.mardous.booming.R
 import com.mardous.booming.core.model.MediaEvent
 import com.mardous.booming.core.model.PaletteColor
 import com.mardous.booming.core.model.action.QueueClearingBehavior
@@ -108,6 +109,7 @@ const val QUEUE_DEBOUNCE = 100L
 @OptIn(FlowPreview::class)
 @androidx.annotation.OptIn(UnstableApi::class)
 class PlayerViewModel(
+    private val appContext: Context,
     private val preferences: SharedPreferences,
     private val repository: Repository,
     private val albumCoverSaver: AlbumCoverSaver,
@@ -1076,14 +1078,18 @@ class PlayerViewModel(
         val song = currentSong
         if (song == Song.emptySong) {
             _sourceSeparationWindowDecodeExperimentStateFlow.value =
-                SourceSeparationWindowDecodeExperimentUiState.Failed("No playable song is selected.")
+                SourceSeparationWindowDecodeExperimentUiState.Failed(
+                    appContext.getString(R.string.source_separation_window_decode_no_song)
+                )
             return
         }
         val positionMs = progress.takeIf { it != C.TIME_UNSET } ?: 0L
         sourceSeparationWindowDecodeExperimentJob = viewModelScope.launch(IO) {
             _sourceSeparationWindowDecodeExperimentStateFlow.value =
                 SourceSeparationWindowDecodeExperimentUiState.Running(
-                    stage = "Starting",
+                    stage = appContext.getString(
+                        R.string.source_separation_window_decode_stage_starting
+                    ),
                     completedSteps = 0,
                     totalSteps = 0,
                     percent = 0,
@@ -1209,7 +1215,9 @@ class PlayerViewModel(
         if (normalizedUrl.isBlank()) {
             _sourceSeparationModelStateFlow.value =
                 _sourceSeparationModelStateFlow.value.copy(
-                    errorMessage = "Model URL cannot be empty.",
+                    errorMessage = appContext.getString(
+                        R.string.source_separation_model_url_empty
+                    ),
             )
             return
         }
