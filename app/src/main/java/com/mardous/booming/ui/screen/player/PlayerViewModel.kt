@@ -1157,10 +1157,15 @@ class PlayerViewModel(
         _sourceSeparationBlendModeFlow.value = mode
 
         if (enabled) {
+            val song = currentSong
+            if (song != Song.emptySong) {
+                sourceSeparationForegroundWorkerCoordinator.clearAutoStartSuppressionForSong(song.id)
+            }
             applySourceSeparationSettingsForSong(
-                song = currentSong,
+                song = song,
                 showMessage = true,
                 fallbackBlend = normalizedBlend,
+                trustFallbackBlend = normalizedBlend != null,
             )
             maybePreStartNextSourceSeparation()
         } else {
@@ -1599,6 +1604,7 @@ class PlayerViewModel(
         song: Song,
         showMessage: Boolean,
         fallbackBlend: Float? = null,
+        trustFallbackBlend: Boolean = false,
     ) {
         sourceSeparationSettingsApplyJob?.cancel()
         val mode = _sourceSeparationBlendModeFlow.value
@@ -1617,6 +1623,7 @@ class PlayerViewModel(
                 mode = mode,
                 song = song,
                 fallbackBlend = fallbackBlend,
+                trustFallbackBlend = trustFallbackBlend,
             )
             updateSourceSeparationBlendState(blend)
             val autoStartDecision =
