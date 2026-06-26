@@ -1,6 +1,5 @@
 package com.mardous.booming.playback
 
-import android.os.Handler
 import androidx.media3.common.FlagSet
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
@@ -12,35 +11,9 @@ class SourceSeparationMediaSessionPlayer(
     private val onSourceSeparationVirtualPause: () -> Unit,
 ) : ForwardingPlayer(player) {
 
-    private val applicationHandler = Handler(player.applicationLooper)
     private val listeners = mutableListOf<Player.Listener>()
 
     private var sourceSeparationVirtualBuffering = false
-    private var virtualStateCorrectionPosted = false
-
-    private val internalListener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) {
-            if (sourceSeparationVirtualBuffering &&
-                events.containsAny(
-                    Player.EVENT_PLAYBACK_STATE_CHANGED,
-                    Player.EVENT_PLAY_WHEN_READY_CHANGED,
-                    Player.EVENT_IS_LOADING_CHANGED,
-                    Player.EVENT_IS_PLAYING_CHANGED,
-                )
-            ) {
-                postVirtualStateCorrection()
-            }
-        }
-    }
-
-    init {
-        wrappedPlayer.addListener(internalListener)
-    }
-
-    override fun release() {
-        wrappedPlayer.removeListener(internalListener)
-        super.release()
-    }
 
     override fun addListener(listener: Player.Listener) {
         listeners.add(listener)
@@ -95,18 +68,6 @@ class SourceSeparationMediaSessionPlayer(
 
         sourceSeparationVirtualBuffering = enabled
         dispatchVirtualPlaybackState()
-    }
-
-    private fun postVirtualStateCorrection() {
-        if (virtualStateCorrectionPosted) return
-
-        virtualStateCorrectionPosted = true
-        applicationHandler.post {
-            virtualStateCorrectionPosted = false
-            if (sourceSeparationVirtualBuffering) {
-                dispatchVirtualPlaybackState()
-            }
-        }
     }
 
     @Suppress("DEPRECATION")
