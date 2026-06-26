@@ -286,6 +286,7 @@ private val dataModule = module {
 private val viewModule = module {
     single {
         SourceSeparationForegroundWorkerCoordinator(
+            context = androidContext(),
             preferences = get(),
             sourceSeparationEngine = get(),
         )
@@ -297,6 +298,7 @@ private val viewModule = module {
 
     viewModel {
         PlayerViewModel(
+            appContext = androidContext(),
             preferences = get(),
             repository = get(),
             albumCoverSaver = get(),

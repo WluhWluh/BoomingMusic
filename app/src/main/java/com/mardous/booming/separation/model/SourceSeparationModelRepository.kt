@@ -3,6 +3,7 @@ package com.mardous.booming.separation.model
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.mardous.booming.R
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -63,7 +64,7 @@ class SourceSeparationModelRepository(
         variant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
     ): SourceSeparationModelState.Available {
         context.contentResolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "Could not open model file." }
+            requireNotNull(input) { context.getString(R.string.source_separation_model_open_failed) }
             return installModel(
                 input = input,
                 displayName = displayName ?: displayNameForUri(uri),
@@ -92,7 +93,10 @@ class SourceSeparationModelRepository(
         onProgress: (SourceSeparationModelDownloadProgress) -> Unit = {},
     ): SourceSeparationModelState.Available {
         val uri = runCatching { URI(url.trim()) }.getOrElse {
-            throw IllegalArgumentException("Model URL is invalid.")
+            throw IllegalArgumentException(
+                context.getString(R.string.source_separation_model_url_invalid),
+                it,
+            )
         }
         return downloadModelWithFallback(
             primaryUri = uri,
@@ -110,7 +114,7 @@ class SourceSeparationModelRepository(
     ): SourceSeparationModelState.Available {
         require(primaryUri.scheme?.equals("http", ignoreCase = true) == true ||
                 primaryUri.scheme?.equals("https", ignoreCase = true) == true) {
-            "Model URL must start with http:// or https://."
+            context.getString(R.string.source_separation_model_url_scheme_invalid)
         }
 
         val attempts = buildList {
@@ -139,7 +143,9 @@ class SourceSeparationModelRepository(
                             usingMirror = true,
                             downloadedBytes = 0L,
                             totalBytes = null,
-                            message = "Retrying download via mirror...",
+                            message = context.getString(
+                                R.string.source_separation_model_download_retrying_mirror
+                            ),
                         ),
                     )
                     continue
@@ -147,7 +153,9 @@ class SourceSeparationModelRepository(
                 throw error
             }
         }
-        throw lastError ?: IOException("Model download failed.")
+        throw lastError ?: IOException(
+            context.getString(R.string.source_separation_model_download_failed)
+        )
     }
 
     private fun downloadModelAttempt(
@@ -158,7 +166,9 @@ class SourceSeparationModelRepository(
         onProgress: (SourceSeparationModelDownloadProgress) -> Unit,
     ): SourceSeparationModelState.Available {
         val connection = uri.toURL().openConnection() as? HttpURLConnection
-            ?: throw IOException("Could not open model download connection.")
+            ?: throw IOException(
+                context.getString(R.string.source_separation_model_download_connection_failed)
+            )
         connection.connectTimeout = DOWNLOAD_CONNECT_TIMEOUT_MS
         connection.readTimeout = DOWNLOAD_READ_TIMEOUT_MS
         connection.instanceFollowRedirects = true
@@ -167,7 +177,12 @@ class SourceSeparationModelRepository(
         return try {
             val responseCode = connection.responseCode
             if (responseCode !in 200..299) {
-                throw IOException("Model download failed: HTTP $responseCode.")
+                throw IOException(
+                    context.getString(
+                        R.string.source_separation_model_download_http_failed,
+                        responseCode,
+                    )
+                )
             }
             val totalBytes = connection.contentLengthLong.takeIf { it > 0L }
             connection.inputStream.use { input ->
@@ -213,9 +228,9 @@ class SourceSeparationModelRepository(
                         downloadedBytes = 0L,
                         totalBytes = totalBytes,
                         message = if (usingMirror) {
-                            "Downloading model from mirror..."
+                            context.getString(R.string.source_separation_model_downloading_mirror)
                         } else {
-                            "Downloading model..."
+                            context.getString(R.string.source_separation_model_downloading)
                         },
                     ),
                 )
@@ -237,9 +252,11 @@ class SourceSeparationModelRepository(
                                 downloadedBytes = sizeBytes,
                                 totalBytes = totalBytes,
                                 message = if (usingMirror) {
-                                    "Downloading model from mirror..."
+                                    context.getString(
+                                        R.string.source_separation_model_downloading_mirror
+                                    )
                                 } else {
-                                    "Downloading model..."
+                                    context.getString(R.string.source_separation_model_downloading)
                                 },
                             ),
                         )
@@ -256,13 +273,13 @@ class SourceSeparationModelRepository(
 
         if (sizeBytes <= 0L) {
             temp.delete()
-            throw IOException("Imported model file is empty.")
+            throw IOException(context.getString(R.string.source_separation_model_import_empty))
         }
 
         val actualSha256 = digest.digest().toHex()
         if (target.exists() && !target.delete()) {
             temp.delete()
-            throw IOException("Could not replace existing model file.")
+            throw IOException(context.getString(R.string.source_separation_model_replace_failed))
         }
         if (!temp.renameTo(target)) {
             temp.copyTo(target, overwrite = true)
@@ -352,7 +369,9 @@ class SourceSeparationModelRepository(
         )
         if (file.exists() && !file.delete()) {
             temp.delete()
-            throw IOException("Could not replace model metadata.")
+            throw IOException(
+                context.getString(R.string.source_separation_model_metadata_replace_failed)
+            )
         }
         if (!temp.renameTo(file)) {
             temp.copyTo(file, overwrite = true)
