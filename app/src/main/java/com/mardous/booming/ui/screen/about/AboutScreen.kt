@@ -540,7 +540,7 @@ private fun getAboutSections(
     val context = LocalContext.current
 
     val sendInvitationTitle = stringResource(R.string.send_invitation_message)
-    val invitationMessage = stringResource(R.string.invitation_message_content, DOWNLOAD_URL)
+    val invitationMessage = stringResource(R.string.booming_ss_invitation_message_content, DOWNLOAD_URL)
 
     fun openGithubProfile(username: String) {
         context.openUrl("https://github.com/$username")

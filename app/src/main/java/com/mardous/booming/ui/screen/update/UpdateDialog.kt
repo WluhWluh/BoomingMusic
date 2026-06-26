@@ -65,7 +65,7 @@ class UpdateDialog : BottomSheetDialogFragment(), View.OnClickListener {
             binding.downloadAction -> {
                 release?.let {
                     viewModel.downloadUpdate(requireContext(), it)
-                    showToast(R.string.downloading_update)
+                    showToast(R.string.booming_ss_downloading_update)
                 }
                 dismiss()
             }

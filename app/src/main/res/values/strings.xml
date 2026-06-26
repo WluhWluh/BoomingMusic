@@ -622,7 +622,7 @@
     <string name="share_app">Share this app</string>
     <string name="share_app_summary">You can help this app grow if you share it with friends.</string>
     <string name="send_invitation_message">Send invitation message</string>
-    <string name="invitation_message_content">Hi. Check out Booming SS, a Booming Music build with local source separation playback. You can download it from here: %s</string>
+    <string name="invitation_message_content">Hi. Check out Booming Music! The best app to listen local music on Android. You can download it from here: %s</string>
     <string name="you_will_be_forwarded_to_the_issue_tracker_website">You will be forwarded to the issue tracker website.</string>
 
     <!-- SAF -->
@@ -649,7 +649,7 @@
     <string name="advanced_title">Advanced</string>
     <string name="advanced_summary">In-app language and other settings for advanced users.</string>
     <string name="about_title">About</string>
-    <string name="about_summary">Booming SS %s, touch for more info.</string>
+    <string name="about_summary">Booming Music %s, touch for more info.</string>
 
     <!-- Preference headers -->
     <string name="general_header">General</string>
@@ -1004,7 +1004,7 @@
     <string name="update_available_title">Update available</string>
     <string name="more_info_action">More info.</string>
     <string name="download_action">Download</string>
-    <string name="downloading_update">Downloading Booming SS update.</string>
+    <string name="downloading_update">Downloading Booming Music update.</string>
 
     <string name="uncaught_error_title">Oops! That wasn\'t supposed to happen!</string>
     <string name="uncaught_error_message">It seems something went wrong and caused the app to crash.
