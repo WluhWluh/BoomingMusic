@@ -10,6 +10,7 @@ Booming SS localization work.
 - Localized files: `app/src/main/res/values-*/strings_booming_ss.xml`
 - Fork-owned keys currently use these prefixes:
   - `action_source_separation`
+  - `booming_ss_`
   - `source_separation_`
   - `about_booming_ss_`
 
