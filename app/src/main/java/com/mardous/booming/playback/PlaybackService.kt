@@ -249,6 +249,7 @@ class PlaybackService :
     private var sourceSeparationProcessingHeartbeatJob: Job? = null
     private var sourceSeparationPreStartJob: Job? = null
     private var sourceSeparationForegroundServiceType: Int? = null
+    private var sourceSeparationForegroundServiceTypeUpdatedAtMs = 0L
 
     private var headsetClickCount = 0
     private val headsetClickRunnable = Runnable {
@@ -3227,9 +3228,13 @@ class PlaybackService :
         if (!::mediaSessionPlayer.isInitialized) return
 
         mediaSessionPlayer.setSourceSeparationVirtualBuffering(
-            sourceSeparationPlaybackIsProcessing &&
-                    sourceSeparationPlaybackResumeWhenReady
+            isSourceSeparationMediaSessionBuffering()
         )
+    }
+
+    private fun isSourceSeparationMediaSessionBuffering(): Boolean {
+        return sourceSeparationPlaybackIsProcessing &&
+                sourceSeparationPlaybackResumeWhenReady
     }
 
     private fun startSourceSeparationProcessingLease(reason: String) {
@@ -3329,7 +3334,16 @@ class PlaybackService :
                 } else {
                     0
                 }
-        if (!force && sourceSeparationForegroundServiceType == type) return
+        if (sourceSeparationForegroundServiceType == type) {
+            if (!force) return
+            if (isSourceSeparationMediaSessionBuffering()) {
+                val elapsedSinceUpdate =
+                    SystemClock.elapsedRealtime() - sourceSeparationForegroundServiceTypeUpdatedAtMs
+                if (elapsedSinceUpdate < SOURCE_SEPARATION_BUFFERING_FGS_REFRESH_MS) {
+                    return
+                }
+            }
+        }
         val notification = getSystemService<NotificationManager>()
             ?.activeNotifications
             ?.firstOrNull { it.id == NOTIFICATION_ID }
@@ -3344,6 +3358,7 @@ class PlaybackService :
         runCatching {
             startForeground(NOTIFICATION_ID, notification, type)
             sourceSeparationForegroundServiceType = type
+            sourceSeparationForegroundServiceTypeUpdatedAtMs = SystemClock.elapsedRealtime()
             traceSourceSeparationPlayback("lease.fgsType.update", "reason=$reason type=$type")
         }.onFailure { error ->
             Log.w(TAG_SOURCE_SEPARATION_PLAYBACK, "Unable to update foreground service type", error)
@@ -4088,6 +4103,7 @@ class PlaybackService :
         private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
         private const val SOURCE_SEPARATION_EXPECT_PROCESSING_TIMEOUT_MS = 10_000L
         private const val SOURCE_SEPARATION_PROCESSING_LEASE_HEARTBEAT_MS = 1_000L
+        private const val SOURCE_SEPARATION_BUFFERING_FGS_REFRESH_MS = 3_000L
         private const val SOURCE_SEPARATION_PROCESSING_WAKE_LOCK_REFRESH_MS = 15_000L
 
         private const val FOREGROUND_SERVICE_TIMEOUT = (60 * 1000) * 2L
