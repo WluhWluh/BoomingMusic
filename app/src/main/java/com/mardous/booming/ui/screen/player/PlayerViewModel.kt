@@ -571,6 +571,7 @@ class PlayerViewModel(
         }
         if (events.contains(Player.EVENT_REPEAT_MODE_CHANGED)) {
             _repeatModeFlow.value = player.repeatMode
+            maybePreStartNextSourceSeparation()
         }
         if (events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) {
             if (!events.contains(Player.EVENT_TIMELINE_CHANGED)) {
@@ -1699,7 +1700,7 @@ class PlayerViewModel(
 
     private fun maybePreStartNextSourceSeparation() {
         val current = currentSong
-        val next = nextSong
+        val next = nextSongForSourceSeparationPreStart(current)
         val mode = _sourceSeparationBlendModeFlow.value
         val readyWindowCount = _sourceSeparationPlaybackReadyWindowCountFlow.value
         if (!_sourceSeparationAutoStartFlow.value ||
@@ -1724,7 +1725,7 @@ class PlayerViewModel(
             if (!_sourceSeparationAutoStartFlow.value ||
                 latestMode == SourceSeparationBlendMode.Off ||
                 currentSong.id != current.id ||
-                nextSong.id != next.id ||
+                nextSongForSourceSeparationPreStart(currentSong).id != next.id ||
                 !sourceSeparationModelRepository.isModelReady()
             ) {
                 return@launch
@@ -1752,7 +1753,7 @@ class PlayerViewModel(
             }.getOrDefault(false)
             if (!currentCacheCompleted ||
                 currentSong.id != current.id ||
-                nextSong.id != next.id ||
+                nextSongForSourceSeparationPreStart(currentSong).id != next.id ||
                 sourceSeparationForegroundWorkerCoordinator.runningSongId() == next.id ||
                 sourceSeparationForegroundWorkerCoordinator.pendingSongId() == next.id
             ) {
@@ -1764,6 +1765,24 @@ class PlayerViewModel(
                 readyWindowCount = readyWindowCount,
             )
         }
+    }
+
+    private fun nextSongForSourceSeparationPreStart(current: Song): Song {
+        val next = nextSong
+        if (next != Song.emptySong) return next
+        if (_repeatModeFlow.value != Player.REPEAT_MODE_ALL) return Song.emptySong
+
+        val queue = _queueFlow.value
+        val position = _positionFlow.value
+        if (queue.isEmpty() ||
+            position.current !in queue.indices ||
+            position.current != queue.lastIndex ||
+            current.id != queue[position.current].id
+        ) {
+            return Song.emptySong
+        }
+
+        return queue.firstOrNull() ?: Song.emptySong
     }
 
     private suspend fun waitForSourceSeparationProcessingCache(song: Song) {
