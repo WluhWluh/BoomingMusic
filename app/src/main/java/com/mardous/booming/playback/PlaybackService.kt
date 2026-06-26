@@ -101,6 +101,7 @@ import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.playback.renderer.AlacWorkaroundCodecSelector
 import com.mardous.booming.playback.renderer.BoomingMusicRenderersFactory
 import com.mardous.booming.separation.SourceSeparationEngine
+import com.mardous.booming.separation.SourceSeparationCacheStatus
 import com.mardous.booming.separation.SourceSeparationPlayableCacheStatus
 import com.mardous.booming.separation.SourceSeparationReadyHorizonStatus
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
@@ -110,6 +111,7 @@ import com.mardous.booming.separation.cache.SourceSeparationOutput
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor.InputMode
 import com.mardous.booming.ui.screen.MainActivity
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
+import com.mardous.booming.ui.screen.player.SourceSeparationUiState
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.CLEAR_QUEUE_ON_COMPLETION
@@ -245,6 +247,7 @@ class PlaybackService :
     private var sourceSeparationProcessingWakeLock: PowerManager.WakeLock? = null
     private var sourceSeparationProcessingWakeLockJob: Job? = null
     private var sourceSeparationProcessingHeartbeatJob: Job? = null
+    private var sourceSeparationPreStartJob: Job? = null
     private var sourceSeparationForegroundServiceType: Int? = null
 
     private var headsetClickCount = 0
@@ -380,6 +383,7 @@ class PlaybackService :
         player.exoPlayer.shuffleOrder = ImprovedShuffleOrder(0, 0, Random.nextLong())
         player.setSequentialTimelineEnabled(sequentialTimeline)
         player.addListener(this)
+        observeSourceSeparationForegroundWorker()
 
         mediaSession = with(MediaLibrarySession.Builder(this, player, this)) {
             setId(packageName)
@@ -449,6 +453,8 @@ class PlaybackService :
     override fun onDestroy() {
         traceSourceSeparationPlayback("service.onDestroy")
         flushSourceSeparationPlaybackTrace()
+        sourceSeparationPreStartJob?.cancel()
+        sourceSeparationPreStartJob = null
         cancelSourceSeparationPlaybackReadinessMonitor("serviceDestroy")
         cancelSourceSeparationPcmHydrationJob(deletePartial = false)
         stopSourceSeparationProcessingLease("serviceDestroy", force = true)
@@ -967,6 +973,7 @@ class PlaybackService :
 
     override fun onTimelineChanged(timeline: Timeline, reason: Int) {
         persistentStorage.saveState(true)
+        maybePreStartNextSourceSeparation("timelineChanged")
     }
 
     private fun updateSourceSeparationForegroundWorkerSong(song: Song) {
@@ -978,6 +985,7 @@ class PlaybackService :
             isPlaying = isSourceSeparationForegroundWorkerClockAdvancing(),
             sourceSeparationBlend = sourceSeparationMixProcessor.blend,
         )
+        maybePreStartNextSourceSeparation("songChanged")
     }
 
     private fun updateSourceSeparationForegroundWorkerPosition() {
@@ -1331,6 +1339,11 @@ class PlaybackService :
                 player.exoPlayer.setSeekForwardIncrementMs(seekInterval)
             }
 
+            SOURCE_SEPARATION_AUTO_START,
+            SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT -> {
+                maybePreStartNextSourceSeparation("prefChanged")
+            }
+
             WIDGET_DYNAMIC_COLORS,
             WIDGET_SMALL_LAYOUT_STYLE,
             WIDGET_IMAGE_CORNER_RADIUS,
@@ -1394,6 +1407,12 @@ class PlaybackService :
             "playback.setEnabled.end",
             "enabled=$enabled result=${result.resultCode}"
         )
+        if (enabled) {
+            maybePreStartNextSourceSeparation("playbackEnabled")
+        } else {
+            sourceSeparationPreStartJob?.cancel()
+            sourceSeparationPreStartJob = null
+        }
         return result
     }
 
@@ -1989,7 +2008,104 @@ class PlaybackService :
     private fun setSourceSeparationBlend(blend: Float): SessionResult {
         sourceSeparationMixProcessor.setBlend(blend)
         broadcastSourceSeparationPlaybackChanged()
+        maybePreStartNextSourceSeparation("blendChanged")
         return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+    }
+
+    private fun observeSourceSeparationForegroundWorker() {
+        serviceScope.launch {
+            sourceSeparationForegroundWorkerCoordinator.workerStateFlow.collect { state ->
+                if (state is SourceSeparationUiState.Completed) {
+                    maybePreStartNextSourceSeparation("workerCompleted:${state.songId}")
+                }
+            }
+        }
+    }
+
+    private fun maybePreStartNextSourceSeparation(reason: String) {
+        if (!::player.isInitialized) return
+        if (!preferences.getBoolean(SOURCE_SEPARATION_AUTO_START, DEFAULT_SOURCE_SEPARATION_AUTO_START) ||
+            !sourceSeparationPlaybackRequested
+        ) {
+            sourceSeparationPreStartJob?.cancel()
+            sourceSeparationPreStartJob = null
+            return
+        }
+
+        val currentMediaItem = player.currentMediaItem ?: run {
+            sourceSeparationPreStartJob?.cancel()
+            sourceSeparationPreStartJob = null
+            return
+        }
+        val nextMediaItemIndex = player.nextMediaItemIndex
+        if (nextMediaItemIndex == C.INDEX_UNSET ||
+            nextMediaItemIndex !in 0 until player.mediaItemCount
+        ) {
+            sourceSeparationPreStartJob?.cancel()
+            sourceSeparationPreStartJob = null
+            return
+        }
+        val nextMediaItem = player.getMediaItemAt(nextMediaItemIndex)
+        val readyWindowCount = sourceSeparationPlaybackReadyWindowCount
+        val autoSyncOnTransition = sourceSeparationPlaybackAutoSyncOnTransition
+        val currentBlend = sourceSeparationMixProcessor.blend
+        val currentMediaId = currentMediaItem.mediaId
+        val nextMediaId = nextMediaItem.mediaId
+
+        sourceSeparationPreStartJob?.cancel()
+        sourceSeparationPreStartJob = serviceScope.launch {
+            val nextSong = withContext(IO) {
+                val currentSong = repository.songByMediaItem(currentMediaItem)
+                val nextSong = repository.songByMediaItem(nextMediaItem)
+                if (currentSong == Song.emptySong || nextSong == Song.emptySong ||
+                    currentSong.id == nextSong.id
+                ) {
+                    return@withContext null
+                }
+
+                val currentCacheCompleted = runCatching {
+                    when (sourceSeparationEngine.cacheStatusForSong(currentSong)) {
+                        is SourceSeparationCacheStatus.Completed,
+                        is SourceSeparationCacheStatus.CompletedWithTemporaryFiles -> true
+                        SourceSeparationCacheStatus.NotStarted,
+                        is SourceSeparationCacheStatus.Partial -> false
+                    }
+                }.getOrDefault(false)
+                if (!currentCacheCompleted) return@withContext null
+
+                val nextNeedsSeparatedOutput = if (autoSyncOnTransition) {
+                    !isDefaultSourceSeparationBlend(currentBlend)
+                } else {
+                    sourceSeparationForegroundWorkerCoordinator
+                        .recordedBlendForSong(nextSong)
+                        ?.let { blend -> !isDefaultSourceSeparationBlend(blend) }
+                        ?: false
+                }
+                nextSong.takeIf { nextNeedsSeparatedOutput }
+            } ?: return@launch
+
+            val latestNextMediaItemIndex = player.nextMediaItemIndex
+            if (!sourceSeparationPlaybackRequested ||
+                !preferences.getBoolean(
+                    SOURCE_SEPARATION_AUTO_START,
+                    DEFAULT_SOURCE_SEPARATION_AUTO_START,
+                ) ||
+                player.currentMediaItem?.mediaId != currentMediaId ||
+                latestNextMediaItemIndex != nextMediaItemIndex ||
+                latestNextMediaItemIndex == C.INDEX_UNSET ||
+                latestNextMediaItemIndex !in 0 until player.mediaItemCount ||
+                player.getMediaItemAt(latestNextMediaItemIndex).mediaId != nextMediaId ||
+                sourceSeparationForegroundWorkerCoordinator.runningSongId() == nextSong.id ||
+                sourceSeparationForegroundWorkerCoordinator.pendingSongId() == nextSong.id
+            ) {
+                return@launch
+            }
+
+            sourceSeparationForegroundWorkerCoordinator.preStartSong(
+                song = nextSong,
+                readyWindowCount = readyWindowCount,
+            )
+        }
     }
 
     private fun realignSourceSeparationPlaybackAfterProcessing(
