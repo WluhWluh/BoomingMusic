@@ -322,13 +322,11 @@ private fun AboutForkSection(
                 iconRes = R.drawable.ic_stem_blend_24dp,
                 title = stringResource(R.string.about_booming_ss_summary_title),
                 summary = stringResource(R.string.about_booming_ss_summary),
-                summaryMaxLines = 6
             )
             AboutListItem(
                 iconRes = R.drawable.ic_info_24dp,
                 title = stringResource(R.string.about_booming_ss_model_title),
                 summary = stringResource(R.string.about_booming_ss_model_summary),
-                summaryMaxLines = 5
             )
             AboutListItem(
                 iconRes = R.drawable.ic_github_circle_24dp,
@@ -581,7 +579,7 @@ private fun AboutListItem(
     title: String,
     modifier: Modifier = Modifier,
     summary: String? = null,
-    summaryMaxLines: Int = 4,
+    summaryMaxLines: Int = Int.MAX_VALUE,
     onClick: (() -> Unit)? = null
 ) {
     Row(
