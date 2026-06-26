@@ -3,6 +3,9 @@
     <string name="action_source_separation">Separate vocals</string>
     <string name="action_source_separation_settings">Source separation</string>
     <string name="action_source_separation_playback">Separated playback</string>
+    <string name="booming_ss_invitation_message_content">Hi. Check out Booming SS, a source-separation fork based on Booming Music. It plays local music and adds separated playback. You can download it here: %s</string>
+    <string name="booming_ss_about_summary">Booming SS %s, a source-separation fork based on Booming Music. Touch for more info.</string>
+    <string name="booming_ss_downloading_update">Downloading Booming SS update.</string>
     <string name="source_separation_blend_mode_off">Original audio</string>
     <string name="source_separation_blend_mode_global">Global stem blend</string>
     <string name="source_separation_blend_mode_per_song">Per-song stem blend</string>

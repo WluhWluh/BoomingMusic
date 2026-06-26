@@ -106,7 +106,7 @@ class GitHubRelease(
         if (apkAsset != null) {
             return DownloadManager.Request(apkAsset.downloadUrl.toUri())
                 .setTitle(apkAsset.name)
-                .setDescription(context.getString(R.string.downloading_update))
+                .setDescription(context.getString(R.string.booming_ss_downloading_update))
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, apkAsset.name)
                 .setMimeType(ReleaseAsset.APK_MIME_TYPE)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)

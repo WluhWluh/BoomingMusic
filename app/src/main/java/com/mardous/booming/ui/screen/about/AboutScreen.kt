@@ -118,7 +118,7 @@ fun AboutScreen(
     }
 
     val sendInvitationTitle = stringResource(R.string.send_invitation_message)
-    val invitationMessage = stringResource(R.string.invitation_message_content, DOWNLOAD_URL)
+    val invitationMessage = stringResource(R.string.booming_ss_invitation_message_content, DOWNLOAD_URL)
 
     CollapsibleAppBarScaffold(
         title = stringResource(R.string.about_title),
