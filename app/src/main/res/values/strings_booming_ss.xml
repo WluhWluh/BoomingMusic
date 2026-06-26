@@ -143,6 +143,12 @@
     <string name="source_separation_cache_model_label">Model</string>
     <string name="source_separation_preparing">Preparing source separation...</string>
     <string name="source_separation_processing_windows">Processing audio windows</string>
+    <string name="source_separation_stage_preparing_model_file">Preparing model file</string>
+    <string name="source_separation_stage_preparing_output_files">Preparing output files</string>
+    <string name="source_separation_stage_preparing_window">Preparing window %1$d/%2$d</string>
+    <string name="source_separation_stage_processed_window">Processed window %1$d/%2$d</string>
+    <string name="source_separation_stage_full_decode">Full decode</string>
+    <string name="source_separation_stage_window_decode">Window decode</string>
     <string name="source_separation_stage">Source separation: %1$s</string>
     <string name="source_separation_progress">Source separation: %4$s - %1$d/%2$d (%3$d%%)</string>
     <string name="source_separation_complete">Source separation complete</string>
@@ -158,6 +164,8 @@
     <string name="about_booming_ss_upstream_title">Original Booming Music</string>
     <string name="about_booming_ss_upstream_summary">View the upstream project by Christians Martínez Alvarado and contributors.</string>
     <string name="about_booming_music_original_author_title">Booming Music original author</string>
+    <string name="about_booming_ss_report_bugs_dialog_message">Booming SS uses its own repository for source-separation changes and fork-specific issues. If the same issue also happens in the original Booming Music app without Booming SS features, please report it to the upstream repository instead.</string>
+    <string name="about_booming_ss_translate_dialog_message">The original Booming Music localization is managed on Hosted Weblate. That project does not include Booming SS source-separation strings; use this link for upstream app translations only. Booming SS-specific translations are maintained separately in this fork.</string>
     <string name="source_separation_panel_entry_title">Source separation panel access</string>
     <string name="source_separation_panel_entry_summary">Show the player button and menu item for the source separation panel.</string>
     <string name="source_separation_quick_controls_title">Source separation quick controls</string>
