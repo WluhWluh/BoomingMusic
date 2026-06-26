@@ -224,6 +224,7 @@ class PlaybackService :
     private var sourceSeparationPlaybackResumeWhenReady = false
     private var sourceSeparationPlaybackInternalPlayWhenReady: Boolean? = null
     private var sourceSeparationPlaybackPlayIntent = false
+    private var sourceSeparationPausedBlendFlushConsumed = false
     private val sourceSeparationPlaybackReadinessMutex = Mutex()
     private var sourceSeparationPlaybackGateJob: Job? = null
     private var sourceSeparationPlaybackReadinessMonitorJob: Job? = null
@@ -1018,6 +1019,7 @@ class PlaybackService :
         if (!isInternalPlayWhenReadyChange) {
             if (playWhenReady) {
                 sourceSeparationPlaybackPlayIntent = true
+                sourceSeparationPausedBlendFlushConsumed = false
             } else if (shouldClearSourceSeparationPlaybackPlayIntent(reason)) {
                 sourceSeparationPlaybackPlayIntent = false
             }
@@ -2017,6 +2019,18 @@ class PlaybackService :
 
     private fun setSourceSeparationBlend(blend: Float): SessionResult {
         sourceSeparationMixProcessor.setBlend(blend)
+        if (sourceSeparationPlaybackSession != null &&
+            !player.playWhenReady &&
+            !player.isPlaying &&
+            player.playbackState != Player.STATE_BUFFERING &&
+            !sourceSeparationPausedBlendFlushConsumed
+        ) {
+            flushSourceSeparationPausedOutput(
+                reason = "blendChanged",
+                forceDiscontinuity = true,
+            )
+            sourceSeparationPausedBlendFlushConsumed = true
+        }
         broadcastSourceSeparationPlaybackChanged()
         maybePreStartNextSourceSeparation("blendChanged")
         return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
@@ -3417,7 +3431,10 @@ class PlaybackService :
         }
     }
 
-    private fun flushSourceSeparationPausedOutput(reason: String) {
+    private fun flushSourceSeparationPausedOutput(
+        reason: String,
+        forceDiscontinuity: Boolean = false,
+    ) {
         val index = player.currentMediaItemIndex
         if (index == C.INDEX_UNSET) {
             traceSourceSeparationPlayback(
@@ -3434,11 +3451,28 @@ class PlaybackService :
             return
         }
         val positionMs = player.currentPosition.coerceAtLeast(0)
+        val seekPositionMs = if (forceDiscontinuity) {
+            sourceSeparationBlendFlushPosition(positionMs)
+        } else {
+            positionMs
+        }
         traceSourceSeparationPlayback(
             "playback.flushPausedOutput",
-            "reason=$reason index=$index position=$positionMs"
+            "reason=$reason index=$index position=$positionMs seekPosition=$seekPositionMs " +
+                    "forceDiscontinuity=$forceDiscontinuity"
         )
-        player.seekTo(index, positionMs)
+        player.seekTo(index, seekPositionMs)
+    }
+
+    private fun sourceSeparationBlendFlushPosition(positionMs: Long): Long {
+        val durationMs = player.duration
+        return if (durationMs != C.TIME_UNSET &&
+            positionMs + SOURCE_SEPARATION_BLEND_FLUSH_SEEK_OFFSET_MS >= durationMs
+        ) {
+            (positionMs - SOURCE_SEPARATION_BLEND_FLUSH_SEEK_OFFSET_MS).coerceAtLeast(0)
+        } else {
+            positionMs + SOURCE_SEPARATION_BLEND_FLUSH_SEEK_OFFSET_MS
+        }
     }
 
     private fun SourceSeparationPlaybackSession.affectsCurrentSourceSeparationItem(): Boolean {
@@ -4099,6 +4133,7 @@ class PlaybackService :
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_DELAY_MS = 120L
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_FALLBACK_DELAY_MS = 1500L
         private const val SOURCE_SEPARATION_INTERNAL_MEDIA_ITEM_CHANGE_MS = 500L
+        private const val SOURCE_SEPARATION_BLEND_FLUSH_SEEK_OFFSET_MS = 10L
         private const val DEFAULT_SOURCE_SEPARATION_BLEND = 0.5f
         private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
         private const val SOURCE_SEPARATION_EXPECT_PROCESSING_TIMEOUT_MS = 10_000L
