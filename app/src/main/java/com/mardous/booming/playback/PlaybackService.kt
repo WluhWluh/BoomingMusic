@@ -207,6 +207,7 @@ class PlaybackService :
     private lateinit var persistentStorage: PersistentStorage
     private lateinit var customCommands: List<CommandButton>
     private lateinit var player: AdvancedForwardingPlayer
+    private lateinit var mediaSessionPlayer: SourceSeparationMediaSessionPlayer
     private var mediaSession: MediaLibrarySession? = null
 
     private var eqStateHandler: Handler? = Handler(Looper.getMainLooper())
@@ -383,8 +384,15 @@ class PlaybackService :
         player.setSequentialTimelineEnabled(sequentialTimeline)
         player.addListener(this)
         observeSourceSeparationForegroundWorker()
+        mediaSessionPlayer = SourceSeparationMediaSessionPlayer(player) {
+            sourceSeparationPlaybackResumeWhenReady = false
+            sourceSeparationPlaybackPlayIntent = false
+            updateSourceSeparationMediaSessionBuffering()
+            updateSourceSeparationProcessingLease("mediaSessionVirtualPause")
+            broadcastSourceSeparationPlaybackChanged()
+        }
 
-        mediaSession = with(MediaLibrarySession.Builder(this, player, this)) {
+        mediaSession = with(MediaLibrarySession.Builder(this, mediaSessionPlayer, this)) {
             setId(packageName)
             setSessionActivity(createSessionActivityIntent())
             setBitmapLoader(CacheBitmapLoader(CoilBitmapLoader(this@PlaybackService)))
@@ -3206,12 +3214,22 @@ class PlaybackService :
             }
             return
         }
+        updateSourceSeparationMediaSessionBuffering()
         if (isSourceSeparationProcessingLeaseNeeded()) {
             startSourceSeparationProcessingLease(reason)
         } else {
             stopSourceSeparationProcessingLease(reason)
         }
         updateSourceSeparationForegroundServiceType(reason)
+    }
+
+    private fun updateSourceSeparationMediaSessionBuffering() {
+        if (!::mediaSessionPlayer.isInitialized) return
+
+        mediaSessionPlayer.setSourceSeparationVirtualBuffering(
+            sourceSeparationPlaybackIsProcessing &&
+                    sourceSeparationPlaybackResumeWhenReady
+        )
     }
 
     private fun startSourceSeparationProcessingLease(reason: String) {
