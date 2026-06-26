@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.mardous.booming.BuildConfig
 import com.mardous.booming.R
 import com.mardous.booming.extensions.files.asReadableFileSize
 import com.mardous.booming.extensions.isLandscape
@@ -382,8 +383,10 @@ private fun SourceSeparationSettingsSheet(
                             modifier = Modifier.padding(cardContentPadding)
                         ) {
                             SourceSeparationStatusText(separationState, currentSongCacheState)
-                            SourceSeparationSchedulerText(separationState)
-                            SourceSeparationDecodeDiagnosticsText(separationState)
+                            if (BuildConfig.DEBUG) {
+                                SourceSeparationSchedulerText(separationState)
+                                SourceSeparationDecodeDiagnosticsText(separationState)
+                            }
                             AnimatedVisibility(
                                 visible = playbackState.processing
                             ) {
@@ -504,19 +507,27 @@ private fun SourceSeparationSettingsSheet(
                                 }
                             }
 
-                            OutlinedButton(
-                                onClick = {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
-                                    viewModel.runWindowDecodeExperimentForCurrentSong()
-                                },
-                                enabled = windowDecodeExperimentState !is
-                                        SourceSeparationWindowDecodeExperimentUiState.Running,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(stringResource(R.string.source_separation_window_decode_experiment))
-                            }
+                            if (BuildConfig.DEBUG) {
+                                OutlinedButton(
+                                    onClick = {
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
+                                        viewModel.runWindowDecodeExperimentForCurrentSong()
+                                    },
+                                    enabled = windowDecodeExperimentState !is
+                                            SourceSeparationWindowDecodeExperimentUiState.Running,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        stringResource(
+                                            R.string.source_separation_window_decode_experiment
+                                        )
+                                    )
+                                }
 
-                            SourceSeparationWindowDecodeExperimentStatusText(windowDecodeExperimentState)
+                                SourceSeparationWindowDecodeExperimentStatusText(
+                                    windowDecodeExperimentState
+                                )
+                            }
                         }
                     }
                 }

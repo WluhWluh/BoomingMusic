@@ -32,6 +32,8 @@
     <string name="source_separation_flac_compression_queued">FLAC compression queued...</string>
     <string name="source_separation_window_decode_experiment">Test window decoding</string>
     <string name="source_separation_window_decode_running">Testing local window decode (%1$d%%, step %2$d/%3$d): %4$s\nCurrent stage: %5$s</string>
+    <string name="source_separation_window_decode_no_song">No playable song is selected.</string>
+    <string name="source_separation_window_decode_stage_starting">Starting</string>
     <string name="source_separation_window_decode_probe_progress">Probe %1$d/%2$d</string>
     <string name="source_separation_window_decode_probe_preparing">Preparing probe</string>
     <string name="source_separation_window_decode_completed">Window decode report saved: %1$s\nFull decode: %2$dms, probes: %3$d, total window decode: %4$dms, worst song-timeline offset: %5$d frames, worst song-timeline mean error: %6$.3f</string>
@@ -46,6 +48,9 @@
     <string name="source_separation_status_paused">Separation paused for \"%1$s\".</string>
     <string name="source_separation_status_failed">Separation failed for \"%1$s\".</string>
     <string name="source_separation_status_failed_with_message">Separation failed for \"%1$s\": %2$s</string>
+    <string name="source_separation_playback_no_song">No playable song is selected.</string>
+    <string name="source_separation_playback_cache_not_found">No separated cache found for this song.</string>
+    <string name="source_separation_playback_stem_files_missing">Separated stem files are missing.</string>
     <string name="source_separation_playback_processing">Processing separated audio for the current position...</string>
     <string name="source_separation_playback_processing_estimate">Preparing buffered stems: %1$d/%2$d windows ready, %3$d waiting. About %4$d s remaining.</string>
     <string name="source_separation_playback_initial_processing_estimate">%1$s. About %2$d s remaining.</string>
@@ -76,6 +81,18 @@
     <string name="source_separation_model_downloading_mirror">Downloading model via mirror...</string>
     <string name="source_separation_model_deleting">Deleting model...</string>
     <string name="source_separation_model_error">Model operation failed: %1$s</string>
+    <string name="source_separation_model_open_failed">Could not open model file.</string>
+    <string name="source_separation_model_url_empty">Model URL cannot be empty.</string>
+    <string name="source_separation_model_url_invalid">Model URL is invalid.</string>
+    <string name="source_separation_model_url_scheme_invalid">Model URL must start with http:// or https://.</string>
+    <string name="source_separation_model_download_retrying_mirror">Retrying download via mirror...</string>
+    <string name="source_separation_model_download_connection_failed">Could not open model download connection.</string>
+    <string name="source_separation_model_download_failed">Model download failed.</string>
+    <string name="source_separation_model_download_http_failed">Model download failed: HTTP %1$d.</string>
+    <string name="source_separation_model_import_empty">Imported model file is empty.</string>
+    <string name="source_separation_model_replace_failed">Could not replace existing model file.</string>
+    <string name="source_separation_model_metadata_replace_failed">Could not replace model metadata.</string>
+    <string name="source_separation_model_load_failed">The installed source separation model could not be loaded. Import or download a valid ONNX model, then try again.</string>
     <string name="source_separation_model_file_label">File</string>
     <string name="source_separation_model_source_label">Source</string>
     <string name="source_separation_model_hash_title">Hash check</string>
@@ -140,6 +157,7 @@
     <string name="about_booming_ss_fork_summary">Open this fork on GitHub for source-separation changes, releases, and issue reports. If the same issue also happens in the original Booming Music app, please report it to the upstream repository.</string>
     <string name="about_booming_ss_upstream_title">Original Booming Music</string>
     <string name="about_booming_ss_upstream_summary">View the upstream project by Christians Martínez Alvarado and contributors.</string>
+    <string name="about_booming_music_original_author_title">Booming Music original author</string>
     <string name="source_separation_panel_entry_title">Source separation panel access</string>
     <string name="source_separation_panel_entry_summary">Show the player button and menu item for the source separation panel.</string>
     <string name="source_separation_quick_controls_title">Source separation quick controls</string>

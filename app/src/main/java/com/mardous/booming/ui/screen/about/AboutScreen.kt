@@ -205,7 +205,7 @@ fun AboutScreen(
                 )
             }
 
-            item { AboutSectionTitle(stringResource(R.string.author)) }
+            item { AboutSectionTitle(stringResource(R.string.about_booming_music_original_author_title)) }
 
             item {
                 AuthorSection(
