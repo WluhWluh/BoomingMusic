@@ -250,6 +250,12 @@ class SourceSeparationForegroundWorkerCoordinator(
         pauseRequested.set(true)
     }
 
+    fun clearAutoStartSuppressionForSong(songId: Long) {
+        if (autoStartSuppressedSongId == songId) {
+            autoStartSuppressedSongId = null
+        }
+    }
+
     suspend fun waitForWorkerToLeaveSong(songId: Long) {
         while (workerSongId == songId && workerJob?.isActive == true) {
             delay(SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS)
@@ -330,6 +336,7 @@ class SourceSeparationForegroundWorkerCoordinator(
         mode: SourceSeparationBlendMode,
         song: Song,
         fallbackBlend: Float?,
+        trustFallbackBlend: Boolean = false,
     ): Float {
         return when (mode) {
             SourceSeparationBlendMode.Off,
@@ -344,6 +351,7 @@ class SourceSeparationForegroundWorkerCoordinator(
                     persistedBlend
                         ?: readTemporaryPerSongBlend(song)
                             ?.also { blend -> migrateTemporaryPerSongBlend(song, blend) }
+                        ?: fallbackBlend?.takeIf { trustFallbackBlend }
                         ?: DEFAULT_SOURCE_SEPARATION_BLEND
                 }
             }
