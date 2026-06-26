@@ -39,6 +39,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -54,6 +55,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -145,6 +147,27 @@ fun AboutScreen(
             }
         }
     }
+    var showTranslateDialog by remember { mutableStateOf(false) }
+    if (showTranslateDialog) {
+        HelpTranslateDialog(
+            onDismiss = { showTranslateDialog = false },
+            onContinue = {
+                showTranslateDialog = false
+                context.openUrl(Constants.TRANSLATIONS_LINK)
+            }
+        )
+    }
+
+    var showReportDialog by remember { mutableStateOf(false) }
+    if (showReportDialog) {
+        ReportBugsDialog(
+            onDismiss = { showReportDialog = false },
+            onContinue = {
+                showReportDialog = false
+                context.openUrl(Constants.ISSUE_TRACKER_LINK)
+            }
+        )
+    }
 
     var showLicensesDialog by remember { mutableStateOf(false) }
     val libraries by produceLibraries(R.raw.aboutlibraries)
@@ -167,7 +190,9 @@ fun AboutScreen(
     }
 
     val sections = getAboutSections(
-        onTranslatorsClick = { showTranslatorsDialog = true }
+        onTranslatorsClick = { showTranslatorsDialog = true },
+        onReportBugsClick = { showReportDialog = true },
+        onTranslateClick = { showTranslateDialog = true }
     )
     val forkItems = getForkItems(
         onForkGitHubClick = { context.openUrl(GITHUB_URL) },
@@ -455,6 +480,66 @@ private fun AuthorSection(
 }
 
 @Composable
+private fun ReportBugsDialog(
+    onDismiss: () -> Unit = {},
+    onContinue: () -> Unit = {}
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_bug_report_24dp),
+                contentDescription = null
+            )
+        },
+        title = { Text(stringResource(R.string.report_bugs)) },
+        text = {
+            Text(text = stringResource(R.string.about_booming_ss_report_bugs_dialog_message))
+        },
+        confirmButton = {
+            Button(onClick = onContinue) {
+                Text(text = stringResource(R.string.continue_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(android.R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
+private fun HelpTranslateDialog(
+    onDismiss: () -> Unit = {},
+    onContinue: () -> Unit = {}
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_language_24dp),
+                contentDescription = null
+            )
+        },
+        title = { Text(stringResource(R.string.help_with_translations)) },
+        text = {
+            Text(text = stringResource(R.string.about_booming_ss_translate_dialog_message))
+        },
+        confirmButton = {
+            Button(onClick = onContinue) {
+                Text(text = stringResource(R.string.continue_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(android.R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
 private fun AboutSectionTitle(
     text: String,
     modifier: Modifier = Modifier
@@ -535,7 +620,9 @@ private fun AboutHeaderButton(
 
 @Composable
 private fun getAboutSections(
-    onTranslatorsClick: () -> Unit
+    onTranslatorsClick: () -> Unit,
+    onReportBugsClick: () -> Unit,
+    onTranslateClick: () -> Unit
 ): List<Pair<String, List<AboutItemData>>> {
     val context = LocalContext.current
 
@@ -621,13 +708,13 @@ private fun getAboutSections(
                 icon = { AboutItemIcon(painterResource(R.drawable.ic_bug_report_24dp)) },
                 title = stringResource(R.string.report_bugs),
                 summary = stringResource(R.string.report_bugs_summary),
-                onClick = { context.openUrl(Constants.ISSUE_TRACKER_LINK) }
+                onClick = onReportBugsClick
             ),
             AboutItemData(
                 icon = { AboutItemIcon(painterResource(R.drawable.ic_language_24dp)) },
                 title = stringResource(R.string.help_with_translations),
                 summary = stringResource(R.string.help_with_translations_summary),
-                onClick = { context.openUrl(Constants.TRANSLATIONS_LINK) }
+                onClick = onTranslateClick
             ),
             AboutItemData(
                 icon = { AboutItemIcon(painterResource(R.drawable.ic_telegram_24dp)) },

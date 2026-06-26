@@ -1093,6 +1093,7 @@ private fun SourceSeparationPlaybackProcessingProgress(
     processingGeneration: Long,
     processingSongId: Long?,
 ) {
+    val context = LocalContext.current
     val progressState = rememberSourceSeparationPlaybackProcessingProgressState(
         separationState = separationState,
         processingGeneration = processingGeneration,
@@ -1116,7 +1117,8 @@ private fun SourceSeparationPlaybackProcessingProgress(
             ) {
                 stringResource(
                     R.string.source_separation_playback_initial_processing_estimate,
-                    progressState.initialProcessingLabel,
+                    context.localizedSourceSeparationStage(progressState.initialProcessingLabel)
+                        ?: progressState.initialProcessingLabel,
                     progressState.estimatedRemainingSeconds,
                 )
             } else {
@@ -1218,6 +1220,7 @@ private fun SourceSeparationStatusText(
     state: SourceSeparationUiState,
     cacheState: SourceSeparationCacheUiState,
 ) {
+    val context = LocalContext.current
     val text = when (state) {
         SourceSeparationUiState.Idle -> when (cacheState) {
             SourceSeparationCacheUiState.NotStarted -> {
@@ -1244,12 +1247,14 @@ private fun SourceSeparationStatusText(
                     state.completedWindows,
                     state.totalWindows,
                     state.percent,
-                    state.stage ?: stringResource(R.string.source_separation_processing_windows),
+                    context.localizedSourceSeparationStage(state.stage)
+                        ?: stringResource(R.string.source_separation_processing_windows),
                 )
             } else {
                 stringResource(
                     R.string.source_separation_stage,
-                    state.stage ?: stringResource(R.string.source_separation_preparing),
+                    context.localizedSourceSeparationStage(state.stage)
+                        ?: stringResource(R.string.source_separation_preparing),
                 )
             }
         }
