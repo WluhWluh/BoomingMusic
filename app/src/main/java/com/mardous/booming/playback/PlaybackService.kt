@@ -224,7 +224,7 @@ class PlaybackService :
     private var sourceSeparationPlaybackResumeWhenReady = false
     private var sourceSeparationPlaybackInternalPlayWhenReady: Boolean? = null
     private var sourceSeparationPlaybackPlayIntent = false
-    private var sourceSeparationPausedBlendFlushConsumed = false
+    private var sourceSeparationPausedBlendFlushPending = false
     private val sourceSeparationPlaybackReadinessMutex = Mutex()
     private var sourceSeparationPlaybackGateJob: Job? = null
     private var sourceSeparationPlaybackReadinessMonitorJob: Job? = null
@@ -1019,7 +1019,7 @@ class PlaybackService :
         if (!isInternalPlayWhenReadyChange) {
             if (playWhenReady) {
                 sourceSeparationPlaybackPlayIntent = true
-                sourceSeparationPausedBlendFlushConsumed = false
+                flushPendingSourceSeparationPausedBlendChange("playWhenReady")
             } else if (shouldClearSourceSeparationPlaybackPlayIntent(reason)) {
                 sourceSeparationPlaybackPlayIntent = false
             }
@@ -2022,14 +2022,9 @@ class PlaybackService :
         if (sourceSeparationPlaybackSession != null &&
             !player.playWhenReady &&
             !player.isPlaying &&
-            player.playbackState != Player.STATE_BUFFERING &&
-            !sourceSeparationPausedBlendFlushConsumed
+            player.playbackState != Player.STATE_BUFFERING
         ) {
-            flushSourceSeparationPausedOutput(
-                reason = "blendChanged",
-                forceDiscontinuity = true,
-            )
-            sourceSeparationPausedBlendFlushConsumed = true
+            sourceSeparationPausedBlendFlushPending = true
         }
         broadcastSourceSeparationPlaybackChanged()
         maybePreStartNextSourceSeparation("blendChanged")
@@ -2657,6 +2652,7 @@ class PlaybackService :
         cancelSourceSeparationPlaybackReadinessMonitor("clear")
         sourceSeparationMixProcessor.disable()
         sourceSeparationPlaybackIsProcessing = false
+        sourceSeparationPausedBlendFlushPending = false
         rememberWarmSourceSeparationHydration(session)
         cleanupCompletedSourceSeparationTemporaryDirs(activeSession = session)
         updateSourceSeparationProcessingLease("clear")
@@ -3462,6 +3458,17 @@ class PlaybackService :
                     "forceDiscontinuity=$forceDiscontinuity"
         )
         player.seekTo(index, seekPositionMs)
+    }
+
+    private fun flushPendingSourceSeparationPausedBlendChange(reason: String) {
+        if (!sourceSeparationPausedBlendFlushPending) return
+        sourceSeparationPausedBlendFlushPending = false
+        if (sourceSeparationPlaybackSession == null) return
+
+        flushSourceSeparationPausedOutput(
+            reason = "blendChanged.$reason",
+            forceDiscontinuity = true,
+        )
     }
 
     private fun sourceSeparationBlendFlushPosition(positionMs: Long): Long {
