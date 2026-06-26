@@ -100,6 +100,7 @@ import com.mardous.booming.ui.screen.player.PlayerViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
 import com.mardous.booming.ui.screen.player.SourceSeparationPlaybackUiState
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
+import com.mardous.booming.ui.screen.player.localizedSourceSeparationStage
 import com.mardous.booming.ui.screen.player.cover.CoverPagerFragment
 import com.mardous.booming.ui.screen.tageditor.SongTagEditorActivity
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
@@ -710,18 +711,19 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                     sourceSeparationSnackbar = null
                     return
                 }
+                val stage = view.context.localizedSourceSeparationStage(state.stage)
                 val message = if (state.totalWindows > 0) {
                     getString(
                         R.string.source_separation_progress,
                         state.completedWindows,
                         state.totalWindows,
                         state.percent,
-                        state.stage ?: getString(R.string.source_separation_processing_windows),
+                        stage ?: getString(R.string.source_separation_processing_windows),
                     )
                 } else {
                     getString(
                         R.string.source_separation_stage,
-                        state.stage ?: getString(R.string.source_separation_preparing),
+                        stage ?: getString(R.string.source_separation_preparing),
                     )
                 }
                 val snackbar = sourceSeparationSnackbar

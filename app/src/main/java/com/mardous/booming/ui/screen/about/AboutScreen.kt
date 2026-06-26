@@ -111,6 +111,16 @@ fun AboutScreen(
             }
         )
     }
+    var showTranslateDialog by remember { mutableStateOf(false) }
+    if (showTranslateDialog) {
+        HelpTranslateDialog(
+            onDismiss = { showTranslateDialog = false },
+            onContinue = {
+                showTranslateDialog = false
+                context.openUrl(TRANSLATIONS_LINK)
+            }
+        )
+    }
 
     val contributors by viewModel.contributors.collectAsState()
     LaunchedEffect(Unit) {
@@ -196,7 +206,7 @@ fun AboutScreen(
 
             AboutSupportSection(
                 onTranslateClick = {
-                    context.openUrl(TRANSLATIONS_LINK)
+                    showTranslateDialog = true
                 },
                 onReportBugsClick = {
                     showReportDialog = true
@@ -519,7 +529,37 @@ private fun ReportBugsDialog(
         },
         title = { Text(stringResource(R.string.report_bugs)) },
         text = {
-            Text(text = stringResource(R.string.you_will_be_forwarded_to_the_issue_tracker_website))
+            Text(text = stringResource(R.string.about_booming_ss_report_bugs_dialog_message))
+        },
+        confirmButton = {
+            Button(onClick = onContinue) {
+                Text(text = stringResource(R.string.continue_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(android.R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
+private fun HelpTranslateDialog(
+    onDismiss: () -> Unit = {},
+    onContinue: () -> Unit = {}
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_language_24dp),
+                contentDescription = null
+            )
+        },
+        title = { Text(stringResource(R.string.help_with_translations)) },
+        text = {
+            Text(text = stringResource(R.string.about_booming_ss_translate_dialog_message))
         },
         confirmButton = {
             Button(onClick = onContinue) {
