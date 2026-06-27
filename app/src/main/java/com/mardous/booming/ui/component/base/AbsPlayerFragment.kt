@@ -489,6 +489,10 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
         playerToolbar?.menu?.onLyricsVisibilityChang(lyricsVisible)
     }
 
+    override fun onSourceSeparationPanelRequested() {
+        findNavController().navigate(R.id.nav_source_separation_settings)
+    }
+
     override fun onDestroyView() {
         sourceSeparationSnackbar?.dismiss()
         sourceSeparationSnackbar = null
