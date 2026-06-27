@@ -1,6 +1,7 @@
 package com.mardous.booming.ui.screen.lyrics
 
 import android.os.SystemClock
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDp
@@ -51,6 +52,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -64,6 +66,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.keepScreenOn
@@ -71,6 +74,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.rememberNestedScrollInteropConnection
 import androidx.compose.ui.res.painterResource
@@ -110,6 +114,7 @@ import com.mardous.booming.ui.screen.player.rememberSourceSeparationPlaybackProc
 import com.mardous.booming.ui.theme.PlayerTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import org.koin.compose.viewmodel.koinActivityViewModel
 import kotlin.math.abs
@@ -295,6 +300,7 @@ fun CoverLyricsScreen(
     lyricsViewModel: LyricsViewModel,
     playerViewModel: PlayerViewModel,
     onExpandClick: () -> Unit,
+    onSourceSeparationPanelLongClick: () -> Unit,
     showSourceSeparationQuickControls: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -404,7 +410,8 @@ fun CoverLyricsScreen(
                             playerViewModel.setSourceSeparationPlaybackEnabled(false)
                         },
                         onBlendPreview = playerViewModel::previewSourceSeparationBlend,
-                        onBlendChangeFinished = playerViewModel::setSourceSeparationBlend
+                        onBlendChangeFinished = playerViewModel::setSourceSeparationBlend,
+                        onLongClick = onSourceSeparationPanelLongClick,
                     )
                 }
 
@@ -455,6 +462,7 @@ private fun CoverLyricsQuickBlendControl(
     onDisableSeparatedPlayback: () -> Unit,
     onBlendPreview: (Float) -> Unit,
     onBlendChangeFinished: (Float) -> Unit,
+    onLongClick: () -> Unit,
 ) {
     var dragBlend by remember { mutableFloatStateOf(blend.coerceIn(0f, 1f)) }
     var dragging by remember { mutableStateOf(false) }
@@ -553,75 +561,140 @@ private fun CoverLyricsQuickBlendControl(
     )
     val viewConfiguration = LocalViewConfiguration.current
     val touchSlop = viewConfiguration.touchSlop
+    val longPressTimeoutMillis = viewConfiguration.longPressTimeoutMillis
     val hapticFeedback = LocalHapticFeedback.current
-    val interactionModifier = if (expanded) {
-        Modifier.pointerInput(touchSlop, hapticFeedback) {
-            awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = false)
-                val pointerId = down.id
-                var gestureDragging = false
-                var latestBlend = displayedBlend
-                var wasInNeutralSnapZone = coverLyricsQuickBlendIsInNeutralSnapZone(
-                    y = down.position.y,
+    val view = LocalView.current
+    val currentDisplayedBlend by rememberUpdatedState(displayedBlend)
+    val currentOnEnableSeparatedPlayback by rememberUpdatedState(onEnableSeparatedPlayback)
+    val currentOnDisableSeparatedPlayback by rememberUpdatedState(onDisableSeparatedPlayback)
+    val currentOnBlendPreview by rememberUpdatedState(onBlendPreview)
+    val currentOnBlendChangeFinished by rememberUpdatedState(onBlendChangeFinished)
+    val currentOnLongClick by rememberUpdatedState(onLongClick)
+    val gestureModifier = Modifier.pointerInput(
+        expanded,
+        touchSlop,
+        longPressTimeoutMillis,
+        hapticFeedback,
+        view,
+    ) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val pointerId = down.id
+            var releasedChange: PointerInputChange? = null
+            var dragStartChange: PointerInputChange? = null
+            var latestBlend = currentDisplayedBlend
+            var wasInNeutralSnapZone = coverLyricsQuickBlendIsInNeutralSnapZone(
+                y = down.position.y,
+                heightPx = size.height.toFloat()
+            )
+
+            fun updateDrag(change: PointerInputChange) {
+                latestBlend = coverLyricsQuickBlendValueForY(
+                    y = change.position.y,
                     heightPx = size.height.toFloat()
                 )
+                val isInNeutralSnapZone = coverLyricsQuickBlendIsInNeutralSnapZone(
+                    y = change.position.y,
+                    heightPx = size.height.toFloat()
+                )
+                if (!wasInNeutralSnapZone && isInNeutralSnapZone) {
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
+                }
+                wasInNeutralSnapZone = isInNeutralSnapZone
+                dragBlend = latestBlend
+                currentOnBlendPreview(latestBlend)
+                change.consume()
+            }
 
-                try {
+            val longPressReached = withTimeoutOrNull(longPressTimeoutMillis) {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes
+                        .firstOrNull { it.id == pointerId }
+                        ?: continue
+
+                    if (!change.pressed) {
+                        releasedChange = change
+                        return@withTimeoutOrNull false
+                    }
+
+                    if ((change.position - down.position).getDistance() > touchSlop) {
+                        dragStartChange = change
+                        return@withTimeoutOrNull false
+                    }
+                }
+            } == null
+
+            when {
+                longPressReached -> {
+                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    currentOnLongClick()
                     while (true) {
                         val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == pointerId } ?: continue
+                        val change = event.changes
+                            .firstOrNull { it.id == pointerId }
+                            ?: continue
+                        change.consume()
+                        if (!change.pressed) break
+                    }
+                }
 
-                        if (!change.pressed) {
-                            if (gestureDragging) {
-                                dragBlend = latestBlend
-                                onBlendChangeFinished(latestBlend)
-                                change.consume()
-                            } else {
-                                coverLyricsQuickBlendHandleTap(
-                                    y = change.position.y,
-                                    heightPx = size.height.toFloat(),
-                                    onVocalsOnly = { onBlendChangeFinished(0f) },
-                                    onCenter = onDisableSeparatedPlayback,
-                                    onInstrumentalOnly = { onBlendChangeFinished(1f) }
-                                )
-                            }
-                            break
-                        }
-
-                        if (!gestureDragging &&
-                            (change.position - down.position).getDistance() > touchSlop
-                        ) {
-                            gestureDragging = true
-                            dragging = true
-                        }
-
-                        if (gestureDragging) {
-                            latestBlend = coverLyricsQuickBlendValueForY(
+                releasedChange != null -> {
+                    releasedChange.let { change ->
+                        if (expanded) {
+                            coverLyricsQuickBlendHandleTap(
                                 y = change.position.y,
-                                heightPx = size.height.toFloat()
+                                heightPx = size.height.toFloat(),
+                                onVocalsOnly = { currentOnBlendChangeFinished(0f) },
+                                onCenter = currentOnDisableSeparatedPlayback,
+                                onInstrumentalOnly = { currentOnBlendChangeFinished(1f) }
                             )
-                            val isInNeutralSnapZone = coverLyricsQuickBlendIsInNeutralSnapZone(
-                                y = change.position.y,
-                                heightPx = size.height.toFloat()
-                            )
-                            if (!wasInNeutralSnapZone && isInNeutralSnapZone) {
-                                hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
-                            }
-                            wasInNeutralSnapZone = isInNeutralSnapZone
-                            dragBlend = latestBlend
-                            onBlendPreview(latestBlend)
-                            change.consume()
+                        } else {
+                            currentOnEnableSeparatedPlayback()
                         }
                     }
-                } finally {
-                    dragging = false
+                }
+
+                expanded && dragStartChange != null -> {
+                    dragging = true
+                    try {
+                        updateDrag(dragStartChange)
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes
+                                .firstOrNull { it.id == pointerId }
+                                ?: continue
+                            if (!change.pressed) {
+                                dragBlend = latestBlend
+                                currentOnBlendChangeFinished(latestBlend)
+                                change.consume()
+                                break
+                            }
+                            updateDrag(change)
+                        }
+                    } finally {
+                        dragging = false
+                    }
+                }
+
+                dragStartChange != null -> {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes
+                            .firstOrNull { it.id == pointerId }
+                            ?: continue
+                        if (!change.pressed) break
+                    }
                 }
             }
         }
+    }
+    val interactionModifier = if (expanded) {
+        gestureModifier
     } else {
         Modifier
             .clip(buttonBackgroundShape)
-            .clickable(onClick = onEnableSeparatedPlayback)
+            .then(gestureModifier)
     }
     Box(
         contentAlignment = Alignment.Center,

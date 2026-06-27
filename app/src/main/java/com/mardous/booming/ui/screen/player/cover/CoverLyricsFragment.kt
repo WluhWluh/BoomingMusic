@@ -51,7 +51,11 @@ class CoverLyricsFragment : Fragment(), SharedPreferences.OnSharedPreferenceChan
                             } else {
                                 goToDestination(requireActivity(), R.id.nav_lyrics)
                             }
-                        })
+                        },
+                        onSourceSeparationPanelLongClick = {
+                            callbacks?.onSourceSeparationPanelRequested()
+                        }
+                    )
                 }
             }
         }
@@ -72,5 +76,15 @@ class CoverLyricsFragment : Fragment(), SharedPreferences.OnSharedPreferenceChan
             showSourceSeparationQuickControlsState.value =
                 Preferences.sourceSeparationQuickControlsVisible
         }
+    }
+
+    private var callbacks: Callbacks? = null
+
+    internal fun setCallbacks(callbacks: Callbacks?) {
+        this.callbacks = callbacks
+    }
+
+    interface Callbacks {
+        fun onSourceSeparationPanelRequested()
     }
 }
