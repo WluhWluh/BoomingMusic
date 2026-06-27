@@ -88,7 +88,6 @@ fun LyricsView(
     isPowerSaveMode: Boolean,
     hasBackgroundEffects: Boolean,
     modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = settings.contentPadding,
     onLineClick: (SyncedLyrics.Line) -> Unit
 ) {
     val density = LocalDensity.current
