@@ -326,13 +326,14 @@ fun CoverLyricsScreen(
         } else {
             CoverLyricsControlSlotSize
         }
+        val baseLyricsContentPadding = PaddingValues(vertical = 72.dp, horizontal = 12.dp)
         val overlayClearance = maxOf(
             0.dp,
-            lyricsViewSettings.contentPadding.calculateBottomPadding() -
+            baseLyricsContentPadding.calculateBottomPadding() -
                     CoverLyricsControlSlotSize -
                     CoverLyricsOverlayPadding
         )
-        val lyricsContentPadding = lyricsViewSettings.contentPadding.withMinimumBottom(
+        val lyricsContentPadding = baseLyricsContentPadding.withMinimumBottom(
             overlayControlsHeight + CoverLyricsOverlayPadding + overlayClearance
         )
         Box(modifier = modifier.fillMaxSize()) {
@@ -868,7 +869,7 @@ private fun LyricsSurface(
     playerViewModel: PlayerViewModel,
     uiState: LyricsUiState,
     settings: LyricsViewSettings,
-    contentPadding: PaddingValues = settings.contentPadding,
+    contentPadding: PaddingValues,
     fadingEdges: FadingEdges,
     textAlign: TextAlign?,
     isPlaying: Boolean,
@@ -958,7 +959,6 @@ private fun LyricsSurface(
                     contentColor = contentColor,
                     isPowerSaveMode = isPowerSaveMode,
                     hasBackgroundEffects = hasBackgroundEffects,
-                    contentPadding = contentPadding,
                     onLineClick = { onSeekToLine(it) }
                 )
             }
