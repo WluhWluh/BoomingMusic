@@ -367,6 +367,7 @@ class PlayerViewModel(
             internalJobs += currentSongFlow
                 .distinctUntilChangedBy { it.id }
                 .onEach { song ->
+                    clearSourceSeparationPausePendingAction(song)
                     refreshCurrentSourceSeparationCacheAvailable(song)
                     applySourceSeparationSettingsForSong(
                         song = song,
@@ -662,7 +663,16 @@ class PlayerViewModel(
             return
         }
         val song = currentSong
+        clearSourceSeparationPausePendingAction(song)
         sourceSeparationForegroundWorkerCoordinator.requestSong(song)
+    }
+
+    private fun clearSourceSeparationPausePendingAction(song: Song = currentSong) {
+        if (currentSong.id == song.id &&
+            _sourceSeparationPendingActionFlow.value == SourceSeparationPendingAction.Pause
+        ) {
+            _sourceSeparationPendingActionFlow.value = null
+        }
     }
 
     private suspend fun handleSourceSeparationModelLoadFailure(message: String) {
@@ -1028,6 +1038,7 @@ class PlayerViewModel(
         shouldPromoteCompletedStems: Boolean,
     ) {
         if (currentSong.id == song.id) {
+            clearSourceSeparationPausePendingAction(song)
             refreshCurrentSourceSeparationCacheAvailable(song)
         }
         pruneSourceSeparationCachesAndRefresh()
@@ -1039,11 +1050,13 @@ class PlayerViewModel(
 
     override fun onSourceSeparationWorkerPaused(song: Song) {
         if (currentSong.id == song.id) {
+            clearSourceSeparationPausePendingAction(song)
             refreshCurrentSourceSeparationCacheAvailable(song)
         }
     }
 
     override fun onSourceSeparationWorkerModelLoadFailed(message: String) {
+        clearSourceSeparationPausePendingAction()
         viewModelScope.launch {
             handleSourceSeparationModelLoadFailure(message)
         }

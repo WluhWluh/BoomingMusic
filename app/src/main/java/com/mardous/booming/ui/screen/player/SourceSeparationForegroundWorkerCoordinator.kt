@@ -164,7 +164,27 @@ class SourceSeparationForegroundWorkerCoordinator(
         workerActivated = true
         autoStartSuppressedSongId = null
         if (workerJob?.isActive == true) {
-            if (workerSongId == song.id) return
+            if (workerSongId == song.id) {
+                pauseRequested.set(false)
+                val workerState = _workerStateFlow.value
+                if (workerState !is SourceSeparationUiState.Running) {
+                    setPendingStart(
+                        SourceSeparationWorkerRequest.Full(
+                            song = song,
+                            reason = SourceSeparationPendingStartReason.Manual,
+                        )
+                    )
+                }
+                if (workerState is SourceSeparationUiState.Paused ||
+                    workerState is SourceSeparationUiState.Idle
+                ) {
+                    _workerStateFlow.value = SourceSeparationUiState.Running(
+                        songId = song.id,
+                        songTitle = song.title,
+                    )
+                }
+                return
+            }
             if (pendingStartRequest?.song?.id == song.id) {
                 pendingStartRequest = SourceSeparationWorkerRequest.Full(
                     song = song,
@@ -633,6 +653,9 @@ class SourceSeparationForegroundWorkerCoordinator(
                             )
                         },
                     )
+                    if (pendingStartRequest?.song?.id == song.id) {
+                        clearPendingStart()
+                    }
                     callbacks?.onSourceSeparationWorkerProgress(song)
                 },
                 onPrepared = {
