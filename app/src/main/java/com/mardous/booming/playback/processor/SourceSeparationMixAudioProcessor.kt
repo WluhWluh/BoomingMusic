@@ -441,12 +441,18 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         debugTraceSink?.invoke("mix.$event | $detail")
     }
 
+    private fun traceSinkForDebugEvent(event: String): ((String) -> Unit)? {
+        return if (debugTraceSink == null) {
+            null
+        } else {
+            { detail -> traceDebug(event, detail) }
+        }
+    }
+
     private fun openStemInput(file: File): StemPcmInput {
         return when {
             file.extension.equals("flac", ignoreCase = true) -> {
-                FlacStemPcmInput(file) { detail ->
-                    traceDebug("flac", detail)
-                }
+                FlacStemPcmInput(file, traceSink = traceSinkForDebugEvent("flac"))
             }
             file.extension.equals("pcm", ignoreCase = true) -> {
                 RawPcmStemInput(file)
@@ -469,6 +475,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         private const val DEFAULT_SAMPLE_RATE = 44_100
         private const val DEFAULT_FRAME_SIZE = CHANNEL_COUNT_STEREO * BYTES_PER_SAMPLE
         private const val MILLIS_PER_SECOND = 1000
+        private const val NANOS_PER_MILLISECOND = 1_000_000L
         private const val WAV_HEADER_SIZE = 44L
     }
 
@@ -524,12 +531,18 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
     private class FlacStemPcmInput(
         file: File,
-        traceSink: ((String) -> Unit)?,
+        private val traceSink: ((String) -> Unit)?,
     ) : StemPcmInput {
         private val reader = Pcm16StereoFlacEncoder.openIndexedPcmReader(file, traceSink)
         private val fallbackPcm = if (reader == null) {
-            traceSink?.invoke("fallbackWholeFileDecode file=${file.name}")
-            Pcm16StereoFlacEncoder.decodeFlacFile(file).pcm16
+            val startedAtNs = System.nanoTime()
+            traceSink?.invoke("fallbackWholeFileDecode.start file=${file.name} bytes=${file.length()}")
+            Pcm16StereoFlacEncoder.decodeFlacFile(file).pcm16.also { pcm ->
+                traceSink?.invoke(
+                    "fallbackWholeFileDecode.end file=${file.name} pcmBytes=${pcm.size} " +
+                            "decodeMs=${(System.nanoTime() - startedAtNs) / NANOS_PER_MILLISECOND.toFloat()}"
+                )
+            }
         } else {
             null
         }
@@ -567,6 +580,10 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 .let { position ->
                     maxBytes?.let(position::coerceAtMost) ?: position
                 }
+            traceSink?.invoke(
+                "flacInput.seek requestedByte=$bytePosition appliedByte=$position " +
+                        "indexed=${activeReader != null} fallbackBytes=${fallbackPcm?.size}"
+            )
         }
 
         override fun close() {

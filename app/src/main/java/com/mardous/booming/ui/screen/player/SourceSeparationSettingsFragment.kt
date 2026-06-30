@@ -1,10 +1,15 @@
 package com.mardous.booming.ui.screen.player
 
 import android.app.Dialog
+import android.content.Context
+import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardOptions
@@ -70,8 +75,11 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.mardous.booming.BuildConfig
 import com.mardous.booming.R
+import com.mardous.booming.extensions.MIME_TYPE_PLAIN_TEXT
 import com.mardous.booming.extensions.files.asReadableFileSize
+import com.mardous.booming.extensions.files.getFormattedFileName
 import com.mardous.booming.extensions.isLandscape
+import com.mardous.booming.extensions.showToast
 import com.mardous.booming.extensions.utilities.dateStr
 import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
 import com.mardous.booming.ui.component.compose.TitledCard
@@ -79,6 +87,7 @@ import com.mardous.booming.ui.theme.SurfaceColorTokens
 import com.mardous.booming.ui.theme.BoomingMusicTheme
 import com.mardous.booming.ui.theme.SliderTokens
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
+import java.io.File
 
 class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
 
@@ -121,6 +130,15 @@ private fun SourceSeparationSettingsSheet(
     viewModel: PlayerViewModel
 ) {
     val hapticFeedback = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val exportTraceLauncher = rememberLauncherForActivityResult(
+        contract = CreateDocument(MIME_TYPE_PLAIN_TEXT),
+        onResult = { destination ->
+            if (destination != null) {
+                exportSourceSeparationDebugTrace(context, destination)
+            }
+        },
+    )
 
     val playbackState by viewModel.sourceSeparationPlaybackStateFlow.collectAsState()
     val blendMode by viewModel.sourceSeparationBlendModeFlow.collectAsState()
@@ -676,9 +694,67 @@ private fun SourceSeparationSettingsSheet(
                         }
                     }
                 }
+
+                if (BuildConfig.DEBUG) {
+                    item {
+                        OutlinedButton(
+                            onClick = {
+                                hapticFeedback.performHapticFeedback(
+                                    HapticFeedbackType.Confirm
+                                )
+                                exportTraceLauncher.launch(
+                                    getFormattedFileName("playback-gate", "log")
+                                )
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_file_export_24dp),
+                                contentDescription = stringResource(
+                                    R.string.action_export_playlist
+                                ),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+private fun exportSourceSeparationDebugTrace(
+    context: Context,
+    destination: Uri,
+) {
+    val source = context.sourceSeparationDebugTraceFile()
+    if (!source.isFile) {
+        context.showToast(R.string.an_unexpected_error_occurred)
+        return
+    }
+
+    runCatching {
+        context.contentResolver.openOutputStream(destination, "w")?.use { output ->
+            source.inputStream().use { input ->
+                input.copyTo(output)
+                output.flush()
+            }
+        } ?: error("Unable to open output stream.")
+    }.onFailure {
+        context.showToast(R.string.an_unexpected_error_occurred)
+    }
+}
+
+private fun Context.sourceSeparationDebugTraceFile(): File {
+    return File(
+        File(
+            getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir,
+            "source-separation/debug",
+        ),
+        "playback-gate.log",
+    )
 }
 
 @Composable

@@ -44,6 +44,7 @@ import com.mardous.booming.playback.ProgressObserver
 import com.mardous.booming.playback.getQueueItems
 import com.mardous.booming.playback.shuffle.ShuffleManager
 import com.mardous.booming.playback.toMediaItems
+import com.mardous.booming.BuildConfig
 import com.mardous.booming.separation.SourceSeparationCacheStatus
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.cache.SourceSeparationCacheEntry
@@ -802,20 +803,44 @@ class PlayerViewModel(
                                 !isSourceSeparationFlacPromotionCurrent(request.song.id)
                     }
                     try {
+                        traceSourceSeparationPlaybackTestMarker(
+                            "flacPromotion.start songId=${request.song.id} " +
+                                    "current=${currentSong.id == request.song.id}"
+                        )
                         runCatching {
                             sourceSeparationEngine.promoteCompletedStemsForSong(
                                 song = request.song,
                                 shouldCancel = shouldCancelRequest,
                             )
                         }.onSuccess { manifest ->
+                            traceSourceSeparationPlaybackTestMarker(
+                                "flacPromotion.success songId=${request.song.id} " +
+                                        "manifest=${manifest != null} current=${currentSong.id == request.song.id} " +
+                                        "state=${manifest?.state} promoted=${manifest?.output?.promotedFormat}"
+                            )
                             if (manifest != null) {
                                 if (currentSong.id == request.song.id) {
                                     refreshCurrentSourceSeparationCacheAvailable(request.song)
+                                    traceSourceSeparationPlaybackTestMarker(
+                                        "flacPromotion.syncPlayback songId=${request.song.id} force=true"
+                                    )
                                     syncSourceSeparationPlaybackIfRequested(force = true)
+                                } else {
+                                    traceSourceSeparationPlaybackTestMarker(
+                                        "flacPromotion.syncPlayback.skip songId=${request.song.id} " +
+                                                "current=${currentSong.id}"
+                                    )
                                 }
+                                traceSourceSeparationPlaybackTestMarker(
+                                    "flacPromotion.cleanupTemporaryCache songId=${request.song.id}"
+                                )
                                 requestSourceSeparationTemporaryCacheCleanup()
                             }
                         }.onFailure { error ->
+                            traceSourceSeparationPlaybackTestMarker(
+                                "flacPromotion.failed songId=${request.song.id} " +
+                                        "error=${error.message ?: error::class.java.name}"
+                            )
                             if (error is CancellationException) {
                                 Log.d(TAG, "Source separation FLAC promotion canceled")
                             } else {
@@ -823,6 +848,10 @@ class PlayerViewModel(
                             }
                         }
                     } finally {
+                        traceSourceSeparationPlaybackTestMarker(
+                            "flacPromotion.finish songId=${request.song.id} " +
+                                    "current=${currentSong.id == request.song.id}"
+                        )
                         finishSourceSeparationFlacPromotionRequest(request)
                     }
                 }
@@ -1860,6 +1889,7 @@ class PlayerViewModel(
     }
 
     private suspend fun traceSourceSeparationPlaybackTestMarker(marker: String) {
+        if (!BuildConfig.DEBUG) return
         runCatching {
             sendSourceSeparationPlaybackCommand(
                 action = Playback.TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER,

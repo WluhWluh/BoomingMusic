@@ -313,6 +313,11 @@ object Pcm16StereoFlacEncoder {
         }
         return runCatching {
             val index = readFrameIndexFile(indexFile)
+            traceSink?.invoke(
+                "indexedOpen validate file=${flacFile.name} flacBytes=${flacFile.length()} " +
+                        "indexBytes=${index.flacBytes} indexFrames=${index.frames.size} " +
+                        "frameCount=${index.frameCount} sampleRate=${index.sampleRate}"
+            )
             require(index.flacBytes == flacFile.length()) {
                 "FLAC index byte length does not match file length."
             }
@@ -1407,6 +1412,13 @@ object Pcm16StereoFlacEncoder {
         override fun read(buffer: ByteArray, byteCount: Int): Int {
             if (pcmBytePosition >= totalPcmBytes()) return -1
             var copied = 0
+            val shouldTraceReadTiming = shouldTraceIndexedReaderTiming()
+            val startedAtNs = if (shouldTraceReadTiming) {
+                System.nanoTime()
+            } else {
+                0L
+            }
+            val startBytePosition = pcmBytePosition
             while (copied < byteCount && pcmBytePosition < totalPcmBytes()) {
                 val frameIndex = frameIndexForPcmByte(pcmBytePosition) ?: break
                 ensureFrameDecoded(frameIndex)
@@ -1430,6 +1442,16 @@ object Pcm16StereoFlacEncoder {
                 copied += available
                 pcmBytePosition += available
             }
+            traceReadIfNeeded(
+                requestedBytes = byteCount,
+                copiedBytes = copied,
+                startBytePosition = startBytePosition,
+                elapsedNs = if (shouldTraceReadTiming) {
+                    System.nanoTime() - startedAtNs
+                } else {
+                    0L
+                },
+            )
             return if (copied > 0) copied else -1
         }
 
@@ -1445,7 +1467,10 @@ object Pcm16StereoFlacEncoder {
                 prefetchTaskFrameIndex = -1
             }
             frameIndexForPcmByte(pcmBytePosition)?.let(::schedulePrefetch)
-            traceSink?.invoke("indexedSeek byte=$pcmBytePosition")
+            traceSink?.invoke(
+                "indexedSeek byte=$pcmBytePosition frame=${pcmBytePosition / BYTES_PER_FRAME} " +
+                        "index=${frameIndexForPcmByte(pcmBytePosition)}"
+            )
         }
 
         override fun close() {
@@ -1462,7 +1487,8 @@ object Pcm16StereoFlacEncoder {
 
         private fun ensureFrameDecoded(frameIndex: Int) {
             if (currentFrameIndex == frameIndex) return
-            val startedAtNs = if (TRACE_INDEXED_FRAME_DECODE_TIMING) {
+            val shouldTraceFrameTiming = shouldTraceIndexedFrameDecodeTiming()
+            val startedAtNs = if (shouldTraceFrameTiming) {
                 System.nanoTime()
             } else {
                 0L
@@ -1475,7 +1501,7 @@ object Pcm16StereoFlacEncoder {
                 traceFrameDecodeIfNeeded(
                     frameIndex = frameIndex,
                     byteOffset = index.frames[frameIndex].byteOffset,
-                    elapsedNs = if (TRACE_INDEXED_FRAME_DECODE_TIMING) {
+                    elapsedNs = if (shouldTraceFrameTiming) {
                         System.nanoTime() - startedAtNs
                     } else {
                         0L
@@ -1498,7 +1524,7 @@ object Pcm16StereoFlacEncoder {
             traceFrameDecodeIfNeeded(
                 frameIndex = frameIndex,
                 byteOffset = index.frames[frameIndex].byteOffset,
-                elapsedNs = if (TRACE_INDEXED_FRAME_DECODE_TIMING) {
+                elapsedNs = if (shouldTraceFrameTiming) {
                     System.nanoTime() - startedAtNs
                 } else {
                     0L
@@ -1606,7 +1632,7 @@ object Pcm16StereoFlacEncoder {
                     prefetchedBlock = block
                 }
             }.onFailure { error ->
-                if (TRACE_INDEXED_FRAME_DECODE_TIMING) {
+                if (shouldTraceIndexedFrameDecodeTiming()) {
                     traceSink?.invoke(
                         "indexedPrefetch failed frame=$prefetchTaskFrameIndex " +
                                 "error=${error.message ?: error::class.java.name}"
@@ -1623,11 +1649,39 @@ object Pcm16StereoFlacEncoder {
             elapsedNs: Long,
             prefetched: Boolean,
         ) {
-            if (!TRACE_INDEXED_FRAME_DECODE_TIMING) return
+            if (!shouldTraceIndexedFrameDecodeTiming()) return
             traceSink?.invoke(
                 "indexedDecode frame=$frameIndex byteOffset=$byteOffset " +
                         "decodeMs=${elapsedNs / NANOS_PER_MILLISECOND.toFloat()} prefetched=$prefetched"
             )
+        }
+
+        private fun traceReadIfNeeded(
+            requestedBytes: Int,
+            copiedBytes: Int,
+            startBytePosition: Long,
+            elapsedNs: Long,
+        ) {
+            if (!shouldTraceIndexedReaderTiming()) return
+            val readSeq = ++debugReadSeq
+            if (readSeq <= TRACE_INDEXED_INITIAL_READ_COUNT ||
+                readSeq % TRACE_INDEXED_READ_INTERVAL == 0L ||
+                copiedBytes <= 0
+            ) {
+                traceSink?.invoke(
+                    "indexedRead seq=$readSeq requested=$requestedBytes copied=$copiedBytes " +
+                            "startByte=$startBytePosition endByte=$pcmBytePosition " +
+                            "readMs=${elapsedNs / NANOS_PER_MILLISECOND.toFloat()}"
+                )
+            }
+        }
+
+        private fun shouldTraceIndexedFrameDecodeTiming(): Boolean {
+            return TRACE_INDEXED_FRAME_DECODE_TIMING && traceSink != null
+        }
+
+        private fun shouldTraceIndexedReaderTiming(): Boolean {
+            return TRACE_INDEXED_READER_TIMING && traceSink != null
         }
 
         private fun frameIndexForPcmByte(bytePosition: Long): Int? {
@@ -1658,6 +1712,8 @@ object Pcm16StereoFlacEncoder {
             val byteCount: Int,
             val pcm: ByteArray,
         )
+
+        private var debugReadSeq = 0L
     }
 
     private class RandomAccessFileInputStream(
@@ -1755,7 +1811,10 @@ object Pcm16StereoFlacEncoder {
     private const val CHUNK_HEADER_BYTES = 8L
     private const val PCM_MD5_BUFFER_BYTES = 256 * 1024
     private const val NANOS_PER_MILLISECOND = 1_000_000L
-    private const val TRACE_INDEXED_FRAME_DECODE_TIMING = false
+    private const val TRACE_INDEXED_FRAME_DECODE_TIMING = true
+    private const val TRACE_INDEXED_READER_TIMING = true
+    private const val TRACE_INDEXED_INITIAL_READ_COUNT = 40L
+    private const val TRACE_INDEXED_READ_INTERVAL = 200L
 
     private const val BLOCK_SIZE_CODE_16_BIT = 7
     private const val BLOCK_SIZE_CODE_4096 = 12
