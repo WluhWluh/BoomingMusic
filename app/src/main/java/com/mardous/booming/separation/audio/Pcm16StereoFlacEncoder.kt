@@ -41,6 +41,19 @@ object Pcm16StereoFlacEncoder {
         if (tempFile.exists()) {
             tempFile.delete()
         }
+        val seekPointCount = if (writeFrameIndex) {
+            seekPointCountForFrameCount(wavInfo.frameCount)
+        } else {
+            0
+        }
+        val firstFrameByteOffset = FLAC_MAGIC.size +
+                METADATA_BLOCK_HEADER_SIZE +
+                STREAMINFO_LENGTH +
+                if (seekPointCount > 0) {
+                    METADATA_BLOCK_HEADER_SIZE + seekPointCount * SEEKTABLE_POINT_LENGTH
+                } else {
+                    0
+                }
         var frameIndex: Pcm16StereoFlacFrameIndex? = null
         try {
             tempFile.outputStream().buffered().use { output ->
@@ -49,7 +62,11 @@ object Pcm16StereoFlacEncoder {
                     sampleRate = wavInfo.sampleRate,
                     frameCount = wavInfo.frameCount,
                     pcmMd5 = pcmMd5,
+                    isLastMetadataBlock = seekPointCount == 0,
                 )
+                if (seekPointCount > 0) {
+                    output.writeSeekTablePlaceholder(seekPointCount)
+                }
                 wavFile.inputStream().buffered().use { input ->
                     skipFully(input, wavInfo.dataOffset)
                     frameIndex = encodeFrames(
@@ -58,13 +75,20 @@ object Pcm16StereoFlacEncoder {
                         frameCount = wavInfo.frameCount,
                         sampleRate = wavInfo.sampleRate,
                         pcmMd5Hex = pcmMd5.toHexString(),
-                        firstFrameByteOffset = FLAC_MAGIC.size + STREAMINFO_METADATA_HEADER.size + STREAMINFO_LENGTH,
+                        firstFrameByteOffset = firstFrameByteOffset,
                         stereoMode = stereoMode,
                         shouldCancel = shouldCancel,
                     )
                 }
             }
             throwIfCanceled(shouldCancel)
+            frameIndex?.let { index ->
+                patchSeekableMetadata(
+                    flacFile = tempFile,
+                    index = index,
+                    hasSeekTable = seekPointCount > 0,
+                )
+            }
 
             if (flacFile.exists() && !flacFile.delete()) {
                 error("Could not replace FLAC output: ${flacFile.absolutePath}")
@@ -853,11 +877,15 @@ object Pcm16StereoFlacEncoder {
         sampleRate: Int,
         frameCount: Int,
         pcmMd5: ByteArray,
+        isLastMetadataBlock: Boolean,
     ) {
         val maxBlockSize = min(MAX_BLOCK_SIZE, frameCount).coerceAtLeast(1)
-        val finalBlockSize = (frameCount % MAX_BLOCK_SIZE).takeIf { it > 0 }
-        val minBlockSize = min(finalBlockSize ?: maxBlockSize, maxBlockSize)
-        write(STREAMINFO_METADATA_HEADER)
+        val minBlockSize = maxBlockSize
+        writeMetadataBlockHeader(
+            isLast = isLastMetadataBlock,
+            type = STREAMINFO_METADATA_BLOCK_TYPE,
+            length = STREAMINFO_LENGTH,
+        )
         val streamInfo = ByteArrayOutputStream(STREAMINFO_LENGTH)
         streamInfo.writeUInt16(minBlockSize)
         streamInfo.writeUInt16(maxBlockSize)
@@ -874,6 +902,50 @@ object Pcm16StereoFlacEncoder {
         val bytes = streamInfo.toByteArray()
         require(bytes.size == STREAMINFO_LENGTH) { "Invalid FLAC STREAMINFO length." }
         write(bytes)
+    }
+
+    private fun OutputStream.writeSeekTablePlaceholder(seekPointCount: Int) {
+        writeMetadataBlockHeader(
+            isLast = true,
+            type = SEEKTABLE_METADATA_BLOCK_TYPE,
+            length = seekPointCount * SEEKTABLE_POINT_LENGTH,
+        )
+        repeat(seekPointCount * SEEKTABLE_POINT_LENGTH) {
+            write(0)
+        }
+    }
+
+    private fun patchSeekableMetadata(
+        flacFile: File,
+        index: Pcm16StereoFlacFrameIndex,
+        hasSeekTable: Boolean,
+    ) {
+        RandomAccessFile(flacFile, "rw").use { output ->
+            val minFrameSize = index.frames.minOfOrNull { it.byteCount } ?: 0
+            val maxFrameSize = index.frames.maxOfOrNull { it.byteCount } ?: 0
+            output.seek((FLAC_MAGIC.size + METADATA_BLOCK_HEADER_SIZE + STREAMINFO_BLOCK_SIZE_OFFSET).toLong())
+            output.writeUInt24(minFrameSize)
+            output.writeUInt24(maxFrameSize)
+
+            if (hasSeekTable) {
+                output.seek(
+                    (FLAC_MAGIC.size +
+                            METADATA_BLOCK_HEADER_SIZE +
+                            STREAMINFO_LENGTH +
+                            METADATA_BLOCK_HEADER_SIZE).toLong()
+                )
+                index.frames.forEach { frame ->
+                    output.writeLong(frame.startPcmFrame)
+                    output.writeLong(frame.byteOffset - index.frames.first().byteOffset)
+                    output.writeUInt16(frame.pcmFrameCount)
+                }
+            }
+        }
+    }
+
+    private fun seekPointCountForFrameCount(frameCount: Int): Int {
+        if (frameCount <= 0) return 0
+        return ((frameCount + MAX_BLOCK_SIZE - 1) / MAX_BLOCK_SIZE)
     }
 
     private fun readPcm16StereoWavInfo(wavFile: File): Pcm16StereoWavInfo {
@@ -1069,6 +1141,28 @@ object Pcm16StereoFlacEncoder {
 
     private fun ByteArrayOutputStream.writeUInt24(value: Int) {
         write((value ushr 16) and 0xFF)
+        write((value ushr 8) and 0xFF)
+        write(value and 0xFF)
+    }
+
+    private fun OutputStream.writeMetadataBlockHeader(
+        isLast: Boolean,
+        type: Int,
+        length: Int,
+    ) {
+        write((if (isLast) 0x80 else 0x00) or (type and 0x7F))
+        write((length ushr 16) and 0xFF)
+        write((length ushr 8) and 0xFF)
+        write(length and 0xFF)
+    }
+
+    private fun RandomAccessFile.writeUInt24(value: Int) {
+        write((value ushr 16) and 0xFF)
+        write((value ushr 8) and 0xFF)
+        write(value and 0xFF)
+    }
+
+    private fun RandomAccessFile.writeUInt16(value: Int) {
         write((value ushr 8) and 0xFF)
         write(value and 0xFF)
     }
@@ -1347,7 +1441,7 @@ object Pcm16StereoFlacEncoder {
             require(frame.startPcmFrame == expectedPcmFrame) { "Unexpected FLAC PCM frame start." }
             require(frame.pcmFrameCount > 0) { "Invalid FLAC frame sample count." }
             require(frame.pcmFrameCount <= MAX_BLOCK_SIZE) { "FLAC frame exceeds max block size." }
-            require(frame.byteOffset >= FLAC_MAGIC.size + STREAMINFO_METADATA_HEADER.size + STREAMINFO_LENGTH) {
+            require(frame.byteOffset >= FLAC_MAGIC.size + METADATA_BLOCK_HEADER_SIZE + STREAMINFO_LENGTH) {
                 "Invalid FLAC frame byte offset."
             }
             require(frame.byteCount > 0) { "Invalid FLAC frame byte count." }
@@ -1843,11 +1937,15 @@ object Pcm16StereoFlacEncoder {
     private const val MAX_RICE_PARAMETER = 14
 
     private const val STREAMINFO_LENGTH = 34
+    private const val METADATA_BLOCK_HEADER_SIZE = 4
+    private const val STREAMINFO_BLOCK_SIZE_OFFSET = 4
     private const val STREAMINFO_SAMPLE_RATE_BITS = 20
     private const val STREAMINFO_CHANNEL_BITS = 3
     private const val STREAMINFO_BITS_PER_SAMPLE_BITS = 5
     private const val STREAMINFO_TOTAL_SAMPLES_BITS = 36
     private const val STREAMINFO_METADATA_BLOCK_TYPE = 0
+    private const val SEEKTABLE_METADATA_BLOCK_TYPE = 3
+    private const val SEEKTABLE_POINT_LENGTH = 18
     private const val STREAMINFO_SAMPLE_RATE_SHIFT = 44
     private const val STREAMINFO_SAMPLE_RATE_MASK = 0xFFFFFL
     private const val STREAMINFO_CHANNEL_SHIFT = 41
@@ -1860,7 +1958,6 @@ object Pcm16StereoFlacEncoder {
     private const val FRAME_INDEX_EXTENSION = ".idx"
 
     private val FLAC_MAGIC = byteArrayOf('f'.code.toByte(), 'L'.code.toByte(), 'a'.code.toByte(), 'C'.code.toByte())
-    private val STREAMINFO_METADATA_HEADER = byteArrayOf(0x80.toByte(), 0x00, 0x00, STREAMINFO_LENGTH.toByte())
 }
 
 data class Pcm16StereoFlacEncodeResult(
