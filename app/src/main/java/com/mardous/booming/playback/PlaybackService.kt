@@ -71,6 +71,7 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
+import com.mardous.booming.BuildConfig
 import com.mardous.booming.R
 import com.mardous.booming.coil.CoilBitmapLoader
 import com.mardous.booming.core.appwidgets.BoomingGlanceWidget
@@ -304,7 +305,7 @@ class PlaybackService :
         nm = requireNotNull(getSystemService<NotificationManager>())
         createNotificationChannel()
         prepareSourceSeparationPlaybackTrace()
-        if (SOURCE_SEPARATION_TRACE_FILE_ENABLED) {
+        if (isSourceSeparationTraceFileEnabled) {
             sourceSeparationMixProcessor.debugTraceSink = { detail ->
                 traceSourceSeparationProcessor(detail)
             }
@@ -1478,6 +1479,12 @@ class PlaybackService :
         preferCompletedCache: Boolean = false,
         expectProcessing: Boolean = false,
     ): SessionResult {
+        traceSourceSeparationPlayback(
+            "check.request",
+            "showMessage=$showUnavailableMessage allowPause=$allowPauseForProcessing " +
+                    "resumeWhenReady=$resumeWhenReady allowNewSession=$allowNewSession " +
+                    "preferCompletedCache=$preferCompletedCache expectProcessing=$expectProcessing"
+        )
         return sourceSeparationPlaybackReadinessMutex.withLock {
             val checkId = ++sourceSeparationPlaybackCheckSeq
             ensureSourceSeparationPlaybackReadyLocked(
@@ -3886,7 +3893,7 @@ class PlaybackService :
     }
 
     private fun prepareSourceSeparationPlaybackTrace() {
-        if (!SOURCE_SEPARATION_TRACE_FILE_ENABLED) {
+        if (!isSourceSeparationTraceFileEnabled) {
             sourceSeparationPlaybackTraceFile = null
             return
         }
@@ -3913,7 +3920,7 @@ class PlaybackService :
         event: String,
         detail: String = "",
     ) {
-        if (!SOURCE_SEPARATION_TRACE_FILE_ENABLED) return
+        if (!isSourceSeparationTraceFileEnabled) return
         val sequence = sourceSeparationPlaybackTraceSeq.incrementAndGet()
         val line = buildString {
             append(sourceSeparationPlaybackTraceTimestamp())
@@ -3929,7 +3936,7 @@ class PlaybackService :
     }
 
     private fun traceSourceSeparationProcessor(detail: String) {
-        if (!SOURCE_SEPARATION_TRACE_FILE_ENABLED) return
+        if (!isSourceSeparationTraceFileEnabled) return
         val sequence = sourceSeparationPlaybackTraceSeq.incrementAndGet()
         val line = buildString {
             append(sourceSeparationPlaybackTraceTimestamp())
@@ -4150,7 +4157,8 @@ class PlaybackService :
 
         private const val FOREGROUND_SERVICE_TIMEOUT = (60 * 1000) * 2L
 
-        private const val SOURCE_SEPARATION_TRACE_FILE_ENABLED = false
+        private val isSourceSeparationTraceFileEnabled: Boolean
+            get() = BuildConfig.DEBUG
         private const val SOURCE_SEPARATION_TRACE_FLUSH_DELAY_MS = 1000L
         private const val SOURCE_SEPARATION_TRACE_FLUSH_LINE_COUNT = 80
         private const val SOURCE_SEPARATION_TRACE_TIME_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS"
