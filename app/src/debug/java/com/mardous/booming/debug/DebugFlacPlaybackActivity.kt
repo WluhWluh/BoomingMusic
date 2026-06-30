@@ -20,6 +20,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.SilenceMediaSource
 import androidx.media3.extractor.DefaultExtractorsFactory
 import java.io.IOException
 import java.io.File
@@ -37,6 +38,8 @@ class DebugFlacPlaybackActivity : Activity() {
     private var player: ExoPlayer? = null
     private var activeCase: ActivePlaybackCase? = null
     private var preferExtensionRenderer = false
+    private var useSilenceSource = false
+    private var silenceDurationMs = DEFAULT_SILENCE_DURATION_MS
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,9 +55,14 @@ class DebugFlacPlaybackActivity : Activity() {
         val timeoutMs = intent.getLongExtra(
             EXTRA_TIMEOUT_MS,
             if (seekSweep) DEFAULT_SEEK_SWEEP_TIMEOUT_MS else DEFAULT_TIMEOUT_MS,
-        )
+            )
             .coerceAtLeast(playMs + 1_000L)
         preferExtensionRenderer = intent.getBooleanExtra(EXTRA_PREFER_EXTENSION, false)
+        useSilenceSource = intent.getBooleanExtra(EXTRA_USE_SILENCE_SOURCE, false)
+        silenceDurationMs = intent.getLongExtra(
+            EXTRA_SILENCE_DURATION_MS,
+            DEFAULT_SILENCE_DURATION_MS,
+        ).coerceAtLeast(playMs + 1_000L)
 
         reportRoot = resolveWritableReportRoot(outputTag)
         summaryFile = File(reportRoot, "flac-playback-summary.csv")
@@ -73,11 +81,26 @@ class DebugFlacPlaybackActivity : Activity() {
             Charsets.UTF_8,
         )
 
-        cases = findFlacPlaybackCases(
-            inputFilePath = inputFilePath,
-            inputDirPath = inputDirPath,
-            maxFiles = maxFiles,
-        )
+        cases = if (useSilenceSource) {
+            listOf(
+                FlacPlaybackCase(
+                    label = "silence-${silenceDurationMs}ms",
+                    file = File("silence"),
+                )
+            )
+        } else {
+            findFlacPlaybackCases(
+                inputFilePath = inputFilePath,
+                inputDirPath = inputDirPath,
+                maxFiles = maxFiles,
+            )
+        }
+        if (useSilenceSource) {
+            logFile.appendText(
+                "Silence source duration ms: $silenceDurationMs\n",
+                Charsets.UTF_8,
+            )
+        }
         logFile.appendText("Cases: ${cases.size}\n\n", Charsets.UTF_8)
         Log.i(TAG, "Starting FLAC playback debug test with ${cases.size} case(s).")
         if (cases.isEmpty()) {
@@ -172,7 +195,11 @@ class DebugFlacPlaybackActivity : Activity() {
             }
         })
 
-        currentPlayer.setMediaItem(MediaItem.fromUri(Uri.fromFile(case.file)))
+        if (useSilenceSource) {
+            currentPlayer.setMediaSource(SilenceMediaSource(silenceDurationMs * 1_000L))
+        } else {
+            currentPlayer.setMediaItem(MediaItem.fromUri(Uri.fromFile(case.file)))
+        }
         currentPlayer.prepare()
         currentPlayer.playWhenReady = true
         handler.postDelayed({ finishCaseIfActive(state, "timeout") }, timeoutMs)
@@ -305,8 +332,8 @@ class DebugFlacPlaybackActivity : Activity() {
         val row = FlacPlaybackRow(
             label = state.case.label,
             status = status,
-            path = state.case.file.absolutePath,
-            bytes = state.case.file.length(),
+            path = if (useSilenceSource) "<silence>" else state.case.file.absolutePath,
+            bytes = if (useSilenceSource) 0L else state.case.file.length(),
             finishReason = finishReason,
             readySeen = state.readySeen,
             readyLatencyMs = readyLatencyMs,
@@ -447,10 +474,13 @@ class DebugFlacPlaybackActivity : Activity() {
         const val EXTRA_TIMEOUT_MS = "timeout_ms"
         const val EXTRA_SEEK_SWEEP = "seek_sweep"
         const val EXTRA_PREFER_EXTENSION = "prefer_extension"
+        const val EXTRA_USE_SILENCE_SOURCE = "use_silence_source"
+        const val EXTRA_SILENCE_DURATION_MS = "silence_duration_ms"
         const val DEFAULT_MAX_FILES = 8
         const val DEFAULT_PLAY_MS = 3_000L
         const val DEFAULT_TIMEOUT_MS = 12_000L
         const val DEFAULT_SEEK_SWEEP_TIMEOUT_MS = 90_000L
+        const val DEFAULT_SILENCE_DURATION_MS = 180_000L
         const val MIN_POSITION_ADVANCE_MS = 500L
         const val MIN_SEEK_ADVANCE_MS = 300L
         const val INITIAL_SEEK_DELAY_MS = 1_000L
