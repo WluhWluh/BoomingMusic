@@ -34,6 +34,7 @@ class DebugFlacPlaybackActivity : Activity() {
     private var caseIndex = 0
     private var player: ExoPlayer? = null
     private var activeCase: ActivePlaybackCase? = null
+    private var preferExtensionRenderer = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,8 +46,13 @@ class DebugFlacPlaybackActivity : Activity() {
         val inputFilePath = intent.getStringExtra(EXTRA_INPUT_FILE)
         val maxFiles = intent.getIntExtra(EXTRA_MAX_FILES, DEFAULT_MAX_FILES).coerceAtLeast(0)
         val playMs = intent.getLongExtra(EXTRA_PLAY_MS, DEFAULT_PLAY_MS).coerceAtLeast(500L)
-        val timeoutMs = intent.getLongExtra(EXTRA_TIMEOUT_MS, DEFAULT_TIMEOUT_MS)
+        val seekSweep = intent.getBooleanExtra(EXTRA_SEEK_SWEEP, false)
+        val timeoutMs = intent.getLongExtra(
+            EXTRA_TIMEOUT_MS,
+            if (seekSweep) DEFAULT_SEEK_SWEEP_TIMEOUT_MS else DEFAULT_TIMEOUT_MS,
+        )
             .coerceAtLeast(playMs + 1_000L)
+        preferExtensionRenderer = intent.getBooleanExtra(EXTRA_PREFER_EXTENSION, false)
 
         reportRoot = File(
             File(
@@ -66,7 +72,9 @@ class DebugFlacPlaybackActivity : Activity() {
                     "Input dir: ${inputDirPath.orEmpty()}\n" +
                     "Max files: $maxFiles\n" +
                     "Play ms: $playMs\n" +
-                    "Timeout ms: $timeoutMs\n\n",
+                    "Timeout ms: $timeoutMs\n" +
+                    "Seek sweep: $seekSweep\n" +
+                    "Prefer extension renderer: $preferExtensionRenderer\n\n",
             Charsets.UTF_8,
         )
 
@@ -81,7 +89,7 @@ class DebugFlacPlaybackActivity : Activity() {
             finish()
             return
         }
-        runNextCase(playMs = playMs, timeoutMs = timeoutMs)
+        runNextCase(playMs = playMs, timeoutMs = timeoutMs, seekSweep = seekSweep)
     }
 
     override fun onDestroy() {
@@ -91,7 +99,11 @@ class DebugFlacPlaybackActivity : Activity() {
         super.onDestroy()
     }
 
-    private fun runNextCase(playMs: Long, timeoutMs: Long) {
+    private fun runNextCase(
+        playMs: Long,
+        timeoutMs: Long,
+        seekSweep: Boolean,
+    ) {
         if (caseIndex >= cases.size) {
             logFile.appendText("\nFinished.\n", Charsets.UTF_8)
             Log.i(TAG, "FLAC playback debug test finished: ${reportRoot.absolutePath}")
@@ -111,6 +123,7 @@ class DebugFlacPlaybackActivity : Activity() {
             startedAtMs = SystemClock.elapsedRealtime(),
             playMs = playMs,
             timeoutMs = timeoutMs,
+            seekSweep = seekSweep,
         )
         activeCase = state
 
@@ -128,7 +141,16 @@ class DebugFlacPlaybackActivity : Activity() {
                     state.readySeen = true
                     state.readyAtMs = SystemClock.elapsedRealtime()
                     state.positionAtReadyMs = currentPlayer.currentPosition
-                    handler.postDelayed({ finishCaseIfActive(state, "ready-play-window") }, playMs)
+                    if (state.seekSweep) {
+                        state.seekTargetsMs = seekTargetsForDuration(currentPlayer.duration)
+                        logFile.appendText(
+                            "SEEKS ${state.index}/${cases.size}: ${state.seekTargetsMs.joinToString("|")}\n",
+                            Charsets.UTF_8,
+                        )
+                        handler.postDelayed({ runNextSeekIfActive(state) }, INITIAL_SEEK_DELAY_MS)
+                    } else {
+                        handler.postDelayed({ finishCaseIfActive(state, "ready-play-window") }, playMs)
+                    }
                 } else if (playbackState == Player.STATE_ENDED) {
                     finishCaseIfActive(state, "ended")
                 }
@@ -147,6 +169,74 @@ class DebugFlacPlaybackActivity : Activity() {
         handler.postDelayed({ finishCaseIfActive(state, "timeout") }, timeoutMs)
     }
 
+    private fun runNextSeekIfActive(state: ActivePlaybackCase) {
+        if (activeCase !== state) return
+        val currentPlayer = player ?: run {
+            finishCaseIfActive(state, "player-missing")
+            return
+        }
+        if (state.seekIndex >= state.seekTargetsMs.size) {
+            finishCaseIfActive(state, "seek-sweep-done")
+            return
+        }
+
+        val targetMs = state.seekTargetsMs[state.seekIndex]
+        state.seekIndex += 1
+        val pendingSeek = PendingSeek(
+            index = state.seekIndex,
+            targetMs = targetMs,
+            beforeMs = currentPlayer.currentPosition,
+            startedAtMs = SystemClock.elapsedRealtime(),
+        )
+        state.pendingSeek = pendingSeek
+        logFile.appendText(
+            "SEEK ${state.index}/${cases.size}.${pendingSeek.index}: " +
+                    "target=$targetMs before=${pendingSeek.beforeMs}\n",
+            Charsets.UTF_8,
+        )
+        currentPlayer.seekTo(targetMs)
+        handler.postDelayed(
+            { evaluateSeekIfActive(state, pendingSeek) },
+            SEEK_VERIFY_DELAY_MS,
+        )
+    }
+
+    private fun evaluateSeekIfActive(
+        state: ActivePlaybackCase,
+        pendingSeek: PendingSeek,
+    ) {
+        if (activeCase !== state || state.pendingSeek !== pendingSeek) return
+        val currentPlayer = player ?: run {
+            finishCaseIfActive(state, "player-missing")
+            return
+        }
+        val positionMs = currentPlayer.currentPosition
+        val playbackState = currentPlayer.playbackState
+        val advancedMs = positionMs - pendingSeek.targetMs
+        val success = playbackState == Player.STATE_READY &&
+                currentPlayer.playWhenReady &&
+                advancedMs >= MIN_SEEK_ADVANCE_MS
+        val result = buildString {
+            append(pendingSeek.index)
+            append(":target=").append(pendingSeek.targetMs)
+            append(":state=").append(playbackState.toStateName())
+            append(":pos=").append(positionMs)
+            append(":advanced=").append(advancedMs)
+            append(":success=").append(success)
+        }
+        state.seekResults += result
+        logFile.appendText(
+            "SEEK_RESULT ${state.index}/${cases.size}.${pendingSeek.index}: $result\n",
+            Charsets.UTF_8,
+        )
+        state.pendingSeek = null
+        if (!success) {
+            finishCaseIfActive(state, "seek-failed-${pendingSeek.index}")
+        } else {
+            handler.postDelayed({ runNextSeekIfActive(state) }, SEEK_GAP_MS)
+        }
+    }
+
     private fun buildPlayer(): ExoPlayer {
         return ExoPlayer.Builder(this)
             .setAudioAttributes(
@@ -158,7 +248,13 @@ class DebugFlacPlaybackActivity : Activity() {
             )
             .setRenderersFactory(
                 DefaultRenderersFactory(this)
-                    .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+                    .setExtensionRendererMode(
+                        if (preferExtensionRenderer) {
+                            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+                        } else {
+                            DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+                        }
+                    )
                     .setEnableDecoderFallback(true)
             )
             .setMediaSourceFactory(
@@ -214,6 +310,7 @@ class DebugFlacPlaybackActivity : Activity() {
             errorCodeName = state.errorCodeName,
             errorMessage = state.errorMessage,
             events = state.events.joinToString("|"),
+            seekResults = state.seekResults.joinToString("|"),
         )
         summaryFile.appendText(row.toCsvLine() + "\n", Charsets.UTF_8)
         logFile.appendText(
@@ -222,7 +319,20 @@ class DebugFlacPlaybackActivity : Activity() {
                     "error=${row.errorCodeName.orEmpty()} ${row.errorMessage.orEmpty()}\n",
             Charsets.UTF_8,
         )
-        runNextCase(playMs = state.playMs, timeoutMs = state.timeoutMs)
+        runNextCase(
+            playMs = state.playMs,
+            timeoutMs = state.timeoutMs,
+            seekSweep = state.seekSweep,
+        )
+    }
+
+    private fun seekTargetsForDuration(durationMs: Long): List<Long> {
+        val validDuration = durationMs.takeIf { it != C.TIME_UNSET && it > 10_000L }
+            ?: return emptyList()
+        return listOf(25, 75, 40, 90, 10, 60)
+            .map { percent -> validDuration * percent / 100 }
+            .map { position -> position.coerceIn(1_000L, validDuration - 2_000L) }
+            .distinct()
     }
 
     private fun findFlacPlaybackCases(
@@ -292,10 +402,17 @@ class DebugFlacPlaybackActivity : Activity() {
         const val EXTRA_MAX_FILES = "max_files"
         const val EXTRA_PLAY_MS = "play_ms"
         const val EXTRA_TIMEOUT_MS = "timeout_ms"
+        const val EXTRA_SEEK_SWEEP = "seek_sweep"
+        const val EXTRA_PREFER_EXTENSION = "prefer_extension"
         const val DEFAULT_MAX_FILES = 8
         const val DEFAULT_PLAY_MS = 3_000L
         const val DEFAULT_TIMEOUT_MS = 12_000L
+        const val DEFAULT_SEEK_SWEEP_TIMEOUT_MS = 90_000L
         const val MIN_POSITION_ADVANCE_MS = 500L
+        const val MIN_SEEK_ADVANCE_MS = 300L
+        const val INITIAL_SEEK_DELAY_MS = 1_000L
+        const val SEEK_VERIFY_DELAY_MS = 10_000L
+        const val SEEK_GAP_MS = 500L
     }
 }
 
@@ -310,12 +427,24 @@ private data class ActivePlaybackCase(
     val startedAtMs: Long,
     val playMs: Long,
     val timeoutMs: Long,
+    val seekSweep: Boolean,
     var readySeen: Boolean = false,
     var readyAtMs: Long? = null,
     var positionAtReadyMs: Long? = null,
     var errorCodeName: String? = null,
     var errorMessage: String? = null,
+    var seekTargetsMs: List<Long> = emptyList(),
+    var seekIndex: Int = 0,
+    var pendingSeek: PendingSeek? = null,
     val events: MutableList<String> = mutableListOf(),
+    val seekResults: MutableList<String> = mutableListOf(),
+)
+
+private data class PendingSeek(
+    val index: Int,
+    val targetMs: Long,
+    val beforeMs: Long,
+    val startedAtMs: Long,
 )
 
 private data class FlacPlaybackRow(
@@ -335,6 +464,7 @@ private data class FlacPlaybackRow(
     val errorCodeName: String?,
     val errorMessage: String?,
     val events: String,
+    val seekResults: String,
 ) {
     fun toCsvLine(): String {
         return listOf(
@@ -354,6 +484,7 @@ private data class FlacPlaybackRow(
             errorCodeName,
             errorMessage,
             events,
+            seekResults,
         ).joinToString(",") { it.toCsvCell() }
     }
 
@@ -376,6 +507,7 @@ private data class FlacPlaybackRow(
                 "errorCodeName",
                 "errorMessage",
                 "events",
+                "seekResults",
             ).joinToString(",")
         }
     }
