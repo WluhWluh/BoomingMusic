@@ -18,8 +18,10 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
+import java.io.IOException
 import java.io.File
 import java.util.Locale
 
@@ -54,14 +56,7 @@ class DebugFlacPlaybackActivity : Activity() {
             .coerceAtLeast(playMs + 1_000L)
         preferExtensionRenderer = intent.getBooleanExtra(EXTRA_PREFER_EXTENSION, false)
 
-        reportRoot = File(
-            File(
-                getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir,
-                "source-separation/debug/flac-playback",
-            ),
-            outputTag,
-        )
-        reportRoot.mkdirs()
+        reportRoot = resolveWritableReportRoot(outputTag)
         summaryFile = File(reportRoot, "flac-playback-summary.csv")
         logFile = File(reportRoot, "flac-playback-log.txt")
         summaryFile.writeText(FlacPlaybackRow.csvHeader() + "\n", Charsets.UTF_8)
@@ -129,6 +124,20 @@ class DebugFlacPlaybackActivity : Activity() {
 
         val currentPlayer = buildPlayer()
         player = currentPlayer
+        currentPlayer.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioDecoderInitialized(
+                eventTime: AnalyticsListener.EventTime,
+                decoderName: String,
+                initializedTimestampMs: Long,
+                initializationDurationMs: Long,
+            ) {
+                logFile.appendText(
+                    "DECODER ${state.index}/${cases.size}: ${state.case.label} " +
+                            "$decoderName initMs=$initializationDurationMs\n",
+                    Charsets.UTF_8,
+                )
+            }
+        })
         currentPlayer.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 state.events += playbackState.toStateName()
@@ -378,6 +387,40 @@ class DebugFlacPlaybackActivity : Activity() {
             .sortedBy { it.label }
             .take(maxFiles)
             .toList()
+    }
+
+    private fun resolveWritableReportRoot(outputTag: String): File {
+        val candidates = listOf(
+            File(
+                File(
+                    getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir,
+                    "source-separation/debug/flac-playback",
+                ),
+                outputTag,
+            ),
+            File(
+                File(filesDir, "source-separation/debug/flac-playback"),
+                outputTag,
+            ),
+        )
+
+        for (candidate in candidates) {
+            try {
+                if (!candidate.exists() && !candidate.mkdirs()) {
+                    continue
+                }
+                val probe = File(candidate, ".write-probe")
+                probe.writeText("ok", Charsets.UTF_8)
+                probe.delete()
+                return candidate
+            } catch (_: IOException) {
+                // Try the next candidate.
+            } catch (_: SecurityException) {
+                // Try the next candidate.
+            }
+        }
+
+        return candidates.last().also { it.mkdirs() }
     }
 
     private fun Int.toStateName(): String {
