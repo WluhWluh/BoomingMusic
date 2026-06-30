@@ -880,7 +880,8 @@ object Pcm16StereoFlacEncoder {
         isLastMetadataBlock: Boolean,
     ) {
         val maxBlockSize = min(MAX_BLOCK_SIZE, frameCount).coerceAtLeast(1)
-        val minBlockSize = maxBlockSize
+        val finalBlockSize = (frameCount % MAX_BLOCK_SIZE).takeIf { it > 0 }
+        val minBlockSize = min(finalBlockSize ?: maxBlockSize, maxBlockSize)
         writeMetadataBlockHeader(
             isLast = isLastMetadataBlock,
             type = STREAMINFO_METADATA_BLOCK_TYPE,
