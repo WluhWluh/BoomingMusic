@@ -13,6 +13,8 @@ import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.floor
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 @OptIn(UnstableApi::class)
@@ -51,6 +53,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private var instrumentalInput: StemPcmInput? = null
     private var scratch = ByteArray(0)
     private var instrumentalScratch = ByteArray(0)
+    private val vocalsResampleCache = StemResampleCache()
+    private val instrumentalResampleCache = StemResampleCache()
+    private var resampleStemFramePosition = 0.0
     private val debugSessionSeq = AtomicLong()
     private val debugQueueSeq = AtomicLong()
 
@@ -222,7 +227,16 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         val frameSize = inputAudioFormat.channelCount * BYTES_PER_SAMPLE
         val frames = remaining / frameSize
         val bytesToRead = frames * frameSize
-        val stemReadResult = readStems(bytesToRead)
+        val resampled = inputAudioFormat.sampleRate != stemSampleRate
+        val stemReadResult = if (resampled) {
+            readResampledStems(
+                frameCount = frames,
+                outputByteCount = bytesToRead,
+                outputSampleRate = inputAudioFormat.sampleRate,
+            )
+        } else {
+            readStems(bytesToRead)
+        }
         val bytesRead = stemReadResult.vocalsBytesRead
         val instrumentalBytesRead = stemReadResult.instrumentalBytesRead
 
@@ -270,7 +284,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         notifyMixedOutputStartedIfNeeded(frames)
         traceQueueIfNeeded(
             queueSeq = queueSeq,
-            branch = "mixed",
+            branch = if (resampled) "mixed-resampled" else "mixed",
             remaining = remaining,
             bytesRead = bytesRead,
             instrumentalBytesRead = instrumentalBytesRead,
@@ -281,7 +295,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         return active &&
                 inputAudioFormat.encoding == C.ENCODING_PCM_16BIT &&
                 inputAudioFormat.channelCount == CHANNEL_COUNT_STEREO &&
-                inputAudioFormat.sampleRate == stemSampleRate
+                inputAudioFormat.sampleRate > 0 &&
+                stemSampleRate > 0 &&
+                stemChannelCount == CHANNEL_COUNT_STEREO
     }
 
     private fun queueUnmixedInput(
@@ -308,6 +324,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             val vocalsBytesRead = if (!active || activeVocalsInput == null) {
                 null
             } else {
+                clearResampleCachesLocked()
                 if (scratch.size < byteCount) {
                     scratch = ByteArray(byteCount)
                 }
@@ -323,6 +340,116 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             }
             StemReadResult(vocalsBytesRead, instrumentalBytesRead)
         }
+    }
+
+    private fun readResampledStems(
+        frameCount: Int,
+        outputByteCount: Int,
+        outputSampleRate: Int,
+    ): StemReadResult {
+        return synchronized(lock) {
+            val activeVocalsInput = vocalsInput
+            val activeInstrumentalInput = instrumentalInput
+            val sourceFrameSize = stemChannelCount * BYTES_PER_SAMPLE
+            val sourceRate = stemSampleRate
+            if (!active || activeVocalsInput == null ||
+                frameCount <= 0 ||
+                outputByteCount <= 0 ||
+                outputSampleRate <= 0 ||
+                sourceRate <= 0 ||
+                sourceFrameSize <= 0
+            ) {
+                return@synchronized StemReadResult(null, null)
+            }
+
+            if (scratch.size < outputByteCount) {
+                scratch = ByteArray(outputByteCount)
+            }
+            val ratio = sourceRate.toDouble() / outputSampleRate.toDouble()
+            val startPosition = resampleStemFramePosition
+            val lastPosition = startPosition + (frameCount - 1).coerceAtLeast(0) * ratio
+            val startFrame = floor(startPosition).toLong().coerceAtLeast(0L)
+            val endFrame = floor(lastPosition).toLong().coerceAtLeast(startFrame) + 1L
+            vocalsResampleCache.ensure(
+                input = activeVocalsInput,
+                startFrame = startFrame,
+                endFrameInclusive = endFrame,
+                frameSize = sourceFrameSize,
+            )
+            fillResampledStem(
+                output = scratch,
+                outputFrames = frameCount,
+                startPosition = startPosition,
+                ratio = ratio,
+                cache = vocalsResampleCache,
+                frameSize = sourceFrameSize,
+            )
+
+            val instrumentalBytesRead = if (activeInstrumentalInput == null) {
+                null
+            } else {
+                if (instrumentalScratch.size < outputByteCount) {
+                    instrumentalScratch = ByteArray(outputByteCount)
+                }
+                instrumentalResampleCache.ensure(
+                    input = activeInstrumentalInput,
+                    startFrame = startFrame,
+                    endFrameInclusive = endFrame,
+                    frameSize = sourceFrameSize,
+                )
+                fillResampledStem(
+                    output = instrumentalScratch,
+                    outputFrames = frameCount,
+                    startPosition = startPosition,
+                    ratio = ratio,
+                    cache = instrumentalResampleCache,
+                    frameSize = sourceFrameSize,
+                )
+                outputByteCount
+            }
+
+            resampleStemFramePosition += frameCount * ratio
+            val keepFromFrame = floor(resampleStemFramePosition).toLong().coerceAtLeast(0L)
+            vocalsResampleCache.dropBefore(keepFromFrame, sourceFrameSize)
+            instrumentalResampleCache.dropBefore(keepFromFrame, sourceFrameSize)
+            StemReadResult(outputByteCount, instrumentalBytesRead)
+        }
+    }
+
+    private fun fillResampledStem(
+        output: ByteArray,
+        outputFrames: Int,
+        startPosition: Double,
+        ratio: Double,
+        cache: StemResampleCache,
+        frameSize: Int,
+    ) {
+        var outputOffset = 0
+        repeat(outputFrames) { outputFrame ->
+            val sourcePosition = startPosition + outputFrame * ratio
+            val sourceFrame = floor(sourcePosition).toLong().coerceAtLeast(0L)
+            val fraction = sourcePosition - sourceFrame
+            val left = interpolatePcm16(cache, sourceFrame, CHANNEL_LEFT, fraction, frameSize)
+            val right = interpolatePcm16(cache, sourceFrame, CHANNEL_RIGHT, fraction, frameSize)
+            output[outputOffset++] = (left and 0xFF).toByte()
+            output[outputOffset++] = ((left ushr 8) and 0xFF).toByte()
+            output[outputOffset++] = (right and 0xFF).toByte()
+            output[outputOffset++] = ((right ushr 8) and 0xFF).toByte()
+        }
+    }
+
+    private fun interpolatePcm16(
+        cache: StemResampleCache,
+        sourceFrame: Long,
+        channel: Int,
+        fraction: Double,
+        frameSize: Int,
+    ): Int {
+        val current = cache.readPcm16(sourceFrame, channel, frameSize)
+        val next = cache.readPcm16(sourceFrame + 1L, channel, frameSize)
+        return (current + (next - current) * fraction)
+            .roundToInt()
+            .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
     }
 
     private fun readPcm16(offset: Int, bytesRead: Int): Int {
@@ -367,6 +494,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             ?: DEFAULT_FRAME_SIZE
         val frame = (positionMs.coerceAtLeast(0) * sampleRate / MILLIS_PER_SECOND.toFloat()).roundToLong()
         val bytePosition = frame * frameSize
+        resampleStemFramePosition = frame.toDouble()
+        clearResampleCachesLocked()
         vocalsInput?.seekToPcmByte(bytePosition)
         instrumentalInput?.seekToPcmByte(bytePosition)
     }
@@ -376,8 +505,14 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         vocalsInput = null
         instrumentalInput?.close()
         instrumentalInput = null
+        clearResampleCachesLocked()
         notifyMixedOutputStarted = false
         mixedOutputPrerollFramesRemaining = 0L
+    }
+
+    private fun clearResampleCachesLocked() {
+        vocalsResampleCache.clear()
+        instrumentalResampleCache.clear()
     }
 
     private fun resetMixedOutputNotificationLocked() {
@@ -471,9 +606,12 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         private const val DEBUG_INITIAL_QUEUE_TRACE_COUNT = 80
         private const val DEBUG_QUEUE_TRACE_INTERVAL = 200L
         private const val CHANNEL_COUNT_STEREO = 2
+        private const val CHANNEL_LEFT = 0
+        private const val CHANNEL_RIGHT = 1
         private const val BYTES_PER_SAMPLE = 2
         private const val DEFAULT_SAMPLE_RATE = 44_100
         private const val DEFAULT_FRAME_SIZE = CHANNEL_COUNT_STEREO * BYTES_PER_SAMPLE
+        private const val RESAMPLE_READ_CHUNK_BYTES = 16 * 1024
         private const val MILLIS_PER_SECOND = 1000
         private const val NANOS_PER_MILLISECOND = 1_000_000L
         private const val WAV_HEADER_SIZE = 44L
@@ -489,6 +627,109 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
         fun read(buffer: ByteArray, byteCount: Int): Int
         fun seekToPcmByte(bytePosition: Long)
+    }
+
+    private class StemResampleCache {
+        private var baseFrame = 0L
+        private var frameCount = 0
+        private var bytes = ByteArray(0)
+        private var readScratch = ByteArray(0)
+
+        fun clear() {
+            baseFrame = 0L
+            frameCount = 0
+        }
+
+        fun ensure(
+            input: StemPcmInput,
+            startFrame: Long,
+            endFrameInclusive: Long,
+            frameSize: Int,
+        ) {
+            val safeStartFrame = startFrame.coerceAtLeast(0L)
+            val safeEndFrame = endFrameInclusive.coerceAtLeast(safeStartFrame)
+            val endExclusiveFrame = baseFrame + frameCount
+            if (frameCount == 0 || safeStartFrame < baseFrame || safeStartFrame > endExclusiveFrame) {
+                input.seekToPcmByte(safeStartFrame * frameSize)
+                baseFrame = safeStartFrame
+                frameCount = 0
+            } else if (safeStartFrame > baseFrame) {
+                dropBefore(safeStartFrame, frameSize)
+            }
+
+            val requiredEndExclusiveFrame = safeEndFrame + 1L
+            val framesToAppend = (requiredEndExclusiveFrame - (baseFrame + frameCount))
+                .coerceAtLeast(0L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            if (framesToAppend == 0) return
+
+            val appendOffset = frameCount * frameSize
+            val appendBytes = framesToAppend * frameSize
+            ensureCapacity(appendOffset + appendBytes)
+            var totalRead = 0
+            while (totalRead < appendBytes) {
+                val chunkSize = minOf(appendBytes - totalRead, RESAMPLE_READ_CHUNK_BYTES)
+                if (readScratch.size < chunkSize) {
+                    readScratch = ByteArray(chunkSize)
+                }
+                val count = input.read(readScratch, chunkSize)
+                if (count <= 0) break
+                readScratch.copyInto(
+                    destination = bytes,
+                    destinationOffset = appendOffset + totalRead,
+                    startIndex = 0,
+                    endIndex = count,
+                )
+                totalRead += count
+            }
+            if (totalRead < appendBytes) {
+                bytes.fill(0, appendOffset + totalRead, appendOffset + appendBytes)
+            }
+            frameCount += framesToAppend
+        }
+
+        fun dropBefore(frame: Long, frameSize: Int) {
+            val safeFrame = frame.coerceAtLeast(0L)
+            if (frameCount == 0 || safeFrame <= baseFrame) return
+            val framesToDrop = (safeFrame - baseFrame)
+                .coerceAtMost(frameCount.toLong())
+                .toInt()
+            if (framesToDrop >= frameCount) {
+                baseFrame = safeFrame
+                frameCount = 0
+                return
+            }
+            val bytesToDrop = framesToDrop * frameSize
+            val remainingBytes = (frameCount - framesToDrop) * frameSize
+            bytes.copyInto(
+                destination = bytes,
+                destinationOffset = 0,
+                startIndex = bytesToDrop,
+                endIndex = bytesToDrop + remainingBytes,
+            )
+            baseFrame += framesToDrop
+            frameCount -= framesToDrop
+        }
+
+        fun readPcm16(frame: Long, channel: Int, frameSize: Int): Int {
+            val frameOffset = frame - baseFrame
+            if (frameOffset < 0L || frameOffset >= frameCount) return 0
+            val byteOffset = frameOffset.toInt() * frameSize + channel * BYTES_PER_SAMPLE
+            if (byteOffset + 1 >= bytes.size) return 0
+            val low = bytes[byteOffset].toInt() and 0xFF
+            val high = bytes[byteOffset + 1].toInt() and 0xFF
+            return (low or (high shl 8)).toShort().toInt()
+        }
+
+        private fun ensureCapacity(requiredBytes: Int) {
+            if (bytes.size >= requiredBytes) return
+            var capacity = bytes.size.coerceAtLeast(DEFAULT_FRAME_SIZE)
+            while (capacity < requiredBytes) {
+                capacity *= 2
+            }
+            bytes = bytes.copyOf(capacity)
+        }
     }
 
     private class WavStemPcmInput(file: File) : StemPcmInput {
