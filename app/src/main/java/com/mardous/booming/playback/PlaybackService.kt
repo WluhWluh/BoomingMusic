@@ -1249,8 +1249,20 @@ class PlaybackService :
         if ((sourceSeparationPlaybackSession != null || sourceSeparationPlaybackIsProcessing) &&
             reason == Player.DISCONTINUITY_REASON_SEEK
         ) {
+            val activeSession = sourceSeparationPlaybackSession
             if (!applySourceSeparationHydrationOnSeekIfReady(newPosition.positionMs)) {
                 sourceSeparationMixProcessor.seekTo(newPosition.positionMs)
+            }
+            if (activeSession != null &&
+                !activeSession.requiresReadinessGate &&
+                !sourceSeparationPlaybackIsProcessing &&
+                !sourceSeparationPlaybackExpectProcessing
+            ) {
+                traceSourceSeparationPlayback(
+                    "check.seek.skip",
+                    "reason=activeCompletedSession position=${newPosition.positionMs}"
+                )
+                return
             }
             serviceScope.launch {
                 ensureSourceSeparationPlaybackReady(
@@ -1804,24 +1816,27 @@ class PlaybackService :
         val originalMediaItem = song.toMediaItem(mediaItem.mediaId)
         val isRunningCache = manifest.state == SourceSeparationCacheState.Running
         val useOriginalClock = manifest.canUseOriginalSourceSeparationClock(output)
+        if (!useOriginalClock) {
+            clearSourceSeparationPlaybackProcessing()
+            traceSourceSeparationPlayback(
+                "check.newSession.unsupportedClock",
+                "id=$checkId decodedChannels=${manifest.audioIdentity.decodedChannelCount} " +
+                        "decodedRate=${manifest.audioIdentity.decodedSampleRate} outputRate=${output.outputSampleRate}"
+            )
+            return sourceSeparationPlaybackUnavailable(
+                showMessage = showUnavailableMessage,
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = getString(R.string.source_separation_playback_unavailable),
+            )
+        }
         val warmHydration = findWarmSourceSeparationHydration(
             songId = song.id,
             vocalsFile = vocalsFile,
             instrumentalFile = instrumentalFile,
         )
-        val queueReplacementToken = if (useOriginalClock) null else
-            "source-separation:${song.id}:$checkId:${SystemClock.elapsedRealtime()}"
-        val queueReplacementFile = if (useOriginalClock) null else instrumentalFile
-        val playbackMediaItem = if (useOriginalClock) {
-            originalMediaItem
-        } else {
-            buildSourceSeparationReplacementMediaItem(
-                originalMediaItem = originalMediaItem,
-                songId = song.id,
-                token = queueReplacementToken!!,
-                durationMs = output.durationMsForPlaybackClock(),
-            )
-        }
+        val queueReplacementToken: String? = null
+        val queueReplacementFile: File? = null
+        val playbackMediaItem = originalMediaItem
 
         val session = SourceSeparationPlaybackSession(
             songId = song.id,
@@ -1845,7 +1860,7 @@ class PlaybackService :
             "check.newSession.applyStem",
             "id=$checkId index=$index position=$positionMs resumeWhenReady=$resumeWhenReady " +
                     "previousPlayWhenReady=$playWhenReady manifestState=${manifest.state} " +
-                    "clock=${if (useOriginalClock) "original" else "instrumentalStem"} " +
+                    "clock=original " +
                     "warmHydration=${warmHydration != null}"
         )
         setSourceSeparationPlaybackExpectProcessing(false)
@@ -1865,27 +1880,32 @@ class PlaybackService :
             waitForMixedOutput = true,
         ) ||
                 resumeWhenReady
+        val switchPositionMs = if (session.replacesQueueMediaItem) {
+            positionMs
+        } else {
+            player.currentPosition.coerceAtLeast(0)
+        }
         clearSourceSeparationPlayback(restoreOriginalItem = false, broadcast = false)
         sourceSeparationPlaybackIsProcessing = false
         sourceSeparationPlaybackResumeWhenReady = false
         setSourceSeparationPlaybackExpectProcessing(false)
         sourceSeparationPlaybackSession = session
-        enableSourceSeparationMixProcessor(session, positionMs)
+        enableSourceSeparationMixProcessor(session, switchPositionMs)
         updateSourceSeparationPlaybackReadinessMonitor(session)
         withSourceSeparationInternalMediaItemChange {
             if (session.replacesQueueMediaItem) {
                 player.replaceMediaItem(index, playbackMediaItem)
+                player.seekTo(index, switchPositionMs)
+                player.prepare()
+                setSourceSeparationPlayWhenReady(false)
             }
-            player.seekTo(index, positionMs)
-            player.prepare()
-            setSourceSeparationPlayWhenReady(false)
         }
         traceSourceSeparationPlayback(
             "check.newSession.afterPrepare",
-            "id=$checkId position=$positionMs shouldPlayAfterSwitch=$shouldPlayAfterSwitch " +
-                    "resumeAfterSwitch=$resumeAfterSwitch"
+            "id=$checkId position=$switchPositionMs shouldPlayAfterSwitch=$shouldPlayAfterSwitch " +
+                    "resumeAfterSwitch=$resumeAfterSwitch replace=${session.replacesQueueMediaItem}"
         )
-        sourceSeparationMixProcessor.seekTo(positionMs)
+        sourceSeparationMixProcessor.seekTo(switchPositionMs)
         resumeSourceSeparationOutputAfterSwitch("newSession", shouldPlayAfterSwitch || resumeAfterSwitch)
         maybeStartSourceSeparationPcmHydration(session)
 
@@ -1961,24 +1981,26 @@ class PlaybackService :
         val shouldPlayAfterSwitch = resumeWhenReady || playWhenReady
         val originalMediaItem = activeSession.originalMediaItem
         val useOriginalClock = manifest.canUseOriginalSourceSeparationClock(output)
+        if (!useOriginalClock) {
+            traceSourceSeparationPlayback(
+                "check.activeSession.unsupportedClock",
+                "id=$checkId decodedChannels=${manifest.audioIdentity.decodedChannelCount} " +
+                        "decodedRate=${manifest.audioIdentity.decodedSampleRate} outputRate=${output.outputSampleRate}"
+            )
+            return sourceSeparationPlaybackUnavailable(
+                showMessage = showUnavailableMessage,
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = getString(R.string.source_separation_playback_unavailable),
+            )
+        }
         val warmHydration = findWarmSourceSeparationHydration(
             songId = song.id,
             vocalsFile = vocalsFile,
             instrumentalFile = instrumentalFile,
         )
-        val queueReplacementToken = if (useOriginalClock) null else
-            "source-separation:${song.id}:$checkId:${SystemClock.elapsedRealtime()}"
-        val queueReplacementFile = if (useOriginalClock) null else instrumentalFile
-        val playbackMediaItem = if (useOriginalClock) {
-            originalMediaItem
-        } else {
-            buildSourceSeparationReplacementMediaItem(
-                originalMediaItem = originalMediaItem,
-                songId = song.id,
-                token = queueReplacementToken!!,
-                durationMs = output.durationMsForPlaybackClock(),
-            )
-        }
+        val queueReplacementToken: String? = null
+        val queueReplacementFile: File? = null
+        val playbackMediaItem = originalMediaItem
         val session = SourceSeparationPlaybackSession(
             songId = song.id,
             sessionId = checkId,
@@ -2000,27 +2022,32 @@ class PlaybackService :
         traceSourceSeparationPlayback(
             "check.activeSession.upgradeCompleted",
             "id=$checkId index=$index position=$positionMs shouldPlayAfterSwitch=$shouldPlayAfterSwitch " +
-                    "clock=${if (useOriginalClock) "original" else "instrumentalStem"} " +
+                    "clock=original " +
                     "warmHydration=${warmHydration != null}"
         )
         val resumeAfterSwitch = pauseSourceSeparationOutputForSwitch(
             reason = "completedCacheUpgrade",
             waitForMixedOutput = true,
         ) || resumeWhenReady
+        val switchPositionMs = if (session.replacesQueueMediaItem) {
+            positionMs
+        } else {
+            player.currentPosition.coerceAtLeast(0)
+        }
         sourceSeparationPlaybackIsProcessing = false
         sourceSeparationPlaybackResumeWhenReady = false
         sourceSeparationPlaybackSession = session
-        enableSourceSeparationMixProcessor(session, positionMs)
+        enableSourceSeparationMixProcessor(session, switchPositionMs)
         updateSourceSeparationPlaybackReadinessMonitor(session)
         withSourceSeparationInternalMediaItemChange {
             if (session.replacesQueueMediaItem) {
                 player.replaceMediaItem(index, playbackMediaItem)
+                player.seekTo(index, switchPositionMs)
+                player.prepare()
+                setSourceSeparationPlayWhenReady(false)
             }
-            player.seekTo(index, positionMs)
-            player.prepare()
-            setSourceSeparationPlayWhenReady(false)
         }
-        sourceSeparationMixProcessor.seekTo(positionMs)
+        sourceSeparationMixProcessor.seekTo(switchPositionMs)
         resumeSourceSeparationOutputAfterSwitch(
             reason = "completedCacheUpgrade",
             resume = shouldPlayAfterSwitch || resumeAfterSwitch,
@@ -4564,8 +4591,7 @@ private fun SourceSeparationOutput.durationMsForPlaybackClock(): Long {
 private fun SourceSeparationManifest.canUseOriginalSourceSeparationClock(
     output: SourceSeparationOutput,
 ): Boolean {
-    return audioIdentity.decodedSampleRate == output.outputSampleRate &&
-            audioIdentity.decodedChannelCount == SOURCE_SEPARATION_STEM_CHANNEL_COUNT
+    return audioIdentity.decodedChannelCount == SOURCE_SEPARATION_STEM_CHANNEL_COUNT
 }
 
 private fun SourceSeparationPlayableCacheStatus.traceName(): String {
