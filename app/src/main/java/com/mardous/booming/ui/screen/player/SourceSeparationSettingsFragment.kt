@@ -179,6 +179,9 @@ private fun SourceSeparationSettingsSheet(
     val autoStartSeparation by viewModel
         .sourceSeparationAutoStartFlow
         .collectAsState()
+    val windowDecode by viewModel
+        .sourceSeparationWindowDecodeFlow
+        .collectAsState()
     val autoCacheCleanup by viewModel
         .sourceSeparationAutoCacheCleanupFlow
         .collectAsState()
@@ -568,6 +571,18 @@ private fun SourceSeparationSettingsSheet(
                                 )
                             ) { checked ->
                                 viewModel.setSourceSeparationAutoStartEnabled(checked)
+                            }
+
+                            LabeledSwitch(
+                                checked = windowDecode,
+                                title = stringResource(
+                                    R.string.source_separation_window_decode_title
+                                ),
+                                description = stringResource(
+                                    R.string.source_separation_window_decode_description
+                                )
+                            ) { checked ->
+                                viewModel.setSourceSeparationWindowDecodeEnabled(checked)
                             }
 
                             LabeledSwitch(

@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Advanced</string>
     <string name="source_separation_auto_start_title">Automatically start separation</string>
     <string name="source_separation_auto_start_description">Start separation for the current song when separated playback needs a non-centered blend, and preprocess the next song\'s opening buffer windows when possible.</string>
+    <string name="source_separation_window_decode_title">Use window decoding</string>
+    <string name="source_separation_window_decode_description">Decode supported formats window by window so separated playback can become available sooner.</string>
     <string name="source_separation_auto_flac_compression_title">Automatically compress completed caches</string>
     <string name="source_separation_auto_flac_compression_description">After a full WAV separation completes, convert its stems to FLAC for future playback.</string>
     <string name="source_separation_show_snackbar_progress_title">Show separation progress snackbars</string>

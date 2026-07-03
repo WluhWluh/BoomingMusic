@@ -66,6 +66,7 @@ import com.mardous.booming.util.REMEMBER_SHUFFLE_MODE
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.MIN_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_LIMIT
@@ -81,6 +82,7 @@ import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_MESSAGES
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS
+import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.FlowPreview
@@ -265,6 +267,11 @@ class PlayerViewModel(
         MutableStateFlow(readSourceSeparationAutoStart())
     val sourceSeparationAutoStartFlow =
         _sourceSeparationAutoStartFlow.asStateFlow()
+
+    private val _sourceSeparationWindowDecodeFlow =
+        MutableStateFlow(readSourceSeparationWindowDecode())
+    val sourceSeparationWindowDecodeFlow =
+        _sourceSeparationWindowDecodeFlow.asStateFlow()
 
     private val _sourceSeparationAutoFlacCompressionFlow =
         MutableStateFlow(readSourceSeparationAutoFlacCompression())
@@ -1591,6 +1598,13 @@ class PlayerViewModel(
         }
     }
 
+    fun setSourceSeparationWindowDecodeEnabled(enabled: Boolean) {
+        preferences.edit {
+            putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, enabled)
+        }
+        _sourceSeparationWindowDecodeFlow.value = enabled
+    }
+
     fun setSourceSeparationShowSnackbarProgressEnabled(enabled: Boolean) {
         preferences.edit {
             putBoolean(SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS, enabled)
@@ -2050,6 +2064,13 @@ class PlayerViewModel(
         return preferences.getBoolean(
             SOURCE_SEPARATION_AUTO_START,
             DEFAULT_SOURCE_SEPARATION_AUTO_START,
+        )
+    }
+
+    private fun readSourceSeparationWindowDecode(): Boolean {
+        return preferences.getBoolean(
+            SOURCE_SEPARATION_WINDOW_DECODE,
+            DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE,
         )
     }
 

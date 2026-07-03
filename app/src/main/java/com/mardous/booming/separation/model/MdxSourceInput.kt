@@ -42,6 +42,7 @@ internal interface MdxSourceInput {
             config: MdxDspConfig,
             uri: Uri,
             displayName: String,
+            windowDecodeEnabled: Boolean = true,
             timing: MdxRangeTimingAccumulator,
             onProgress: (MdxRangeProgress) -> Unit,
             shouldCancel: () -> Boolean,
@@ -53,14 +54,16 @@ internal interface MdxSourceInput {
             }
             throwIfCanceled(shouldCancel)
 
-            val mp3WindowDecodeDisabled = MdxWindowDecodeProfile.isMp3(sourceInfo) &&
+            val mp3WindowDecodeDisabled = windowDecodeEnabled &&
+                    MdxWindowDecodeProfile.isMp3(sourceInfo) &&
                     Mp3WindowDecodeSessionGate.isDisabled
-            val windowProfile = if (mp3WindowDecodeDisabled) {
+            val windowProfile = if (!windowDecodeEnabled || mp3WindowDecodeDisabled) {
                 null
             } else {
                 MdxWindowDecodeProfile.forSource(sourceInfo, displayName, config)
             }
             var fallbackReason: String? = when {
+                !windowDecodeEnabled -> "Window decoding is disabled in source separation settings."
                 mp3WindowDecodeDisabled -> Mp3WindowDecodeSessionGate.fallbackReason
                 sourceInfo.frameCount == null -> "Source duration is unavailable."
                 else -> MdxWindowDecodeProfile.fallbackReason(sourceInfo, displayName, config)

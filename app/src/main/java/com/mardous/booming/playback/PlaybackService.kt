@@ -120,6 +120,7 @@ import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_
 import com.mardous.booming.util.CLEAR_QUEUE_ON_COMPLETION
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.ENABLE_HISTORY
 import com.mardous.booming.util.IGNORE_AUDIO_FOCUS
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
@@ -139,6 +140,7 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.STOP_WHEN_CLOSED_FROM_RECENTS
 import com.mardous.booming.util.SongPlayCountHelper
 import com.mardous.booming.util.WIDGET_DYNAMIC_COLORS
@@ -831,6 +833,10 @@ class PlaybackService :
                         playbackReadyWindowCountProvider = {
                             sourceSeparationPlaybackReadyWindowCount
                         },
+                        windowDecodeEnabled = preferences.getBoolean(
+                            SOURCE_SEPARATION_WINDOW_DECODE,
+                            DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE,
+                        ),
                     )
                     cleanupCompletedSourceSeparationTemporaryDirs()
                     SessionResult(
