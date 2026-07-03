@@ -274,6 +274,11 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
                 writeStatus(context, command, report, controller)
                 null
             }
+            COMMAND_RUN_CURRENT_MP3_OVERLAP_SWEEP -> {
+                val report = runCurrentMp3OverlapSweep(context, intent, command, controller)
+                writeStatus(context, command, report, controller)
+                null
+            }
             else -> {
                 writeStatus(context, command, "unknownCommand", controller)
                 null
@@ -397,6 +402,61 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
             append(" repeatCount=").append(repeatCount)
             append(" localUniqueHashes=").append(result.localRuns.map { it.pcmSha256 }.distinct().size)
             append(" prerollUniqueHashes=").append(result.prerollRuns.map { it.pcmSha256 }.distinct().size)
+        }
+    }
+
+    private fun runCurrentMp3OverlapSweep(
+        context: Context,
+        intent: Intent,
+        command: String,
+        controller: MediaController?,
+    ): String {
+        val currentItem = controller?.currentMediaItem
+            ?: error("No current media item is available.")
+        val uri = currentItem.localConfiguration?.uri
+            ?: error("Current media item has no URI.")
+        val displayName = currentItem.mediaMetadata.title?.toString()
+            ?.takeIf { it.isNotBlank() }
+            ?: currentItem.mediaId.ifBlank { uri.lastPathSegment ?: "current-song" }
+        val outputTag = intent.getStringExtra(EXTRA_OUTPUT_TAG)
+            ?.sanitizePathSegment()
+            ?.ifBlank { null }
+            ?: "current-mp3-overlap-${System.currentTimeMillis()}"
+        val reportRoot = File(
+            File(
+                context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir,
+                "source-separation/debug/current-mp3-overlap",
+            ),
+            outputTag,
+        )
+        reportRoot.mkdirs()
+
+        writeStatus(
+            context,
+            command,
+            "running uri=$uri title=${displayName.sanitizeForStatus()}",
+            controller,
+        )
+        val startedAtMs = SystemClock.elapsedRealtime()
+        val result = Mp3OverlapSweepExperiment(context).run(
+            uri = uri,
+            displayName = displayName,
+            reportDir = reportRoot,
+            onProgress = { stage ->
+                Log.i(TAG, "MP3 overlap sweep: $stage")
+            },
+        )
+        val elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
+        val large = result.comparisons.filter { it.valid && it.largeOffset && !it.smallOffset }
+        val minRelative = large.mapNotNull { it.relativeError }.minOrNull()
+        return buildString {
+            append("report=").append(result.reportFile.absolutePath)
+            append(" elapsedMs=").append(elapsedMs)
+            append(" segments=").append(result.segmentCount)
+            append(" comparisons=").append(result.comparisons.size)
+            append(" large=").append(large.size)
+            append(" minLargeRelative=")
+            append(if (minRelative != null) String.format(Locale.US, "%.6f", minRelative) else "")
         }
     }
 
@@ -528,6 +588,7 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
         private const val COMMAND_RUN_CURRENT_WINDOW_DECODE_EXPERIMENT = "runCurrentWindowDecodeExperiment"
         private const val COMMAND_RUN_CURRENT_WINDOW_REPEAT_DECODE_EXPERIMENT =
             "runCurrentWindowRepeatDecodeExperiment"
+        private const val COMMAND_RUN_CURRENT_MP3_OVERLAP_SWEEP = "runCurrentMp3OverlapSweep"
         private const val COMMAND_STATUS = "status"
 
         private const val TAG = "SrcSepDebugReceiver"
