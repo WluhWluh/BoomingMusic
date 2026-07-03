@@ -3,6 +3,7 @@ package com.mardous.booming.separation.model
 import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Log
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
@@ -15,8 +16,12 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.SourceSeparationManifest
 import java.io.File
 import java.nio.FloatBuffer
+import java.util.LinkedHashMap
+import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 class MdxRangeSeparator(
     private val context: Context,
@@ -46,7 +51,7 @@ class MdxRangeSeparator(
         val timing = MdxRangeTimingAccumulator()
         val totalStartedAt = SystemClock.elapsedRealtime()
         throwIfCanceled(shouldCancel)
-        val sourceInput = MdxSourceInput.create(
+        var sourceInput = MdxSourceInput.create(
             context = context,
             config = config,
             uri = uri,
@@ -136,6 +141,11 @@ class MdxRangeSeparator(
             null
         }
         val canWriteWindowsByFrame = declaredOutputDataSizeBytes != null
+        var mp3WindowOverlapGuard = if (canWriteWindowsByFrame && sourceInput.usesMp3WindowDecode) {
+            Mp3LazyWindowOverlapGuard(config)
+        } else {
+            null
+        }
 
         WavFileWriter(
             file = vocalsFile,
@@ -257,6 +267,48 @@ class MdxRangeSeparator(
                             timing = timing,
                             shouldCancel = shouldCancel,
                         )
+                        val overlapResult = mp3WindowOverlapGuard?.observe(segment.index, mixWindow)
+                        if (overlapResult is Mp3LazyWindowOverlapResult.Failed) {
+                            val resetState = if (segmentOutputDir != null) {
+                                SourceSeparationSegmentState.Queued
+                            } else {
+                                SourceSeparationSegmentState.Missing
+                            }
+                            val invalidatedSegments = mp3WindowOverlapGuard
+                                ?.observedSegmentIndexes()
+                                .orEmpty()
+                            for (index in invalidatedSegments.sorted()) {
+                                currentSegmentPlan = currentSegmentPlan.withSegmentState(
+                                    segmentIndex = index,
+                                    state = resetState,
+                                )
+                                processedSegments.remove(index)
+                                onSegmentStateChanged(index, resetState)
+                            }
+                            processedWindowCount = currentSegmentPlan.segments
+                                .count { it.state == SourceSeparationSegmentState.Ready }
+                            mp3WindowOverlapGuard = null
+                            onProgress(
+                                MdxRangeProgress(
+                                    processedWindowCount,
+                                    windowCount,
+                                    stage = "MP3 window overlap check failed; decoding full source",
+                                    sourceDecodeDiagnostics = sourceInput.diagnostics,
+                                    scheduler = schedulerProgress,
+                                )
+                            )
+                            sourceInput = MdxSourceInput.createFullSongFallback(
+                                context = context,
+                                config = config,
+                                uri = uri,
+                                fallbackReason = overlapResult.reason,
+                                timing = timing,
+                                onProgress = onProgress,
+                                shouldCancel = shouldCancel,
+                            )
+                            throwIfCanceled(shouldCancel)
+                            continue
+                        }
 
                         val modelOutputWindow = runWindow(
                             session = session,
@@ -570,6 +622,279 @@ class MdxRangeSeparator(
             .coerceAtMost(segments.size)
         return segments.subList(startIndex, endIndex)
     }
+}
+
+private class Mp3LazyWindowOverlapGuard(
+    private val config: MdxDspConfig,
+) {
+    private val windows = object : LinkedHashMap<Int, Array<FloatArray>>(MAX_STORED_WINDOWS, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<Int, Array<FloatArray>>,
+        ): Boolean {
+            return size > MAX_STORED_WINDOWS
+        }
+    }
+    private val observedSegmentIndexes = linkedSetOf<Int>()
+
+    fun observe(
+        segmentIndex: Int,
+        mixWindow: Array<FloatArray>,
+    ): Mp3LazyWindowOverlapResult {
+        observedSegmentIndexes += segmentIndex
+        val comparisons = buildList {
+            windows[segmentIndex - 1]?.let { previous ->
+                add(compareAdjacent(previous, mixWindow, segmentIndex - 1, segmentIndex))
+            }
+            windows[segmentIndex + 1]?.let { next ->
+                add(compareAdjacent(mixWindow, next, segmentIndex, segmentIndex + 1))
+            }
+        }
+        windows[segmentIndex] = mixWindow
+
+        comparisons.firstOrNull { it is Mp3LazyWindowOverlapResult.Failed }?.let {
+            return it
+        }
+        return if (comparisons.any { it is Mp3LazyWindowOverlapResult.Passed }) {
+            Mp3LazyWindowOverlapResult.Passed
+        } else {
+            Mp3LazyWindowOverlapResult.Inconclusive
+        }
+    }
+
+    fun observedSegmentIndexes(): Set<Int> = observedSegmentIndexes.toSet()
+
+    private fun compareAdjacent(
+        lowerWindow: Array<FloatArray>,
+        upperWindow: Array<FloatArray>,
+        lowerSegmentIndex: Int,
+        upperSegmentIndex: Int,
+    ): Mp3LazyWindowOverlapResult {
+        val overlapFrames = config.chunkSize - config.generationSize
+        val edgeGuardFrames = minOf(MP3_OVERLAP_EDGE_GUARD_FRAMES, overlapFrames / 4)
+        val stableFrames = overlapFrames - edgeGuardFrames * 2
+        if (stableFrames < MIN_MP3_OVERLAP_COMPARISON_FRAMES) {
+            return Mp3LazyWindowOverlapResult.Inconclusive
+        }
+
+        val signalRms = signalRms(
+            lowerWindow = lowerWindow,
+            upperWindow = upperWindow,
+            edgeGuardFrames = edgeGuardFrames,
+            frames = stableFrames,
+        )
+        if (signalRms < MP3_OVERLAP_MIN_SIGNAL_RMS) {
+            return Mp3LazyWindowOverlapResult.Inconclusive
+        }
+
+        val zeroMetrics = overlapMetricsAtOffset(
+            lowerWindow = lowerWindow,
+            upperWindow = upperWindow,
+            edgeGuardFrames = edgeGuardFrames,
+            offsetFrames = 0,
+        ) ?: return Mp3LazyWindowOverlapResult.Inconclusive
+        val best = bestOffset(
+            lowerWindow = lowerWindow,
+            upperWindow = upperWindow,
+            edgeGuardFrames = edgeGuardFrames,
+            maxOffsetFrames = MP3_OVERLAP_MAX_SEARCH_OFFSET_FRAMES
+                .coerceAtMost(stableFrames - MIN_MP3_OVERLAP_COMPARISON_FRAMES),
+        ) ?: return Mp3LazyWindowOverlapResult.Inconclusive
+
+        val relativeBestError = best.metrics.errorRms / signalRms.coerceAtLeast(Double.MIN_VALUE)
+        val improvement = 1.0 - (best.metrics.errorRms / zeroMetrics.errorRms.coerceAtLeast(Double.MIN_VALUE))
+        val smallOffset = abs(best.offsetFrames) <= MP3_OVERLAP_PASS_OFFSET_FRAMES
+        val strongLargeOffset = abs(best.offsetFrames) >= MP3_OVERLAP_FAIL_OFFSET_FRAMES &&
+                improvement >= MP3_OVERLAP_MIN_FAILURE_IMPROVEMENT &&
+                relativeBestError <= MP3_OVERLAP_MAX_FAILURE_RELATIVE_ERROR
+        Log.i(
+            MP3_OVERLAP_LOG_TAG,
+            "segments=$lowerSegmentIndex/$upperSegmentIndex " +
+                    "bestOffset=${best.offsetFrames} zeroErrorRms=${zeroMetrics.errorRms.format(6)} " +
+                    "bestErrorRms=${best.metrics.errorRms.format(6)} signalRms=${signalRms.format(6)} " +
+                    "bestLowerRms=${best.metrics.lowerRms.format(6)} " +
+                    "bestUpperRms=${best.metrics.upperRms.format(6)} " +
+                    "relative=${relativeBestError.format(3)} improvement=${improvement.format(3)} " +
+                    "smallOffset=$smallOffset strongLargeOffset=$strongLargeOffset",
+        )
+        return if (smallOffset) {
+            Mp3LazyWindowOverlapResult.Passed
+        } else if (!strongLargeOffset) {
+            Mp3LazyWindowOverlapResult.Inconclusive
+        } else {
+            Mp3LazyWindowOverlapResult.Failed(
+                reason = "MP3 window overlap mismatch between segments " +
+                        "$lowerSegmentIndex/$upperSegmentIndex: " +
+                        "bestOffset=${best.offsetFrames}, zeroErrorRms=${zeroMetrics.errorRms.format(6)}, " +
+                        "bestErrorRms=${best.metrics.errorRms.format(6)}, signalRms=${signalRms.format(6)}, " +
+                        "bestLowerRms=${best.metrics.lowerRms.format(6)}, " +
+                        "bestUpperRms=${best.metrics.upperRms.format(6)}, " +
+                        "relative=${relativeBestError.format(3)}, improvement=${improvement.format(3)}",
+            )
+        }
+    }
+
+    private fun signalRms(
+        lowerWindow: Array<FloatArray>,
+        upperWindow: Array<FloatArray>,
+        edgeGuardFrames: Int,
+        frames: Int,
+    ): Double {
+        var sumSquares = 0.0
+        var count = 0
+        val lowerStartFrame = config.generationSize + edgeGuardFrames
+        val upperStartFrame = edgeGuardFrames
+        for (channel in 0 until MdxDspConfig.STEREO_CHANNELS) {
+            val lower = lowerWindow[channel]
+            val upper = upperWindow[channel]
+            for (frame in 0 until frames) {
+                val lowerValue = lower[lowerStartFrame + frame].toDouble()
+                val upperValue = upper[upperStartFrame + frame].toDouble()
+                sumSquares += lowerValue * lowerValue + upperValue * upperValue
+                count += 2
+            }
+        }
+        return if (count > 0) sqrt(sumSquares / count.toDouble()) else 0.0
+    }
+
+    private fun bestOffset(
+        lowerWindow: Array<FloatArray>,
+        upperWindow: Array<FloatArray>,
+        edgeGuardFrames: Int,
+        maxOffsetFrames: Int,
+    ): Mp3OverlapOffset? {
+        if (maxOffsetFrames < 0) return null
+        var best: Mp3OverlapOffset? = null
+        var coarseOffset = -maxOffsetFrames
+        while (coarseOffset <= maxOffsetFrames) {
+            val metrics = validOffsetMetrics(
+                lowerWindow = lowerWindow,
+                upperWindow = upperWindow,
+                edgeGuardFrames = edgeGuardFrames,
+                offsetFrames = coarseOffset,
+            )
+            if (metrics != null && (best == null || metrics.errorRms < best.metrics.errorRms)) {
+                best = Mp3OverlapOffset(coarseOffset, metrics)
+            }
+            coarseOffset += MP3_OVERLAP_COARSE_SEARCH_STEP_FRAMES
+        }
+
+        val coarseBest = best ?: return null
+        val refineStart = (coarseBest.offsetFrames - MP3_OVERLAP_REFINE_RADIUS_FRAMES)
+            .coerceAtLeast(-maxOffsetFrames)
+        val refineEnd = (coarseBest.offsetFrames + MP3_OVERLAP_REFINE_RADIUS_FRAMES)
+            .coerceAtMost(maxOffsetFrames)
+        for (offset in refineStart..refineEnd) {
+            val metrics = validOffsetMetrics(
+                lowerWindow = lowerWindow,
+                upperWindow = upperWindow,
+                edgeGuardFrames = edgeGuardFrames,
+                offsetFrames = offset,
+            )
+            if (metrics != null && metrics.errorRms < best!!.metrics.errorRms) {
+                best = Mp3OverlapOffset(offset, metrics)
+            }
+        }
+        return best
+    }
+
+    private fun validOffsetMetrics(
+        lowerWindow: Array<FloatArray>,
+        upperWindow: Array<FloatArray>,
+        edgeGuardFrames: Int,
+        offsetFrames: Int,
+    ): Mp3OverlapMetrics? {
+        val metrics = overlapMetricsAtOffset(
+            lowerWindow = lowerWindow,
+            upperWindow = upperWindow,
+            edgeGuardFrames = edgeGuardFrames,
+            offsetFrames = offsetFrames,
+        ) ?: return null
+        if (metrics.lowerRms < MP3_OVERLAP_MIN_CANDIDATE_SIDE_RMS ||
+            metrics.upperRms < MP3_OVERLAP_MIN_CANDIDATE_SIDE_RMS
+        ) {
+            return null
+        }
+        return metrics
+    }
+
+    private fun overlapMetricsAtOffset(
+        lowerWindow: Array<FloatArray>,
+        upperWindow: Array<FloatArray>,
+        edgeGuardFrames: Int,
+        offsetFrames: Int,
+    ): Mp3OverlapMetrics? {
+        val overlapFrames = config.chunkSize - config.generationSize
+        val localStartFrame = maxOf(edgeGuardFrames, edgeGuardFrames - offsetFrames)
+        val localEndFrame = minOf(
+            overlapFrames - edgeGuardFrames,
+            overlapFrames - edgeGuardFrames - offsetFrames,
+        )
+        val frames = localEndFrame - localStartFrame
+        if (frames < MIN_MP3_OVERLAP_COMPARISON_FRAMES) return null
+
+        val lowerStartFrame = config.generationSize + localStartFrame
+        val upperStartFrame = localStartFrame + offsetFrames
+        var errorSumSquares = 0.0
+        var lowerSumSquares = 0.0
+        var upperSumSquares = 0.0
+        var count = 0
+        for (channel in 0 until MdxDspConfig.STEREO_CHANNELS) {
+            val lower = lowerWindow[channel]
+            val upper = upperWindow[channel]
+            for (frame in 0 until frames) {
+                val lowerValue = lower[lowerStartFrame + frame].toDouble()
+                val upperValue = upper[upperStartFrame + frame].toDouble()
+                val difference = lowerValue - upperValue
+                errorSumSquares += difference * difference
+                lowerSumSquares += lowerValue * lowerValue
+                upperSumSquares += upperValue * upperValue
+                count += 1
+            }
+        }
+        if (count <= 0) return null
+        return Mp3OverlapMetrics(
+            errorRms = sqrt(errorSumSquares / count.toDouble()),
+            lowerRms = sqrt(lowerSumSquares / count.toDouble()),
+            upperRms = sqrt(upperSumSquares / count.toDouble()),
+        )
+    }
+
+    private fun Double.format(decimals: Int): String {
+        return "%.${decimals}f".format(Locale.US, this)
+    }
+
+    private companion object {
+        const val MAX_STORED_WINDOWS = 8
+        const val MP3_OVERLAP_EDGE_GUARD_FRAMES = 512
+        const val MIN_MP3_OVERLAP_COMPARISON_FRAMES = 1_024
+        const val MP3_OVERLAP_MAX_SEARCH_OFFSET_FRAMES = 4_096
+        const val MP3_OVERLAP_COARSE_SEARCH_STEP_FRAMES = 16
+        const val MP3_OVERLAP_REFINE_RADIUS_FRAMES = 32
+        const val MP3_OVERLAP_PASS_OFFSET_FRAMES = 96
+        const val MP3_OVERLAP_FAIL_OFFSET_FRAMES = 384
+        const val MP3_OVERLAP_MIN_SIGNAL_RMS = 0.001
+        const val MP3_OVERLAP_MIN_CANDIDATE_SIDE_RMS = 0.001
+        const val MP3_OVERLAP_MIN_FAILURE_IMPROVEMENT = 0.20
+        const val MP3_OVERLAP_MAX_FAILURE_RELATIVE_ERROR = 0.12
+        const val MP3_OVERLAP_LOG_TAG = "Mp3OverlapGuard"
+    }
+}
+
+private data class Mp3OverlapOffset(
+    val offsetFrames: Int,
+    val metrics: Mp3OverlapMetrics,
+)
+
+private data class Mp3OverlapMetrics(
+    val errorRms: Double,
+    val lowerRms: Double,
+    val upperRms: Double,
+)
+
+private sealed interface Mp3LazyWindowOverlapResult {
+    data object Passed : Mp3LazyWindowOverlapResult
+    data object Inconclusive : Mp3LazyWindowOverlapResult
+    data class Failed(val reason: String) : Mp3LazyWindowOverlapResult
 }
 
 data class MdxRangeProgress(

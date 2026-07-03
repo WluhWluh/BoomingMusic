@@ -21,6 +21,8 @@ internal interface MdxSourceInput {
     val sourceSampleRate: Int
     val sourceChannelCount: Int
     val outputFrameCount: Int
+    val usesMp3WindowDecode: Boolean
+        get() = false
 
     fun toStereoFloatContextWindow(
         windowStartFrame: Int,
@@ -90,6 +92,55 @@ internal interface MdxSourceInput {
                 }
             }
 
+            return createFullSong(
+                decoder = decoder,
+                uri = uri,
+                config = config,
+                sourceInfo = sourceInfo,
+                fallbackReason = fallbackReason,
+                timing = timing,
+                onProgress = onProgress,
+                shouldCancel = shouldCancel,
+            )
+        }
+
+        fun createFullSongFallback(
+            context: Context,
+            config: MdxDspConfig,
+            uri: Uri,
+            fallbackReason: String?,
+            timing: MdxRangeTimingAccumulator,
+            onProgress: (MdxRangeProgress) -> Unit,
+            shouldCancel: () -> Boolean,
+        ): MdxSourceInput {
+            val decoder = AudioPcmDecoder(context)
+            onProgress(MdxRangeProgress.preparing("Inspecting source audio"))
+            val sourceInfo = measureElapsed(timing, "Inspect source") {
+                decoder.inspect(uri)
+            }
+            throwIfCanceled(shouldCancel)
+            return createFullSong(
+                decoder = decoder,
+                uri = uri,
+                config = config,
+                sourceInfo = sourceInfo,
+                fallbackReason = fallbackReason,
+                timing = timing,
+                onProgress = onProgress,
+                shouldCancel = shouldCancel,
+            )
+        }
+
+        private fun createFullSong(
+            decoder: AudioPcmDecoder,
+            uri: Uri,
+            config: MdxDspConfig,
+            sourceInfo: AudioSourceInfo,
+            fallbackReason: String?,
+            timing: MdxRangeTimingAccumulator,
+            onProgress: (MdxRangeProgress) -> Unit,
+            shouldCancel: () -> Boolean,
+        ): MdxSourceInput {
             val fallbackDiagnostics = MdxSourceDecodeDiagnostics(
                 mode = MdxSourceDecodeMode.FullSong,
                 profile = null,
@@ -210,6 +261,7 @@ private class WindowDecodeMdxSourceInput(
     override val sourceFrameCount: Int = safeSourceFrameCount
     override val sourceSampleRate: Int = sourceInfo.sampleRate
     override val sourceChannelCount: Int = sourceInfo.channelCount
+    override val usesMp3WindowDecode: Boolean = profile.isMp3
     override val outputFrameCount: Int = targetFrameCountFor(
         sourceFrameCount = safeSourceFrameCount,
         sourceSampleRate = sourceInfo.sampleRate,
@@ -220,7 +272,9 @@ private class WindowDecodeMdxSourceInput(
         timing: MdxRangeTimingAccumulator,
         shouldCancel: () -> Boolean,
     ) {
-        if (profile == MdxWindowDecodeProfile.Mp3_44100_NoGaplessQuantized) {
+        if (profile == MdxWindowDecodeProfile.Mp3_44100_NoGaplessQuantized &&
+            !MP3_LAZY_OVERLAP_VALIDATION_ENABLED
+        ) {
             mp3NoGaplessCalibration = measureElapsed(timing, "Window calibration") {
                 Mp3NoGaplessCalibrationGate(
                     context = context,
@@ -393,6 +447,10 @@ private enum class MdxWindowDecodeProfile(
     Flac_44100_TimestampSongTimeline("FLAC 44.1 kHz", experimental = true),
     Mp3_44100_MetadataQuantized("MP3 44.1 kHz", experimental = true),
     Mp3_44100_NoGaplessQuantized("MP3 44.1 kHz no-gapless calibrated", experimental = true);
+
+    val isMp3: Boolean
+        get() = this == Mp3_44100_MetadataQuantized ||
+                this == Mp3_44100_NoGaplessQuantized
 
     companion object {
         fun forSource(
@@ -891,6 +949,7 @@ private const val MICROS_PER_SECOND = 1_000_000L
 private const val CANCEL_CHECK_INTERVAL_FRAMES = 16_384
 private const val MP3_FINE_QUANTUM_FRAMES = 384
 private const val MP3_NO_GAPLESS_CALIBRATION_VERSION = 1
+private const val MP3_LAZY_OVERLAP_VALIDATION_ENABLED = true
 private const val PCM_FLOAT_SCALE = 32768f
 private const val WINDOW_DECODE_FALLBACK_PREROLL_US = MICROS_PER_SECOND
 private const val DECODER_NO_PCM_OUTPUT_MESSAGE = "Decoder produced no PCM output."
