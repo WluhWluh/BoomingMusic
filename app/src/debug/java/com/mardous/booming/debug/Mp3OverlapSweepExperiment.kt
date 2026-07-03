@@ -212,6 +212,7 @@ class Mp3OverlapSweepExperiment(
             signalRms = signalRms,
             zeroErrorRms = zeroMetrics.errorRms,
         )
+        val zeroRelative = zeroMetrics.errorRms / signalRms.coerceAtLeast(Double.MIN_VALUE)
         val relative = best.metrics.errorRms / signalRms.coerceAtLeast(Double.MIN_VALUE)
         val improvement = 1.0 - (best.metrics.errorRms / zeroMetrics.errorRms.coerceAtLeast(Double.MIN_VALUE))
         return Mp3OverlapSweepComparison(
@@ -221,6 +222,7 @@ class Mp3OverlapSweepExperiment(
             zeroErrorRms = zeroMetrics.errorRms,
             bestErrorRms = best.metrics.errorRms,
             signalRms = signalRms,
+            zeroRelativeError = zeroRelative,
             bestLowerRms = best.metrics.lowerRms,
             bestUpperRms = best.metrics.upperRms,
             relativeError = relative,
@@ -375,6 +377,8 @@ class Mp3OverlapSweepExperiment(
     }
 }
 
+private const val MP3_SWEEP_ZERO_OFFSET_BAD_RELATIVE_ERROR = 1.15
+
 data class Mp3OverlapSweepResult(
     val displayName: String,
     val sourceInfo: AudioSourceInfo,
@@ -384,8 +388,12 @@ data class Mp3OverlapSweepResult(
     val reportFile: File,
 ) {
     fun toReportText(): String {
+        val valid = comparisons.filter { it.valid }
         val validLarge = comparisons.filter { it.valid && it.largeOffset && !it.smallOffset }
         val largeRelativeValues = validLarge.mapNotNull { it.relativeError }
+        val zeroBad = valid.count {
+            (it.zeroRelativeError ?: Double.MAX_VALUE) >= MP3_SWEEP_ZERO_OFFSET_BAD_RELATIVE_ERROR
+        }
         return buildString {
             appendLine("MP3 overlap sweep: $displayName")
             appendLine("MIME: ${sourceInfo.mimeType}")
@@ -395,6 +403,8 @@ data class Mp3OverlapSweepResult(
             appendLine("Segments: $segmentCount")
             appendLine("Comparisons: ${comparisons.size}")
             appendLine("Elapsed: ${elapsedMs}ms")
+            appendLine("Zero-offset bad relative threshold: $MP3_SWEEP_ZERO_OFFSET_BAD_RELATIVE_ERROR")
+            appendLine("Zero-offset bad comparisons: $zeroBad/${valid.size}")
             appendLine("Valid large-offset comparisons: ${validLarge.size}")
             appendLine("Large-offset relative percentiles:")
             appendLine("  p50=${validLarge.relativePercentile(0.50)}")
@@ -405,7 +415,7 @@ data class Mp3OverlapSweepResult(
             appendLine("  max=${largeRelativeValues.maxOrNull().formatNullable(6)}")
             appendLine()
             appendLine(
-                "lower,upper,valid,bestOffset,zeroError,bestError,signal,bestLower,bestUpper," +
+                "lower,upper,valid,bestOffset,zeroError,bestError,signal,zeroRelative,bestLower,bestUpper," +
                         "relative,improvement,smallOffset,largeOffset"
             )
             comparisons.forEach { comparison ->
@@ -422,6 +432,7 @@ data class Mp3OverlapSweepComparison(
     val zeroErrorRms: Double?,
     val bestErrorRms: Double?,
     val signalRms: Double?,
+    val zeroRelativeError: Double?,
     val bestLowerRms: Double?,
     val bestUpperRms: Double?,
     val relativeError: Double?,
@@ -439,6 +450,7 @@ data class Mp3OverlapSweepComparison(
             zeroErrorRms.formatNullable(6),
             bestErrorRms.formatNullable(6),
             signalRms.formatNullable(6),
+            zeroRelativeError.formatNullable(6),
             bestLowerRms.formatNullable(6),
             bestUpperRms.formatNullable(6),
             relativeError.formatNullable(6),
@@ -462,6 +474,7 @@ data class Mp3OverlapSweepComparison(
                 zeroErrorRms = zeroErrorRms,
                 bestErrorRms = null,
                 signalRms = signalRms,
+                zeroRelativeError = null,
                 bestLowerRms = null,
                 bestUpperRms = null,
                 relativeError = null,
