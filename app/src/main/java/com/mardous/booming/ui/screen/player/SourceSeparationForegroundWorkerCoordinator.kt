@@ -21,12 +21,14 @@ import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COM
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -682,6 +684,10 @@ class SourceSeparationForegroundWorkerCoordinator(
                         DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
                     ).coerceAtLeast(1)
                 },
+                windowDecodeEnabled = preferences.getBoolean(
+                    SOURCE_SEPARATION_WINDOW_DECODE,
+                    DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE,
+                ),
                 sessionProvider = sessionProvider,
                 shouldPause = {
                     pauseRequested.get() ||
