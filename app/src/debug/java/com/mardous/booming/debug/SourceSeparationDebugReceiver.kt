@@ -19,9 +19,11 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.PlaybackService
 import com.mardous.booming.separation.SourceSeparationEngine
+import com.mardous.booming.separation.audio.AudioWindowDecodeExperiment
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerDebugBridge
 import org.koin.java.KoinJavaComponent.get
 import java.io.File
+import java.util.Locale
 
 class SourceSeparationDebugReceiver : BroadcastReceiver() {
 
@@ -262,10 +264,139 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
                 writeStatus(context, command, "status", controller)
                 null
             }
+            COMMAND_RUN_CURRENT_WINDOW_DECODE_EXPERIMENT -> {
+                val report = runCurrentWindowDecodeExperiment(context, intent, command, controller)
+                writeStatus(context, command, report, controller)
+                null
+            }
+            COMMAND_RUN_CURRENT_WINDOW_REPEAT_DECODE_EXPERIMENT -> {
+                val report = runCurrentWindowRepeatDecodeExperiment(context, intent, command, controller)
+                writeStatus(context, command, report, controller)
+                null
+            }
             else -> {
                 writeStatus(context, command, "unknownCommand", controller)
                 null
             }
+        }
+    }
+
+    private fun runCurrentWindowDecodeExperiment(
+        context: Context,
+        intent: Intent,
+        command: String,
+        controller: MediaController?,
+    ): String {
+        val currentItem = controller?.currentMediaItem
+            ?: error("No current media item is available.")
+        val uri = currentItem.localConfiguration?.uri
+            ?: error("Current media item has no URI.")
+        val displayName = currentItem.mediaMetadata.title?.toString()
+            ?.takeIf { it.isNotBlank() }
+            ?: currentItem.mediaId.ifBlank { uri.lastPathSegment ?: "current-song" }
+        val playbackPositionMs = controller.currentPosition.takeIf { it >= 0L } ?: 0L
+        val outputTag = intent.getStringExtra(EXTRA_OUTPUT_TAG)
+            ?.sanitizePathSegment()
+            ?.ifBlank { null }
+            ?: "current-${System.currentTimeMillis()}"
+        val reportRoot = File(
+            File(
+                context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir,
+                "source-separation/debug/current-window-decode",
+            ),
+            outputTag,
+        )
+        reportRoot.mkdirs()
+
+        writeStatus(
+            context,
+            command,
+            "running uri=$uri positionMs=$playbackPositionMs title=${displayName.sanitizeForStatus()}",
+            controller,
+        )
+        val startedAtMs = SystemClock.elapsedRealtime()
+        val result = AudioWindowDecodeExperiment(context).run(
+            uri = uri,
+            displayName = displayName,
+            playbackPositionMs = playbackPositionMs,
+            reportDir = reportRoot,
+            onProgress = { progress ->
+                Log.i(
+                    TAG,
+                    "Window decode experiment ${progress.completedSteps}/${progress.totalSteps}: " +
+                            progress.stage,
+                )
+            },
+        )
+        val elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
+        return buildString {
+            append("report=").append(result.reportFile.absolutePath)
+            append(" elapsedMs=").append(elapsedMs)
+            append(" fullDecodeMs=").append(result.fullDecodeMs)
+            append(" totalWindowDecodeMs=").append(result.totalLocalDecodeMs)
+            append(" worstSongTimelineOffset=").append(result.worstSongTimelineSummary.offsetFrames)
+            append(" worstSongTimelineMeanAbs=")
+            append(String.format(Locale.US, "%.3f", result.worstSongTimelineSummary.meanAbsoluteError))
+        }
+    }
+
+    private fun runCurrentWindowRepeatDecodeExperiment(
+        context: Context,
+        intent: Intent,
+        command: String,
+        controller: MediaController?,
+    ): String {
+        val currentItem = controller?.currentMediaItem
+            ?: error("No current media item is available.")
+        val uri = currentItem.localConfiguration?.uri
+            ?: error("Current media item has no URI.")
+        val displayName = currentItem.mediaMetadata.title?.toString()
+            ?.takeIf { it.isNotBlank() }
+            ?: currentItem.mediaId.ifBlank { uri.lastPathSegment ?: "current-song" }
+        val playbackPositionMs = if (intent.hasExtra(EXTRA_POSITION_MS)) {
+            intent.getLongExtra(EXTRA_POSITION_MS, 0L).coerceAtLeast(0L)
+        } else {
+            controller.currentPosition.takeIf { it >= 0L } ?: 0L
+        }
+        val repeatCount = intent.getIntExtra(EXTRA_REPEAT_COUNT, 6).coerceIn(1, 20)
+        val outputTag = intent.getStringExtra(EXTRA_OUTPUT_TAG)
+            ?.sanitizePathSegment()
+            ?.ifBlank { null }
+            ?: "current-repeat-${System.currentTimeMillis()}"
+        val reportRoot = File(
+            File(
+                context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir,
+                "source-separation/debug/current-window-repeat",
+            ),
+            outputTag,
+        )
+        reportRoot.mkdirs()
+
+        writeStatus(
+            context,
+            command,
+            "running uri=$uri positionMs=$playbackPositionMs repeatCount=$repeatCount " +
+                    "title=${displayName.sanitizeForStatus()}",
+            controller,
+        )
+        val startedAtMs = SystemClock.elapsedRealtime()
+        val result = WindowDecodeRepeatExperiment(context).run(
+            uri = uri,
+            displayName = displayName,
+            playbackPositionMs = playbackPositionMs,
+            repeatCount = repeatCount,
+            reportDir = reportRoot,
+            onProgress = { stage ->
+                Log.i(TAG, "Window repeat decode experiment: $stage")
+            },
+        )
+        val elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
+        return buildString {
+            append("report=").append(result.reportFile.absolutePath)
+            append(" elapsedMs=").append(elapsedMs)
+            append(" repeatCount=").append(repeatCount)
+            append(" localUniqueHashes=").append(result.localRuns.map { it.pcmSha256 }.distinct().size)
+            append(" prerollUniqueHashes=").append(result.prerollRuns.map { it.pcmSha256 }.distinct().size)
         }
     }
 
@@ -348,6 +479,16 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
         return if (hasExtra(name)) getFloatExtra(name, 0f) else null
     }
 
+    private fun String.sanitizeForStatus(): String {
+        return replace('\n', ' ')
+            .replace('\r', ' ')
+            .take(120)
+    }
+
+    private fun String.sanitizePathSegment(): String {
+        return replace(Regex("[^A-Za-z0-9._-]+"), "_").trim('_')
+    }
+
     companion object {
         private const val EXTRA_COMMAND = "command"
         private const val EXTRA_POSITION_MS = "positionMs"
@@ -361,6 +502,8 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
         private const val EXTRA_INDEX = "index"
         private const val EXTRA_REPEAT_MODE = "repeatMode"
         private const val EXTRA_REPEAT_MODE_INT = "repeatModeInt"
+        private const val EXTRA_OUTPUT_TAG = "output_tag"
+        private const val EXTRA_REPEAT_COUNT = "repeatCount"
 
         private const val COMMAND_PLAY = "play"
         private const val COMMAND_PAUSE = "pause"
@@ -382,6 +525,9 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
         private const val COMMAND_WINDOW_SAMPLES = "windowSamples"
         private const val COMMAND_CLEAR_WINDOW_SAMPLES = "clearWindowSamples"
         private const val COMMAND_CLEAR_DEBUG_LOG = "clearDebugLog"
+        private const val COMMAND_RUN_CURRENT_WINDOW_DECODE_EXPERIMENT = "runCurrentWindowDecodeExperiment"
+        private const val COMMAND_RUN_CURRENT_WINDOW_REPEAT_DECODE_EXPERIMENT =
+            "runCurrentWindowRepeatDecodeExperiment"
         private const val COMMAND_STATUS = "status"
 
         private const val TAG = "SrcSepDebugReceiver"
