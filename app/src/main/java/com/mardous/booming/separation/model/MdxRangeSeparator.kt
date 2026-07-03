@@ -19,7 +19,6 @@ import java.nio.FloatBuffer
 import java.util.LinkedHashMap
 import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -635,6 +634,7 @@ private class Mp3LazyWindowOverlapGuard(
         }
     }
     private val observedSegmentIndexes = linkedSetOf<Int>()
+    private val zeroOffsetObservations = mutableListOf<Mp3ZeroOffsetObservation>()
 
     fun observe(
         segmentIndex: Int,
@@ -692,44 +692,43 @@ private class Mp3LazyWindowOverlapGuard(
             edgeGuardFrames = edgeGuardFrames,
             offsetFrames = 0,
         ) ?: return Mp3LazyWindowOverlapResult.Inconclusive
-        val best = bestOffset(
-            lowerWindow = lowerWindow,
-            upperWindow = upperWindow,
-            edgeGuardFrames = edgeGuardFrames,
-            maxOffsetFrames = MP3_OVERLAP_MAX_SEARCH_OFFSET_FRAMES
-                .coerceAtMost(stableFrames - MIN_MP3_OVERLAP_COMPARISON_FRAMES),
-        ) ?: return Mp3LazyWindowOverlapResult.Inconclusive
-
-        val relativeBestError = best.metrics.errorRms / signalRms.coerceAtLeast(Double.MIN_VALUE)
-        val improvement = 1.0 - (best.metrics.errorRms / zeroMetrics.errorRms.coerceAtLeast(Double.MIN_VALUE))
-        val smallOffset = abs(best.offsetFrames) <= MP3_OVERLAP_PASS_OFFSET_FRAMES
-        val strongLargeOffset = abs(best.offsetFrames) >= MP3_OVERLAP_FAIL_OFFSET_FRAMES &&
-                improvement >= MP3_OVERLAP_MIN_FAILURE_IMPROVEMENT &&
-                relativeBestError <= MP3_OVERLAP_MAX_FAILURE_RELATIVE_ERROR
+        val zeroRelativeError = zeroMetrics.errorRms / signalRms.coerceAtLeast(Double.MIN_VALUE)
+        val zeroBad = zeroRelativeError >= MP3_ZERO_OFFSET_BAD_RELATIVE_ERROR
+        zeroOffsetObservations += Mp3ZeroOffsetObservation(
+            lowerSegmentIndex = lowerSegmentIndex,
+            upperSegmentIndex = upperSegmentIndex,
+            zeroRelativeError = zeroRelativeError,
+            bad = zeroBad,
+        )
+        val observedCount = zeroOffsetObservations.size
+        val badCount = zeroOffsetObservations.count { it.bad }
+        val badRatio = badCount.toDouble() / observedCount.toDouble().coerceAtLeast(1.0)
+        val strongZeroMismatch = observedCount >= MP3_ZERO_OFFSET_MIN_COMPARISONS &&
+                badCount >= MP3_ZERO_OFFSET_FAIL_BAD_COMPARISONS &&
+                badRatio >= MP3_ZERO_OFFSET_FAIL_BAD_RATIO
         Log.i(
             MP3_OVERLAP_LOG_TAG,
             "segments=$lowerSegmentIndex/$upperSegmentIndex " +
-                    "bestOffset=${best.offsetFrames} zeroErrorRms=${zeroMetrics.errorRms.format(6)} " +
-                    "bestErrorRms=${best.metrics.errorRms.format(6)} signalRms=${signalRms.format(6)} " +
-                    "bestLowerRms=${best.metrics.lowerRms.format(6)} " +
-                    "bestUpperRms=${best.metrics.upperRms.format(6)} " +
-                    "relative=${relativeBestError.format(3)} improvement=${improvement.format(3)} " +
-                    "smallOffset=$smallOffset strongLargeOffset=$strongLargeOffset",
+                    "zeroErrorRms=${zeroMetrics.errorRms.format(6)} signalRms=${signalRms.format(6)} " +
+                    "zeroLowerRms=${zeroMetrics.lowerRms.format(6)} " +
+                    "zeroUpperRms=${zeroMetrics.upperRms.format(6)} " +
+                    "zeroRelative=${zeroRelativeError.format(3)} zeroBad=$zeroBad " +
+                    "zeroObserved=$observedCount zeroBadCount=$badCount " +
+                    "zeroBadRatio=${badRatio.format(3)} strongZeroMismatch=$strongZeroMismatch",
         )
-        return if (smallOffset) {
-            Mp3LazyWindowOverlapResult.Passed
-        } else if (!strongLargeOffset) {
-            Mp3LazyWindowOverlapResult.Inconclusive
-        } else {
+        return if (strongZeroMismatch) {
             Mp3LazyWindowOverlapResult.Failed(
                 reason = "MP3 window overlap mismatch between segments " +
                         "$lowerSegmentIndex/$upperSegmentIndex: " +
-                        "bestOffset=${best.offsetFrames}, zeroErrorRms=${zeroMetrics.errorRms.format(6)}, " +
-                        "bestErrorRms=${best.metrics.errorRms.format(6)}, signalRms=${signalRms.format(6)}, " +
-                        "bestLowerRms=${best.metrics.lowerRms.format(6)}, " +
-                        "bestUpperRms=${best.metrics.upperRms.format(6)}, " +
-                        "relative=${relativeBestError.format(3)}, improvement=${improvement.format(3)}",
+                        "zeroErrorRms=${zeroMetrics.errorRms.format(6)}, " +
+                        "signalRms=${signalRms.format(6)}, zeroRelative=${zeroRelativeError.format(3)}, " +
+                        "zeroObserved=$observedCount, zeroBadCount=$badCount, " +
+                        "zeroBadRatio=${badRatio.format(3)}",
             )
+        } else if (zeroBad) {
+            Mp3LazyWindowOverlapResult.Inconclusive
+        } else {
+            Mp3LazyWindowOverlapResult.Passed
         }
     }
 
@@ -754,67 +753,6 @@ private class Mp3LazyWindowOverlapGuard(
             }
         }
         return if (count > 0) sqrt(sumSquares / count.toDouble()) else 0.0
-    }
-
-    private fun bestOffset(
-        lowerWindow: Array<FloatArray>,
-        upperWindow: Array<FloatArray>,
-        edgeGuardFrames: Int,
-        maxOffsetFrames: Int,
-    ): Mp3OverlapOffset? {
-        if (maxOffsetFrames < 0) return null
-        var best: Mp3OverlapOffset? = null
-        var coarseOffset = -maxOffsetFrames
-        while (coarseOffset <= maxOffsetFrames) {
-            val metrics = validOffsetMetrics(
-                lowerWindow = lowerWindow,
-                upperWindow = upperWindow,
-                edgeGuardFrames = edgeGuardFrames,
-                offsetFrames = coarseOffset,
-            )
-            if (metrics != null && (best == null || metrics.errorRms < best.metrics.errorRms)) {
-                best = Mp3OverlapOffset(coarseOffset, metrics)
-            }
-            coarseOffset += MP3_OVERLAP_COARSE_SEARCH_STEP_FRAMES
-        }
-
-        val coarseBest = best ?: return null
-        val refineStart = (coarseBest.offsetFrames - MP3_OVERLAP_REFINE_RADIUS_FRAMES)
-            .coerceAtLeast(-maxOffsetFrames)
-        val refineEnd = (coarseBest.offsetFrames + MP3_OVERLAP_REFINE_RADIUS_FRAMES)
-            .coerceAtMost(maxOffsetFrames)
-        for (offset in refineStart..refineEnd) {
-            val metrics = validOffsetMetrics(
-                lowerWindow = lowerWindow,
-                upperWindow = upperWindow,
-                edgeGuardFrames = edgeGuardFrames,
-                offsetFrames = offset,
-            )
-            if (metrics != null && metrics.errorRms < best!!.metrics.errorRms) {
-                best = Mp3OverlapOffset(offset, metrics)
-            }
-        }
-        return best
-    }
-
-    private fun validOffsetMetrics(
-        lowerWindow: Array<FloatArray>,
-        upperWindow: Array<FloatArray>,
-        edgeGuardFrames: Int,
-        offsetFrames: Int,
-    ): Mp3OverlapMetrics? {
-        val metrics = overlapMetricsAtOffset(
-            lowerWindow = lowerWindow,
-            upperWindow = upperWindow,
-            edgeGuardFrames = edgeGuardFrames,
-            offsetFrames = offsetFrames,
-        ) ?: return null
-        if (metrics.lowerRms < MP3_OVERLAP_MIN_CANDIDATE_SIDE_RMS ||
-            metrics.upperRms < MP3_OVERLAP_MIN_CANDIDATE_SIDE_RMS
-        ) {
-            return null
-        }
-        return metrics
     }
 
     private fun overlapMetricsAtOffset(
@@ -867,28 +805,26 @@ private class Mp3LazyWindowOverlapGuard(
         const val MAX_STORED_WINDOWS = 8
         const val MP3_OVERLAP_EDGE_GUARD_FRAMES = 512
         const val MIN_MP3_OVERLAP_COMPARISON_FRAMES = 1_024
-        const val MP3_OVERLAP_MAX_SEARCH_OFFSET_FRAMES = 4_096
-        const val MP3_OVERLAP_COARSE_SEARCH_STEP_FRAMES = 16
-        const val MP3_OVERLAP_REFINE_RADIUS_FRAMES = 32
-        const val MP3_OVERLAP_PASS_OFFSET_FRAMES = 96
-        const val MP3_OVERLAP_FAIL_OFFSET_FRAMES = 384
         const val MP3_OVERLAP_MIN_SIGNAL_RMS = 0.001
-        const val MP3_OVERLAP_MIN_CANDIDATE_SIDE_RMS = 0.001
-        const val MP3_OVERLAP_MIN_FAILURE_IMPROVEMENT = 0.20
-        const val MP3_OVERLAP_MAX_FAILURE_RELATIVE_ERROR = 0.12
+        const val MP3_ZERO_OFFSET_BAD_RELATIVE_ERROR = 1.15
+        const val MP3_ZERO_OFFSET_MIN_COMPARISONS = 4
+        const val MP3_ZERO_OFFSET_FAIL_BAD_COMPARISONS = 3
+        const val MP3_ZERO_OFFSET_FAIL_BAD_RATIO = 0.75
         const val MP3_OVERLAP_LOG_TAG = "Mp3OverlapGuard"
     }
 }
-
-private data class Mp3OverlapOffset(
-    val offsetFrames: Int,
-    val metrics: Mp3OverlapMetrics,
-)
 
 private data class Mp3OverlapMetrics(
     val errorRms: Double,
     val lowerRms: Double,
     val upperRms: Double,
+)
+
+private data class Mp3ZeroOffsetObservation(
+    val lowerSegmentIndex: Int,
+    val upperSegmentIndex: Int,
+    val zeroRelativeError: Double,
+    val bad: Boolean,
 )
 
 private sealed interface Mp3LazyWindowOverlapResult {
