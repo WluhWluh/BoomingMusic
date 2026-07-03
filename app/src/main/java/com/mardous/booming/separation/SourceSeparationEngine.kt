@@ -260,7 +260,7 @@ class SourceSeparationEngine(
         val segmentIndex = snapshot.segmentPlan.segmentIndexForFrame(frame)
         val currentSegment = snapshot.segments.getOrNull(segmentIndex)
             ?: return SourceSeparationReadyHorizonStatus.Processing
-        if (!currentSegment.isReady) {
+        if (!currentSegment.isPlaybackReady) {
             return SourceSeparationReadyHorizonStatus.Processing
         }
 
@@ -268,7 +268,7 @@ class SourceSeparationEngine(
         var readyUntilFrame = currentSegment.segment.playbackEndFrame
         for (index in (segmentIndex + 1)..snapshot.segments.lastIndex) {
             val segment = snapshot.segments[index]
-            if (!segment.isReady) break
+            if (!segment.isPlaybackReady) break
             readyThroughSegmentIndex = index
             readyUntilFrame = segment.segment.playbackEndFrame
         }
@@ -361,7 +361,7 @@ class SourceSeparationEngine(
             .toInt()
         val segmentIndex = snapshot.segmentPlan.segmentIndexForFrame(frame)
         val playbackWindowStates = snapshot.playbackWindowStatesAt(segmentIndex, readyWindowCount)
-        val ready = playbackWindowStates.all { it.isReady }
+        val ready = playbackWindowStates.all { it.isPlaybackReady }
         return SourceSeparationPlayableCacheDebugInfo(
             status = if (ready) "Ready" else "Processing",
             manifestState = manifest.state,
@@ -375,7 +375,7 @@ class SourceSeparationEngine(
             currentSegment = snapshot.segments.getOrNull(segmentIndex)?.toDebugInfo(),
             nextSegment = snapshot.segments.getOrNull(segmentIndex + 1)?.toDebugInfo(),
             requiredWindowCount = playbackWindowStates.size,
-            requiredReadyCount = playbackWindowStates.count { it.isReady },
+            requiredReadyCount = playbackWindowStates.count { it.isPlaybackReady },
             readyCount = snapshot.readyCount,
             totalCount = snapshot.totalCount,
             note = if (ready) "requiredPlaybackWindowsReady" else "requiredPlaybackWindowsNotReady",

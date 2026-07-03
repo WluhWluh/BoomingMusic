@@ -8,7 +8,7 @@ data class SourceSeparationSegmentSnapshot(
     val segments: List<SourceSeparationSegmentFileState>,
 ) {
     val readyCount: Int
-        get() = segments.count { it.state == SourceSeparationSegmentState.Ready }
+        get() = segments.count { it.state.isComplete }
 
     val totalCount: Int
         get() = segments.size
@@ -33,7 +33,7 @@ data class SourceSeparationSegmentSnapshot(
         return playbackWindowStatesAt(
             segmentIndex = segmentIndex,
             readyWindowCount = readyWindowCount,
-        ).all { it.isReady }
+        ).all { it.isPlaybackReady }
     }
 
     fun playbackWindowStatesAt(
@@ -62,5 +62,8 @@ data class SourceSeparationSegmentFileState(
     val instrumentalReady: Boolean,
 ) {
     val isReady: Boolean
-        get() = state == SourceSeparationSegmentState.Ready
+        get() = state.isComplete
+
+    val isPlaybackReady: Boolean
+        get() = state.isPlaybackReady
 }

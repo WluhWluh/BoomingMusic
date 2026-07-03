@@ -246,11 +246,18 @@ class MdxRangeSeparator(
                                     processingSegmentIndex = segment.index,
                                 ),
                         )
+                        val processingState = if (segment.state == SourceSeparationSegmentState.Misaligned) {
+                            SourceSeparationSegmentState.Misaligned
+                        } else {
+                            SourceSeparationSegmentState.Running
+                        }
                         currentSegmentPlan = currentSegmentPlan.withSegmentState(
                             segmentIndex = segment.index,
-                            state = SourceSeparationSegmentState.Running,
+                            state = processingState,
                         )
-                        onSegmentStateChanged(segment.index, SourceSeparationSegmentState.Running)
+                        if (processingState == SourceSeparationSegmentState.Running) {
+                            onSegmentStateChanged(segment.index, SourceSeparationSegmentState.Running)
+                        }
                         onProgress(
                             MdxRangeProgress(
                                 processedWindowCount,
@@ -273,16 +280,19 @@ class MdxRangeSeparator(
                             } else {
                                 SourceSeparationSegmentState.Missing
                             }
-                            val invalidatedSegments = mp3WindowOverlapGuard
-                                ?.observedSegmentIndexes()
-                                .orEmpty()
+                            val invalidatedSegments = overlapResult.misalignedSegmentIndexes + segment.index
                             for (index in invalidatedSegments.sorted()) {
+                                val state = if (segmentOutputDir != null && index in processedSegments) {
+                                    SourceSeparationSegmentState.Misaligned
+                                } else {
+                                    resetState
+                                }
                                 currentSegmentPlan = currentSegmentPlan.withSegmentState(
                                     segmentIndex = index,
-                                    state = resetState,
+                                    state = state,
                                 )
                                 processedSegments.remove(index)
-                                onSegmentStateChanged(index, resetState)
+                                onSegmentStateChanged(index, state)
                             }
                             processedWindowCount = currentSegmentPlan.segments
                                 .count { it.state == SourceSeparationSegmentState.Ready }
@@ -591,7 +601,7 @@ class MdxRangeSeparator(
         readyWindowCount: Int,
     ): Int {
         return playbackReadyWindowStates(playbackSegmentIndex, readyWindowCount)
-            .count { it.state == SourceSeparationSegmentState.Ready }
+            .count { it.state.isPlaybackReady }
     }
 
     private fun SourceSeparationSegmentPlan.playbackReadyWindowPendingCount(
@@ -604,10 +614,10 @@ class MdxRangeSeparator(
             readyWindowCount = readyWindowCount,
         )
         val pendingPlaybackWindows = playbackWindowStates
-            .count { it.state != SourceSeparationSegmentState.Ready }
+            .count { !it.state.isPlaybackReady }
         val processingOutsidePlaybackWindow = processingSegmentIndex != null &&
                 playbackWindowStates.none { it.index == processingSegmentIndex } &&
-                segments.getOrNull(processingSegmentIndex)?.state != SourceSeparationSegmentState.Ready
+                segments.getOrNull(processingSegmentIndex)?.state?.isPlaybackReady != true
         return pendingPlaybackWindows + if (processingOutsidePlaybackWindow) 1 else 0
     }
 
@@ -633,14 +643,12 @@ private class Mp3LazyWindowOverlapGuard(
             return size > MAX_STORED_WINDOWS
         }
     }
-    private val observedSegmentIndexes = linkedSetOf<Int>()
     private val zeroOffsetObservations = mutableListOf<Mp3ZeroOffsetObservation>()
 
     fun observe(
         segmentIndex: Int,
         mixWindow: Array<FloatArray>,
     ): Mp3LazyWindowOverlapResult {
-        observedSegmentIndexes += segmentIndex
         val comparisons = buildList {
             windows[segmentIndex - 1]?.let { previous ->
                 add(compareAdjacent(previous, mixWindow, segmentIndex - 1, segmentIndex))
@@ -660,8 +668,6 @@ private class Mp3LazyWindowOverlapGuard(
             Mp3LazyWindowOverlapResult.Inconclusive
         }
     }
-
-    fun observedSegmentIndexes(): Set<Int> = observedSegmentIndexes.toSet()
 
     private fun compareAdjacent(
         lowerWindow: Array<FloatArray>,
@@ -717,6 +723,10 @@ private class Mp3LazyWindowOverlapGuard(
                     "zeroBadRatio=${badRatio.format(3)} strongZeroMismatch=$strongZeroMismatch",
         )
         return if (strongZeroMismatch) {
+            val misalignedSegmentIndexes = zeroOffsetObservations
+                .filter { it.bad }
+                .flatMap { listOf(it.lowerSegmentIndex, it.upperSegmentIndex) }
+                .toSet()
             Mp3LazyWindowOverlapResult.Failed(
                 reason = "MP3 window overlap mismatch between segments " +
                         "$lowerSegmentIndex/$upperSegmentIndex: " +
@@ -724,6 +734,7 @@ private class Mp3LazyWindowOverlapGuard(
                         "signalRms=${signalRms.format(6)}, zeroRelative=${zeroRelativeError.format(3)}, " +
                         "zeroObserved=$observedCount, zeroBadCount=$badCount, " +
                         "zeroBadRatio=${badRatio.format(3)}",
+                misalignedSegmentIndexes = misalignedSegmentIndexes,
             )
         } else if (zeroBad) {
             Mp3LazyWindowOverlapResult.Inconclusive
@@ -830,7 +841,10 @@ private data class Mp3ZeroOffsetObservation(
 private sealed interface Mp3LazyWindowOverlapResult {
     data object Passed : Mp3LazyWindowOverlapResult
     data object Inconclusive : Mp3LazyWindowOverlapResult
-    data class Failed(val reason: String) : Mp3LazyWindowOverlapResult
+    data class Failed(
+        val reason: String,
+        val misalignedSegmentIndexes: Set<Int>,
+    ) : Mp3LazyWindowOverlapResult
 }
 
 data class MdxRangeProgress(
