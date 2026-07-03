@@ -275,6 +275,7 @@ class MdxRangeSeparator(
                         )
                         val overlapResult = mp3WindowOverlapGuard?.observe(segment.index, mixWindow)
                         if (overlapResult is Mp3LazyWindowOverlapResult.Failed) {
+                            Mp3WindowDecodeSessionGate.disable(overlapResult.reason)
                             val resetState = if (segmentOutputDir != null) {
                                 SourceSeparationSegmentState.Queued
                             } else {

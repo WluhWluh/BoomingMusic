@@ -53,11 +53,17 @@ internal interface MdxSourceInput {
             }
             throwIfCanceled(shouldCancel)
 
-            val windowProfile = MdxWindowDecodeProfile.forSource(sourceInfo, displayName, config)
-            var fallbackReason: String? = if (sourceInfo.frameCount == null) {
-                "Source duration is unavailable."
+            val mp3WindowDecodeDisabled = MdxWindowDecodeProfile.isMp3(sourceInfo) &&
+                    Mp3WindowDecodeSessionGate.isDisabled
+            val windowProfile = if (mp3WindowDecodeDisabled) {
+                null
             } else {
-                MdxWindowDecodeProfile.fallbackReason(sourceInfo, displayName, config)
+                MdxWindowDecodeProfile.forSource(sourceInfo, displayName, config)
+            }
+            var fallbackReason: String? = when {
+                mp3WindowDecodeDisabled -> Mp3WindowDecodeSessionGate.fallbackReason
+                sourceInfo.frameCount == null -> "Source duration is unavailable."
+                else -> MdxWindowDecodeProfile.fallbackReason(sourceInfo, displayName, config)
             }
             if (windowProfile != null && sourceInfo.frameCount != null) {
                 val input = WindowDecodeMdxSourceInput(
@@ -488,6 +494,10 @@ private enum class MdxWindowDecodeProfile(
         private const val OGG_VORBIS_MIME_TYPE = "audio/vorbis"
         private const val FLAC_MIME_TYPE = "audio/flac"
         private const val MP3_MIME_TYPE = "audio/mpeg"
+
+        fun isMp3(sourceInfo: AudioSourceInfo): Boolean {
+            return sourceInfo.mimeType == MP3_MIME_TYPE
+        }
 
         fun fallbackReason(
             sourceInfo: AudioSourceInfo,
