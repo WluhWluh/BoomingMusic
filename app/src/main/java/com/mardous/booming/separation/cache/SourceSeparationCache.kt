@@ -57,10 +57,14 @@ class SourceSeparationCache(
                     segmentPlan = segmentPlan.copy(
                         segments = snapshot.segments.map { segmentState ->
                             segmentState.segment.copy(
-                                state = if (canPreserveReadySegments &&
-                                    segmentState.state == SourceSeparationSegmentState.Ready
-                                ) {
-                                    SourceSeparationSegmentState.Ready
+                                state = if (canPreserveReadySegments) {
+                                    when (segmentState.state) {
+                                        SourceSeparationSegmentState.Ready ->
+                                            SourceSeparationSegmentState.Ready
+                                        SourceSeparationSegmentState.Misaligned ->
+                                            SourceSeparationSegmentState.Misaligned
+                                        else -> SourceSeparationSegmentState.Queued
+                                    }
                                 } else {
                                     SourceSeparationSegmentState.Queued
                                 }
@@ -1111,6 +1115,8 @@ class SourceSeparationCache(
                     state = when {
                         filesPresent && segment.state == SourceSeparationSegmentState.Ready ->
                             SourceSeparationSegmentState.Ready
+                        filesPresent && segment.state == SourceSeparationSegmentState.Misaligned ->
+                            SourceSeparationSegmentState.Misaligned
                         segment.state == SourceSeparationSegmentState.Running -> SourceSeparationSegmentState.Running
                         segment.state == SourceSeparationSegmentState.Queued -> SourceSeparationSegmentState.Queued
                         segment.state == SourceSeparationSegmentState.Failed -> SourceSeparationSegmentState.Failed

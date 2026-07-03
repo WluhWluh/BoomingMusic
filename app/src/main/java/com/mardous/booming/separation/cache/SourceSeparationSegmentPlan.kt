@@ -117,6 +117,15 @@ enum class SourceSeparationSegmentState {
     Missing,
     Queued,
     Running,
+    Misaligned,
     Ready,
     Failed,
+
+    ;
+
+    val isComplete: Boolean
+        get() = this == Ready
+
+    val isPlaybackReady: Boolean
+        get() = this == Ready || this == Misaligned
 }
