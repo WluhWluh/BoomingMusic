@@ -1142,6 +1142,12 @@ class PlaybackService :
         ) {
             return
         }
+        val shouldApplyDeferredPerSongSourceSeparationSync =
+            !isInternalMediaItemChange &&
+                    sourceSeparationPlaybackRequested &&
+                    mediaItem != null &&
+                    mediaItem.mediaId != activeSession?.songId?.toString() &&
+                    !sourceSeparationPlaybackAutoSyncOnTransition
         if (!isInternalMediaItemChange &&
             sourceSeparationPlaybackRequested && mediaItem != null &&
             mediaItem.mediaId != activeSession?.songId?.toString()
@@ -1181,8 +1187,23 @@ class PlaybackService :
             songPlayCountHelper.notifySongChanged(newSong, isPlaying)
 
             if (newSong != Song.emptySong) {
+                val deferredPerSongBlend = if (shouldApplyDeferredPerSongSourceSeparationSync) {
+                    sourceSeparationForegroundWorkerCoordinator.recordedBlendForSong(newSong)
+                        ?: DEFAULT_SOURCE_SEPARATION_BLEND
+                } else {
+                    null
+                }
                 withContext(Main) {
-                    updateSourceSeparationForegroundWorkerSong(newSong)
+                    val deferredMediaItem = mediaItem
+                    if (deferredPerSongBlend != null && deferredMediaItem != null) {
+                        applyDeferredPerSongSourceSeparationTransition(
+                            mediaItem = deferredMediaItem,
+                            song = newSong,
+                            blend = deferredPerSongBlend,
+                        )
+                    } else {
+                        updateSourceSeparationForegroundWorkerSong(newSong)
+                    }
                 }
                 replayGainProcessor.currentGain = ReplayGainTagExtractor.getReplayGain(newSong)
                 if (preferences.getBoolean(ENABLE_HISTORY, true)) {
@@ -1221,6 +1242,60 @@ class PlaybackService :
 
         persistentStorage.saveState()
         updateWidgets(force = true)
+    }
+
+    private suspend fun applyDeferredPerSongSourceSeparationTransition(
+        mediaItem: MediaItem,
+        song: Song,
+        blend: Float,
+    ) {
+        if (!sourceSeparationPlaybackRequested ||
+            sourceSeparationPlaybackAutoSyncOnTransition ||
+            player.currentMediaItem?.mediaId != mediaItem.mediaId
+        ) {
+            traceSourceSeparationPlayback(
+                "perSongTransition.skip",
+                "songId=${song.id} requested=$sourceSeparationPlaybackRequested " +
+                        "autoSync=$sourceSeparationPlaybackAutoSyncOnTransition " +
+                        "currentMediaId=${player.currentMediaItem?.mediaId} targetMediaId=${mediaItem.mediaId}"
+            )
+            updateSourceSeparationForegroundWorkerSong(song)
+            return
+        }
+
+        val normalizedBlend = blend.coerceIn(0f, 1f)
+        traceSourceSeparationPlayback(
+            "perSongTransition.apply",
+            "songId=${song.id} blend=$normalizedBlend"
+        )
+        sourceSeparationMixProcessor.setBlend(normalizedBlend)
+        updateSourceSeparationForegroundWorkerSong(song)
+
+        if (isDefaultSourceSeparationBlend(normalizedBlend)) {
+            clearSourceSeparationPlayback(restoreOriginalItem = true, broadcast = false)
+            clearSourceSeparationPlaybackProcessing()
+            restoreSourceSeparationOutputVolume("perSongTransition.defaultBlend")
+            broadcastSourceSeparationPlaybackChanged()
+            maybePreStartNextSourceSeparation("perSongTransition.defaultBlend")
+            return
+        }
+
+        val autoStartDecision =
+            sourceSeparationForegroundWorkerCoordinator.autoStartDecision(song, normalizedBlend)
+        if (autoStartDecision.shouldStart && player.currentMediaItem?.mediaId == mediaItem.mediaId) {
+            sourceSeparationForegroundWorkerCoordinator.requestSong(song)
+        }
+        val expectProcessing = autoStartDecision.shouldStart ||
+                autoStartDecision.shouldWaitForProcessingCache
+        setSourceSeparationPlaybackExpectProcessing(expectProcessing)
+        ensureSourceSeparationPlaybackReady(
+            showUnavailableMessage = false,
+            allowPauseForProcessing = true,
+            resumeWhenReady = shouldResumeSourceSeparationPlaybackWhenReady(),
+            allowNewSession = true,
+            expectProcessing = expectProcessing,
+        )
+        maybePreStartNextSourceSeparation("perSongTransition")
     }
 
     override fun onPositionDiscontinuity(
