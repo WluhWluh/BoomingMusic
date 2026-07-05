@@ -284,7 +284,7 @@ private fun BoomingMusicHeader(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = stringResource(R.string.app_name),
+            text = stringResource(R.string.app_name_long),
             style = MaterialTheme.typography.headlineMedium,
             maxLines = 1
         )
