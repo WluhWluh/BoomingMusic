@@ -23,18 +23,26 @@ fun Context.localizedSourceSeparationStage(stage: String?): String? {
             getString(R.string.source_separation_processing_windows)
         else -> {
             preparingWindowStageRegex.matchEntire(text)?.let { match ->
-                return getString(
-                    R.string.source_separation_stage_preparing_window,
-                    match.groupValues[1].toIntOrNull() ?: match.groupValues[1],
-                    match.groupValues[2].toIntOrNull() ?: match.groupValues[2],
-                )
+                val windowIndex = match.groupValues[1].toIntOrNull()
+                val windowCount = match.groupValues[2].toIntOrNull()
+                if (windowIndex != null && windowCount != null) {
+                    return getString(
+                        R.string.source_separation_stage_preparing_window,
+                        windowIndex,
+                        windowCount,
+                    )
+                }
             }
             processedWindowStageRegex.matchEntire(text)?.let { match ->
-                return getString(
-                    R.string.source_separation_stage_processed_window,
-                    match.groupValues[1].toIntOrNull() ?: match.groupValues[1],
-                    match.groupValues[2].toIntOrNull() ?: match.groupValues[2],
-                )
+                val windowIndex = match.groupValues[1].toIntOrNull()
+                val windowCount = match.groupValues[2].toIntOrNull()
+                if (windowIndex != null && windowCount != null) {
+                    return getString(
+                        R.string.source_separation_stage_processed_window,
+                        windowIndex,
+                        windowCount,
+                    )
+                }
             }
             text
         }
