@@ -4635,6 +4635,7 @@ private fun sourceSeparationQueueReplacementUri(songId: Long, token: String): Ur
         .build()
 }
 
+@OptIn(UnstableApi::class)
 private fun sourceSeparationAwareMediaSourceFactory(
     context: Context,
     mp3IndexSeekingEnabled: Boolean,

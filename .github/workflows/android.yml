@@ -40,7 +40,15 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run Lint
-        run: ./gradlew lint
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            ./gradlew lintNormalDebug
+          else
+            ./gradlew lintNormalRelease
+          fi
+        env:
+          RELEASE_TYPE: "CI"
+          EVENT_NAME: ${{ github.event_name }}
 
   build:
     needs: check
