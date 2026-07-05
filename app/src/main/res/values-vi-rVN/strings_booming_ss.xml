@@ -3,8 +3,8 @@
     <string name="action_source_separation">Tách âm thanh</string>
     <string name="action_source_separation_settings">Tách nguồn âm thanh</string>
     <string name="action_source_separation_playback">Phát tách nguồn</string>
-    <string name="booming_ss_invitation_message_content">Xin chào. Hãy dùng thử Booming SS, một nhánh dựa trên Booming Music có tính năng tách nguồn âm thanh. Ứng dụng phát nhạc cục bộ và thêm phát tách nguồn. Bạn có thể tải tại đây: %s</string>
-    <string name="booming_ss_about_summary">Booming SS %s, một nhánh dựa trên Booming Music có tính năng tách nguồn âm thanh. Chạm để xem thêm thông tin.</string>
+    <string name="booming_ss_invitation_message_content">Xin chào. Hãy dùng thử Booming SS, một nhánh dựa trên Booming Music có tính năng tách nguồn âm thanh. Ứng dụng nghe nhạc ngoại tuyến và thêm phát tách nguồn. Bạn có thể tải xuống từ: %s</string>
+    <string name="booming_ss_about_summary">Booming SS %s, một nhánh dựa trên Booming Music có tính năng tách nguồn âm thanh. Bấm để tìm hiểu thêm.</string>
     <string name="booming_ss_downloading_update">Đang tải bản cập nhật Booming SS.</string>
     <string name="source_separation_blend_mode_off">Âm thanh gốc</string>
     <string name="source_separation_blend_mode_global">Trộn stem toàn cục</string>
@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Nâng cao</string>
     <string name="source_separation_auto_start_title">Tự động bắt đầu tách nguồn</string>
     <string name="source_separation_auto_start_description">Bắt đầu tách nguồn cho bài hát hiện tại khi phát tách nguồn cần mức trộn không ở giữa, đồng thời xử lý trước các cửa sổ bộ đệm đầu của bài hát tiếp theo khi có thể.</string>
+    <string name="source_separation_window_decode_title">Sử dụng giải mã theo cửa sổ</string>
+    <string name="source_separation_window_decode_description">Giải mã các định dạng được hỗ trợ theo từng cửa sổ để phát tách nguồn có thể khả dụng sớm hơn.</string>
     <string name="source_separation_auto_flac_compression_title">Tự động nén bộ nhớ đệm đã hoàn tất</string>
     <string name="source_separation_auto_flac_compression_description">Sau khi hoàn tất tách nguồn WAV đầy đủ, chuyển các stem sang FLAC để phát về sau.</string>
     <string name="source_separation_show_snackbar_progress_title">Hiển thị thông báo tiến trình tách nguồn</string>
@@ -104,7 +106,7 @@
     <string name="source_separation_model_hash_not_checked">Chưa chạy kiểm tra hash.</string>
     <string name="source_separation_model_acquisition_title">Nhập hoặc tải xuống</string>
     <string name="source_separation_model_preset_url">URL mô hình đặt sẵn: %1$s</string>
-    <string name="source_separation_download_preset_model">Tải mô hình đặt sẵn</string>
+    <string name="source_separation_download_preset_model">Tải xuống mô hình đặt sẵn</string>
     <string name="source_separation_custom_model_url">URL mô hình tùy chỉnh</string>
     <string name="source_separation_download_custom_model">Tải từ URL</string>
     <string name="source_separation_import_model">Nhập mô hình</string>
@@ -156,7 +158,7 @@
     <string name="source_separation_failed">Tách nguồn âm thanh thất bại</string>
     <string name="about_booming_ss_title">Booming SS</string>
     <string name="about_booming_ss_summary_title">Nhánh tách nguồn âm thanh</string>
-    <string name="about_booming_ss_summary">Booming SS là bản dựng tách nguồn âm thanh không chính thức dựa trên Booming Music. Ứng dụng giữ trải nghiệm trình phát nhạc cục bộ gốc và thêm phát tách nguồn, điều khiển trộn stem, ghi nhớ mức trộn theo bài hát và quản lý bộ nhớ đệm đã tách.</string>
+    <string name="about_booming_ss_summary">Booming SS là bản dựng tách nguồn âm thanh không chính thức dựa trên Booming Music. Ứng dụng giữ trải nghiệm nghe nhạc ngoại tuyến gốc và thêm phát tách nguồn, điều khiển trộn stem, ghi nhớ mức trộn theo bài hát và quản lý bộ nhớ đệm đã tách.</string>
     <string name="about_booming_ss_model_title">Tệp mô hình</string>
     <string name="about_booming_ss_model_summary">Mô hình tách nguồn âm thanh không đi kèm ứng dụng. Bạn có thể tải mô hình đặt sẵn, dùng URL tùy chỉnh hoặc nhập tệp ONNX cục bộ. Kiểm tra hash chỉ được hiển thị để tham khảo và không chặn việc sử dụng.</string>
     <string name="about_booming_ss_fork_title">Mã nguồn Booming SS</string>
