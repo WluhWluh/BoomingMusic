@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Lanjutan</string>
     <string name="source_separation_auto_start_title">Mulai pemisahan otomatis</string>
     <string name="source_separation_auto_start_description">Mulai pemisahan lagu saat ini ketika pemutaran terpisah memerlukan campuran yang tidak berada di tengah, dan mempraproses jendela buffer awal lagu berikutnya jika memungkinkan.</string>
+    <string name="source_separation_window_decode_title">Gunakan dekode jendela</string>
+    <string name="source_separation_window_decode_description">Dekode format yang didukung jendela demi jendela agar pemutaran terpisah dapat tersedia lebih cepat.</string>
     <string name="source_separation_auto_flac_compression_title">Kompres otomatis cache yang selesai</string>
     <string name="source_separation_auto_flac_compression_description">Setelah pemisahan WAV penuh selesai, ubah stem-nya ke FLAC untuk pemutaran berikutnya.</string>
     <string name="source_separation_show_snackbar_progress_title">Tampilkan snackbar progres pemisahan</string>

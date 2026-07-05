@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">پیشرفته</string>
     <string name="source_separation_auto_start_title">شروع خودکار جداسازی</string>
     <string name="source_separation_auto_start_description">وقتی پخش جداشده به میکسی خارج از مرکز نیاز دارد، جداسازی آهنگ فعلی را شروع کنید و در صورت امکان پنجره‌های بافر آغاز آهنگ بعدی را از پیش پردازش کنید.</string>
+    <string name="source_separation_window_decode_title">استفاده از رمزگشایی پنجره‌ای</string>
+    <string name="source_separation_window_decode_description">قالب‌های پشتیبانی‌شده را پنجره به پنجره رمزگشایی می‌کند تا پخش جداشده زودتر در دسترس قرار گیرد.</string>
     <string name="source_separation_auto_flac_compression_title">فشرده‌سازی خودکار کش‌های کامل‌شده</string>
     <string name="source_separation_auto_flac_compression_description">پس از کامل شدن جداسازی WAV کامل، استم‌ها را برای پخش بعدی به FLAC تبدیل کنید.</string>
     <string name="source_separation_show_snackbar_progress_title">نمایش پیام‌های پیشرفت جداسازی</string>

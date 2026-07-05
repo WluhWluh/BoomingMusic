@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">進階</string>
     <string name="source_separation_auto_start_title">自動開始音源分離</string>
     <string name="source_separation_auto_start_description">當分軌播放需要非置中的混音比例時，開始目前歌曲的音源分離。條件允許時，預先處理下一首歌曲開頭的緩衝窗口。</string>
+    <string name="source_separation_window_decode_title">使用窗口解碼</string>
+    <string name="source_separation_window_decode_description">逐窗口解碼支援的格式，讓分軌播放更快可用。</string>
     <string name="source_separation_auto_flac_compression_title">自動壓縮已完成快取</string>
     <string name="source_separation_auto_flac_compression_description">完整 WAV 音源分離完成後，將分軌轉換為 FLAC，供後續播放使用。</string>
     <string name="source_separation_show_snackbar_progress_title">顯示音源分離進度訊息列</string>

@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Avansert</string>
     <string name="source_separation_auto_start_title">Start separasjon automatisk</string>
     <string name="source_separation_auto_start_description">Start separasjon av gjeldende sang når separert avspilling trenger en miks utenfor midten, og forhåndsbehandle de første buffervinduene i neste sang når mulig.</string>
+    <string name="source_separation_window_decode_title">Bruk vindusdekoding</string>
+    <string name="source_separation_window_decode_description">Dekod støttede formater vindu for vindu, slik at separert avspilling kan bli tilgjengelig tidligere.</string>
     <string name="source_separation_auto_flac_compression_title">Komprimer fullførte hurtigbuffere automatisk</string>
     <string name="source_separation_auto_flac_compression_description">Konverter sporene til FLAC for senere avspilling når en full WAV-separasjon er ferdig.</string>
     <string name="source_separation_show_snackbar_progress_title">Vis fremdriftsmeldinger for separasjon</string>

@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Дополнительно</string>
     <string name="source_separation_auto_start_title">Автоматически запускать разделение</string>
     <string name="source_separation_auto_start_description">Запускать разделение текущей песни, когда раздельному воспроизведению нужен микс не по центру, и по возможности заранее обрабатывать начальные окна буфера следующей песни.</string>
+    <string name="source_separation_window_decode_title">Использовать оконное декодирование</string>
+    <string name="source_separation_window_decode_description">Декодировать поддерживаемые форматы окно за окном, чтобы раздельное воспроизведение могло стать доступно раньше.</string>
     <string name="source_separation_auto_flac_compression_title">Автоматически сжимать завершенные кэши</string>
     <string name="source_separation_auto_flac_compression_description">После завершения полного разделения WAV преобразовывать дорожки в FLAC для последующего воспроизведения.</string>
     <string name="source_separation_show_snackbar_progress_title">Показывать сообщения о ходе разделения</string>

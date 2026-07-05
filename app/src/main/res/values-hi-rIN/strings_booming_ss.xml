@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">उन्नत</string>
     <string name="source_separation_auto_start_title">पृथक्करण अपने आप शुरू करें</string>
     <string name="source_separation_auto_start_description">जब अलग किए गए प्लेबैक को केंद्र से हटे मिक्स की आवश्यकता हो, तो मौजूदा गाने का पृथक्करण शुरू करें और संभव होने पर अगले गाने की शुरुआती बफ़र विंडो पहले से प्रोसेस करें।</string>
+    <string name="source_separation_window_decode_title">विंडो डिकोडिंग का उपयोग करें</string>
+    <string name="source_separation_window_decode_description">समर्थित फ़ॉर्मैट को विंडो दर विंडो डिकोड करें, ताकि अलग किया गया प्लेबैक जल्दी उपलब्ध हो सके।</string>
     <string name="source_separation_auto_flac_compression_title">पूरे हुए कैश अपने आप संपीड़ित करें</string>
     <string name="source_separation_auto_flac_compression_description">पूरा WAV पृथक्करण खत्म होने के बाद, भविष्य के प्लेबैक के लिए उसके स्टेम को FLAC में बदलें।</string>
     <string name="source_separation_show_snackbar_progress_title">पृथक्करण प्रगति संदेश दिखाएँ</string>

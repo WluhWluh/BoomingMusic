@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Кеңейтілген</string>
     <string name="source_separation_auto_start_title">Бөлуді автоматты түрде бастау</string>
     <string name="source_separation_auto_start_description">Бөлінген ойнату ортасынан ығысқан миксті қажет еткенде ағымдағы әнді бөлуді бастау және мүмкін болса, келесі әннің бастапқы буфер терезелерін алдын ала өңдеу.</string>
+    <string name="source_separation_window_decode_title">Терезелік декодтауды пайдалану</string>
+    <string name="source_separation_window_decode_description">Бөлінген ойнату ертерек қолжетімді болуы үшін қолдау көрсетілетін пішімдерді терезе бойынша декодтау.</string>
     <string name="source_separation_auto_flac_compression_title">Аяқталған кэштерді автоматты түрде сығу</string>
     <string name="source_separation_auto_flac_compression_description">Толық WAV бөлуі аяқталғаннан кейін жолдарды кейінгі ойнату үшін FLAC пішіміне түрлендіру.</string>
     <string name="source_separation_show_snackbar_progress_title">Бөлу барысы хабарларын көрсету</string>

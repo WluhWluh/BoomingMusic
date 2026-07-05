@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Avancerat</string>
     <string name="source_separation_auto_start_title">Starta separation automatiskt</string>
     <string name="source_separation_auto_start_description">Starta separation av aktuell låt när separerad uppspelning behöver en mixning utanför mitten, och förbehandla de första buffertfönstren i nästa låt när det är möjligt.</string>
+    <string name="source_separation_window_decode_title">Använd fönsteravkodning</string>
+    <string name="source_separation_window_decode_description">Avkoda format som stöds fönster för fönster så att separerad uppspelning kan bli tillgänglig tidigare.</string>
     <string name="source_separation_auto_flac_compression_title">Komprimera slutförda cacher automatiskt</string>
     <string name="source_separation_auto_flac_compression_description">När en full WAV-separation är klar, konvertera spåren till FLAC för framtida uppspelning.</string>
     <string name="source_separation_show_snackbar_progress_title">Visa förloppsmeddelanden för separation</string>

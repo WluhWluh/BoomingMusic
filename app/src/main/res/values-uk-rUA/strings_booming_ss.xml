@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Розширені</string>
     <string name="source_separation_auto_start_title">Автоматично запускати розділення</string>
     <string name="source_separation_auto_start_description">Запускати розділення поточної пісні, коли роздільному відтворенню потрібен мікс не по центру, і за можливості заздалегідь обробляти початкові вікна буфера наступної пісні.</string>
+    <string name="source_separation_window_decode_title">Використовувати віконне декодування</string>
+    <string name="source_separation_window_decode_description">Декодувати підтримувані формати вікно за вікном, щоб роздільне відтворення могло стати доступним раніше.</string>
     <string name="source_separation_auto_flac_compression_title">Автоматично стискати завершені кеші</string>
     <string name="source_separation_auto_flac_compression_description">Після завершення повного розділення WAV перетворювати доріжки у FLAC для майбутнього відтворення.</string>
     <string name="source_separation_show_snackbar_progress_title">Показувати повідомлення про перебіг розділення</string>

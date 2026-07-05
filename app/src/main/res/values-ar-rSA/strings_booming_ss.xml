@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">متقدم</string>
     <string name="source_separation_auto_start_title">بدء الفصل تلقائيًا</string>
     <string name="source_separation_auto_start_description">ابدأ فصل الأغنية الحالية عندما يحتاج تشغيل المسارات المفصولة إلى مزج غير متمركز، وعالج نوافذ المخزن المؤقت في بداية الأغنية التالية مسبقًا عندما يكون ذلك ممكنًا.</string>
+    <string name="source_separation_window_decode_title">استخدام فك ترميز النوافذ</string>
+    <string name="source_separation_window_decode_description">يفك ترميز الصيغ المدعومة نافذةً تلو الأخرى حتى يصبح تشغيل المسارات المفصولة متاحًا في وقت أبكر.</string>
     <string name="source_separation_auto_flac_compression_title">ضغط الذواكر المؤقتة المكتملة تلقائيًا</string>
     <string name="source_separation_auto_flac_compression_description">بعد اكتمال فصل WAV كامل، حوّل مساراته إلى FLAC لاستخدامها في التشغيل لاحقًا.</string>
     <string name="source_separation_show_snackbar_progress_title">إظهار رسائل تقدم الفصل</string>

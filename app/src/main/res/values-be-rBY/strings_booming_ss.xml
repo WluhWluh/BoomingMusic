@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Дадаткова</string>
     <string name="source_separation_auto_start_title">Аўтаматычна запускаць раздзяленне</string>
     <string name="source_separation_auto_start_description">Запускаць раздзяленне бягучай песні, калі раздзельнаму прайграванню патрэбны мікс не па цэнтры, і па магчымасці загадзя апрацоўваць пачатковыя вокны буфера наступнай песні.</string>
+    <string name="source_separation_window_decode_title">Выкарыстоўваць аконнае дэкадаванне</string>
+    <string name="source_separation_window_decode_description">Дэкадаваць падтрыманыя фарматы акно за акном, каб раздзельнае прайграванне магло стаць даступным раней.</string>
     <string name="source_separation_auto_flac_compression_title">Аўтаматычна сціскаць завершаныя кэшы</string>
     <string name="source_separation_auto_flac_compression_description">Пасля завяршэння поўнага раздзялення WAV пераўтвараць дарожкі ў FLAC для будучага прайгравання.</string>
     <string name="source_separation_show_snackbar_progress_title">Паказваць паведамленні пра ход раздзялення</string>

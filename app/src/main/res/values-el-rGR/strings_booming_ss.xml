@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Προχωρημένα</string>
     <string name="source_separation_auto_start_title">Αυτόματη εκκίνηση διαχωρισμού</string>
     <string name="source_separation_auto_start_description">Εκκίνηση διαχωρισμού για το τρέχον τραγούδι όταν η διαχωρισμένη αναπαραγωγή χρειάζεται μη κεντραρισμένη μίξη και, όταν είναι δυνατό, προεπεξεργασία των αρχικών παραθύρων προσωρινής αποθήκευσης του επόμενου τραγουδιού.</string>
+    <string name="source_separation_window_decode_title">Χρήση αποκωδικοποίησης παραθύρων</string>
+    <string name="source_separation_window_decode_description">Αποκωδικοποιεί τις υποστηριζόμενες μορφές παράθυρο προς παράθυρο, ώστε η διαχωρισμένη αναπαραγωγή να γίνει διαθέσιμη νωρίτερα.</string>
     <string name="source_separation_auto_flac_compression_title">Αυτόματη συμπίεση ολοκληρωμένων κρυφών μνημών</string>
     <string name="source_separation_auto_flac_compression_description">Μετά την ολοκλήρωση πλήρους διαχωρισμού WAV, μετατροπή των διαχωρισμένων μερών σε FLAC για μελλοντική αναπαραγωγή.</string>
     <string name="source_separation_show_snackbar_progress_title">Εμφάνιση μηνυμάτων προόδου διαχωρισμού</string>

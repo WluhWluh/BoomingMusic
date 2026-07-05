@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Avanzado</string>
     <string name="source_separation_auto_start_title">Iniciar a separación automaticamente</string>
     <string name="source_separation_auto_start_description">Inicia a separación da canción actual cando a reprodución separada precise unha mestura non centrada, e preprocesa as primeiras xanelas de búfer da seguinte canción cando sexa posible.</string>
+    <string name="source_separation_window_decode_title">Usar a descodificación por xanelas</string>
+    <string name="source_separation_window_decode_description">Descodifica os formatos compatibles xanela a xanela para que a reprodución separada poida estar dispoñible antes.</string>
     <string name="source_separation_auto_flac_compression_title">Comprimir automaticamente as cachés completadas</string>
     <string name="source_separation_auto_flac_compression_description">Despois de completar unha separación WAV completa, converte as súas pistas a FLAC para futuras reproducións.</string>
     <string name="source_separation_show_snackbar_progress_title">Mostrar avisos de progreso da separación</string>

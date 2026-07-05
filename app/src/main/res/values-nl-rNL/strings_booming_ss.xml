@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Geavanceerd</string>
     <string name="source_separation_auto_start_title">Scheiding automatisch starten</string>
     <string name="source_separation_auto_start_description">Start de scheiding van het huidige nummer wanneer gescheiden afspelen een niet-gecentreerde mix nodig heeft, en verwerk waar mogelijk alvast de eerste buffervensters van het volgende nummer.</string>
+    <string name="source_separation_window_decode_title">Vensterdecodering gebruiken</string>
+    <string name="source_separation_window_decode_description">Decodeer ondersteunde indelingen venster voor venster, zodat gescheiden afspelen eerder beschikbaar kan zijn.</string>
     <string name="source_separation_auto_flac_compression_title">Voltooide caches automatisch comprimeren</string>
     <string name="source_separation_auto_flac_compression_description">Converteer de sporen naar FLAC nadat een volledige WAV-scheiding klaar is, zodat ze later kunnen worden afgespeeld.</string>
     <string name="source_separation_show_snackbar_progress_title">Voortgangsmeldingen voor scheiding tonen</string>
