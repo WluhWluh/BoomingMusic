@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">詳細</string>
     <string name="source_separation_auto_start_title">音源分離を自動開始</string>
     <string name="source_separation_auto_start_description">分離再生で中央以外のミックスが必要な場合、現在の曲の音源分離を開始します。可能な場合は、次の曲の冒頭バッファウィンドウも事前処理します。</string>
+    <string name="source_separation_window_decode_title">ウィンドウデコードを使用</string>
+    <string name="source_separation_window_decode_description">対応形式をウィンドウごとにデコードし、分離再生をより早く利用できるようにします。</string>
     <string name="source_separation_auto_flac_compression_title">完了したキャッシュを自動圧縮</string>
     <string name="source_separation_auto_flac_compression_description">WAV での完全な音源分離が完了した後、今後の再生用にステムを FLAC に変換します。</string>
     <string name="source_separation_show_snackbar_progress_title">音源分離の進行状況を表示</string>

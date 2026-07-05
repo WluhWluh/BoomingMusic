@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Advanced</string>
     <string name="source_separation_auto_start_title">Awtomatikong simulan ang paghihiwalay</string>
     <string name="source_separation_auto_start_description">Simulan ang paghihiwalay ng kasalukuyang kanta kapag kailangan ng hiwalay na playback ang mix na wala sa gitna, at i-preprocess ang mga unang buffer window ng susunod na kanta kapag maaari.</string>
+    <string name="source_separation_window_decode_title">Gamitin ang window decoding</string>
+    <string name="source_separation_window_decode_description">I-decode ang mga sinusuportahang format nang paisa-isang window para mas maagang maging available ang hiwalay na playback.</string>
     <string name="source_separation_auto_flac_compression_title">Awtomatikong i-compress ang mga natapos na cache</string>
     <string name="source_separation_auto_flac_compression_description">Kapag nakumpleto na ang buong WAV separation, i-convert ang mga stem nito sa FLAC para sa susunod na playback.</string>
     <string name="source_separation_show_snackbar_progress_title">Ipakita ang mga mensahe ng progreso ng paghihiwalay</string>

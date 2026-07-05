@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Täpsem</string>
     <string name="source_separation_auto_start_title">Alusta eraldamist automaatselt</string>
     <string name="source_separation_auto_start_description">Alusta praeguse loo eraldamist, kui eraldatud taasesitus vajab keskpunktist erinevat miksi, ja eeltöötle võimaluse korral järgmise loo alguse puhvraknad.</string>
+    <string name="source_separation_window_decode_title">Kasuta akendega dekodeerimist</string>
+    <string name="source_separation_window_decode_description">Dekodeeri toetatud vorminguid akna kaupa, et eraldatud taasesitus saaks varem kättesaadavaks.</string>
     <string name="source_separation_auto_flac_compression_title">Tihenda lõpetatud vahemälud automaatselt</string>
     <string name="source_separation_auto_flac_compression_description">Kui täielik WAV-eraldamine on valmis, teisenda selle rajad hilisemaks taasesituseks FLAC-iks.</string>
     <string name="source_separation_show_snackbar_progress_title">Kuva eraldamise edenemise teated</string>

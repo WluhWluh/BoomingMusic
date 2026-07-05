@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Lisäasetukset</string>
     <string name="source_separation_auto_start_title">Aloita erottelu automaattisesti</string>
     <string name="source_separation_auto_start_description">Aloita nykyisen kappaleen erottelu, kun eroteltu toisto tarvitsee keskittämättömän miksauksen, ja esikäsittele seuraavan kappaleen ensimmäiset puskuri-ikkunat, kun se on mahdollista.</string>
+    <string name="source_separation_window_decode_title">Käytä ikkunadekoodausta</string>
+    <string name="source_separation_window_decode_description">Dekoodaa tuetut muodot ikkuna kerrallaan, jotta eroteltu toisto voi tulla käyttöön aiemmin.</string>
     <string name="source_separation_auto_flac_compression_title">Pakkaa valmiit välimuistit automaattisesti</string>
     <string name="source_separation_auto_flac_compression_description">Kun täysi WAV-erottelu valmistuu, muunna sen raidat FLAC-muotoon myöhempää toistoa varten.</string>
     <string name="source_separation_show_snackbar_progress_title">Näytä erottelun edistymisviestit</string>

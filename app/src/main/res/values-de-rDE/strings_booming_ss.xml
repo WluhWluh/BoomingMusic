@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Erweitert</string>
     <string name="source_separation_auto_start_title">Trennung automatisch starten</string>
     <string name="source_separation_auto_start_description">Trennung für den aktuellen Titel starten, wenn die Wiedergabe getrennter Spuren eine nicht zentrierte Mischung benötigt, und nach Möglichkeit die ersten Pufferfenster des nächsten Titels vorverarbeiten.</string>
+    <string name="source_separation_window_decode_title">Fensterdekodierung verwenden</string>
+    <string name="source_separation_window_decode_description">Unterstützte Formate Fenster für Fenster dekodieren, damit die Wiedergabe getrennter Spuren früher verfügbar sein kann.</string>
     <string name="source_separation_auto_flac_compression_title">Abgeschlossene Caches automatisch komprimieren</string>
     <string name="source_separation_auto_flac_compression_description">Nach einer vollständigen WAV-Trennung die Spuren für spätere Wiedergabe in FLAC umwandeln.</string>
     <string name="source_separation_show_snackbar_progress_title">Fortschritt der Trennung als Snackbar anzeigen</string>

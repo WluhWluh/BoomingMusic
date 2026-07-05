@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Avancé</string>
     <string name="source_separation_auto_start_title">Démarrer automatiquement la séparation</string>
     <string name="source_separation_auto_start_description">Démarrer la séparation du morceau actuel lorsque la lecture séparée a besoin d\'un mixage non centré, et prétraiter si possible les premières fenêtres de tampon du morceau suivant.</string>
+    <string name="source_separation_window_decode_title">Utiliser le décodage par fenêtre</string>
+    <string name="source_separation_window_decode_description">Décoder les formats pris en charge fenêtre par fenêtre afin que la lecture séparée puisse être disponible plus tôt.</string>
     <string name="source_separation_auto_flac_compression_title">Compresser automatiquement les caches terminés</string>
     <string name="source_separation_auto_flac_compression_description">Après une séparation WAV complète, convertir ses pistes en FLAC pour les lectures futures.</string>
     <string name="source_separation_show_snackbar_progress_title">Afficher les messages de progression de la séparation</string>

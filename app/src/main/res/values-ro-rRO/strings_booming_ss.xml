@@ -58,6 +58,8 @@
     <string name="source_separation_advanced_title">Avansat</string>
     <string name="source_separation_auto_start_title">Pornește automat separarea</string>
     <string name="source_separation_auto_start_description">Pornește separarea melodiei curente când redarea separată necesită un mixaj deplasat de la centru și preprocesează, când este posibil, ferestrele de buffer de la începutul melodiei următoare.</string>
+    <string name="source_separation_window_decode_title">Folosește decodarea pe ferestre</string>
+    <string name="source_separation_window_decode_description">Decodează formatele acceptate fereastră cu fereastră, astfel încât redarea separată să poată deveni disponibilă mai devreme.</string>
     <string name="source_separation_auto_flac_compression_title">Comprimă automat cache-urile finalizate</string>
     <string name="source_separation_auto_flac_compression_description">După finalizarea unei separări WAV complete, convertește pistele în FLAC pentru redări viitoare.</string>
     <string name="source_separation_show_snackbar_progress_title">Afișează mesajele de progres ale separării</string>
