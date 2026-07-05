@@ -33,8 +33,12 @@ jobs:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           SIGNING_PROPERTIES: ${{ secrets.SIGNING_PROPERTIES }}
         run: |
-          echo $SIGNING_KEY | base64 -di > ./booming_keystore.jks
-          echo $SIGNING_PROPERTIES | base64 -di > ./keystore.properties
+          if [ -n "$SIGNING_KEY" ] && [ -n "$SIGNING_PROPERTIES" ]; then
+            printf '%s' "$SIGNING_KEY" | base64 -d > ./booming_keystore.jks
+            printf '%s' "$SIGNING_PROPERTIES" | base64 -d > ./keystore.properties
+          else
+            echo "Signing secrets are not configured; release builds will use the debug signing fallback."
+          fi
 
       - name: Make Gradle executable
         run: chmod +x ./gradlew
@@ -57,7 +61,7 @@ jobs:
         with:
           name: artifacts-${{ matrix.variant }}-release
           path: |
-            app/build/outputs/apk/*/release/BoomingMusic-*.apk
+            app/build/outputs/apk/*/release/BoomingSS-*.apk
             app/build/outputs/bundle/*/*.aab
 
   publish-release:
@@ -92,4 +96,4 @@ jobs:
           prerelease: ${{ steps.prerelease.outputs.value }}
           generate_release_notes: true
           files: |
-            release-artifacts/*/release/BoomingMusic-*.apk
+            release-artifacts/*/release/BoomingSS-*.apk
