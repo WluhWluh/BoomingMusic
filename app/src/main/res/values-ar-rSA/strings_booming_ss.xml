@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="action_source_separation">فصل الصوت</string>
-    <string name="action_source_separation_settings">فصل مصادر الصوت</string>
+    <string name="action_source_separation_settings">فصل الصوت</string>
     <string name="action_source_separation_playback">تشغيل المسارات المفصولة</string>
-    <string name="booming_ss_invitation_message_content">مرحبًا. جرّب Booming SS، وهو فرع من Booming Music يضيف فصل مصادر الصوت. يشغّل الموسيقى المحلية ويضيف تشغيل المسارات المفصولة. يمكنك تنزيله من هنا: %s</string>
-    <string name="booming_ss_about_summary">Booming SS %s، فرع مبني على Booming Music لفصل مصادر الصوت. المس لمزيد من المعلومات.</string>
+    <string name="booming_ss_invitation_message_content">مرحبًا. جرّب Booming SS، وهو فرع من Booming Music يضيف فصل الصوت. يشغّل الموسيقى المحلية ويضيف تشغيل المسارات المفصولة. يمكنك تنزيله من هنا: %s</string>
+    <string name="booming_ss_about_summary">Booming SS %s، فرع مبني على Booming Music لفصل الصوت. المس لمزيد من المعلومات.</string>
     <string name="booming_ss_downloading_update">يتم تنزيل تحديث Booming SS.</string>
     <string name="source_separation_blend_mode_off">الصوت الأصلي</string>
     <string name="source_separation_blend_mode_global">مزج المسارات العام</string>
@@ -14,7 +14,7 @@
     <string name="source_separation_blend_title">مزج المسارات</string>
     <string name="source_separation_reset_blend">إعادة ضبط مزج المسارات</string>
     <string name="source_separation_blend_vocals">الغناء</string>
-    <string name="source_separation_blend_instrumental">الموسيقى المصاحبة</string>
+    <string name="source_separation_blend_instrumental">العزف</string>
     <string name="source_separation_playback_unavailable">تشغيل المسارات المفصولة غير متاح</string>
     <string name="source_separation_playback_title">تشغيل المسارات المفصولة</string>
     <string name="source_separation_playback_description">التشغيل باستخدام المسارات المفصولة عندما يكون ما يكفي من الصوت المخزّن مؤقتًا جاهزًا للموضع الحالي.</string>
@@ -92,7 +92,7 @@
     <string name="source_separation_model_import_empty">ملف النموذج المستورد فارغ.</string>
     <string name="source_separation_model_replace_failed">تعذر استبدال ملف النموذج الحالي.</string>
     <string name="source_separation_model_metadata_replace_failed">تعذر استبدال بيانات تعريف النموذج.</string>
-    <string name="source_separation_model_load_failed">تعذر تحميل نموذج فصل مصادر الصوت المثبت. استورد نموذج ONNX صالحًا أو نزّله، ثم أعد المحاولة.</string>
+    <string name="source_separation_model_load_failed">تعذر تحميل نموذج فصل الصوت المثبت. استورد نموذج ONNX صالحًا أو نزّله، ثم أعد المحاولة.</string>
     <string name="source_separation_model_file_label">الملف</string>
     <string name="source_separation_model_source_label">المصدر</string>
     <string name="source_separation_model_hash_title">فحص التجزئة</string>
@@ -141,7 +141,7 @@
     <string name="source_separation_cache_updated_label">تم التحديث</string>
     <string name="source_separation_cache_accessed_label">آخر استخدام</string>
     <string name="source_separation_cache_model_label">النموذج</string>
-    <string name="source_separation_preparing">يتم تحضير فصل مصادر الصوت...</string>
+    <string name="source_separation_preparing">يتم تحضير فصل الصوت...</string>
     <string name="source_separation_processing_windows">تتم معالجة نوافذ الصوت</string>
     <string name="source_separation_stage_preparing_model_file">يتم تحضير ملف النموذج</string>
     <string name="source_separation_stage_preparing_output_files">يتم تحضير ملفات الإخراج</string>
@@ -149,13 +149,13 @@
     <string name="source_separation_stage_processed_window">تمت معالجة النافذة %1$d/%2$d</string>
     <string name="source_separation_stage_full_decode">فك ترميز كامل</string>
     <string name="source_separation_stage_window_decode">فك ترميز النوافذ</string>
-    <string name="source_separation_stage">فصل مصادر الصوت: %1$s</string>
-    <string name="source_separation_progress">فصل مصادر الصوت: %4$s - %1$d/%2$d (%3$d%%)</string>
-    <string name="source_separation_complete">اكتمل فصل مصادر الصوت</string>
-    <string name="source_separation_canceled">تم إلغاء فصل مصادر الصوت</string>
-    <string name="source_separation_failed">فشل فصل مصادر الصوت</string>
+    <string name="source_separation_stage">فصل الصوت: %1$s</string>
+    <string name="source_separation_progress">فصل الصوت: %4$s - %1$d/%2$d (%3$d%%)</string>
+    <string name="source_separation_complete">اكتمل فصل الصوت</string>
+    <string name="source_separation_canceled">تم إلغاء فصل الصوت</string>
+    <string name="source_separation_failed">فشل فصل الصوت</string>
     <string name="about_booming_ss_title">Booming SS</string>
-    <string name="about_booming_ss_summary_title">فرع لفصل مصادر الصوت</string>
+    <string name="about_booming_ss_summary_title">فرع لفصل الصوت</string>
     <string name="about_booming_ss_summary">Booming SS هو إصدار غير رسمي مبني على Booming Music مع فصل مصادر الصوت. يحافظ على تجربة مشغل الموسيقى المحلي الأصلية ويضيف تشغيل المسارات المفصولة، والتحكم في مزج المسارات، وتذكّر المزج لكل أغنية، وإدارة ذواكر الفصل المؤقتة.</string>
     <string name="about_booming_ss_model_title">ملفات النموذج</string>
     <string name="about_booming_ss_model_summary">نماذج فصل مصادر الصوت غير مرفقة مع التطبيق. يمكنك تنزيل نموذج مسبق، أو استخدام عنوان URL مخصص، أو استيراد ملف ONNX محلي. تُعرض فحوصات التجزئة للإرشاد فقط ولا تمنع الاستخدام.</string>
@@ -166,8 +166,8 @@
     <string name="about_booming_music_original_author_title">المؤلف الأصلي لـ Booming Music</string>
     <string name="about_booming_ss_report_bugs_dialog_message">يستخدم Booming SS مستودعه الخاص لتغييرات فصل مصادر الصوت والمشكلات الخاصة بهذا الفرع. إذا كانت المشكلة نفسها تحدث في Booming Music الأصلي بدون ميزات Booming SS، فأبلغ عنها في مستودع المشروع الأصلي بدلًا من ذلك.</string>
     <string name="about_booming_ss_translate_dialog_message">تتم إدارة ترجمة Booming Music الأصلي على Hosted Weblate. لا يتضمن ذلك المشروع نصوص فصل مصادر الصوت الخاصة بـ Booming SS؛ استخدم هذا الرابط لترجمات التطبيق الأصلي فقط. تتم صيانة الترجمات الخاصة بـ Booming SS بشكل منفصل في هذا الفرع.</string>
-    <string name="source_separation_panel_entry_title">الوصول إلى لوحة فصل مصادر الصوت</string>
-    <string name="source_separation_panel_entry_summary">إظهار زر المشغل وعنصر القائمة للوحة فصل مصادر الصوت.</string>
-    <string name="source_separation_quick_controls_title">عناصر تحكم سريعة لفصل مصادر الصوت</string>
-    <string name="source_separation_quick_controls_summary">إظهار اختصار مزج المسارات فوق كلمات الأغنية في المشغل.</string>
+    <string name="source_separation_panel_entry_title">الوصول إلى لوحة فصل الصوت</string>
+    <string name="source_separation_panel_entry_summary">إظهار زر فصل الصوت في شاشة التشغيل الآن وعنصر القائمة الخاص باللوحة.</string>
+    <string name="source_separation_quick_controls_title">عناصر تحكم سريعة لفصل الصوت</string>
+    <string name="source_separation_quick_controls_summary">إظهار اختصار مزج المسارات عند عرض كلمات الأغنية في شاشة التشغيل الآن.</string>
 </resources>
