@@ -109,13 +109,17 @@ jobs:
     - name: Find APK (CI build)
       if: github.event_name != 'pull_request'
       run: |
-        APK_PATH=$(find app/build/outputs/apk/normal/release -name 'BoomingSS-*.apk' | sort | head -n 1)
-        if [ -z "$APK_PATH" ]; then
+        mapfile -t APK_FILES < <(find app/build/outputs/apk/normal/release -name 'BoomingSS-*.apk' | sort)
+        if [ "${#APK_FILES[@]}" -eq 0 ]; then
           echo "No Booming SS release APK found." >&2
           exit 1
         fi
-        echo "APK_FILE=$APK_PATH" >> $GITHUB_ENV
-        echo "APK_FILE_NAME=$(basename $APK_PATH .apk)" >> $GITHUB_ENV
+        {
+          echo "APK_FILES<<EOF"
+          printf '%s\n' "${APK_FILES[@]}"
+          echo "EOF"
+          echo "APK_ARTIFACT_NAME=BoomingSS-normal-release-apks"
+        } >> $GITHUB_ENV
 
     - name: Check Telegram configuration
       id: telegram
@@ -136,13 +140,17 @@ jobs:
     - name: Find APK (PR)
       if: github.event_name == 'pull_request'
       run: |
-        APK_PATH=$(find app/build/outputs/apk/normal/debug -name 'BoomingSS-*.apk' | sort | head -n 1)
-        if [ -z "$APK_PATH" ]; then
+        mapfile -t APK_FILES < <(find app/build/outputs/apk/normal/debug -name 'BoomingSS-*.apk' | sort)
+        if [ "${#APK_FILES[@]}" -eq 0 ]; then
           echo "No Booming SS debug APK found." >&2
           exit 1
         fi
-        echo "APK_FILE=$APK_PATH" >> $GITHUB_ENV
-        echo "APK_FILE_NAME=$(basename $APK_PATH .apk)" >> $GITHUB_ENV
+        {
+          echo "APK_FILES<<EOF"
+          printf '%s\n' "${APK_FILES[@]}"
+          echo "EOF"
+          echo "APK_ARTIFACT_NAME=BoomingSS-normal-debug-apks"
+        } >> $GITHUB_ENV
 
     - name: Send files to Telegram
       if: github.event_name != 'pull_request' && steps.telegram.outputs.enabled == 'true'
@@ -153,7 +161,7 @@ jobs:
           📋 **Changelog:**
           ${{ env.CHANGELOG }}
         files: |
-          ${{ env.APK_FILE }}
+          ${{ env.APK_FILES }}
       env:
         CHANGELOG: ${{ steps.changelog.outputs.result }}
         API_ID: ${{ secrets.TG_API_ID }}
@@ -164,13 +172,12 @@ jobs:
       if: github.event_name != 'pull_request'
       uses: actions/upload-artifact@v7
       with:
-        name: ${{ env.APK_FILE_NAME }}
-        path: ${{ env.APK_FILE }}
-        archive: false
+        name: ${{ env.APK_ARTIFACT_NAME }}
+        path: ${{ env.APK_FILES }}
 
     - name: Upload apk (PR)
       if: github.event_name == 'pull_request'
       uses: actions/upload-artifact@v7
       with:
-        name: ${{ env.APK_FILE_NAME }}
-        path: ${{ env.APK_FILE }}
+        name: ${{ env.APK_ARTIFACT_NAME }}
+        path: ${{ env.APK_FILES }}
