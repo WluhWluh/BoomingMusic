@@ -13,7 +13,7 @@ jobs:
 
     strategy:
       matrix:
-        variant: [ github, fdroid, playstore ]
+        variant: [ github, fdroid ]
 
     steps:
       - uses: actions/checkout@v6
@@ -33,8 +33,12 @@ jobs:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           SIGNING_PROPERTIES: ${{ secrets.SIGNING_PROPERTIES }}
         run: |
-          echo $SIGNING_KEY | base64 -di > ./booming_keystore.jks
-          echo $SIGNING_PROPERTIES | base64 -di > ./keystore.properties
+          if [ -n "$SIGNING_KEY" ] && [ -n "$SIGNING_PROPERTIES" ]; then
+            printf '%s' "$SIGNING_KEY" | base64 -d > ./booming_keystore.jks
+            printf '%s' "$SIGNING_PROPERTIES" | base64 -d > ./keystore.properties
+          else
+            echo "Signing secrets are not configured; release builds will use the debug signing fallback."
+          fi
 
       - name: Make Gradle executable
         run: chmod +x ./gradlew
@@ -46,19 +50,14 @@ jobs:
           LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
         run: |
           CAP_VARIANT="$(echo ${VARIANT:0:1} | tr '[:lower:]' '[:upper:]')${VARIANT:1}"
-          if [ "$VARIANT" == "playstore" ]; then
-            ./gradlew bundle${CAP_VARIANT}Release
-          else
-            ./gradlew assemble${CAP_VARIANT}Release
-          fi
+          ./gradlew assemble${CAP_VARIANT}Release
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
         with:
           name: artifacts-${{ matrix.variant }}-release
           path: |
-            app/build/outputs/apk/*/release/BoomingMusic-*.apk
-            app/build/outputs/bundle/*/*.aab
+            app/build/outputs/apk/*/release/BoomingSS-*.apk
 
   publish-release:
     needs: build
@@ -92,4 +91,4 @@ jobs:
           prerelease: ${{ steps.prerelease.outputs.value }}
           generate_release_notes: true
           files: |
-            release-artifacts/*/release/BoomingMusic-*.apk
+            release-artifacts/*/release/BoomingSS-*.apk

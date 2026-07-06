@@ -76,6 +76,7 @@ val currentVersion: Version = Version.Beta(
     versionPatch = 1,
     versionBuild = 2
 )
+val sourceSeparationVersionSuffix = "-ss.1"
 val currentVersionCode = currentVersion.code
 
 android {
@@ -86,9 +87,9 @@ android {
         minSdk = 26
         targetSdk = 36
 
-        applicationId = namespace
+        applicationId = "com.wluhwluh.booming.sourcesep"
         versionCode = 1310102
-        versionName = currentVersion.name
+        versionName = currentVersion.name + sourceSeparationVersionSuffix
         check(versionCode == currentVersionCode)
     }
 
@@ -168,11 +169,10 @@ android {
 
             // AppBundle tasks usually contain "bundle" in their name
             //noinspection WrongGradleMethod
-            val isCI = System.getenv("RELEASE_TYPE") == "CI"
             val isBuildingBundle = gradle.startParameter.taskNames.any { it.lowercase().contains("bundle") }
 
             // Disable split abis when building app bundle
-            isEnable = !isCI && !isBuildingBundle
+            isEnable = !isBuildingBundle
 
             reset()
             include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
@@ -245,7 +245,7 @@ androidComponents {
         variant.outputs.forEach { output ->
             val filter = output.filters.joinToString("-") { it.identifier }
             val abi = filter.ifEmpty { "universal" }
-            output.outputFileName = "BoomingMusic-${output.versionName.get()}-${variant.flavorName}-$abi.apk"
+            output.outputFileName = "BoomingSS-${output.versionName.get()}-${variant.flavorName}-$abi.apk"
         }
     }
 }
@@ -319,6 +319,8 @@ dependencies {
     implementation(libs.versioncompare)
     implementation(libs.commons.text)
     implementation(libs.juniversalchardet)
+    implementation(libs.onnxruntime.android)
+    implementation(libs.jtransforms)
 }
 
 fun getProperties(fileName: String): Properties? {

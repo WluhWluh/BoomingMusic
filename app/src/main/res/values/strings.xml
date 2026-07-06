@@ -44,6 +44,7 @@
     <string name="action_share">Share</string>
     <string name="action_save">Save</string>
     <string name="back_action">Back</string>
+    <string name="refresh_action">Refresh</string>
     <string name="add_action">Add</string>
     <string name="delete_action">Delete</string>
     <string name="remove_action">Remove</string>
@@ -189,6 +190,7 @@
     <string name="label_more_from_x">More from %s</string>
     <string name="various_artists">Various Artists</string>
     <string name="unknown_artist">Unknown Artist</string>
+    <string name="unknown_song">Unknown song</string>
     <string name="unknown_genre">Unknown Genre</string>
     <string name="unknown_year">Unknown Year</string>
     <string name="no_songs_label">No songs</string>
@@ -617,6 +619,7 @@
     <string name="contributor_ttop_description">The project\'s very first contributor and tester.</string>
     <string name="contributor_lenard_description">Developer of the app website and contributor.</string>
     <string name="contributor_alex_description">Longtime friend of the project who provided access to essential APIs.</string>
+    <string name="you_will_be_forwarded_to_the_issue_tracker_website">You will be forwarded to the issue tracker website.</string>
 
     <!-- SAF -->
     <string name="saf_access_required_title">Storage Access Required</string>

@@ -79,3 +79,6 @@ local.properties
 /.kotlin/
 
 get_weblate_translators.py
+
+# Local model weights for personal source-separation builds
+models/

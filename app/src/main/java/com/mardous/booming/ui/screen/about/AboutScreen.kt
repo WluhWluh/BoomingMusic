@@ -39,6 +39,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -54,6 +55,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -86,17 +88,15 @@ import com.mardous.booming.extensions.openUrl
 import com.mardous.booming.extensions.toChooser
 import com.mardous.booming.extensions.tryStartActivity
 import com.mardous.booming.ui.component.compose.CollapsibleAppBarScaffold
+import com.mardous.booming.util.Constants
 import com.mardous.booming.util.Constants.AUTHOR_GITHUB_URL
 import com.mardous.booming.util.Constants.COMMUNITY_LINK
 import com.mardous.booming.util.Constants.DONATION_LINK
 import com.mardous.booming.util.Constants.DOWNLOAD_URL
 import com.mardous.booming.util.Constants.FAQ_LINK
-import com.mardous.booming.util.Constants.APP_GITHUB_URL
-import com.mardous.booming.util.Constants.ISSUE_TRACKER_LINK
+import com.mardous.booming.util.Constants.GITHUB_URL
 import com.mardous.booming.util.Constants.RELEASES_LINK
 import com.mardous.booming.util.Constants.SUPPORT_EMAIL
-import com.mardous.booming.util.Constants.TELEGRAM_LINK
-import com.mardous.booming.util.Constants.TRANSLATIONS_LINK
 import com.mikepenz.aboutlibraries.ui.compose.android.produceLibraries
 import com.mikepenz.aboutlibraries.ui.compose.m3.LibrariesContainer
 import dev.jeziellago.compose.markdowntext.MarkdownText
@@ -148,6 +148,27 @@ fun AboutScreen(
             }
         }
     }
+    var showTranslateDialog by remember { mutableStateOf(false) }
+    if (showTranslateDialog) {
+        HelpTranslateDialog(
+            onDismiss = { showTranslateDialog = false },
+            onContinue = {
+                showTranslateDialog = false
+                context.openUrl(Constants.TRANSLATIONS_LINK)
+            }
+        )
+    }
+
+    var showReportDialog by remember { mutableStateOf(false) }
+    if (showReportDialog) {
+        ReportBugsDialog(
+            onDismiss = { showReportDialog = false },
+            onContinue = {
+                showReportDialog = false
+                context.openUrl(Constants.ISSUE_TRACKER_LINK)
+            }
+        )
+    }
 
     var showLicensesDialog by remember { mutableStateOf(false) }
     val libraries by produceLibraries(R.raw.aboutlibraries)
@@ -170,7 +191,13 @@ fun AboutScreen(
     }
 
     val sections = getAboutSections(
-        onTranslatorsClick = { showTranslatorsDialog = true }
+        onTranslatorsClick = { showTranslatorsDialog = true },
+        onReportBugsClick = { showReportDialog = true },
+        onTranslateClick = { showTranslateDialog = true }
+    )
+    val forkItems = getForkItems(
+        onForkGitHubClick = { context.openUrl(GITHUB_URL) },
+        onUpstreamGitHubClick = { context.openUrl(Constants.UPSTREAM_GITHUB_URL) }
     )
 
     CollapsibleAppBarScaffold(
@@ -188,13 +215,23 @@ fun AboutScreen(
                 BoomingMusicHeader(
                     version = appVersion,
                     onChangelogClick = { context.openUrl(RELEASES_LINK) },
-                    onForkClick = { context.openUrl(APP_GITHUB_URL) },
+                    onForkClick = { context.openUrl(GITHUB_URL) },
                     onFAQClick = { context.openUrl(FAQ_LINK) },
                     onLicensesClick = { showLicensesDialog = true }
                 )
             }
 
-            item { AboutSectionTitle(stringResource(R.string.author)) }
+            item { AboutSectionTitle(stringResource(R.string.about_booming_ss_title)) }
+
+            itemsIndexed(forkItems) { index, item ->
+                AboutListItem(
+                    index = index,
+                    itemCount = forkItems.size,
+                    data = item
+                )
+            }
+
+            item { AboutSectionTitle(stringResource(R.string.about_booming_music_original_author_title)) }
 
             item {
                 AuthorSection(
@@ -248,7 +285,7 @@ private fun BoomingMusicHeader(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = stringResource(R.string.app_name),
+            text = stringResource(R.string.app_name_long),
             style = MaterialTheme.typography.headlineMedium,
             maxLines = 1
         )
@@ -327,6 +364,37 @@ private fun BoomingMusicHeader(
         }
     }
 }
+
+@Composable
+private fun getForkItems(
+    onForkGitHubClick: () -> Unit,
+    onUpstreamGitHubClick: () -> Unit
+) = listOf(
+    AboutItemData(
+        icon = { AboutItemIcon(painterResource(R.drawable.ic_stem_blend_24dp)) },
+        title = stringResource(R.string.about_booming_ss_summary_title),
+        summary = stringResource(R.string.about_booming_ss_summary),
+        onClick = {}
+    ),
+    AboutItemData(
+        icon = { AboutItemIcon(painterResource(R.drawable.ic_info_24dp)) },
+        title = stringResource(R.string.about_booming_ss_model_title),
+        summary = stringResource(R.string.about_booming_ss_model_summary),
+        onClick = {}
+    ),
+    AboutItemData(
+        icon = { AboutItemIcon(painterResource(R.drawable.ic_github_circle_24dp)) },
+        title = stringResource(R.string.about_booming_ss_fork_title),
+        summary = stringResource(R.string.about_booming_ss_fork_summary),
+        onClick = onForkGitHubClick
+    ),
+    AboutItemData(
+        icon = { AboutItemIcon(painterResource(R.drawable.ic_open_in_new_24dp)) },
+        title = stringResource(R.string.about_booming_ss_upstream_title),
+        summary = stringResource(R.string.about_booming_ss_upstream_summary),
+        onClick = onUpstreamGitHubClick
+    )
+)
 
 @Composable
 private fun AuthorSection(
@@ -413,6 +481,66 @@ private fun AuthorSection(
 }
 
 @Composable
+private fun ReportBugsDialog(
+    onDismiss: () -> Unit = {},
+    onContinue: () -> Unit = {}
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_bug_report_24dp),
+                contentDescription = null
+            )
+        },
+        title = { Text(stringResource(R.string.report_bugs)) },
+        text = {
+            Text(text = stringResource(R.string.about_booming_ss_report_bugs_dialog_message))
+        },
+        confirmButton = {
+            Button(onClick = onContinue) {
+                Text(text = stringResource(R.string.continue_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(android.R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
+private fun HelpTranslateDialog(
+    onDismiss: () -> Unit = {},
+    onContinue: () -> Unit = {}
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_language_24dp),
+                contentDescription = null
+            )
+        },
+        title = { Text(stringResource(R.string.help_with_translations)) },
+        text = {
+            Text(text = stringResource(R.string.about_booming_ss_translate_dialog_message))
+        },
+        confirmButton = {
+            Button(onClick = onContinue) {
+                Text(text = stringResource(R.string.continue_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(android.R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
 private fun AboutSectionTitle(
     text: String,
     modifier: Modifier = Modifier
@@ -493,12 +621,14 @@ private fun AboutHeaderButton(
 
 @Composable
 private fun getAboutSections(
-    onTranslatorsClick: () -> Unit
+    onTranslatorsClick: () -> Unit,
+    onReportBugsClick: () -> Unit,
+    onTranslateClick: () -> Unit
 ): List<Pair<String, List<AboutItemData>>> {
     val context = LocalContext.current
 
     val sendInvitationTitle = stringResource(R.string.send_invitation_message)
-    val invitationMessage = stringResource(R.string.invitation_message_content, DOWNLOAD_URL)
+    val invitationMessage = stringResource(R.string.booming_ss_invitation_message_content, DOWNLOAD_URL)
 
     fun openGithubProfile(username: String) {
         context.openUrl("https://github.com/$username")
@@ -579,19 +709,19 @@ private fun getAboutSections(
                 icon = { AboutItemIcon(painterResource(R.drawable.ic_bug_report_24dp)) },
                 title = stringResource(R.string.report_bugs),
                 summary = stringResource(R.string.report_bugs_summary),
-                onClick = { context.openUrl(ISSUE_TRACKER_LINK) }
+                onClick = onReportBugsClick
             ),
             AboutItemData(
                 icon = { AboutItemIcon(painterResource(R.drawable.ic_language_24dp)) },
                 title = stringResource(R.string.help_with_translations),
                 summary = stringResource(R.string.help_with_translations_summary),
-                onClick = { context.openUrl(TRANSLATIONS_LINK) }
+                onClick = onTranslateClick
             ),
             AboutItemData(
                 icon = { AboutItemIcon(painterResource(R.drawable.ic_telegram_24dp)) },
                 title = stringResource(R.string.telegram_community),
                 summary = stringResource(R.string.telegram_community_summary),
-                onClick = { context.openUrl(TELEGRAM_LINK) }
+                onClick = { context.openUrl(Constants.TELEGRAM_COMMUNITY_LINK) }
             ),
             AboutItemData(
                 icon = { AboutItemIcon(painterResource(R.drawable.ic_share_24dp)) },

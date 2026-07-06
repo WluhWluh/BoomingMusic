@@ -1,6 +1,7 @@
 name: Android CI
 
 on:
+  workflow_dispatch:
   push:
     branches-ignore: [ "stable" ]
     paths-ignore:
@@ -39,7 +40,15 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run Lint
-        run: ./gradlew lint
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            ./gradlew lintGithubDebug
+          else
+            ./gradlew lintGithubRelease
+          fi
+        env:
+          RELEASE_TYPE: "CI"
+          EVENT_NAME: ${{ github.event_name }}
 
   build:
     runs-on: ubuntu-latest
@@ -57,8 +66,12 @@ jobs:
         SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         SIGNING_PROPERTIES: ${{ secrets.SIGNING_PROPERTIES }}
       run: |
-        echo $SIGNING_KEY | base64 -di > ./booming_keystore.jks
-        echo $SIGNING_PROPERTIES | base64 -di > ./keystore.properties
+        if [ -n "$SIGNING_KEY" ] && [ -n "$SIGNING_PROPERTIES" ]; then
+          printf '%s' "$SIGNING_KEY" | base64 -d > ./booming_keystore.jks
+          printf '%s' "$SIGNING_PROPERTIES" | base64 -d > ./keystore.properties
+        else
+          echo "Signing secrets are not configured; release builds will use the debug signing fallback."
+        fi
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
@@ -77,9 +90,9 @@ jobs:
     - name: Build with Gradle
       run: |
         if [ "$EVENT_NAME" = "pull_request" ]; then
-          ./gradlew assembleDebug
+          ./gradlew assembleGithubDebug
         else
-          ./gradlew assembleRelease
+          ./gradlew assembleGithubRelease
         fi
       env:
         RELEASE_TYPE: "CI"
@@ -94,7 +107,10 @@ jobs:
       with:
         result-encoding: string
         script: |
-          const commits = JSON.parse(process.env.COMMITS);
+          const commits = JSON.parse(process.env.COMMITS || "[]") || [];
+          if (!Array.isArray(commits) || commits.length === 0) {
+            return `- Manual build for ${context.ref}`;
+          }
 
           return commits
             .map(commit => `- ${commit.message.split("\n")[0]}`)
@@ -103,19 +119,85 @@ jobs:
     - name: Find APK (CI build)
       if: github.event_name != 'pull_request'
       run: |
-        APK_PATH=$(find app/build/outputs/apk/github/release -name '*.apk')
-        echo "APK_FILE=$APK_PATH" >> $GITHUB_ENV
-        echo "APK_FILE_NAME=$(basename $APK_PATH .apk)" >> $GITHUB_ENV
+        APK_OUTPUT_DIR=app/build/outputs/apk/github/release
+        mapfile -t APK_FILES < <(find "$APK_OUTPUT_DIR" -name 'BoomingSS-*.apk' | sort)
+        if [ "${#APK_FILES[@]}" -eq 0 ]; then
+          echo "No Booming SS release APK found." >&2
+          exit 1
+        fi
+        set_apk_env() {
+          local key="$1"
+          local pattern="$2"
+          local apk_path
+          apk_path=$(find "$APK_OUTPUT_DIR" -name "$pattern" | sort | head -n 1)
+          if [ -z "$apk_path" ]; then
+            echo "No Booming SS APK found for $pattern." >&2
+            exit 1
+          fi
+          echo "APK_${key}=$apk_path" >> $GITHUB_ENV
+          echo "APK_${key}_NAME=$(basename "$apk_path" .apk)" >> $GITHUB_ENV
+        }
+        {
+          echo "APK_FILES<<EOF"
+          printf '%s\n' "${APK_FILES[@]}"
+          echo "EOF"
+        } >> $GITHUB_ENV
+        set_apk_env "ARM64" "*-arm64-v8a.apk"
+        set_apk_env "ARMV7" "*-armeabi-v7a.apk"
+        set_apk_env "X86_64" "*-x86_64.apk"
+        set_apk_env "X86" "*-x86.apk"
+        set_apk_env "UNIVERSAL" "*-universal.apk"
+
+    - name: Check Telegram configuration
+      id: telegram
+      if: github.event_name != 'pull_request'
+      env:
+        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        TG_API_ID: ${{ secrets.TG_API_ID }}
+        TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      run: |
+        if [ -n "$TG_CHAT_ID" ] && [ -n "$TG_API_ID" ] && [ -n "$TG_API_HASH" ] && [ -n "$TG_BOT_TOKEN" ]; then
+          echo "enabled=true" >> $GITHUB_OUTPUT
+        else
+          echo "enabled=false" >> $GITHUB_OUTPUT
+          echo "Telegram secrets are not configured; skipping Telegram upload."
+        fi
 
     - name: Find APK (PR)
       if: github.event_name == 'pull_request'
       run: |
-        APK_PATH=$(find app/build/outputs/apk/github/debug -name '*.apk')
-        echo "APK_FILE=$APK_PATH" >> $GITHUB_ENV
-        echo "APK_FILE_NAME=$(basename $APK_PATH .apk)" >> $GITHUB_ENV
+        APK_OUTPUT_DIR=app/build/outputs/apk/github/debug
+        mapfile -t APK_FILES < <(find "$APK_OUTPUT_DIR" -name 'BoomingSS-*.apk' | sort)
+        if [ "${#APK_FILES[@]}" -eq 0 ]; then
+          echo "No Booming SS debug APK found." >&2
+          exit 1
+        fi
+        set_apk_env() {
+          local key="$1"
+          local pattern="$2"
+          local apk_path
+          apk_path=$(find "$APK_OUTPUT_DIR" -name "$pattern" | sort | head -n 1)
+          if [ -z "$apk_path" ]; then
+            echo "No Booming SS APK found for $pattern." >&2
+            exit 1
+          fi
+          echo "APK_${key}=$apk_path" >> $GITHUB_ENV
+          echo "APK_${key}_NAME=$(basename "$apk_path" .apk)" >> $GITHUB_ENV
+        }
+        {
+          echo "APK_FILES<<EOF"
+          printf '%s\n' "${APK_FILES[@]}"
+          echo "EOF"
+        } >> $GITHUB_ENV
+        set_apk_env "ARM64" "*-arm64-v8a.apk"
+        set_apk_env "ARMV7" "*-armeabi-v7a.apk"
+        set_apk_env "X86_64" "*-x86_64.apk"
+        set_apk_env "X86" "*-x86.apk"
+        set_apk_env "UNIVERSAL" "*-universal.apk"
 
     - name: Send files to Telegram
-      if: github.event_name != 'pull_request'
+      if: github.event_name != 'pull_request' && steps.telegram.outputs.enabled == 'true'
       uses: xz-dev/TelegramFileUploader@v1
       with:
         to-who: ${{ secrets.TG_CHAT_ID }}
@@ -123,24 +205,44 @@ jobs:
           📋 **Changelog:**
           ${{ env.CHANGELOG }}
         files: |
-          ${{ env.APK_FILE }}
+          ${{ env.APK_FILES }}
       env:
         CHANGELOG: ${{ steps.changelog.outputs.result }}
         API_ID: ${{ secrets.TG_API_ID }}
         API_HASH: ${{ secrets.TG_API_HASH }}
         BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
 
-    - name: Upload apk (CI build)
-      if: github.event_name != 'pull_request'
+    - name: Upload APK (arm64-v8a)
       uses: actions/upload-artifact@v7
       with:
-        name: ${{ env.APK_FILE_NAME }}
-        path: ${{ env.APK_FILE }}
+        name: ${{ env.APK_ARM64_NAME }}
+        path: ${{ env.APK_ARM64 }}
         archive: false
 
-    - name: Upload apk (PR)
-      if: github.event_name == 'pull_request'
+    - name: Upload APK (armeabi-v7a)
       uses: actions/upload-artifact@v7
       with:
-        name: ${{ env.APK_FILE_NAME }}
-        path: ${{ env.APK_FILE }}
+        name: ${{ env.APK_ARMV7_NAME }}
+        path: ${{ env.APK_ARMV7 }}
+        archive: false
+
+    - name: Upload APK (x86_64)
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ env.APK_X86_64_NAME }}
+        path: ${{ env.APK_X86_64 }}
+        archive: false
+
+    - name: Upload APK (x86)
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ env.APK_X86_NAME }}
+        path: ${{ env.APK_X86 }}
+        archive: false
+
+    - name: Upload APK (universal)
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ env.APK_UNIVERSAL_NAME }}
+        path: ${{ env.APK_UNIVERSAL }}
+        archive: false
