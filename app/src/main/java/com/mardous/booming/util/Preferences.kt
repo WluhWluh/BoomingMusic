@@ -268,6 +268,18 @@ object Preferences : KoinComponent {
     val circularPlayButton: Boolean
         get() = preferences.getBoolean(CIRCLE_PLAY_BUTTON, false)
 
+    val sourceSeparationPanelEntryVisible: Boolean
+        get() = preferences.getBoolean(
+            SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE,
+            DEFAULT_SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE
+        )
+
+    val sourceSeparationQuickControlsVisible: Boolean
+        get() = preferences.getBoolean(
+            SOURCE_SEPARATION_QUICK_CONTROLS_VISIBLE,
+            DEFAULT_SOURCE_SEPARATION_QUICK_CONTROLS_VISIBLE
+        )
+
     val enableScrollingText: Boolean
         get() = preferences.getBoolean(ENABLE_SCROLLING_TEXT, false)
 
@@ -582,6 +594,8 @@ const val COVER_RIGHT_DOUBLE_TAP_ACTION = "cover_right_double_tap_action"
 const val COVER_LONG_PRESS_ACTION = "cover_long_press_action"
 const val ANIMATE_PLAYER_CONTROL = "animate_player_control"
 const val CIRCLE_PLAY_BUTTON = "circle_play_button"
+const val SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE = "source_separation.panel_entry_visible"
+const val SOURCE_SEPARATION_QUICK_CONTROLS_VISIBLE = "source_separation.quick_controls_visible"
 const val ENABLE_SCROLLING_TEXT = "enable_scrolling_text"
 const val DISPLAY_ALBUM_TITLE = "display_album_title"
 const val DISPLAY_EXTRA_INFO = "display_extra_info"
@@ -603,6 +617,40 @@ const val PLAY_OPTION_PLAYS_WHOLE_LIST = "play_option_whole_list"
 const val PLAY_ALL_SONGS_WHEN_SEARCHING = "play_all_songs_when_searching"
 const val CLEAR_QUEUE_ON_COMPLETION = "clear_queue_on_completion"
 const val REMEMBER_SHUFFLE_MODE = "remember_shuffle_mode"
+const val SOURCE_SEPARATION_AUTO_START = "source_separation.auto_start"
+const val SOURCE_SEPARATION_WINDOW_DECODE = "source_separation.window_decode"
+const val SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION = "source_separation.auto_flac_compression"
+const val SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS = "source_separation.show_snackbar_progress"
+const val SOURCE_SEPARATION_SHOW_SNACKBAR_MESSAGES = "source_separation.show_snackbar_messages"
+const val SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = "source_separation.mixed_output_preroll_ms"
+const val SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS =
+    "source_separation.hydrated_mixed_output_preroll_ms"
+const val SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT =
+    "source_separation.playback_ready_window_count"
+const val SOURCE_SEPARATION_AUTO_CACHE_CLEANUP = "source_separation.auto_cache_cleanup"
+const val SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT =
+    "source_separation.auto_cache_cleanup_partial_limit"
+const val SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT =
+    "source_separation.auto_cache_cleanup_completed_limit"
+const val SOURCE_SEPARATION_AVERAGE_WINDOW_MS = "source_separation.average_window_ms"
+const val SOURCE_SEPARATION_AVERAGE_WINDOW_SAMPLE_COUNT =
+    "source_separation.average_window_sample_count"
+const val DEFAULT_SOURCE_SEPARATION_AUTO_START = true
+const val DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE = true
+const val DEFAULT_SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE = false
+const val DEFAULT_SOURCE_SEPARATION_QUICK_CONTROLS_VISIBLE = true
+const val DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP = true
+const val DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT = 5
+const val DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT = 10
+const val MIN_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_LIMIT = 1
+const val DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 400L
+const val DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS = 0L
+const val MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS = 5000L
+const val DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT = 2
+const val MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT = 2
+const val MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT = 8
+const val DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS = 3000L
+const val MAX_SOURCE_SEPARATION_AVERAGE_WINDOW_SAMPLE_COUNT = 32
 const val ALBUM_SHUFFLE_MODE = "album_shuffle_mode"
 const val ARTIST_SHUFFLE_MODE = "artist_shuffle_mode"
 const val RESUME_ON_CONNECT = "resume_on_connect"
