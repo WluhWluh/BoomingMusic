@@ -26,6 +26,7 @@ import android.view.View
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsCompat.Type
+import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import com.mardous.booming.R
 import com.mardous.booming.core.model.action.NowPlayingAction
@@ -35,6 +36,7 @@ import com.mardous.booming.databinding.FragmentGradientPlayerBinding
 import com.mardous.booming.extensions.whichFragment
 import com.mardous.booming.ui.component.base.AbsPlayerControlsFragment
 import com.mardous.booming.ui.component.base.AbsPlayerFragment
+import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
 import com.mardous.booming.util.Preferences
 
 class GradientPlayerFragment : AbsPlayerFragment(R.layout.fragment_gradient_player), View.OnClickListener {
@@ -66,13 +68,18 @@ class GradientPlayerFragment : AbsPlayerFragment(R.layout.fragment_gradient_play
     private fun setupListeners() {
         binding.openQueueButton.setOnClickListener(this)
         binding.showLyricsButton.setOnClickListener(this)
+        binding.sourceSeparationSettingsButton.setOnClickListener(this)
         binding.soundSettingsButton.setOnClickListener(this)
+        onSourceSeparationPanelEntryVisibilityChanged(
+            Preferences.sourceSeparationPanelEntryVisible
+        )
     }
 
     override fun onClick(v: View) {
         when (v) {
             binding.openQueueButton -> onQuickActionEvent(NowPlayingAction.OpenPlayQueue)
             binding.showLyricsButton -> onQuickActionEvent(NowPlayingAction.Lyrics)
+            binding.sourceSeparationSettingsButton -> onQuickActionEvent(NowPlayingAction.SourceSeparationSettings)
             binding.soundSettingsButton -> onQuickActionEvent(NowPlayingAction.SoundSettings)
         }
     }
@@ -85,6 +92,7 @@ class GradientPlayerFragment : AbsPlayerFragment(R.layout.fragment_gradient_play
         super.onMenuInflated(menu)
         menu.removeItem(R.id.action_playing_queue)
         menu.removeItem(R.id.action_show_lyrics)
+        menu.removeItem(R.id.action_source_separation_settings)
         menu.removeItem(R.id.action_sound_settings)
         menu.removeItem(R.id.action_favorite)
     }
@@ -103,15 +111,26 @@ class GradientPlayerFragment : AbsPlayerFragment(R.layout.fragment_gradient_play
         val oldMaskColor = binding.mask.backgroundTintList?.defaultColor
             ?: Color.TRANSPARENT
         val oldPrimaryTextColor = binding.openQueueButton.iconTint.defaultColor
+        val oldBlendColor = binding.sourceSeparationSettingsButton.iconTint.defaultColor
         return mutableListOf(
             binding.colorBackground.surfaceTintTarget(scheme.surfaceColor),
             binding.mask.tintTarget(oldMaskColor, scheme.surfaceColor),
             binding.openQueueButton.iconButtonTintTarget(oldPrimaryTextColor, scheme.onSurfaceColor),
             binding.showLyricsButton.iconButtonTintTarget(oldPrimaryTextColor, scheme.onSurfaceColor),
+            binding.sourceSeparationSettingsButton.iconButtonTintTarget(oldBlendColor, scheme.onSurfaceColor),
             binding.soundSettingsButton.iconButtonTintTarget(oldPrimaryTextColor, scheme.onSurfaceColor)
         ).also {
             it.addAll(playerControlsFragment.getTintTargets(scheme))
         }
+    }
+
+    override fun onSourceSeparationSettingsStateChanged(mode: SourceSeparationBlendMode) {
+        super.onSourceSeparationSettingsStateChanged(mode)
+        setSourceSeparationBlendButtonState(_binding?.sourceSeparationSettingsButton, mode)
+    }
+
+    override fun onSourceSeparationPanelEntryVisibilityChanged(visible: Boolean) {
+        _binding?.sourceSeparationSettingsButton?.isVisible = visible
     }
 
     override fun onLyricsVisibilityChange(animatorSet: AnimatorSet, lyricsVisible: Boolean) {

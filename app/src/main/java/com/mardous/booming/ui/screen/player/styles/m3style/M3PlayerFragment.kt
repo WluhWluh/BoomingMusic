@@ -27,6 +27,7 @@ import androidx.appcompat.widget.Toolbar
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsCompat.Type
+import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import com.mardous.booming.R
 import com.mardous.booming.core.model.action.NowPlayingAction
@@ -41,6 +42,7 @@ import com.mardous.booming.extensions.getOnBackPressedDispatcher
 import com.mardous.booming.extensions.whichFragment
 import com.mardous.booming.ui.component.base.AbsPlayerControlsFragment
 import com.mardous.booming.ui.component.base.AbsPlayerFragment
+import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
 import com.mardous.booming.util.Preferences
 
 /**
@@ -85,8 +87,12 @@ class M3PlayerFragment : AbsPlayerFragment(R.layout.fragment_m3_player) {
         popupMenu = inflateMenuInView(binding.moreAction)
         setViewAction(binding.openQueueButton, NowPlayingAction.OpenPlayQueue)
         setViewAction(binding.showLyricsButton, NowPlayingAction.Lyrics)
+        setViewAction(binding.sourceSeparationSettingsButton, NowPlayingAction.SourceSeparationSettings)
         setViewAction(binding.sleepTimerAction, NowPlayingAction.SleepTimer)
         setViewAction(binding.addToPlaylistAction, NowPlayingAction.AddToPlaylist)
+        onSourceSeparationPanelEntryVisibilityChanged(
+            Preferences.sourceSeparationPanelEntryVisible
+        )
     }
 
     private fun setupToolbar() {
@@ -100,6 +106,7 @@ class M3PlayerFragment : AbsPlayerFragment(R.layout.fragment_m3_player) {
         menu.removeItem(R.id.action_playing_queue)
         menu.removeItem(R.id.action_sleep_timer)
         menu.removeItem(R.id.action_show_lyrics)
+        menu.removeItem(R.id.action_source_separation_settings)
         menu.removeItem(R.id.action_add_to_playlist)
     }
 
@@ -110,10 +117,12 @@ class M3PlayerFragment : AbsPlayerFragment(R.layout.fragment_m3_player) {
 
     override fun getTintTargets(scheme: PlayerColorScheme): List<PlayerTintTarget> {
         val oldColor = binding.openQueueButton.iconTint.defaultColor
+        val oldBlendColor = binding.sourceSeparationSettingsButton.iconTint.defaultColor
         return mutableListOf(
             binding.root.surfaceTintTarget(scheme.surfaceColor),
             binding.openQueueButton.iconButtonTintTarget(oldColor, scheme.onSurfaceColor),
             binding.showLyricsButton.iconButtonTintTarget(oldColor, scheme.onSurfaceColor),
+            binding.sourceSeparationSettingsButton.iconButtonTintTarget(oldBlendColor, scheme.onSurfaceColor),
             binding.sleepTimerAction.iconButtonTintTarget(oldColor, scheme.onSurfaceColor),
             binding.addToPlaylistAction.iconButtonTintTarget(oldColor, scheme.onSurfaceColor),
             binding.moreAction.iconButtonTintTarget(oldColor, scheme.onSurfaceColor),
@@ -132,6 +141,15 @@ class M3PlayerFragment : AbsPlayerFragment(R.layout.fragment_m3_player) {
                 it.contentDescription = getString(R.string.action_show_lyrics)
             }
         }
+    }
+
+    override fun onSourceSeparationSettingsStateChanged(mode: SourceSeparationBlendMode) {
+        super.onSourceSeparationSettingsStateChanged(mode)
+        setSourceSeparationBlendButtonState(_binding?.sourceSeparationSettingsButton, mode)
+    }
+
+    override fun onSourceSeparationPanelEntryVisibilityChanged(visible: Boolean) {
+        _binding?.sourceSeparationSettingsButton?.isVisible = visible
     }
 
     override fun onIsFavoriteChanged(isFavorite: Boolean, withAnimation: Boolean) {

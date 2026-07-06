@@ -1,29 +1,44 @@
 package com.mardous.booming.ui.screen.lyrics
 
 import android.os.SystemClock
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -33,25 +48,40 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.keepScreenOn
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.rememberNestedScrollInteropConnection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.SingletonImageLoader
@@ -78,11 +108,16 @@ import com.mardous.booming.ui.component.compose.lyrics.LyricsView
 import com.mardous.booming.ui.component.views.PlaceholderDrawable
 import com.mardous.booming.ui.screen.library.LibraryViewModel
 import com.mardous.booming.ui.screen.player.PlayerViewModel
+import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
+import com.mardous.booming.ui.screen.player.SourceSeparationPlaybackProcessingProgressState
+import com.mardous.booming.ui.screen.player.rememberSourceSeparationPlaybackProcessingProgressState
 import com.mardous.booming.ui.theme.PlayerTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import org.koin.compose.viewmodel.koinActivityViewModel
+import kotlin.math.abs
 
 sealed class LyricsUiState(open val id: Long) {
     data class Loading(override val id: Long) : LyricsUiState(id)
@@ -265,6 +300,8 @@ fun CoverLyricsScreen(
     lyricsViewModel: LyricsViewModel,
     playerViewModel: PlayerViewModel,
     onExpandClick: () -> Unit,
+    onSourceSeparationPanelLongClick: () -> Unit,
+    showSourceSeparationQuickControls: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -280,12 +317,64 @@ fun CoverLyricsScreen(
     )
 
     PlayerTheme(playerColorScheme) {
+        val currentSong by playerViewModel.currentSongFlow.collectAsStateWithLifecycle()
+        val sourceSeparationBlendMode by playerViewModel
+            .sourceSeparationBlendModeFlow
+            .collectAsStateWithLifecycle()
+        val sourceSeparationPlaybackState by playerViewModel
+            .sourceSeparationPlaybackStateFlow
+            .collectAsStateWithLifecycle()
+        val sourceSeparationState by playerViewModel
+            .sourceSeparationStateFlow
+            .collectAsStateWithLifecycle()
+        val quickBlendExpanded = showSourceSeparationQuickControls &&
+                sourceSeparationBlendMode != SourceSeparationBlendMode.Off
+        val quickBlendProcessingProgressState = if (
+            quickBlendExpanded &&
+            sourceSeparationPlaybackState.processing
+        ) {
+            rememberSourceSeparationPlaybackProcessingProgressState(
+                separationState = sourceSeparationState,
+                processingGeneration = sourceSeparationPlaybackState.processingGeneration,
+                processingSongId = currentSong.id,
+            )
+        } else {
+            null
+        }
+        val quickBlendHeight = if (quickBlendExpanded) {
+            CoverLyricsQuickBlendSliderHeight
+        } else {
+            CoverLyricsButtonSize
+        }
+        val quickBlendProgressExtraHeight = if (quickBlendProcessingProgressState != null) {
+            CoverLyricsQuickBlendProgressOffset
+        } else {
+            0.dp
+        }
+        val overlayControlsHeight = if (showSourceSeparationQuickControls) {
+            quickBlendHeight +
+                    quickBlendProgressExtraHeight +
+                    CoverLyricsButtonSpacing +
+                    CoverLyricsControlSlotSize
+        } else {
+            CoverLyricsControlSlotSize
+        }
+        val baseLyricsContentPadding = PaddingValues(vertical = 72.dp, horizontal = 12.dp)
+        val overlayClearance = maxOf(
+            0.dp,
+            baseLyricsContentPadding.calculateBottomPadding() -
+                    CoverLyricsControlSlotSize -
+                    CoverLyricsOverlayPadding
+        )
+        val lyricsContentPadding = baseLyricsContentPadding.withMinimumBottom(
+            overlayControlsHeight + CoverLyricsOverlayPadding + overlayClearance
+        )
         Box(modifier = modifier.fillMaxSize()) {
             LyricsSurface(
                 uiState = uiState,
                 playerViewModel = playerViewModel,
                 settings = lyricsViewSettings,
-                contentPadding = PaddingValues(vertical = 72.dp, horizontal = 12.dp),
+                contentPadding = lyricsContentPadding,
                 fadingEdges = FadingEdges(top = 72.dp, bottom = 64.dp),
                 textAlign = TextAlign.Center,
                 isPlaying = isPlaying,
@@ -300,23 +389,510 @@ fun CoverLyricsScreen(
                 modifier = Modifier.fillMaxSize(),
             )
 
-            FilledIconButton(
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(CoverLyricsButtonSpacing),
                 modifier = Modifier
-                    .wrapContentSize()
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.onSurface,
-                    contentColor = MaterialTheme.colorScheme.surface
-                ),
-                onClick = onExpandClick
+                    .padding(CoverLyricsOverlayPadding)
             ) {
-                Icon(
+                if (showSourceSeparationQuickControls) {
+                    CoverLyricsQuickBlendControl(
+                        expanded = quickBlendExpanded,
+                        blend = sourceSeparationPlaybackState.blend,
+                        processingProgressState = quickBlendProcessingProgressState,
+                        onEnableSeparatedPlayback = {
+                            playerViewModel.setSourceSeparationPlaybackEnabled(
+                                enabled = true,
+                                blend = sourceSeparationPlaybackState.blend
+                            )
+                        },
+                        onDisableSeparatedPlayback = {
+                            playerViewModel.setSourceSeparationPlaybackEnabled(false)
+                        },
+                        onBlendPreview = playerViewModel::previewSourceSeparationBlend,
+                        onBlendChangeFinished = playerViewModel::setSourceSeparationBlend,
+                        onLongClick = onSourceSeparationPanelLongClick,
+                    )
+                }
+
+                CoverLyricsCircularIconButton(
                     painter = painterResource(R.drawable.ic_open_in_full_24dp),
-                    contentDescription = stringResource(R.string.action_lyrics_editor)
+                    contentDescription = stringResource(R.string.action_lyrics_editor),
+                    onClick = onExpandClick
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun CoverLyricsCircularIconButton(
+    painter: Painter,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier.size(CoverLyricsControlSlotSize)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(CoverLyricsButtonSize)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.onSurface)
+                .clickable(onClick = onClick)
+        ) {
+            Icon(
+                painter = painter,
+                contentDescription = contentDescription,
+                tint = MaterialTheme.colorScheme.surface
+            )
+        }
+    }
+}
+
+@Composable
+private fun CoverLyricsQuickBlendControl(
+    expanded: Boolean,
+    blend: Float,
+    processingProgressState: SourceSeparationPlaybackProcessingProgressState?,
+    onEnableSeparatedPlayback: () -> Unit,
+    onDisableSeparatedPlayback: () -> Unit,
+    onBlendPreview: (Float) -> Unit,
+    onBlendChangeFinished: (Float) -> Unit,
+    onLongClick: () -> Unit,
+) {
+    var dragBlend by remember { mutableFloatStateOf(blend.coerceIn(0f, 1f)) }
+    var dragging by remember { mutableStateOf(false) }
+    LaunchedEffect(blend, expanded) {
+        if (!dragging) {
+            dragBlend = blend.coerceIn(0f, 1f)
+        }
+        if (!expanded) {
+            dragging = false
+        }
+    }
+
+    val transition = updateTransition(expanded, label = "CoverLyricsQuickBlend")
+    val height by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "height"
+    ) { isExpanded ->
+        if (isExpanded) CoverLyricsQuickBlendSliderHeight else CoverLyricsButtonSize
+    }
+    val centerGap by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "centerGap"
+    ) { isExpanded ->
+        if (isExpanded) CoverLyricsQuickBlendCenterGap else 0.dp
+    }
+    val innerCornerRadius by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "innerCornerRadius"
+    ) { isExpanded ->
+        if (isExpanded) CoverLyricsQuickBlendInnerCornerRadius else 0.dp
+    }
+    val buttonBackgroundAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "buttonBackgroundAlpha"
+    ) { isExpanded ->
+        if (isExpanded) 0f else 1f
+    }
+    val trackAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "trackAlpha"
+    ) { isExpanded ->
+        if (isExpanded) 0.1f else 0f
+    }
+    val stemIconAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "stemIconAlpha"
+    ) { isExpanded ->
+        if (isExpanded) 0f else 1f
+    }
+    val endpointIconAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "endpointIconAlpha"
+    ) { isExpanded ->
+        if (isExpanded) 1f else 0f
+    }
+    val endpointIconOffset by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "endpointIconOffset"
+    ) { isExpanded ->
+        if (isExpanded) CoverLyricsQuickBlendEndpointIconOffset else 0.dp
+    }
+    val colorScheme = MaterialTheme.colorScheme
+    val progressColor = colorScheme.onSurface
+    val displayedBlend = dragBlend
+    val trackHeight = ((height - centerGap) / 2).coerceAtLeast(0.dp)
+    val vocalsFillHeight = trackHeight *
+            ((CoverLyricsQuickBlendNeutralBlend - displayedBlend) /
+                    CoverLyricsQuickBlendNeutralBlend).coerceIn(0f, 1f)
+    val instrumentalFillHeight = trackHeight *
+            ((displayedBlend - CoverLyricsQuickBlendNeutralBlend) /
+                    CoverLyricsQuickBlendNeutralBlend).coerceIn(0f, 1f)
+    val topIconFillHeight = (
+            CoverLyricsQuickBlendEndpointIconOffset + CoverLyricsQuickBlendIconSize -
+                    maxOf(
+                        CoverLyricsQuickBlendEndpointIconOffset,
+                        trackHeight - vocalsFillHeight
+                    )
+            ).coerceIn(0.dp, CoverLyricsQuickBlendIconSize)
+    val bottomIconTopInTrack = trackHeight -
+            CoverLyricsQuickBlendEndpointIconOffset -
+            CoverLyricsQuickBlendIconSize
+    val bottomIconFillHeight = (instrumentalFillHeight - bottomIconTopInTrack)
+        .coerceIn(0.dp, CoverLyricsQuickBlendIconSize)
+    val buttonBackgroundShape = CircleShape
+    val topTrackShape = RoundedCornerShape(
+        topStart = CoverLyricsButtonSize / 2,
+        topEnd = CoverLyricsButtonSize / 2,
+        bottomStart = innerCornerRadius,
+        bottomEnd = innerCornerRadius,
+    )
+    val bottomTrackShape = RoundedCornerShape(
+        topStart = innerCornerRadius,
+        topEnd = innerCornerRadius,
+        bottomStart = CoverLyricsButtonSize / 2,
+        bottomEnd = CoverLyricsButtonSize / 2,
+    )
+    val viewConfiguration = LocalViewConfiguration.current
+    val touchSlop = viewConfiguration.touchSlop
+    val longPressTimeoutMillis = viewConfiguration.longPressTimeoutMillis
+    val hapticFeedback = LocalHapticFeedback.current
+    val view = LocalView.current
+    val currentDisplayedBlend by rememberUpdatedState(displayedBlend)
+    val currentOnEnableSeparatedPlayback by rememberUpdatedState(onEnableSeparatedPlayback)
+    val currentOnDisableSeparatedPlayback by rememberUpdatedState(onDisableSeparatedPlayback)
+    val currentOnBlendPreview by rememberUpdatedState(onBlendPreview)
+    val currentOnBlendChangeFinished by rememberUpdatedState(onBlendChangeFinished)
+    val currentOnLongClick by rememberUpdatedState(onLongClick)
+    val gestureModifier = Modifier.pointerInput(
+        expanded,
+        touchSlop,
+        longPressTimeoutMillis,
+        hapticFeedback,
+        view,
+    ) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val pointerId = down.id
+            var releasedChange: PointerInputChange? = null
+            var dragStartChange: PointerInputChange? = null
+            var latestBlend = currentDisplayedBlend
+            var wasInNeutralSnapZone = coverLyricsQuickBlendIsInNeutralSnapZone(
+                y = down.position.y,
+                heightPx = size.height.toFloat()
+            )
+
+            fun updateDrag(change: PointerInputChange) {
+                latestBlend = coverLyricsQuickBlendValueForY(
+                    y = change.position.y,
+                    heightPx = size.height.toFloat()
+                )
+                val isInNeutralSnapZone = coverLyricsQuickBlendIsInNeutralSnapZone(
+                    y = change.position.y,
+                    heightPx = size.height.toFloat()
+                )
+                if (!wasInNeutralSnapZone && isInNeutralSnapZone) {
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
+                }
+                wasInNeutralSnapZone = isInNeutralSnapZone
+                dragBlend = latestBlend
+                currentOnBlendPreview(latestBlend)
+                change.consume()
+            }
+
+            val longPressReached = withTimeoutOrNull(longPressTimeoutMillis) {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes
+                        .firstOrNull { it.id == pointerId }
+                        ?: continue
+
+                    if (!change.pressed) {
+                        releasedChange = change
+                        return@withTimeoutOrNull false
+                    }
+
+                    if ((change.position - down.position).getDistance() > touchSlop) {
+                        dragStartChange = change
+                        return@withTimeoutOrNull false
+                    }
+                }
+            } == null
+
+            when {
+                longPressReached -> {
+                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    currentOnLongClick()
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes
+                            .firstOrNull { it.id == pointerId }
+                            ?: continue
+                        change.consume()
+                        if (!change.pressed) break
+                    }
+                }
+
+                releasedChange != null -> {
+                    releasedChange.let { change ->
+                        if (expanded) {
+                            coverLyricsQuickBlendHandleTap(
+                                y = change.position.y,
+                                heightPx = size.height.toFloat(),
+                                onVocalsOnly = { currentOnBlendChangeFinished(0f) },
+                                onCenter = currentOnDisableSeparatedPlayback,
+                                onInstrumentalOnly = { currentOnBlendChangeFinished(1f) }
+                            )
+                        } else {
+                            currentOnEnableSeparatedPlayback()
+                        }
+                    }
+                }
+
+                expanded && dragStartChange != null -> {
+                    dragging = true
+                    try {
+                        updateDrag(dragStartChange)
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes
+                                .firstOrNull { it.id == pointerId }
+                                ?: continue
+                            if (!change.pressed) {
+                                dragBlend = latestBlend
+                                currentOnBlendChangeFinished(latestBlend)
+                                change.consume()
+                                break
+                            }
+                            updateDrag(change)
+                        }
+                    } finally {
+                        dragging = false
+                    }
+                }
+
+                dragStartChange != null -> {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes
+                            .firstOrNull { it.id == pointerId }
+                            ?: continue
+                        if (!change.pressed) break
+                    }
+                }
+            }
+        }
+    }
+    val interactionModifier = if (expanded) {
+        gestureModifier
+    } else {
+        Modifier
+            .clip(buttonBackgroundShape)
+            .then(gestureModifier)
+    }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(
+                width = CoverLyricsControlSlotSize,
+                height = height
+            )
+    ) {
+        Box(
+            modifier = Modifier
+                .size(
+                    width = CoverLyricsButtonSize,
+                    height = height
+                )
+                .then(interactionModifier)
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(buttonBackgroundShape)
+                    .background(progressColor.copy(alpha = buttonBackgroundAlpha))
+            )
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .size(
+                        width = CoverLyricsButtonSize,
+                        height = trackHeight
+                    )
+                    .clip(topTrackShape)
+                    .background(progressColor.copy(alpha = trackAlpha))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .size(
+                            width = CoverLyricsButtonSize,
+                            height = vocalsFillHeight
+                        )
+                        .background(progressColor.copy(alpha = endpointIconAlpha))
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .size(
+                        width = CoverLyricsButtonSize,
+                        height = trackHeight
+                    )
+                    .clip(bottomTrackShape)
+                    .background(progressColor.copy(alpha = trackAlpha))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .size(
+                            width = CoverLyricsButtonSize,
+                            height = instrumentalFillHeight
+                        )
+                        .background(progressColor.copy(alpha = endpointIconAlpha))
+                )
+            }
+
+            Icon(
+                painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
+                contentDescription = stringResource(R.string.action_source_separation_playback),
+                tint = colorScheme.surface,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .alpha(stemIconAlpha)
+            )
+
+            CoverLyricsQuickBlendEndpointIcon(
+                painter = painterResource(R.drawable.ic_person_24dp),
+                unfilledColor = progressColor,
+                filledColor = colorScheme.surface,
+                filledHeight = topIconFillHeight,
+                fillFromTop = false,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = endpointIconOffset)
+                    .alpha(endpointIconAlpha)
+            )
+
+            CoverLyricsQuickBlendEndpointIcon(
+                painter = painterResource(R.drawable.ic_speaker_24dp),
+                unfilledColor = progressColor,
+                filledColor = colorScheme.surface,
+                filledHeight = bottomIconFillHeight,
+                fillFromTop = true,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -endpointIconOffset)
+                    .alpha(endpointIconAlpha)
+            )
+        }
+
+        if (processingProgressState != null) {
+            val progressModifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = -CoverLyricsQuickBlendProgressOffset)
+                .size(CoverLyricsQuickBlendProgressSize)
+                .alpha(endpointIconAlpha)
+            CircularProgressIndicator(
+                progress = { processingProgressState.progress },
+                color = progressColor,
+                trackColor = progressColor.copy(alpha = 0.1f),
+                strokeWidth = CoverLyricsQuickBlendProgressStrokeWidth,
+                modifier = progressModifier
+            )
+        }
+    }
+}
+
+@Composable
+private fun CoverLyricsQuickBlendEndpointIcon(
+    painter: Painter,
+    unfilledColor: Color,
+    filledColor: Color,
+    filledHeight: Dp,
+    fillFromTop: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val clippedHeight = filledHeight.coerceIn(0.dp, CoverLyricsQuickBlendIconSize)
+    Canvas(modifier = modifier.size(CoverLyricsQuickBlendIconSize)) {
+        val painterSize = size
+        with(painter) {
+            draw(
+                size = painterSize,
+                colorFilter = ColorFilter.tint(unfilledColor)
+            )
+
+            val clippedHeightPx = clippedHeight.toPx().coerceIn(0f, painterSize.height)
+            if (clippedHeightPx > 0f) {
+                val top = if (fillFromTop) 0f else painterSize.height - clippedHeightPx
+                val bottom = if (fillFromTop) clippedHeightPx else painterSize.height
+                clipRect(top = top, bottom = bottom) {
+                    draw(
+                        size = painterSize,
+                        colorFilter = ColorFilter.tint(filledColor)
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun coverLyricsQuickBlendIsInNeutralSnapZone(y: Float, heightPx: Float): Boolean {
+    if (heightPx <= 0f) return false
+    val rawBlend = (y / heightPx).coerceIn(0f, 1f)
+    val snapStart = CoverLyricsQuickBlendNeutralBlend -
+            CoverLyricsQuickBlendNeutralSnapThreshold
+    val snapEnd = CoverLyricsQuickBlendNeutralBlend +
+            CoverLyricsQuickBlendNeutralSnapThreshold
+    return rawBlend in snapStart..snapEnd
+}
+
+private fun coverLyricsQuickBlendValueForY(y: Float, heightPx: Float): Float {
+    if (heightPx <= 0f) return CoverLyricsQuickBlendNeutralBlend
+    val rawBlend = (y / heightPx).coerceIn(0f, 1f)
+    val snapStart = CoverLyricsQuickBlendNeutralBlend -
+            CoverLyricsQuickBlendNeutralSnapThreshold
+    val snapEnd = CoverLyricsQuickBlendNeutralBlend +
+            CoverLyricsQuickBlendNeutralSnapThreshold
+    return when {
+        rawBlend < snapStart -> {
+            (rawBlend / snapStart) * CoverLyricsQuickBlendNeutralBlend
+        }
+        rawBlend > snapEnd -> {
+            CoverLyricsQuickBlendNeutralBlend +
+                    ((rawBlend - snapEnd) / (1f - snapEnd)) *
+                    CoverLyricsQuickBlendNeutralBlend
+        }
+        else -> CoverLyricsQuickBlendNeutralBlend
+    }
+}
+
+private fun coverLyricsQuickBlendHandleTap(
+    y: Float,
+    heightPx: Float,
+    onVocalsOnly: () -> Unit,
+    onCenter: () -> Unit,
+    onInstrumentalOnly: () -> Unit,
+) {
+    val topThird = heightPx / 3f
+    val bottomThird = topThird * 2f
+    when {
+        y < topThird -> onVocalsOnly()
+        y > bottomThird -> onInstrumentalOnly()
+        else -> onCenter()
     }
 }
 
@@ -430,3 +1006,40 @@ private fun LyricsSurface(
         }
     }
 }
+
+@Composable
+private fun PaddingValues.withMinimumBottom(minimumBottom: Dp): PaddingValues {
+    val layoutDirection = LocalLayoutDirection.current
+    return PaddingValues(
+        start = calculateStartPadding(layoutDirection),
+        top = calculateTopPadding(),
+        end = calculateEndPadding(layoutDirection),
+        bottom = maxOf(calculateBottomPadding(), minimumBottom)
+    )
+}
+
+private val CoverLyricsButtonSize = 40.dp
+private val CoverLyricsControlSlotSize = 48.dp
+private val CoverLyricsQuickBlendSliderHeight = 120.dp
+private val CoverLyricsQuickBlendCenterGap = 4.dp
+private val CoverLyricsQuickBlendIconSize = 24.dp
+private val CoverLyricsQuickBlendEndpointIconOffset = 8.dp
+private val CoverLyricsQuickBlendProgressSize = 24.dp
+private val CoverLyricsQuickBlendProgressStrokeWidth = 3.dp
+private val CoverLyricsQuickBlendProgressOffset = 32.dp
+private val CoverLyricsButtonSpacing = 12.dp
+private val CoverLyricsOverlayPadding = 16.dp
+private val CoverLyricsQuickBlendInnerCornerRadius = 2.dp
+private const val CoverLyricsQuickBlendNeutralBlend = 0.5f
+private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.10f
+private fun coverLyricsQuickBlendDpTransitionSpec() =
+    tween<Dp>(
+        durationMillis = 260,
+        easing = FastOutSlowInEasing
+    )
+
+private fun coverLyricsQuickBlendFloatTransitionSpec() =
+    tween<Float>(
+        durationMillis = 220,
+        easing = FastOutSlowInEasing
+    )

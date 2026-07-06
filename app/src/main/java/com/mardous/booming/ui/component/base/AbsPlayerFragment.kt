@@ -20,6 +20,7 @@ package com.mardous.booming.ui.component.base
 import android.animation.AnimatorSet
 import android.app.Activity
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.drawable.AnimatedVectorDrawable
 import android.os.Bundle
@@ -51,6 +52,8 @@ import coil3.size.Scale
 import com.commit451.coiltransformations.BlurTransformation
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.snackbar.Snackbar
 import com.mardous.booming.R
 import com.mardous.booming.core.model.MediaEvent
 import com.mardous.booming.core.model.PaletteColor
@@ -72,6 +75,7 @@ import com.mardous.booming.extensions.navigation.findActivityNavController
 import com.mardous.booming.extensions.navigation.genreDetailArgs
 import com.mardous.booming.extensions.resources.animateBackgroundColor
 import com.mardous.booming.extensions.resources.animateTintColor
+import com.mardous.booming.extensions.resources.applyColor
 import com.mardous.booming.extensions.resources.inflateMenu
 import com.mardous.booming.extensions.resources.setMarquee
 import com.mardous.booming.extensions.utilities.buildInfoString
@@ -90,10 +94,15 @@ import com.mardous.booming.ui.screen.lyrics.LyricsFragment
 import com.mardous.booming.ui.screen.player.PlayerGesturesController
 import com.mardous.booming.ui.screen.player.PlayerGesturesController.GestureType
 import com.mardous.booming.ui.screen.player.PlayerViewModel
+import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
+import com.mardous.booming.ui.screen.player.SourceSeparationPlaybackUiState
+import com.mardous.booming.ui.screen.player.SourceSeparationUiState
+import com.mardous.booming.ui.screen.player.localizedSourceSeparationStage
 import com.mardous.booming.ui.screen.player.cover.CoverPagerFragment
 import com.mardous.booming.ui.screen.tageditor.SongTagEditorActivity
 import com.mardous.booming.util.NOW_PLAYING_EXTRA_INFO
 import com.mardous.booming.util.Preferences
+import com.mardous.booming.util.SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
@@ -104,6 +113,7 @@ import org.koin.androidx.viewmodel.ext.android.activityViewModel
 abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes),
     Toolbar.OnMenuItemClickListener,
     PlayerGesturesController.Listener,
+    SharedPreferences.OnSharedPreferenceChangeListener,
     CoverPagerFragment.Callbacks {
 
     val playerViewModel: PlayerViewModel by activityViewModel()
@@ -111,6 +121,8 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
 
     private var gesturesController: PlayerGesturesController? = null
     private var coverFragment: CoverPagerFragment? = null
+    private var sourceSeparationSnackbar: Snackbar? = null
+    private var lastSourceSeparationPlaybackMessage: String? = null
 
     protected abstract val colorSchemeMode: PlayerColorSchemeMode
     protected abstract val playerControlsFragment: AbsPlayerControlsFragment
@@ -145,6 +157,46 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
             }
         }
         viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationStateFlow.collect { state ->
+                onSourceSeparationStateChanged(view, state)
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationShowSnackbarProgressFlow.collect { showProgress ->
+                if (!showProgress) {
+                    sourceSeparationSnackbar?.dismiss()
+                    sourceSeparationSnackbar = null
+                }
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationShowSnackbarMessagesFlow.collect { showMessages ->
+                if (!showMessages) {
+                    lastSourceSeparationPlaybackMessage = null
+                }
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationPlaybackStateFlow.collect { state ->
+                onSourceSeparationPlaybackStateChanged(view, state)
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationBlendModeFlow.collect { mode ->
+                onSourceSeparationSettingsStateChanged(mode)
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationModelManagementEventFlow.collect {
+                val navController = findNavController()
+                if (navController.currentDestination?.id !=
+                    R.id.nav_source_separation_model_management
+                ) {
+                    navController.navigate(R.id.nav_source_separation_model_management)
+                }
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
             combine(
                 playerViewModel.currentSongFlow,
                 playerViewModel.colorSchemeFlow
@@ -154,6 +206,7 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                     applyBlur(song, scheme)
                 }
         }
+        Preferences.registerOnSharedPreferenceChangeListener(this)
     }
 
     @CallSuper
@@ -188,6 +241,10 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                     popupMenu.setOnMenuItemClickListener { onMenuItemClick(it) }
                 }
                 view.setOnClickListener {
+                    popupMenu.menu.onSourceSeparationSettingsStateChanged(
+                        playerViewModel.sourceSeparationBlendModeFlow.value
+                    )
+                    popupMenu.menu.updateSourceSeparationPanelEntryVisibility()
                     popupMenu.show()
                 }
                 return popupMenu
@@ -197,7 +254,10 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
     }
 
     @CallSuper
-    protected open fun onMenuInflated(menu: Menu) {}
+    protected open fun onMenuInflated(menu: Menu) {
+        menu.onSourceSeparationSettingsStateChanged(playerViewModel.sourceSeparationBlendModeFlow.value)
+        menu.updateSourceSeparationPanelEntryVisibility()
+    }
 
     protected fun Menu.setShowAsAction(itemId: Int, mode: Int = MenuItem.SHOW_AS_ACTION_IF_ROOM) {
         findItem(itemId)?.setShowAsAction(mode)
@@ -271,6 +331,11 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                             .toBundle()
                     )
                 }
+                true
+            }
+
+            R.id.action_source_separation_settings -> {
+                onQuickActionEvent(NowPlayingAction.SourceSeparationSettings)
                 true
             }
 
@@ -416,17 +481,35 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
         }
     }
 
+    protected open fun onSourceSeparationSettingsStateChanged(mode: SourceSeparationBlendMode) {
+        playerToolbar?.menu?.onSourceSeparationSettingsStateChanged(mode)
+    }
+
     override fun onLyricsVisibilityChange(animatorSet: AnimatorSet, lyricsVisible: Boolean) {
         playerToolbar?.menu?.onLyricsVisibilityChang(lyricsVisible)
     }
 
+    override fun onSourceSeparationPanelRequested() {
+        findNavController().navigate(R.id.nav_source_separation_settings)
+    }
+
     override fun onDestroyView() {
+        sourceSeparationSnackbar?.dismiss()
+        sourceSeparationSnackbar = null
         view?.setOnTouchListener(null)
         gesturesController?.release()
         gesturesController = null
         cancelColorAnimator()
         coverFragment = null
+        Preferences.unregisterOnSharedPreferenceChangeListener(this)
         super.onDestroyView()
+    }
+
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
+        if (key == SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE) {
+            (activity as? AbsSlidingMusicPanelActivity)?.refreshPlayerUi()
+                ?: updateSourceSeparationPanelEntryVisibility()
+        }
     }
 
     internal fun onQuickActionEvent(action: NowPlayingAction): Boolean {
@@ -512,6 +595,11 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
 
             NowPlayingAction.SoundSettings -> {
                 findNavController().navigate(R.id.nav_sound_settings)
+                true
+            }
+
+            NowPlayingAction.SourceSeparationSettings -> {
+                findNavController().navigate(R.id.nav_source_separation_settings)
                 true
             }
 
@@ -604,6 +692,143 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
         }
     }
 
+    private fun onSourceSeparationStateChanged(
+        view: View,
+        state: SourceSeparationUiState,
+    ) {
+        when (state) {
+            SourceSeparationUiState.Idle -> {
+                sourceSeparationSnackbar?.dismiss()
+                sourceSeparationSnackbar = null
+            }
+            is SourceSeparationUiState.Running -> {
+                if (!playerViewModel.sourceSeparationShowSnackbarProgressFlow.value) {
+                    sourceSeparationSnackbar?.dismiss()
+                    sourceSeparationSnackbar = null
+                    return
+                }
+                val stage = view.context.localizedSourceSeparationStage(state.stage)
+                val message = if (state.totalWindows > 0) {
+                    getString(
+                        R.string.source_separation_progress,
+                        state.completedWindows,
+                        state.totalWindows,
+                        state.percent,
+                        stage ?: getString(R.string.source_separation_processing_windows),
+                    )
+                } else {
+                    getString(
+                        R.string.source_separation_stage,
+                        stage ?: getString(R.string.source_separation_preparing),
+                    )
+                }
+                val snackbar = sourceSeparationSnackbar
+                    ?.takeIf { it.isShownOrQueued }
+                    ?: Snackbar.make(view, message, Snackbar.LENGTH_INDEFINITE)
+                        .setAction(R.string.action_pause) {
+                            playerViewModel.pauseSourceSeparation()
+                        }
+                        .also {
+                            sourceSeparationSnackbar = it
+                            it.show()
+                        }
+                snackbar.setText(message)
+            }
+            is SourceSeparationUiState.Completed -> {
+                sourceSeparationSnackbar?.dismiss()
+                sourceSeparationSnackbar = null
+                if (playerViewModel.sourceSeparationShowSnackbarProgressFlow.value) {
+                    Snackbar.make(view, R.string.source_separation_complete, Snackbar.LENGTH_SHORT)
+                        .show()
+                }
+                playerViewModel.clearSourceSeparationStatus()
+            }
+            is SourceSeparationUiState.Canceled -> {
+                sourceSeparationSnackbar?.dismiss()
+                sourceSeparationSnackbar = null
+                if (playerViewModel.sourceSeparationShowSnackbarProgressFlow.value) {
+                    Snackbar.make(view, R.string.source_separation_canceled, Snackbar.LENGTH_SHORT)
+                        .show()
+                }
+                playerViewModel.clearSourceSeparationStatus()
+            }
+            is SourceSeparationUiState.Paused -> {
+                sourceSeparationSnackbar?.dismiss()
+                sourceSeparationSnackbar = null
+            }
+            is SourceSeparationUiState.Failed -> {
+                sourceSeparationSnackbar?.dismiss()
+                sourceSeparationSnackbar = null
+                if (playerViewModel.sourceSeparationShowSnackbarProgressFlow.value) {
+                    Snackbar.make(view, R.string.source_separation_failed, Snackbar.LENGTH_SHORT)
+                        .show()
+                }
+                playerViewModel.clearSourceSeparationStatus()
+            }
+        }
+    }
+
+    private fun onSourceSeparationPlaybackStateChanged(
+        view: View,
+        state: SourceSeparationPlaybackUiState,
+    ) {
+        if (!playerViewModel.sourceSeparationShowSnackbarMessagesFlow.value) {
+            return
+        }
+        val message = state.message?.takeIf { it != lastSourceSeparationPlaybackMessage }
+            ?: return
+        lastSourceSeparationPlaybackMessage = message
+        Snackbar.make(view, message, Snackbar.LENGTH_SHORT).show()
+    }
+
+    protected fun setSourceSeparationBlendButtonState(button: MaterialButton?, mode: SourceSeparationBlendMode) {
+        button ?: return
+        button.setIconResource(mode.sourceSeparationBlendIconRes)
+        button.contentDescription = getString(mode.sourceSeparationBlendTitleRes)
+        button.applyColor(
+            color = playerViewModel.colorScheme.onSurfaceColor,
+            isIconButton = true,
+        )
+    }
+
+    protected fun setSourceSeparationBlendTonalButtonState(button: MaterialButton?, mode: SourceSeparationBlendMode) {
+        button ?: return
+        button.setIconResource(mode.sourceSeparationBlendIconRes)
+        button.contentDescription = getString(mode.sourceSeparationBlendTitleRes)
+        button.applyColor(color = playerViewModel.colorScheme.secondaryContainerColor)
+    }
+
+    protected fun Menu.onSourceSeparationSettingsStateChanged(mode: SourceSeparationBlendMode) {
+        val iconColor = playerViewModel.colorScheme.onSurfaceColor
+        findItem(R.id.action_source_separation_settings)?.apply {
+            setIcon(getSourceSeparationBlendDrawable(mode, iconColor))
+            setTitle(R.string.action_source_separation_settings)
+        }
+    }
+
+    protected open fun isSourceSeparationPanelMenuEntryAvailable(): Boolean = true
+
+    protected open fun onSourceSeparationPanelEntryVisibilityChanged(visible: Boolean) = Unit
+
+    protected fun Menu.updateSourceSeparationPanelEntryVisibility() {
+        findItem(R.id.action_source_separation_settings)?.isVisible =
+            Preferences.sourceSeparationPanelEntryVisible &&
+                    isSourceSeparationPanelMenuEntryAvailable()
+    }
+
+    protected fun updateSourceSeparationPanelEntryVisibility() {
+        onSourceSeparationSettingsStateChanged(
+            playerViewModel.sourceSeparationBlendModeFlow.value
+        )
+        playerToolbar?.menu?.updateSourceSeparationPanelEntryVisibility()
+        onSourceSeparationPanelEntryVisibilityChanged(
+            Preferences.sourceSeparationPanelEntryVisible
+        )
+    }
+
+    private fun getSourceSeparationBlendDrawable(mode: SourceSeparationBlendMode, color: Int) =
+        getTintedDrawable(mode.sourceSeparationBlendIconRes, color)
+
     fun setViewAction(view: View, action: NowPlayingAction) {
         view.setOnClickListener { onQuickActionEvent(action) }
     }
@@ -638,6 +863,20 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
         }
     }
 }
+
+private val SourceSeparationBlendMode.sourceSeparationBlendIconRes: Int
+    get() = when (this) {
+        SourceSeparationBlendMode.Off -> R.drawable.ic_stem_blend_outline_24dp
+        SourceSeparationBlendMode.Global -> R.drawable.ic_stem_blend_24dp
+        SourceSeparationBlendMode.PerSong -> R.drawable.ic_stem_blend_per_song_24dp
+    }
+
+private val SourceSeparationBlendMode.sourceSeparationBlendTitleRes: Int
+    get() = when (this) {
+        SourceSeparationBlendMode.Off -> R.string.source_separation_blend_mode_off
+        SourceSeparationBlendMode.Global -> R.string.source_separation_blend_mode_global
+        SourceSeparationBlendMode.PerSong -> R.string.source_separation_blend_mode_per_song
+    }
 
 fun goToArtist(activity: Activity, song: Song) {
     goToDestination(

@@ -21,6 +21,11 @@
 		android:icon="@drawable/ic_lyrics_outline_24dp"
 		app:showAsAction="never"/>
 	<item
+		android:id="@+id/action_source_separation_settings"
+		android:title="@string/action_source_separation_settings"
+		android:icon="@drawable/ic_stem_blend_outline_24dp"
+		app:showAsAction="never"/>
+	<item
 		android:id="@+id/action_equalizer"
 		android:title="@string/equalizer_label"
 		android:icon="@drawable/ic_equalizer_24dp"

@@ -86,6 +86,12 @@ class MainActivity : AbsSlidingMusicPanelActivity(), MediaController.Listener {
                 SessionResult(SessionResult.RESULT_SUCCESS)
             }
 
+            Playback.EVENT_SOURCE_SEPARATION_PLAYBACK_CHANGED -> {
+                playerViewModel.updateSourceSeparationPlaybackState(args)
+                playerViewModel.submitEvent(MediaEvent.SourceSeparationPlaybackChanged)
+                SessionResult(SessionResult.RESULT_SUCCESS)
+            }
+
             else -> SessionResult(SessionError.ERROR_NOT_SUPPORTED)
         }
         return Futures.immediateFuture(sessionResult)
@@ -169,8 +175,13 @@ class MainActivity : AbsSlidingMusicPanelActivity(), MediaController.Listener {
                 R.id.nav_queue,
                 R.id.nav_lyrics_editor,
                 R.id.nav_play_info,
-                R.id.nav_about -> {
-                    setBottomNavVisibility(visible = false, hideBottomSheet = true)
+                R.id.nav_about,
+                R.id.nav_licenses,
+                R.id.nav_translators -> {
+                    setBottomNavVisibility(
+                        visible = false,
+                        hideBottomSheetForDestination = true
+                    )
                 }
 
                 else -> setBottomNavVisibility(visible = false, animate = true) // Hide Bottom Navigation Bar

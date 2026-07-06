@@ -120,6 +120,7 @@ class FullCoverPlayerFragment : AbsPlayerFragment(R.layout.fragment_full_cover_p
     override fun onMenuInflated(menu: Menu) {
         super.onMenuInflated(menu)
         menu.removeItem(R.id.action_favorite)
+        menu.removeItem(R.id.action_source_separation_settings)
     }
 
     override fun onCreateChildFragments() {
@@ -162,7 +163,8 @@ class FullCoverPlayerFragment : AbsPlayerFragment(R.layout.fragment_full_cover_p
         _binding = null
     }
 
-    override fun onSharedPreferenceChanged(preferences: SharedPreferences, key: String?) {
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
+        super.onSharedPreferenceChanged(sharedPreferences, key)
         if (key == DISPLAY_NEXT_SONG) {
             setupNextSongVisibility()
         }

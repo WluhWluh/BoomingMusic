@@ -196,9 +196,29 @@
         android:name="com.mardous.booming.ui.screen.sound.SoundSettingsFragment"
         android:label="SoundSettingsFragment"/>
 
+    <dialog
+        android:id="@+id/nav_source_separation_settings"
+        android:name="com.mardous.booming.ui.screen.player.SourceSeparationSettingsFragment"
+        android:label="SourceSeparationSettingsFragment"/>
+
+    <dialog
+        android:id="@+id/nav_source_separation_model_management"
+        android:name="com.mardous.booming.ui.screen.player.SourceSeparationModelManagementFragment"
+        android:label="SourceSeparationModelManagementFragment"/>
+
     <fragment
         android:id="@+id/nav_about"
         android:name="com.mardous.booming.ui.screen.about.AboutFragment"
         android:label="AboutFragment"/>
+
+    <fragment
+        android:id="@+id/nav_translators"
+        android:name="com.mardous.booming.ui.screen.about.TranslatorsFragment"
+        android:label="TranslatorsFragment"/>
+
+    <fragment
+        android:id="@+id/nav_licenses"
+        android:name="com.mardous.booming.ui.screen.about.LicensesFragment"
+        android:label="LicensesFragment"/>
 
 </navigation>

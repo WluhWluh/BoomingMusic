@@ -114,6 +114,7 @@ class PlainPlayerFragment : AbsPlayerFragment(R.layout.fragment_plain_player) {
         menu.setShowAsAction(R.id.action_favorite, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
         menu.setShowAsAction(R.id.action_sleep_timer, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
         menu.setShowAsAction(R.id.action_show_lyrics, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
+        menu.setShowAsAction(R.id.action_source_separation_settings, mode = MenuItem.SHOW_AS_ACTION_ALWAYS)
     }
 
     override fun onCreateChildFragments() {

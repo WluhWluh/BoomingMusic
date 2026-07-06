@@ -63,7 +63,8 @@ import org.koin.androidx.viewmodel.ext.android.activityViewModel
 class CoverPagerFragment : Fragment(R.layout.fragment_player_album_cover),
     ViewPager.OnPageChangeListener,
     SharedPreferences.OnSharedPreferenceChangeListener,
-    NavController.OnDestinationChangedListener {
+    NavController.OnDestinationChangedListener,
+    CoverLyricsFragment.Callbacks {
 
     private val playerViewModel: PlayerViewModel by activityViewModel()
 
@@ -98,6 +99,7 @@ class CoverPagerFragment : Fragment(R.layout.fragment_player_album_cover),
         _binding = FragmentPlayerAlbumCoverBinding.bind(view)
         coverLyricsFragment =
             childFragmentManager.findFragmentById(R.id.coverLyricsFragment) as? CoverLyricsFragment
+        coverLyricsFragment?.setCallbacks(this)
         navController = findActivityNavController(R.id.fragment_container)
         navController?.addOnDestinationChangedListener(this)
         setupPageTransformer()
@@ -218,6 +220,8 @@ class CoverPagerFragment : Fragment(R.layout.fragment_player_album_cover),
     override fun onDestroyView() {
         gesturesController?.release()
         gesturesController = null
+        coverLyricsFragment?.setCallbacks(null)
+        coverLyricsFragment = null
         viewPager.adapter = null
         viewPager.setOnTouchListener(null)
         viewPager.removeOnPageChangeListener(this)
@@ -323,9 +327,14 @@ class CoverPagerFragment : Fragment(R.layout.fragment_player_album_cover),
         this.callbacks = callbacks
     }
 
+    override fun onSourceSeparationPanelRequested() {
+        callbacks?.onSourceSeparationPanelRequested()
+    }
+
     interface Callbacks {
         fun onColorChanged(color: PaletteColor)
         fun onLyricsVisibilityChange(animatorSet: AnimatorSet, lyricsVisible: Boolean)
+        fun onSourceSeparationPanelRequested()
     }
 
     companion object {

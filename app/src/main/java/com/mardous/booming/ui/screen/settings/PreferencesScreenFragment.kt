@@ -227,7 +227,7 @@ open class PreferenceScreenFragment : PreferenceFragmentCompat(),
 
     fun preparePreferences() {
         findPreference<Preference>("about")?.summary =
-            getString(R.string.about_summary, BuildConfig.VERSION_NAME)
+            getString(R.string.booming_ss_about_summary, BuildConfig.VERSION_NAME)
 
         findPreference<ThemePreference>(GENERAL_THEME)?.apply {
             customCallback = object : ThemePreference.Callback {

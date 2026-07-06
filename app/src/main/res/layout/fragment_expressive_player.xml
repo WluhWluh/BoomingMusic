@@ -222,6 +222,19 @@
             app:iconSize="20dp"
             app:icon="@drawable/ic_lyrics_outline_24dp" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@id/source_separation_settings_button"
+            style="?materialIconButtonFilledTonalStyle"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:insetTop="2dp"
+            android:insetBottom="2dp"
+            android:insetRight="2dp"
+            android:insetLeft="2dp"
+            android:contentDescription="@string/action_source_separation_settings"
+            app:iconSize="20dp"
+            app:icon="@drawable/ic_stem_blend_outline_24dp" />
+
     </com.google.android.material.button.MaterialButtonGroup>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

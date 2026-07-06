@@ -75,6 +75,15 @@
                 app:icon="@drawable/ic_lyrics_outline_24dp"
                 app:iconTint="?colorOnSurface" />
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@id/source_separation_settings_button"
+                    style="?materialIconButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/action_source_separation_settings"
+                    app:icon="@drawable/ic_stem_blend_outline_24dp"
+                    app:iconTint="?colorOnSurface" />
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/soundSettingsButton"
                 style="?materialIconButtonStyle"

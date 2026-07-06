@@ -162,6 +162,24 @@
             app:widgetLayout="@layout/preference_switch"
             app:key="add_extra_controls" />
 
+        <SwitchPreferenceCompat
+            app:icon="@drawable/ic_stem_blend_outline_24dp"
+            app:title="@string/source_separation_panel_entry_title"
+            app:summary="@string/source_separation_panel_entry_summary"
+            app:defaultValue="false"
+            app:layout="@layout/list_item_view"
+            app:widgetLayout="@layout/preference_switch"
+            app:key="source_separation.panel_entry_visible" />
+
+        <SwitchPreferenceCompat
+            app:iconSpaceReserved="true"
+            app:title="@string/source_separation_quick_controls_title"
+            app:summary="@string/source_separation_quick_controls_summary"
+            app:defaultValue="true"
+            app:layout="@layout/list_item_view"
+            app:widgetLayout="@layout/preference_switch"
+            app:key="source_separation.quick_controls_visible" />
+
     </PreferenceCategory>
 
     <PreferenceCategory
