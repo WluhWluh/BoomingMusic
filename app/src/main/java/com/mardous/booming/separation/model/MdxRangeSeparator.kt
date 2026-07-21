@@ -4,9 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
 import com.mardous.booming.separation.audio.WavFileWriter
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.SourceSeparationSegmentScheduler
@@ -15,7 +12,6 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentPriority
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.SourceSeparationManifest
 import java.io.File
-import java.nio.FloatBuffer
 import java.util.LinkedHashMap
 import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
@@ -44,7 +40,7 @@ class MdxRangeSeparator(
         playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
         windowDecodeEnabled: Boolean = true,
         resumeManifest: SourceSeparationManifest? = null,
-        sessionProvider: MdxOrtSessionProvider = DefaultMdxOrtSessionProvider,
+        sessionProvider: MdxInferenceSessionProvider = DefaultMdxInferenceSessionProvider,
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
     ): MdxRangeSeparationResult {
@@ -70,9 +66,11 @@ class MdxRangeSeparator(
         require(targetFrames > 0) { "Selected range is empty." }
 
         onProgress(MdxRangeProgress.preparing("Preparing model file"))
-        val modelFile = measureElapsed(timing, "Model file") {
-            MdxModelFile.get(context, modelVariant)
+        val modelArtifact = measureElapsed(timing, "Model file") {
+            MdxModelFile.resolve(context, modelVariant)
         }
+        val executionProfile = MdxExecutionProfile.legacy(modelVariant, config)
+        executionProfile.validateArtifact(modelArtifact)
         onProgress(MdxRangeProgress.preparing("Preparing output files"))
         val (vocalsFile, instrumentalFile, timingFile) = measureElapsed(timing, "Output setup") {
             outputDir.mkdirs()
@@ -147,6 +145,7 @@ class MdxRangeSeparator(
         } else {
             null
         }
+        var runtimeDiagnostics: MdxRuntimeDiagnostics? = null
 
         WavFileWriter(
             file = vocalsFile,
@@ -162,18 +161,17 @@ class MdxRangeSeparator(
                 declaredDataSizeBytes = declaredOutputDataSizeBytes,
                 preserveExistingData = resumeManifest != null,
             ).use { instrumentalWriter ->
-                onProgress(MdxRangeProgress.preparing("Creating ONNX session"))
+                onProgress(MdxRangeProgress.preparing("Creating model session"))
                 val sessionLease = measureElapsed(timing, "Session setup") {
                     sessionProvider.acquire(
-                        modelFile = modelFile,
+                        artifact = modelArtifact,
+                        profile = executionProfile,
                         runtimeSettings = runtimeSettings,
-                        modelVariant = modelVariant,
                     )
                 }
                 sessionLease.use { lease ->
                     val session = lease.session
-                    val inputName = session.inputInfo.keys.first()
-                    val outputName = session.outputInfo.keys.first()
+                    runtimeDiagnostics = session.diagnostics
                     var processedWindowCount = currentSegmentPlan.segments
                         .count { it.state == SourceSeparationSegmentState.Ready }
                     val processedSegments = mutableSetOf<Int>()
@@ -322,25 +320,27 @@ class MdxRangeSeparator(
                             continue
                         }
 
+                        throwIfCanceled(shouldCancel)
                         val modelOutputWindow = runWindow(
                             session = session,
-                            inputName = inputName,
-                            outputName = outputName,
                             spectrogram = spectrogram,
                             mixWindow = mixWindow,
                             timing = timing,
                         )
                         throwIfCanceled(shouldCancel)
-                        val residualWindow = measureElapsed(timing, "Stem subtract") {
-                            subtract(mixWindow, modelOutputWindow)
+                        val scaledModelOutputWindow = measureElapsed(timing, "Output compensation") {
+                            scale(modelOutputWindow, executionProfile.modelOutputScale)
                         }
-                        val vocalsWindow = when (modelVariant.modelOutputStem) {
-                            MdxStem.VOCALS -> modelOutputWindow
+                        val residualWindow = measureElapsed(timing, "Stem subtract") {
+                            subtract(mixWindow, scaledModelOutputWindow)
+                        }
+                        val vocalsWindow = when (executionProfile.modelOutputStem) {
+                            MdxStem.VOCALS -> scaledModelOutputWindow
                             MdxStem.INSTRUMENTAL -> residualWindow
                         }
-                        val instrumentalWindow = when (modelVariant.modelOutputStem) {
+                        val instrumentalWindow = when (executionProfile.modelOutputStem) {
                             MdxStem.VOCALS -> residualWindow
-                            MdxStem.INSTRUMENTAL -> modelOutputWindow
+                            MdxStem.INSTRUMENTAL -> scaledModelOutputWindow
                         }
 
                         val vocalsPcm = measureElapsed(timing, "PCM convert") {
@@ -437,7 +437,10 @@ class MdxRangeSeparator(
             windowCount = windowCount,
             totalMs = elapsedMs,
             runtimeSettings = runtimeSettings,
-            modelVariant = modelVariant,
+            runtimeDiagnostics = requireNotNull(runtimeDiagnostics) {
+                "Inference runtime diagnostics were not initialized."
+            },
+            executionProfile = executionProfile,
             sourceDecodeDiagnostics = sourceInput.diagnostics,
         )
         timingFile.writeText(
@@ -465,7 +468,9 @@ class MdxRangeSeparator(
             segmentPlan = currentSegmentPlan,
             timingReport = timingReport,
             runtimeSettings = runtimeSettings,
+            runtimeDiagnostics = timingReport.runtimeDiagnostics,
             modelVariant = modelVariant,
+            executionProfile = executionProfile,
             sourceDecodeDiagnostics = sourceInput.diagnostics,
         )
     }
@@ -500,9 +505,7 @@ class MdxRangeSeparator(
     }
 
     private fun runWindow(
-        session: OrtSession,
-        inputName: String,
-        outputName: String,
+        session: MdxInferenceSession,
         spectrogram: MdxSpectrogram,
         mixWindow: Array<FloatArray>,
         timing: MdxRangeTimingAccumulator,
@@ -510,26 +513,11 @@ class MdxRangeSeparator(
         val modelInput = measureElapsed(timing, "STFT") {
             spectrogram.waveformToTensor(mixWindow)
         }
-        val shape = longArrayOf(1, 4, config.dimF.toLong(), config.dimT.toLong())
-
-        measureElapsed(timing, "Tensor create") {
-            OnnxTensor.createTensor(OrtEnvironment.getEnvironment(), FloatBuffer.wrap(modelInput), shape)
-        }.use { tensor ->
-            measureElapsed(timing, "ONNX inference") {
-                session.run(mapOf(inputName to tensor))
-            }.use { outputs ->
-                val output = outputs[outputName].orElseThrow {
-                    IllegalStateException("Missing ONNX output: $outputName")
-                }.value
-                @Suppress("UNCHECKED_CAST")
-                val outputArray = output as Array<Array<Array<FloatArray>>>
-                val flatOutput = measureElapsed(timing, "Output flatten") {
-                    flattenOutput(outputArray)
-                }
-                return measureElapsed(timing, "ISTFT") {
-                    spectrogram.tensorToWaveform(flatOutput)
-                }
-            }
+        val modelOutput = measureElapsed(timing, "Model inference") {
+            session.run(modelInput)
+        }
+        return measureElapsed(timing, "ISTFT") {
+            spectrogram.tensorToWaveform(modelOutput)
         }
     }
 
@@ -548,18 +536,11 @@ class MdxRangeSeparator(
         return bytes
     }
 
-    private fun flattenOutput(output: Array<Array<Array<FloatArray>>>): FloatArray {
-        require(output.size == 1) { "Expected batch size 1, got ${output.size}." }
-        val flat = FloatArray(config.tensorElementCount)
-        var offset = 0
-        for (channel in output[0]) {
-            for (frequency in channel) {
-                for (value in frequency) {
-                    flat[offset++] = value
-                }
-            }
+    private fun scale(waveform: Array<FloatArray>, scale: Float): Array<FloatArray> {
+        if (scale == 1f) return waveform
+        return Array(MdxDspConfig.STEREO_CHANNELS) { channel ->
+            FloatArray(config.chunkSize) { index -> waveform[channel][index] * scale }
         }
-        return flat
     }
 
     private fun subtract(mix: Array<FloatArray>, stem: Array<FloatArray>): Array<FloatArray> {
@@ -926,7 +907,9 @@ data class MdxRangeSeparationResult(
     val segmentPlan: SourceSeparationSegmentPlan,
     val timingReport: MdxRangeTimingReport,
     val runtimeSettings: MdxRuntimeSettings,
+    val runtimeDiagnostics: MdxRuntimeDiagnostics,
     val modelVariant: MdxModelVariant,
+    val executionProfile: MdxExecutionProfile,
     val sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics,
 ) {
     val durationSeconds: Double

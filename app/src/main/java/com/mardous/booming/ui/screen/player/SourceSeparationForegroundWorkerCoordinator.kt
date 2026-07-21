@@ -13,7 +13,7 @@ import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPerformanceStats
 import com.mardous.booming.separation.SourceSeparationPlayableCacheStatus
 import com.mardous.booming.separation.model.MdxRangeProgress
-import com.mardous.booming.separation.model.ReusableMdxOrtSessionProvider
+import com.mardous.booming.separation.model.ReusableMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
 import com.mardous.booming.separation.model.SourceSeparationModelLoadException
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
@@ -52,7 +52,7 @@ class SourceSeparationForegroundWorkerCoordinator(
 ) {
     private val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val performanceStats = SourceSeparationPerformanceStats(preferences)
-    private val sessionProvider = ReusableMdxOrtSessionProvider()
+    private val sessionProvider = ReusableMdxInferenceSessionProvider()
     private val cancelRequested = AtomicBoolean(false)
     private val pauseRequested = AtomicBoolean(false)
     private val debugWindowSamples = ArrayDeque<SourceSeparationDebugWindowSample>()

@@ -11,9 +11,9 @@ import com.mardous.booming.separation.cache.SourceSeparationCacheEntry
 import com.mardous.booming.separation.cache.SourceSeparationCachePruneResult
 import com.mardous.booming.separation.cache.SourceSeparationCacheState
 import com.mardous.booming.separation.cache.SourceSeparationManifest
-import com.mardous.booming.separation.model.DefaultMdxOrtSessionProvider
+import com.mardous.booming.separation.model.DefaultMdxInferenceSessionProvider
+import com.mardous.booming.separation.model.MdxInferenceSessionProvider
 import com.mardous.booming.separation.model.MdxModelVariant
-import com.mardous.booming.separation.model.MdxOrtSessionProvider
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import com.mardous.booming.separation.model.MdxRangeSeparator
@@ -392,7 +392,7 @@ class SourceSeparationEngine(
         playbackPositionMsProvider: () -> Long? = { null },
         playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
         windowDecodeEnabled: Boolean = true,
-        sessionProvider: MdxOrtSessionProvider = DefaultMdxOrtSessionProvider,
+        sessionProvider: MdxInferenceSessionProvider = DefaultMdxInferenceSessionProvider,
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
     ): MdxRangeSeparationResult {

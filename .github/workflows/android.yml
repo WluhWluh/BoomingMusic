@@ -50,6 +50,9 @@ jobs:
           RELEASE_TYPE: "CI"
           EVENT_NAME: ${{ github.event_name }}
 
+      - name: Run unit tests
+        run: ./gradlew testGithubDebugUnitTest
+
   build:
     runs-on: ubuntu-latest
     steps:

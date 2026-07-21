@@ -15,7 +15,8 @@ internal class MdxRangeTimingAccumulator {
         windowCount: Int,
         totalMs: Long,
         runtimeSettings: MdxRuntimeSettings,
-        modelVariant: MdxModelVariant,
+        runtimeDiagnostics: MdxRuntimeDiagnostics,
+        executionProfile: MdxExecutionProfile,
         sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics,
     ): MdxRangeTimingReport {
         return MdxRangeTimingReport(
@@ -23,7 +24,8 @@ internal class MdxRangeTimingAccumulator {
             windowCount = windowCount,
             totalMs = totalMs,
             runtimeSettings = runtimeSettings,
-            modelVariant = modelVariant,
+            runtimeDiagnostics = runtimeDiagnostics,
+            executionProfile = executionProfile,
             sourceDecodeDiagnostics = sourceDecodeDiagnostics,
             stageMs = LinkedHashMap(stageMs),
         )
@@ -35,7 +37,8 @@ data class MdxRangeTimingReport(
     val windowCount: Int,
     val totalMs: Long,
     val runtimeSettings: MdxRuntimeSettings,
-    val modelVariant: MdxModelVariant,
+    val runtimeDiagnostics: MdxRuntimeDiagnostics,
+    val executionProfile: MdxExecutionProfile,
     val sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics,
     val stageMs: Map<String, Long>,
 ) {
@@ -47,8 +50,8 @@ data class MdxRangeTimingReport(
             appendLine("Range separation timing report")
             appendLine("Audio duration: ${decimal(audioDurationSeconds)} seconds")
             appendLine("Windows: $windowCount")
-            appendLine("Model: ${modelVariant.displayName}")
-            appendLine(runtimeSettings.toDisplayText())
+            appendLine("Model: ${executionProfile.displayName}")
+            appendLine(runtimeDiagnostics.toDisplayText())
             appendLine(sourceDecodeDiagnostics.toDisplayText())
             appendLine("Vocals: ${vocalsFile.absolutePath}")
             appendLine("Instrumental: ${instrumentalFile.absolutePath}")
@@ -104,10 +107,9 @@ data class MdxRangeTimingReport(
             "Window decode",
             "Window resample",
             "STFT",
-            "Tensor create",
-            "ONNX inference",
-            "Output flatten",
+            "Model inference",
             "ISTFT",
+            "Output compensation",
             "Stem subtract",
             "PCM convert",
             "WAV write",
