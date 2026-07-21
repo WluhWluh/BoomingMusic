@@ -490,7 +490,7 @@ class MdxLiteRtCpuValidationTest {
             )
         }
         val loadedRuntimeMaps = File("/proc/self/maps").useLines { lines ->
-            lines.filter { it.contains("litert", ignoreCase = true) }.toList()
+            lines.filter { it.contains("liblitert", ignoreCase = true) }.toList()
         }
         val extractedRuntime = File(applicationInfo.nativeLibraryDir, "libLiteRt.so")
             .takeIf(File::isFile)
