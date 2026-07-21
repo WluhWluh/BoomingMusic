@@ -25,6 +25,7 @@ import com.mardous.booming.separation.model.contract.SourceSeparationModelContra
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractValidator
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
+import dalvik.system.BaseDexClassLoader
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertNotSame
@@ -494,6 +495,8 @@ class MdxLiteRtCpuValidationTest {
         }
         val extractedRuntime = File(applicationInfo.nativeLibraryDir, "libLiteRt.so")
             .takeIf(File::isFile)
+        val classLoaderRuntime = (context.classLoader as? BaseDexClassLoader)
+            ?.findLibrary("LiteRt")
         return JSONObject()
             .put("supportedAbis", JSONArray(Build.SUPPORTED_ABIS.toList()))
             .put("osArch", System.getProperty("os.arch").orEmpty())
@@ -510,6 +513,7 @@ class MdxLiteRtCpuValidationTest {
                         .put("sha256", runtime.sha256())
                 } ?: JSONObject.NULL,
             )
+            .put("classLoaderResolvedRuntime", classLoaderRuntime ?: JSONObject.NULL)
             .put("apkInventories", apkInventories)
             .put("loadedRuntimeMaps", JSONArray(loadedRuntimeMaps))
             .put("totalDeviceMemoryBytes", deviceMemory.totalMem)
