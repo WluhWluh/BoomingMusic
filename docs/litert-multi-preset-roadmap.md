@@ -14,9 +14,19 @@ Booming SS unless a phase below explicitly changes it.
 
 Booming SS will migrate from ONNX Runtime to LiteRT and will no longer ship or
 load ONNX models. The app will provide a catalog of converted TFLite presets
-hosted by the companion `bss-tflite` repository. The catalog will place the
-first three validated presets at the top and expose a larger experimental
-candidate list below them.
+hosted by the companion `bss-tflite` repository. Its first production release
+will have exactly one recommended/default preset: `UVR_MDXNET_3_9662` FP32.
+That preset is only a recommended candidate until it passes the Phase 7
+full-song, playback, thermal, and resource gates; it must not be called stable
+before then.
+
+The remaining candidates do not all belong to one selectable "experimental"
+bucket. KARA FP32 is the current candidate for a clearly labelled CPU-only
+experimental tier after its own Phase 7 full-song and listening checks. HQ4 is
+reviewed but resource-gated and remains download-only. Candidates without a
+reviewed contract, a safe stem UI, or sufficient device evidence also remain
+download-only. Download-only still permits acquisition and catalog inspection;
+it never permits normal in-app activation.
 
 Downloading or importing a model and selecting the model used for new
 separation work are separate operations. A completed download only makes a
@@ -74,6 +84,7 @@ rebased upstream branch:
 - structured Booming SS tip: `d6613e7c`
 - development branch: `feature/litert-multi-model-presets`
 - completed Phase 1 tip: `2f32f8be`
+- completed Phase 3 tip: `9c574447`
 - model conversion repository:
   [`WluhWluh/bss-tflite`](https://github.com/WluhWluh/bss-tflite)
 - supplemental x86 runtime repository:
@@ -88,6 +99,12 @@ and validated against ORT desktop output. The Android comparison established
 that LiteRT 2.1.5 is preferable to `tensorflow-lite:2.16.1` on the tested S10
 and S25 devices. The old TFLite runtime is a comparison reference only and
 must not become a second production runtime.
+
+Phase 3 narrows the initial product candidates. Only 9662 FP32 has a GPU
+profile eligible for Phase 7 promotion. KARA FP32 keeps its CPU evidence but
+its GPU profile misses the raw-output gate. HQ4 has a reviewed contract but
+exceeds the present resource gate and has no eligible CPU fallback. FP16
+profiles are rejected for numerical parity and are not official presets.
 
 ## Product Decisions
 
@@ -146,8 +163,7 @@ Every usable model must therefore have a contract with at least:
 - primary and residual stem meaning, including generic target-stem labels when
   a model is not a vocals/instrumental model;
 - complement or residual reconstruction rule;
-- pipeline compatibility version;
-- minimum and known-good Android ABI/backend information.
+- pipeline compatibility version.
 
 The contract must be stored separately from the weight file. Official catalog
 entries supply it authoritatively. The conversion scripts in `bss-tflite`
@@ -158,6 +174,18 @@ The first contract schema is versioned independently from both the application
 version and the separation pipeline version. An app update does not imply a
 contract migration, and a pipeline change must not silently reinterpret a
 contract whose `contractSchemaVersion` is still accepted.
+
+Phase 1 contract schema v1 also embedded `minimumAndroidApi` and mutable
+ABI/backend status records. Phase 3 showed that this is the wrong ownership:
+runtime qualification changes with LiteRT, ABI, execution profile, precision,
+device evidence, and resource policy, while the model's tensor/DSP/stem
+contract does not. Before any model Release or production activation, Phase 4
+must introduce contract schema v2 without runtime evidence, regenerate the
+reviewed contracts/sidecars, and move runtime requirements and evidence into
+the versioned catalog qualification records. Schema v1 remains an immutable
+Phase 1 history artifact and is not an accepted official-release contract.
+There is no installed-data migration requirement under the clean-install
+compatibility boundary.
 
 A portable custom sidecar uses the exact name `<model file name>.json`. For
 example, `model.tflite` is paired with `model.tflite.json`, not `model.json`.
@@ -197,19 +225,24 @@ action.
 
 ## Preset Catalog and Candidate Inventory
 
-The first catalog revision should place these three converted artifacts in its
-recommended section:
+The Phase 1 catalog provisionally placed the first three converted artifacts in
+its recommended section. Phase 3 device evidence supersedes that provisional
+classification. Before Phase 4 integrates downloads, the catalog must be
+reclassified as follows:
 
-| ID | Role | TFLite size | `dimF` | `nFft` | Expected behavior |
+| ID | Product tier | TFLite size | `dimF` | `nFft` | Activation plan |
 | --- | --- | ---: | ---: | ---: | --- |
-| `uvr_mdxnet_3_9662` | Balanced vocals/instrumental default | 29,700,464 bytes | 2048 | 6144 | Default preset for normal use |
-| `uvr_mdxnet_kara` | Karaoke and accompaniment-focused | 29,700,460 bytes | 2048 | 6144 | Optional preference for karaoke-like use |
-| `uvr_mdxnet_inst_hq_4` | Higher-quality instrumental | 59,057,268 bytes | 2560 | 5120 | Optional quality preset; higher memory and latency |
+| `uvr_mdxnet_3_9662` | Sole recommended/default candidate | 29,700,464 bytes | 2048 | 6144 | FP32 CPU plus eligible FP32 GPU candidate; production activation after Phase 7 |
+| `uvr_mdxnet_kara` | Reviewed experimental candidate | 29,700,460 bytes | 2048 | 6144 | CPU-only and explicit user choice; activation after full-song and listening validation |
+| `uvr_mdxnet_inst_hq_4` | Reviewed download-only candidate | 59,057,268 bytes | 2560 | 5120 | Resource-gated; no normal `Use` action for the current artifact/profile |
 
 All three use 44.1 kHz audio, hop length 1024, `dimTPower=8`, an actual model
 time dimension of 256, and static batch-1 float32 tensors. The exact hashes and
 validation reports live in `bss-tflite`; the app catalog must pin a release tag
 and asset hash rather than follow a mutable branch or `latest` asset.
+The FP16 experiments were runtime execution profiles over these FP32 artifacts,
+not separate model presets. Their failed numerical results must not appear as a
+download, backend choice, or supported optimization.
 
 The 9662 preset replaces 9482 as the default. The old 9482 ONNX preset is not
 silently mapped to a TFLite file. A clean app-data state has no legacy 9482
@@ -244,14 +277,30 @@ The catalog should therefore contain:
 - conversion, desktop, device, and full-song validation states separately.
 
 Every candidate is downloadable when its artifact is available, but download
-availability does not imply activation support. Each entry has an explicit
-support level:
+availability does not imply activation support. Contract review, product tier,
+activation policy, validation maturity, and runtime-profile evidence are
+independent catalog facts:
 
-- `recommended`: one of the first three presets, with the strongest validation;
-- `experimental`: structurally compatible and selectable, but with limited
-  device or audio validation;
-- `download-only`: published for inspection or external testing, but not
-  selectable until its DSP or stem contract is complete.
+- `recommended`: the default intended for ordinary users. The first production
+  catalog has only 9662 FP32 in this tier, and it is not stable or selectable in
+  a release until all Phase 7 promotion gates pass.
+- `experimental`: a reviewed specialist or test model. It becomes selectable
+  only with an explicit warning, correct stem UI, desktop parity, full-song and
+  listening validation, and a `known-good` CPU profile for the current ABI. A
+  GPU profile is optional and cannot borrow CPU or another profile's evidence.
+- `download-only`: published for inspection, external testing, or future work,
+  but never selectable in normal UI. This includes incomplete contracts and
+  stem semantics as well as reviewed models such as HQ4 that fail a resource or
+  fallback gate.
+
+A reviewed contract must survive demotion from `recommended` to `experimental`
+or `download-only`; contract presence is not a reward for catalog prominence.
+Likewise, assigning `experimental` does not itself grant a `Use` action. A
+separate activation policy records whether the entry is blocked pending review,
+blocked by resources, or selectable with an experimental warning. Runtime
+evidence is keyed by LiteRT version, ABI, backend, and execution-profile ID so
+that 9662 `gpu-auto-fp32-v1`, rejected FP16 profiles, KARA's rejected GPU
+profiles, and a future retest cannot overwrite one another.
 
 Models such as bass, drums, other, or reverb targets must not be presented as
 vocals or instrumental by filename guesswork. They remain `download-only`
@@ -292,7 +341,7 @@ A reusable session matches only when model SHA-256, execution-profile identity
 (including contract ID and pipeline version where applicable), backend, and
 runtime settings all match. File path, length, and modification time are not
 sufficient model identity. The internal tensor specification may represent
-the legacy ONNX model's NCHW layout, but published contract schema v1 remains
+the legacy ONNX model's NCHW layout, but release contract schema v2 remains
 NHWC-only. The first refactor must put the existing ORT implementation behind
 this boundary and preserve its current production behavior before a LiteRT
 implementation is added. The production worker continues to select ORT until
@@ -527,22 +576,27 @@ Replace the current single-variant repository with a catalog-aware repository:
 - import of a TFLite file and optional sidecar contract;
 - clear distinction between installed, active, downloading, invalid, and
   unsupported models;
+- independent presentation of reviewed contracts, product tier, maturity, and
+  activation policy; and
 - a distinction between selectable experimental models and download-only
-  candidates.
+  candidates, including resource-gated reviewed models.
 
 The app should bundle a reviewed snapshot of the full catalog, including the
-recommended and experimental candidate entries. The matching bss-tflite
+recommended, experimental, and download-only entries. The matching bss-tflite
 Release should publish the catalog and manifests for audit and reproducibility,
 but runtime metadata must not be fetched from a mutable branch or `latest` URL.
 The app downloads only the artifact URL pinned by its bundled catalog and
 verifies its size and SHA-256 before installation. A later signed remote
 catalog can add discovery, but it must not change model code, DSP semantics,
-or activation support without an app update and a pinned contract review.
+product tier, release maturity, or activation support without an app update and
+a pinned contract review.
 
-The model-management screen should show the recommended group first and the
-candidate group below it. An installed candidate may remain inactive while a
-different model is used. Switching the active model changes only future work;
-it does not delete, hide, or alter other installed models.
+The model-management screen should show the sole recommended/default model
+first, selectable experimental models in a separately warned section, and
+download-only entries below them with no normal `Use` action. An installed
+candidate may remain inactive while a different model is used. Switching the
+active model changes only future work; it does not delete, hide, or alter other
+installed models.
 
 The About/model UI should explain that official weights are hosted by the
 separate `bss-tflite` repository and that users converting other models should
@@ -976,8 +1030,8 @@ flow must make the missing semantics explicit. It should show:
   `contractSchemaVersion` independent from app and pipeline versions.
 - [x] Import the full candidate inventory into the catalog: 48 source records,
   18 duplicate aliases, and 30 distinct artifact records.
-- [x] Convert the three recommended `bss-tflite` manifests into catalog
-  entries, then add experimental and download-only candidates.
+- [x] Convert the three provisionally recommended `bss-tflite` manifests into
+  catalog entries, then add experimental and download-only candidates.
 - [x] Add contract validation tests for 9662, KARA, and HQ4.
 - [x] Define explicit output stem semantics and support levels; keep generic
   target-stem candidates download-only until the neutral-label UI is complete.
@@ -1000,9 +1054,13 @@ Frozen Phase 1 outputs:
   identical ONNX `GraphProto`, initializer fingerprint, and deterministic ORT
   probe output with maximum absolute error `0.0` against the canonical TRvlvr
   source.
-- Catalog v1 classifies three recommended, 19 experimental, and eight generic
-  target-stem download-only entries. Experimental entries remain blocked until
-  conversion produces a pinned artifact and a reviewed complete contract.
+- At contract-freeze time, catalog v1 classified three recommended, 19
+  experimental, and eight generic target-stem download-only entries.
+  Experimental entries remain blocked until conversion produces a pinned
+  artifact and a reviewed complete contract. This is a historical contract
+  snapshot, not the final product-tier decision: Phase 4 reclassifies 9662,
+  KARA, and HQ4 using the Phase 3 evidence without discarding their reviewed
+  contracts.
 - The three complete sidecars pin the existing converted TFLite sizes and
   SHA-256 values. They also freeze output compensation at `1.035` for 9662 and
   KARA and `1.019` for HQ4 before mixture-minus-output reconstruction.
@@ -1051,7 +1109,7 @@ the provisional memory limit; both 32-bit targets are explicitly unsupported.
 
 Phase 2 deliberately keeps ORT as the production default while LiteRT is
 validated through debug and test entry points. Builds temporarily contain both
-runtimes; final installed-size targets apply after ORT removal in Phase 6, not
+runtimes; final installed-size targets apply after ORT removal in Phase 8, not
 to this dual-runtime development interval. No user-visible backend setting or
 backup field is added in this phase.
 
@@ -1154,10 +1212,12 @@ JNI/API coverage; it does not use UVR weights.
 - [x] Exercise all three models with the official x86_64 runtime and exercise
   9662 and KARA with the supplemental API 26 pure-x86 CPU runtime. Route pure
   x86 directly to CPU without attempting GPU setup.
-- [x] Reconcile `runtimeCompatibility` only from these app-packaged reports:
-  update the authoritative contracts in `bss-tflite`, regenerate the bundled
-  catalog snapshot, and keep any combination without sufficient evidence
-  `untested` or `unsupported`. Do not patch only the app's copied JSON.
+- [x] Reconcile Phase 1 v1 `runtimeCompatibility` only from these app-packaged
+  reports: update the authoritative v1 snapshots in `bss-tflite`, regenerate
+  the bundled catalog snapshot, and keep any combination without sufficient
+  evidence `untested` or `unsupported`. Do not patch only the app's copied JSON.
+  Phase 4 supersedes this placement by moving runtime qualification out of
+  contract schema v2.
 - [x] Run cancellation before invocation and during a blocking invocation,
   session reuse, session replacement, and process restart tests. Confirm the
   unchanged production ORT path still follows existing scheduler and playback
@@ -1171,7 +1231,7 @@ Acceptance criteria:
 - The ORT adapter is behaviorally equivalent to the pre-refactor production
   path before LiteRT is selected by any internal test, and production playback
   still has no route that silently selects LiteRT.
-- All three recommended models produce correctly shaped, finite CPU output in
+- All three Phase 1 reviewed models produce correctly shaped, finite CPU output in
   arm64 processes on S10 and S25 and in an x86_64 process; 9662 and KARA also
   pass the `armeabi-v7a` S10 process and pure-x86 CPU path.
 - For the frozen synthetic and Coast Town `bss-tflite` parity fixtures, raw
@@ -1336,12 +1396,13 @@ more than the API can prove.
 - [x] Assert zero GPU allocator calls for `armeabi-v7a` and pure `x86`. An
   x86_64 emulator may validate loading and API behavior, but its host-backed GPU
   result must not create a production compatibility record by itself.
-- [x] Reconcile GPU evidence through authoritative `bss-tflite` contracts and
+- [x] Reconcile GPU evidence through the Phase 1 v1 `bss-tflite` contracts and
   regenerate the bundled catalog; never patch only the app copy. Replace the
   current deferred evidence with Phase 3 report references. Keep a successful
   candidate `untested` until Phase 7 full-song, thermal, and playback-readiness
   gates approve a production profile; use `unsupported` only for a repeatable,
   explicitly evidenced incompatibility. Phase 3 must not set GPU `known-good`.
+  Phase 4 moves these records into profile-aware catalog qualification.
 - [x] Verify no failed GPU session leaves the internal job or validation state
   stuck. Repeat the cache-ready and playback-gate assertions after Phase 5
   integrates the controller with model-aware production state.
@@ -1371,13 +1432,40 @@ Acceptance criteria:
   prefer GPU in production. Full-song wall time, thermal behavior, memory,
   cancellation, and playback readiness remain Phase 7 gates.
 
-### Phase 4: Multi-preset repository
+### Phase 4: Multi-preset repository and post-Phase 3 catalog
 
 Model management may be developed and tested before production inference is
 switched, but it remains behind a development feature gate. Selecting a TFLite
 model must not route a normal worker through that model while cache identity is
-still song/legacy-variant based. The gate is removed only by the ordered Phase
-6 cutover after Phase 5 acceptance.
+still song/legacy-variant based. The gate may reach the normal worker only
+through the ordered Phase 6 cutover after Phase 5 acceptance; no release tier
+is promoted until Phase 7 closes.
+
+The first deliverable is contract schema v2 plus a new catalog revision rather
+than an in-place rewrite of the frozen Phase 1 snapshot. Contract v2 removes
+the v1 `runtimeCompatibility` block, while preserving reviewed artifact,
+tensor, DSP, stem, source, conversion, and pipeline facts. The catalog must
+keep that reviewed contract independent from support level and activation
+policy. In particular, KARA and HQ4 retain complete reviewed contracts even
+though KARA becomes experimental and HQ4 becomes resource-gated download-only.
+The catalog revision must represent at least these independent dimensions:
+
+- contract review and the exact contract/artifact identity;
+- product tier: `recommended`, `experimental`, or `download-only`;
+- activation policy: normal selectable, explicitly warned CPU-only
+  experimental, resource-gated download-only, or blocked pending contract/UI;
+- release maturity: candidate, beta-ready, or stable; and
+- runtime evidence keyed by model hash, contract/pipeline identity, LiteRT
+  version, ABI, backend, and execution-profile ID, including precision.
+
+Its initial policy is fixed: 9662 FP32 is the only recommended/default
+candidate; KARA FP32 is a CPU-only experimental candidate and has no Auto GPU
+path; HQ4 is reviewed but download-only because it has no eligible fallback and
+exceeds the current resource gate. FP16 has no preset entry. Every other
+candidate remains download-only until it satisfies its own contract, stem-UI,
+desktop, CPU, and full-song promotion requirements. Promotion is per model and
+per execution profile, never a bulk conversion of all candidates into
+experimental models.
 
 Before production download integration, `bss-tflite` must publish the canonical
 candidate artifacts in an immutable versioned Release. Complete the pinned
@@ -1387,6 +1475,17 @@ canonical candidates intended for the first broad testing wave. Entries whose
 DSP or stem semantics remain incomplete may still be published as
 `download-only`; artifact availability must not upgrade activation support.
 
+- [ ] Add contract schema v2 without mutable runtime qualification, regenerate
+  the three reviewed contracts and exact-name sidecars, and reject v1 as an
+  official-release contract under the clean-install boundary.
+- [ ] Add a catalog schema/revision that separates contract review, product
+  tier, activation policy, release maturity, and profile-aware runtime evidence;
+  retain the Phase 1 catalog as an immutable historical snapshot.
+- [ ] Reclassify 9662 FP32 as the sole recommended/default candidate, KARA FP32
+  as CPU-only experimental, and HQ4 as resource-gated download-only without
+  deleting either reviewed contract.
+- [ ] Record rejected FP16 and KARA GPU profiles by exact execution-profile ID;
+  permit a future new profile to be tested without overwriting that evidence.
 - [ ] Replace `MdxModelVariant.MDXNET_9482` as the sole active path with a
   catalog-backed model ID in the new repository and selection state, without
   yet changing the feature-gated production worker.
@@ -1398,12 +1497,18 @@ DSP or stem semantics remain incomplete may still be published as
   operations.
 - [ ] Prevent a completed download from changing the active model.
 - [ ] Keep inactive downloaded models until the user explicitly deletes them.
-- [ ] Display recommended, experimental, and download-only candidates with
-  distinct activation rules.
-- [ ] Allow production activation only when the current ABI has a `known-good`
-  CPU path for that exact contract. `Auto` may add a known-good GPU path or
-  fall back to that CPU path; `untested`, missing, and `unsupported` statuses
-  remain downloadable but not usable outside internal validation.
+- [ ] Display the sole recommended/default model, explicitly warned selectable
+  experimental models, and download-only candidates with distinct activation
+  rules.
+- [ ] Apply tier-specific `Use` gates: a recommended release model requires its
+  Phase 7 stable evidence; an experimental model requires its Phase 7 CPU
+  evidence and manual user confirmation; download-only entries have no normal
+  `Use` action. A window-level `known-good` CPU record alone is not a release
+  promotion.
+- [ ] Require a matching `known-good` CPU profile for every selectable
+  model/ABI. `Auto` may add only an individually approved GPU profile and must
+  retain that CPU fallback; `untested`, rejected, missing, and `unsupported`
+  profiles remain downloadable but not usable outside internal validation.
 - [ ] Implement the import priority: built-in contract by SHA-256, matching
   sidecar, then advanced profile form with an unverifiable-quality warning.
 - [ ] Keep every download or import inactive until the user explicitly chooses
@@ -1421,13 +1526,21 @@ Acceptance criteria:
 - Every network-backed catalog entry resolves to one immutable Release asset
   with a matching size and SHA-256, or remains explicitly unavailable rather
   than falling back to a mutable source URL.
-- The recommended and experimental artifacts can coexist without overwriting
-  files or metadata.
+- The catalog has exactly one recommended/default entry, 9662 FP32. KARA and
+  HQ4 retain their reviewed contracts while carrying their different activation
+  policies.
+- Official contracts and sidecars use schema v2 and contain no ABI, backend,
+  precision, device, or runtime-profile qualification records.
+- Runtime evidence for a GPU profile cannot overwrite CPU evidence, a different
+  precision, or a different versioned profile.
+- Recommended, selectable experimental, and download-only artifacts can coexist
+  without overwriting files or metadata.
 - Downloading a model does not select it, and selecting a model does not delete
   another installed model.
 - The active model cannot be deleted accidentally.
 - No model can become active on an ABI whose complete CPU compatibility state
-  is anything other than `known-good`.
+  is anything other than `known-good`; no model becomes release-selectable from
+  that condition alone.
 - Switching models affects only new separation work.
 - An unknown import can be installed through a valid sidecar or completed
   advanced form without being activated automatically.
@@ -1494,57 +1607,77 @@ Acceptance criteria:
   a model-aware window ready until the CPU result has completed and been
   written successfully.
 
-### Phase 6: Remove ONNX Runtime
+### Phase 6: Feature-gated LiteRT production cutover
 
-- [ ] In a build that still contains both runtimes, switch all production
-  engine construction to the selected contract-backed LiteRT `Auto` path and
-  verify that no error silently falls back to ORT.
-- [ ] Run the production worker, playback, model-switch, model-aware-cache, and
-  process-restart suite with ORT still available only as an unreachable
-  regression oracle.
-- [ ] Remove ONNX model URLs, import validation, and user-facing ONNX text.
-- [ ] Remove `onnxruntime.android` and all ONNX native libraries from release
-  artifacts.
-- [ ] Remove obsolete ONNX-only tests and diagnostics after equivalent LiteRT
-  coverage exists.
-- [ ] Remove legacy ONNX model, manifest, and cache discovery paths instead of
-  retaining compatibility readers.
-- [ ] Remove the temporary legacy 9482 execution profile, old model repository,
-  and `MdxModelVariant` routing after all production references are gone.
+Phase 6 proves that the normal worker, scheduler, cache, and playback path can
+use the selected contract-backed LiteRT model without an ORT fallback. It keeps
+ORT in the development/test build as an unreachable regression oracle until
+Phase 7 finishes. This ordering preserves a trusted tensor reference while
+full-song, lifecycle, cache, and device behavior is still being validated; it
+does not expose an unqualified model as stable.
+
+- [ ] In a build that still contains both runtimes, switch normal engine
+  construction to the selected contract-backed LiteRT `Auto` path and verify
+  that no error silently falls back to ORT.
+- [ ] Keep ORT construction reachable only from isolated test/debug oracle code;
+  a selected LiteRT model must never instantiate it during production-like
+  worker, scheduler, cache, or playback tests.
+- [ ] Run the normal worker, playback, model-switch, model-aware-cache, and
+  process-restart suite with the Phase 4 activation gate enforced.
+- [ ] Preserve the temporary legacy 9482 execution profile only as a test
+  oracle; do not retain it as a selectable model, catalog entry, cache identity,
+  or normal worker route.
+- [ ] Prove that LiteRT cache manifests, completed playback, cancellation, and
+  GPU-to-CPU recreation remain correct when the selected model changes.
 
 Acceptance criteria:
 
-- `rg` finds no production ONNX Runtime dependency or model-loading path.
-- Release APKs contain no `libonnxruntime*.so`.
-- Every production-selectable model/backend/ABI combination is `known-good`;
-  an untested combination cannot become active merely because its native
-  library is present.
+- No selected LiteRT model path can fall back to ORT after a setup, GPU, CPU,
+  tensor, cancellation, or output-validation failure.
+- ORT remains confined to explicitly invoked test/debug oracle code and cannot
+  be reached by the normal worker, scheduler, cache, or playback surface.
+- A clean install can download, explicitly select under the development gate,
+  and use a contract-backed TFLite preset without any ONNX file.
+- Phase 4 tier and activation policy prevents an unqualified model/profile from
+  becoming active merely because its native library is present.
 - Every ABI APK contains the expected LiteRT inventory, and the x86 APK
   contains exactly the pinned supplemental `libLiteRt.so`.
-- A clean install can download and use a TFLite preset without any ONNX file.
 
-### Phase 7: Full-device validation
+### Phase 7: Full-device validation and tier promotion
 
-- [ ] Run full worker/playback comparisons for 9662 and KARA on S10 and S25
-  with CPU and each GPU runtime profile still eligible after Phase 3.
-- [ ] Revisit HQ4 on S10 and S25 only if its Phase 3 GPU measurements justify a
-  bounded full-song experiment. Do not allocate its disqualified CPU session
-  or call the result Auto-capable without a known-good fallback.
+Phase 7 is a promotion-or-decline gate, not an excuse to repeat every Phase 3
+experiment. It decides the first release's model tiers from full worker,
+playback, audio, resource, and lifecycle evidence. A model that has only
+window parity remains a candidate even if it is downloadable.
+
+- [ ] Run full worker/playback comparisons for 9662 FP32 on S10 and S25 CPU.
+  Run `gpu-auto-fp32-v1` only as its sole eligible GPU-promotion profile, and
+  exercise its CPU fallback path. CPU-first remains an acceptable production
+  result if the GPU profile does not pass every gate.
+- [ ] Run KARA FP32 full worker/playback and representative listening checks on
+  S10 and S25 CPU. Do not treat its rejected GPU profile as a Phase 7 candidate;
+  KARA can become selectable only as an explicitly warned CPU-only experimental
+  model.
+- [ ] Leave HQ4 download-only for the current artifact and profiles. Revisit it
+  only after a materially changed artifact/runtime path first demonstrates a
+  resource-safe CPU fallback and a new preflight evidence record; do not repeat
+  the known-disqualified full-song allocation merely to populate a matrix.
 - [ ] Install the `armeabi-v7a` split on S10 and run full worker/playback tests
-  for every model marked known-good there; confirm any 32-bit HQ4 rejection
-  occurs during compatibility preflight.
-- [ ] Run full worker/playback tests for every model marked known-good on an
-  x86_64 emulator using the official LiteRT runtime.
+  for 9662 and any experimental model that requests arm32 selection. Confirm
+  HQ4 rejection occurs in compatibility preflight without allocating its model.
+- [ ] Run full worker/playback tests for 9662 and any experimentally selectable
+  model on an x86_64 emulator using the official LiteRT runtime.
 - [ ] Run conversion and LiteRT smoke validation for every published candidate
-  artifact, recording unsupported or download-only states explicitly.
+  artifact, recording download-only, rejected, and unsupported states without
+  granting activation from a successful conversion alone.
 - [ ] Test 9662 and KARA with the supplemental CPU runtime on an API 26 pure
   x86 emulator, including model load, one-window parity, cancellation, and
-  session recreation.
+  session recreation. Retain KARA only if its experimental CPU gate succeeds.
 - [ ] Confirm HQ4 is reported as unsupported on the expanded 3,036 MiB x86 AVD
   without repeating the opt-in allocation already known to fail.
 - [ ] Test a missing, altered, or wrong-architecture supplemental runtime and
-  confirm that build verification or the localized runtime error fails
-  clearly rather than loading another inference engine.
+  confirm that build verification or the localized runtime error fails clearly
+  rather than loading another inference engine.
 - [ ] Start every installation and device-validation run after clearing all
   application data.
 - [ ] Test model switching during paused and active playback.
@@ -1554,9 +1687,9 @@ Acceptance criteria:
   S10 and S25 using full-song time, peak PSS, thermal behavior, cancellation,
   and playback readiness before changing the default.
 - [ ] Validate GPU library/accelerator discovery, GPU-only compilation, memory
-  eligibility, bounded probe, and one-way fallback on both devices. Record
-  false-positive and false-negative decisions without claiming unavailable
-  per-operator coverage data.
+  eligibility, bounded probe, and one-way fallback for 9662 FP32 on both
+  devices. Record false-positive and false-negative decisions without claiming
+  unavailable per-operator coverage data.
 - [ ] Test Android clear-cache behavior with installed models, partial entries,
   completed entries, hydration PCM, and debug artifacts present.
 - [ ] Test backup format v1 and both settings schema v1 payloads with the
@@ -1579,34 +1712,80 @@ Acceptance criteria:
   canonical JSON wins when present, and one setting is never applied twice by
   ZIP entry order.
 - [ ] Delete an unknown custom profile with both partial and completed caches:
-  completed output remains read-only playable, while partial output stays
-  stale until the exact model and profile return.
+  completed output remains read-only playable, while partial output stays stale
+  until the exact model and profile return.
 - [ ] Verify a clean first launch writes only the new model and cache layouts
   and never requires a legacy path.
 - [ ] Test seeking, ready-window gating, blend changes, FLAC promotion, and
   background continuation.
-- [ ] Inspect all four ABI APKs plus the universal APK for native library
-  duplication, x86 hash agreement, and absence of ONNX Runtime.
-- [ ] Measure package size, install size, peak PSS, thermal behavior, and
-  full-song wall time for every preset/backend.
-- [ ] Evaluate HQ4 against the 64 MiB model, 256/384 MiB peak-PSS, and S10
-  lower-device gates; evaluate each ABI runtime against the 10/16 MiB
-  target/hard limits and record any model or device-class downgrade.
-- [ ] Decide from the full-song matrix whether production `Auto` should prefer
-  a specific versioned GPU profile or remain CPU-first. Any selected profile
-  must receive new catalog evidence; an FP32 result cannot approve FP16.
+- [ ] Inspect all four ABI APKs plus the universal APK for native-library
+  duplication, x86 hash agreement, and the expected LiteRT inventory. The
+  final absence-of-ORT check belongs to Phase 8.
+- [ ] Measure peak PSS, graphics/native memory, thermal behavior, and full-song
+  wall time for every selectable preset/backend. Record dual-runtime package
+  size only as a development baseline; final install-size acceptance follows
+  ORT removal.
+- [ ] Retain HQ4's 64 MiB model and 256/384 MiB PSS gates. A changed HQ4 path
+  must pass them on S10 before it can leave download-only; S25 does not waive a
+  lower-device failure.
+- [ ] Decide from the 9662 FP32 full-song matrix whether production `Auto`
+  should prefer `gpu-auto-fp32-v1` or remain CPU-first. Any selected profile
+  requires new catalog evidence; an FP32 result cannot approve FP16.
 
 Acceptance criteria:
 
-- No regression in continuous separated playback, seeking, or blend changes.
-- GPU failure and process/lifecycle recreation recover without a permanent
-  loading state.
+- 9662 FP32 becomes the sole stable recommended/default preset only after its
+  full CPU, playback, cache, lifecycle, resource, and required device gates
+  pass. A GPU pass is required only to enable that exact GPU profile, not to
+  keep CPU-first 9662 available.
+- KARA FP32 becomes selectable only if its CPU full-song and listening evidence
+  passes on its requested ABIs; it remains explicitly experimental and CPU-only.
+  Otherwise it remains download-only.
+- HQ4 remains download-only until a newly evidenced implementation meets the
+  fallback and resource gates. FP16 and all unreviewed candidates remain
+  non-selectable.
+- No regression occurs in continuous separated playback, seeking, blend
+  changes, GPU failure recovery, or process/lifecycle recreation.
 - Performance and memory reports are stored with the model/catalog revision.
 - Any change to the provisional thread, probe, GPU eligibility, or resource
   targets is justified by recorded S10 and S25 results and preserves the hard
   fallback/disable behavior.
 
-### Phase 8: Beta readiness
+### Phase 8: Retire ONNX Runtime
+
+Begin this phase only after Phase 7 has established the first selectable
+release matrix. Removing ORT before that point would make a regression oracle
+disappear before the production LiteRT path has completed full-device testing.
+
+- [ ] Remove ONNX model URLs, import validation, and user-facing ONNX text.
+- [ ] Remove `onnxruntime.android` and all ONNX native libraries from release
+  artifacts.
+- [ ] Remove obsolete ONNX-only tests and diagnostics after equivalent LiteRT
+  coverage exists; retain immutable desktop reference reports in validation
+  artifacts, not in the release app.
+- [ ] Remove the temporary legacy 9482 execution profile, old model repository,
+  and `MdxModelVariant` routing after all production and test-oracle references
+  are gone.
+- [ ] Remove legacy ONNX model, manifest, and cache discovery paths instead of
+  retaining compatibility readers.
+- [ ] Re-run clean-install smoke, selected-model worker/playback, model switch,
+  cancellation, and APK/native-inventory checks after removal.
+- [ ] Measure final package and installed size per ABI against the 10/16 MiB
+  LiteRT-runtime budget, and inspect all four ABI APKs plus the universal APK
+  for native-library duplication, x86 hash agreement, and no ONNX runtime.
+
+Acceptance criteria:
+
+- `rg` finds no production ONNX Runtime dependency or model-loading path.
+- Release APKs contain no `libonnxruntime*.so`.
+- Every release-selectable model/backend/ABI combination passed its Phase 7
+  tier gate; an untested combination cannot become active merely because its
+  native library is present.
+- Every ABI APK contains the expected LiteRT inventory, and the x86 APK
+  contains exactly the pinned supplemental `libLiteRt.so`.
+- A clean install can download and use a TFLite preset without any ONNX file.
+
+### Phase 9: Beta readiness
 
 - [ ] Complete model attribution and conversion guidance in the app and
   `bss-tflite` repository.
@@ -1624,8 +1803,12 @@ Acceptance criteria:
   projections in every Beta backup, with tests enforcing canonical priority.
 - [ ] Publish the full candidate catalog with all source records, duplicate
   aliases, pinned artifacts, manifests, and reproducible checksums.
-- [ ] Keep the first three models at the top of the catalog and label all
-  other entries with their actual experimental or download-only state.
+- [ ] Place only stable 9662 FP32 in the recommended/default section. Place
+  KARA FP32 in the warned CPU-only experimental section only if Phase 7 admits
+  it; otherwise keep it download-only. Keep HQ4 resource-gated download-only.
+- [ ] Label every other entry from its actual contract, stem-UI, activation,
+  runtime-profile, and maturity evidence. Do not describe a downloadable or
+  window-tested artifact as stable.
 - [ ] Publish a beta with pinned catalog assets and reproducible hashes.
 
 ## Verification Matrix
@@ -1634,16 +1817,17 @@ Every runtime or model change should run the narrowest applicable checks:
 
 | Area | Required check |
 | --- | --- |
-| Catalog | Source provenance, normalized duplicate equivalence, aliases, support level, and pinned asset |
-| Acquisition | Download, verify, install, activate, manual delete, and reinstall |
-| Contract | Schema v1, sidecar/hash pairing, shape, dtype, layout, DSP, stem mapping, and migration rejection |
+| Catalog | Source provenance, normalized duplicate equivalence, aliases, reviewed contract, product tier, activation policy, release maturity, profile-aware evidence, and pinned asset |
+| Acquisition | Download, verify, install, tier-specific `Use` gate, manual delete, and reinstall |
+| Contract | Release schema v2, historical v1 rejection, sidecar/hash pairing, shape, dtype, layout, DSP, stem mapping, and runtime-evidence exclusion |
 | Conversion | Desktop LiteRT/TFLite output versus ORT reference |
-| Runtime | ORT abstraction baseline, NCHW/NHWC conversion, raw parity, output compensation/residual, CPU thread matrix, versioned GPU profiles, eligibility/probe, one-way fallback, close/recreate, and cancellation |
+| Runtime | ORT abstraction baseline through Phase 7, NCHW/NHWC conversion, raw parity, output compensation/residual, CPU thread matrix, versioned GPU profiles, eligibility/probe, one-way fallback, close/recreate, and cancellation |
 | Playback | Start, pause/resume, seek, song transition, blend update |
+| Audio | Full-song joins and representative listening for every model requesting selection; window parity alone is insufficient |
 | Cache | Multiple models per song, deleted custom profile, partial stale/resume, read-only completed playback, FLAC promotion, delete/cleanup, and system clear-cache recovery |
 | Persistence/Backup | Format/schema v1, key allowlists, pending active model, unknown fork payload, canonical/legacy priority, both package directions, and excluded model/cache/per-song data |
 | Lifecycle | Activity recreation, process restart, background worker continuation |
-| Device | Galaxy S10/S25 arm64 CPU and GPU evidence, S10 armeabi-v7a CPU, official x86_64 CPU plus GPU packaging/API evidence, API 26 pure x86 CPU for 9662/KARA, actual process-ABI evidence, and explicit HQ4 x86 rejection |
+| Device | Galaxy S10/S25 arm64 9662 CPU and eligible GPU evidence, CPU-only KARA promotion evidence, S10 armeabi-v7a CPU, official x86_64 CPU plus GPU packaging/API evidence, API 26 pure x86 CPU for 9662/KARA, actual process-ABI evidence, and explicit HQ4 resource rejection |
 | Resource budgets | Model/runtime install size, peak PSS, graphics/native memory, thermal behavior, and target/hard-limit decisions |
 | Native supply chain | Pinned source/toolchain, Release hash, ELF/JNI audit, checksums, notices, and GitHub provenance |
 | Packaging | Four ABI splits plus universal APK, one runtime per ABI, native inventory, and APK/install size |
@@ -1666,8 +1850,11 @@ Prefer small, buildable commits in this order:
 5. LiteRT GPU backend and fallback;
 6. multi-preset repository and download UI;
 7. model-aware cache identities and cache storage;
-8. ONNX removal and packaging cleanup;
-9. device validation, documentation, and localization.
+8. feature-gated LiteRT normal-worker cutover with ORT retained only as an
+   unreachable test oracle;
+9. full-device validation and model-tier promotion;
+10. ONNX removal and packaging cleanup; and
+11. beta documentation, localization, and release validation.
 
 Before starting a new LiteRT milestone:
 
@@ -1693,17 +1880,56 @@ reverse the associated correctness, identity, fallback, or backup rule.
 
 ### Contract schema and sidecars
 
-Adopt contract schema v1 with `contractSchemaVersion` independent from the app
-version and pipeline version. A sidecar is named `<model file name>.json`, so
-`model.tflite` uses `model.tflite.json`. It carries the model SHA-256, tensor
-shape, dtype, layout, `dimF`, DSP values, stem semantics, complement rule,
-contract schema, and pipeline compatibility version. Pair by embedded SHA-256;
-never accept filename adjacency as identity.
+Phase 1 adopted contract schema v1 with `contractSchemaVersion` independent
+from the app and pipeline versions. Phase 4 must replace it for official
+release use with schema v2 because v1 incorrectly embedded mutable runtime
+qualification. Schema v2 preserves model/artifact, tensor, DSP, stem, source,
+conversion, and pipeline facts, but ABI, backend, LiteRT version, precision,
+device, and execution-profile evidence live only in catalog qualification
+records. The clean-install boundary means no installed v1 migration is needed;
+v1 remains an immutable development-history artifact.
 
-Validation must cover sidecar round trips, unknown fields, schema rejection,
-shape/contract disagreement, and a correct filename with the wrong model hash.
-Changing the schema requires an explicit schema migration; changing the app
+A v2 sidecar is named `<model file name>.json`, so `model.tflite` uses
+`model.tflite.json`. It carries the model SHA-256, tensor shape, dtype, layout,
+`dimF`, DSP values, stem semantics, complement rule, contract schema, and
+pipeline compatibility version. Pair by embedded SHA-256; never accept
+filename adjacency as identity.
+
+Validation must cover sidecar round trips, unknown fields, v1 official-release
+rejection, unsupported future schemas, shape/contract disagreement, a correct
+filename with the wrong model hash, and the absence of runtime qualification in
+v2. Changing the schema requires an explicit schema revision; changing the app
 version alone does not.
+
+### Preset support tiers and promotion
+
+Adopt one recommended/default target rather than treating the three first
+contracts as equivalent release presets. The post-Phase 3 catalog keeps
+contract review, product tier, activation policy, release maturity, and
+profile-aware runtime evidence independent. Demoting an entry must not delete
+its reviewed contract, and adding a converted artifact must not grant `Use`.
+
+Use these initial decisions:
+
+- 9662 FP32 is the only recommended/default candidate. Mark it stable only
+  after Phase 7 full-song, playback, device, lifecycle, and resource acceptance.
+- KARA FP32 may become an explicitly warned CPU-only experimental model after
+  its Phase 7 full-song and listening gate. Its Phase 3 GPU profile is rejected
+  and cannot be used by `Auto`.
+- HQ4 retains its reviewed contract but remains resource-gated download-only.
+  Reconsider it only for a materially changed implementation with a safe CPU
+  fallback and new resource evidence.
+- FP16 is rejected by the current numerical evidence and is not an official
+  preset or user-facing execution choice.
+- Every other converted candidate remains download-only until its own contract,
+  stem UI, desktop parity, CPU, full-song, and resource gates pass. Promotion is
+  individual and does not happen merely because a broad Release is published.
+
+Runtime evidence must include the exact model hash, contract and pipeline,
+LiteRT version, ABI, backend, profile ID, and precision. A failed profile stays
+recorded even if a future profile succeeds. Tests must prove that a reviewed
+download-only contract resolves for inspection while activation remains
+blocked, and that a window-level CPU pass cannot create stable release maturity.
 
 ### Generic target-stem models
 
@@ -1764,21 +1990,24 @@ by `AUTOMATIC`. Eligibility therefore combines ABI/library preflight, exact
 runtime records, a known-good CPU fallback, accelerator discovery, successful
 GPU-only compilation, memory gates, and a bounded deterministic probe.
 
-Version GPU options independently from the model contract. Validate explicit
-`AUTOMATIC + FP32` first and treat `AUTOMATIC + FP16` as a separate candidate
-whose session key, diagnostics, parity data, and compatibility evidence cannot
-be borrowed from FP32. Forced OpenCL/OpenGL runs are diagnostic profiles, not
-silent substitutes. Do not expose precision, forced backend, probe controls,
-or `GPU only` as initial user settings.
+Version GPU options independently from the model contract. Phase 3 tested
+explicit `AUTOMATIC + FP32` and separate `AUTOMATIC + FP16` profiles. Only 9662
+`gpu-auto-fp32-v1` proceeds to Phase 7; KARA's FP32 profile and all tested FP16
+profiles remain rejected. A future option or implementation change receives a
+new profile ID and new evidence rather than overwriting those results. Forced
+OpenCL/OpenGL runs are diagnostic profiles, not silent substitutes. Do not
+expose precision, forced backend, probe controls, or `GPU only` as initial user
+settings.
 
 After a recoverable setup, probe, invocation, or output-validation failure,
 discard GPU output, close GPU completely, recreate the same contract on CPU,
 and retry the same input once. The controller remains on CPU afterward.
 Cancellation does not trigger fallback; out-of-memory or unconfirmed cleanup
-does not trigger a second large allocation. HQ4 remains GPU-exploratory because
-its current arm64 CPU path cannot satisfy the fallback resource gate. Arm32 and
-x86 skip GPU, while x86_64 library or emulator evidence alone cannot establish
-a production GPU record.
+does not trigger a second large allocation. KARA's possible release path is
+CPU-only. HQ4 remains internally GPU-exploratory and product download-only
+because its current arm64 CPU path cannot satisfy the fallback resource gate.
+Arm32 and x86 skip GPU, while x86_64 library or emulator evidence alone cannot
+establish a production GPU record.
 
 Use this initial CPU thread formula:
 
