@@ -362,7 +362,7 @@
           {
             "abi": "arm64-v8a",
             "backend": "gpu",
-            "evidence": "BoomingSS GPU adapter and fallback validation is deferred to Phase 3",
+            "evidence": "BoomingSS app-packaged LiteRT 2.1.5 Phase 3 reports at WluhWluh/BoomingSS@67ad4812b15ee1a410762fe4ac62a72ddb4976e7 (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 window parity and Auto fallback passed on Galaxy S10/S25; gpu-auto-fp16-v1 parity failed; full-song Phase 7 gate pending",
             "status": "untested"
           },
           {
@@ -488,7 +488,7 @@
           {
             "abi": "arm64-v8a",
             "backend": "gpu",
-            "evidence": "BoomingSS GPU adapter and fallback validation is deferred to Phase 3",
+            "evidence": "BoomingSS app-packaged LiteRT 2.1.5 Phase 3 reports at WluhWluh/BoomingSS@67ad4812b15ee1a410762fe4ac62a72ddb4976e7 (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 window parity passed on Galaxy S10/S25; gpu-auto-fp16-v1 parity failed; full-song Phase 7 gate pending",
             "status": "untested"
           },
           {
@@ -614,7 +614,7 @@
           {
             "abi": "arm64-v8a",
             "backend": "gpu",
-            "evidence": "BoomingSS GPU adapter and fallback validation is deferred to Phase 3",
+            "evidence": "BoomingSS Phase 3 reports at WluhWluh/BoomingSS@67ad4812b15ee1a410762fe4ac62a72ddb4976e7 (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 window parity passed on Galaxy S10/S25, but the approximately 0.8 GiB GPU-session PSS increase exceeds 384 MiB and no known-good CPU fallback exists",
             "status": "untested"
           },
           {
@@ -1006,7 +1006,7 @@
       "supportLevel": "recommended",
       "validation": {
         "androidCpu": "partial",
-        "androidGpu": "pending",
+        "androidGpu": "partial",
         "conversion": "passed",
         "desktopNumerical": "passed",
         "fullSong": "pending"
@@ -1126,7 +1126,7 @@
       "supportLevel": "recommended",
       "validation": {
         "androidCpu": "passed",
-        "androidGpu": "pending",
+        "androidGpu": "partial",
         "conversion": "passed",
         "desktopNumerical": "passed",
         "fullSong": "pending"
@@ -1161,7 +1161,7 @@
       "supportLevel": "recommended",
       "validation": {
         "androidCpu": "passed",
-        "androidGpu": "pending",
+        "androidGpu": "partial",
         "conversion": "passed",
         "desktopNumerical": "passed",
         "fullSong": "pending"
