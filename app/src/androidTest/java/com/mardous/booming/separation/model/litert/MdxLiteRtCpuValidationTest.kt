@@ -99,9 +99,7 @@ class MdxLiteRtCpuValidationTest {
         runtimeAbi: MdxRuntimeAbi,
         report: JSONObject,
     ) {
-        val stagingRoot = requireNotNull(context.getExternalFilesDir(null))
-            .resolve(STAGING_DIRECTORY)
-            .canonicalFile
+        val stagingRoot = context.filesDir.resolve(STAGING_DIRECTORY).canonicalFile
         val modelFile = arguments.requiredStagedFile(ARG_MODEL_PATH, stagingRoot)
         val inputFile = arguments.requiredStagedFile(ARG_INPUT_PATH, stagingRoot)
         val referenceFile = arguments.requiredStagedFile(ARG_REFERENCE_PATH, stagingRoot)

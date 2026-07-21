@@ -14,9 +14,13 @@ Do not add UVR weights or full tensor fixtures to this repository.
 
 The runner verifies the bundled contract, model filename, byte size and
 SHA-256 before creating LiteRT. It also verifies host-provided hashes for the
-input and ORT reference. Host-staged files are read only from the app's
-external validation staging directory. Reports are written below the internal
-cache root at `cache/litert-validation/<run-id>/report.json`.
+input and ORT reference. Host-staged files are read only from the app-private
+`files/litert-validation-staging/<run-id>/` directory. The host first pushes
+each file to a temporary shell-owned directory and then copies it with
+`run-as`, so Android 37 and earlier releases expose the same app-owned files
+to instrumentation. Staged inputs are removed after each run. Reports are
+written below the internal cache root at
+`cache/litert-validation/<run-id>/report.json`.
 
 ## Run one case
 

@@ -56,6 +56,14 @@ function Require-File([string]$Path, [string]$Role) {
     return (Resolve-Path -LiteralPath $Path).Path
 }
 
+function Require-SafeLeafName([string]$Path, [string]$Role) {
+    $leafName = Split-Path -Leaf $Path
+    if ($leafName -notmatch '^[A-Za-z0-9._-]+$') {
+        throw "$Role filename contains unsupported characters: $leafName"
+    }
+    return $leafName
+}
+
 if (-not $PreflightOnly) {
     $ModelPath = Require-File $ModelPath "Model"
     $InputPath = Require-File $InputPath "Input"
@@ -65,6 +73,8 @@ if (-not [string]::IsNullOrWhiteSpace($SecondaryModelId)) {
     $SecondaryModelPath = Require-File $SecondaryModelPath "Secondary model"
 }
 
+$remoteRelativeRoot = ""
+$remoteTempRoot = ""
 Push-Location $repoRoot
 try {
     if (-not $SkipBuild) {
@@ -90,9 +100,20 @@ try {
     Start-Sleep -Milliseconds 750
     & $adb -s $Serial shell input keyevent KEYCODE_HOME 2>$null | Out-Null
 
-    $remoteRoot = "/sdcard/Android/data/$package/files/litert-validation-staging/$RunId"
-    Invoke-Adb shell rm -rf $remoteRoot
-    Invoke-Adb shell mkdir -p $remoteRoot
+    $appDataRoot = (& $adb -s $Serial shell run-as $package pwd) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($appDataRoot)) {
+        throw "Could not resolve the app data directory with run-as."
+    }
+    $appDataRoot = $appDataRoot.Trim()
+    if ($appDataRoot -notmatch '^/data/(data|user/[0-9]+)/[A-Za-z0-9._-]+$') {
+        throw "Unexpected app data directory: $appDataRoot"
+    }
+    $remoteRelativeRoot = "files/litert-validation-staging/$RunId"
+    $remoteTempRoot = "/data/local/tmp/booming-ss-litert-validation-$RunId"
+    Invoke-Adb shell run-as $package rm -rf $remoteRelativeRoot
+    Invoke-Adb shell run-as $package mkdir -p $remoteRelativeRoot
+    Invoke-Adb shell rm -rf $remoteTempRoot
+    Invoke-Adb shell mkdir -p $remoteTempRoot
     & $adb -s $Serial shell run-as $package rm -rf "cache/litert-validation/$RunId" 2>$null | Out-Null
     $instrumentArguments = @(
         "-e", "class", "$testClass#validateStagedModel",
@@ -106,12 +127,24 @@ try {
     )
 
     if (-not $PreflightOnly) {
-        $remoteModel = "$remoteRoot/$(Split-Path -Leaf $ModelPath)"
-        $remoteInput = "$remoteRoot/$(Split-Path -Leaf $InputPath)"
-        $remoteReference = "$remoteRoot/$(Split-Path -Leaf $ReferencePath)"
-        Invoke-Adb push $ModelPath $remoteModel
-        Invoke-Adb push $InputPath $remoteInput
-        Invoke-Adb push $ReferencePath $remoteReference
+        $modelLeaf = Require-SafeLeafName $ModelPath "Model"
+        $inputLeaf = Require-SafeLeafName $InputPath "Input"
+        $referenceLeaf = Require-SafeLeafName $ReferencePath "Reference"
+        $remoteModel = "$appDataRoot/$remoteRelativeRoot/$modelLeaf"
+        $remoteInput = "$appDataRoot/$remoteRelativeRoot/$inputLeaf"
+        $remoteReference = "$appDataRoot/$remoteRelativeRoot/$referenceLeaf"
+        foreach ($stagedFile in @(
+            @{ Local = $ModelPath; Leaf = $modelLeaf },
+            @{ Local = $InputPath; Leaf = $inputLeaf },
+            @{ Local = $ReferencePath; Leaf = $referenceLeaf }
+        )) {
+            $temporaryPath = "$remoteTempRoot/$($stagedFile.Leaf)"
+            $relativePath = "$remoteRelativeRoot/$($stagedFile.Leaf)"
+            Invoke-Adb push $stagedFile.Local $temporaryPath
+            Invoke-Adb shell chmod 644 $temporaryPath
+            Invoke-Adb shell run-as $package cp $temporaryPath $relativePath
+            Invoke-Adb shell run-as $package test -f $relativePath
+        }
         $instrumentArguments += @(
             "-e", "modelPath", $remoteModel,
             "-e", "inputPath", $remoteInput,
@@ -121,8 +154,14 @@ try {
         )
     }
     if (-not [string]::IsNullOrWhiteSpace($SecondaryModelId)) {
-        $remoteSecondary = "$remoteRoot/$(Split-Path -Leaf $SecondaryModelPath)"
-        Invoke-Adb push $SecondaryModelPath $remoteSecondary
+        $secondaryLeaf = Require-SafeLeafName $SecondaryModelPath "Secondary model"
+        $temporarySecondary = "$remoteTempRoot/$secondaryLeaf"
+        $relativeSecondary = "$remoteRelativeRoot/$secondaryLeaf"
+        $remoteSecondary = "$appDataRoot/$relativeSecondary"
+        Invoke-Adb push $SecondaryModelPath $temporarySecondary
+        Invoke-Adb shell chmod 644 $temporarySecondary
+        Invoke-Adb shell run-as $package cp $temporarySecondary $relativeSecondary
+        Invoke-Adb shell run-as $package test -f $relativeSecondary
         $instrumentArguments += @(
             "-e", "secondaryModelId", $SecondaryModelId,
             "-e", "secondaryModelPath", $remoteSecondary
@@ -148,12 +187,17 @@ try {
         throw "Validation report could not be read from the app cache."
     }
     $reportText -join "`n" | Set-Content -LiteralPath $localReport -Encoding utf8
-    Invoke-Adb shell rm -rf $remoteRoot
 
     if ($instrumentExit -ne 0 -or $instrumentText -notmatch 'OK \(1 test\)') {
         throw "Instrumentation validation failed. Report: $localReport"
     }
     Write-Host "Saved validation report to $localReport"
 } finally {
+    if (-not [string]::IsNullOrWhiteSpace($remoteRelativeRoot)) {
+        & $adb -s $Serial shell run-as $package rm -rf $remoteRelativeRoot 2>$null | Out-Null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($remoteTempRoot)) {
+        & $adb -s $Serial shell rm -rf $remoteTempRoot 2>$null | Out-Null
+    }
     Pop-Location
 }
