@@ -91,6 +91,18 @@ class MdxLiteRtCompatibilityTest {
         assertNull(resolveMdxProcessAbi("riscv64", true))
     }
 
+    @Test
+    fun `runtime ABI follows a native bridge target when process ISA is not advertised`() {
+        assertEquals(
+            MdxRuntimeAbi.X86_64,
+            resolveMdxRuntimeAbi("aarch64", true, listOf("x86_64", "x86")),
+        )
+        assertEquals(
+            MdxRuntimeAbi.ArmeabiV7a,
+            resolveMdxRuntimeAbi("armv8l", false, listOf("arm64-v8a", "armeabi-v7a")),
+        )
+    }
+
     private fun decision(
         modelId: String,
         platform: MdxRuntimePlatform,

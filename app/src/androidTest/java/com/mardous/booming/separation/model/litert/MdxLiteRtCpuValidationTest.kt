@@ -59,22 +59,26 @@ class MdxLiteRtCpuValidationTest {
             val modelId = arguments.requiredString(ARG_MODEL_ID)
             val contract = bundledContract(context, modelId)
             val profile = contract.toMdxExecutionProfile()
-            val expectedProcessAbi = arguments.requiredString(ARG_PROCESS_ABI)
+            val expectedRuntimeAbi = arguments.requiredString(ARG_PROCESS_ABI)
             val actualProcessAbi = currentProcessAbi().androidName
-            require(actualProcessAbi == expectedProcessAbi) {
-                "Expected $expectedProcessAbi process, got $actualProcessAbi."
+            val runtimeAbi = installedLiteRtRuntimeAbi(context)
+            require(runtimeAbi.androidName == expectedRuntimeAbi) {
+                "Expected $expectedRuntimeAbi LiteRT library, got ${runtimeAbi.androidName}."
             }
             report.put("contractId", contract.contractId)
                 .put("contractConversionRevision", contract.conversion.revision)
                 .put("modelId", modelId)
-                .put("process", processReport(context, actualProcessAbi))
+                .put("process", processReport(context, actualProcessAbi, runtimeAbi.androidName))
 
             if (arguments.getString(ARG_PREFLIGHT_ONLY).toBoolean()) {
-                validateUnsupportedPreflight(profile, report)
+                validateUnsupportedPreflight(profile, runtimeAbi, report)
             } else {
-                validateParityRun(context, arguments, contract, profile, report)
+                validateParityRun(context, arguments, contract, profile, runtimeAbi, report)
             }
-            report.put("process", processReport(context, actualProcessAbi))
+            report.put(
+                "process",
+                processReport(context, actualProcessAbi, runtimeAbi.androidName),
+            )
             report.put("status", "complete")
             reportFile.writeText(report.toString(2))
         } catch (error: Throwable) {
@@ -92,6 +96,7 @@ class MdxLiteRtCpuValidationTest {
         arguments: android.os.Bundle,
         contract: SourceSeparationModelContract,
         profile: MdxExecutionProfile,
+        runtimeAbi: MdxRuntimeAbi,
         report: JSONObject,
     ) {
         val stagingRoot = requireNotNull(context.getExternalFilesDir(null))
@@ -118,6 +123,7 @@ class MdxLiteRtCpuValidationTest {
         val reference = readFloat32(referenceFile, profile.outputTensor.elementCount)
         val processBefore = memorySnapshot()
         val factory = MdxLiteRtCpuInferenceSessionFactory(
+            platformProvider = { MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi) },
             compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
         )
         val provider = ReusableMdxInferenceSessionProvider(factory)
@@ -215,10 +221,12 @@ class MdxLiteRtCpuValidationTest {
 
     private fun validateUnsupportedPreflight(
         profile: MdxExecutionProfile,
+        runtimeAbi: MdxRuntimeAbi,
         report: JSONObject,
     ) {
         val allocator = RejectingAllocator()
         val factory = MdxLiteRtCpuInferenceSessionFactory(
+            platformProvider = { MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi) },
             compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
             sessionAllocator = allocator,
         )
@@ -372,7 +380,11 @@ class MdxLiteRtCpuValidationTest {
         .put("packageName", context.packageName)
         .put("startedAtEpochMs", System.currentTimeMillis())
 
-    private fun processReport(context: Context, processAbi: String): JSONObject {
+    private fun processReport(
+        context: Context,
+        processAbi: String,
+        runtimeAbi: String,
+    ): JSONObject {
         val applicationInfo = context.applicationInfo
         val apkPaths = listOfNotNull(applicationInfo.sourceDir) +
             applicationInfo.splitSourceDirs.orEmpty()
@@ -394,12 +406,24 @@ class MdxLiteRtCpuValidationTest {
         val loadedRuntimeMaps = File("/proc/self/maps").useLines { lines ->
             lines.filter { it.contains("libLiteRt") }.toList()
         }
+        val extractedRuntime = File(applicationInfo.nativeLibraryDir, "libLiteRt.so")
+            .takeIf(File::isFile)
         return JSONObject()
             .put("supportedAbis", JSONArray(Build.SUPPORTED_ABIS.toList()))
             .put("osArch", System.getProperty("os.arch").orEmpty())
             .put("is64Bit", Process.is64Bit())
             .put("resolvedProcessAbi", processAbi)
+            .put("selectedLiteRtRuntimeAbi", runtimeAbi)
             .put("nativeLibraryDir", applicationInfo.nativeLibraryDir)
+            .put(
+                "extractedRuntime",
+                extractedRuntime?.let { runtime ->
+                    JSONObject()
+                        .put("path", runtime.absolutePath)
+                        .put("byteSize", runtime.length())
+                        .put("sha256", runtime.sha256())
+                } ?: JSONObject.NULL,
+            )
             .put("apkInventories", apkInventories)
             .put("loadedRuntimeMaps", JSONArray(loadedRuntimeMaps))
             .put("pid", Process.myPid())
@@ -408,6 +432,26 @@ class MdxLiteRtCpuValidationTest {
             .put("device", Build.DEVICE)
             .put("androidApi", Build.VERSION.SDK_INT)
             .put("fingerprint", Build.FINGERPRINT)
+    }
+
+    private fun installedLiteRtRuntimeAbi(context: Context): MdxRuntimeAbi {
+        val applicationInfo = context.applicationInfo
+        val apkPaths = listOfNotNull(applicationInfo.sourceDir) +
+            applicationInfo.splitSourceDirs.orEmpty()
+        val runtimeAbis = apkPaths.flatMap { path ->
+            ZipFile(path).use { archive ->
+                archive.entries().asSequence()
+                    .map { it.name }
+                    .filter { it.matches(Regex("^lib/[^/]+/libLiteRt\\.so$")) }
+                    .map { entry -> entry.substringAfter("lib/").substringBefore('/') }
+                    .mapNotNull { name -> MdxRuntimeAbi.entries.singleOrNull { it.androidName == name } }
+                    .toList()
+            }
+        }.toSet()
+        require(runtimeAbis.size == 1) {
+            "Validation requires one app-packaged LiteRT ABI, got $runtimeAbis."
+        }
+        return runtimeAbis.single()
     }
 
     private fun memorySnapshot(): JSONObject {

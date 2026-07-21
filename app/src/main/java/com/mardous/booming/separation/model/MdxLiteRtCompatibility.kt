@@ -30,7 +30,7 @@ data class MdxRuntimeCompatibilityRecord(
 
 data class MdxRuntimePlatform(
     val androidApi: Int,
-    val processAbi: MdxRuntimeAbi,
+    val runtimeAbi: MdxRuntimeAbi,
 ) {
     init {
         require(androidApi > 0) { "Android API level must be positive." }
@@ -44,11 +44,15 @@ fun interface MdxRuntimePlatformProvider {
 object AndroidMdxRuntimePlatformProvider : MdxRuntimePlatformProvider {
     override fun current(): MdxRuntimePlatform {
         val osArch = System.getProperty("os.arch").orEmpty()
-        val processAbi = resolveMdxProcessAbi(osArch, Process.is64Bit())
+        val runtimeAbi = resolveMdxRuntimeAbi(
+            osArch = osArch,
+            is64Bit = Process.is64Bit(),
+            supportedAbis = Build.SUPPORTED_ABIS.toList(),
+        )
             ?: throw MdxInferenceCompatibilityException(
                 "Unsupported process architecture: $osArch"
             )
-        return MdxRuntimePlatform(Build.VERSION.SDK_INT, processAbi)
+        return MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi)
     }
 }
 
@@ -102,9 +106,9 @@ object MdxLiteRtCompatibilityResolver {
             )
         }
         val record = profile.runtimeCompatibility.singleOrNull {
-            it.abi == platform.processAbi && it.backend == backend
+            it.abi == platform.runtimeAbi && it.backend == backend
         } ?: return unsupported(
-            "No ${backend.name} compatibility record exists for ${platform.processAbi.androidName}."
+            "No ${backend.name} compatibility record exists for ${platform.runtimeAbi.androidName}."
         )
         return when (record.status) {
             MdxRuntimeSupportStatus.KnownGood -> MdxCompatibilityDecision(
@@ -165,3 +169,19 @@ internal fun resolveMdxProcessAbi(osArch: String, is64Bit: Boolean): MdxRuntimeA
         else -> null
     }
 }
+
+internal fun resolveMdxRuntimeAbi(
+    osArch: String,
+    is64Bit: Boolean,
+    supportedAbis: List<String>,
+): MdxRuntimeAbi? {
+    val processAbi = resolveMdxProcessAbi(osArch, is64Bit)
+    val advertised = supportedAbis.mapNotNull(::mdxRuntimeAbiFromAndroidName)
+    if (processAbi in advertised) return processAbi
+    return advertised.firstOrNull { candidate ->
+        is64Bit == (candidate == MdxRuntimeAbi.Arm64V8a || candidate == MdxRuntimeAbi.X86_64)
+    } ?: processAbi
+}
+
+internal fun mdxRuntimeAbiFromAndroidName(value: String): MdxRuntimeAbi? =
+    MdxRuntimeAbi.entries.singleOrNull { it.androidName == value }

@@ -19,7 +19,8 @@ param(
     [string]$OutputRoot = "",
     [switch]$TestInFlightCancellation,
     [switch]$PreflightOnly,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$SkipInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -79,8 +80,10 @@ try {
         Select-Object -First 1
     if ($null -eq $testApk) { throw "No AndroidTest APK was found." }
 
-    Invoke-Adb install -r -t $appApk.FullName
-    Invoke-Adb install -r -t $testApk.FullName
+    if (-not $SkipInstall) {
+        Invoke-Adb install -r -t $appApk.FullName
+        Invoke-Adb install -r -t $testApk.FullName
+    }
     Invoke-Adb shell am force-stop $package
     & $adb -s $Serial shell monkey -p $package 1 2>$null | Out-Null
     Start-Sleep -Milliseconds 750
