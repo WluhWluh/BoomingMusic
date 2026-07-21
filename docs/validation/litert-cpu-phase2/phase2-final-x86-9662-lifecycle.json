@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase2-final-x86-9662-lifecycle",
+  "status": "complete",
+  "appCommit": "545a1a5f4ac2f4b7174e9b569337c0ad2b32afdb",
+  "catalogSha256": "3bbcfb976ddeed3eb85bf424bfc28bcc54ab5622dda8e4cc912d83d689140e78",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784633516580,
+  "contractId": "uvr_mdxnet_3_9662@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_3_9662",
+  "process": {
+    "supportedAbis": [
+      "x86"
+    ],
+    "osArch": "i686",
+    "is64Bit": false,
+    "resolvedProcessAbi": "x86",
+    "selectedLiteRtRuntimeAbi": "x86",
+    "nativeLibraryDir": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/lib\/x86",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/base.apk!\/lib\/x86\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/x86\/libLiteRt.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 3183624192,
+    "availableDeviceMemoryBytes": 2678566912,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 150994944,
+    "pid": 4564,
+    "manufacturer": "unknown",
+    "model": "Android SDK built for x86",
+    "device": "generic_x86",
+    "androidApi": 26,
+    "fingerprint": "Android\/sdk_phone_x86\/generic_x86:8.0.0\/OSR1.180418.004\/4931640:userdebug\/test-keys"
+  },
+  "compatibilityOverride": null,
+  "fixture": "coast_town_window0",
+  "artifact": {
+    "fileName": "UVR_MDXNET_3_9662_static_float32.tflite",
+    "byteSize": 29700464,
+    "sha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378"
+  },
+  "input": {
+    "fileName": "uvr_mdxnet_3_9662_coast_town_window0_nchw_f32.bin",
+    "byteSize": 8388608,
+    "sha256": "cfe4f6cd85c2f91e94a259886d96eed3c7dcce604642dcfcb9ea1873fb254201"
+  },
+  "reference": {
+    "fileName": "uvr_mdxnet_3_9662_coast_town_window0_ort_nchw_f32.bin",
+    "byteSize": 8388608,
+    "sha256": "4d6e23a417428439cf010b54e690e645445c82a4d89255d83824b80dded933f0"
+  },
+  "processorCountOverride": null,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 1947131,
+    "processCpuMs": 2707,
+    "totalPssKb": 145753,
+    "nativePssKb": 12266,
+    "dalvikPssKb": 19846,
+    "otherPssKb": 113641,
+    "nativeHeapAllocatedBytes": 7303256
+  },
+  "runtimeDiagnostics": "Runtime: LiteRT 2.1.5, backend=LiteRtCpu, threads=4, layout=NHWC, status=Supported, evidence=BoomingSS API 26 x86 report at app commit 6843e435, 2026-07-21",
+  "setupWallMs": 70,
+  "memoryAfterSetup": {
+    "elapsedRealtimeMs": 1947218,
+    "processCpuMs": 2812,
+    "totalPssKb": 201146,
+    "nativePssKb": 35578,
+    "dalvikPssKb": 17590,
+    "otherPssKb": 147978,
+    "nativeHeapAllocatedBytes": 64323152
+  },
+  "processWithSession": {
+    "supportedAbis": [
+      "x86"
+    ],
+    "osArch": "i686",
+    "is64Bit": false,
+    "resolvedProcessAbi": "x86",
+    "selectedLiteRtRuntimeAbi": "x86",
+    "nativeLibraryDir": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/lib\/x86",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/base.apk!\/lib\/x86\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/x86\/libLiteRt.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 3183624192,
+    "availableDeviceMemoryBytes": 2690297856,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 150994944,
+    "pid": 4564,
+    "manufacturer": "unknown",
+    "model": "Android SDK built for x86",
+    "device": "generic_x86",
+    "androidApi": 26,
+    "fingerprint": "Android\/sdk_phone_x86\/generic_x86:8.0.0\/OSR1.180418.004\/4931640:userdebug\/test-keys"
+  },
+  "firstInferenceWallMs": 1830,
+  "reusedInferenceWallMs": 1459,
+  "reusedSameSession": true,
+  "comparisonToOrt": {
+    "snrDb": 97.59860504552219,
+    "cosineSimilarity": 0.9999999999128177,
+    "maxAbsError": 5.953013896942139E-5,
+    "meanAbsError": 2.5748828876016737E-6,
+    "rmse": 4.060401983747919E-6
+  },
+  "reuseComparison": {
+    "snrDb": 1.7976931348623157E308,
+    "cosineSimilarity": 1,
+    "maxAbsError": 0,
+    "meanAbsError": 0,
+    "rmse": 0
+  },
+  "thresholds": {
+    "minimumSnrDb": 93.8,
+    "minimumCosine": 0.999999999,
+    "maximumAbsoluteError": 1.0E-4
+  },
+  "stemValidation": {
+    "modelOutputStem": "VOCALS",
+    "modelOutputScale": 1.034999966621399,
+    "reconstructionMaxAbsError": 1.4901161193847656E-8
+  },
+  "cancellation": {
+    "tested": true,
+    "checks": 3,
+    "elapsedWallMs": 1410,
+    "result": "java.util.concurrent.CancellationException"
+  },
+  "replacement": null,
+  "memoryWithSession": {
+    "elapsedRealtimeMs": 1951965,
+    "processCpuMs": 19901,
+    "totalPssKb": 690170,
+    "nativePssKb": 499774,
+    "dalvikPssKb": 58550,
+    "otherPssKb": 131846,
+    "nativeHeapAllocatedBytes": 581938320
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 1953776,
+    "processCpuMs": 23202,
+    "totalPssKb": 166243,
+    "nativePssKb": 4574,
+    "dalvikPssKb": 58666,
+    "otherPssKb": 103003,
+    "nativeHeapAllocatedBytes": 7916816
+  }
+}

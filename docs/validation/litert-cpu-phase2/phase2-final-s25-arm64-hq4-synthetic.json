@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase2-final-s25-arm64-hq4-synthetic",
+  "status": "complete",
+  "appCommit": "545a1a5f4ac2f4b7174e9b569337c0ad2b32afdb",
+  "catalogSha256": "3bbcfb976ddeed3eb85bf424bfc28bcc54ab5622dda8e4cc912d83d689140e78",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784633284327,
+  "contractId": "uvr_mdxnet_inst_hq_4@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_inst_hq_4",
+  "process": {
+    "supportedAbis": [
+      "arm64-v8a"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~6XB22QjAlaxx7C_i-ufpvQ==\/com.wluhwluh.booming.sourcesep.debug-BHU1FzPYdPILVdjgv4IqOQ==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~6XB22QjAlaxx7C_i-ufpvQ==\/com.wluhwluh.booming.sourcesep.debug-BHU1FzPYdPILVdjgv4IqOQ==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~6XB22QjAlaxx7C_i-ufpvQ==\/com.wluhwluh.booming.sourcesep.debug-BHU1FzPYdPILVdjgv4IqOQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 11658948608,
+    "availableDeviceMemoryBytes": 4550119424,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 31531,
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "device": "pa1q",
+    "androidApi": 35,
+    "fingerprint": "samsung\/pa1qzcx\/pa1q:15\/AP3A.240905.015.A2\/S9310ZCU5AYHA_CHC5AYHA:user\/release-keys"
+  },
+  "compatibilityOverride": null,
+  "fixture": "synthetic_00",
+  "artifact": {
+    "fileName": "UVR-MDX-NET-Inst_HQ_4_static_float32.tflite",
+    "byteSize": 59057268,
+    "sha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742"
+  },
+  "input": {
+    "fileName": "uvr_mdxnet_inst_hq_4_synthetic_00_nchw_f32.bin",
+    "byteSize": 10485760,
+    "sha256": "b6461ad4d87d955794b5c9a86fc3518cab0899e0617975f8621dcd7152d99935"
+  },
+  "reference": {
+    "fileName": "uvr_mdxnet_inst_hq_4_synthetic_00_ort_nchw_f32.bin",
+    "byteSize": 10485760,
+    "sha256": "b8a0afff6f16c312b0d7b1f4c89d5e14ef72a75909a7b0f092d14c13779a8cdc"
+  },
+  "processorCountOverride": null,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 409316281,
+    "processCpuMs": 1365,
+    "totalPssKb": 256794,
+    "nativePssKb": 18588,
+    "dalvikPssKb": 33065,
+    "otherPssKb": 204686,
+    "nativeHeapAllocatedBytes": 19948048
+  },
+  "runtimeDiagnostics": "Runtime: LiteRT 2.1.5, backend=LiteRtCpu, threads=4, layout=NHWC, status=InternalValidationOnly, evidence=Window parity passed on Galaxy S10 and S25, but the approximately 1.1 GiB PSS increase exceeds the provisional 384 MiB hard limit; full-song gate pending",
+  "setupWallMs": 537,
+  "memoryAfterSetup": {
+    "elapsedRealtimeMs": 409316852,
+    "processCpuMs": 1915,
+    "totalPssKb": 1312555,
+    "nativePssKb": 1012489,
+    "dalvikPssKb": 33121,
+    "otherPssKb": 266486,
+    "nativeHeapAllocatedBytes": 1100873696
+  },
+  "processWithSession": {
+    "supportedAbis": [
+      "arm64-v8a"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~6XB22QjAlaxx7C_i-ufpvQ==\/com.wluhwluh.booming.sourcesep.debug-BHU1FzPYdPILVdjgv4IqOQ==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~6XB22QjAlaxx7C_i-ufpvQ==\/com.wluhwluh.booming.sourcesep.debug-BHU1FzPYdPILVdjgv4IqOQ==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~6XB22QjAlaxx7C_i-ufpvQ==\/com.wluhwluh.booming.sourcesep.debug-BHU1FzPYdPILVdjgv4IqOQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 11658948608,
+    "availableDeviceMemoryBytes": 3389452288,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 31531,
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "device": "pa1q",
+    "androidApi": 35,
+    "fingerprint": "samsung\/pa1qzcx\/pa1q:15\/AP3A.240905.015.A2\/S9310ZCU5AYHA_CHC5AYHA:user\/release-keys"
+  },
+  "firstInferenceWallMs": 3465,
+  "reusedInferenceWallMs": 3446,
+  "reusedSameSession": true,
+  "comparisonToOrt": {
+    "snrDb": 89.50038935682208,
+    "cosineSimilarity": 0.9999999994386748,
+    "maxAbsError": 1.1771917343139648E-4,
+    "meanAbsError": 6.914284484307864E-6,
+    "rmse": 9.506239110684965E-6
+  },
+  "reuseComparison": {
+    "snrDb": 1.7976931348623157E308,
+    "cosineSimilarity": 1,
+    "maxAbsError": 0,
+    "meanAbsError": 0,
+    "rmse": 0
+  },
+  "thresholds": {
+    "minimumSnrDb": 89.4,
+    "minimumCosine": 0.999999999,
+    "maximumAbsoluteError": 6.0E-4
+  },
+  "stemValidation": {
+    "modelOutputStem": "INSTRUMENTAL",
+    "modelOutputScale": 1.0190000534057617,
+    "reconstructionMaxAbsError": 1.4551915228366852E-10
+  },
+  "cancellation": null,
+  "replacement": null,
+  "memoryWithSession": {
+    "elapsedRealtimeMs": 409323848,
+    "processCpuMs": 28453,
+    "totalPssKb": 1362362,
+    "nativePssKb": 1031209,
+    "dalvikPssKb": 84367,
+    "otherPssKb": 246661,
+    "nativeHeapAllocatedBytes": 1089520544
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 409324774,
+    "processCpuMs": 29425,
+    "totalPssKb": 307691,
+    "nativePssKb": 10889,
+    "dalvikPssKb": 108419,
+    "otherPssKb": 188258,
+    "nativeHeapAllocatedBytes": 8614672
+  }
+}

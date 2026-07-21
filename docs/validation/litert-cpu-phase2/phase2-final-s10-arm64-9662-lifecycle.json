@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase2-final-s10-arm64-9662-lifecycle",
+  "status": "complete",
+  "appCommit": "545a1a5f4ac2f4b7174e9b569337c0ad2b32afdb",
+  "catalogSha256": "3bbcfb976ddeed3eb85bf424bfc28bcc54ab5622dda8e4cc912d83d689140e78",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784633329334,
+  "contractId": "uvr_mdxnet_3_9662@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_3_9662",
+  "process": {
+    "supportedAbis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~zRFUuugxTSOBYkOvj4K_Rw==\/com.wluhwluh.booming.sourcesep.debug-2yxJKYKAvyhSONC3CcM3Ng==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~zRFUuugxTSOBYkOvj4K_Rw==\/com.wluhwluh.booming.sourcesep.debug-2yxJKYKAvyhSONC3CcM3Ng==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~zRFUuugxTSOBYkOvj4K_Rw==\/com.wluhwluh.booming.sourcesep.debug-2yxJKYKAvyhSONC3CcM3Ng==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 7823921152,
+    "availableDeviceMemoryBytes": 2713935872,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 408944640,
+    "pid": 17752,
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "device": "beyond1q",
+    "androidApi": 31,
+    "fingerprint": "samsung\/beyond1qltezc\/beyond1q:12\/SP1A.210812.016\/G9730ZCU8HWE2:user\/release-keys"
+  },
+  "compatibilityOverride": null,
+  "fixture": "coast_town_window0",
+  "artifact": {
+    "fileName": "UVR_MDXNET_3_9662_static_float32.tflite",
+    "byteSize": 29700464,
+    "sha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378"
+  },
+  "input": {
+    "fileName": "uvr_mdxnet_3_9662_coast_town_window0_nchw_f32.bin",
+    "byteSize": 8388608,
+    "sha256": "cfe4f6cd85c2f91e94a259886d96eed3c7dcce604642dcfcb9ea1873fb254201"
+  },
+  "reference": {
+    "fileName": "uvr_mdxnet_3_9662_coast_town_window0_ort_nchw_f32.bin",
+    "byteSize": 8388608,
+    "sha256": "4d6e23a417428439cf010b54e690e645445c82a4d89255d83824b80dded933f0"
+  },
+  "processorCountOverride": null,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 182485664,
+    "processCpuMs": 2652,
+    "totalPssKb": 267120,
+    "nativePssKb": 45407,
+    "dalvikPssKb": 24437,
+    "otherPssKb": 197142,
+    "nativeHeapAllocatedBytes": 8118288
+  },
+  "runtimeDiagnostics": "Runtime: LiteRT 2.1.5, backend=LiteRtCpu, threads=4, layout=NHWC, status=Supported, evidence=BoomingSS app-packaged LiteRT 2.1.5 reports on Galaxy S10 and S25, runtime commit 8568ab9b, 2026-07-21",
+  "setupWallMs": 559,
+  "memoryAfterSetup": {
+    "elapsedRealtimeMs": 182486276,
+    "processCpuMs": 3360,
+    "totalPssKb": 930716,
+    "nativePssKb": 673496,
+    "dalvikPssKb": 24758,
+    "otherPssKb": 232335,
+    "nativeHeapAllocatedBytes": 705244768
+  },
+  "processWithSession": {
+    "supportedAbis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~zRFUuugxTSOBYkOvj4K_Rw==\/com.wluhwluh.booming.sourcesep.debug-2yxJKYKAvyhSONC3CcM3Ng==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~zRFUuugxTSOBYkOvj4K_Rw==\/com.wluhwluh.booming.sourcesep.debug-2yxJKYKAvyhSONC3CcM3Ng==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~zRFUuugxTSOBYkOvj4K_Rw==\/com.wluhwluh.booming.sourcesep.debug-2yxJKYKAvyhSONC3CcM3Ng==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 7823921152,
+    "availableDeviceMemoryBytes": 2417643520,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 408944640,
+    "pid": 17752,
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "device": "beyond1q",
+    "androidApi": 31,
+    "fingerprint": "samsung\/beyond1qltezc\/beyond1q:12\/SP1A.210812.016\/G9730ZCU8HWE2:user\/release-keys"
+  },
+  "firstInferenceWallMs": 2464,
+  "reusedInferenceWallMs": 2459,
+  "reusedSameSession": true,
+  "comparisonToOrt": {
+    "snrDb": 97.52345253613817,
+    "cosineSimilarity": 0.9999999999109155,
+    "maxAbsError": 5.84721565246582E-5,
+    "meanAbsError": 2.588595632721513E-6,
+    "rmse": 4.095686029635431E-6
+  },
+  "reuseComparison": {
+    "snrDb": 1.7976931348623157E308,
+    "cosineSimilarity": 1,
+    "maxAbsError": 0,
+    "meanAbsError": 0,
+    "rmse": 0
+  },
+  "thresholds": {
+    "minimumSnrDb": 93.8,
+    "minimumCosine": 0.999999999,
+    "maximumAbsoluteError": 1.0E-4
+  },
+  "stemValidation": {
+    "modelOutputStem": "VOCALS",
+    "modelOutputScale": 1.034999966621399,
+    "reconstructionMaxAbsError": 1.4901161193847656E-8
+  },
+  "cancellation": {
+    "tested": true,
+    "checks": 3,
+    "elapsedWallMs": 2728,
+    "result": "java.util.concurrent.CancellationException"
+  },
+  "replacement": {
+    "modelId": "uvr_mdxnet_kara",
+    "contractId": "uvr_mdxnet_kara@1",
+    "artifact": {
+      "fileName": "UVR_MDXNET_KARA_static_float32.tflite",
+      "byteSize": 29700460,
+      "sha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64"
+    },
+    "differentSession": true,
+    "setupWallMs": 399,
+    "diagnostics": "Runtime: LiteRT 2.1.5, backend=LiteRtCpu, threads=4, layout=NHWC, status=Supported, evidence=BoomingSS app-packaged LiteRT 2.1.5 reports on Galaxy S10 and S25, runtime commit 8568ab9b, 2026-07-21"
+  },
+  "memoryWithSession": {
+    "elapsedRealtimeMs": 182494033,
+    "processCpuMs": 34040,
+    "totalPssKb": 937718,
+    "nativePssKb": 662755,
+    "dalvikPssKb": 56725,
+    "otherPssKb": 218113,
+    "nativeHeapAllocatedBytes": 703745712
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 182495154,
+    "processCpuMs": 35311,
+    "totalPssKb": 413786,
+    "nativePssKb": 145959,
+    "dalvikPssKb": 79465,
+    "otherPssKb": 188237,
+    "nativeHeapAllocatedBytes": 6431968
+  }
+}

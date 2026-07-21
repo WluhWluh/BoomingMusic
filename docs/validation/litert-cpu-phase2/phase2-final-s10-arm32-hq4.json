@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase2-final-s10-arm32-hq4",
+  "status": "error",
+  "appCommit": "545a1a5f4ac2f4b7174e9b569337c0ad2b32afdb",
+  "catalogSha256": "3bbcfb976ddeed3eb85bf424bfc28bcc54ab5622dda8e4cc912d83d689140e78",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784633945786,
+  "contractId": "uvr_mdxnet_inst_hq_4@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_inst_hq_4",
+  "process": {
+    "supportedAbis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ],
+    "osArch": "armv8l",
+    "is64Bit": false,
+    "resolvedProcessAbi": "armeabi-v7a",
+    "selectedLiteRtRuntimeAbi": "armeabi-v7a",
+    "nativeLibraryDir": "\/data\/app\/~~hkq9cmWnMTLDf3FkY0fEqQ==\/com.wluhwluh.booming.sourcesep.debug-xS6pqoNzkLS9kHLPnz2T1w==\/lib\/arm",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~hkq9cmWnMTLDf3FkY0fEqQ==\/com.wluhwluh.booming.sourcesep.debug-xS6pqoNzkLS9kHLPnz2T1w==\/base.apk!\/lib\/armeabi-v7a\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~hkq9cmWnMTLDf3FkY0fEqQ==\/com.wluhwluh.booming.sourcesep.debug-xS6pqoNzkLS9kHLPnz2T1w==\/base.apk",
+        "liteRtEntries": [
+          "lib\/armeabi-v7a\/libLiteRt.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 7823921152,
+    "availableDeviceMemoryBytes": 2712207360,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 408944640,
+    "pid": 20400,
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "device": "beyond1q",
+    "androidApi": 31,
+    "fingerprint": "samsung\/beyond1qltezc\/beyond1q:12\/SP1A.210812.016\/G9730ZCU8HWE2:user\/release-keys"
+  },
+  "compatibilityOverride": null,
+  "fixture": "coast_town_window0",
+  "artifact": {
+    "fileName": "UVR-MDX-NET-Inst_HQ_4_static_float32.tflite",
+    "byteSize": 59057268,
+    "sha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742"
+  },
+  "input": {
+    "fileName": "uvr_mdxnet_inst_hq_4_coast_town_window0_nchw_f32.bin",
+    "byteSize": 10485760,
+    "sha256": "b372032e560aacf7842de493bc8379365b63300caa8d62837b774bb865f4d7ed"
+  },
+  "reference": {
+    "fileName": "uvr_mdxnet_inst_hq_4_coast_town_window0_ort_nchw_f32.bin",
+    "byteSize": 10485760,
+    "sha256": "29de449397919db05539f3eaecff0dae4cb7bcb5ee547c85a9609df79de5087b"
+  },
+  "processorCountOverride": null,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 183102248,
+    "processCpuMs": 3097,
+    "totalPssKb": 291790,
+    "nativePssKb": 29358,
+    "dalvikPssKb": 32200,
+    "otherPssKb": 221080,
+    "nativeHeapAllocatedBytes": 14298720
+  },
+  "errorType": "com.google.ai.edge.litert.LiteRtException",
+  "errorMessage": "ERROR: [.\/third_party\/odml\/litert\/litert\/cc\/litert_compiled_model.h:1656]\n└ ERROR: [.\/third_party\/odml\/litert\/litert\/cc\/litert_compiled_model.h:1620]\n└ ERROR: [.\/third_party\/odml\/litert\/litert\/cc\/litert_compiled_model.h:495]",
+  "stackTrace": "com.google.ai.edge.litert.LiteRtException: ERROR: [.\/third_party\/odml\/litert\/litert\/cc\/litert_compiled_model.h:1656]\n└ ERROR: [.\/third_party\/odml\/litert\/litert\/cc\/litert_compiled_model.h:1620]\n└ ERROR: [.\/third_party\/odml\/litert\/litert\/cc\/litert_compiled_model.h:495]\n\tat com.google.ai.edge.litert.CompiledModel.nativeCreateOutputBuffers(Native Method)\n\tat com.google.ai.edge.litert.CompiledModel.access$nativeCreateOutputBuffers(Model.kt:56)\n\tat com.google.ai.edge.litert.CompiledModel$Companion.nativeCreateOutputBuffers(Unknown Source:0)\n\tat com.google.ai.edge.litert.CompiledModel$Companion.access$nativeCreateOutputBuffers(Model.kt:500)\n\tat com.google.ai.edge.litert.CompiledModel.createOutputBuffers(Model.kt:407)\n\tat com.google.ai.edge.litert.CompiledModel.createOutputBuffers$default(Model.kt:404)\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtNativeSessionAllocator.create(MdxLiteRtNativeSessionAllocator.kt:72)\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSessionFactory.create(MdxLiteRtCpuInferenceSessionFactory.kt:42)\n\tat com.mardous.booming.separation.model.ReusableMdxInferenceSessionProvider.acquire(MdxInferenceRuntime.kt:274)\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtCpuValidationTest.validateParityRun(MdxLiteRtCpuValidationTest.kt:181)\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtCpuValidationTest.validateStagedModel(MdxLiteRtCpuValidationTest.kt:92)\n\tat java.lang.reflect.Method.invoke(Native Method)\n\tat org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)\n\tat org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)\n\tat org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)\n\tat org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)\n\tat org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)\n\tat org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)\n\tat org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)\n\tat org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)\n\tat org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)\n\tat org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)\n\tat org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)\n\tat org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)\n\tat org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)\n\tat org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)\n\tat org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)\n\tat org.junit.runners.ParentRunner.run(ParentRunner.java:413)\n\tat androidx.test.ext.junit.runners.AndroidJUnit4.run(AndroidJUnit4.java:162)\n\tat org.junit.runners.Suite.runChild(Suite.java:128)\n\tat org.junit.runners.Suite.runChild(Suite.java:27)\n\tat org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)\n\tat org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)\n\tat org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)\n\tat org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)\n\tat org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)\n\tat org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)\n\tat org.junit.runners.ParentRunner.run(ParentRunner.java:413)\n\tat org.junit.runner.JUnitCore.run(JUnitCore.java:137)\n\tat org.junit.runner.JUnitCore.run(JUnitCore.java:115)\n\tat androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:68)\n\tat androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:59)\n\tat androidx.test.runner.AndroidJUnitRunner.onStart(AndroidJUnitRunner.java:467)\n\tat android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2261)\n",
+  "memoryAfterFailureCleanup": {
+    "elapsedRealtimeMs": 183102816,
+    "processCpuMs": 3756,
+    "totalPssKb": 506644,
+    "nativePssKb": 265318,
+    "dalvikPssKb": 28576,
+    "otherPssKb": 203664,
+    "nativeHeapAllocatedBytes": 14078544
+  }
+}

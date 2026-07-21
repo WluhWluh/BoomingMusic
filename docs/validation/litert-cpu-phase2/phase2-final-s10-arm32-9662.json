@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase2-final-s10-arm32-9662",
+  "status": "complete",
+  "appCommit": "545a1a5f4ac2f4b7174e9b569337c0ad2b32afdb",
+  "catalogSha256": "3bbcfb976ddeed3eb85bf424bfc28bcc54ab5622dda8e4cc912d83d689140e78",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784633441037,
+  "contractId": "uvr_mdxnet_3_9662@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_3_9662",
+  "process": {
+    "supportedAbis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ],
+    "osArch": "armv8l",
+    "is64Bit": false,
+    "resolvedProcessAbi": "armeabi-v7a",
+    "selectedLiteRtRuntimeAbi": "armeabi-v7a",
+    "nativeLibraryDir": "\/data\/app\/~~ihwBHG1E_sqRa-QIkRSIcg==\/com.wluhwluh.booming.sourcesep.debug-9nHXgITOtGuOJfW8V204EQ==\/lib\/arm",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~ihwBHG1E_sqRa-QIkRSIcg==\/com.wluhwluh.booming.sourcesep.debug-9nHXgITOtGuOJfW8V204EQ==\/base.apk!\/lib\/armeabi-v7a\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~ihwBHG1E_sqRa-QIkRSIcg==\/com.wluhwluh.booming.sourcesep.debug-9nHXgITOtGuOJfW8V204EQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/armeabi-v7a\/libLiteRt.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 7823921152,
+    "availableDeviceMemoryBytes": 2822205440,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 408944640,
+    "pid": 18809,
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "device": "beyond1q",
+    "androidApi": 31,
+    "fingerprint": "samsung\/beyond1qltezc\/beyond1q:12\/SP1A.210812.016\/G9730ZCU8HWE2:user\/release-keys"
+  },
+  "compatibilityOverride": null,
+  "fixture": "coast_town_window0",
+  "artifact": {
+    "fileName": "UVR_MDXNET_3_9662_static_float32.tflite",
+    "byteSize": 29700464,
+    "sha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378"
+  },
+  "input": {
+    "fileName": "uvr_mdxnet_3_9662_coast_town_window0_nchw_f32.bin",
+    "byteSize": 8388608,
+    "sha256": "cfe4f6cd85c2f91e94a259886d96eed3c7dcce604642dcfcb9ea1873fb254201"
+  },
+  "reference": {
+    "fileName": "uvr_mdxnet_3_9662_coast_town_window0_ort_nchw_f32.bin",
+    "byteSize": 8388608,
+    "sha256": "4d6e23a417428439cf010b54e690e645445c82a4d89255d83824b80dded933f0"
+  },
+  "processorCountOverride": null,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 182597461,
+    "processCpuMs": 2889,
+    "totalPssKb": 286765,
+    "nativePssKb": 33334,
+    "dalvikPssKb": 27800,
+    "otherPssKb": 216469,
+    "nativeHeapAllocatedBytes": 14293792
+  },
+  "runtimeDiagnostics": "Runtime: LiteRT 2.1.5, backend=LiteRtCpu, threads=4, layout=NHWC, status=Supported, evidence=BoomingSS Galaxy S10 32-bit report at app commit 8568ab9b, 2026-07-21",
+  "setupWallMs": 377,
+  "memoryAfterSetup": {
+    "elapsedRealtimeMs": 182597894,
+    "processCpuMs": 3402,
+    "totalPssKb": 759578,
+    "nativePssKb": 498578,
+    "dalvikPssKb": 19784,
+    "otherPssKb": 232120,
+    "nativeHeapAllocatedBytes": 536232384
+  },
+  "processWithSession": {
+    "supportedAbis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ],
+    "osArch": "armv8l",
+    "is64Bit": false,
+    "resolvedProcessAbi": "armeabi-v7a",
+    "selectedLiteRtRuntimeAbi": "armeabi-v7a",
+    "nativeLibraryDir": "\/data\/app\/~~ihwBHG1E_sqRa-QIkRSIcg==\/com.wluhwluh.booming.sourcesep.debug-9nHXgITOtGuOJfW8V204EQ==\/lib\/arm",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~ihwBHG1E_sqRa-QIkRSIcg==\/com.wluhwluh.booming.sourcesep.debug-9nHXgITOtGuOJfW8V204EQ==\/base.apk!\/lib\/armeabi-v7a\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~ihwBHG1E_sqRa-QIkRSIcg==\/com.wluhwluh.booming.sourcesep.debug-9nHXgITOtGuOJfW8V204EQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/armeabi-v7a\/libLiteRt.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 7823921152,
+    "availableDeviceMemoryBytes": 2565586944,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 408944640,
+    "pid": 18809,
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "device": "beyond1q",
+    "androidApi": 31,
+    "fingerprint": "samsung\/beyond1qltezc\/beyond1q:12\/SP1A.210812.016\/G9730ZCU8HWE2:user\/release-keys"
+  },
+  "firstInferenceWallMs": 2829,
+  "reusedInferenceWallMs": 2981,
+  "reusedSameSession": true,
+  "comparisonToOrt": {
+    "snrDb": 97.49205378395924,
+    "cosineSimilarity": 0.9999999999104828,
+    "maxAbsError": 5.930662155151367E-5,
+    "meanAbsError": 2.5984290896036155E-6,
+    "rmse": 4.1105183789227656E-6
+  },
+  "reuseComparison": {
+    "snrDb": 1.7976931348623157E308,
+    "cosineSimilarity": 1,
+    "maxAbsError": 0,
+    "meanAbsError": 0,
+    "rmse": 0
+  },
+  "thresholds": {
+    "minimumSnrDb": 93.8,
+    "minimumCosine": 0.999999999,
+    "maximumAbsoluteError": 1.0E-4
+  },
+  "stemValidation": {
+    "modelOutputStem": "VOCALS",
+    "modelOutputScale": 1.034999966621399,
+    "reconstructionMaxAbsError": 1.4901161193847656E-8
+  },
+  "cancellation": null,
+  "replacement": null,
+  "memoryWithSession": {
+    "elapsedRealtimeMs": 182603807,
+    "processCpuMs": 26111,
+    "totalPssKb": 817056,
+    "nativePssKb": 514970,
+    "dalvikPssKb": 60360,
+    "otherPssKb": 232640,
+    "nativeHeapAllocatedBytes": 536216368
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 182605026,
+    "processCpuMs": 27942,
+    "totalPssKb": 503270,
+    "nativePssKb": 213042,
+    "dalvikPssKb": 77316,
+    "otherPssKb": 203828,
+    "nativeHeapAllocatedBytes": 4881280
+  }
+}

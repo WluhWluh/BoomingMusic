@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase2-final-x86-hq4-preflight",
+  "status": "complete",
+  "appCommit": "545a1a5f4ac2f4b7174e9b569337c0ad2b32afdb",
+  "catalogSha256": "3bbcfb976ddeed3eb85bf424bfc28bcc54ab5622dda8e4cc912d83d689140e78",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784633586763,
+  "contractId": "uvr_mdxnet_inst_hq_4@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_inst_hq_4",
+  "process": {
+    "supportedAbis": [
+      "x86"
+    ],
+    "osArch": "i686",
+    "is64Bit": false,
+    "resolvedProcessAbi": "x86",
+    "selectedLiteRtRuntimeAbi": "x86",
+    "nativeLibraryDir": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/lib\/x86",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/base.apk!\/lib\/x86\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/x86\/libLiteRt.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 3183624192,
+    "availableDeviceMemoryBytes": 2735083520,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 150994944,
+    "pid": 4820,
+    "manufacturer": "unknown",
+    "model": "Android SDK built for x86",
+    "device": "generic_x86",
+    "androidApi": 26,
+    "fingerprint": "Android\/sdk_phone_x86\/generic_x86:8.0.0\/OSR1.180418.004\/4931640:userdebug\/test-keys"
+  },
+  "compatibilityOverride": null,
+  "preflightOnly": true,
+  "preflightErrorType": "com.mardous.booming.separation.model.MdxInferenceCompatibilityException",
+  "preflightErrorMessage": "The runtime target is explicitly unsupported.",
+  "nativeAllocatorCalls": 0,
+  "modelFileExists": false,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 2017184,
+    "processCpuMs": 2566,
+    "totalPssKb": 109037,
+    "nativePssKb": 9342,
+    "dalvikPssKb": 3072,
+    "otherPssKb": 96623,
+    "nativeHeapAllocatedBytes": 7287992
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 2017198,
+    "processCpuMs": 2577,
+    "totalPssKb": 109117,
+    "nativePssKb": 9342,
+    "dalvikPssKb": 3076,
+    "otherPssKb": 96699,
+    "nativeHeapAllocatedBytes": 7287992
+  }
+}

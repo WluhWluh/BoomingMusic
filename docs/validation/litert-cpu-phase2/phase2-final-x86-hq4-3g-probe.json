@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase2-final-x86-hq4-3g-probe",
+  "status": "error",
+  "appCommit": "545a1a5f4ac2f4b7174e9b569337c0ad2b32afdb",
+  "catalogSha256": "3bbcfb976ddeed3eb85bf424bfc28bcc54ab5622dda8e4cc912d83d689140e78",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784633605591,
+  "contractId": "uvr_mdxnet_inst_hq_4@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_inst_hq_4",
+  "process": {
+    "supportedAbis": [
+      "x86"
+    ],
+    "osArch": "i686",
+    "is64Bit": false,
+    "resolvedProcessAbi": "x86",
+    "selectedLiteRtRuntimeAbi": "x86",
+    "nativeLibraryDir": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/lib\/x86",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/base.apk!\/lib\/x86\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/x86\/libLiteRt.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 3183624192,
+    "availableDeviceMemoryBytes": 2434158592,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 150994944,
+    "pid": 4952,
+    "manufacturer": "unknown",
+    "model": "Android SDK built for x86",
+    "device": "generic_x86",
+    "androidApi": 26,
+    "fingerprint": "Android\/sdk_phone_x86\/generic_x86:8.0.0\/OSR1.180418.004\/4931640:userdebug\/test-keys"
+  },
+  "compatibilityOverride": {
+    "scope": "androidTest-only",
+    "abi": "x86",
+    "backend": "LiteRtCpu",
+    "originalStatus": "Unsupported",
+    "originalEvidence": "BoomingSS API 26 x86 probe at app commit 6843e435: XNNPACK tensor allocation failed with 3.0 GiB RAM",
+    "effectiveStatus": "Untested"
+  },
+  "fixture": "coast_town_window0",
+  "artifact": {
+    "fileName": "UVR-MDX-NET-Inst_HQ_4_static_float32.tflite",
+    "byteSize": 59057268,
+    "sha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742"
+  },
+  "input": {
+    "fileName": "uvr_mdxnet_inst_hq_4_coast_town_window0_nchw_f32.bin",
+    "byteSize": 10485760,
+    "sha256": "b372032e560aacf7842de493bc8379365b63300caa8d62837b774bb865f4d7ed"
+  },
+  "reference": {
+    "fileName": "uvr_mdxnet_inst_hq_4_coast_town_window0_ort_nchw_f32.bin",
+    "byteSize": 10485760,
+    "sha256": "29de449397919db05539f3eaecff0dae4cb7bcb5ee547c85a9609df79de5087b"
+  },
+  "processorCountOverride": 2,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 2036139,
+    "processCpuMs": 2606,
+    "totalPssKb": 150956,
+    "nativePssKb": 9169,
+    "dalvikPssKb": 23928,
+    "otherPssKb": 117859,
+    "nativeHeapAllocatedBytes": 7335928
+  },
+  "runtimeDiagnostics": "Runtime: LiteRT 2.1.5, backend=LiteRtCpu, threads=2, layout=NHWC, status=InternalValidationOnly, evidence=Internal resource probe only; original evidence: BoomingSS API 26 x86 probe at app commit 6843e435: XNNPACK tensor allocation failed with 3.0 GiB RAM",
+  "setupWallMs": 97,
+  "memoryAfterSetup": {
+    "elapsedRealtimeMs": 2036259,
+    "processCpuMs": 2730,
+    "totalPssKb": 267061,
+    "nativePssKb": 64666,
+    "dalvikPssKb": 21684,
+    "otherPssKb": 180711,
+    "nativeHeapAllocatedBytes": 102284376
+  },
+  "processWithSession": {
+    "supportedAbis": [
+      "x86"
+    ],
+    "osArch": "i686",
+    "is64Bit": false,
+    "resolvedProcessAbi": "x86",
+    "selectedLiteRtRuntimeAbi": "x86",
+    "nativeLibraryDir": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/lib\/x86",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/base.apk!\/lib\/x86\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-ixpLJOWqjfiWC0fTh_XTpQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/x86\/libLiteRt.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 3183624192,
+    "availableDeviceMemoryBytes": 2655985664,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 150994944,
+    "pid": 4952,
+    "manufacturer": "unknown",
+    "model": "Android SDK built for x86",
+    "device": "generic_x86",
+    "androidApi": 26,
+    "fingerprint": "Android\/sdk_phone_x86\/generic_x86:8.0.0\/OSR1.180418.004\/4931640:userdebug\/test-keys"
+  },
+  "firstInferenceFailureWallMs": 174,
+  "memoryAtFirstInferenceFailure": {
+    "elapsedRealtimeMs": 2036476,
+    "processCpuMs": 2941,
+    "totalPssKb": 459761,
+    "nativePssKb": 265794,
+    "dalvikPssKb": 33724,
+    "otherPssKb": 160243,
+    "nativeHeapAllocatedBytes": 321316360
+  },
+  "errorType": "com.google.ai.edge.litert.LiteRtException",
+  "errorMessage": "Failed to invoke the compiled model",
+  "stackTrace": "com.google.ai.edge.litert.LiteRtException: Failed to invoke the compiled model\n\tat com.google.ai.edge.litert.CompiledModel.nativeRun(Native Method)\n\tat com.google.ai.edge.litert.CompiledModel.access$nativeRun(Model.kt:56)\n\tat com.google.ai.edge.litert.CompiledModel$Companion.nativeRun(Unknown Source:0)\n\tat com.google.ai.edge.litert.CompiledModel$Companion.access$nativeRun(Model.kt:500)\n\tat com.google.ai.edge.litert.CompiledModel.run(Model.kt:443)\n\tat com.google.ai.edge.litert.CompiledModel.run$default(Model.kt:440)\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSession.run$lambda$2(MdxLiteRtNativeSessionAllocator.kt:139)\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSession$$ExternalSyntheticLambda3.invoke(D8$$SyntheticClass:0)\n\tat com.mardous.booming.separation.model.MdxInferenceRuntimeKt.runNonInterruptibleMdxInference(MdxInferenceRuntime.kt:337)\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSession.run(MdxLiteRtNativeSessionAllocator.kt:138)\n\tat com.mardous.booming.separation.model.MdxInferenceSession.run$default(MdxInferenceRuntime.kt:191)\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtCpuValidationTest.validateParityRun(MdxLiteRtCpuValidationTest.kt:198)\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtCpuValidationTest.validateStagedModel(MdxLiteRtCpuValidationTest.kt:92)\n\tat java.lang.reflect.Method.invoke(Native Method)\n\tat org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)\n\tat org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)\n\tat org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)\n\tat org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)\n\tat org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)\n\tat org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)\n\tat org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)\n\tat org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)\n\tat org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)\n\tat org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)\n\tat org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)\n\tat org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)\n\tat org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)\n\tat org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)\n\tat org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)\n\tat org.junit.runners.ParentRunner.run(ParentRunner.java:413)\n\tat androidx.test.ext.junit.runners.AndroidJUnit4.run(AndroidJUnit4.java:162)\n\tat org.junit.runners.Suite.runChild(Suite.java:128)\n\tat org.junit.runners.Suite.runChild(Suite.java:27)\n\tat org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)\n\tat org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)\n\tat org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)\n\tat org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)\n\tat org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)\n\tat org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)\n\tat org.junit.runners.ParentRunner.run(ParentRunner.java:413)\n\tat org.junit.runner.JUnitCore.run(JUnitCore.java:137)\n\tat org.junit.runner.JUnitCore.run(JUnitCore.java:115)\n\tat androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:68)\n\tat androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:59)\n\tat androidx.test.runner.AndroidJUnitRunner.onStart(AndroidJUnitRunner.java:467)\n\tat android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2074)\n",
+  "memoryAfterFailureCleanup": {
+    "elapsedRealtimeMs": 2036550,
+    "processCpuMs": 3032,
+    "totalPssKb": 407951,
+    "nativePssKb": 266778,
+    "dalvikPssKb": 38376,
+    "otherPssKb": 102797,
+    "nativeHeapAllocatedBytes": 13677520
+  }
+}

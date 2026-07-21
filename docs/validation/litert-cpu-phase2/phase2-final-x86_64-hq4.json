@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase2-final-x86_64-hq4",
+  "status": "complete",
+  "appCommit": "545a1a5f4ac2f4b7174e9b569337c0ad2b32afdb",
+  "catalogSha256": "3bbcfb976ddeed3eb85bf424bfc28bcc54ab5622dda8e4cc912d83d689140e78",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784633692806,
+  "contractId": "uvr_mdxnet_inst_hq_4@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_inst_hq_4",
+  "process": {
+    "supportedAbis": [
+      "x86_64",
+      "arm64-v8a"
+    ],
+    "osArch": "x86_64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "x86_64",
+    "selectedLiteRtRuntimeAbi": "x86_64",
+    "nativeLibraryDir": "\/data\/app\/~~ysrVBSZQdpkpEiEkqQSLcQ==\/com.wluhwluh.booming.sourcesep.debug-Cv6-PexOmCcx-gZHudM8qA==\/lib\/x86_64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~ysrVBSZQdpkpEiEkqQSLcQ==\/com.wluhwluh.booming.sourcesep.debug-Cv6-PexOmCcx-gZHudM8qA==\/base.apk!\/lib\/x86_64\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~ysrVBSZQdpkpEiEkqQSLcQ==\/com.wluhwluh.booming.sourcesep.debug-Cv6-PexOmCcx-gZHudM8qA==\/base.apk",
+        "liteRtEntries": [
+          "lib\/x86_64\/libLiteRt.so",
+          "lib\/x86_64\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 8325386240,
+    "availableDeviceMemoryBytes": 6063894528,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 7665,
+    "manufacturer": "Google",
+    "model": "sdk_gphone16k_x86_64",
+    "device": "emu64xa16k",
+    "androidApi": 37,
+    "fingerprint": "google\/sdk_gphone16k_x86_64\/emu64xa16k:17\/CP21.260330.012\/15545953:userdebug\/dev-keys"
+  },
+  "compatibilityOverride": null,
+  "fixture": "coast_town_window0",
+  "artifact": {
+    "fileName": "UVR-MDX-NET-Inst_HQ_4_static_float32.tflite",
+    "byteSize": 59057268,
+    "sha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742"
+  },
+  "input": {
+    "fileName": "uvr_mdxnet_inst_hq_4_coast_town_window0_nchw_f32.bin",
+    "byteSize": 10485760,
+    "sha256": "b372032e560aacf7842de493bc8379365b63300caa8d62837b774bb865f4d7ed"
+  },
+  "reference": {
+    "fileName": "uvr_mdxnet_inst_hq_4_coast_town_window0_ort_nchw_f32.bin",
+    "byteSize": 10485760,
+    "sha256": "29de449397919db05539f3eaecff0dae4cb7bcb5ee547c85a9609df79de5087b"
+  },
+  "processorCountOverride": null,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 3048982,
+    "processCpuMs": 6425,
+    "totalPssKb": 252269,
+    "nativePssKb": 14429,
+    "dalvikPssKb": 34058,
+    "otherPssKb": 203782,
+    "nativeHeapAllocatedBytes": 18153504
+  },
+  "runtimeDiagnostics": "Runtime: LiteRT 2.1.5, backend=LiteRtCpu, threads=4, layout=NHWC, status=InternalValidationOnly, evidence=Window parity passed on native x86_64, but the approximately 1.3 GiB PSS increase exceeds the provisional 384 MiB hard limit; full-song gate pending",
+  "setupWallMs": 731,
+  "memoryAfterSetup": {
+    "elapsedRealtimeMs": 3049762,
+    "processCpuMs": 7257,
+    "totalPssKb": 1561542,
+    "nativePssKb": 1317643,
+    "dalvikPssKb": 34114,
+    "otherPssKb": 209785,
+    "nativeHeapAllocatedBytes": 1416881872
+  },
+  "processWithSession": {
+    "supportedAbis": [
+      "x86_64",
+      "arm64-v8a"
+    ],
+    "osArch": "x86_64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "x86_64",
+    "selectedLiteRtRuntimeAbi": "x86_64",
+    "nativeLibraryDir": "\/data\/app\/~~ysrVBSZQdpkpEiEkqQSLcQ==\/com.wluhwluh.booming.sourcesep.debug-Cv6-PexOmCcx-gZHudM8qA==\/lib\/x86_64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~ysrVBSZQdpkpEiEkqQSLcQ==\/com.wluhwluh.booming.sourcesep.debug-Cv6-PexOmCcx-gZHudM8qA==\/base.apk!\/lib\/x86_64\/libLiteRt.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~ysrVBSZQdpkpEiEkqQSLcQ==\/com.wluhwluh.booming.sourcesep.debug-Cv6-PexOmCcx-gZHudM8qA==\/base.apk",
+        "liteRtEntries": [
+          "lib\/x86_64\/libLiteRt.so",
+          "lib\/x86_64\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "totalDeviceMemoryBytes": 8325386240,
+    "availableDeviceMemoryBytes": 4753596416,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 7665,
+    "manufacturer": "Google",
+    "model": "sdk_gphone16k_x86_64",
+    "device": "emu64xa16k",
+    "androidApi": 37,
+    "fingerprint": "google\/sdk_gphone16k_x86_64\/emu64xa16k:17\/CP21.260330.012\/15545953:userdebug\/dev-keys"
+  },
+  "firstInferenceWallMs": 2392,
+  "reusedInferenceWallMs": 2360,
+  "reusedSameSession": true,
+  "comparisonToOrt": {
+    "snrDb": 103.43065686375957,
+    "cosineSimilarity": 0.9999999999771086,
+    "maxAbsError": 3.204345703125E-4,
+    "meanAbsError": 6.365689961917656E-6,
+    "rmse": 9.87921387002763E-6
+  },
+  "reuseComparison": {
+    "snrDb": 1.7976931348623157E308,
+    "cosineSimilarity": 1,
+    "maxAbsError": 0,
+    "meanAbsError": 0,
+    "rmse": 0
+  },
+  "thresholds": {
+    "minimumSnrDb": 89.4,
+    "minimumCosine": 0.999999999,
+    "maximumAbsoluteError": 6.0E-4
+  },
+  "stemValidation": {
+    "modelOutputStem": "INSTRUMENTAL",
+    "modelOutputScale": 1.0190000534057617,
+    "reconstructionMaxAbsError": 2.3283064365386963E-10
+  },
+  "cancellation": null,
+  "replacement": null,
+  "memoryWithSession": {
+    "elapsedRealtimeMs": 3054593,
+    "processCpuMs": 25371,
+    "totalPssKb": 1597716,
+    "nativePssKb": 1333302,
+    "dalvikPssKb": 74663,
+    "otherPssKb": 189751,
+    "nativeHeapAllocatedBytes": 1405541472
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 3056288,
+    "processCpuMs": 27442,
+    "totalPssKb": 286682,
+    "nativePssKb": 25290,
+    "dalvikPssKb": 72819,
+    "otherPssKb": 188573,
+    "nativeHeapAllocatedBytes": 6899376
+  }
+}

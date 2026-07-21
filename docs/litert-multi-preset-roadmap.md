@@ -1018,6 +1018,13 @@ Acceptance criteria:
 
 ### Phase 2: Implement LiteRT CPU inference
 
+Status: completed on 2026-07-21. The device matrix, resource decisions, and
+packaging evidence are recorded in
+[`litert-cpu-validation-results.md`](litert-cpu-validation-results.md), with
+checksummed raw reports under [`validation/litert-cpu-phase2/`](validation/litert-cpu-phase2/).
+HQ4 passed 64-bit window parity but remains internal-only because it exceeds
+the provisional memory limit; both 32-bit targets are explicitly unsupported.
+
 Phase 2 deliberately keeps ORT as the production default while LiteRT is
 validated through debug and test entry points. Builds temporarily contain both
 runtimes; final installed-size targets apply after ORT removal in Phase 6, not
@@ -1034,104 +1041,104 @@ JNI/API coverage; it does not use UVR weights.
 
 #### Phase 2A: Runtime-neutral boundary with an ORT baseline
 
-- [ ] Introduce runtime-neutral factory, session, lease, execution-profile,
+- [x] Introduce runtime-neutral factory, session, lease, execution-profile,
   backend-diagnostics, and runtime-settings types. The execution profile binds
   verified model identity, tensor contract, DSP profile, output scale, and
   stem semantics without implementing installed-model selection yet.
-- [ ] Keep flat NCHW tensors as the DSP-facing input/output contract and move
+- [x] Keep flat NCHW tensors as the DSP-facing input/output contract and move
   every direct `OrtSession`, `OnnxTensor`, input-name, output-name, and result
   access out of `MdxRangeSeparator` into an ORT adapter.
-- [ ] Run the current 9482 production path through the new interface with a
+- [x] Run the current 9482 production path through the new interface with a
   behavior-preserving legacy profile before adding LiteRT. Do not change
   scheduler priority, cache paths, output naming, or playback gating.
-- [ ] Construct `MdxDspConfig` and all derived window dimensions from an
+- [x] Construct `MdxDspConfig` and all derived window dimensions from an
   execution profile, while fixing the legacy profile to its current values.
   Add a contract-backed HQ4 configuration test before attempting inference.
-- [ ] Generalize the reusable provider so its cache key includes artifact
+- [x] Generalize the reusable provider so its cache key includes artifact
   SHA-256, contract/pipeline identity, backend, and runtime settings, and so a
   lease never exposes an engine-specific session type.
-- [ ] Add fake-session unit tests for acquire/reuse/replacement/close order,
+- [x] Add fake-session unit tests for acquire/reuse/replacement/close order,
   tensor element counts, backend diagnostics, pause, cancellation, and a
   failed invocation that must not mark a window ready.
-- [ ] Run host unit tests in ordinary CI in addition to lint and assembly.
+- [x] Run host unit tests in ordinary CI in addition to lint and assembly.
 
 #### Phase 2B: LiteRT packaging and native supply chain
 
-- [ ] Pin `com.google.ai.edge.litert:litert:2.1.5` in the version catalog and
+- [x] Pin `com.google.ai.edge.litert:litert:2.1.5` in the version catalog and
   keep all LiteRT API use inside the runtime adapter package.
-- [ ] Vendor the canonical `v2.1.5-bss.1` x86 binary as
+- [x] Vendor the canonical `v2.1.5-bss.1` x86 binary as
   `app/src/main/jniLibs/x86/libLiteRt.so` and record its Release URL, asset
   name, byte size, SHA-256, source commit/toolchain manifest, LiteRT license,
   and third-party notices in the repository.
-- [ ] Add CI checks for the vendored x86 file's hash, ELF32/i386 machine,
+- [x] Add CI checks for the vendored x86 file's hash, ELF32/i386 machine,
   expected LiteRT JNI and C API exports, and dynamic dependency allowlist.
-- [ ] Keep the official LiteRT libraries for `armeabi-v7a`, `arm64-v8a`, and
+- [x] Keep the official LiteRT libraries for `armeabi-v7a`, `arm64-v8a`, and
   `x86_64`; package exactly one `libLiteRt.so` per ABI without `pickFirst`.
   Inspect every ABI split and the universal APK rather than only Gradle's
   merged-native-libs directory.
-- [ ] Add an API 26 pure-x86 instrumentation smoke test with the small
+- [x] Add an API 26 pure-x86 instrumentation smoke test with the small
   Apache-2.0 model so the exact app APK proves that `Environment`,
   `CompiledModel`, `TensorBuffer`, JNI loading, invocation, and close all work.
 
 #### Phase 2C: LiteRT CPU session
 
-- [ ] Implement a CPU session with LiteRT `Environment` and `CompiledModel`.
+- [x] Implement a CPU session with LiteRT `Environment` and `CompiledModel`.
   Create input/output `TensorBuffer` objects once per session and reuse them
   together with NCHW/NHWC conversion scratch buffers for every window.
-- [ ] Resolve minimum API, ABI, backend, and contract compatibility before
+- [x] Resolve minimum API, ABI, backend, and contract compatibility before
   source decoding, cache-run creation, output-file creation, tensor allocation,
   or `CompiledModel.create`. Treat `unsupported` as a hard preflight result;
   permit an `untested` status only in the internal validation path until it is
   promoted by device evidence. A missing ABI/backend status is unsupported,
   not an invitation to guess.
-- [ ] After model creation, validate one named float32 input and output against
+- [x] After model creation, validate one named float32 input and output against
   the exact contract names, static NHWC shapes, element counts, and layouts
   before the first invocation. Reject non-finite output before ISTFT.
-- [ ] Return raw output in canonical NCHW order. Apply
+- [x] Return raw output in canonical NCHW order. Apply
   `modelOutputScale` once after ISTFT, construct the residual from the scaled
   waveform, and map both outputs using the contract's stem semantics.
-- [ ] Use `max(2, min(4, availableProcessors - 1))` as the initial LiteRT CPU
+- [x] Use `max(2, min(4, availableProcessors - 1))` as the initial LiteRT CPU
   thread policy. Record the resolved count in diagnostics but do not expose it
   as a user setting or backup value.
-- [ ] Check cancellation before and after the non-interruptible invocation,
+- [x] Check cancellation before and after the non-interruptible invocation,
   discard an output canceled in flight, and prohibit concurrent session close.
-- [ ] Add unit tests for NCHW/NHWC round trips with non-symmetric dimensions,
+- [x] Add unit tests for NCHW/NHWC round trips with non-symmetric dimensions,
   exact output compensation, residual reconstruction, tensor mismatch,
   non-finite output, compatibility decisions, and session replacement.
-- [ ] Add a factory-spy test proving HQ4/x86 is rejected before
+- [x] Add a factory-spy test proving HQ4/x86 is rejected before
   `CompiledModel.create` or any large tensor allocation.
 
 #### Phase 2D: Internal integration and parity validation
 
-- [ ] Add a debug/internal runner that accepts a locally staged TFLite file
+- [x] Add a debug/internal runner that accepts a locally staged TFLite file
   only after its file identity and complete bundled contract match. Keep it
   out of release UI, normal model acquisition, production defaults, and
   settings persistence. Write only to an isolated validation directory under
   the cache root; do not use the production `SourceSeparationCache`, foreground
   worker, playback gate, or existing 9482 cache identity.
-- [ ] Compare raw NCHW LiteRT output with the frozen ORT tensor reference for
+- [x] Compare raw NCHW LiteRT output with the frozen ORT tensor reference for
   the same checked input, then independently validate compensation, stem
   mapping, and residual reconstruction.
-- [ ] Record the actual process architecture (`SUPPORTED_ABIS`, `os.arch`,
+- [x] Record the actual process architecture (`SUPPORTED_ABIS`, `os.arch`,
   `Process.is64Bit()`), installed APK/split identity, and loaded runtime
   inventory in every device report. An ABI list alone is not sufficient
   evidence that a particular native library executed.
-- [ ] Exercise 9662, KARA, and HQ4 in arm64 processes on S10 and S25 CPU. On
+- [x] Exercise 9662, KARA, and HQ4 in arm64 processes on S10 and S25 CPU. On
   S10, separately install the `armeabi-v7a` split and validate at least 9662
   and KARA; test HQ4 only after the 32-bit compatibility preflight accepts its
   memory budget, otherwise record it as unsupported.
-- [ ] Exercise all three models with the official x86_64 runtime and exercise
+- [x] Exercise all three models with the official x86_64 runtime and exercise
   9662 and KARA with the supplemental API 26 pure-x86 CPU runtime. Route pure
   x86 directly to CPU without attempting GPU setup.
-- [ ] Reconcile `runtimeCompatibility` only from these app-packaged reports:
+- [x] Reconcile `runtimeCompatibility` only from these app-packaged reports:
   update the authoritative contracts in `bss-tflite`, regenerate the bundled
   catalog snapshot, and keep any combination without sufficient evidence
   `untested` or `unsupported`. Do not patch only the app's copied JSON.
-- [ ] Run cancellation before invocation and during a blocking invocation,
+- [x] Run cancellation before invocation and during a blocking invocation,
   session reuse, session replacement, and process restart tests. Confirm the
   unchanged production ORT path still follows existing scheduler and playback
   behavior.
-- [ ] Store the resulting parity, timing, memory, and packaging report with
+- [x] Store the resulting parity, timing, memory, and packaging report with
   the app commit, catalog revision, contract IDs, runtime version, ABI, device,
   Android version, and fixture hashes.
 
