@@ -25,20 +25,22 @@ import java.io.File
 
 class MdxLiteRtCpuInferenceSessionFactoryTest {
     @Test
-    fun `HQ4 x86 is rejected before the session allocator runs`() {
-        val allocator = RecordingAllocator()
+    fun `HQ4 32-bit targets are rejected before the session allocator runs`() {
         val profile = profile("uvr_mdxnet_inst_hq_4")
-        val factory = factory(
-            abi = MdxRuntimeAbi.X86,
-            allocator = allocator,
-            processors = 4,
-        )
+        for (abi in listOf(MdxRuntimeAbi.ArmeabiV7a, MdxRuntimeAbi.X86)) {
+            val allocator = RecordingAllocator()
+            val factory = factory(
+                abi = abi,
+                allocator = allocator,
+                processors = 4,
+            )
 
-        assertThrows(MdxInferenceCompatibilityException::class.java) {
-            factory.create(artifact(profile), profile, MdxRuntimeSettings())
+            assertThrows(MdxInferenceCompatibilityException::class.java) {
+                factory.create(artifact(profile), profile, MdxRuntimeSettings())
+            }
+
+            assertEquals(0, allocator.createCount)
         }
-
-        assertEquals(0, allocator.createCount)
     }
 
     @Test

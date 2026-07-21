@@ -983,8 +983,8 @@ Frozen Phase 1 outputs:
   SHA-256 values. They also freeze output compensation at `1.035` for 9662 and
   KARA and `1.019` for HQ4 before mixture-minus-output reconstruction.
 - The bundled Android catalog is copied from `bss-tflite` revision
-  `815b8361dbe7ddb9e605a6ceafc18e0630d1e861` and pinned by catalog SHA-256
-  `3bbcfb976ddeed3eb85bf424bfc28bcc54ab5622dda8e4cc912d83d689140e78`.
+  `73e6b25c51dd57da62e3eb30ba93d4a1fe8d5ea6` and pinned by catalog SHA-256
+  `a1cb77832cdb28864dd4388ec8b66ca16e25903dde8752c568eaffadb1e45ff5`.
   JSON line endings are fixed to LF so the byte identity survives Windows
   checkouts.
 - Source-declared ONNX metadata remains provenance only. For example, the

@@ -626,8 +626,8 @@
           {
             "abi": "armeabi-v7a",
             "backend": "cpu",
-            "evidence": "No 32-bit ARM inference evidence; HQ4 memory validation is pending",
-            "status": "untested"
+            "evidence": "BoomingSS Galaxy S10 32-bit report at app commit 545a1a5f: LiteRT output-buffer allocation failed before first inference",
+            "status": "unsupported"
           },
           {
             "abi": "x86_64",

@@ -30,7 +30,7 @@ class MdxContractExecutionProfileTest {
     }
 
     @Test
-    fun `HQ4 profile retains its distinct DSP and x86 rejection`() {
+    fun `HQ4 profile retains its distinct DSP and 32-bit rejection`() {
         val contract = catalog.contracts.single { it.modelId == "uvr_mdxnet_inst_hq_4" }
 
         val profile = contract.toMdxExecutionProfile()
@@ -39,13 +39,14 @@ class MdxContractExecutionProfileTest {
         assertEquals(2_560, profile.dspConfig.dimF)
         assertEquals(listOf(1, 2560, 256, 4), profile.outputTensor.shape)
         assertEquals(MdxStem.INSTRUMENTAL, profile.modelOutputStem)
-        assertEquals(
-            MdxRuntimeSupportStatus.Unsupported,
-            profile.runtimeCompatibility.single {
-                it.abi == MdxRuntimeAbi.X86 &&
-                    it.backend == MdxInferenceBackend.LiteRtCpu
-            }.status,
-        )
+        for (abi in listOf(MdxRuntimeAbi.ArmeabiV7a, MdxRuntimeAbi.X86)) {
+            assertEquals(
+                MdxRuntimeSupportStatus.Unsupported,
+                profile.runtimeCompatibility.single {
+                    it.abi == abi && it.backend == MdxInferenceBackend.LiteRtCpu
+                }.status,
+            )
+        }
     }
 
     companion object {
