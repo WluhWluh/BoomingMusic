@@ -352,24 +352,45 @@ transition. Pause keeps the same window-boundary semantics.
 
 ### Backend policy
 
-The default policy should be `Auto`:
+The initial product policy remains `Auto`, but Phase 3 implements it only in
+the isolated internal runner. LiteRT 2.1.5 exposes accelerator discovery and
+GPU-only `CompiledModel` creation, but no supported API that reports delegated
+operator coverage. The policy must therefore avoid pretending that operator
+support can be decided from a static query:
 
-1. Check that the ABI includes the GPU accelerator, delegate creation is
-   supported, the model operators are compatible, and the device has a viable
-   memory budget.
-2. When static eligibility is not enough, run a bounded output-validity probe
-   before committing a full separation worker to GPU.
-3. If initialization, the probe, or a later invocation fails, close the GPU
-   session and recreate the same model on CPU.
-4. Continue the current window on CPU when it is safe to retry.
-5. Record only the backend actually used and the fallback reason in
-   diagnostics and cache timing reports.
+1. For an Auto attempt, preflight the process ABI, packaged accelerator
+   library, exact model/backend compatibility record, known-good CPU fallback,
+   and a conservative memory floor before allocating a GPU resource. An
+   `untested` GPU record, or a GPU probe without CPU fallback, is allowed only
+   in an explicitly labeled internal validation path.
+2. Create an `Environment`, require `Accelerator.GPU` in
+   `getAvailableAccelerators()`, and compile the model with an explicit,
+   versioned GPU option profile. Successful GPU-only compilation and invocation
+   establish operator compatibility for that artifact and runtime profile.
+3. Validate tensor metadata and run a bounded deterministic output probe when
+   required by the eligibility policy. Do not keep a CPU model alive beside the
+   GPU model merely to perform the probe.
+4. Classify eligibility skips, setup failures, probe failures, invocation
+   failures, output-read/validation failures, cancellation, memory exhaustion,
+   and cleanup failures separately.
+5. After a recoverable GPU failure, discard all GPU output, close the complete
+   GPU session, create the same contract on its known-good CPU path, and run
+   the same input window once. Latch that controller to CPU for the remainder
+   of the session; never cycle from GPU to CPU and back to GPU.
+6. Treat cancellation as cancellation rather than backend failure. If GPU
+   cleanup cannot be confirmed, or memory exhaustion makes another large
+   allocation unsafe, end the attempt with a terminal diagnostic instead of
+   creating a concurrent CPU session.
+7. Record the requested policy, GPU option profile, backend that produced the
+   accepted output, setup/probe/inference timings, and typed fallback or
+   terminal reason. A failed GPU result is never reported as successful.
 
 CPU must remain a first-class path, not a test-only fallback. GPU behavior is
-device-dependent, so a failed GPU delegate must never leave playback waiting
+device-dependent, so a failed accelerator must never leave playback waiting
 indefinitely or corrupt a partial cache. The first implementation must not
-offer a `GPU only` mode; a delegate failure must always leave a usable CPU
-path.
+offer a `GPU only` mode. A model without a known-good CPU path, including HQ4
+under the current resource gate, may be exercised on GPU internally but cannot
+be made production-selectable through `Auto`.
 
 The initial CPU thread count is:
 
@@ -377,13 +398,15 @@ The initial CPU thread count is:
 max(2, min(4, availableProcessors - 1))
 ```
 
-S10 and S25 testing should begin at four threads where the formula permits it.
-The exact thread count, device allowlist, memory threshold, and need for a GPU
-validity probe remain tunable from Phase 3 and Phase 7 measurements. Changing
-those values requires full-song wall-time, peak-memory, thermal, cancellation,
-and playback-readiness comparisons; it does not require changing the model
-contract. Backend timing and thread-performance statistics are runtime data
-and remain excluded from backup.
+S10 and S25 fallback testing should begin at four threads where the formula
+permits it. Phase 3 must not change this policy while introducing GPU behavior.
+The exact thread count, production device eligibility, memory threshold, probe
+policy, and GPU precision remain tunable from Phase 7 full-song measurements.
+Changing them requires wall-time, peak-memory, thermal, cancellation, and
+playback-readiness comparisons; it does not require changing the model
+contract. A changed GPU option profile does invalidate its runtime evidence and
+must receive a new profile ID and validation report. Backend timing and thread-
+performance statistics are runtime data and remain excluded from backup.
 
 Only one active inference session should be created per worker/model task.
 Model selection changes should close the old session at a window boundary and
@@ -454,11 +477,12 @@ LiteRT upgrade or x86 patch change requires a new producer release and a new
 reviewed hash before the app updates its vendored binary.
 
 Pure x86 is CPU-only for this stage. `Auto` must skip GPU setup there rather
-than fail into CPU after an avoidable delegate attempt. The initial x86
-validation passed 9662 and KARA inference and numerical comparison; HQ4 failed
-allocation in the tested 2 GB, 32-bit x86 environment. HQ4 must therefore be
-marked unsupported for that baseline and must not become x86-selectable unless
-a later device class passes explicit memory validation.
+than fail into CPU after an avoidable accelerator attempt. The x86 validation
+passed 9662 and KARA inference and numerical comparison. An explicit HQ4 probe
+still failed XNNPACK tensor allocation after the API 26 AVD was expanded to
+3,036 MiB and the CPU policy was reduced to two threads. HQ4 is unsupported for
+the current x86 contract and must not become x86-selectable without a new
+artifact/runtime review and explicit memory validation.
 
 Arm64 devices equivalent to the tested S10 and S25 remain the primary
 performance and GPU targets, but pure x86 CPU support for compatible presets
@@ -1172,9 +1196,11 @@ Acceptance criteria:
 - Unit and connected tests prove that the contract scale is applied exactly
   once and that scaled primary plus residual reconstructs the unclipped input
   window with maximum absolute error at most `0.00001`.
-- HQ4 returns an explicit unsupported compatibility result on the 2 GB x86
-  baseline, and a factory spy confirms no `CompiledModel`, tensor buffer, or
-  large conversion buffer was allocated.
+- HQ4 returns an explicit unsupported compatibility result on the normal x86
+  path, and a factory spy confirms no `CompiledModel`, tensor buffer, or large
+  conversion buffer was allocated. The separate opt-in probe records that
+  allocation still fails with 3,036 MiB AVD RAM and two CPU threads; it does
+  not weaken the preflight block.
 - A cancellation received during invocation waits for the call to return,
   discards its output, does not close the session concurrently, and does not
   mark the segment ready.
@@ -1195,32 +1221,145 @@ Acceptance criteria:
 
 Phase 3 uses the same isolated internal runner as Phase 2. GPU results do not
 enter playback or a production cache until the model repository and
-model-aware cache work in Phases 4 and 5 is complete.
+model-aware cache work in Phases 4 and 5 is complete. Production ORT routing
+must remain unchanged throughout this phase.
 
-- [ ] Add the LiteRT GPU backend behind the same adapter.
-- [ ] Implement ABI, accelerator-library, operator, delegate, and memory
-  eligibility checks plus failure classification.
-- [ ] Add a bounded output-validity probe where static eligibility is
-  insufficient.
-- [ ] Recreate the model on CPU after GPU setup or invocation failure.
-- [ ] Record backend, setup time, inference time, and fallback reason.
-- [ ] Retain the Phase 2 CPU thread policy for fallback initially; tune it only
-  from the recorded S10/S25 full-song matrix rather than changing it while
-  introducing GPU behavior.
-- [ ] Keep `GPU only` out of the initial UI and settings schema.
-- [ ] Verify no failed GPU session leaves the internal runtime job or
-  validation state stuck. Repeat the production worker/playback-gate assertion
-  after Phase 5 integration.
+The implementation must target the API actually shipped by the pinned LiteRT
+2.1.5 AAR. It provides `Environment.getAvailableAccelerators()`,
+`CompiledModel.Options(Accelerator.GPU)`, and `GpuOptions`, while the packaged
+`libLiteRtClGlAccelerator.so` exists only for `arm64-v8a` and `x86_64`. It does
+not expose a supported operator-coverage query or the selected OpenCL/OpenGL
+implementation. Reports must state this evidence boundary rather than infer
+more than the API can prove.
+
+#### Phase 3A: GPU adapter and runtime profiles
+
+- [ ] Add a GPU factory and session beside the CPU implementation under the
+  same runtime-neutral interface. Keep LiteRT API types inside the adapter
+  package and keep flat NCHW arrays at the DSP boundary.
+- [ ] Introduce versioned internal GPU runtime profiles and include the profile
+  ID in the factory/session identity and diagnostics. Begin with explicit
+  `AUTOMATIC + FP32` options as the correctness baseline; evaluate
+  `AUTOMATIC + FP16` as a separate optimization candidate. Do not silently
+  inherit LiteRT defaults or treat forced OpenCL/OpenGL diagnostic runs as the
+  same profile.
+- [ ] Reuse one compiled model, one named input buffer, one named output buffer,
+  and NCHW/NHWC scratch arrays per GPU session. Apply the Phase 2 tensor name,
+  float32, static-shape, element-count, finite-output, and close-order checks
+  without creating a second CPU session alongside it.
+- [ ] Require `Accelerator.GPU` from the created environment before model
+  compilation. Treat successful GPU-only `CompiledModel.create` and invocation
+  as the available operator-compatibility test because LiteRT 2.1.5 has no
+  public delegated-operator coverage API.
+- [ ] Preserve the Phase 2 lease rule: invocation is non-interruptible, close
+  cannot race an in-flight call, cancellation after return discards output,
+  and session replacement occurs only after the active lease is released.
+
+#### Phase 3B: Auto eligibility and one-way fallback
+
+- [ ] Add an `Auto` controller above the low-level GPU and CPU factories. Its
+  key must bind artifact SHA-256, contract/pipeline identity, GPU runtime
+  profile, CPU runtime settings, and process ABI.
+- [ ] Route `armeabi-v7a` and pure `x86` directly to CPU without creating a GPU
+  environment. Permit arm64 GPU attempts only through the internal `untested`
+  compatibility policy in this phase. Treat x86_64 as packaging/API evidence
+  only until an exact GPU compatibility record and representative validation
+  exist; native-library presence alone is not eligibility.
+- [ ] Require a known-good CPU record for the exact model, contract, and ABI
+  before enabling recoverable fallback. Consequently, validate 9662 and KARA
+  as the Auto candidates and keep HQ4 GPU work exploratory while its arm64 CPU
+  path exceeds the resource gate.
+- [ ] Define typed outcomes for static skip, accelerator unavailable, GPU setup,
+  tensor setup, probe write/invoke/read/validation, normal invocation,
+  output read/validation, cancellation, out-of-memory, GPU cleanup, CPU setup,
+  and CPU invocation. Preserve the first failure and attach later cleanup or
+  fallback failures as secondary diagnostics.
+- [ ] Recover only explicitly classified accelerator failures. Do not turn an
+  arbitrary `Throwable`, cancellation, VM error, or memory error into a CPU
+  retry that could hide a programming fault or worsen process pressure.
+- [ ] For a recoverable GPU failure, discard its output, close every GPU
+  resource, create CPU only after cleanup succeeds, and rerun the same input
+  once. Latch the session to CPU after fallback and prohibit repeated retries
+  or a CPU-to-GPU transition.
+- [ ] Do not fall back for cancellation. Treat an unconfirmed GPU cleanup or an
+  out-of-memory condition as terminal for that attempt so Auto cannot retain a
+  large GPU allocation while creating a CPU model.
+- [ ] Keep the Phase 2 CPU formula unchanged and keep `GPU only`, precision,
+  forced API selection, probe controls, and backend timing out of user settings
+  and backup schemas.
+- [ ] Emit structured internal diagnostics for requested policy and profile,
+  eligibility decision, available accelerators, attempted and accepted
+  backend, setup/probe/inference/cleanup timings, fallback stage and reason,
+  and CPU retry result. Do not persist performance history as a preference.
+
+#### Phase 3C: Fault injection and app-packaged device evidence
+
+- [ ] Extend the Phase 2 runner with deterministic GPU reports that pin the app
+  commit, catalog revision, model/runtime hashes, process ABI, Android/device
+  identity, GPU profile, fixture and ORT-reference hashes, and parity thresholds.
+- [ ] Keep complete fixture inputs and ORT reference tensors in AndroidTest
+  staging only. Make the probe policy injectable so Phase 7 can choose a compact
+  production probe without adding full validation tensors to release APKs.
+- [ ] Add host tests with blocking and fault-injecting factories for eligibility
+  skip, setup, probe write/invoke/read/non-finite/parity, normal invocation,
+  output read/non-finite, cancellation, cleanup, CPU recreation, CPU failure,
+  session reuse/replacement, and process-level controller recreation.
+- [ ] On S10 and S25 arm64, run 9662 and KARA against the frozen synthetic and
+  Coast Town fixtures. Establish FP32 correctness first, then measure FP16
+  separately for parity, repeatability, setup/reuse time, and memory. A
+  precision profile cannot borrow another profile's evidence.
+- [ ] Add internal connected-test failpoints around setup, probe, invocation,
+  and output read. On each arm64 device, close at least one real GPU session and
+  prove that a real CPU session recomputes the same 9662 input once.
+- [ ] Prove the strongest evidence available from LiteRT 2.1.5: the APK contains
+  the arm64 accelerator library, the runtime reports `Accelerator.GPU`, the
+  accelerator library appears in the process mappings, the model was requested
+  with the GPU-only profile, and repeated invocation returns valid output.
+  Explicitly record that per-operator placement cannot be queried.
+- [ ] Record snapshots before environment creation, after compilation/buffer
+  allocation, after first and reused inference, and after close. Include total,
+  native, graphics/EGL/mtrack where available, and aggregate PSS rather than
+  relying on Java heap alone.
+- [ ] Exercise HQ4 on S10 and S25 only as an exploratory GPU resource probe.
+  Even a successful window does not make it Auto-selectable while its CPU
+  fallback is not production-approved.
+- [ ] Assert zero GPU allocator calls for `armeabi-v7a` and pure `x86`. An
+  x86_64 emulator may validate loading and API behavior, but its host-backed GPU
+  result must not create a production compatibility record by itself.
+- [ ] Reconcile GPU evidence through authoritative `bss-tflite` contracts and
+  regenerate the bundled catalog; never patch only the app copy. Replace the
+  current deferred evidence with Phase 3 report references. Keep a successful
+  candidate `untested` until Phase 7 full-song, thermal, and playback-readiness
+  gates approve a production profile; use `unsupported` only for a repeatable,
+  explicitly evidenced incompatibility. Phase 3 must not set GPU `known-good`.
+- [ ] Verify no failed GPU session leaves the internal job or validation state
+  stuck. Repeat the cache-ready and playback-gate assertions after Phase 5
+  integrates the controller with model-aware production state.
 
 Acceptance criteria:
 
-- GPU is used where it passes validation.
-- CPU fallback completes the same model window after a forced GPU failure.
-- A failed GPU attempt never exposes its output as successful or ready in the
-  internal runner; the model-aware cache assertion remains a Phase 5 and
-  Phase 7 gate.
-- Thread-policy or probe changes are supported by full-song performance,
-  memory, thermal, cancellation, and readiness measurements on S10 and S25.
+- Every 9662/KARA FP32 cell on S10 and S25 produces either an app-packaged GPU
+  report meeting the Phase 2 model-specific raw-output floors or a repeatable,
+  explicit unsupported result. Only a profile that passes both devices enters
+  Phase 7 as a production candidate. FP16 results are reported separately, do
+  not borrow an FP32 pass, and do not relax thresholds merely to finish Phase 3.
+- Each report proves GPU accelerator discovery, GPU-only model creation,
+  accelerator-library loading, valid repeated output, and the API's lack of an
+  operator-placement query. It does not claim GPU use from ABI inventory alone.
+- Forced recoverable failures at setup, probe, invocation, and output read or
+  validation close GPU first and complete the same input once on known-good
+  CPU. No failed GPU output is accepted, no controller loops back to GPU, and
+  no large GPU and CPU sessions remain live together.
+- Cancellation causes no fallback; out-of-memory or unconfirmed cleanup ends
+  cleanly without another large allocation. Every injected path reaches a
+  terminal success, cancellation, or failure state with no concurrent close,
+  duplicate retry, leaked lease, or permanent loading state.
+- HQ4 and x86_64 GPU reports remain exploratory, and arm32/x86 perform zero GPU
+  allocations. Production inference still routes through ORT, and no catalog
+  GPU record becomes `known-good` before Phase 7.
+- Phase 3 does not change the CPU thread formula or decide that Auto should
+  prefer GPU in production. Full-song wall time, thermal behavior, memory,
+  cancellation, and playback readiness remain Phase 7 gates.
 
 ### Phase 4: Multi-preset repository
 
@@ -1376,8 +1515,11 @@ Acceptance criteria:
 
 ### Phase 7: Full-device validation
 
-- [ ] Test 9662, KARA, and HQ4 on S10 with CPU and eligible GPU paths.
-- [ ] Test all three on S25 with CPU and eligible GPU paths.
+- [ ] Run full worker/playback comparisons for 9662 and KARA on S10 and S25
+  with CPU and each GPU runtime profile still eligible after Phase 3.
+- [ ] Revisit HQ4 on S10 and S25 only if its Phase 3 GPU measurements justify a
+  bounded full-song experiment. Do not allocate its disqualified CPU session
+  or call the result Auto-capable without a known-good fallback.
 - [ ] Install the `armeabi-v7a` split on S10 and run full worker/playback tests
   for every model marked known-good there; confirm any 32-bit HQ4 rejection
   occurs during compatibility preflight.
@@ -1388,8 +1530,8 @@ Acceptance criteria:
 - [ ] Test 9662 and KARA with the supplemental CPU runtime on an API 26 pure
   x86 emulator, including model load, one-window parity, cancellation, and
   session recreation.
-- [ ] Confirm HQ4 is reported as unsupported on the 2 GB x86 baseline without
-  attempting an allocation known to fail.
+- [ ] Confirm HQ4 is reported as unsupported on the expanded 3,036 MiB x86 AVD
+  without repeating the opt-in allocation already known to fail.
 - [ ] Test a missing, altered, or wrong-architecture supplemental runtime and
   confirm that build verification or the localized runtime error fails
   clearly rather than loading another inference engine.
@@ -1401,8 +1543,10 @@ Acceptance criteria:
 - [ ] Compare the initial CPU thread formula with neighboring thread counts on
   S10 and S25 using full-song time, peak PSS, thermal behavior, cancellation,
   and playback readiness before changing the default.
-- [ ] Validate the GPU operator/memory eligibility rules and bounded probe on
-  both devices; record false-positive and false-negative delegate decisions.
+- [ ] Validate GPU library/accelerator discovery, GPU-only compilation, memory
+  eligibility, bounded probe, and one-way fallback on both devices. Record
+  false-positive and false-negative decisions without claiming unavailable
+  per-operator coverage data.
 - [ ] Test Android clear-cache behavior with installed models, partial entries,
   completed entries, hydration PCM, and debug artifacts present.
 - [ ] Test backup format v1 and both settings schema v1 payloads with the
@@ -1438,6 +1582,9 @@ Acceptance criteria:
 - [ ] Evaluate HQ4 against the 64 MiB model, 256/384 MiB peak-PSS, and S10
   lower-device gates; evaluate each ABI runtime against the 10/16 MiB
   target/hard limits and record any model or device-class downgrade.
+- [ ] Decide from the full-song matrix whether production `Auto` should prefer
+  a specific versioned GPU profile or remain CPU-first. Any selected profile
+  must receive new catalog evidence; an FP32 result cannot approve FP16.
 
 Acceptance criteria:
 
@@ -1481,12 +1628,12 @@ Every runtime or model change should run the narrowest applicable checks:
 | Acquisition | Download, verify, install, activate, manual delete, and reinstall |
 | Contract | Schema v1, sidecar/hash pairing, shape, dtype, layout, DSP, stem mapping, and migration rejection |
 | Conversion | Desktop LiteRT/TFLite output versus ORT reference |
-| Runtime | ORT abstraction baseline, NCHW/NHWC conversion, raw parity, output compensation/residual, CPU thread matrix, GPU eligibility/probe, fallback, close/recreate, and cancellation |
+| Runtime | ORT abstraction baseline, NCHW/NHWC conversion, raw parity, output compensation/residual, CPU thread matrix, versioned GPU profiles, eligibility/probe, one-way fallback, close/recreate, and cancellation |
 | Playback | Start, pause/resume, seek, song transition, blend update |
 | Cache | Multiple models per song, deleted custom profile, partial stale/resume, read-only completed playback, FLAC promotion, delete/cleanup, and system clear-cache recovery |
 | Persistence/Backup | Format/schema v1, key allowlists, pending active model, unknown fork payload, canonical/legacy priority, both package directions, and excluded model/cache/per-song data |
 | Lifecycle | Activity recreation, process restart, background worker continuation |
-| Device | Galaxy S10 arm64 and armeabi-v7a, Galaxy S25 arm64, official x86_64 emulator runtime, API 26 pure x86 for 9662/KARA, actual process-ABI evidence, and explicit HQ4 x86 rejection |
+| Device | Galaxy S10/S25 arm64 CPU and GPU evidence, S10 armeabi-v7a CPU, official x86_64 CPU plus GPU packaging/API evidence, API 26 pure x86 CPU for 9662/KARA, actual process-ABI evidence, and explicit HQ4 x86 rejection |
 | Resource budgets | Model/runtime install size, peak PSS, graphics/native memory, thermal behavior, and target/hard-limit decisions |
 | Native supply chain | Pinned source/toolchain, Release hash, ELF/JNI audit, checksums, notices, and GitHub provenance |
 | Packaging | Four ABI splits plus universal APK, one runtime per ABI, native inventory, and APK/install size |
@@ -1599,11 +1746,29 @@ both outcomes.
 
 ### GPU eligibility and CPU threads
 
-Adopt `Auto` as the only initial accelerated mode. Eligibility checks ABI,
-accelerator availability, delegate creation, model operators, and memory; a
-bounded output-validity probe is allowed where static checks are insufficient.
-Any setup, probe, or invocation failure closes the GPU session and recreates
-the model on CPU. Do not expose `GPU only` initially.
+Adopt `Auto` as the only initial accelerated mode, but keep it internal until
+Phase 7 chooses whether production should prefer GPU. The pinned LiteRT 2.1.5
+API can report available accelerators and can create a GPU-only compiled model;
+it cannot report delegated operator coverage or the OpenCL/OpenGL backend chosen
+by `AUTOMATIC`. Eligibility therefore combines ABI/library preflight, exact
+runtime records, a known-good CPU fallback, accelerator discovery, successful
+GPU-only compilation, memory gates, and a bounded deterministic probe.
+
+Version GPU options independently from the model contract. Validate explicit
+`AUTOMATIC + FP32` first and treat `AUTOMATIC + FP16` as a separate candidate
+whose session key, diagnostics, parity data, and compatibility evidence cannot
+be borrowed from FP32. Forced OpenCL/OpenGL runs are diagnostic profiles, not
+silent substitutes. Do not expose precision, forced backend, probe controls,
+or `GPU only` as initial user settings.
+
+After a recoverable setup, probe, invocation, or output-validation failure,
+discard GPU output, close GPU completely, recreate the same contract on CPU,
+and retry the same input once. The controller remains on CPU afterward.
+Cancellation does not trigger fallback; out-of-memory or unconfirmed cleanup
+does not trigger a second large allocation. HQ4 remains GPU-exploratory because
+its current arm64 CPU path cannot satisfy the fallback resource gate. Arm32 and
+x86 skip GPU, while x86_64 library or emulator evidence alone cannot establish
+a production GPU record.
 
 Use this initial CPU thread formula:
 
@@ -1611,11 +1776,12 @@ Use this initial CPU thread formula:
 max(2, min(4, availableProcessors - 1))
 ```
 
-The fallback behavior and diagnostic recording are fixed. The exact device
-eligibility rules, memory threshold, validity probe, and thread count are
-provisional. Tune them only after repeated S10 and S25 full-song comparisons
-of wall time, peak memory, thermal behavior, cancellation, and playback
-readiness. Performance statistics remain runtime data and are never backed up.
+The one-way fallback, cancellation, cleanup, and diagnostic rules are fixed.
+The production device eligibility, memory threshold, validity probe, selected
+GPU profile, and thread count are provisional. Tune them only after repeated
+S10 and S25 full-song comparisons of wall time, peak memory, thermal behavior,
+cancellation, and playback readiness. Performance statistics remain runtime
+data and are never backed up.
 
 ### HQ4 and runtime resource budgets
 
