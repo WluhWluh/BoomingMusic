@@ -29,12 +29,12 @@ class MdxLiteRtCompatibilityTest {
         val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.X86_64)
 
         val production = decision(
-            "uvr_mdxnet_3_9662",
+            "uvr_mdxnet_inst_hq_4",
             platform,
             MdxCompatibilityPolicy.KnownGoodOnly,
         )
         val internal = decision(
-            "uvr_mdxnet_3_9662",
+            "uvr_mdxnet_inst_hq_4",
             platform,
             MdxCompatibilityPolicy.AllowUntestedInternal,
         )
@@ -65,7 +65,7 @@ class MdxLiteRtCompatibilityTest {
         )
 
         assertEquals(MdxCompatibilityOutcome.Unsupported, hq4X86.outcome)
-        assertTrue(hq4X86.evidence.orEmpty().contains("Allocation failed"))
+        assertTrue(hq4X86.evidence.orEmpty().contains("XNNPACK tensor allocation failed"))
         assertEquals(MdxCompatibilityOutcome.Unsupported, missing.outcome)
         assertNull(missing.evidence)
     }

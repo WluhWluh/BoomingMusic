@@ -356,32 +356,32 @@
           {
             "abi": "arm64-v8a",
             "backend": "cpu",
-            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
+            "evidence": "BoomingSS app-packaged LiteRT 2.1.5 reports on Galaxy S10 and S25, runtime commit 8568ab9b, 2026-07-21",
             "status": "known-good"
           },
           {
             "abi": "arm64-v8a",
             "backend": "gpu",
-            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
-            "status": "known-good"
+            "evidence": "BoomingSS GPU adapter and fallback validation is deferred to Phase 3",
+            "status": "untested"
           },
           {
             "abi": "x86",
             "backend": "cpu",
-            "evidence": "bss-litert-android v2.1.5-bss.1 API 26 smoke",
+            "evidence": "BoomingSS API 26 x86 report at app commit 6843e435, 2026-07-21",
             "status": "known-good"
           },
           {
             "abi": "armeabi-v7a",
             "backend": "cpu",
-            "evidence": "Official LiteRT ABI present; device validation pending",
-            "status": "untested"
+            "evidence": "BoomingSS Galaxy S10 32-bit report at app commit 8568ab9b, 2026-07-21",
+            "status": "known-good"
           },
           {
             "abi": "x86_64",
             "backend": "cpu",
-            "evidence": "Official LiteRT ABI present; native x86_64 validation pending",
-            "status": "untested"
+            "evidence": "BoomingSS native x86_64 report at app commit 6843e435, 2026-07-21",
+            "status": "known-good"
           }
         ]
       },
@@ -482,32 +482,32 @@
           {
             "abi": "arm64-v8a",
             "backend": "cpu",
-            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
+            "evidence": "BoomingSS app-packaged LiteRT 2.1.5 reports on Galaxy S10 and S25, runtime commit 8568ab9b, 2026-07-21",
             "status": "known-good"
           },
           {
             "abi": "arm64-v8a",
             "backend": "gpu",
-            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
-            "status": "known-good"
+            "evidence": "BoomingSS GPU adapter and fallback validation is deferred to Phase 3",
+            "status": "untested"
           },
           {
             "abi": "x86",
             "backend": "cpu",
-            "evidence": "bss-litert-android v2.1.5-bss.1 API 26 smoke",
+            "evidence": "BoomingSS API 26 x86 report at app commit 6843e435, 2026-07-21",
             "status": "known-good"
           },
           {
             "abi": "armeabi-v7a",
             "backend": "cpu",
-            "evidence": "Official LiteRT ABI present; device validation pending",
-            "status": "untested"
+            "evidence": "BoomingSS Galaxy S10 32-bit report at app commit 8568ab9b, 2026-07-21",
+            "status": "known-good"
           },
           {
             "abi": "x86_64",
             "backend": "cpu",
-            "evidence": "Official LiteRT ABI present; native x86_64 validation pending",
-            "status": "untested"
+            "evidence": "BoomingSS native x86_64 report at app commit 6843e435, 2026-07-21",
+            "status": "known-good"
           }
         ]
       },
@@ -608,31 +608,31 @@
           {
             "abi": "arm64-v8a",
             "backend": "cpu",
-            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
-            "status": "known-good"
+            "evidence": "Window parity passed on Galaxy S10 and S25, but the approximately 1.1 GiB PSS increase exceeds the provisional 384 MiB hard limit; full-song gate pending",
+            "status": "untested"
           },
           {
             "abi": "arm64-v8a",
             "backend": "gpu",
-            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
-            "status": "known-good"
+            "evidence": "BoomingSS GPU adapter and fallback validation is deferred to Phase 3",
+            "status": "untested"
           },
           {
             "abi": "x86",
             "backend": "cpu",
-            "evidence": "Allocation failed on the 2 GB API 26 x86 baseline",
+            "evidence": "BoomingSS API 26 x86 probe at app commit 6843e435: XNNPACK tensor allocation failed with 3.0 GiB RAM",
             "status": "unsupported"
           },
           {
             "abi": "armeabi-v7a",
             "backend": "cpu",
-            "evidence": "Official LiteRT ABI present; memory validation pending",
+            "evidence": "No 32-bit ARM inference evidence; HQ4 memory validation is pending",
             "status": "untested"
           },
           {
             "abi": "x86_64",
             "backend": "cpu",
-            "evidence": "Official LiteRT ABI present; native x86_64 validation pending",
+            "evidence": "Window parity passed on native x86_64, but the approximately 1.3 GiB PSS increase exceeds the provisional 384 MiB hard limit; full-song gate pending",
             "status": "untested"
           }
         ]
@@ -1005,8 +1005,8 @@
       "stemUi": "vocals-instrumental",
       "supportLevel": "recommended",
       "validation": {
-        "androidCpu": "passed",
-        "androidGpu": "passed",
+        "androidCpu": "partial",
+        "androidGpu": "pending",
         "conversion": "passed",
         "desktopNumerical": "passed",
         "fullSong": "pending"
@@ -1126,7 +1126,7 @@
       "supportLevel": "recommended",
       "validation": {
         "androidCpu": "passed",
-        "androidGpu": "passed",
+        "androidGpu": "pending",
         "conversion": "passed",
         "desktopNumerical": "passed",
         "fullSong": "pending"
@@ -1161,7 +1161,7 @@
       "supportLevel": "recommended",
       "validation": {
         "androidCpu": "passed",
-        "androidGpu": "passed",
+        "androidGpu": "pending",
         "conversion": "passed",
         "desktopNumerical": "passed",
         "fullSong": "pending"
