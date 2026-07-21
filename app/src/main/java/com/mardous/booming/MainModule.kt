@@ -62,6 +62,8 @@ import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.model.SourceSeparationModelRepository
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.ui.screen.equalizer.EqualizerViewModel
 import com.mardous.booming.ui.screen.info.InfoViewModel
 import com.mardous.booming.ui.screen.library.LibraryViewModel
@@ -75,6 +77,7 @@ import com.mardous.booming.ui.screen.library.years.YearDetailViewModel
 import com.mardous.booming.ui.screen.lyrics.LyricsViewModel
 import com.mardous.booming.ui.screen.player.PlayerViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
+import com.mardous.booming.ui.screen.player.SourceSeparationPresetManagementViewModel
 import com.mardous.booming.ui.screen.sleeptimer.SleepTimerViewModel
 import com.mardous.booming.ui.screen.tageditor.TagEditorViewModel
 import com.mardous.booming.ui.screen.update.UpdateViewModel
@@ -149,6 +152,15 @@ private val mainModule = module {
     }
     single {
         SourceSeparationModelRepository(context = androidContext())
+    }
+    single {
+        SourceSeparationPresetRepository(
+            context = androidContext(),
+            preferences = get(),
+        )
+    }
+    single {
+        SourceSeparationPresetDownloader(repository = get())
     }
     single {
         SourceSeparationEngine(context = androidContext())
@@ -300,6 +312,13 @@ private val viewModule = module {
             sourceSeparationEngine = get(),
             sourceSeparationModelRepository = get(),
             sourceSeparationForegroundWorkerCoordinator = get(),
+        )
+    }
+
+    viewModel {
+        SourceSeparationPresetManagementViewModel(
+            repository = get(),
+            downloader = get(),
         )
     }
 

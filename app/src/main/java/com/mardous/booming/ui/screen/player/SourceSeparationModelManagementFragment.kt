@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.mardous.booming.BuildConfig
 import com.mardous.booming.R
 import com.mardous.booming.extensions.files.asReadableFileSize
 import com.mardous.booming.extensions.isLandscape
@@ -60,11 +61,13 @@ import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
 import com.mardous.booming.ui.component.compose.TitledCard
 import com.mardous.booming.ui.theme.BoomingMusicTheme
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
+import org.koin.androidx.viewmodel.ext.android.viewModel
 import java.util.Locale
 
 class SourceSeparationModelManagementFragment : BottomSheetDialogFragment() {
 
     private val viewModel: PlayerViewModel by activityViewModel()
+    private val presetViewModel: SourceSeparationPresetManagementViewModel by viewModel()
     private val importModelLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
@@ -91,24 +94,39 @@ class SourceSeparationModelManagementFragment : BottomSheetDialogFragment() {
             )
             setContent {
                 BoomingMusicTheme {
-                    val state by viewModel.sourceSeparationModelStateFlow.collectAsState()
-                    SourceSeparationModelManagementSheet(
-                        state = state,
-                        onImport = {
-                            importModelLauncher.launch(
-                                arrayOf(
-                                    "application/octet-stream",
-                                    "application/x-onnx",
-                                    "application/*",
-                                    "*/*",
-                                ),
-                            )
-                        },
-                        onDownloadPreset = viewModel::downloadPresetSourceSeparationModel,
-                        onDownloadUrl = viewModel::downloadSourceSeparationModel,
-                        onDelete = viewModel::deleteSourceSeparationModel,
-                        onRefresh = viewModel::refreshSourceSeparationModelState,
-                    )
+                    if (BuildConfig.DEBUG) {
+                        val state by presetViewModel.state.collectAsState()
+                        SourceSeparationPresetManagementSheet(
+                            state = state,
+                            onDownload = presetViewModel::download,
+                            onCancelDownload = presetViewModel::cancelDownload,
+                            onUse = presetViewModel::requestUse,
+                            onDelete = presetViewModel::delete,
+                            onConfirmExperimental = presetViewModel::confirmExperimentalUse,
+                            onDismissExperimental = presetViewModel::dismissExperimentalUse,
+                            onClearError = presetViewModel::clearError,
+                            onRefresh = presetViewModel::refresh,
+                        )
+                    } else {
+                        val state by viewModel.sourceSeparationModelStateFlow.collectAsState()
+                        SourceSeparationModelManagementSheet(
+                            state = state,
+                            onImport = {
+                                importModelLauncher.launch(
+                                    arrayOf(
+                                        "application/octet-stream",
+                                        "application/x-onnx",
+                                        "application/*",
+                                        "*/*",
+                                    ),
+                                )
+                            },
+                            onDownloadPreset = viewModel::downloadPresetSourceSeparationModel,
+                            onDownloadUrl = viewModel::downloadSourceSeparationModel,
+                            onDelete = viewModel::deleteSourceSeparationModel,
+                            onRefresh = viewModel::refreshSourceSeparationModelState,
+                        )
+                    }
                 }
             }
         }

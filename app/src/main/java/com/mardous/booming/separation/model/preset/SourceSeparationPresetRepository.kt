@@ -10,6 +10,7 @@ import com.mardous.booming.separation.model.contract.SourceSeparationModelContra
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractException
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractValidator
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
+import com.mardous.booming.separation.model.contract.CatalogSupportLevel
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import java.io.File
@@ -51,6 +52,8 @@ class SourceSeparationPresetRepository internal constructor(
     private val lock = Any()
 
     fun catalogEntries() = catalog.entries
+
+    internal fun catalogSnapshot(): SourceSeparationModelCatalog = catalog
 
     /**
      * Resolves the immutable Release asset for one official catalog entry.
@@ -179,7 +182,7 @@ class SourceSeparationPresetRepository internal constructor(
         customProfile: SourceSeparationCustomModelProfile? = null,
         expectedOfficialPreset: SourceSeparationOfficialPreset? = null,
         onProgress: (Long) -> Unit = {},
-    ): SourceSeparationInstalledPreset = synchronized(lock) {
+    ): SourceSeparationInstalledPreset {
         requireSafeTfliteFileName(originalFileName)
         val stagingDirectory = File(stagingRoot(), UUID.randomUUID().toString())
         val temporaryPayload = File(stagingDirectory, TEMPORARY_PAYLOAD_NAME)
@@ -238,23 +241,6 @@ class SourceSeparationPresetRepository internal constructor(
             throw error
         }
 
-        val destinationDirectory = modelDirectory(copied.sha256)
-        readInstalledPreset(destinationDirectory)?.let { existing ->
-            if (existing.bindingKind == SourceSeparationPresetBindingKind.CustomProfile &&
-                customProfile != null
-            ) {
-                customProfileStore.write(customProfile)
-            }
-            stagingDirectory.deleteRecursively()
-            return existing
-        }
-        if (destinationDirectory.exists()) {
-            stagingDirectory.deleteRecursively()
-            throw SourceSeparationPresetInstallException(
-                "Installed model directory is incomplete: ${copied.sha256}",
-            )
-        }
-
         val stagedModel = File(stagingDirectory, binding.fileName)
         if (!temporaryPayload.renameTo(stagedModel)) {
             temporaryPayload.copyTo(stagedModel, overwrite = true)
@@ -276,30 +262,49 @@ class SourceSeparationPresetRepository internal constructor(
         )
         writeRecord(File(stagingDirectory, INSTALL_RECORD_FILE_NAME), record)
 
-        if (!stagingDirectory.renameTo(destinationDirectory)) {
-            if (!destinationDirectory.mkdirs()) {
+        return synchronized(lock) {
+            val destinationDirectory = modelDirectory(copied.sha256)
+            readInstalledPreset(destinationDirectory)?.let { existing ->
+                if (existing.bindingKind == SourceSeparationPresetBindingKind.CustomProfile &&
+                    customProfile != null
+                ) {
+                    customProfileStore.write(customProfile)
+                }
+                stagingDirectory.deleteRecursively()
+                return@synchronized existing
+            }
+            if (destinationDirectory.exists()) {
                 stagingDirectory.deleteRecursively()
                 throw SourceSeparationPresetInstallException(
-                    "Unable to create installed model directory.",
+                    "Installed model directory is incomplete: ${copied.sha256}",
                 )
             }
-            stagedModel.copyTo(File(destinationDirectory, binding.fileName), overwrite = false)
-            File(stagingDirectory, INSTALL_RECORD_FILE_NAME).copyTo(
-                File(destinationDirectory, INSTALL_RECORD_FILE_NAME),
-                overwrite = false,
-            )
-            stagingDirectory.deleteRecursively()
-        }
-        binding.customProfile?.let { profile ->
-            try {
-                customProfileStore.write(profile)
-            } catch (error: Throwable) {
-                destinationDirectory.deleteRecursively()
-                throw error
+
+            if (!stagingDirectory.renameTo(destinationDirectory)) {
+                if (!destinationDirectory.mkdirs()) {
+                    stagingDirectory.deleteRecursively()
+                    throw SourceSeparationPresetInstallException(
+                        "Unable to create installed model directory.",
+                    )
+                }
+                stagedModel.copyTo(File(destinationDirectory, binding.fileName), overwrite = false)
+                File(stagingDirectory, INSTALL_RECORD_FILE_NAME).copyTo(
+                    File(destinationDirectory, INSTALL_RECORD_FILE_NAME),
+                    overwrite = false,
+                )
+                stagingDirectory.deleteRecursively()
             }
-        }
-        return requireNotNull(readInstalledPreset(destinationDirectory)) {
-            "Installed model metadata could not be read."
+            binding.customProfile?.let { profile ->
+                try {
+                    customProfileStore.write(profile)
+                } catch (error: Throwable) {
+                    destinationDirectory.deleteRecursively()
+                    throw error
+                }
+            }
+            requireNotNull(readInstalledPreset(destinationDirectory)) {
+                "Installed model metadata could not be read."
+            }
         }
     }
 
@@ -321,7 +326,11 @@ class SourceSeparationPresetRepository internal constructor(
                 if (!eligibility.allowed) {
                     throw SourceSeparationPresetActivationException(eligibility)
                 }
-                if (eligibility.requiresExperimentalConfirmation && !experimentalConfirmed) {
+                val isExperimental = catalog.entries.single { it.modelId == installed.modelId }
+                    .supportLevel == CatalogSupportLevel.Experimental
+                if ((eligibility.requiresExperimentalConfirmation || isExperimental) &&
+                    !experimentalConfirmed
+                ) {
                     throw SourceSeparationPresetActivationException(
                         SourceSeparationPresetSelectionEligibility(
                             allowed = false,
