@@ -137,6 +137,37 @@ class SourceSeparationPresetRepositoryTest {
     }
 
     @Test
+    fun `manual custom profile cannot activate when structural inspection is unavailable`() {
+        val payload = "custom-model".encodeToByteArray()
+        fixture(
+            officialPayload = "official-model".encodeToByteArray(),
+            structuralInspector = SourceSeparationPresetStructuralInspector { _, _ ->
+                SourceSeparationPresetStructuralInspection.Unavailable("x86 inspection unavailable")
+            },
+        ).use { fixture ->
+            val installed = fixture.repository.install(
+                input = ByteArrayInputStream(payload),
+                originalFileName = "custom.tflite",
+                origin = SourceSeparationInstalledPresetOrigin.ImportedFile,
+                customProfile = customProfile(payload),
+            )
+
+            val error = assertThrows(SourceSeparationPresetActivationException::class.java) {
+                fixture.repository.activate(
+                    sha256 = installed.sha256,
+                    platform = MdxRuntimePlatform(26, MdxRuntimeAbi.X86),
+                    scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                )
+            }
+            assertEquals(
+                SourceSeparationPresetSelectionBlockReason
+                    .CustomModelStructuralInspectionUnavailable,
+                error.eligibility.blockReason,
+            )
+        }
+    }
+
+    @Test
     fun `experimental official model requires confirmation during internal validation`() {
         val payload = "experimental-model".encodeToByteArray()
         fixture(
@@ -232,6 +263,10 @@ class SourceSeparationPresetRepositoryTest {
     private fun fixture(
         officialPayload: ByteArray,
         catalog: SourceSeparationModelCatalog = catalog(officialPayload),
+        structuralInspector: SourceSeparationPresetStructuralInspector =
+            SourceSeparationPresetStructuralInspector { _, _ ->
+                SourceSeparationPresetStructuralInspection.Compatible(1, 1)
+            },
     ): RepositoryFixture {
         val root = Files.createTempDirectory("source-separation-preset-test").toFile()
         val store = InMemoryActiveModelStore()
@@ -241,6 +276,7 @@ class SourceSeparationPresetRepositoryTest {
             activeModelStore = store,
             clock = { 1_000L },
             customProfileStore = FileSourceSeparationCustomProfileStore(root.resolve("profiles")),
+            structuralInspector = structuralInspector,
         )
         return RepositoryFixture(root, repository)
     }

@@ -30,6 +30,8 @@ enum class SourceSeparationPresetSelectionBlockReason {
     ExperimentalFullSongValidationPending,
     ExperimentalConfirmationRequired,
     UnsupportedCustomModel,
+    CustomModelStructuralInspectionUnavailable,
+    CustomModelStructuralInspectionFailed,
 }
 
 data class SourceSeparationPresetSelectionEligibility(

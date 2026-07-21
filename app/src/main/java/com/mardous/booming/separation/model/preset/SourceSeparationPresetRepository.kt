@@ -36,6 +36,8 @@ class SourceSeparationPresetRepository internal constructor(
         FileSourceSeparationCustomProfileStore(
             File(rootDirectory.parentFile, CUSTOM_PROFILE_ROOT_DIRECTORY.substringAfterLast('/')),
         ),
+    private val structuralInspector: SourceSeparationPresetStructuralInspector =
+        UnavailableSourceSeparationPresetStructuralInspector,
 ) {
     constructor(
         context: Context,
@@ -47,6 +49,7 @@ class SourceSeparationPresetRepository internal constructor(
         customProfileStore = FileSourceSeparationCustomProfileStore(
             File(context.filesDir, CUSTOM_PROFILE_ROOT_DIRECTORY),
         ),
+        structuralInspector = AndroidSourceSeparationPresetStructuralInspector,
     )
 
     private val lock = Any()
@@ -87,6 +90,10 @@ class SourceSeparationPresetRepository internal constructor(
             releaseTag = release.tag,
             downloadUrl = release.url,
         )
+    }
+
+    fun hasOfficialArtifact(sha256: String): Boolean = catalog.artifacts.any { artifact ->
+        artifact.tflite?.sha256.equals(sha256, ignoreCase = true)
     }
 
     fun installedModels(): List<SourceSeparationInstalledPreset> = synchronized(lock) {
@@ -364,6 +371,22 @@ class SourceSeparationPresetRepository internal constructor(
                 requireInternalSelection(scope)
                 val profile = requireNotNull(installed.customProfile)
                 SourceSeparationModelContractValidator.validateCustomProfile(profile)
+                when (val inspection = structuralInspector.inspect(installed.file, platform)) {
+                    is SourceSeparationPresetStructuralInspection.Compatible -> Unit
+                    is SourceSeparationPresetStructuralInspection.Unavailable -> {
+                        throw customProfileActivationException(
+                            SourceSeparationPresetSelectionBlockReason
+                                .CustomModelStructuralInspectionUnavailable,
+                        )
+                    }
+
+                    is SourceSeparationPresetStructuralInspection.Incompatible -> {
+                        throw customProfileActivationException(
+                            SourceSeparationPresetSelectionBlockReason
+                                .CustomModelStructuralInspectionFailed,
+                        )
+                    }
+                }
                 SourceSeparationActiveModelReference(
                     modelId = profile.modelId,
                     artifactSha256 = installed.sha256,
@@ -465,6 +488,16 @@ class SourceSeparationPresetRepository internal constructor(
             )
         }
     }
+
+    private fun customProfileActivationException(
+        reason: SourceSeparationPresetSelectionBlockReason,
+    ): SourceSeparationPresetActivationException = SourceSeparationPresetActivationException(
+        SourceSeparationPresetSelectionEligibility(
+            allowed = false,
+            requiresExperimentalConfirmation = false,
+            blockReason = reason,
+        ),
+    )
 
     private fun readInstalledPreset(directory: File): SourceSeparationInstalledPreset? {
         if (!directory.isDirectory) return null
