@@ -21,19 +21,18 @@ The target experience is:
 
 ## Reference Implementation
 
-The starting technical reference is the separate local prototype at:
-
-`C:\Users\User\Documents\MusicSourceSeparation`
+The starting technical reference is the separate
+[MusicSourceSeparation Android research and benchmark repository](https://github.com/WluhWluh/MusicSourceSeparation).
 
 Important reference components:
 
-- `docs/model_contracts.md`
-- `app/src/main/java/com/example/musicsourceseparation/model/MdxDspConfig.kt`
-- `app/src/main/java/com/example/musicsourceseparation/model/MdxSpectrogram.kt`
-- `app/src/main/java/com/example/musicsourceseparation/model/MdxRangeSeparator.kt`
-- `app/src/main/java/com/example/musicsourceseparation/model/MdxRuntimeSettings.kt`
-- `app/src/main/java/com/example/musicsourceseparation/audio/AudioPcmDecoder.kt`
-- `app/src/main/java/com/example/musicsourceseparation/audio/WavFileWriter.kt`
+- [`docs/model_contracts.md`](https://github.com/WluhWluh/MusicSourceSeparation/blob/main/docs/model_contracts.md)
+- [`MdxDspConfig.kt`](https://github.com/WluhWluh/MusicSourceSeparation/blob/main/app/src/main/java/com/example/musicsourceseparation/model/MdxDspConfig.kt)
+- [`MdxSpectrogram.kt`](https://github.com/WluhWluh/MusicSourceSeparation/blob/main/app/src/main/java/com/example/musicsourceseparation/model/MdxSpectrogram.kt)
+- [`MdxRangeSeparator.kt`](https://github.com/WluhWluh/MusicSourceSeparation/blob/main/app/src/main/java/com/example/musicsourceseparation/model/MdxRangeSeparator.kt)
+- [`MdxRuntimeSettings.kt`](https://github.com/WluhWluh/MusicSourceSeparation/blob/main/app/src/main/java/com/example/musicsourceseparation/model/MdxRuntimeSettings.kt)
+- [`AudioPcmDecoder.kt`](https://github.com/WluhWluh/MusicSourceSeparation/blob/main/app/src/main/java/com/example/musicsourceseparation/audio/AudioPcmDecoder.kt)
+- [`WavFileWriter.kt`](https://github.com/WluhWluh/MusicSourceSeparation/blob/main/app/src/main/java/com/example/musicsourceseparation/audio/WavFileWriter.kt)
 
 The preferred first model is `UVR_MDXNET_9482.onnx` because real-device testing on a Samsung S25 showed good enough quality with roughly quarter-duration processing time for full-song output.
 

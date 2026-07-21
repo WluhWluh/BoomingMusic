@@ -73,13 +73,14 @@ rebased upstream branch:
 - upstream baseline: `3a30569b`
 - structured Booming SS tip: `d6613e7c`
 - development branch: `feature/litert-multi-model-presets`
-- model conversion repository: `C:\Users\User\Documents\BSSModels\bss-tflite`
+- model conversion repository:
+  [`WluhWluh/bss-tflite`](https://github.com/WluhWluh/bss-tflite)
 - supplemental x86 runtime repository:
-  `C:\Users\User\Documents\BSSModels\bss-litert-android`
+  [`WluhWluh/bss-litert-android`](https://github.com/WluhWluh/bss-litert-android)
 - pinned x86 runtime release:
   [`v2.1.5-bss.1`](https://github.com/WluhWluh/bss-litert-android/releases/tag/v2.1.5-bss.1)
 - playback and cache reference project:
-  `C:\Users\User\Documents\MusicSourceSeparation`
+  [`WluhWluh/MusicSourceSeparation`](https://github.com/WluhWluh/MusicSourceSeparation)
 
 The first TFLite artifacts were converted to static batch-1 float32 FlatBuffers
 and validated against ORT desktop output. The Android comparison established
