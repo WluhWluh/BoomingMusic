@@ -140,6 +140,7 @@ Every usable model must therefore have a contract with at least:
 - exact static input and output shape;
 - `dimF`, the actual model time dimension, `dimTPower`, `nFft`, sample rate,
   and hop length;
+- the model-output compensation scale applied before residual reconstruction;
 - channel count and batch size;
 - primary and residual stem meaning, including generic target-stem labels when
   a model is not a vocals/instrumental model;
@@ -884,26 +885,63 @@ flow must make the missing semantics explicit. It should show:
 
 ### Phase 1: Freeze the model contract
 
-- [ ] Define contract schema v1 and Kotlin serialization types with an explicit
+- [x] Define contract schema v1 and Kotlin serialization types with an explicit
   `contractSchemaVersion` independent from app and pipeline versions.
-- [ ] Import the full candidate inventory into the catalog: 48 source records,
-  duplicate aliases, and approximately 30 distinct artifact records.
-- [ ] Convert the three recommended `bss-tflite` manifests into catalog
+- [x] Import the full candidate inventory into the catalog: 48 source records,
+  18 duplicate aliases, and 30 distinct artifact records.
+- [x] Convert the three recommended `bss-tflite` manifests into catalog
   entries, then add experimental and download-only candidates.
-- [ ] Add contract validation tests for 9662, KARA, and HQ4.
-- [ ] Define explicit output stem semantics and support levels; keep generic
+- [x] Add contract validation tests for 9662, KARA, and HQ4.
+- [x] Define explicit output stem semantics and support levels; keep generic
   target-stem candidates download-only until the neutral-label UI is complete.
-- [ ] Keep source-declared DSP metadata separate from the validated Booming SS
+- [x] Keep source-declared DSP metadata separate from the validated Booming SS
   DSP contract.
-- [ ] Implement `<model file name>.json` sidecars and require their embedded
+- [x] Implement `<model file name>.json` sidecars and require their embedded
   model SHA-256 to match before pairing.
-- [ ] Record canonical artifacts and `aliasOf` source records by normalized
+- [x] Record canonical artifacts and `aliasOf` source records by normalized
   graph/initializer and numerical equivalence rather than requiring identical
   converted FlatBuffer bytes.
-- [ ] Define backup format v1, both settings schema v1 payloads, and their
+- [x] Define backup format v1, both settings schema v1 payloads, and their
   explicit allowlists before adding new persistent model state.
-- [ ] Mark model files, generated cache files, per-song blend files, and
+- [x] Mark model files, generated cache files, per-song blend files, and
   runtime statistics as non-backup data in the design and backup tests.
+
+Frozen Phase 1 outputs:
+
+- `bss-tflite` inventory v1 contains 48 source records from the two pinned
+  distributions and 30 canonical graph records. All 18 k2-fsa aliases have an
+  identical ONNX `GraphProto`, initializer fingerprint, and deterministic ORT
+  probe output with maximum absolute error `0.0` against the canonical TRvlvr
+  source.
+- Catalog v1 classifies three recommended, 19 experimental, and eight generic
+  target-stem download-only entries. Experimental entries remain blocked until
+  conversion produces a pinned artifact and a reviewed complete contract.
+- The three complete sidecars pin the existing converted TFLite sizes and
+  SHA-256 values. They also freeze output compensation at `1.035` for 9662 and
+  KARA and `1.019` for HQ4 before mixture-minus-output reconstruction.
+- The bundled Android catalog is copied from `bss-tflite` revision
+  `a5ef10e96f8082ad2cb884a9d5b47a7eb28f6fe3` and pinned by catalog SHA-256
+  `a246f08675534e2b49044b25d85bed4a0179196c08646a2ab3fcf511834d735b`.
+  JSON line endings are fixed to LF so the byte identity survives Windows
+  checkouts.
+- Source-declared ONNX metadata remains provenance only. For example, the
+  k2-fsa 9662 file declares `n_fft=4096`, while its separately reviewed UVR and
+  Booming SS contract uses `nFft=6144`; validators never promote the embedded
+  value by filename or source priority.
+- Backup format v1 now has strict serializable manifest and payload types, a
+  117-key common-settings table, a 15-key source-separation table, portable
+  active-model/custom-profile metadata, and explicit non-backup rules. The
+  existing archive writer and restore path are intentionally unchanged until
+  the later persistence implementation phase.
+- Phase 1 tests cover strict parsing, relational catalog validation, exact-name
+  sidecar binding, mismatched hashes, blocked unknown activation, generic-stem
+  policy, custom-profile requirements, backup value types, optional unknown
+  fork payloads, unsafe archive paths, and representative excluded data.
+
+The catalog and sidecars are release candidates, not mutable download URLs.
+Publishing the converted assets under an immutable `bss-tflite` Release and
+adding those pinned URLs to a later bundled catalog revision remains separate
+from this contract freeze.
 
 Acceptance criteria:
 
