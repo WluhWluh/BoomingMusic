@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.model.litert
 
+import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
 import android.os.Debug
@@ -10,11 +11,13 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.separation.model.MdxCompatibilityDecision
 import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.MdxExecutionProfile
+import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxInferenceSession
 import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxSpectrogram
 import com.mardous.booming.separation.model.ReusableMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.mapMdxStemWaveforms
@@ -58,7 +61,7 @@ class MdxLiteRtCpuValidationTest {
         try {
             val modelId = arguments.requiredString(ARG_MODEL_ID)
             val contract = bundledContract(context, modelId)
-            val profile = contract.toMdxExecutionProfile()
+            val contractProfile = contract.toMdxExecutionProfile()
             val expectedRuntimeAbi = arguments.requiredString(ARG_PROCESS_ABI)
             val actualProcessAbi = currentProcessAbi().androidName
             val runtimeAbi = installedLiteRtRuntimeAbi(context)
@@ -69,6 +72,18 @@ class MdxLiteRtCpuValidationTest {
                 .put("contractConversionRevision", contract.conversion.revision)
                 .put("modelId", modelId)
                 .put("process", processReport(context, actualProcessAbi, runtimeAbi.androidName))
+
+            val resourceProbe = arguments.getString(ARG_ALLOW_UNSUPPORTED_RESOURCE_PROBE)
+                .toBoolean()
+            require(!resourceProbe || !arguments.getString(ARG_PREFLIGHT_ONLY).toBoolean()) {
+                "An unsupported resource probe cannot also be preflight-only."
+            }
+            val (profile, compatibilityOverride) = if (resourceProbe) {
+                internalResourceProbeProfile(contractProfile, runtimeAbi)
+            } else {
+                contractProfile to null
+            }
+            report.put("compatibilityOverride", compatibilityOverride ?: JSONObject.NULL)
 
             if (arguments.getString(ARG_PREFLIGHT_ONLY).toBoolean()) {
                 validateUnsupportedPreflight(profile, runtimeAbi, report)
@@ -82,10 +97,18 @@ class MdxLiteRtCpuValidationTest {
             report.put("status", "complete")
             reportFile.writeText(report.toString(2))
         } catch (error: Throwable) {
+            runCatching {
+                processReport(
+                    context,
+                    currentProcessAbi().androidName,
+                    installedLiteRtRuntimeAbi(context).androidName,
+                )
+            }.getOrNull()?.let { process -> report.put("process", process) }
             report.put("status", "error")
                 .put("errorType", error.javaClass.name)
                 .put("errorMessage", error.message.orEmpty())
                 .put("stackTrace", error.stackTraceToString())
+                .put("memoryAfterFailureCleanup", memorySnapshot())
             reportFile.writeText(report.toString(2))
             throw error
         }
@@ -123,6 +146,12 @@ class MdxLiteRtCpuValidationTest {
         val processorCountOverride = arguments.getString(ARG_PROCESSOR_COUNT_OVERRIDE)
             ?.toIntOrNull()
             ?.takeIf { it > 0 }
+        report.put("fixture", arguments.requiredString(ARG_FIXTURE_NAME))
+            .put("artifact", modelIdentity.toJson())
+            .put("input", inputFile.fixtureJson(arguments.requiredString(ARG_INPUT_SHA256)))
+            .put("reference", referenceFile.fixtureJson(arguments.requiredString(ARG_REFERENCE_SHA256)))
+            .put("processorCountOverride", processorCountOverride ?: JSONObject.NULL)
+            .put("memoryBefore", processBefore)
         val factory = if (processorCountOverride == null) {
             MdxLiteRtCpuInferenceSessionFactory(
                 platformProvider = { MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi) },
@@ -152,28 +181,51 @@ class MdxLiteRtCpuValidationTest {
             setupMs = SystemClock.elapsedRealtime() - setupStarted
             val firstSession = firstLease.session
             diagnostics = firstSession.diagnostics.toDisplayText()
+            report.put("runtimeDiagnostics", diagnostics)
+                .put("setupWallMs", setupMs)
+                .put("memoryAfterSetup", memorySnapshot())
+                .put(
+                    "processWithSession",
+                    processReport(
+                        context,
+                        currentProcessAbi().androidName,
+                        runtimeAbi.androidName,
+                    ),
+                )
             val firstStarted = SystemClock.elapsedRealtime()
-            firstOutput = firstSession.run(input).copyOf()
-            firstInferenceMs = SystemClock.elapsedRealtime() - firstStarted
-            firstLease.close()
+            try {
+                firstOutput = firstSession.run(input).copyOf()
+                firstInferenceMs = SystemClock.elapsedRealtime() - firstStarted
+            } catch (error: Throwable) {
+                report.put(
+                    "firstInferenceFailureWallMs",
+                    SystemClock.elapsedRealtime() - firstStarted,
+                ).put("memoryAtFirstInferenceFailure", memorySnapshot())
+                throw error
+            } finally {
+                firstLease.close()
+            }
 
             val reusedLease = provider.acquire(modelIdentity, profile, MdxRuntimeSettings())
             reusedSameSession = firstSession === reusedLease.session
             assertSame("An identical model/profile must reuse its session", firstSession, reusedLease.session)
-            val reusedStarted = SystemClock.elapsedRealtime()
-            reusedOutput = reusedLease.session.run(input).copyOf()
-            reusedInferenceMs = SystemClock.elapsedRealtime() - reusedStarted
-            val beforeInvocationCanceled = runCatching {
-                reusedLease.session.run(input) { true }
-            }.exceptionOrNull()
-            require(beforeInvocationCanceled is CancellationException) {
-                "Cancellation before invocation was not propagated."
+            try {
+                val reusedStarted = SystemClock.elapsedRealtime()
+                reusedOutput = reusedLease.session.run(input).copyOf()
+                reusedInferenceMs = SystemClock.elapsedRealtime() - reusedStarted
+                val beforeInvocationCanceled = runCatching {
+                    reusedLease.session.run(input) { true }
+                }.exceptionOrNull()
+                require(beforeInvocationCanceled is CancellationException) {
+                    "Cancellation before invocation was not propagated."
+                }
+                if (arguments.getString(ARG_TEST_IN_FLIGHT_CANCELLATION).toBoolean()) {
+                    cancellationReport = validateInFlightCancellation(reusedLease.session, input)
+                }
+                memoryWithSession = memorySnapshot()
+            } finally {
+                reusedLease.close()
             }
-            if (arguments.getString(ARG_TEST_IN_FLIGHT_CANCELLATION).toBoolean()) {
-                cancellationReport = validateInFlightCancellation(reusedLease.session, input)
-            }
-            memoryWithSession = memorySnapshot()
-            reusedLease.close()
 
             arguments.getString(ARG_SECONDARY_MODEL_ID)?.takeIf(String::isNotBlank)?.let { secondaryId ->
                 replacementReport = validateSessionReplacement(
@@ -194,14 +246,7 @@ class MdxLiteRtCpuValidationTest {
         val reuseComparison = compareOutputs(requireNotNull(firstOutput), output)
         val thresholds = parityThresholds(contract.modelId)
         val stemValidation = validateStemMapping(input, output, profile)
-        report.put("fixture", arguments.requiredString(ARG_FIXTURE_NAME))
-            .put("artifact", modelIdentity.toJson())
-            .put("input", inputFile.fixtureJson(arguments.requiredString(ARG_INPUT_SHA256)))
-            .put("reference", referenceFile.fixtureJson(arguments.requiredString(ARG_REFERENCE_SHA256)))
-            .put("runtimeDiagnostics", diagnostics)
-            .put("processorCountOverride", processorCountOverride ?: JSONObject.NULL)
-            .put("setupWallMs", setupMs)
-            .put("firstInferenceWallMs", firstInferenceMs)
+        report.put("firstInferenceWallMs", firstInferenceMs)
             .put("reusedInferenceWallMs", reusedInferenceMs)
             .put("reusedSameSession", reusedSameSession)
             .put("comparisonToOrt", comparison.toJson())
@@ -210,7 +255,6 @@ class MdxLiteRtCpuValidationTest {
             .put("stemValidation", stemValidation.toJson())
             .put("cancellation", cancellationReport ?: JSONObject.NULL)
             .put("replacement", replacementReport ?: JSONObject.NULL)
-            .put("memoryBefore", processBefore)
             .put("memoryWithSession", requireNotNull(memoryWithSession))
             .put("memoryAfter", memorySnapshot())
         require(comparison.snrDb >= thresholds.minimumSnrDb) {
@@ -259,6 +303,36 @@ class MdxLiteRtCpuValidationTest {
             .put("modelFileExists", artifact.file.exists())
             .put("memoryBefore", processBefore)
             .put("memoryAfter", memorySnapshot())
+    }
+
+    private fun internalResourceProbeProfile(
+        profile: MdxExecutionProfile,
+        runtimeAbi: MdxRuntimeAbi,
+    ): Pair<MdxExecutionProfile, JSONObject> {
+        val original = profile.runtimeCompatibility.singleOrNull {
+            it.abi == runtimeAbi && it.backend == MdxInferenceBackend.LiteRtCpu
+        } ?: error("No LiteRT CPU compatibility record exists for ${runtimeAbi.androidName}.")
+        require(original.status == MdxRuntimeSupportStatus.Unsupported) {
+            "A resource probe override requires an explicitly unsupported target."
+        }
+        val probeEvidence = "Internal resource probe only; original evidence: ${original.evidence}"
+        val overridden = original.copy(
+            status = MdxRuntimeSupportStatus.Untested,
+            evidence = probeEvidence,
+        )
+        val probeProfile = profile.copy(
+            runtimeCompatibility = profile.runtimeCompatibility.map { record ->
+                if (record === original) overridden else record
+            },
+        )
+        val report = JSONObject()
+            .put("scope", "androidTest-only")
+            .put("abi", original.abi.androidName)
+            .put("backend", original.backend.name)
+            .put("originalStatus", original.status.name)
+            .put("originalEvidence", original.evidence)
+            .put("effectiveStatus", overridden.status.name)
+        return probeProfile to report
     }
 
     private fun validateInFlightCancellation(
@@ -395,6 +469,9 @@ class MdxLiteRtCpuValidationTest {
         runtimeAbi: String,
     ): JSONObject {
         val applicationInfo = context.applicationInfo
+        val deviceMemory = ActivityManager.MemoryInfo().also { memory ->
+            context.getSystemService(ActivityManager::class.java).getMemoryInfo(memory)
+        }
         val apkPaths = listOfNotNull(applicationInfo.sourceDir) +
             applicationInfo.splitSourceDirs.orEmpty()
         val apkInventories = JSONArray()
@@ -413,7 +490,7 @@ class MdxLiteRtCpuValidationTest {
             )
         }
         val loadedRuntimeMaps = File("/proc/self/maps").useLines { lines ->
-            lines.filter { it.contains("libLiteRt") }.toList()
+            lines.filter { it.contains("litert", ignoreCase = true) }.toList()
         }
         val extractedRuntime = File(applicationInfo.nativeLibraryDir, "libLiteRt.so")
             .takeIf(File::isFile)
@@ -435,6 +512,10 @@ class MdxLiteRtCpuValidationTest {
             )
             .put("apkInventories", apkInventories)
             .put("loadedRuntimeMaps", JSONArray(loadedRuntimeMaps))
+            .put("totalDeviceMemoryBytes", deviceMemory.totalMem)
+            .put("availableDeviceMemoryBytes", deviceMemory.availMem)
+            .put("lowMemory", deviceMemory.lowMemory)
+            .put("lowMemoryThresholdBytes", deviceMemory.threshold)
             .put("pid", Process.myPid())
             .put("manufacturer", Build.MANUFACTURER)
             .put("model", Build.MODEL)
@@ -657,6 +738,8 @@ class MdxLiteRtCpuValidationTest {
         private const val ARG_SECONDARY_MODEL_ID = "secondaryModelId"
         private const val ARG_SECONDARY_MODEL_PATH = "secondaryModelPath"
         private const val ARG_PREFLIGHT_ONLY = "preflightOnly"
+        private const val ARG_ALLOW_UNSUPPORTED_RESOURCE_PROBE =
+            "allowUnsupportedResourceProbe"
         private const val ARG_PROCESSOR_COUNT_OVERRIDE = "processorCountOverride"
         private val SAFE_NAME_PATTERN = Regex("^[a-zA-Z0-9._-]{1,120}$")
         private val SHA256_PATTERN = Regex("^[a-fA-F0-9]{64}$")

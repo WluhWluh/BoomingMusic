@@ -19,6 +19,7 @@ param(
     [string]$OutputRoot = "",
     [int]$ProcessorCountOverride = 0,
     [switch]$TestInFlightCancellation,
+    [switch]$AllowUnsupportedResourceProbe,
     [switch]$PreflightOnly,
     [switch]$SkipBuild,
     [switch]$SkipInstall
@@ -72,6 +73,9 @@ if (-not $PreflightOnly) {
 if (-not [string]::IsNullOrWhiteSpace($SecondaryModelId)) {
     $SecondaryModelPath = Require-File $SecondaryModelPath "Secondary model"
 }
+if ($PreflightOnly -and $AllowUnsupportedResourceProbe) {
+    throw "AllowUnsupportedResourceProbe cannot be combined with PreflightOnly."
+}
 
 $remoteRelativeRoot = ""
 $remoteTempRoot = ""
@@ -123,6 +127,7 @@ try {
         "-e", "processAbi", $ProcessAbi,
         "-e", "appCommit", (git rev-parse HEAD),
         "-e", "testInFlightCancellation", $TestInFlightCancellation.IsPresent.ToString().ToLowerInvariant(),
+        "-e", "allowUnsupportedResourceProbe", $AllowUnsupportedResourceProbe.IsPresent.ToString().ToLowerInvariant(),
         "-e", "preflightOnly", $PreflightOnly.IsPresent.ToString().ToLowerInvariant()
     )
 
@@ -143,7 +148,7 @@ try {
             Invoke-Adb push $stagedFile.Local $temporaryPath
             Invoke-Adb shell chmod 644 $temporaryPath
             Invoke-Adb shell run-as $package cp $temporaryPath $relativePath
-            Invoke-Adb shell run-as $package test -f $relativePath
+            Invoke-Adb shell run-as $package ls -l $relativePath
         }
         $instrumentArguments += @(
             "-e", "modelPath", $remoteModel,
@@ -161,7 +166,7 @@ try {
         Invoke-Adb push $SecondaryModelPath $temporarySecondary
         Invoke-Adb shell chmod 644 $temporarySecondary
         Invoke-Adb shell run-as $package cp $temporarySecondary $relativeSecondary
-        Invoke-Adb shell run-as $package test -f $relativeSecondary
+        Invoke-Adb shell run-as $package ls -l $relativeSecondary
         $instrumentArguments += @(
             "-e", "secondaryModelId", $SecondaryModelId,
             "-e", "secondaryModelPath", $remoteSecondary

@@ -44,6 +44,13 @@ that must fail before native allocation, use `-PreflightOnly` without staging
 a model. `-ProcessorCountOverride` is reserved for internal CPU thread-policy
 experiments and does not create an app setting or backup field.
 
+Use `-AllowUnsupportedResourceProbe` only to measure an explicitly unsupported
+ABI/model pair after changing the test environment's resource envelope. The
+AndroidTest process records the original status and evidence, then treats that
+single CPU record as internal-only for the run. This switch does not change
+the bundled contract, production compatibility policy, or the default
+preflight test that proves native allocation is blocked.
+
 Every report records the app commit, catalog and contract identities, model
 and fixture hashes, numerical metrics, process ABI and bitness, APK LiteRT
 inventory, loaded `libLiteRt` mappings, device identity, timings, memory,
