@@ -8,6 +8,7 @@ import com.mardous.booming.separation.model.contract.CatalogConversionState
 import com.mardous.booming.separation.model.contract.CatalogEntry
 import com.mardous.booming.separation.model.contract.CatalogInventoryReference
 import com.mardous.booming.separation.model.contract.CatalogReleaseMaturity
+import com.mardous.booming.separation.model.contract.CatalogReleaseAsset
 import com.mardous.booming.separation.model.contract.CatalogStemUi
 import com.mardous.booming.separation.model.contract.CatalogSupportLevel
 import com.mardous.booming.separation.model.contract.CatalogTfliteArtifact
@@ -77,6 +78,7 @@ class SourceSeparationPresetRepositoryTest {
                 customProfile = customProfile(payload),
             )
             assertEquals(SourceSeparationPresetBindingKind.CustomProfile, installed.bindingKind)
+            assertEquals(listOf("custom-profile"), fixture.repository.customProfiles().map { it.profileId })
             assertEquals(SourceSeparationActivePresetState.None, fixture.repository.activeModel())
 
             val reference = fixture.repository.activate(
@@ -89,10 +91,16 @@ class SourceSeparationPresetRepositoryTest {
             assertThrows(SourceSeparationPresetDeletionException::class.java) {
                 fixture.repository.delete(installed.sha256)
             }
+            assertThrows(SourceSeparationPresetProfileException::class.java) {
+                fixture.repository.deleteCustomProfile("custom-profile")
+            }
 
             fixture.repository.setPendingActiveModel(null)
             assertTrue(fixture.repository.delete(installed.sha256))
             assertFalse(installed.file.parentFile?.exists() ?: true)
+            assertEquals("custom-profile", fixture.repository.customProfiles().single().profileId)
+            assertTrue(fixture.repository.deleteCustomProfile("custom-profile"))
+            assertTrue(fixture.repository.customProfiles().isEmpty())
         }
     }
 
@@ -119,10 +127,11 @@ class SourceSeparationPresetRepositoryTest {
         val root = Files.createTempDirectory("source-separation-preset-test").toFile()
         val store = InMemoryActiveModelStore()
         val repository = SourceSeparationPresetRepository(
-            rootDirectory = root,
+            rootDirectory = root.resolve("models"),
             catalog = catalog(officialPayload),
             activeModelStore = store,
             clock = { 1_000L },
+            customProfileStore = FileSourceSeparationCustomProfileStore(root.resolve("profiles")),
         )
         return RepositoryFixture(root, repository)
     }
@@ -150,6 +159,10 @@ class SourceSeparationPresetRepositoryTest {
                         fileName = "official-model.tflite",
                         byteSize = officialPayload.size.toLong(),
                         sha256 = hash,
+                        releaseAsset = CatalogReleaseAsset(
+                            tag = "v1",
+                            url = "https://example.com/download/v1/official-model.tflite",
+                        ),
                     ),
                 ),
             ),

@@ -31,6 +31,10 @@ class SourceSeparationPresetRepository internal constructor(
     private val catalog: SourceSeparationModelCatalog,
     private val activeModelStore: SourceSeparationActiveModelStore,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val customProfileStore: SourceSeparationCustomProfileStore =
+        FileSourceSeparationCustomProfileStore(
+            File(rootDirectory.parentFile, CUSTOM_PROFILE_ROOT_DIRECTORY.substringAfterLast('/')),
+        ),
 ) {
     constructor(
         context: Context,
@@ -39,11 +43,48 @@ class SourceSeparationPresetRepository internal constructor(
         rootDirectory = File(context.filesDir, MODEL_ROOT_DIRECTORY),
         catalog = SourceSeparationModelMetadata.loadBundledCatalog(context),
         activeModelStore = SharedPreferencesSourceSeparationActiveModelStore(preferences),
+        customProfileStore = FileSourceSeparationCustomProfileStore(
+            File(context.filesDir, CUSTOM_PROFILE_ROOT_DIRECTORY),
+        ),
     )
 
     private val lock = Any()
 
     fun catalogEntries() = catalog.entries
+
+    /**
+     * Resolves the immutable Release asset for one official catalog entry.
+     * The caller must use this identity rather than deriving a URL from a
+     * filename or following a mutable release endpoint.
+     */
+    fun officialPreset(modelId: String): SourceSeparationOfficialPreset {
+        val entry = catalog.entries.singleOrNull { it.modelId == modelId }
+            ?: throw SourceSeparationPresetDownloadException(
+                "The requested model is not present in the bundled catalog.",
+            )
+        val artifact = catalog.artifacts.singleOrNull { it.artifactId == entry.artifactId }
+            ?: throw SourceSeparationPresetDownloadException(
+                "The catalog artifact is missing for $modelId.",
+            )
+        val tflite = artifact.tflite
+            ?: throw SourceSeparationPresetDownloadException(
+                "The catalog artifact is not available for download: $modelId.",
+            )
+        val release = tflite.releaseAsset
+            ?: throw SourceSeparationPresetDownloadException(
+                "The catalog artifact is not pinned to an immutable Release: $modelId.",
+            )
+        return SourceSeparationOfficialPreset(
+            modelId = entry.modelId,
+            displayName = entry.displayName,
+            artifactId = artifact.artifactId,
+            fileName = tflite.fileName,
+            byteSize = tflite.byteSize,
+            sha256 = tflite.sha256,
+            releaseTag = release.tag,
+            downloadUrl = release.url,
+        )
+    }
 
     fun installedModels(): List<SourceSeparationInstalledPreset> = synchronized(lock) {
         modelRoot().listFiles()
@@ -60,6 +101,21 @@ class SourceSeparationPresetRepository internal constructor(
 
     fun installedModel(sha256: String): SourceSeparationInstalledPreset? = synchronized(lock) {
         readInstalledPreset(modelDirectory(sha256))
+    }
+
+    fun customProfiles(): List<SourceSeparationCustomModelProfile> = customProfileStore.profiles()
+
+    fun saveCustomProfile(profile: SourceSeparationCustomModelProfile) {
+        customProfileStore.write(profile)
+    }
+
+    fun deleteCustomProfile(profileId: String): Boolean {
+        if (activeModelStore.read()?.profileId == profileId) {
+            throw SourceSeparationPresetProfileException(
+                "The active model profile must be changed before it can be deleted.",
+            )
+        }
+        return customProfileStore.delete(profileId)
     }
 
     fun activeModel(): SourceSeparationActivePresetState {
@@ -87,6 +143,42 @@ class SourceSeparationPresetRepository internal constructor(
         origin: SourceSeparationInstalledPresetOrigin,
         sidecar: SourceSeparationPresetSidecar? = null,
         customProfile: SourceSeparationCustomModelProfile? = null,
+        onProgress: (Long) -> Unit = {},
+    ): SourceSeparationInstalledPreset = installInternal(
+        input = input,
+        originalFileName = originalFileName,
+        displayName = displayName,
+        origin = origin,
+        sidecar = sidecar,
+        customProfile = customProfile,
+        onProgress = onProgress,
+    )
+
+    fun installOfficial(
+        modelId: String,
+        input: InputStream,
+        onProgress: (Long) -> Unit = {},
+    ): SourceSeparationInstalledPreset {
+        val preset = officialPreset(modelId)
+        return installInternal(
+            input = input,
+            originalFileName = preset.fileName,
+            displayName = preset.displayName,
+            origin = SourceSeparationInstalledPresetOrigin.OfficialDownload,
+            expectedOfficialPreset = preset,
+            onProgress = onProgress,
+        )
+    }
+
+    private fun installInternal(
+        input: InputStream,
+        originalFileName: String,
+        displayName: String? = null,
+        origin: SourceSeparationInstalledPresetOrigin,
+        sidecar: SourceSeparationPresetSidecar? = null,
+        customProfile: SourceSeparationCustomModelProfile? = null,
+        expectedOfficialPreset: SourceSeparationOfficialPreset? = null,
+        onProgress: (Long) -> Unit = {},
     ): SourceSeparationInstalledPreset = synchronized(lock) {
         requireSafeTfliteFileName(originalFileName)
         val stagingDirectory = File(stagingRoot(), UUID.randomUUID().toString())
@@ -94,7 +186,7 @@ class SourceSeparationPresetRepository internal constructor(
         stagingDirectory.mkdirs()
 
         val copied = try {
-            copyAndDigest(input, temporaryPayload)
+            copyAndDigest(input, temporaryPayload, onProgress)
         } catch (error: Throwable) {
             stagingDirectory.deleteRecursively()
             throw error
@@ -104,8 +196,29 @@ class SourceSeparationPresetRepository internal constructor(
             throw SourceSeparationPresetInstallException("Imported TFLite file is empty.")
         }
 
+        expectedOfficialPreset?.let { expected ->
+            if (copied.byteSize != expected.byteSize ||
+                !copied.sha256.equals(expected.sha256, ignoreCase = true)
+            ) {
+                stagingDirectory.deleteRecursively()
+                throw SourceSeparationPresetDownloadIntegrityException(
+                    expected = expected,
+                    actualByteSize = copied.byteSize,
+                    actualSha256 = copied.sha256,
+                )
+            }
+        }
+
         val officialArtifact = catalog.artifacts.singleOrNull {
             it.tflite?.sha256.equals(copied.sha256, ignoreCase = true)
+        }
+        if (expectedOfficialPreset != null &&
+            officialArtifact?.artifactId != expectedOfficialPreset.artifactId
+        ) {
+            stagingDirectory.deleteRecursively()
+            throw SourceSeparationPresetDownloadException(
+                "The downloaded model resolved to a different catalog artifact.",
+            )
         }
         val binding = try {
             resolveBinding(
@@ -127,6 +240,11 @@ class SourceSeparationPresetRepository internal constructor(
 
         val destinationDirectory = modelDirectory(copied.sha256)
         readInstalledPreset(destinationDirectory)?.let { existing ->
+            if (existing.bindingKind == SourceSeparationPresetBindingKind.CustomProfile &&
+                customProfile != null
+            ) {
+                customProfileStore.write(customProfile)
+            }
             stagingDirectory.deleteRecursively()
             return existing
         }
@@ -153,7 +271,7 @@ class SourceSeparationPresetRepository internal constructor(
             bindingKind = binding.kind,
             contractId = binding.contractId,
             sidecarContract = binding.sidecarContract,
-            customProfile = binding.customProfile,
+            customProfileId = binding.customProfile?.profileId,
             installedAtEpochMs = clock(),
         )
         writeRecord(File(stagingDirectory, INSTALL_RECORD_FILE_NAME), record)
@@ -171,6 +289,14 @@ class SourceSeparationPresetRepository internal constructor(
                 overwrite = false,
             )
             stagingDirectory.deleteRecursively()
+        }
+        binding.customProfile?.let { profile ->
+            try {
+                customProfileStore.write(profile)
+            } catch (error: Throwable) {
+                destinationDirectory.deleteRecursively()
+                throw error
+            }
         }
         return requireNotNull(readInstalledPreset(destinationDirectory)) {
             "Installed model metadata could not be read."
@@ -347,7 +473,7 @@ class SourceSeparationPresetRepository internal constructor(
             bindingKind = record.bindingKind,
             contractId = record.contractId,
             sidecarContract = record.sidecarContract,
-            customProfile = record.customProfile,
+            customProfile = record.customProfileId?.let(customProfileStore::profile),
             installedAtEpochMs = record.installedAtEpochMs,
         )
     }
@@ -385,7 +511,11 @@ class SourceSeparationPresetRepository internal constructor(
         }
     }
 
-    private fun copyAndDigest(input: InputStream, target: File): CopiedModel {
+    private fun copyAndDigest(
+        input: InputStream,
+        target: File,
+        onProgress: (Long) -> Unit,
+    ): CopiedModel {
         val digest = MessageDigest.getInstance("SHA-256")
         var byteSize = 0L
         target.outputStream().use { output ->
@@ -397,6 +527,7 @@ class SourceSeparationPresetRepository internal constructor(
                 output.write(buffer, 0, read)
                 digest.update(buffer, 0, read)
                 byteSize += read
+                onProgress(byteSize)
             }
         }
         return CopiedModel(
@@ -458,6 +589,7 @@ class SourceSeparationPresetRepository internal constructor(
 
     companion object {
         const val MODEL_ROOT_DIRECTORY = "source-separation/litert-models-v1"
+        const val CUSTOM_PROFILE_ROOT_DIRECTORY = "source-separation/model-profiles-v1"
 
         private const val STAGING_DIRECTORY = ".staging"
         private const val TEMPORARY_PAYLOAD_NAME = "model.importing"
@@ -472,6 +604,17 @@ class SourceSeparationPresetRepository internal constructor(
 data class SourceSeparationPresetSidecar(
     val fileName: String,
     val contents: String,
+)
+
+data class SourceSeparationOfficialPreset(
+    val modelId: String,
+    val displayName: String,
+    val artifactId: String,
+    val fileName: String,
+    val byteSize: Long,
+    val sha256: String,
+    val releaseTag: String,
+    val downloadUrl: String,
 )
 
 data class SourceSeparationInstalledPreset(
@@ -514,7 +657,7 @@ internal data class SourceSeparationInstalledPresetRecord(
     val bindingKind: SourceSeparationPresetBindingKind,
     val contractId: String? = null,
     val sidecarContract: SourceSeparationModelContract? = null,
-    val customProfile: SourceSeparationCustomModelProfile? = null,
+    val customProfileId: String? = null,
     val installedAtEpochMs: Long,
 ) {
     fun isValid(): Boolean =
@@ -525,6 +668,8 @@ internal data class SourceSeparationInstalledPresetRecord(
             fileName.endsWith(".tflite", ignoreCase = true) &&
             byteSize > 0L &&
             SHA256_PATTERN.matches(sha256) &&
+            (bindingKind != SourceSeparationPresetBindingKind.CustomProfile ||
+                !customProfileId.isNullOrBlank()) &&
             installedAtEpochMs > 0L
 
     companion object {
@@ -611,6 +756,16 @@ private class SharedPreferencesSourceSeparationActiveModelStore(
 }
 
 class SourceSeparationPresetInstallException(message: String) : IllegalStateException(message)
+
+open class SourceSeparationPresetDownloadException(message: String) : IllegalStateException(message)
+
+class SourceSeparationPresetDownloadIntegrityException(
+    val expected: SourceSeparationOfficialPreset,
+    val actualByteSize: Long,
+    val actualSha256: String,
+) : SourceSeparationPresetDownloadException(
+    "Downloaded model does not match the catalog asset for ${expected.modelId}.",
+)
 
 class SourceSeparationPresetDeletionException(message: String) : IllegalStateException(message)
 
