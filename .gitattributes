@@ -1,1 +1,3 @@
 app/src/main/assets/source-separation/*.json text eol=lf
+docs/validation/**/*.json text eol=lf
+docs/validation/**/SHA256SUMS text eol=lf

@@ -1,0 +1,254 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase3-s25-arm64-9662-auto-setup",
+  "status": "complete",
+  "appCommit": "9f4d2d04f109c92029e4eff258454161642e9be4",
+  "catalogSha256": "a1cb77832cdb28864dd4388ec8b66ca16e25903dde8752c568eaffadb1e45ff5",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784638148797,
+  "requestedBackend": "LiteRtAuto",
+  "contractId": "uvr_mdxnet_3_9662@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_3_9662",
+  "process": {
+    "supportedAbis": [
+      "arm64-v8a"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk!\/lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 11658948608,
+    "availableDeviceMemoryBytes": 5499379712,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 2611,
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "device": "pa1q",
+    "androidApi": 35,
+    "fingerprint": "samsung\/pa1qzcx\/pa1q:15\/AP3A.240905.015.A2\/S9310ZCU5AYHA_CHC5AYHA:user\/release-keys"
+  },
+  "fixture": "coast_town_window0",
+  "artifact": {
+    "fileName": "UVR_MDXNET_3_9662_static_float32.tflite",
+    "byteSize": 29700464,
+    "sha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378"
+  },
+  "input": {
+    "fileName": "uvr_mdxnet_3_9662_coast_town_window0_nchw_f32.bin",
+    "byteSize": 8388608,
+    "sha256": "cfe4f6cd85c2f91e94a259886d96eed3c7dcce604642dcfcb9ea1873fb254201"
+  },
+  "reference": {
+    "fileName": "ort-uvr_mdxnet_3_9662-9482-uvr_mdxnet_3_9662_coast_town_window0_nchw_f32-fp32.bin",
+    "byteSize": 8388608,
+    "sha256": "4d6e23a417428439cf010b54e690e645445c82a4d89255d83824b80dded933f0"
+  },
+  "runtimeProfileId": "gpu-auto-fp32-v1",
+  "failpoint": "setup",
+  "thresholds": {
+    "minimumSnrDb": 93.8,
+    "minimumCosine": 0.999999999,
+    "maximumAbsoluteError": 1.0E-4
+  },
+  "memoryBefore": {
+    "elapsedRealtimeMs": 414180738,
+    "processCpuMs": 1345,
+    "totalPssKb": 249501,
+    "nativePssKb": 18640,
+    "dalvikPssKb": 29088,
+    "otherPssKb": 200712,
+    "nativeHeapAllocatedBytes": 19968912,
+    "summaryKb": {
+      "summary.java-heap": 38208,
+      "summary.native-heap": 18604,
+      "summary.code": 1244,
+      "summary.stack": 660,
+      "summary.graphics": 0,
+      "summary.private-other": 182940,
+      "summary.system": 7845,
+      "summary.total-pss": 249501,
+      "summary.total-swap": 25400
+    }
+  },
+  "availableAcceleratorsBeforeSetup": [
+    "CPU",
+    "GPU"
+  ],
+  "setupWallMs": 1255,
+  "autoAfterSetup": {
+    "state": "CpuFallback",
+    "gpuProfileId": "gpu-auto-fp32-v1",
+    "eligibilityReason": "Eligible",
+    "eligibilityDetail": "Resolved LiteRtClGlAccelerator with 5458939904 bytes available.",
+    "gpuAttempted": true,
+    "activeBackend": "LiteRtCpu",
+    "acceptedOutputBackend": null,
+    "fallbackStage": "GpuSetup",
+    "fallbackReason": "LiteRT ModelCompile failed: Injected GPU setup failure.",
+    "gpuSetupNanos": 919240156,
+    "gpuProbeNanos": null,
+    "gpuInferenceNanos": null,
+    "cpuSetupNanos": 334791823,
+    "cpuInferenceNanos": null
+  },
+  "memoryAfterSetup": {
+    "elapsedRealtimeMs": 414182034,
+    "processCpuMs": 2644,
+    "totalPssKb": 944463,
+    "nativePssKb": 656609,
+    "dalvikPssKb": 29156,
+    "otherPssKb": 257660,
+    "nativeHeapAllocatedBytes": 709120096,
+    "summaryKb": {
+      "summary.java-heap": 38284,
+      "summary.native-heap": 656592,
+      "summary.code": 25824,
+      "summary.stack": 708,
+      "summary.graphics": 412,
+      "summary.private-other": 213236,
+      "summary.system": 9407,
+      "summary.total-pss": 944463,
+      "summary.total-swap": 25060
+    }
+  },
+  "processWithSession": {
+    "supportedAbis": [
+      "arm64-v8a"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk!\/lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 11658948608,
+    "availableDeviceMemoryBytes": 4906250240,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 2611,
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "device": "pa1q",
+    "androidApi": 35,
+    "fingerprint": "samsung\/pa1qzcx\/pa1q:15\/AP3A.240905.015.A2\/S9310ZCU5AYHA_CHC5AYHA:user\/release-keys"
+  },
+  "inferenceWallMs": 1430,
+  "autoAfterRun": {
+    "state": "CpuFallback",
+    "gpuProfileId": "gpu-auto-fp32-v1",
+    "eligibilityReason": "Eligible",
+    "eligibilityDetail": "Resolved LiteRtClGlAccelerator with 5458939904 bytes available.",
+    "gpuAttempted": true,
+    "activeBackend": "LiteRtCpu",
+    "acceptedOutputBackend": "LiteRtCpu",
+    "fallbackStage": "GpuSetup",
+    "fallbackReason": "LiteRT ModelCompile failed: Injected GPU setup failure.",
+    "gpuSetupNanos": 919240156,
+    "gpuProbeNanos": null,
+    "gpuInferenceNanos": null,
+    "cpuSetupNanos": 334791823,
+    "cpuInferenceNanos": 1421896458
+  },
+  "memoryWithSession": {
+    "elapsedRealtimeMs": 414183551,
+    "processCpuMs": 7877,
+    "totalPssKb": 967823,
+    "nativePssKb": 672973,
+    "dalvikPssKb": 53647,
+    "otherPssKb": 241066,
+    "nativeHeapAllocatedBytes": 709121536,
+    "summaryKb": {
+      "summary.java-heap": 62848,
+      "summary.native-heap": 672956,
+      "summary.code": 25916,
+      "summary.stack": 712,
+      "summary.graphics": 412,
+      "summary.private-other": 196468,
+      "summary.system": 8511,
+      "summary.total-pss": 967823,
+      "summary.total-swap": 22356
+    }
+  },
+  "probeComparisonToOrt": null,
+  "comparisonToOrt": {
+    "snrDb": 97.59665510140842,
+    "cosineSimilarity": 0.99999999991244,
+    "maxAbsError": 6.079673767089844E-5,
+    "meanAbsError": 2.5752405571274894E-6,
+    "rmse": 4.0613136285042585E-6
+  },
+  "stemValidation": {
+    "modelOutputStem": "VOCALS",
+    "modelOutputScale": 1.034999966621399,
+    "reconstructionMaxAbsError": 1.4901161193847656E-8
+  },
+  "sessionTracker": {
+    "gpuCreateCount": 1,
+    "cpuCreateCount": 1,
+    "activeGpuSessions": 0,
+    "activeCpuSessions": 0,
+    "maximumActiveGpuSessions": 1,
+    "maximumActiveCpuSessions": 1,
+    "cpuCreatedWhileGpuActive": false,
+    "events": [
+      "gpu-created",
+      "gpu-closed",
+      "cpu-created",
+      "LiteRtCpu-run-1",
+      "cpu-closed"
+    ]
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 414184321,
+    "processCpuMs": 8694,
+    "totalPssKb": 313259,
+    "nativePssKb": 34117,
+    "dalvikPssKb": 67719,
+    "otherPssKb": 211286,
+    "nativeHeapAllocatedBytes": 12458960,
+    "summaryKb": {
+      "summary.java-heap": 76920,
+      "summary.native-heap": 34100,
+      "summary.code": 24972,
+      "summary.stack": 720,
+      "summary.graphics": 412,
+      "summary.private-other": 167548,
+      "summary.system": 8587,
+      "summary.total-pss": 313259,
+      "summary.total-swap": 22356
+    }
+  }
+}

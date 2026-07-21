@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase3-s25-arm64-9662-fp16",
+  "status": "complete",
+  "appCommit": "9f4d2d04f109c92029e4eff258454161642e9be4",
+  "catalogSha256": "a1cb77832cdb28864dd4388ec8b66ca16e25903dde8752c568eaffadb1e45ff5",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784637957205,
+  "contractId": "uvr_mdxnet_3_9662@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_3_9662",
+  "requestedBackend": "LiteRtGpu",
+  "process": {
+    "supportedAbis": [
+      "arm64-v8a"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk!\/lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 11658948608,
+    "availableDeviceMemoryBytes": 5318045696,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 32227,
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "device": "pa1q",
+    "androidApi": 35,
+    "fingerprint": "samsung\/pa1qzcx\/pa1q:15\/AP3A.240905.015.A2\/S9310ZCU5AYHA_CHC5AYHA:user\/release-keys"
+  },
+  "compatibilityOverride": null,
+  "fixture": "coast_town_window0",
+  "artifact": {
+    "fileName": "UVR_MDXNET_3_9662_static_float32.tflite",
+    "byteSize": 29700464,
+    "sha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378"
+  },
+  "input": {
+    "fileName": "uvr_mdxnet_3_9662_coast_town_window0_nchw_f32.bin",
+    "byteSize": 8388608,
+    "sha256": "cfe4f6cd85c2f91e94a259886d96eed3c7dcce604642dcfcb9ea1873fb254201"
+  },
+  "reference": {
+    "fileName": "ort-uvr_mdxnet_3_9662-9482-uvr_mdxnet_3_9662_coast_town_window0_nchw_f32-fp32.bin",
+    "byteSize": 8388608,
+    "sha256": "4d6e23a417428439cf010b54e690e645445c82a4d89255d83824b80dded933f0"
+  },
+  "processorCountOverride": null,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 413989141,
+    "processCpuMs": 1329,
+    "totalPssKb": 249871,
+    "nativePssKb": 18636,
+    "dalvikPssKb": 29085,
+    "otherPssKb": 201111,
+    "nativeHeapAllocatedBytes": 19966416,
+    "summaryKb": {
+      "summary.java-heap": 38172,
+      "summary.native-heap": 18600,
+      "summary.code": 1228,
+      "summary.stack": 664,
+      "summary.graphics": 0,
+      "summary.private-other": 183444,
+      "summary.system": 7763,
+      "summary.total-pss": 249871,
+      "summary.total-swap": 25340
+    }
+  },
+  "runtimeProfileId": "gpu-auto-fp16-v1",
+  "thresholdsEnforced": false,
+  "availableAcceleratorsBeforeSetup": [
+    "CPU",
+    "GPU"
+  ],
+  "runtimeDiagnostics": "Runtime: LiteRT 2.1.5, backend=LiteRtGpu, layout=NHWC, profile=gpu-auto-fp16-v1, api=Automatic, precision=Float16, status=InternalValidationOnly, evidence=BoomingSS GPU adapter and fallback validation is deferred to Phase 3",
+  "setupWallMs": 1264,
+  "memoryAfterSetup": {
+    "elapsedRealtimeMs": 413990439,
+    "processCpuMs": 2611,
+    "totalPssKb": 524867,
+    "nativePssKb": 43513,
+    "dalvikPssKb": 29138,
+    "otherPssKb": 451164,
+    "nativeHeapAllocatedBytes": 48403232,
+    "summaryKb": {
+      "summary.java-heap": 38240,
+      "summary.native-heap": 43476,
+      "summary.code": 26992,
+      "summary.stack": 696,
+      "summary.graphics": 162976,
+      "summary.private-other": 243188,
+      "summary.system": 9299,
+      "summary.total-pss": 524867,
+      "summary.total-swap": 25120
+    }
+  },
+  "processWithSession": {
+    "supportedAbis": [
+      "arm64-v8a"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk!\/lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~wzQweuYhxv0GfZsBZixv5g==\/com.wluhwluh.booming.sourcesep.debug-hXwf5oW9QsV6YEfcogUVjA==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 11658948608,
+    "availableDeviceMemoryBytes": 5204414464,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 32227,
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "device": "pa1q",
+    "androidApi": 35,
+    "fingerprint": "samsung\/pa1qzcx\/pa1q:15\/AP3A.240905.015.A2\/S9310ZCU5AYHA_CHC5AYHA:user\/release-keys"
+  },
+  "firstInferenceWallMs": 410,
+  "reusedInferenceWallMs": 307,
+  "reusedSameSession": true,
+  "comparisonToOrt": {
+    "snrDb": 18.234856989500074,
+    "cosineSimilarity": 0.9926308489409538,
+    "maxAbsError": 0.8695288300514221,
+    "meanAbsError": 0.02451852162525814,
+    "rmse": 0.037736049600994595
+  },
+  "reuseComparison": {
+    "snrDb": 1.7976931348623157E308,
+    "cosineSimilarity": 1,
+    "maxAbsError": 0,
+    "meanAbsError": 0,
+    "rmse": 0
+  },
+  "thresholds": {
+    "minimumSnrDb": 93.8,
+    "minimumCosine": 0.999999999,
+    "maximumAbsoluteError": 1.0E-4
+  },
+  "stemValidation": {
+    "modelOutputStem": "VOCALS",
+    "modelOutputScale": 1.034999966621399,
+    "reconstructionMaxAbsError": 1.4901161193847656E-8
+  },
+  "cancellation": null,
+  "replacement": null,
+  "memoryWithSession": {
+    "elapsedRealtimeMs": 413991240,
+    "processCpuMs": 2997,
+    "totalPssKb": 562094,
+    "nativePssKb": 42549,
+    "dalvikPssKb": 67963,
+    "otherPssKb": 451445,
+    "nativeHeapAllocatedBytes": 37020272,
+    "summaryKb": {
+      "summary.java-heap": 77152,
+      "summary.native-heap": 42532,
+      "summary.code": 26948,
+      "summary.stack": 708,
+      "summary.graphics": 162976,
+      "summary.private-other": 243408,
+      "summary.system": 8370,
+      "summary.total-pss": 562094,
+      "summary.total-swap": 22356
+    }
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 413992086,
+    "processCpuMs": 3880,
+    "totalPssKb": 335446,
+    "nativePssKb": 26217,
+    "dalvikPssKb": 98155,
+    "otherPssKb": 210937,
+    "nativeHeapAllocatedBytes": 12454896,
+    "summaryKb": {
+      "summary.java-heap": 107344,
+      "summary.native-heap": 26200,
+      "summary.code": 24780,
+      "summary.stack": 720,
+      "summary.graphics": 412,
+      "summary.private-other": 167432,
+      "summary.system": 8558,
+      "summary.total-pss": 335446,
+      "summary.total-swap": 22356
+    }
+  }
+}

@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase3-s10-arm64-kara-fp32",
+  "status": "complete",
+  "appCommit": "9f4d2d04f109c92029e4eff258454161642e9be4",
+  "catalogSha256": "a1cb77832cdb28864dd4388ec8b66ca16e25903dde8752c568eaffadb1e45ff5",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784637914102,
+  "contractId": "uvr_mdxnet_kara@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_kara",
+  "requestedBackend": "LiteRtGpu",
+  "process": {
+    "supportedAbis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~bjNG-S6nq9tYkrDJq6hIsA==\/com.wluhwluh.booming.sourcesep.debug-4rccagVkgQLTZ5s_vqhpOQ==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~bjNG-S6nq9tYkrDJq6hIsA==\/com.wluhwluh.booming.sourcesep.debug-4rccagVkgQLTZ5s_vqhpOQ==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~bjNG-S6nq9tYkrDJq6hIsA==\/com.wluhwluh.booming.sourcesep.debug-4rccagVkgQLTZ5s_vqhpOQ==\/base.apk!\/lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~bjNG-S6nq9tYkrDJq6hIsA==\/com.wluhwluh.booming.sourcesep.debug-4rccagVkgQLTZ5s_vqhpOQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 7823921152,
+    "availableDeviceMemoryBytes": 2934751232,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 408944640,
+    "pid": 3315,
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "device": "beyond1q",
+    "androidApi": 31,
+    "fingerprint": "samsung\/beyond1qltezc\/beyond1q:12\/SP1A.210812.016\/G9730ZCU8HWE2:user\/release-keys"
+  },
+  "compatibilityOverride": null,
+  "fixture": "coast_town_window0",
+  "artifact": {
+    "fileName": "UVR_MDXNET_KARA_static_float32.tflite",
+    "byteSize": 29700460,
+    "sha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64"
+  },
+  "input": {
+    "fileName": "uvr_mdxnet_kara_coast_town_window0_nchw_f32.bin",
+    "byteSize": 8388608,
+    "sha256": "cfe4f6cd85c2f91e94a259886d96eed3c7dcce604642dcfcb9ea1873fb254201"
+  },
+  "reference": {
+    "fileName": "ort-uvr_mdxnet_kara-9482-uvr_mdxnet_kara_coast_town_window0_nchw_f32-fp32.bin",
+    "byteSize": 8388608,
+    "sha256": "cbeb712793119734430ab83595ff64fd25110d644845f256c179c6f596e52d42"
+  },
+  "processorCountOverride": null,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 187070434,
+    "processCpuMs": 2632,
+    "totalPssKb": 264602,
+    "nativePssKb": 43748,
+    "dalvikPssKb": 24161,
+    "otherPssKb": 196554,
+    "nativeHeapAllocatedBytes": 6689008,
+    "summaryKb": {
+      "summary.java-heap": 31484,
+      "summary.native-heap": 43740,
+      "summary.code": 164064,
+      "summary.stack": 636,
+      "summary.graphics": 0,
+      "summary.private-other": 20760,
+      "summary.system": 3918,
+      "summary.total-pss": 264602,
+      "summary.total-swap": 20860
+    }
+  },
+  "runtimeProfileId": "gpu-auto-fp32-v1",
+  "thresholdsEnforced": true,
+  "availableAcceleratorsBeforeSetup": [
+    "CPU",
+    "GPU"
+  ],
+  "runtimeDiagnostics": "Runtime: LiteRT 2.1.5, backend=LiteRtGpu, layout=NHWC, profile=gpu-auto-fp32-v1, api=Automatic, precision=Float32, status=InternalValidationOnly, evidence=BoomingSS GPU adapter and fallback validation is deferred to Phase 3",
+  "setupWallMs": 1133,
+  "memoryAfterSetup": {
+    "elapsedRealtimeMs": 187071619,
+    "processCpuMs": 3846,
+    "totalPssKb": 675953,
+    "nativePssKb": 127095,
+    "dalvikPssKb": 24237,
+    "otherPssKb": 524490,
+    "nativeHeapAllocatedBytes": 30091472,
+    "summaryKb": {
+      "summary.java-heap": 31560,
+      "summary.native-heap": 127088,
+      "summary.code": 191532,
+      "summary.stack": 680,
+      "summary.graphics": 270108,
+      "summary.private-other": 50296,
+      "summary.system": 4689,
+      "summary.total-pss": 675953,
+      "summary.total-swap": 20488
+    }
+  },
+  "processWithSession": {
+    "supportedAbis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~bjNG-S6nq9tYkrDJq6hIsA==\/com.wluhwluh.booming.sourcesep.debug-4rccagVkgQLTZ5s_vqhpOQ==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~bjNG-S6nq9tYkrDJq6hIsA==\/com.wluhwluh.booming.sourcesep.debug-4rccagVkgQLTZ5s_vqhpOQ==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~bjNG-S6nq9tYkrDJq6hIsA==\/com.wluhwluh.booming.sourcesep.debug-4rccagVkgQLTZ5s_vqhpOQ==\/base.apk!\/lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~bjNG-S6nq9tYkrDJq6hIsA==\/com.wluhwluh.booming.sourcesep.debug-4rccagVkgQLTZ5s_vqhpOQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 7823921152,
+    "availableDeviceMemoryBytes": 2842513408,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 408944640,
+    "pid": 3315,
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "device": "beyond1q",
+    "androidApi": 31,
+    "fingerprint": "samsung\/beyond1qltezc\/beyond1q:12\/SP1A.210812.016\/G9730ZCU8HWE2:user\/release-keys"
+  },
+  "firstInferenceWallMs": 2456,
+  "reusedInferenceWallMs": 2435,
+  "reusedSameSession": true,
+  "comparisonToOrt": {
+    "snrDb": 109.35148634607076,
+    "cosineSimilarity": 0.9999999999943424,
+    "maxAbsError": 1.811981201171875E-5,
+    "meanAbsError": 6.6094856432386E-7,
+    "rmse": 1.1255434600276115E-6
+  },
+  "reuseComparison": {
+    "snrDb": 1.7976931348623157E308,
+    "cosineSimilarity": 1,
+    "maxAbsError": 0,
+    "meanAbsError": 0,
+    "rmse": 0
+  },
+  "thresholds": {
+    "minimumSnrDb": 109,
+    "minimumCosine": 0.999999999,
+    "maximumAbsoluteError": 3.0E-5
+  },
+  "stemValidation": {
+    "modelOutputStem": "VOCALS",
+    "modelOutputScale": 1.034999966621399,
+    "reconstructionMaxAbsError": 1.4901161193847656E-8
+  },
+  "cancellation": null,
+  "replacement": null,
+  "memoryWithSession": {
+    "elapsedRealtimeMs": 187076611,
+    "processCpuMs": 4373,
+    "totalPssKb": 695277,
+    "nativePssKb": 126104,
+    "dalvikPssKb": 59573,
+    "otherPssKb": 509469,
+    "nativeHeapAllocatedBytes": 29993872,
+    "summaryKb": {
+      "summary.java-heap": 66900,
+      "summary.native-heap": 126096,
+      "summary.code": 191532,
+      "summary.stack": 620,
+      "summary.graphics": 271264,
+      "summary.private-other": 34204,
+      "summary.system": 4661,
+      "summary.total-pss": 695277,
+      "summary.total-swap": 20468
+    }
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 187077654,
+    "processCpuMs": 5895,
+    "totalPssKb": 301003,
+    "nativePssKb": 22968,
+    "dalvikPssKb": 70649,
+    "otherPssKb": 207255,
+    "nativeHeapAllocatedBytes": 6683008,
+    "summaryKb": {
+      "summary.java-heap": 77976,
+      "summary.native-heap": 22960,
+      "summary.code": 189336,
+      "summary.stack": 636,
+      "summary.graphics": 212,
+      "summary.private-other": 5144,
+      "summary.system": 4739,
+      "summary.total-pss": 301003,
+      "summary.total-swap": 20456
+    }
+  }
+}
