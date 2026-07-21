@@ -25,96 +25,132 @@ internal object MdxLiteRtNativeSessionAllocator : MdxLiteRtSessionAllocator {
         profile: MdxExecutionProfile,
         cpuThreads: Int,
         compatibility: MdxCompatibilityDecision,
-    ): MdxInferenceSession {
-        val environment = Environment.create()
-        var compiledModel: CompiledModel? = null
-        var inputBuffers: List<TensorBuffer> = emptyList()
-        var outputBuffers: List<TensorBuffer> = emptyList()
-        try {
-            if (!environment.getAvailableAccelerators().contains(Accelerator.CPU)) {
-                throw MdxInferenceCompatibilityException(
-                    "The app-packaged LiteRT runtime has no CPU accelerator."
-                )
-            }
-            val options = CompiledModel.Options(Accelerator.CPU).apply {
-                this.cpuOptions = CompiledModel.CpuOptions(cpuThreads, null, null)
-            }
-            compiledModel = CompiledModel.create(
-                artifact.file.absolutePath,
-                options,
-                environment,
+    ): MdxInferenceSession = createNativeLiteRtSession(
+        artifact = artifact,
+        profile = profile,
+        requiredAccelerator = Accelerator.CPU,
+        options = CompiledModel.Options(Accelerator.CPU).apply {
+            this.cpuOptions = CompiledModel.CpuOptions(cpuThreads, null, null)
+        },
+        diagnostics = MdxRuntimeDiagnostics(
+            runtimeName = "LiteRT 2.1.5",
+            backend = MdxInferenceBackend.LiteRtCpu,
+            cpuThreads = cpuThreads,
+            detail = compatibilityDetail(compatibility),
+        ),
+    )
+}
+
+internal object MdxLiteRtNativeGpuSessionAllocator : MdxLiteRtGpuSessionAllocator {
+    override fun create(
+        artifact: MdxModelArtifact,
+        profile: MdxExecutionProfile,
+        runtimeProfile: MdxLiteRtGpuRuntimeProfile,
+        compatibility: MdxCompatibilityDecision,
+    ): MdxInferenceSession = createNativeLiteRtSession(
+        artifact = artifact,
+        profile = profile,
+        requiredAccelerator = Accelerator.GPU,
+        options = CompiledModel.Options(Accelerator.GPU).apply {
+            gpuOptions = CompiledModel.GpuOptions(
+                precision = runtimeProfile.precision.toLiteRtPrecision(),
+                backend = runtimeProfile.api.toLiteRtBackend(),
             )
-            validateTensorType(
-                declared = profile.inputTensor,
-                actual = compiledModel.getInputTensorType(requireNotNull(profile.inputTensor.name)),
-                role = "input",
+        },
+        diagnostics = MdxRuntimeDiagnostics(
+            runtimeName = "LiteRT 2.1.5",
+            backend = MdxInferenceBackend.LiteRtGpu,
+            cpuThreads = null,
+            detail = buildString {
+                append("layout=NHWC, profile=").append(runtimeProfile.profileId)
+                append(", api=").append(runtimeProfile.api.name)
+                append(", precision=").append(runtimeProfile.precision.name)
+                append(", ").append(compatibilityDetail(compatibility))
+            },
+        ),
+    )
+}
+
+private fun createNativeLiteRtSession(
+    artifact: MdxModelArtifact,
+    profile: MdxExecutionProfile,
+    requiredAccelerator: Accelerator,
+    options: CompiledModel.Options,
+    diagnostics: MdxRuntimeDiagnostics,
+): MdxInferenceSession {
+    val environment = Environment.create()
+    var compiledModel: CompiledModel? = null
+    var inputBuffers: List<TensorBuffer> = emptyList()
+    var outputBuffers: List<TensorBuffer> = emptyList()
+    try {
+        if (!environment.getAvailableAccelerators().contains(requiredAccelerator)) {
+            throw MdxInferenceCompatibilityException(
+                "The app-packaged LiteRT runtime has no ${requiredAccelerator.name} accelerator."
             )
-            validateTensorType(
-                declared = profile.outputTensor,
-                actual = compiledModel.getOutputTensorType(requireNotNull(profile.outputTensor.name)),
-                role = "output",
-            )
-            validateBufferSize(
-                role = "input",
-                expectedElementCount = profile.inputTensor.elementCount,
-                actualBytes = compiledModel.getInputBufferRequirements(
-                    requireNotNull(profile.inputTensor.name)
-                ).bufferSize,
-            )
-            validateBufferSize(
-                role = "output",
-                expectedElementCount = profile.outputTensor.elementCount,
-                actualBytes = compiledModel.getOutputBufferRequirements(
-                    requireNotNull(profile.outputTensor.name)
-                ).bufferSize,
-            )
-            inputBuffers = compiledModel.createInputBuffers()
-            outputBuffers = compiledModel.createOutputBuffers()
-            requireSingleTensor(inputBuffers, "input")
-            requireSingleTensor(outputBuffers, "output")
-            return MdxLiteRtCpuInferenceSession(
-                environment = environment,
-                compiledModel = compiledModel,
-                inputBuffer = inputBuffers.single(),
-                outputBuffer = outputBuffers.single(),
-                profile = profile,
-                cpuThreads = cpuThreads,
-                compatibility = compatibility,
-            )
-        } catch (error: Throwable) {
-            inputBuffers.closeQuietly()
-            outputBuffers.closeQuietly()
-            compiledModel?.closeQuietly()
-            environment.closeQuietly()
-            throw error
         }
+        compiledModel = CompiledModel.create(
+            artifact.file.absolutePath,
+            options,
+            environment,
+        )
+        validateTensorType(
+            declared = profile.inputTensor,
+            actual = compiledModel.getInputTensorType(requireNotNull(profile.inputTensor.name)),
+            role = "input",
+        )
+        validateTensorType(
+            declared = profile.outputTensor,
+            actual = compiledModel.getOutputTensorType(requireNotNull(profile.outputTensor.name)),
+            role = "output",
+        )
+        validateBufferSize(
+            role = "input",
+            expectedElementCount = profile.inputTensor.elementCount,
+            actualBytes = compiledModel.getInputBufferRequirements(
+                requireNotNull(profile.inputTensor.name)
+            ).bufferSize,
+        )
+        validateBufferSize(
+            role = "output",
+            expectedElementCount = profile.outputTensor.elementCount,
+            actualBytes = compiledModel.getOutputBufferRequirements(
+                requireNotNull(profile.outputTensor.name)
+            ).bufferSize,
+        )
+        inputBuffers = compiledModel.createInputBuffers()
+        outputBuffers = compiledModel.createOutputBuffers()
+        requireSingleTensor(inputBuffers, "input")
+        requireSingleTensor(outputBuffers, "output")
+        return MdxLiteRtInferenceSession(
+            environment = environment,
+            compiledModel = compiledModel,
+            inputBuffer = inputBuffers.single(),
+            outputBuffer = outputBuffers.single(),
+            profile = profile,
+            diagnostics = diagnostics,
+        )
+    } catch (error: Throwable) {
+        inputBuffers.closeQuietly()
+        outputBuffers.closeQuietly()
+        compiledModel?.closeQuietly()
+        environment.closeQuietly()
+        throw error
     }
 }
 
-private class MdxLiteRtCpuInferenceSession(
+private class MdxLiteRtInferenceSession(
     private val environment: Environment,
     private val compiledModel: CompiledModel,
     private val inputBuffer: TensorBuffer,
     private val outputBuffer: TensorBuffer,
     private val profile: MdxExecutionProfile,
-    cpuThreads: Int,
-    compatibility: MdxCompatibilityDecision,
+    override val diagnostics: MdxRuntimeDiagnostics,
 ) : MdxInferenceSession {
     private val inputNhwc = FloatArray(profile.inputTensor.elementCount)
     private val outputNchw = FloatArray(profile.outputTensor.elementCount)
     private val inputBuffers = listOf(inputBuffer)
     private val outputBuffers = listOf(outputBuffer)
     private var closed = false
-
-    override val diagnostics = MdxRuntimeDiagnostics(
-        runtimeName = "LiteRT 2.1.5",
-        backend = MdxInferenceBackend.LiteRtCpu,
-        cpuThreads = cpuThreads,
-        detail = buildString {
-            append("layout=NHWC, status=").append(compatibility.outcome.name)
-            compatibility.evidence?.let { append(", evidence=").append(it) }
-        },
-    )
 
     @Synchronized
     override fun run(
@@ -171,6 +207,23 @@ private class MdxLiteRtCpuInferenceSession(
         }
         failure?.let { throw it }
     }
+}
+
+private fun compatibilityDetail(compatibility: MdxCompatibilityDecision): String = buildString {
+    append("status=").append(compatibility.outcome.name)
+    compatibility.evidence?.let { append(", evidence=").append(it) }
+}
+
+private fun MdxLiteRtGpuPrecision.toLiteRtPrecision(): CompiledModel.GpuOptions.Precision =
+    when (this) {
+        MdxLiteRtGpuPrecision.Float32 -> CompiledModel.GpuOptions.Precision.FP32
+        MdxLiteRtGpuPrecision.Float16 -> CompiledModel.GpuOptions.Precision.FP16
+    }
+
+private fun MdxLiteRtGpuApi.toLiteRtBackend(): CompiledModel.GpuOptions.Backend = when (this) {
+    MdxLiteRtGpuApi.Automatic -> CompiledModel.GpuOptions.Backend.AUTOMATIC
+    MdxLiteRtGpuApi.OpenCl -> CompiledModel.GpuOptions.Backend.OPENCL
+    MdxLiteRtGpuApi.OpenGl -> CompiledModel.GpuOptions.Backend.OPENGL
 }
 
 internal fun validateLiteRtTensorMetadata(
