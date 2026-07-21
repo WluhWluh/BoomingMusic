@@ -2,7 +2,7 @@
 
 Status: active plan for `feature/litert-multi-model-presets`
 
-Updated: 2026-07-20
+Updated: 2026-07-21
 
 This document is the plan for the next Booming SS development stage. The
 older `source-separation-roadmap.md` remains the historical record of the
@@ -73,6 +73,7 @@ rebased upstream branch:
 - upstream baseline: `3a30569b`
 - structured Booming SS tip: `d6613e7c`
 - development branch: `feature/litert-multi-model-presets`
+- completed Phase 1 tip: `2f32f8be`
 - model conversion repository:
   [`WluhWluh/bss-tflite`](https://github.com/WluhWluh/bss-tflite)
 - supplemental x86 runtime repository:
@@ -268,24 +269,86 @@ models on demand and must not install the entire candidate set on first use.
 ### Adapter boundary
 
 Introduce a narrow model-runtime boundary between the existing MDX DSP code
-and the inference implementation. The DSP layer should provide a model
-contract and an NHWC float input; the runtime adapter should return an NHWC
-float output and expose backend diagnostics.
+and the inference implementation. The existing `MdxSpectrogram` layout is the
+engine-side canonical layout: a flat NCHW float tensor with shape
+`[1, 4, dimF, modelTimeFrames]`. The TFLite artifact contract remains NHWC
+with shape `[1, dimF, modelTimeFrames, 4]`. Runtime-neutral sessions accept
+and return the engine-side NCHW representation; the LiteRT adapter alone owns
+the NCHW-to-NHWC and NHWC-to-NCHW conversion. This avoids combining a runtime
+migration with a rewrite of the validated STFT/ISTFT implementation.
+
+The boundary should have three explicit ownership levels:
+
+- a factory opens a session from a verified model artifact, execution profile,
+  backend request, and runtime settings; a contract-backed profile embeds one
+  complete model contract, while the temporary ORT baseline uses an explicit
+  non-catalog legacy profile;
+- a session validates and executes one model invocation at a time without
+  exposing ORT or LiteRT types; and
+- a lease allows the worker to release a use while a reusable provider keeps
+  the matching session warm for a later job.
+
+A reusable session matches only when model SHA-256, execution-profile identity
+(including contract ID and pipeline version where applicable), backend, and
+runtime settings all match. File path, length, and modification time are not
+sufficient model identity. The internal tensor specification may represent
+the legacy ONNX model's NCHW layout, but published contract schema v1 remains
+NHWC-only. The first refactor must put the existing ORT implementation behind
+this boundary and preserve its current production behavior before a LiteRT
+implementation is added. The production worker continues to select ORT until
+the explicit Phase 6 switch.
+The temporary legacy 9482 execution profile therefore uses the existing DSP,
+stem mapping, and an output scale of `1.0`; it is a regression baseline, not a
+new catalog contract or a reason to retain 9482 after migration.
+
+For a contract-backed path, the execution profile must construct
+`MdxDspConfig` from the reviewed DSP fields before source decoding, segment
+planning, STFT, or tensor allocation. No contract-backed run may inherit the
+current default 2048-bin configuration implicitly. This is required for HQ4,
+whose `dimF=2560` and `nFft=5120` differ from 9662 and KARA. Derived chunk,
+trim, generation, and tensor sizes must agree with the tensor contract before
+opening a runtime session.
 
 The adapter must own:
 
-- LiteRT model loading and interpreter/compiled-model lifetime;
+- runtime environment, compiled-model, tensor-buffer, and session lifetime;
 - input and output tensor validation;
-- NCHW-to-NHWC and NHWC-to-NCHW conversion at the boundary if needed;
+- reusable NCHW-to-NHWC and NHWC-to-NCHW conversion buffers;
 - CPU thread configuration;
 - GPU backend creation;
 - session recreation after backend failure;
 - cancellation and close behavior;
 - backend name and failure reason for diagnostics.
 
-The rest of the separation engine must not import LiteRT classes directly.
-This keeps cache scheduling, DSP, and playback independent from runtime API
-changes.
+The adapter returns raw, unscaled model output. After ISTFT, the separation
+pipeline applies the contract's `modelOutputScale` exactly once to the primary
+waveform and only then constructs the residual as
+`mixture - scaledModelOutput`. Stem semantics from the contract decide which
+waveform is vocals, instrumental, or a generic target; the runtime adapter
+does not own compensation or stem naming. Keeping raw inference and
+post-processing separate allows parity tests to detect both runtime errors and
+a missing or duplicated compensation step.
+
+The separation engine, cache scheduler, and playback code must not import ORT
+or LiteRT classes directly. Runtime-specific option construction and display
+text also move out of the current ORT-shaped `MdxRuntimeSettings` API. This
+keeps scheduling, DSP, and playback independent from runtime API changes and
+allows the legacy ORT path to retain a behavior-preserving profile while the
+contract-backed LiteRT path is tested.
+
+### Invocation and cancellation semantics
+
+LiteRT `CompiledModel.run` is treated as a synchronous, non-interruptible
+invocation. Cancellation is checked before tensor conversion, immediately
+before invocation, and after invocation/output read before ISTFT, file writes,
+or cache-state changes. A cancellation that arrives during an invocation
+discards that invocation's output; its segment must never become `Ready`.
+
+No other thread may close a session while `run` is active. Session replacement
+and provider shutdown occur on the worker path after the invocation returns
+and at a model-window boundary. Tests must use a blocking fake session to prove
+that cancellation does not cause a concurrent close, output write, or ready
+transition. Pause keeps the same window-boundary semantics.
 
 ### Backend policy
 
@@ -955,35 +1018,169 @@ Acceptance criteria:
 
 ### Phase 2: Implement LiteRT CPU inference
 
-- [ ] Add the LiteRT 2.1.5 dependency and isolate it behind the runtime
-  adapter.
-- [ ] Vendor the pinned `v2.1.5-bss.1` x86 `libLiteRt.so` under `jniLibs/x86`
-  and record its source Release, SHA-256, and provenance in the repository.
-- [ ] Add CI checks for the vendored x86 file's hash, ELF machine, expected JNI
-  exports, and dynamic dependency allowlist.
+Phase 2 deliberately keeps ORT as the production default while LiteRT is
+validated through debug and test entry points. Builds temporarily contain both
+runtimes; final installed-size targets apply after ORT removal in Phase 6, not
+to this dual-runtime development interval. No user-visible backend setting or
+backup field is added in this phase.
+
+The three real UVR artifacts, pinned NCHW inputs, and generated ORT reference
+tensors are staged by validation tooling from the exact `bss-tflite` source
+and artifact hashes for connected-device testing. They must not be committed
+to the app repository, bundled in an APK, or fetched by an unfinished
+production downloader. CI uses a small, reproducibly generated Apache-2.0
+TFLite smoke model and keeps its generator/source beside the fixture for
+JNI/API coverage; it does not use UVR weights.
+
+#### Phase 2A: Runtime-neutral boundary with an ORT baseline
+
+- [ ] Introduce runtime-neutral factory, session, lease, execution-profile,
+  backend-diagnostics, and runtime-settings types. The execution profile binds
+  verified model identity, tensor contract, DSP profile, output scale, and
+  stem semantics without implementing installed-model selection yet.
+- [ ] Keep flat NCHW tensors as the DSP-facing input/output contract and move
+  every direct `OrtSession`, `OnnxTensor`, input-name, output-name, and result
+  access out of `MdxRangeSeparator` into an ORT adapter.
+- [ ] Run the current 9482 production path through the new interface with a
+  behavior-preserving legacy profile before adding LiteRT. Do not change
+  scheduler priority, cache paths, output naming, or playback gating.
+- [ ] Construct `MdxDspConfig` and all derived window dimensions from an
+  execution profile, while fixing the legacy profile to its current values.
+  Add a contract-backed HQ4 configuration test before attempting inference.
+- [ ] Generalize the reusable provider so its cache key includes artifact
+  SHA-256, contract/pipeline identity, backend, and runtime settings, and so a
+  lease never exposes an engine-specific session type.
+- [ ] Add fake-session unit tests for acquire/reuse/replacement/close order,
+  tensor element counts, backend diagnostics, pause, cancellation, and a
+  failed invocation that must not mark a window ready.
+- [ ] Run host unit tests in ordinary CI in addition to lint and assembly.
+
+#### Phase 2B: LiteRT packaging and native supply chain
+
+- [ ] Pin `com.google.ai.edge.litert:litert:2.1.5` in the version catalog and
+  keep all LiteRT API use inside the runtime adapter package.
+- [ ] Vendor the canonical `v2.1.5-bss.1` x86 binary as
+  `app/src/main/jniLibs/x86/libLiteRt.so` and record its Release URL, asset
+  name, byte size, SHA-256, source commit/toolchain manifest, LiteRT license,
+  and third-party notices in the repository.
+- [ ] Add CI checks for the vendored x86 file's hash, ELF32/i386 machine,
+  expected LiteRT JNI and C API exports, and dynamic dependency allowlist.
 - [ ] Keep the official LiteRT libraries for `armeabi-v7a`, `arm64-v8a`, and
   `x86_64`; package exactly one `libLiteRt.so` per ABI without `pickFirst`.
-- [ ] Replace the ONNX session provider only for an internal test path first.
-- [ ] Validate static tensor shapes, dtype, and layout before invocation.
-- [ ] Compare desktop and Android output against the existing ORT reference.
-- [ ] Preserve cancellation and session reuse at model-window boundaries.
-- [ ] Route pure x86 directly to the CPU backend and skip GPU initialization.
+  Inspect every ABI split and the universal APK rather than only Gradle's
+  merged-native-libs directory.
+- [ ] Add an API 26 pure-x86 instrumentation smoke test with the small
+  Apache-2.0 model so the exact app APK proves that `Environment`,
+  `CompiledModel`, `TensorBuffer`, JNI loading, invocation, and close all work.
+
+#### Phase 2C: LiteRT CPU session
+
+- [ ] Implement a CPU session with LiteRT `Environment` and `CompiledModel`.
+  Create input/output `TensorBuffer` objects once per session and reuse them
+  together with NCHW/NHWC conversion scratch buffers for every window.
+- [ ] Resolve minimum API, ABI, backend, and contract compatibility before
+  source decoding, cache-run creation, output-file creation, tensor allocation,
+  or `CompiledModel.create`. Treat `unsupported` as a hard preflight result;
+  permit an `untested` status only in the internal validation path until it is
+  promoted by device evidence. A missing ABI/backend status is unsupported,
+  not an invitation to guess.
+- [ ] After model creation, validate one named float32 input and output against
+  the exact contract names, static NHWC shapes, element counts, and layouts
+  before the first invocation. Reject non-finite output before ISTFT.
+- [ ] Return raw output in canonical NCHW order. Apply
+  `modelOutputScale` once after ISTFT, construct the residual from the scaled
+  waveform, and map both outputs using the contract's stem semantics.
+- [ ] Use `max(2, min(4, availableProcessors - 1))` as the initial LiteRT CPU
+  thread policy. Record the resolved count in diagnostics but do not expose it
+  as a user setting or backup value.
+- [ ] Check cancellation before and after the non-interruptible invocation,
+  discard an output canceled in flight, and prohibit concurrent session close.
+- [ ] Add unit tests for NCHW/NHWC round trips with non-symmetric dimensions,
+  exact output compensation, residual reconstruction, tensor mismatch,
+  non-finite output, compatibility decisions, and session replacement.
+- [ ] Add a factory-spy test proving HQ4/x86 is rejected before
+  `CompiledModel.create` or any large tensor allocation.
+
+#### Phase 2D: Internal integration and parity validation
+
+- [ ] Add a debug/internal runner that accepts a locally staged TFLite file
+  only after its file identity and complete bundled contract match. Keep it
+  out of release UI, normal model acquisition, production defaults, and
+  settings persistence. Write only to an isolated validation directory under
+  the cache root; do not use the production `SourceSeparationCache`, foreground
+  worker, playback gate, or existing 9482 cache identity.
+- [ ] Compare raw NCHW LiteRT output with the frozen ORT tensor reference for
+  the same checked input, then independently validate compensation, stem
+  mapping, and residual reconstruction.
+- [ ] Record the actual process architecture (`SUPPORTED_ABIS`, `os.arch`,
+  `Process.is64Bit()`), installed APK/split identity, and loaded runtime
+  inventory in every device report. An ABI list alone is not sufficient
+  evidence that a particular native library executed.
+- [ ] Exercise 9662, KARA, and HQ4 in arm64 processes on S10 and S25 CPU. On
+  S10, separately install the `armeabi-v7a` split and validate at least 9662
+  and KARA; test HQ4 only after the 32-bit compatibility preflight accepts its
+  memory budget, otherwise record it as unsupported.
+- [ ] Exercise all three models with the official x86_64 runtime and exercise
+  9662 and KARA with the supplemental API 26 pure-x86 CPU runtime. Route pure
+  x86 directly to CPU without attempting GPU setup.
+- [ ] Reconcile `runtimeCompatibility` only from these app-packaged reports:
+  update the authoritative contracts in `bss-tflite`, regenerate the bundled
+  catalog snapshot, and keep any combination without sufficient evidence
+  `untested` or `unsupported`. Do not patch only the app's copied JSON.
+- [ ] Run cancellation before invocation and during a blocking invocation,
+  session reuse, session replacement, and process restart tests. Confirm the
+  unchanged production ORT path still follows existing scheduler and playback
+  behavior.
+- [ ] Store the resulting parity, timing, memory, and packaging report with
+  the app commit, catalog revision, contract IDs, runtime version, ABI, device,
+  Android version, and fixture hashes.
 
 Acceptance criteria:
 
-- All three recommended models produce finite output on their supported
-  ABI/backend contracts; 9662 and KARA also pass the pure x86 CPU path.
-- HQ4 is rejected with an explicit compatibility state on the 2 GB x86
-  baseline before a failed allocation can strand a worker.
-- Real-device SNR and cosine similarity remain within the conversion reports.
-- CPU inference works on S10, S25, and the API 26 pure x86 test environment
-  without changing playback scheduling.
+- The ORT adapter is behaviorally equivalent to the pre-refactor production
+  path before LiteRT is selected by any internal test, and production playback
+  still has no route that silently selects LiteRT.
+- All three recommended models produce correctly shaped, finite CPU output in
+  arm64 processes on S10 and S25 and in an x86_64 process; 9662 and KARA also
+  pass the `armeabi-v7a` S10 process and pure-x86 CPU path.
+- For the frozen synthetic and Coast Town `bss-tflite` parity fixtures, raw
+  output meets these machine-checked floors against ORT. These limits apply to
+  the named inputs; maximum absolute error is input-amplitude dependent and is
+  not a universal quality threshold for arbitrary songs.
+
+  | Model | Minimum SNR | Minimum cosine | Maximum absolute error |
+  | --- | ---: | ---: | ---: |
+  | 9662 | 94.0 dB | 0.999999999 | 0.00010 |
+  | KARA | 109.0 dB | 0.999999999 | 0.00003 |
+  | HQ4 | 95.0 dB | 0.999999999 | 0.00060 |
+
+- Unit and connected tests prove that the contract scale is applied exactly
+  once and that scaled primary plus residual reconstructs the unclipped input
+  window with maximum absolute error at most `0.00001`.
+- HQ4 returns an explicit unsupported compatibility result on the 2 GB x86
+  baseline, and a factory spy confirms no `CompiledModel`, tensor buffer, or
+  large conversion buffer was allocated.
+- A cancellation received during invocation waits for the call to return,
+  discards its output, does not close the session concurrently, and does not
+  mark the segment ready.
+- CPU inference and session reuse work on S10, S25, and the API 26 pure-x86
+  test environment without changing production playback scheduling.
+- Every `known-good` status used by the app is backed by an app commit, exact
+  model/runtime hashes, actual process ABI, Android/device identity, and
+  numerical report. `untested`, missing, and `unsupported` combinations remain
+  unavailable outside internal validation.
 - The packaged x86 runtime has the pinned
   `02b6556ec235926c11eb0c067eb16e459adcddb1568a42eefe0c40f4cc4b59af`
-  hash and no release artifact contains duplicate `libLiteRt.so` entries for
-  one ABI.
+  hash; each ABI split contains only its matching runtime inventory, and the
+  universal APK contains exactly one `libLiteRt.so` for each of the four ABIs.
+- CI runs host unit tests, native supply-chain checks, APK inventory checks,
+  and the app-packaged x86 JNI/API smoke test without downloading UVR weights.
 
 ### Phase 3: Add GPU execution and fallback
+
+Phase 3 uses the same isolated internal runner as Phase 2. GPU results do not
+enter playback or a production cache until the model repository and
+model-aware cache work in Phases 4 and 5 is complete.
 
 - [ ] Add the LiteRT GPU backend behind the same adapter.
 - [ ] Implement ABI, accelerator-library, operator, delegate, and memory
@@ -992,23 +1189,45 @@ Acceptance criteria:
   insufficient.
 - [ ] Recreate the model on CPU after GPU setup or invocation failure.
 - [ ] Record backend, setup time, inference time, and fallback reason.
-- [ ] Use `max(2, min(4, availableProcessors - 1))` as the initial CPU thread
-  policy and begin S10/S25 measurements at four threads where available.
+- [ ] Retain the Phase 2 CPU thread policy for fallback initially; tune it only
+  from the recorded S10/S25 full-song matrix rather than changing it while
+  introducing GPU behavior.
 - [ ] Keep `GPU only` out of the initial UI and settings schema.
-- [ ] Verify no failed GPU session leaves a worker or playback gate stuck.
+- [ ] Verify no failed GPU session leaves the internal runtime job or
+  validation state stuck. Repeat the production worker/playback-gate assertion
+  after Phase 5 integration.
 
 Acceptance criteria:
 
 - GPU is used where it passes validation.
 - CPU fallback completes the same model window after a forced GPU failure.
-- A failed GPU attempt never produces a partial cache marked ready.
+- A failed GPU attempt never exposes its output as successful or ready in the
+  internal runner; the model-aware cache assertion remains a Phase 5 and
+  Phase 7 gate.
 - Thread-policy or probe changes are supported by full-song performance,
   memory, thermal, cancellation, and readiness measurements on S10 and S25.
 
 ### Phase 4: Multi-preset repository
 
+Model management may be developed and tested before production inference is
+switched, but it remains behind a development feature gate. Selecting a TFLite
+model must not route a normal worker through that model while cache identity is
+still song/legacy-variant based. The gate is removed only by the ordered Phase
+6 cutover after Phase 5 acceptance.
+
+Before production download integration, `bss-tflite` must publish the canonical
+candidate artifacts in an immutable versioned Release. Complete the pinned
+conversion, provenance, sidecar/contract review where activation is claimed,
+desktop numerical validation, per-asset checksums, and release manifest for all
+canonical candidates intended for the first broad testing wave. Entries whose
+DSP or stem semantics remain incomplete may still be published as
+`download-only`; artifact availability must not upgrade activation support.
+
 - [ ] Replace `MdxModelVariant.MDXNET_9482` as the sole active path with a
-  catalog-backed model ID.
+  catalog-backed model ID in the new repository and selection state, without
+  yet changing the feature-gated production worker.
+- [ ] Pin the immutable `bss-tflite` Release tag, asset URLs, byte sizes, and
+  hashes in a reviewed catalog revision; never resolve `latest` at runtime.
 - [ ] Install every artifact under a separate hash-aware model directory.
 - [ ] Track download/import state per model.
 - [ ] Add separate download, active-model selection, and manual deletion
@@ -1017,6 +1236,10 @@ Acceptance criteria:
 - [ ] Keep inactive downloaded models until the user explicitly deletes them.
 - [ ] Display recommended, experimental, and download-only candidates with
   distinct activation rules.
+- [ ] Allow production activation only when the current ABI has a `known-good`
+  CPU path for that exact contract. `Auto` may add a known-good GPU path or
+  fall back to that CPU path; `untested`, missing, and `unsupported` statuses
+  remain downloadable but not usable outside internal validation.
 - [ ] Implement the import priority: built-in contract by SHA-256, matching
   sidecar, then advanced profile form with an unverifiable-quality warning.
 - [ ] Keep every download or import inactive until the user explicitly chooses
@@ -1031,11 +1254,16 @@ Acceptance criteria:
 
 Acceptance criteria:
 
+- Every network-backed catalog entry resolves to one immutable Release asset
+  with a matching size and SHA-256, or remains explicitly unavailable rather
+  than falling back to a mutable source URL.
 - The recommended and experimental artifacts can coexist without overwriting
   files or metadata.
 - Downloading a model does not select it, and selecting a model does not delete
   another installed model.
 - The active model cannot be deleted accidentally.
+- No model can become active on an ABI whose complete CPU compatibility state
+  is anything other than `known-good`.
 - Switching models affects only new separation work.
 - An unknown import can be installed through a valid sidecar or completed
   advanced form without being activated automatically.
@@ -1043,6 +1271,11 @@ Acceptance criteria:
   existing import policy.
 
 ### Phase 5: Model-aware caches and storage
+
+Phase 5 integrates the feature-gated LiteRT path with the new cache identity.
+It must pass cache isolation and recovery tests before any normal worker can
+honor the selected TFLite model. No transitional implementation may write a
+TFLite result under `MdxModelVariant.MDXNET_9482`.
 
 - [ ] Extend cache keys with model hash, contract version, DSP profile, and the
   canonical audio identity; store the complete contract, stem mapping, and
@@ -1093,10 +1326,18 @@ Acceptance criteria:
   installed again.
 - Deleting a model does not silently delete unrelated completed caches.
 - Restoring settings does not recreate a cache entry or a per-song blend value.
+- Cancellation, runtime failure, and GPU-to-CPU session recreation cannot mark
+  a model-aware window ready until the CPU result has completed and been
+  written successfully.
 
 ### Phase 6: Remove ONNX Runtime
 
-- [ ] Switch all production engine construction to LiteRT.
+- [ ] In a build that still contains both runtimes, switch all production
+  engine construction to the selected contract-backed LiteRT `Auto` path and
+  verify that no error silently falls back to ORT.
+- [ ] Run the production worker, playback, model-switch, model-aware-cache, and
+  process-restart suite with ORT still available only as an unreachable
+  regression oracle.
 - [ ] Remove ONNX model URLs, import validation, and user-facing ONNX text.
 - [ ] Remove `onnxruntime.android` and all ONNX native libraries from release
   artifacts.
@@ -1104,11 +1345,16 @@ Acceptance criteria:
   coverage exists.
 - [ ] Remove legacy ONNX model, manifest, and cache discovery paths instead of
   retaining compatibility readers.
+- [ ] Remove the temporary legacy 9482 execution profile, old model repository,
+  and `MdxModelVariant` routing after all production references are gone.
 
 Acceptance criteria:
 
 - `rg` finds no production ONNX Runtime dependency or model-loading path.
 - Release APKs contain no `libonnxruntime*.so`.
+- Every production-selectable model/backend/ABI combination is `known-good`;
+  an untested combination cannot become active merely because its native
+  library is present.
 - Every ABI APK contains the expected LiteRT inventory, and the x86 APK
   contains exactly the pinned supplemental `libLiteRt.so`.
 - A clean install can download and use a TFLite preset without any ONNX file.
@@ -1117,6 +1363,11 @@ Acceptance criteria:
 
 - [ ] Test 9662, KARA, and HQ4 on S10 with CPU and eligible GPU paths.
 - [ ] Test all three on S25 with CPU and eligible GPU paths.
+- [ ] Install the `armeabi-v7a` split on S10 and run full worker/playback tests
+  for every model marked known-good there; confirm any 32-bit HQ4 rejection
+  occurs during compatibility preflight.
+- [ ] Run full worker/playback tests for every model marked known-good on an
+  x86_64 emulator using the official LiteRT runtime.
 - [ ] Run conversion and LiteRT smoke validation for every published candidate
   artifact, recording unsupported or download-only states explicitly.
 - [ ] Test 9662 and KARA with the supplemental CPU runtime on an API 26 pure
@@ -1215,12 +1466,12 @@ Every runtime or model change should run the narrowest applicable checks:
 | Acquisition | Download, verify, install, activate, manual delete, and reinstall |
 | Contract | Schema v1, sidecar/hash pairing, shape, dtype, layout, DSP, stem mapping, and migration rejection |
 | Conversion | Desktop LiteRT/TFLite output versus ORT reference |
-| Runtime | CPU thread matrix, GPU eligibility/probe, fallback, close/recreate, and cancellation |
+| Runtime | ORT abstraction baseline, NCHW/NHWC conversion, raw parity, output compensation/residual, CPU thread matrix, GPU eligibility/probe, fallback, close/recreate, and cancellation |
 | Playback | Start, pause/resume, seek, song transition, blend update |
 | Cache | Multiple models per song, deleted custom profile, partial stale/resume, read-only completed playback, FLAC promotion, delete/cleanup, and system clear-cache recovery |
 | Persistence/Backup | Format/schema v1, key allowlists, pending active model, unknown fork payload, canonical/legacy priority, both package directions, and excluded model/cache/per-song data |
 | Lifecycle | Activity recreation, process restart, background worker continuation |
-| Device | Galaxy S10, Galaxy S25, API 26 pure x86 for 9662/KARA, and explicit HQ4 x86 rejection |
+| Device | Galaxy S10 arm64 and armeabi-v7a, Galaxy S25 arm64, official x86_64 emulator runtime, API 26 pure x86 for 9662/KARA, actual process-ABI evidence, and explicit HQ4 x86 rejection |
 | Resource budgets | Model/runtime install size, peak PSS, graphics/native memory, thermal behavior, and target/hard-limit decisions |
 | Native supply chain | Pinned source/toolchain, Release hash, ELF/JNI audit, checksums, notices, and GitHub provenance |
 | Packaging | Four ABI splits plus universal APK, one runtime per ABI, native inventory, and APK/install size |
@@ -1237,12 +1488,14 @@ Keep the LiteRT transition commits above the seven stable Booming SS commits.
 Prefer small, buildable commits in this order:
 
 1. model contract and preset catalog;
-2. LiteRT CPU adapter, pinned x86 runtime integration, and parity tests;
-3. LiteRT GPU backend and fallback;
-4. multi-preset repository and download UI;
-5. model-aware cache identities and cache storage;
-6. ONNX removal and packaging cleanup;
-7. device validation, documentation, and localization.
+2. runtime-neutral interface and behavior-preserving ORT adapter;
+3. LiteRT dependency, pinned x86 runtime, provenance, and packaging checks;
+4. LiteRT CPU session, internal integration, and parity tests;
+5. LiteRT GPU backend and fallback;
+6. multi-preset repository and download UI;
+7. model-aware cache identities and cache storage;
+8. ONNX removal and packaging cleanup;
+9. device validation, documentation, and localization.
 
 Before starting a new LiteRT milestone:
 
