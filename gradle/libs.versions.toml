@@ -51,6 +51,7 @@ versioncompare = "1.5.0"
 commons-text = "1.15.0"
 onnxruntime = "1.26.0"
 jtransforms = "3.1"
+junit = "4.13.2"
 
 [libraries]
 material-components = { module = "com.google.android.material:material", version.ref = "material" }
@@ -145,6 +146,7 @@ commons-text = { module = "org.apache.commons:commons-text", version.ref = "comm
 juniversalchardet = { module = "com.github.albfernandez:juniversalchardet", version = "2.5.0" }
 onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
 jtransforms = { module = "com.github.wendykierp:JTransforms", version.ref = "jtransforms" }
+junit = { module = "junit:junit", version.ref = "junit" }
 
 [bundles]
 kotlinx = ["kotlinx-datetime", "kotlinx-coroutines-android", "kotlinx-coroutines-guava"]

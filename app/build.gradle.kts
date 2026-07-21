@@ -119,6 +119,9 @@ android {
     }
 
     sourceSets {
+        named("test") {
+            resources.srcDir("src/main/assets")
+        }
         named("github") {
             kotlin.directories.add("src/shared/java")
         }
@@ -321,6 +324,8 @@ dependencies {
     implementation(libs.juniversalchardet)
     implementation(libs.onnxruntime.android)
     implementation(libs.jtransforms)
+
+    testImplementation(libs.junit)
 }
 
 fun getProperties(fileName: String): Properties? {

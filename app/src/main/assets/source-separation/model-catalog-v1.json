@@ -1,0 +1,1518 @@
+{
+  "artifacts": [
+    {
+      "artifactId": "kim_inst",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:Kim_Inst.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "Kim_Inst_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:Kim_Inst.onnx"
+      ]
+    },
+    {
+      "artifactId": "kim_vocal_1",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:Kim_Vocal_1.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "Kim_Vocal_1_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:Kim_Vocal_1.onnx"
+      ]
+    },
+    {
+      "artifactId": "kim_vocal_2",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:Kim_Vocal_2.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "Kim_Vocal_2_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:Kim_Vocal_2.onnx"
+      ]
+    },
+    {
+      "artifactId": "kuielab_a_bass",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:kuielab_a_bass.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "kuielab_a_bass_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:kuielab_a_bass.onnx"
+      ]
+    },
+    {
+      "artifactId": "kuielab_a_drums",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:kuielab_a_drums.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "kuielab_a_drums_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:kuielab_a_drums.onnx"
+      ]
+    },
+    {
+      "artifactId": "kuielab_a_other",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:kuielab_a_other.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "kuielab_a_other_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:kuielab_a_other.onnx"
+      ]
+    },
+    {
+      "artifactId": "kuielab_a_vocals",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:kuielab_a_vocals.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "kuielab_a_vocals_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:kuielab_a_vocals.onnx"
+      ]
+    },
+    {
+      "artifactId": "kuielab_b_bass",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:kuielab_b_bass.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "kuielab_b_bass_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:kuielab_b_bass.onnx"
+      ]
+    },
+    {
+      "artifactId": "kuielab_b_drums",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:kuielab_b_drums.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "kuielab_b_drums_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:kuielab_b_drums.onnx"
+      ]
+    },
+    {
+      "artifactId": "kuielab_b_other",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:kuielab_b_other.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "kuielab_b_other_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:kuielab_b_other.onnx"
+      ]
+    },
+    {
+      "artifactId": "kuielab_b_vocals",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:kuielab_b_vocals.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "kuielab_b_vocals_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:kuielab_b_vocals.onnx"
+      ]
+    },
+    {
+      "artifactId": "reverb_hq_by_foxjoy",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:Reverb_HQ_By_FoxJoy.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "Reverb_HQ_By_FoxJoy_static_float32.tflite",
+      "sourceIds": [
+        "trvlvr-all-public-uvr-models:Reverb_HQ_By_FoxJoy.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_1",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_1.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR-MDX-NET-Inst_1_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR-MDX-NET-Inst_1.onnx",
+        "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_1.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_2",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_2.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR-MDX-NET-Inst_2_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR-MDX-NET-Inst_2.onnx",
+        "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_2.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_3",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_3.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR-MDX-NET-Inst_3_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR-MDX-NET-Inst_3.onnx",
+        "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_3.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_hq_1",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_1.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR-MDX-NET-Inst_HQ_1_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR-MDX-NET-Inst_HQ_1.onnx",
+        "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_1.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_hq_2",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_2.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR-MDX-NET-Inst_HQ_2_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR-MDX-NET-Inst_HQ_2.onnx",
+        "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_2.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_hq_3",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_3.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR-MDX-NET-Inst_HQ_3_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR-MDX-NET-Inst_HQ_3.onnx",
+        "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_3.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_hq_4",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_4.onnx",
+      "conversionState": "converted-unreleased",
+      "plannedFileName": "UVR-MDX-NET-Inst_HQ_4_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR-MDX-NET-Inst_HQ_4.onnx",
+        "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_4.onnx"
+      ],
+      "tflite": {
+        "byteSize": 59057268,
+        "fileName": "UVR-MDX-NET-Inst_HQ_4_static_float32.tflite",
+        "sha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742"
+      }
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_hq_5",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_5.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR-MDX-NET-Inst_HQ_5_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR-MDX-NET-Inst_HQ_5.onnx",
+        "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_5.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_main",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_Main.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR-MDX-NET-Inst_Main_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR-MDX-NET-Inst_Main.onnx",
+        "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_Main.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_voc_ft",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Voc_FT.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR-MDX-NET-Voc_FT_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR-MDX-NET-Voc_FT.onnx",
+        "trvlvr-all-public-uvr-models:UVR-MDX-NET-Voc_FT.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_crowd_hq_1",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET_Crowd_HQ_1.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR-MDX-NET_Crowd_HQ_1_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR-MDX-NET_Crowd_HQ_1.onnx",
+        "trvlvr-all-public-uvr-models:UVR-MDX-NET_Crowd_HQ_1.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_1_9703",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_1_9703.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR_MDXNET_1_9703_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR_MDXNET_1_9703.onnx",
+        "trvlvr-all-public-uvr-models:UVR_MDXNET_1_9703.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_2_9682",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_2_9682.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR_MDXNET_2_9682_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR_MDXNET_2_9682.onnx",
+        "trvlvr-all-public-uvr-models:UVR_MDXNET_2_9682.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_3_9662",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_3_9662.onnx",
+      "conversionState": "converted-unreleased",
+      "plannedFileName": "UVR_MDXNET_3_9662_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR_MDXNET_3_9662.onnx",
+        "trvlvr-all-public-uvr-models:UVR_MDXNET_3_9662.onnx"
+      ],
+      "tflite": {
+        "byteSize": 29700464,
+        "fileName": "UVR_MDXNET_3_9662_static_float32.tflite",
+        "sha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378"
+      }
+    },
+    {
+      "artifactId": "uvr_mdxnet_9482",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_9482.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR_MDXNET_9482_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR_MDXNET_9482.onnx",
+        "trvlvr-all-public-uvr-models:UVR_MDXNET_9482.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_kara",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_KARA.onnx",
+      "conversionState": "converted-unreleased",
+      "plannedFileName": "UVR_MDXNET_KARA_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR_MDXNET_KARA.onnx",
+        "trvlvr-all-public-uvr-models:UVR_MDXNET_KARA.onnx"
+      ],
+      "tflite": {
+        "byteSize": 29700460,
+        "fileName": "UVR_MDXNET_KARA_static_float32.tflite",
+        "sha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64"
+      }
+    },
+    {
+      "artifactId": "uvr_mdxnet_kara_2",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_KARA_2.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR_MDXNET_KARA_2_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR_MDXNET_KARA_2.onnx",
+        "trvlvr-all-public-uvr-models:UVR_MDXNET_KARA_2.onnx"
+      ]
+    },
+    {
+      "artifactId": "uvr_mdxnet_main",
+      "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_Main.onnx",
+      "conversionState": "not-converted",
+      "plannedFileName": "UVR_MDXNET_Main_static_float32.tflite",
+      "sourceIds": [
+        "sherpa-source-separation-models:UVR_MDXNET_Main.onnx",
+        "trvlvr-all-public-uvr-models:UVR_MDXNET_Main.onnx"
+      ]
+    }
+  ],
+  "catalogId": "booming-ss-model-catalog-v1",
+  "catalogSchemaVersion": 1,
+  "contractSchemaVersion": 1,
+  "contracts": [
+    {
+      "artifact": {
+        "byteSize": 29700464,
+        "fileName": "UVR_MDXNET_3_9662_static_float32.tflite",
+        "format": "tflite-flatbuffer",
+        "sha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378"
+      },
+      "contractId": "uvr_mdxnet_3_9662@1",
+      "contractSchemaVersion": 1,
+      "conversion": {
+        "pipelineVersion": 1,
+        "repository": "https://github.com/WluhWluh/bss-tflite",
+        "revision": "3c202e64604de480241c31dba97e41d5a082805a",
+        "toolVersions": {
+          "ai-edge-litert": "2.1.2",
+          "flatbuffers": "25.12.19",
+          "numpy": "2.2.6",
+          "onnx": "1.20.1",
+          "onnx2tf": "2.6.6",
+          "onnxruntime": "1.26.0",
+          "tensorflow": "2.20.0",
+          "tf-keras": "2.20.1"
+        }
+      },
+      "displayName": "UVR-MDX-NET 3",
+      "dsp": {
+        "channelCount": 2,
+        "dimF": 2048,
+        "dimTPower": 8,
+        "hopLength": 1024,
+        "modelOutputScale": 1.035,
+        "modelTimeFrames": 256,
+        "nFft": 6144,
+        "sampleRate": 44100,
+        "window": "periodic-hann"
+      },
+      "modelId": "uvr_mdxnet_3_9662",
+      "pipelineCompatibility": {
+        "maximumVersion": 1,
+        "minimumVersion": 1,
+        "pipelineId": "booming-ss-mdx-stft"
+      },
+      "runtimeCompatibility": {
+        "minimumAndroidApi": 26,
+        "statuses": [
+          {
+            "abi": "arm64-v8a",
+            "backend": "cpu",
+            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
+            "status": "known-good"
+          },
+          {
+            "abi": "arm64-v8a",
+            "backend": "gpu",
+            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
+            "status": "known-good"
+          },
+          {
+            "abi": "x86",
+            "backend": "cpu",
+            "evidence": "bss-litert-android v2.1.5-bss.1 API 26 smoke",
+            "status": "known-good"
+          },
+          {
+            "abi": "armeabi-v7a",
+            "backend": "cpu",
+            "evidence": "Official LiteRT ABI present; device validation pending",
+            "status": "untested"
+          },
+          {
+            "abi": "x86_64",
+            "backend": "cpu",
+            "evidence": "Official LiteRT ABI present; native x86_64 validation pending",
+            "status": "untested"
+          }
+        ]
+      },
+      "source": {
+        "attribution": [
+          "Ultimate Vocal Remover GUI",
+          "TRvlvr/model_repo"
+        ],
+        "byteSize": 29704436,
+        "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_3_9662.onnx",
+        "fileName": "UVR_MDXNET_3_9662.onnx",
+        "sha256": "e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_3_9662.onnx"
+      },
+      "stemContract": {
+        "modelOutput": {
+          "displayLabel": "Vocals",
+          "semantic": "vocals"
+        },
+        "residual": {
+          "displayLabel": "Instrumental",
+          "semantic": "instrumental"
+        },
+        "residualRule": "mixture-minus-scaled-model-output"
+      },
+      "tensorContract": {
+        "batchSize": 1,
+        "complexChannelCount": 4,
+        "input": {
+          "dtype": "float32",
+          "layout": "NHWC",
+          "name": "input",
+          "shape": [
+            1,
+            2048,
+            256,
+            4
+          ]
+        },
+        "output": {
+          "dtype": "float32",
+          "layout": "NHWC",
+          "name": "output",
+          "shape": [
+            1,
+            2048,
+            256,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "artifact": {
+        "byteSize": 29700460,
+        "fileName": "UVR_MDXNET_KARA_static_float32.tflite",
+        "format": "tflite-flatbuffer",
+        "sha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64"
+      },
+      "contractId": "uvr_mdxnet_kara@1",
+      "contractSchemaVersion": 1,
+      "conversion": {
+        "pipelineVersion": 1,
+        "repository": "https://github.com/WluhWluh/bss-tflite",
+        "revision": "3c202e64604de480241c31dba97e41d5a082805a",
+        "toolVersions": {
+          "ai-edge-litert": "2.1.2",
+          "flatbuffers": "25.12.19",
+          "numpy": "2.2.6",
+          "onnx": "1.20.1",
+          "onnx2tf": "2.6.6",
+          "onnxruntime": "1.26.0",
+          "tensorflow": "2.20.0",
+          "tf-keras": "2.20.1"
+        }
+      },
+      "displayName": "UVR-MDX-NET Karaoke",
+      "dsp": {
+        "channelCount": 2,
+        "dimF": 2048,
+        "dimTPower": 8,
+        "hopLength": 1024,
+        "modelOutputScale": 1.035,
+        "modelTimeFrames": 256,
+        "nFft": 6144,
+        "sampleRate": 44100,
+        "window": "periodic-hann"
+      },
+      "modelId": "uvr_mdxnet_kara",
+      "pipelineCompatibility": {
+        "maximumVersion": 1,
+        "minimumVersion": 1,
+        "pipelineId": "booming-ss-mdx-stft"
+      },
+      "runtimeCompatibility": {
+        "minimumAndroidApi": 26,
+        "statuses": [
+          {
+            "abi": "arm64-v8a",
+            "backend": "cpu",
+            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
+            "status": "known-good"
+          },
+          {
+            "abi": "arm64-v8a",
+            "backend": "gpu",
+            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
+            "status": "known-good"
+          },
+          {
+            "abi": "x86",
+            "backend": "cpu",
+            "evidence": "bss-litert-android v2.1.5-bss.1 API 26 smoke",
+            "status": "known-good"
+          },
+          {
+            "abi": "armeabi-v7a",
+            "backend": "cpu",
+            "evidence": "Official LiteRT ABI present; device validation pending",
+            "status": "untested"
+          },
+          {
+            "abi": "x86_64",
+            "backend": "cpu",
+            "evidence": "Official LiteRT ABI present; native x86_64 validation pending",
+            "status": "untested"
+          }
+        ]
+      },
+      "source": {
+        "attribution": [
+          "Ultimate Vocal Remover GUI",
+          "TRvlvr/model_repo"
+        ],
+        "byteSize": 29704436,
+        "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_KARA.onnx",
+        "fileName": "UVR_MDXNET_KARA.onnx",
+        "sha256": "e3167c87333a48548413e972a286bf40bf5694001d2853861eb1435953f02d63",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_KARA.onnx"
+      },
+      "stemContract": {
+        "modelOutput": {
+          "displayLabel": "Vocals",
+          "semantic": "vocals"
+        },
+        "residual": {
+          "displayLabel": "Instrumental",
+          "semantic": "instrumental"
+        },
+        "residualRule": "mixture-minus-scaled-model-output"
+      },
+      "tensorContract": {
+        "batchSize": 1,
+        "complexChannelCount": 4,
+        "input": {
+          "dtype": "float32",
+          "layout": "NHWC",
+          "name": "input",
+          "shape": [
+            1,
+            2048,
+            256,
+            4
+          ]
+        },
+        "output": {
+          "dtype": "float32",
+          "layout": "NHWC",
+          "name": "output",
+          "shape": [
+            1,
+            2048,
+            256,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "artifact": {
+        "byteSize": 59057268,
+        "fileName": "UVR-MDX-NET-Inst_HQ_4_static_float32.tflite",
+        "format": "tflite-flatbuffer",
+        "sha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742"
+      },
+      "contractId": "uvr_mdxnet_inst_hq_4@1",
+      "contractSchemaVersion": 1,
+      "conversion": {
+        "pipelineVersion": 1,
+        "repository": "https://github.com/WluhWluh/bss-tflite",
+        "revision": "3c202e64604de480241c31dba97e41d5a082805a",
+        "toolVersions": {
+          "ai-edge-litert": "2.1.2",
+          "flatbuffers": "25.12.19",
+          "numpy": "2.2.6",
+          "onnx": "1.20.1",
+          "onnx2tf": "2.6.6",
+          "onnxruntime": "1.26.0",
+          "tensorflow": "2.20.0",
+          "tf-keras": "2.20.1"
+        }
+      },
+      "displayName": "UVR-MDX-NET Inst HQ 4",
+      "dsp": {
+        "channelCount": 2,
+        "dimF": 2560,
+        "dimTPower": 8,
+        "hopLength": 1024,
+        "modelOutputScale": 1.019,
+        "modelTimeFrames": 256,
+        "nFft": 5120,
+        "sampleRate": 44100,
+        "window": "periodic-hann"
+      },
+      "modelId": "uvr_mdxnet_inst_hq_4",
+      "pipelineCompatibility": {
+        "maximumVersion": 1,
+        "minimumVersion": 1,
+        "pipelineId": "booming-ss-mdx-stft"
+      },
+      "runtimeCompatibility": {
+        "minimumAndroidApi": 26,
+        "statuses": [
+          {
+            "abi": "arm64-v8a",
+            "backend": "cpu",
+            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
+            "status": "known-good"
+          },
+          {
+            "abi": "arm64-v8a",
+            "backend": "gpu",
+            "evidence": "Galaxy S10 and S25 inference report, 2026-07-19",
+            "status": "known-good"
+          },
+          {
+            "abi": "x86",
+            "backend": "cpu",
+            "evidence": "Allocation failed on the 2 GB API 26 x86 baseline",
+            "status": "unsupported"
+          },
+          {
+            "abi": "armeabi-v7a",
+            "backend": "cpu",
+            "evidence": "Official LiteRT ABI present; memory validation pending",
+            "status": "untested"
+          },
+          {
+            "abi": "x86_64",
+            "backend": "cpu",
+            "evidence": "Official LiteRT ABI present; native x86_64 validation pending",
+            "status": "untested"
+          }
+        ]
+      },
+      "source": {
+        "attribution": [
+          "Ultimate Vocal Remover GUI",
+          "TRvlvr/model_repo"
+        ],
+        "byteSize": 59074342,
+        "canonicalSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_4.onnx",
+        "fileName": "UVR-MDX-NET-Inst_HQ_4.onnx",
+        "sha256": "3c4b5b9b05090fdf238f38ba5046813982d50e2a652e9cb3324ea79720c3c9c8",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_4.onnx"
+      },
+      "stemContract": {
+        "modelOutput": {
+          "displayLabel": "Instrumental",
+          "semantic": "instrumental"
+        },
+        "residual": {
+          "displayLabel": "Vocals",
+          "semantic": "vocals"
+        },
+        "residualRule": "mixture-minus-scaled-model-output"
+      },
+      "tensorContract": {
+        "batchSize": 1,
+        "complexChannelCount": 4,
+        "input": {
+          "dtype": "float32",
+          "layout": "NHWC",
+          "name": "input",
+          "shape": [
+            1,
+            2560,
+            256,
+            4
+          ]
+        },
+        "output": {
+          "dtype": "float32",
+          "layout": "NHWC",
+          "name": "output",
+          "shape": [
+            1,
+            2560,
+            256,
+            4
+          ]
+        }
+      }
+    }
+  ],
+  "entries": [
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "kim_inst",
+      "displayName": "Kim Inst",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "kim_inst",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "kim_vocal_1",
+      "displayName": "Kim Vocal 1",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "kim_vocal_1",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "kim_vocal_2",
+      "displayName": "Kim Vocal 2",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "kim_vocal_2",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifactId": "kuielab_a_bass",
+      "displayName": "Kuielab A Bass",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "kuielab_a_bass",
+      "stemUi": "generic-target-residual-required",
+      "supportLevel": "download-only",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifactId": "kuielab_a_drums",
+      "displayName": "Kuielab A Drums",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "kuielab_a_drums",
+      "stemUi": "generic-target-residual-required",
+      "supportLevel": "download-only",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifactId": "kuielab_a_other",
+      "displayName": "Kuielab A Other",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "kuielab_a_other",
+      "stemUi": "generic-target-residual-required",
+      "supportLevel": "download-only",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "kuielab_a_vocals",
+      "displayName": "Kuielab A Vocals",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "kuielab_a_vocals",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifactId": "kuielab_b_bass",
+      "displayName": "Kuielab B Bass",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "kuielab_b_bass",
+      "stemUi": "generic-target-residual-required",
+      "supportLevel": "download-only",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifactId": "kuielab_b_drums",
+      "displayName": "Kuielab B Drums",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "kuielab_b_drums",
+      "stemUi": "generic-target-residual-required",
+      "supportLevel": "download-only",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifactId": "kuielab_b_other",
+      "displayName": "Kuielab B Other",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "kuielab_b_other",
+      "stemUi": "generic-target-residual-required",
+      "supportLevel": "download-only",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "kuielab_b_vocals",
+      "displayName": "Kuielab B Vocals",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "kuielab_b_vocals",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifactId": "reverb_hq_by_foxjoy",
+      "displayName": "Reverb HQ by FoxJoy",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "reverb_hq_by_foxjoy",
+      "stemUi": "generic-target-residual-required",
+      "supportLevel": "download-only",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_inst_1",
+      "displayName": "UVR-MDX-NET Inst 1",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_inst_1",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_inst_2",
+      "displayName": "UVR-MDX-NET Inst 2",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_inst_2",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_inst_3",
+      "displayName": "UVR-MDX-NET Inst 3",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_inst_3",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_inst_hq_1",
+      "displayName": "UVR-MDX-NET Inst HQ 1",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_inst_hq_1",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_inst_hq_2",
+      "displayName": "UVR-MDX-NET Inst HQ 2",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_inst_hq_2",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_inst_hq_3",
+      "displayName": "UVR-MDX-NET Inst HQ 3",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_inst_hq_3",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "selectable-when-installed",
+      "artifactId": "uvr_mdxnet_inst_hq_4",
+      "contractId": "uvr_mdxnet_inst_hq_4@1",
+      "displayName": "UVR-MDX-NET Inst HQ 4",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_inst_hq_4",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "recommended",
+      "validation": {
+        "androidCpu": "passed",
+        "androidGpu": "passed",
+        "conversion": "passed",
+        "desktopNumerical": "passed",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_inst_hq_5",
+      "displayName": "UVR-MDX-NET Inst HQ 5",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_inst_hq_5",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_inst_main",
+      "displayName": "UVR-MDX-NET Inst Main",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_inst_main",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_voc_ft",
+      "displayName": "UVR-MDX-NET Voc FT",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_voc_ft",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifactId": "uvr_mdxnet_crowd_hq_1",
+      "displayName": "UVR-MDX-NET Crowd HQ 1",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_crowd_hq_1",
+      "stemUi": "generic-target-residual-required",
+      "supportLevel": "download-only",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_1_9703",
+      "displayName": "UVR-MDX-NET 1",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_1_9703",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_2_9682",
+      "displayName": "UVR-MDX-NET 2",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_2_9682",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "selectable-when-installed",
+      "artifactId": "uvr_mdxnet_3_9662",
+      "contractId": "uvr_mdxnet_3_9662@1",
+      "displayName": "UVR-MDX-NET 3",
+      "downloadActivatesModel": false,
+      "isDefault": true,
+      "modelId": "uvr_mdxnet_3_9662",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "recommended",
+      "validation": {
+        "androidCpu": "passed",
+        "androidGpu": "passed",
+        "conversion": "passed",
+        "desktopNumerical": "passed",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_9482",
+      "displayName": "UVR-MDX-NET 9482",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_9482",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "selectable-when-installed",
+      "artifactId": "uvr_mdxnet_kara",
+      "contractId": "uvr_mdxnet_kara@1",
+      "displayName": "UVR-MDX-NET Karaoke",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_kara",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "recommended",
+      "validation": {
+        "androidCpu": "passed",
+        "androidGpu": "passed",
+        "conversion": "passed",
+        "desktopNumerical": "passed",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_kara_2",
+      "displayName": "UVR-MDX-NET Karaoke 2",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_kara_2",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactId": "uvr_mdxnet_main",
+      "displayName": "UVR-MDX-NET Main",
+      "downloadActivatesModel": false,
+      "isDefault": false,
+      "modelId": "uvr_mdxnet_main",
+      "stemUi": "vocals-instrumental",
+      "supportLevel": "experimental",
+      "validation": {
+        "androidCpu": "pending",
+        "androidGpu": "pending",
+        "conversion": "pending",
+        "desktopNumerical": "pending",
+        "fullSong": "pending"
+      }
+    }
+  ],
+  "inventory": {
+    "fileName": "candidate-sources-v1.json",
+    "inventorySchemaVersion": 1,
+    "sha256": "42295c6c2be8f2d2908922ec42b81e2b5199084684952cedaa045ff266b6d553"
+  },
+  "sources": [
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_1.onnx",
+      "artifactId": "uvr_mdxnet_inst_1",
+      "fileName": "UVR-MDX-NET-Inst_1.onnx",
+      "sha256": "63e8c20b1fd31250bf841ff6974365397bc5091f6c0a846e17d4ae0da2612d58",
+      "sourceId": "sherpa-source-separation-models:UVR-MDX-NET-Inst_1.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_2.onnx",
+      "artifactId": "uvr_mdxnet_inst_2",
+      "fileName": "UVR-MDX-NET-Inst_2.onnx",
+      "sha256": "4e341695ff5b6d90e8fa391b8916562fedd78b40f089a678f7ab0c9dc6e84926",
+      "sourceId": "sherpa-source-separation-models:UVR-MDX-NET-Inst_2.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_3.onnx",
+      "artifactId": "uvr_mdxnet_inst_3",
+      "fileName": "UVR-MDX-NET-Inst_3.onnx",
+      "sha256": "ac776034718c9df1c3cc6ab41408642d65671e903851a4876273dfef46307b69",
+      "sourceId": "sherpa-source-separation-models:UVR-MDX-NET-Inst_3.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_1.onnx",
+      "artifactId": "uvr_mdxnet_inst_hq_1",
+      "fileName": "UVR-MDX-NET-Inst_HQ_1.onnx",
+      "sha256": "f3d1546ed6ca7257ec1c324e72bf2932e8339588c348f6cbda126e728cdd2f8a",
+      "sourceId": "sherpa-source-separation-models:UVR-MDX-NET-Inst_HQ_1.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_2.onnx",
+      "artifactId": "uvr_mdxnet_inst_hq_2",
+      "fileName": "UVR-MDX-NET-Inst_HQ_2.onnx",
+      "sha256": "9e0f425c4b797920ab9421f58db743adcc7bc1b48798a946e268b6d9e0b8e235",
+      "sourceId": "sherpa-source-separation-models:UVR-MDX-NET-Inst_HQ_2.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_3.onnx",
+      "artifactId": "uvr_mdxnet_inst_hq_3",
+      "fileName": "UVR-MDX-NET-Inst_HQ_3.onnx",
+      "sha256": "c207b845d51dc1303c543503f6f5a8b596da5d7de97bead77b3e16ec38e8d5b3",
+      "sourceId": "sherpa-source-separation-models:UVR-MDX-NET-Inst_HQ_3.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_4.onnx",
+      "artifactId": "uvr_mdxnet_inst_hq_4",
+      "fileName": "UVR-MDX-NET-Inst_HQ_4.onnx",
+      "sha256": "af6de857b80f3ea7c4fd7b0380e7138f5ecf91da3e5f140c463b5aa6d927636f",
+      "sourceId": "sherpa-source-separation-models:UVR-MDX-NET-Inst_HQ_4.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_5.onnx",
+      "artifactId": "uvr_mdxnet_inst_hq_5",
+      "fileName": "UVR-MDX-NET-Inst_HQ_5.onnx",
+      "sha256": "487e35ae87ed9af9914c85c357e60800c07b8196949e274fe884c18a0c620dbb",
+      "sourceId": "sherpa-source-separation-models:UVR-MDX-NET-Inst_HQ_5.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_Main.onnx",
+      "artifactId": "uvr_mdxnet_inst_main",
+      "fileName": "UVR-MDX-NET-Inst_Main.onnx",
+      "sha256": "628d621d64a06237949de109571cad488c977ab1b34f53d852428d44e492f198",
+      "sourceId": "sherpa-source-separation-models:UVR-MDX-NET-Inst_Main.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Voc_FT.onnx",
+      "artifactId": "uvr_mdxnet_voc_ft",
+      "fileName": "UVR-MDX-NET-Voc_FT.onnx",
+      "sha256": "e411182ce2c53541fefdcc99a8f46f2fe03978eb22038b9497c1d9d95a00fad4",
+      "sourceId": "sherpa-source-separation-models:UVR-MDX-NET-Voc_FT.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET_Crowd_HQ_1.onnx",
+      "artifactId": "uvr_mdxnet_crowd_hq_1",
+      "fileName": "UVR-MDX-NET_Crowd_HQ_1.onnx",
+      "sha256": "5b934c62d115a60015a1a58300a3aa48841230c0f54732b30d0c2ea5788d46f6",
+      "sourceId": "sherpa-source-separation-models:UVR-MDX-NET_Crowd_HQ_1.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_1_9703.onnx",
+      "artifactId": "uvr_mdxnet_1_9703",
+      "fileName": "UVR_MDXNET_1_9703.onnx",
+      "sha256": "1edd6f6891afd845cdc5b325d008075007ccffa6965861ae88411396d60fcc03",
+      "sourceId": "sherpa-source-separation-models:UVR_MDXNET_1_9703.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_2_9682.onnx",
+      "artifactId": "uvr_mdxnet_2_9682",
+      "fileName": "UVR_MDXNET_2_9682.onnx",
+      "sha256": "27b90a8b3a30969072b366c417ed95df4072c6fc05dadfae8561a451fee51b4a",
+      "sourceId": "sherpa-source-separation-models:UVR_MDXNET_2_9682.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_3_9662.onnx",
+      "artifactId": "uvr_mdxnet_3_9662",
+      "fileName": "UVR_MDXNET_3_9662.onnx",
+      "sha256": "2139f8df7302e33ca8d3b36bbe20509e6e2a5cf959f79cde5698177683cd9c70",
+      "sourceId": "sherpa-source-separation-models:UVR_MDXNET_3_9662.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_9482.onnx",
+      "artifactId": "uvr_mdxnet_9482",
+      "fileName": "UVR_MDXNET_9482.onnx",
+      "sha256": "9d78f8566fa8198065214ab628be1de966a500c57786695aa4b13e2b27a7727d",
+      "sourceId": "sherpa-source-separation-models:UVR_MDXNET_9482.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_KARA.onnx",
+      "artifactId": "uvr_mdxnet_kara",
+      "fileName": "UVR_MDXNET_KARA.onnx",
+      "sha256": "4e1cddd765cac6a55785cf28938d02b4ca100cf9ad84d9d86ff1118a50fff8fe",
+      "sourceId": "sherpa-source-separation-models:UVR_MDXNET_KARA.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_KARA_2.onnx",
+      "artifactId": "uvr_mdxnet_kara_2",
+      "fileName": "UVR_MDXNET_KARA_2.onnx",
+      "sha256": "c05b3b7a3ab73362c85511dd0386ad173f28570e23ce1d8d3f87391396a85c08",
+      "sourceId": "sherpa-source-separation-models:UVR_MDXNET_KARA_2.onnx"
+    },
+    {
+      "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_Main.onnx",
+      "artifactId": "uvr_mdxnet_main",
+      "fileName": "UVR_MDXNET_Main.onnx",
+      "sha256": "900fb63c1a2405fe860316ca03c831ce4c7a4129ff1fbc55f99aee4422b98592",
+      "sourceId": "sherpa-source-separation-models:UVR_MDXNET_Main.onnx"
+    },
+    {
+      "artifactId": "kim_inst",
+      "fileName": "Kim_Inst.onnx",
+      "sha256": "86b1940e7122fbdd2beadc65507cbff6c352d79012a8a7e60d56db98532af5f7",
+      "sourceId": "trvlvr-all-public-uvr-models:Kim_Inst.onnx"
+    },
+    {
+      "artifactId": "kim_vocal_1",
+      "fileName": "Kim_Vocal_1.onnx",
+      "sha256": "f313140ef8fecc3041881b60ecb993d985a0281a138b2fb634aa8901aebc38cb",
+      "sourceId": "trvlvr-all-public-uvr-models:Kim_Vocal_1.onnx"
+    },
+    {
+      "artifactId": "kim_vocal_2",
+      "fileName": "Kim_Vocal_2.onnx",
+      "sha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b",
+      "sourceId": "trvlvr-all-public-uvr-models:Kim_Vocal_2.onnx"
+    },
+    {
+      "artifactId": "kuielab_a_bass",
+      "fileName": "kuielab_a_bass.onnx",
+      "sha256": "0c3e77b9963185b1ea6bb46a4b8924137d9370fc1ccdefec7b1b416ef550dcaa",
+      "sourceId": "trvlvr-all-public-uvr-models:kuielab_a_bass.onnx"
+    },
+    {
+      "artifactId": "kuielab_a_drums",
+      "fileName": "kuielab_a_drums.onnx",
+      "sha256": "40f586b7091934dd6f5563f0cba8f14bad57ce88440da1098bf388ea716c2901",
+      "sourceId": "trvlvr-all-public-uvr-models:kuielab_a_drums.onnx"
+    },
+    {
+      "artifactId": "kuielab_a_other",
+      "fileName": "kuielab_a_other.onnx",
+      "sha256": "7b67a1dcb5f232153528c59960b4c7bf8dc736b8114de360af0e719633f53358",
+      "sourceId": "trvlvr-all-public-uvr-models:kuielab_a_other.onnx"
+    },
+    {
+      "artifactId": "kuielab_a_vocals",
+      "fileName": "kuielab_a_vocals.onnx",
+      "sha256": "daba83c2ee1afee9139766ad64c9b6808d6b6f092fff04bed3338be50baac721",
+      "sourceId": "trvlvr-all-public-uvr-models:kuielab_a_vocals.onnx"
+    },
+    {
+      "artifactId": "kuielab_b_bass",
+      "fileName": "kuielab_b_bass.onnx",
+      "sha256": "b4b7080fe501d0bece62076c5d4eda4d6590c5207ed78ec84a57bac0740a061d",
+      "sourceId": "trvlvr-all-public-uvr-models:kuielab_b_bass.onnx"
+    },
+    {
+      "artifactId": "kuielab_b_drums",
+      "fileName": "kuielab_b_drums.onnx",
+      "sha256": "a6fecee758059b33ed99f6dabba297439b3e7cacfac4b1097bd324aff8052208",
+      "sourceId": "trvlvr-all-public-uvr-models:kuielab_b_drums.onnx"
+    },
+    {
+      "artifactId": "kuielab_b_other",
+      "fileName": "kuielab_b_other.onnx",
+      "sha256": "b0d0b63950ac332333fea2d58f68c92fd3ab0aae071398c2a8beeae1ad15b655",
+      "sourceId": "trvlvr-all-public-uvr-models:kuielab_b_other.onnx"
+    },
+    {
+      "artifactId": "kuielab_b_vocals",
+      "fileName": "kuielab_b_vocals.onnx",
+      "sha256": "9b7dcb9d878acb0f3e64ff3fd27750faae96577013f6d50f5996875bf4250713",
+      "sourceId": "trvlvr-all-public-uvr-models:kuielab_b_vocals.onnx"
+    },
+    {
+      "artifactId": "reverb_hq_by_foxjoy",
+      "fileName": "Reverb_HQ_By_FoxJoy.onnx",
+      "sha256": "233bb5c6aaa365e568659a0a81211746fa881f8f47f82d9e864fce1f7692db80",
+      "sourceId": "trvlvr-all-public-uvr-models:Reverb_HQ_By_FoxJoy.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_1",
+      "fileName": "UVR-MDX-NET-Inst_1.onnx",
+      "sha256": "6ca53f94b7a0cbb04fcfcc8f3ea5ec1ae22cd8ad044f5e673588859f83976f5e",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_1.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_2",
+      "fileName": "UVR-MDX-NET-Inst_2.onnx",
+      "sha256": "e3a96a664d28b52db9def0a9cae9a16dbb524d8325bfe8f0ac64ac5d231456bc",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_2.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_3",
+      "fileName": "UVR-MDX-NET-Inst_3.onnx",
+      "sha256": "2b7834e2972158d8c9864e7376e3a7d084079c80a23f38dc31c4b0a4e901a1cb",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_3.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_hq_1",
+      "fileName": "UVR-MDX-NET-Inst_HQ_1.onnx",
+      "sha256": "38a045c4ded87e3bf97b609ec5be7910e8a7cecec455f507227ab12b5e29f7f9",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_1.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_hq_2",
+      "fileName": "UVR-MDX-NET-Inst_HQ_2.onnx",
+      "sha256": "197f8ab296df850f961e68c595f6649acb7d9e621b5600b460f3458967299112",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_2.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_hq_3",
+      "fileName": "UVR-MDX-NET-Inst_HQ_3.onnx",
+      "sha256": "317554b07fe1ea5279a77f2b1520a41ea4b93432560c4ffd08792c30fddf9adc",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_3.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_hq_4",
+      "fileName": "UVR-MDX-NET-Inst_HQ_4.onnx",
+      "sha256": "3c4b5b9b05090fdf238f38ba5046813982d50e2a652e9cb3324ea79720c3c9c8",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_4.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_hq_5",
+      "fileName": "UVR-MDX-NET-Inst_HQ_5.onnx",
+      "sha256": "811cb24095d865763752310848b7ec86aeede0626cb05749ab35350e46897000",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_HQ_5.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_inst_main",
+      "fileName": "UVR-MDX-NET-Inst_Main.onnx",
+      "sha256": "8ab401dfe4a548b87deb64f975294bd56ff946aa32903f53b4b24bb13b2cce1e",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_Main.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_voc_ft",
+      "fileName": "UVR-MDX-NET-Voc_FT.onnx",
+      "sha256": "534b2070fcc7df514b13ef660dc8cbb328679c2374d04354a5c42bb14ecce111",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Voc_FT.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_crowd_hq_1",
+      "fileName": "UVR-MDX-NET_Crowd_HQ_1.onnx",
+      "sha256": "313b7bf869c411fdafe005cf0d5a635c405cb3d0df137178a64091952d75225c",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET_Crowd_HQ_1.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_1_9703",
+      "fileName": "UVR_MDXNET_1_9703.onnx",
+      "sha256": "229ad3bb96a037e89d8ed86732d6d3675856e6a07c3e3f02896eac01ec7ee4be",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_1_9703.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_2_9682",
+      "fileName": "UVR_MDXNET_2_9682.onnx",
+      "sha256": "1deb7295acd3206bc9582a5d92f1b0a74bf3f41c7c1fb78a0ac0123cde4372db",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_2_9682.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_3_9662",
+      "fileName": "UVR_MDXNET_3_9662.onnx",
+      "sha256": "e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_3_9662.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_9482",
+      "fileName": "UVR_MDXNET_9482.onnx",
+      "sha256": "f4f365207c56deb115bceedff3ad8fe98a751c745f9e370cecec6226b8b47184",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_9482.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_kara",
+      "fileName": "UVR_MDXNET_KARA.onnx",
+      "sha256": "e3167c87333a48548413e972a286bf40bf5694001d2853861eb1435953f02d63",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_KARA.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_kara_2",
+      "fileName": "UVR_MDXNET_KARA_2.onnx",
+      "sha256": "bf32e15105a09c0f7dddd2b67346146334d6f3ecb399ed7638eba2ab07cbf5f4",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_KARA_2.onnx"
+    },
+    {
+      "artifactId": "uvr_mdxnet_main",
+      "fileName": "UVR_MDXNET_Main.onnx",
+      "sha256": "8289784cda38543ff431add4070662813311a8cccfc0112ca82f76d9dba2b4ca",
+      "sourceId": "trvlvr-all-public-uvr-models:UVR_MDXNET_Main.onnx"
+    }
+  ]
+}
