@@ -17,6 +17,7 @@ param(
     [string]$SecondaryModelId = "",
     [string]$SecondaryModelPath = "",
     [string]$OutputRoot = "",
+    [int]$ProcessorCountOverride = 0,
     [switch]$TestInFlightCancellation,
     [switch]$PreflightOnly,
     [switch]$SkipBuild,
@@ -125,6 +126,11 @@ try {
         $instrumentArguments += @(
             "-e", "secondaryModelId", $SecondaryModelId,
             "-e", "secondaryModelPath", $remoteSecondary
+        )
+    }
+    if ($ProcessorCountOverride -gt 0) {
+        $instrumentArguments += @(
+            "-e", "processorCountOverride", $ProcessorCountOverride
         )
     }
 

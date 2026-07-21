@@ -37,7 +37,8 @@ Use `-TestInFlightCancellation` on selected long-running cases. Use
 `-SecondaryModelId` and `-SecondaryModelPath` to verify native session
 replacement after the first session lease is released. For a contract target
 that must fail before native allocation, use `-PreflightOnly` without staging
-a model.
+a model. `-ProcessorCountOverride` is reserved for internal CPU thread-policy
+experiments and does not create an app setting or backup field.
 
 Every report records the app commit, catalog and contract identities, model
 and fixture hashes, numerical metrics, process ABI and bitness, APK LiteRT
