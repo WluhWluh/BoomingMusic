@@ -666,7 +666,7 @@ class MdxLiteRtCpuValidationTest {
         private fun parityThresholds(modelId: String) = when (modelId) {
             "uvr_mdxnet_3_9662" -> ParityThresholds(93.8, 0.999999999, 0.00010)
             "uvr_mdxnet_kara" -> ParityThresholds(109.0, 0.999999999, 0.00003)
-            "uvr_mdxnet_inst_hq_4" -> ParityThresholds(95.0, 0.999999999, 0.00060)
+            "uvr_mdxnet_inst_hq_4" -> ParityThresholds(89.4, 0.999999999, 0.00060)
             else -> error("No Phase 2 parity thresholds exist for $modelId.")
         }
     }

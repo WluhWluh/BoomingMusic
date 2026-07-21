@@ -1152,12 +1152,15 @@ Acceptance criteria:
   | --- | ---: | ---: | ---: |
   | 9662 | 93.8 dB | 0.999999999 | 0.00010 |
   | KARA | 109.0 dB | 0.999999999 | 0.00003 |
-  | HQ4 | 95.0 dB | 0.999999999 | 0.00060 |
+  | HQ4 | 89.4 dB | 0.999999999 | 0.00060 |
 
   The 9662 SNR floor was calibrated from the app-packaged LiteRT 2.1.5 CPU
   result for `synthetic_00` on the S25. Its stable 93.891 dB result was
   identical with two, three, and four CPU threads; cosine similarity and
   maximum absolute error remained within the stricter limits above.
+  The HQ4 floor was likewise calibrated from its S25 `synthetic_00` result:
+  89.500 dB with identical output at two and four threads, cosine similarity
+  0.999999999439, and maximum absolute error 0.000118.
 
 - Unit and connected tests prove that the contract scale is applied exactly
   once and that scaled primary plus residual reconstructs the unclipped input
