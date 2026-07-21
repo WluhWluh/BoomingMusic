@@ -13,10 +13,15 @@ enum class MdxTensorLayout {
     Nhwc,
 }
 
+enum class MdxTensorDataType {
+    Float32,
+}
+
 data class MdxTensorSpec(
     val name: String?,
     val shape: List<Int>,
     val layout: MdxTensorLayout,
+    val dataType: MdxTensorDataType,
 ) {
     val elementCount: Int = shape.fold(1) { total, dimension ->
         Math.multiplyExact(total, dimension)
@@ -45,15 +50,22 @@ data class MdxExecutionProfile(
     val expectedByteSize: Long? = null,
     val expectedSha256: String? = null,
     val legacyModelVariant: MdxModelVariant? = null,
+    val minimumAndroidApi: Int? = null,
+    val runtimeCompatibility: List<MdxRuntimeCompatibilityRecord> = emptyList(),
 ) {
     val sessionIdentity: String = buildString {
         append(profileId)
+        append('|').append(modelFormat)
         append('|').append(pipelineId)
         append('|').append(pipelineVersion)
+        append('|').append(inputTensor.name)
         append('|').append(inputTensor.shape.joinToString("x"))
         append('|').append(inputTensor.layout)
+        append('|').append(inputTensor.dataType)
+        append('|').append(outputTensor.name)
         append('|').append(outputTensor.shape.joinToString("x"))
         append('|').append(outputTensor.layout)
+        append('|').append(outputTensor.dataType)
     }
 
     init {
@@ -109,8 +121,18 @@ data class MdxExecutionProfile(
                 displayName = variant.displayName,
                 outputTag = variant.outputTag,
                 modelFormat = MdxModelFormat.Onnx,
-                inputTensor = MdxTensorSpec(null, shape, MdxTensorLayout.Nchw),
-                outputTensor = MdxTensorSpec(null, shape, MdxTensorLayout.Nchw),
+                inputTensor = MdxTensorSpec(
+                    name = null,
+                    shape = shape,
+                    layout = MdxTensorLayout.Nchw,
+                    dataType = MdxTensorDataType.Float32,
+                ),
+                outputTensor = MdxTensorSpec(
+                    name = null,
+                    shape = shape,
+                    layout = MdxTensorLayout.Nchw,
+                    dataType = MdxTensorDataType.Float32,
+                ),
                 dspConfig = dspConfig,
                 modelOutputScale = 1f,
                 modelOutputStem = variant.modelOutputStem,
@@ -165,7 +187,11 @@ data class MdxRuntimeDiagnostics(
 interface MdxInferenceSession : AutoCloseable {
     val diagnostics: MdxRuntimeDiagnostics
 
-    fun run(inputNchw: FloatArray): FloatArray
+    /** The returned buffer remains valid until the next invocation or session close. */
+    fun run(
+        inputNchw: FloatArray,
+        shouldCancel: () -> Boolean = { false },
+    ): FloatArray
 }
 
 interface MdxInferenceSessionFactory {
@@ -295,4 +321,20 @@ object DefaultMdxInferenceSessionProvider : MdxInferenceSessionProvider {
         profile: MdxExecutionProfile,
         runtimeSettings: MdxRuntimeSettings,
     ): MdxInferenceSessionLease = delegate.acquire(artifact, profile, runtimeSettings)
+}
+
+internal fun throwIfMdxInferenceCanceled(shouldCancel: () -> Boolean) {
+    if (shouldCancel()) {
+        throw java.util.concurrent.CancellationException("Source separation inference canceled.")
+    }
+}
+
+internal fun <T> runNonInterruptibleMdxInference(
+    shouldCancel: () -> Boolean,
+    invocation: () -> T,
+): T {
+    throwIfMdxInferenceCanceled(shouldCancel)
+    val result = invocation()
+    throwIfMdxInferenceCanceled(shouldCancel)
+    return result
 }

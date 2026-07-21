@@ -8,6 +8,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
+import java.util.concurrent.CancellationException
 
 class MdxInferenceRuntimeTest {
     @Test
@@ -109,6 +110,35 @@ class MdxInferenceRuntimeTest {
         }
     }
 
+    @Test
+    fun `non interruptible invocation discards an output canceled in flight`() {
+        var canceled = false
+        var invocationCount = 0
+
+        assertThrows(CancellationException::class.java) {
+            runNonInterruptibleMdxInference(shouldCancel = { canceled }) {
+                invocationCount += 1
+                canceled = true
+                floatArrayOf(1f)
+            }
+        }
+
+        assertEquals(1, invocationCount)
+    }
+
+    @Test
+    fun `cancellation before invocation does not enter the runtime`() {
+        var invocationCount = 0
+
+        assertThrows(CancellationException::class.java) {
+            runNonInterruptibleMdxInference(shouldCancel = { true }) {
+                invocationCount += 1
+            }
+        }
+
+        assertEquals(0, invocationCount)
+    }
+
     private fun artifact(profile: MdxExecutionProfile): MdxModelArtifact {
         val directory = Files.createTempDirectory("mdx-runtime-test").toFile()
         val file = directory.resolve(profile.expectedFileName)
@@ -147,7 +177,10 @@ class MdxInferenceRuntimeTest {
         val closed: Boolean
             get() = closeCount > 0
 
-        override fun run(inputNchw: FloatArray): FloatArray = inputNchw.copyOf()
+        override fun run(
+            inputNchw: FloatArray,
+            shouldCancel: () -> Boolean,
+        ): FloatArray = inputNchw.copyOf()
 
         override fun close() {
             closeCount += 1

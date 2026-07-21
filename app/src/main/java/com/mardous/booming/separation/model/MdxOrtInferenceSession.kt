@@ -62,7 +62,10 @@ private class MdxOrtInferenceSession(
         },
     )
 
-    override fun run(inputNchw: FloatArray): FloatArray {
+    override fun run(
+        inputNchw: FloatArray,
+        shouldCancel: () -> Boolean,
+    ): FloatArray {
         require(inputNchw.size == profile.inputTensor.elementCount) {
             "Expected ${profile.inputTensor.elementCount} input elements, got ${inputNchw.size}."
         }
@@ -71,7 +74,9 @@ private class MdxOrtInferenceSession(
             FloatBuffer.wrap(inputNchw),
             inputShape,
         ).use { tensor ->
-            session.run(mapOf(inputName to tensor)).use { outputs ->
+            runNonInterruptibleMdxInference(shouldCancel) {
+                session.run(mapOf(inputName to tensor))
+            }.use { outputs ->
                 val output = outputs[outputName].orElseThrow {
                     IllegalStateException("Missing ONNX output: $outputName")
                 }.value

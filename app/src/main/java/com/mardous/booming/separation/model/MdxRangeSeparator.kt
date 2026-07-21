@@ -326,33 +326,34 @@ class MdxRangeSeparator(
                             spectrogram = spectrogram,
                             mixWindow = mixWindow,
                             timing = timing,
+                            shouldCancel = shouldCancel,
                         )
                         throwIfCanceled(shouldCancel)
                         val scaledModelOutputWindow = measureElapsed(timing, "Output compensation") {
-                            scale(modelOutputWindow, executionProfile.modelOutputScale)
+                            compensateMdxModelOutput(
+                                rawModelOutput = modelOutputWindow,
+                                modelOutputScale = executionProfile.modelOutputScale,
+                            )
                         }
                         val residualWindow = measureElapsed(timing, "Stem subtract") {
-                            subtract(mixWindow, scaledModelOutputWindow)
+                            reconstructMdxResidual(mixWindow, scaledModelOutputWindow)
                         }
-                        val vocalsWindow = when (executionProfile.modelOutputStem) {
-                            MdxStem.VOCALS -> scaledModelOutputWindow
-                            MdxStem.INSTRUMENTAL -> residualWindow
-                        }
-                        val instrumentalWindow = when (executionProfile.modelOutputStem) {
-                            MdxStem.VOCALS -> residualWindow
-                            MdxStem.INSTRUMENTAL -> scaledModelOutputWindow
-                        }
+                        val mappedStems = mapMdxStemWaveformsFromComponents(
+                            scaledModelOutput = scaledModelOutputWindow,
+                            residual = residualWindow,
+                            modelOutputStem = executionProfile.modelOutputStem,
+                        )
 
                         val vocalsPcm = measureElapsed(timing, "PCM convert") {
                             stereoFloatToPcm16(
-                                waveform = vocalsWindow,
+                                waveform = mappedStems.vocals,
                                 startFrame = config.trim,
                                 frames = writeFrames,
                             )
                         }
                         val instrumentalPcm = measureElapsed(timing, "PCM convert") {
                             stereoFloatToPcm16(
-                                waveform = instrumentalWindow,
+                                waveform = mappedStems.instrumental,
                                 startFrame = config.trim,
                                 frames = writeFrames,
                             )
@@ -509,12 +510,13 @@ class MdxRangeSeparator(
         spectrogram: MdxSpectrogram,
         mixWindow: Array<FloatArray>,
         timing: MdxRangeTimingAccumulator,
+        shouldCancel: () -> Boolean,
     ): Array<FloatArray> {
         val modelInput = measureElapsed(timing, "STFT") {
             spectrogram.waveformToTensor(mixWindow)
         }
         val modelOutput = measureElapsed(timing, "Model inference") {
-            session.run(modelInput)
+            session.run(modelInput, shouldCancel)
         }
         return measureElapsed(timing, "ISTFT") {
             spectrogram.tensorToWaveform(modelOutput)
@@ -534,21 +536,6 @@ class MdxRangeSeparator(
             }
         }
         return bytes
-    }
-
-    private fun scale(waveform: Array<FloatArray>, scale: Float): Array<FloatArray> {
-        if (scale == 1f) return waveform
-        return Array(MdxDspConfig.STEREO_CHANNELS) { channel ->
-            FloatArray(config.chunkSize) { index -> waveform[channel][index] * scale }
-        }
-    }
-
-    private fun subtract(mix: Array<FloatArray>, stem: Array<FloatArray>): Array<FloatArray> {
-        return Array(MdxDspConfig.STEREO_CHANNELS) { channel ->
-            FloatArray(config.chunkSize) { index ->
-                mix[channel][index] - stem[channel][index]
-            }
-        }
     }
 
     private fun msToFrame(ms: Long): Int {
