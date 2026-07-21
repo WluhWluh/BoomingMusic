@@ -1,0 +1,479 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase3-final-s25-arm64-kara-synthetic-fp32-repeat",
+  "status": "error",
+  "appCommit": "a0836c59aa0afcac2d7aefb7b97ffd60967b7dca",
+  "catalogSha256": "ded5070bcac3194cb62e83aca91b3e2d62427ec203fcb2d9ebe4dbd7d70b7d59",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784642370316,
+  "contractId": "uvr_mdxnet_kara@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_kara",
+  "requestedBackend": "LiteRtGpu",
+  "process": {
+    "supportedAbis": [
+      "arm64-v8a"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk!\/lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "mappedLiteRtEntries": [
+      {
+        "apkPath": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "entryName": "lib\/arm64-v8a\/libLiteRt.so",
+        "dataOffset": 32407552,
+        "byteSize": 5328296,
+        "mapLines": [
+          "6d40448000-6d40948000 r-xp 01ee8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6d40948000-6d40955000 r--p 023e8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6d40958000-6d40961000 rw-p 023f4000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+        ]
+      },
+      {
+        "apkPath": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "entryName": "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+        "dataOffset": 37748736,
+        "byteSize": 2728920,
+        "mapLines": []
+      }
+    ],
+    "loadedRuntimeMaps": [
+      "6d40448000-6d40948000 r-xp 01ee8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6d40948000-6d40955000 r--p 023e8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6d40958000-6d40961000 rw-p 023f4000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+    ],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 11658948608,
+    "availableDeviceMemoryBytes": 5362376704,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 9388,
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "device": "pa1q",
+    "androidApi": 35,
+    "fingerprint": "samsung\/pa1qzcx\/pa1q:15\/AP3A.240905.015.A2\/S9310ZCU5AYHA_CHC5AYHA:user\/release-keys"
+  },
+  "compatibilityOverride": null,
+  "fixture": "synthetic_00",
+  "artifact": {
+    "fileName": "UVR_MDXNET_KARA_static_float32.tflite",
+    "byteSize": 29700460,
+    "sha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64"
+  },
+  "input": {
+    "fileName": "uvr_mdxnet_kara_synthetic_00_nchw_f32.bin",
+    "byteSize": 8388608,
+    "sha256": "195c81b8c72c2865f18080a78433c4377b4375a8569f3bc4d7a243ffbc1b3a33"
+  },
+  "reference": {
+    "fileName": "uvr_mdxnet_kara_synthetic_00_ort_nchw_f32.bin",
+    "byteSize": 8388608,
+    "sha256": "25e4e1a9287a9603b624ac1e58f09a18e47c51b2667e2cbeeae011c86902c5e6"
+  },
+  "processorCountOverride": null,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 418402606,
+    "processCpuMs": 1687,
+    "totalPssKb": 281240,
+    "nativePssKb": 41888,
+    "dalvikPssKb": 35729,
+    "otherPssKb": 201838,
+    "nativeHeapAllocatedBytes": 43681504,
+    "summaryKb": {
+      "summary.java-heap": 45116,
+      "summary.native-heap": 41852,
+      "summary.code": 1344,
+      "summary.stack": 664,
+      "summary.graphics": 0,
+      "summary.private-other": 183604,
+      "summary.system": 8660,
+      "summary.total-pss": 281240,
+      "summary.total-swap": 25920
+    }
+  },
+  "runtimeProfileId": "gpu-auto-fp32-v1",
+  "thresholdsEnforced": true,
+  "availableAcceleratorsBeforeSetup": [
+    "CPU",
+    "GPU"
+  ],
+  "runtimeDiagnostics": "Runtime: LiteRT 2.1.5, backend=LiteRtGpu, layout=NHWC, profile=gpu-auto-fp32-v1, api=Automatic, precision=Float32, status=InternalValidationOnly, evidence=BoomingSS app-packaged LiteRT 2.1.5 Phase 3 reports at WluhWluh\/BoomingSS@67ad4812b15ee1a410762fe4ac62a72ddb4976e7 (docs\/validation\/litert-gpu-phase3): gpu-auto-fp32-v1 window parity passed on Galaxy S10\/S25; gpu-auto-fp16-v1 parity failed; full-song Phase 7 gate pending",
+  "setupWallMs": 893,
+  "memoryAfterSetup": {
+    "elapsedRealtimeMs": 418403535,
+    "processCpuMs": 2635,
+    "totalPssKb": 698668,
+    "nativePssKb": 55654,
+    "dalvikPssKb": 35797,
+    "otherPssKb": 605484,
+    "nativeHeapAllocatedBytes": 62402560,
+    "summaryKb": {
+      "summary.java-heap": 45184,
+      "summary.native-heap": 55640,
+      "summary.code": 25836,
+      "summary.stack": 696,
+      "summary.graphics": 289000,
+      "summary.private-other": 272040,
+      "summary.system": 10272,
+      "summary.total-pss": 698668,
+      "summary.total-swap": 25548
+    }
+  },
+  "processWithSession": {
+    "supportedAbis": [
+      "arm64-v8a"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk!\/lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "mappedLiteRtEntries": [
+      {
+        "apkPath": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "entryName": "lib\/arm64-v8a\/libLiteRt.so",
+        "dataOffset": 32407552,
+        "byteSize": 5328296,
+        "mapLines": [
+          "6d40448000-6d40948000 r-xp 01ee8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6d40948000-6d40955000 r--p 023e8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6d40958000-6d40961000 rw-p 023f4000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+        ]
+      },
+      {
+        "apkPath": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "entryName": "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+        "dataOffset": 37748736,
+        "byteSize": 2728920,
+        "mapLines": [
+          "6cbf4d2000-6cbf75d000 r-xp 02400000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6cbf75e000-6cbf76a000 r--p 0268c000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6cbf76a000-6cbf76c000 rw-p 02698000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [
+      "6d40448000-6d40948000 r-xp 01ee8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6d40948000-6d40955000 r--p 023e8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6d40958000-6d40961000 rw-p 023f4000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf4d2000-6cbf75d000 r-xp 02400000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf75e000-6cbf76a000 r--p 0268c000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf76a000-6cbf76c000 rw-p 02698000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+    ],
+    "loadedGpuAcceleratorMaps": [
+      "6cbf4d2000-6cbf75d000 r-xp 02400000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf75e000-6cbf76a000 r--p 0268c000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf76a000-6cbf76c000 rw-p 02698000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+    ],
+    "totalDeviceMemoryBytes": 11658948608,
+    "availableDeviceMemoryBytes": 5140156416,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 9388,
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "device": "pa1q",
+    "androidApi": 35,
+    "fingerprint": "samsung\/pa1qzcx\/pa1q:15\/AP3A.240905.015.A2\/S9310ZCU5AYHA_CHC5AYHA:user\/release-keys"
+  },
+  "firstInferenceWallMs": 430,
+  "reusedInferenceWallMs": 351,
+  "reusedSameSession": true,
+  "memoryAfterFirstInference": {
+    "elapsedRealtimeMs": 418404371,
+    "processCpuMs": 3244,
+    "totalPssKb": 724045,
+    "nativePssKb": 57194,
+    "dalvikPssKb": 61967,
+    "otherPssKb": 604740,
+    "nativeHeapAllocatedBytes": 63430000,
+    "summaryKb": {
+      "summary.java-heap": 71412,
+      "summary.native-heap": 57180,
+      "summary.code": 25740,
+      "summary.stack": 708,
+      "summary.graphics": 289000,
+      "summary.private-other": 271232,
+      "summary.system": 8773,
+      "summary.total-pss": 724045,
+      "summary.total-swap": 22356
+    }
+  },
+  "memoryAfterReusedInference": {
+    "elapsedRealtimeMs": 418405125,
+    "processCpuMs": 3768,
+    "totalPssKb": 769461,
+    "nativePssKb": 76130,
+    "dalvikPssKb": 87671,
+    "otherPssKb": 605516,
+    "nativeHeapAllocatedBytes": 86303168,
+    "summaryKb": {
+      "summary.java-heap": 97116,
+      "summary.native-heap": 76116,
+      "summary.code": 25740,
+      "summary.stack": 708,
+      "summary.graphics": 289000,
+      "summary.private-other": 272008,
+      "summary.system": 8773,
+      "summary.total-pss": 769461,
+      "summary.total-swap": 22356
+    }
+  },
+  "processAfterFirstInference": {
+    "supportedAbis": [
+      "arm64-v8a"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk!\/lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "mappedLiteRtEntries": [
+      {
+        "apkPath": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "entryName": "lib\/arm64-v8a\/libLiteRt.so",
+        "dataOffset": 32407552,
+        "byteSize": 5328296,
+        "mapLines": [
+          "6d40448000-6d40948000 r-xp 01ee8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6d40948000-6d40955000 r--p 023e8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6d40958000-6d40961000 rw-p 023f4000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+        ]
+      },
+      {
+        "apkPath": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "entryName": "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+        "dataOffset": 37748736,
+        "byteSize": 2728920,
+        "mapLines": [
+          "6cbf4d2000-6cbf75d000 r-xp 02400000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6cbf75e000-6cbf76a000 r--p 0268c000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6cbf76a000-6cbf76c000 rw-p 02698000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [
+      "6d40448000-6d40948000 r-xp 01ee8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6d40948000-6d40955000 r--p 023e8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6d40958000-6d40961000 rw-p 023f4000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf4d2000-6cbf75d000 r-xp 02400000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf75e000-6cbf76a000 r--p 0268c000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf76a000-6cbf76c000 rw-p 02698000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+    ],
+    "loadedGpuAcceleratorMaps": [
+      "6cbf4d2000-6cbf75d000 r-xp 02400000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf75e000-6cbf76a000 r--p 0268c000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf76a000-6cbf76c000 rw-p 02698000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+    ],
+    "totalDeviceMemoryBytes": 11658948608,
+    "availableDeviceMemoryBytes": 5094559744,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 9388,
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "device": "pa1q",
+    "androidApi": 35,
+    "fingerprint": "samsung\/pa1qzcx\/pa1q:15\/AP3A.240905.015.A2\/S9310ZCU5AYHA_CHC5AYHA:user\/release-keys"
+  },
+  "processAfterReusedInference": {
+    "supportedAbis": [
+      "arm64-v8a"
+    ],
+    "osArch": "aarch64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "arm64-v8a",
+    "selectedLiteRtRuntimeAbi": "arm64-v8a",
+    "nativeLibraryDir": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/lib\/arm64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk!\/lib\/arm64-v8a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk!\/lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "liteRtEntries": [
+          "lib\/arm64-v8a\/libLiteRt.so",
+          "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "mappedLiteRtEntries": [
+      {
+        "apkPath": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "entryName": "lib\/arm64-v8a\/libLiteRt.so",
+        "dataOffset": 32407552,
+        "byteSize": 5328296,
+        "mapLines": [
+          "6d40448000-6d40948000 r-xp 01ee8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6d40948000-6d40955000 r--p 023e8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6d40958000-6d40961000 rw-p 023f4000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+        ]
+      },
+      {
+        "apkPath": "\/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+        "entryName": "lib\/arm64-v8a\/libLiteRtClGlAccelerator.so",
+        "dataOffset": 37748736,
+        "byteSize": 2728920,
+        "mapLines": [
+          "6cbf4d2000-6cbf75d000 r-xp 02400000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6cbf75e000-6cbf76a000 r--p 0268c000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+          "6cbf76a000-6cbf76c000 rw-p 02698000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+        ]
+      }
+    ],
+    "loadedRuntimeMaps": [
+      "6d40448000-6d40948000 r-xp 01ee8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6d40948000-6d40955000 r--p 023e8000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6d40958000-6d40961000 rw-p 023f4000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf4d2000-6cbf75d000 r-xp 02400000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf75e000-6cbf76a000 r--p 0268c000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf76a000-6cbf76c000 rw-p 02698000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+    ],
+    "loadedGpuAcceleratorMaps": [
+      "6cbf4d2000-6cbf75d000 r-xp 02400000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf75e000-6cbf76a000 r--p 0268c000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk",
+      "6cbf76a000-6cbf76c000 rw-p 02698000 fe:41 599055                         \/data\/app\/~~1hPK0VGM0JuRUPlALPAd2g==\/com.wluhwluh.booming.sourcesep.debug-8wcZVlLgzHxRx7nXYWLuyg==\/base.apk"
+    ],
+    "totalDeviceMemoryBytes": 11658948608,
+    "availableDeviceMemoryBytes": 5081305088,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 9388,
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "device": "pa1q",
+    "androidApi": 35,
+    "fingerprint": "samsung\/pa1qzcx\/pa1q:15\/AP3A.240905.015.A2\/S9310ZCU5AYHA_CHC5AYHA:user\/release-keys"
+  },
+  "comparisonToOrt": {
+    "snrDb": 108.48365838255246,
+    "cosineSimilarity": 0.9999999999925443,
+    "maxAbsError": 1.2122094631195068E-5,
+    "meanAbsError": 6.299769550466294E-7,
+    "rmse": 9.404464617939731E-7
+  },
+  "reuseComparison": {
+    "snrDb": 1.7976931348623157E308,
+    "cosineSimilarity": 1,
+    "maxAbsError": 0,
+    "meanAbsError": 0,
+    "rmse": 0
+  },
+  "thresholds": {
+    "minimumSnrDb": 109,
+    "minimumCosine": 0.999999999,
+    "maximumAbsoluteError": 3.0E-5
+  },
+  "stemValidation": {
+    "modelOutputStem": "VOCALS",
+    "modelOutputScale": 1.034999966621399,
+    "reconstructionMaxAbsError": 2.3283064365386963E-10
+  },
+  "cancellation": null,
+  "replacement": null,
+  "memoryWithSession": {
+    "elapsedRealtimeMs": 418405516,
+    "processCpuMs": 4189,
+    "totalPssKb": 740645,
+    "nativePssKb": 72866,
+    "dalvikPssKb": 62871,
+    "otherPssKb": 604764,
+    "nativeHeapAllocatedBytes": 63416864,
+    "summaryKb": {
+      "summary.java-heap": 72316,
+      "summary.native-heap": 72852,
+      "summary.code": 25740,
+      "summary.stack": 708,
+      "summary.graphics": 289000,
+      "summary.private-other": 271256,
+      "summary.system": 8773,
+      "summary.total-pss": 740645,
+      "summary.total-swap": 22356
+    }
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 418406386,
+    "processCpuMs": 5128,
+    "totalPssKb": 341653,
+    "nativePssKb": 45266,
+    "dalvikPssKb": 85359,
+    "otherPssKb": 210884,
+    "nativeHeapAllocatedBytes": 12461472,
+    "summaryKb": {
+      "summary.java-heap": 94816,
+      "summary.native-heap": 45252,
+      "summary.code": 23668,
+      "summary.stack": 720,
+      "summary.graphics": 412,
+      "summary.private-other": 167904,
+      "summary.system": 8881,
+      "summary.total-pss": 341653,
+      "summary.total-swap": 22344
+    }
+  },
+  "errorType": "java.lang.IllegalArgumentException",
+  "errorMessage": "SNR 108.48365838255246 is below 109.0.",
+  "stackTrace": "java.lang.IllegalArgumentException: SNR 108.48365838255246 is below 109.0.\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtCpuValidationTest.validateParityRun(MdxLiteRtCpuValidationTest.kt:409)\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtCpuValidationTest.validateStagedModel(MdxLiteRtCpuValidationTest.kt:166)\n\tat com.mardous.booming.separation.model.litert.MdxLiteRtCpuValidationTest.validateStagedGpuModel(MdxLiteRtCpuValidationTest.kt:59)\n\tat java.lang.reflect.Method.invoke(Native Method)\n\tat org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)\n\tat org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)\n\tat org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)\n\tat org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)\n\tat org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)\n\tat org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)\n\tat org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)\n\tat org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)\n\tat org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)\n\tat org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)\n\tat org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)\n\tat org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)\n\tat org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)\n\tat org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)\n\tat org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)\n\tat org.junit.runners.ParentRunner.run(ParentRunner.java:413)\n\tat androidx.test.ext.junit.runners.AndroidJUnit4.run(AndroidJUnit4.java:162)\n\tat org.junit.runners.Suite.runChild(Suite.java:128)\n\tat org.junit.runners.Suite.runChild(Suite.java:27)\n\tat org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)\n\tat org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)\n\tat org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)\n\tat org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)\n\tat org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)\n\tat org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)\n\tat org.junit.runners.ParentRunner.run(ParentRunner.java:413)\n\tat org.junit.runner.JUnitCore.run(JUnitCore.java:137)\n\tat org.junit.runner.JUnitCore.run(JUnitCore.java:115)\n\tat androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:68)\n\tat androidx.test.internal.runner.TestExecutor.execute(TestExecutor.java:59)\n\tat androidx.test.runner.AndroidJUnitRunner.onStart(AndroidJUnitRunner.java:467)\n\tat android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2607)\n",
+  "memoryAfterFailureCleanup": {
+    "elapsedRealtimeMs": 418406809,
+    "processCpuMs": 5548,
+    "totalPssKb": 358465,
+    "nativePssKb": 50694,
+    "dalvikPssKb": 96707,
+    "otherPssKb": 210920,
+    "nativeHeapAllocatedBytes": 48322880,
+    "summaryKb": {
+      "summary.java-heap": 106168,
+      "summary.native-heap": 50680,
+      "summary.code": 23672,
+      "summary.stack": 720,
+      "summary.graphics": 412,
+      "summary.private-other": 167904,
+      "summary.system": 8909,
+      "summary.total-pss": 358465,
+      "summary.total-swap": 22344
+    }
+  }
+}

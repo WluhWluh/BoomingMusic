@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase3-final-x86-gpu-preflight",
+  "status": "complete",
+  "appCommit": "a0836c59aa0afcac2d7aefb7b97ffd60967b7dca",
+  "catalogSha256": "ded5070bcac3194cb62e83aca91b3e2d62427ec203fcb2d9ebe4dbd7d70b7d59",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784643065535,
+  "contractId": "uvr_mdxnet_3_9662@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_3_9662",
+  "requestedBackend": "LiteRtGpu",
+  "process": {
+    "supportedAbis": [
+      "x86"
+    ],
+    "osArch": "i686",
+    "is64Bit": false,
+    "resolvedProcessAbi": "x86",
+    "selectedLiteRtRuntimeAbi": "x86",
+    "nativeLibraryDir": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-tUgnXIcxgiFnQyktyrOhOA==\/lib\/x86",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-tUgnXIcxgiFnQyktyrOhOA==\/base.apk!\/lib\/x86\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": null,
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-tUgnXIcxgiFnQyktyrOhOA==\/base.apk",
+        "liteRtEntries": [
+          "lib\/x86\/libLiteRt.so"
+        ]
+      }
+    ],
+    "mappedLiteRtEntries": [
+      {
+        "apkPath": "\/data\/app\/com.wluhwluh.booming.sourcesep.debug-tUgnXIcxgiFnQyktyrOhOA==\/base.apk",
+        "entryName": "lib\/x86\/libLiteRt.so",
+        "dataOffset": 32407552,
+        "byteSize": 7482132,
+        "mapLines": []
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 3183624192,
+    "availableDeviceMemoryBytes": 2725662720,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 150994944,
+    "pid": 5736,
+    "manufacturer": "unknown",
+    "model": "Android SDK built for x86",
+    "device": "generic_x86",
+    "androidApi": 26,
+    "fingerprint": "Android\/sdk_phone_x86\/generic_x86:8.0.0\/OSR1.180418.004\/4931640:userdebug\/test-keys"
+  },
+  "compatibilityOverride": null,
+  "preflightOnly": true,
+  "preflightErrorType": "com.mardous.booming.separation.model.MdxInferenceCompatibilityException",
+  "preflightErrorMessage": "No LiteRtGpu compatibility record exists for x86.",
+  "nativeGpuAllocatorCalls": 0,
+  "modelFileExists": false,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 11496251,
+    "processCpuMs": 2971,
+    "totalPssKb": 110265,
+    "nativePssKb": 10733,
+    "dalvikPssKb": 2890,
+    "otherPssKb": 96642,
+    "nativeHeapAllocatedBytes": 13008448,
+    "summaryKb": {
+      "summary.java-heap": 6584,
+      "summary.native-heap": 10404,
+      "summary.code": 82580,
+      "summary.stack": 380,
+      "summary.graphics": 0,
+      "summary.private-other": 4192,
+      "summary.system": 6125,
+      "summary.total-pss": 110265,
+      "summary.total-swap": 0
+    }
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 11496267,
+    "processCpuMs": 2987,
+    "totalPssKb": 110329,
+    "nativePssKb": 10733,
+    "dalvikPssKb": 2894,
+    "otherPssKb": 96702,
+    "nativeHeapAllocatedBytes": 13008448,
+    "summaryKb": {
+      "summary.java-heap": 6588,
+      "summary.native-heap": 10404,
+      "summary.code": 82592,
+      "summary.stack": 380,
+      "summary.graphics": 0,
+      "summary.private-other": 4196,
+      "summary.system": 6169,
+      "summary.total-pss": 110329,
+      "summary.total-swap": 0
+    }
+  }
+}

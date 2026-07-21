@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase3-final-x86_64-gpu-preflight",
+  "status": "complete",
+  "appCommit": "a0836c59aa0afcac2d7aefb7b97ffd60967b7dca",
+  "catalogSha256": "ded5070bcac3194cb62e83aca91b3e2d62427ec203fcb2d9ebe4dbd7d70b7d59",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784643056132,
+  "contractId": "uvr_mdxnet_3_9662@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_3_9662",
+  "requestedBackend": "LiteRtGpu",
+  "process": {
+    "supportedAbis": [
+      "x86_64",
+      "arm64-v8a"
+    ],
+    "osArch": "x86_64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "x86_64",
+    "selectedLiteRtRuntimeAbi": "x86_64",
+    "nativeLibraryDir": "\/data\/app\/~~lYFObsj-jUjRoZcyU1QDLQ==\/com.wluhwluh.booming.sourcesep.debug-jS7OSuXUBWu7xzoyqYSMig==\/lib\/x86_64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~lYFObsj-jUjRoZcyU1QDLQ==\/com.wluhwluh.booming.sourcesep.debug-jS7OSuXUBWu7xzoyqYSMig==\/base.apk!\/lib\/x86_64\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~lYFObsj-jUjRoZcyU1QDLQ==\/com.wluhwluh.booming.sourcesep.debug-jS7OSuXUBWu7xzoyqYSMig==\/base.apk!\/lib\/x86_64\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~lYFObsj-jUjRoZcyU1QDLQ==\/com.wluhwluh.booming.sourcesep.debug-jS7OSuXUBWu7xzoyqYSMig==\/base.apk",
+        "liteRtEntries": [
+          "lib\/x86_64\/libLiteRt.so",
+          "lib\/x86_64\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "mappedLiteRtEntries": [
+      {
+        "apkPath": "\/data\/app\/~~lYFObsj-jUjRoZcyU1QDLQ==\/com.wluhwluh.booming.sourcesep.debug-jS7OSuXUBWu7xzoyqYSMig==\/base.apk",
+        "entryName": "lib\/x86_64\/libLiteRt.so",
+        "dataOffset": 32407552,
+        "byteSize": 7272904,
+        "mapLines": []
+      },
+      {
+        "apkPath": "\/data\/app\/~~lYFObsj-jUjRoZcyU1QDLQ==\/com.wluhwluh.booming.sourcesep.debug-jS7OSuXUBWu7xzoyqYSMig==\/base.apk",
+        "entryName": "lib\/x86_64\/libLiteRtClGlAccelerator.so",
+        "dataOffset": 39682048,
+        "byteSize": 3400840,
+        "mapLines": []
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 8325386240,
+    "availableDeviceMemoryBytes": 6070030336,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 9058,
+    "manufacturer": "Google",
+    "model": "sdk_gphone16k_x86_64",
+    "device": "emu64xa16k",
+    "androidApi": 37,
+    "fingerprint": "google\/sdk_gphone16k_x86_64\/emu64xa16k:17\/CP21.260330.012\/15545953:userdebug\/dev-keys"
+  },
+  "compatibilityOverride": null,
+  "preflightOnly": true,
+  "preflightErrorType": "com.mardous.booming.separation.model.MdxInferenceCompatibilityException",
+  "preflightErrorMessage": "No LiteRtGpu compatibility record exists for x86_64.",
+  "nativeGpuAllocatorCalls": 0,
+  "modelFileExists": false,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 12412837,
+    "processCpuMs": 9330,
+    "totalPssKb": 230251,
+    "nativePssKb": 30314,
+    "dalvikPssKb": 15708,
+    "otherPssKb": 184229,
+    "nativeHeapAllocatedBytes": 34444016,
+    "summaryKb": {
+      "summary.java-heap": 22220,
+      "summary.native-heap": 30232,
+      "summary.code": 164040,
+      "summary.stack": 692,
+      "summary.graphics": 0,
+      "summary.private-other": 4004,
+      "summary.system": 9063,
+      "summary.total-pss": 230251,
+      "summary.total-swap": 0
+    }
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 12412872,
+    "processCpuMs": 9362,
+    "totalPssKb": 230198,
+    "nativePssKb": 30322,
+    "dalvikPssKb": 15716,
+    "otherPssKb": 184160,
+    "nativeHeapAllocatedBytes": 34444080,
+    "summaryKb": {
+      "summary.java-heap": 22228,
+      "summary.native-heap": 30240,
+      "summary.code": 164036,
+      "summary.stack": 692,
+      "summary.graphics": 0,
+      "summary.private-other": 3916,
+      "summary.system": 9086,
+      "summary.total-pss": 230198,
+      "summary.total-swap": 0
+    }
+  }
+}

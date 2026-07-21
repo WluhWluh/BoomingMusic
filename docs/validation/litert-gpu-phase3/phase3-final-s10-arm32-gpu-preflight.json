@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase3-final-s10-arm32-gpu-preflight",
+  "status": "complete",
+  "appCommit": "a0836c59aa0afcac2d7aefb7b97ffd60967b7dca",
+  "catalogSha256": "ded5070bcac3194cb62e83aca91b3e2d62427ec203fcb2d9ebe4dbd7d70b7d59",
+  "contractSchemaVersion": 1,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784643057225,
+  "contractId": "uvr_mdxnet_3_9662@1",
+  "contractConversionRevision": "3c202e64604de480241c31dba97e41d5a082805a",
+  "modelId": "uvr_mdxnet_3_9662",
+  "requestedBackend": "LiteRtGpu",
+  "process": {
+    "supportedAbis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ],
+    "osArch": "armv8l",
+    "is64Bit": false,
+    "resolvedProcessAbi": "armeabi-v7a",
+    "selectedLiteRtRuntimeAbi": "armeabi-v7a",
+    "nativeLibraryDir": "\/data\/app\/~~6Id_nqz5QcVP5e5oW9fvcw==\/com.wluhwluh.booming.sourcesep.debug-JFHvOV5PEvjkEoQCl-L__Q==\/lib\/arm",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~6Id_nqz5QcVP5e5oW9fvcw==\/com.wluhwluh.booming.sourcesep.debug-JFHvOV5PEvjkEoQCl-L__Q==\/base.apk!\/lib\/armeabi-v7a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": null,
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~6Id_nqz5QcVP5e5oW9fvcw==\/com.wluhwluh.booming.sourcesep.debug-JFHvOV5PEvjkEoQCl-L__Q==\/base.apk",
+        "liteRtEntries": [
+          "lib\/armeabi-v7a\/libLiteRt.so"
+        ]
+      }
+    ],
+    "mappedLiteRtEntries": [
+      {
+        "apkPath": "\/data\/app\/~~6Id_nqz5QcVP5e5oW9fvcw==\/com.wluhwluh.booming.sourcesep.debug-JFHvOV5PEvjkEoQCl-L__Q==\/base.apk",
+        "entryName": "lib\/armeabi-v7a\/libLiteRt.so",
+        "dataOffset": 32407552,
+        "byteSize": 3504124,
+        "mapLines": []
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 7823921152,
+    "availableDeviceMemoryBytes": 2808676352,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 408944640,
+    "pid": 26115,
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "device": "beyond1q",
+    "androidApi": 31,
+    "fingerprint": "samsung\/beyond1qltezc\/beyond1q:12\/SP1A.210812.016\/G9730ZCU8HWE2:user\/release-keys"
+  },
+  "compatibilityOverride": null,
+  "preflightOnly": true,
+  "preflightErrorType": "com.mardous.booming.separation.model.MdxInferenceCompatibilityException",
+  "preflightErrorMessage": "No LiteRtGpu compatibility record exists for armeabi-v7a.",
+  "nativeGpuAllocatorCalls": 0,
+  "modelFileExists": false,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 192214091,
+    "processCpuMs": 3438,
+    "totalPssKb": 245788,
+    "nativePssKb": 26136,
+    "dalvikPssKb": 12480,
+    "otherPssKb": 198018,
+    "nativeHeapAllocatedBytes": 24232000,
+    "summaryKb": {
+      "summary.java-heap": 24720,
+      "summary.native-heap": 25480,
+      "summary.code": 175488,
+      "summary.stack": 496,
+      "summary.graphics": 0,
+      "summary.private-other": 6080,
+      "summary.system": 13524,
+      "summary.total-pss": 245788,
+      "summary.total-swap": 18320
+    }
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 192214136,
+    "processCpuMs": 3482,
+    "totalPssKb": 245902,
+    "nativePssKb": 26144,
+    "dalvikPssKb": 12488,
+    "otherPssKb": 198134,
+    "nativeHeapAllocatedBytes": 24232000,
+    "summaryKb": {
+      "summary.java-heap": 24728,
+      "summary.native-heap": 25484,
+      "summary.code": 175588,
+      "summary.stack": 496,
+      "summary.graphics": 0,
+      "summary.private-other": 6084,
+      "summary.system": 13522,
+      "summary.total-pss": 245902,
+      "summary.total-swap": 18284
+    }
+  }
+}

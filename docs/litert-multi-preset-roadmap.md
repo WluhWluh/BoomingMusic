@@ -1224,6 +1224,16 @@ enter playback or a production cache until the model repository and
 model-aware cache work in Phases 4 and 5 is complete. Production ORT routing
 must remain unchanged throughout this phase.
 
+Status: implementation and controlled device evidence completed on 2026-07-21.
+The detailed matrix is recorded in
+[`litert-gpu-validation-results.md`](litert-gpu-validation-results.md) and
+[`validation/litert-gpu-phase3/`](validation/litert-gpu-phase3/). This does
+not approve production Auto: 9662 `gpu-auto-fp32-v1` is the only Phase 7
+full-song candidate; KARA FP32 deterministically missed its synthetic-input
+raw-output floor, FP16 failed parity, and HQ4 exceeded its resource gate while
+lacking a known-good CPU fallback. All arm64 GPU compatibility records remain
+`untested` until the Phase 7 gates pass.
+
 The implementation must target the API actually shipped by the pinned LiteRT
 2.1.5 AAR. It provides `Environment.getAvailableAccelerators()`,
 `CompiledModel.Options(Accelerator.GPU)`, and `GpuOptions`, while the packaged
@@ -1234,105 +1244,105 @@ more than the API can prove.
 
 #### Phase 3A: GPU adapter and runtime profiles
 
-- [ ] Add a GPU factory and session beside the CPU implementation under the
+- [x] Add a GPU factory and session beside the CPU implementation under the
   same runtime-neutral interface. Keep LiteRT API types inside the adapter
   package and keep flat NCHW arrays at the DSP boundary.
-- [ ] Introduce versioned internal GPU runtime profiles and include the profile
+- [x] Introduce versioned internal GPU runtime profiles and include the profile
   ID in the factory/session identity and diagnostics. Begin with explicit
   `AUTOMATIC + FP32` options as the correctness baseline; evaluate
   `AUTOMATIC + FP16` as a separate optimization candidate. Do not silently
   inherit LiteRT defaults or treat forced OpenCL/OpenGL diagnostic runs as the
   same profile.
-- [ ] Reuse one compiled model, one named input buffer, one named output buffer,
+- [x] Reuse one compiled model, one named input buffer, one named output buffer,
   and NCHW/NHWC scratch arrays per GPU session. Apply the Phase 2 tensor name,
   float32, static-shape, element-count, finite-output, and close-order checks
   without creating a second CPU session alongside it.
-- [ ] Require `Accelerator.GPU` from the created environment before model
+- [x] Require `Accelerator.GPU` from the created environment before model
   compilation. Treat successful GPU-only `CompiledModel.create` and invocation
   as the available operator-compatibility test because LiteRT 2.1.5 has no
   public delegated-operator coverage API.
-- [ ] Preserve the Phase 2 lease rule: invocation is non-interruptible, close
+- [x] Preserve the Phase 2 lease rule: invocation is non-interruptible, close
   cannot race an in-flight call, cancellation after return discards output,
   and session replacement occurs only after the active lease is released.
 
 #### Phase 3B: Auto eligibility and one-way fallback
 
-- [ ] Add an `Auto` controller above the low-level GPU and CPU factories. Its
+- [x] Add an `Auto` controller above the low-level GPU and CPU factories. Its
   key must bind artifact SHA-256, contract/pipeline identity, GPU runtime
   profile, CPU runtime settings, and process ABI.
-- [ ] Route `armeabi-v7a` and pure `x86` directly to CPU without creating a GPU
+- [x] Route `armeabi-v7a` and pure `x86` directly to CPU without creating a GPU
   environment. Permit arm64 GPU attempts only through the internal `untested`
   compatibility policy in this phase. Treat x86_64 as packaging/API evidence
   only until an exact GPU compatibility record and representative validation
   exist; native-library presence alone is not eligibility.
-- [ ] Require a known-good CPU record for the exact model, contract, and ABI
+- [x] Require a known-good CPU record for the exact model, contract, and ABI
   before enabling recoverable fallback. Consequently, validate 9662 and KARA
   as the Auto candidates and keep HQ4 GPU work exploratory while its arm64 CPU
   path exceeds the resource gate.
-- [ ] Define typed outcomes for static skip, accelerator unavailable, GPU setup,
+- [x] Define typed outcomes for static skip, accelerator unavailable, GPU setup,
   tensor setup, probe write/invoke/read/validation, normal invocation,
   output read/validation, cancellation, out-of-memory, GPU cleanup, CPU setup,
   and CPU invocation. Preserve the first failure and attach later cleanup or
   fallback failures as secondary diagnostics.
-- [ ] Recover only explicitly classified accelerator failures. Do not turn an
+- [x] Recover only explicitly classified accelerator failures. Do not turn an
   arbitrary `Throwable`, cancellation, VM error, or memory error into a CPU
   retry that could hide a programming fault or worsen process pressure.
-- [ ] For a recoverable GPU failure, discard its output, close every GPU
+- [x] For a recoverable GPU failure, discard its output, close every GPU
   resource, create CPU only after cleanup succeeds, and rerun the same input
   once. Latch the session to CPU after fallback and prohibit repeated retries
   or a CPU-to-GPU transition.
-- [ ] Do not fall back for cancellation. Treat an unconfirmed GPU cleanup or an
+- [x] Do not fall back for cancellation. Treat an unconfirmed GPU cleanup or an
   out-of-memory condition as terminal for that attempt so Auto cannot retain a
   large GPU allocation while creating a CPU model.
-- [ ] Keep the Phase 2 CPU formula unchanged and keep `GPU only`, precision,
+- [x] Keep the Phase 2 CPU formula unchanged and keep `GPU only`, precision,
   forced API selection, probe controls, and backend timing out of user settings
   and backup schemas.
-- [ ] Emit structured internal diagnostics for requested policy and profile,
+- [x] Emit structured internal diagnostics for requested policy and profile,
   eligibility decision, available accelerators, attempted and accepted
   backend, setup/probe/inference/cleanup timings, fallback stage and reason,
   and CPU retry result. Do not persist performance history as a preference.
 
 #### Phase 3C: Fault injection and app-packaged device evidence
 
-- [ ] Extend the Phase 2 runner with deterministic GPU reports that pin the app
+- [x] Extend the Phase 2 runner with deterministic GPU reports that pin the app
   commit, catalog revision, model/runtime hashes, process ABI, Android/device
   identity, GPU profile, fixture and ORT-reference hashes, and parity thresholds.
-- [ ] Keep complete fixture inputs and ORT reference tensors in AndroidTest
+- [x] Keep complete fixture inputs and ORT reference tensors in AndroidTest
   staging only. Make the probe policy injectable so Phase 7 can choose a compact
   production probe without adding full validation tensors to release APKs.
-- [ ] Add host tests with blocking and fault-injecting factories for eligibility
+- [x] Add host tests with blocking and fault-injecting factories for eligibility
   skip, setup, probe write/invoke/read/non-finite/parity, normal invocation,
   output read/non-finite, cancellation, cleanup, CPU recreation, CPU failure,
   session reuse/replacement, and process-level controller recreation.
-- [ ] On S10 and S25 arm64, run 9662 and KARA against the frozen synthetic and
+- [x] On S10 and S25 arm64, run 9662 and KARA against the frozen synthetic and
   Coast Town fixtures. Establish FP32 correctness first, then measure FP16
   separately for parity, repeatability, setup/reuse time, and memory. A
   precision profile cannot borrow another profile's evidence.
-- [ ] Add internal connected-test failpoints around setup, probe, invocation,
+- [x] Add internal connected-test failpoints around setup, probe, invocation,
   and output read. On each arm64 device, close at least one real GPU session and
   prove that a real CPU session recomputes the same 9662 input once.
-- [ ] Prove the strongest evidence available from LiteRT 2.1.5: the APK contains
+- [x] Prove the strongest evidence available from LiteRT 2.1.5: the APK contains
   the arm64 accelerator library, the runtime reports `Accelerator.GPU`, the
   accelerator library appears in the process mappings, the model was requested
   with the GPU-only profile, and repeated invocation returns valid output.
   Explicitly record that per-operator placement cannot be queried.
-- [ ] Record snapshots before environment creation, after compilation/buffer
+- [x] Record snapshots before environment creation, after compilation/buffer
   allocation, after first and reused inference, and after close. Include total,
   native, graphics/EGL/mtrack where available, and aggregate PSS rather than
   relying on Java heap alone.
-- [ ] Exercise HQ4 on S10 and S25 only as an exploratory GPU resource probe.
+- [x] Exercise HQ4 on S10 and S25 only as an exploratory GPU resource probe.
   Even a successful window does not make it Auto-selectable while its CPU
   fallback is not production-approved.
-- [ ] Assert zero GPU allocator calls for `armeabi-v7a` and pure `x86`. An
+- [x] Assert zero GPU allocator calls for `armeabi-v7a` and pure `x86`. An
   x86_64 emulator may validate loading and API behavior, but its host-backed GPU
   result must not create a production compatibility record by itself.
-- [ ] Reconcile GPU evidence through authoritative `bss-tflite` contracts and
+- [x] Reconcile GPU evidence through authoritative `bss-tflite` contracts and
   regenerate the bundled catalog; never patch only the app copy. Replace the
   current deferred evidence with Phase 3 report references. Keep a successful
   candidate `untested` until Phase 7 full-song, thermal, and playback-readiness
   gates approve a production profile; use `unsupported` only for a repeatable,
   explicitly evidenced incompatibility. Phase 3 must not set GPU `known-good`.
-- [ ] Verify no failed GPU session leaves the internal job or validation state
+- [x] Verify no failed GPU session leaves the internal job or validation state
   stuck. Repeat the cache-ready and playback-gate assertions after Phase 5
   integrates the controller with model-aware production state.
 
