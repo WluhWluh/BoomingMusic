@@ -168,6 +168,7 @@ enum class MdxInferenceBackend {
     OrtCpu,
     LiteRtCpu,
     LiteRtGpu,
+    LiteRtAuto,
 }
 
 data class MdxRuntimeDiagnostics(

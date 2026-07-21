@@ -18,6 +18,29 @@ import com.mardous.booming.separation.model.MdxTensorLayoutConverter
 import com.mardous.booming.separation.model.MdxTensorSpec
 import com.mardous.booming.separation.model.runNonInterruptibleMdxInference
 import com.mardous.booming.separation.model.throwIfMdxInferenceCanceled
+import java.util.concurrent.CancellationException
+
+internal enum class MdxLiteRtFailureStage {
+    EnvironmentCreate,
+    AcceleratorDiscovery,
+    ModelCompile,
+    TensorMetadata,
+    BufferAllocation,
+    InputWrite,
+    Invocation,
+    OutputRead,
+    OutputValidation,
+    Cleanup,
+}
+
+internal class MdxLiteRtBackendException(
+    val stage: MdxLiteRtFailureStage,
+    val isRecoverable: Boolean,
+    cause: Throwable,
+) : IllegalStateException(
+    "LiteRT ${stage.name} failed: ${cause.message.orEmpty()}",
+    cause,
+)
 
 internal object MdxLiteRtNativeSessionAllocator : MdxLiteRtSessionAllocator {
     override fun create(
@@ -78,62 +101,86 @@ private fun createNativeLiteRtSession(
     options: CompiledModel.Options,
     diagnostics: MdxRuntimeDiagnostics,
 ): MdxInferenceSession {
-    val environment = Environment.create()
+    val environment = runLiteRtOperation(MdxLiteRtFailureStage.EnvironmentCreate) {
+        Environment.create()
+    }
     var compiledModel: CompiledModel? = null
     var inputBuffers: List<TensorBuffer> = emptyList()
     var outputBuffers: List<TensorBuffer> = emptyList()
     try {
-        if (!environment.getAvailableAccelerators().contains(requiredAccelerator)) {
-            throw MdxInferenceCompatibilityException(
-                "The app-packaged LiteRT runtime has no ${requiredAccelerator.name} accelerator."
+        runLiteRtOperation(MdxLiteRtFailureStage.AcceleratorDiscovery) {
+            if (!environment.getAvailableAccelerators().contains(requiredAccelerator)) {
+                throw MdxInferenceCompatibilityException(
+                    "The app-packaged LiteRT runtime has no " +
+                        "${requiredAccelerator.name} accelerator."
+                )
+            }
+        }
+        val activeCompiledModel = runLiteRtOperation(MdxLiteRtFailureStage.ModelCompile) {
+            CompiledModel.create(
+                artifact.file.absolutePath,
+                options,
+                environment,
             )
         }
-        compiledModel = CompiledModel.create(
-            artifact.file.absolutePath,
-            options,
-            environment,
-        )
-        validateTensorType(
-            declared = profile.inputTensor,
-            actual = compiledModel.getInputTensorType(requireNotNull(profile.inputTensor.name)),
-            role = "input",
-        )
-        validateTensorType(
-            declared = profile.outputTensor,
-            actual = compiledModel.getOutputTensorType(requireNotNull(profile.outputTensor.name)),
-            role = "output",
-        )
-        validateBufferSize(
-            role = "input",
-            expectedElementCount = profile.inputTensor.elementCount,
-            actualBytes = compiledModel.getInputBufferRequirements(
-                requireNotNull(profile.inputTensor.name)
-            ).bufferSize,
-        )
-        validateBufferSize(
-            role = "output",
-            expectedElementCount = profile.outputTensor.elementCount,
-            actualBytes = compiledModel.getOutputBufferRequirements(
-                requireNotNull(profile.outputTensor.name)
-            ).bufferSize,
-        )
-        inputBuffers = compiledModel.createInputBuffers()
-        outputBuffers = compiledModel.createOutputBuffers()
-        requireSingleTensor(inputBuffers, "input")
-        requireSingleTensor(outputBuffers, "output")
+        compiledModel = activeCompiledModel
+        runLiteRtOperation(
+            stage = MdxLiteRtFailureStage.TensorMetadata,
+            isRecoverable = false,
+        ) {
+            validateTensorType(
+                declared = profile.inputTensor,
+                actual = activeCompiledModel.getInputTensorType(
+                    requireNotNull(profile.inputTensor.name)
+                ),
+                role = "input",
+            )
+            validateTensorType(
+                declared = profile.outputTensor,
+                actual = activeCompiledModel.getOutputTensorType(
+                    requireNotNull(profile.outputTensor.name)
+                ),
+                role = "output",
+            )
+        }
+        runLiteRtOperation(MdxLiteRtFailureStage.BufferAllocation) {
+            validateBufferSize(
+                role = "input",
+                expectedElementCount = profile.inputTensor.elementCount,
+                actualBytes = activeCompiledModel.getInputBufferRequirements(
+                    requireNotNull(profile.inputTensor.name)
+                ).bufferSize,
+            )
+            validateBufferSize(
+                role = "output",
+                expectedElementCount = profile.outputTensor.elementCount,
+                actualBytes = activeCompiledModel.getOutputBufferRequirements(
+                    requireNotNull(profile.outputTensor.name)
+                ).bufferSize,
+            )
+            inputBuffers = activeCompiledModel.createInputBuffers()
+            outputBuffers = activeCompiledModel.createOutputBuffers()
+            requireSingleTensor(inputBuffers, "input")
+            requireSingleTensor(outputBuffers, "output")
+        }
         return MdxLiteRtInferenceSession(
             environment = environment,
-            compiledModel = compiledModel,
+            compiledModel = activeCompiledModel,
             inputBuffer = inputBuffers.single(),
             outputBuffer = outputBuffers.single(),
             profile = profile,
             diagnostics = diagnostics,
         )
     } catch (error: Throwable) {
-        inputBuffers.closeQuietly()
-        outputBuffers.closeQuietly()
-        compiledModel?.closeQuietly()
-        environment.closeQuietly()
+        closeAfterFailure(
+            resources = buildList {
+                addAll(inputBuffers)
+                addAll(outputBuffers)
+                compiledModel?.let(::add)
+                add(environment)
+            },
+            primaryFailure = error,
+        )
         throw error
     }
 }
@@ -170,16 +217,24 @@ private class MdxLiteRtInferenceSession(
             height = profile.dspConfig.dimF,
             width = profile.dspConfig.dimT,
         )
-        inputBuffer.writeFloat(inputNhwc)
+        runLiteRtOperation(MdxLiteRtFailureStage.InputWrite) {
+            inputBuffer.writeFloat(inputNhwc)
+        }
         runNonInterruptibleMdxInference(shouldCancel) {
-            compiledModel.run(inputBuffers, outputBuffers)
+            runLiteRtOperation(MdxLiteRtFailureStage.Invocation) {
+                compiledModel.run(inputBuffers, outputBuffers)
+            }
         }
-        val rawOutputNhwc = outputBuffer.readFloat()
-        require(rawOutputNhwc.size == profile.outputTensor.elementCount) {
-            "Expected ${profile.outputTensor.elementCount} output elements, " +
-                "got ${rawOutputNhwc.size}."
+        val rawOutputNhwc = runLiteRtOperation(MdxLiteRtFailureStage.OutputRead) {
+            outputBuffer.readFloat()
         }
-        requireFiniteMdxTensor(rawOutputNhwc)
+        runLiteRtOperation(MdxLiteRtFailureStage.OutputValidation) {
+            require(rawOutputNhwc.size == profile.outputTensor.elementCount) {
+                "Expected ${profile.outputTensor.elementCount} output elements, " +
+                    "got ${rawOutputNhwc.size}."
+            }
+            requireFiniteMdxTensor(rawOutputNhwc)
+        }
         MdxTensorLayoutConverter.nhwcToNchw(
             source = rawOutputNhwc,
             destination = outputNchw,
@@ -196,13 +251,22 @@ private class MdxLiteRtInferenceSession(
     override fun close() {
         if (closed) return
         closed = true
-        var failure: Throwable? = null
+        var failure: MdxLiteRtBackendException? = null
         listOf<AutoCloseable>(inputBuffer, outputBuffer, compiledModel, environment).forEach { resource ->
             try {
                 resource.close()
             } catch (error: Throwable) {
+                val cleanupFailure = MdxLiteRtBackendException(
+                    stage = MdxLiteRtFailureStage.Cleanup,
+                    isRecoverable = false,
+                    cause = error,
+                )
                 val existingFailure = failure
-                if (existingFailure == null) failure = error else existingFailure.addSuppressed(error)
+                if (existingFailure == null) {
+                    failure = cleanupFailure
+                } else {
+                    existingFailure.addSuppressed(cleanupFailure)
+                }
             }
         }
         failure?.let { throw it }
@@ -299,10 +363,35 @@ private fun requireSingleTensor(buffers: List<TensorBuffer>, role: String) {
     }
 }
 
-private fun Iterable<AutoCloseable>.closeQuietly() {
-    forEach { it.closeQuietly() }
+private inline fun <T> runLiteRtOperation(
+    stage: MdxLiteRtFailureStage,
+    isRecoverable: Boolean = true,
+    operation: () -> T,
+): T = try {
+    operation()
+} catch (error: CancellationException) {
+    throw error
+} catch (error: MdxLiteRtBackendException) {
+    throw error
+} catch (error: Exception) {
+    throw MdxLiteRtBackendException(stage, isRecoverable, error)
 }
 
-private fun AutoCloseable.closeQuietly() {
-    runCatching { close() }
+private fun closeAfterFailure(
+    resources: List<AutoCloseable>,
+    primaryFailure: Throwable,
+) {
+    resources.forEach { resource ->
+        try {
+            resource.close()
+        } catch (cleanupError: Throwable) {
+            primaryFailure.addSuppressed(
+                MdxLiteRtBackendException(
+                    stage = MdxLiteRtFailureStage.Cleanup,
+                    isRecoverable = false,
+                    cause = cleanupError,
+                )
+            )
+        }
+    }
 }
