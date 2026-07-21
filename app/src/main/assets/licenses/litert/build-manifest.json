@@ -1,0 +1,43 @@
+{
+  "artifactVersion": "2.1.5-bss.1",
+  "build": {
+    "abi": "x86",
+    "buildInclude": "cpu_only",
+    "disabledXnnpackMicrokernels": [
+      "avxvnni",
+      "avxvnniint8",
+      "avx512fp16",
+      "avx512amx"
+    ],
+    "target": "//litert/kotlin:LiteRt"
+  },
+  "expectedDynamicDependencies": [
+    "libandroid.so",
+    "libc.so",
+    "libdl.so",
+    "liblog.so",
+    "libm.so"
+  ],
+  "litert": {
+    "commit": "9d26e89d88ef8785b6a1e54ec41ac8add215a125",
+    "repository": "https://github.com/google-ai-edge/LiteRT",
+    "version": "2.1.5"
+  },
+  "outputs": {
+    "libLiteRt-2.1.5-bss.1-android-x86.so": {
+      "bytes": 7482132,
+      "sha256": "02b6556ec235926c11eb0c067eb16e459adcddb1568a42eefe0c40f4cc4b59af"
+    },
+    "litert-2.1.5-bss.1-android-x86.aar": {
+      "bytes": 2972957,
+      "sha256": "eefa25926c72c85cd506d5591869c1a72b1de1a7a091ab9ccbfb5cb102146f47"
+    }
+  },
+  "schemaVersion": 1,
+  "toolchain": {
+    "androidApiLevel": 23,
+    "androidNdk": "25.1.8937393",
+    "bazel": "7.7.0",
+    "rulesAndroidNdk": "0.1.3"
+  }
+}

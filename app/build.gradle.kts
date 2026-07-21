@@ -90,6 +90,7 @@ android {
         applicationId = "com.wluhwluh.booming.sourcesep"
         versionCode = 1310102
         versionName = currentVersion.name + sourceSeparationVersionSuffix
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         check(versionCode == currentVersionCode)
     }
 
@@ -172,10 +173,12 @@ android {
 
             // AppBundle tasks usually contain "bundle" in their name
             //noinspection WrongGradleMethod
-            val isBuildingBundle = gradle.startParameter.taskNames.any { it.lowercase().contains("bundle") }
+            val requestedTasks = gradle.startParameter.taskNames.map { it.lowercase() }
+            val isBuildingBundle = requestedTasks.any { it.contains("bundle") }
+            val isRunningAndroidTest = requestedTasks.any { it.contains("androidtest") }
 
-            // Disable split abis when building app bundle
-            isEnable = !isBuildingBundle
+            // Test installation uses one universal APK so the emulator selects its process ABI.
+            isEnable = !isBuildingBundle && !isRunningAndroidTest
 
             reset()
             include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
@@ -323,9 +326,12 @@ dependencies {
     implementation(libs.commons.text)
     implementation(libs.juniversalchardet)
     implementation(libs.onnxruntime.android)
+    implementation(libs.litert)
     implementation(libs.jtransforms)
 
     testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }
 
 fun getProperties(fileName: String): Properties? {

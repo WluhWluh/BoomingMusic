@@ -52,6 +52,13 @@ jobs:
           CAP_VARIANT="$(echo ${VARIANT:0:1} | tr '[:lower:]' '[:upper:]')${VARIANT:1}"
           ./gradlew assemble${CAP_VARIANT}Release
 
+      - name: Verify LiteRT native supply chain and APK inventories
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          python tools/verify_litert_native.py
+          python tools/verify_litert_apks.py "app/build/outputs/apk/${VARIANT}/release"
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
         with:
