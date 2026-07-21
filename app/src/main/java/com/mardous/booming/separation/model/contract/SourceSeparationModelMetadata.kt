@@ -5,11 +5,11 @@ import kotlinx.serialization.json.Json
 import java.security.MessageDigest
 
 object SourceSeparationModelMetadata {
-    const val CATALOG_ASSET_PATH = "source-separation/model-catalog-v1.json"
+    const val CATALOG_ASSET_PATH = "source-separation/model-catalog-v2.json"
     const val CATALOG_SOURCE_REPOSITORY = "https://github.com/WluhWluh/bss-tflite"
-    const val CATALOG_SOURCE_REVISION = "0d1b1853f147321a7a94e603d4ac0c8b63662633"
+    const val CATALOG_SOURCE_REVISION = "710c6ae4aa1fe34eaf314697db63a65874127395"
     const val CATALOG_SHA256 =
-        "bdfa3cdafa00c01254a09fd468b707840cebe63f073db83ab874db6ec42a8950"
+        "9025533f7fce2add2482846d04b3adc1fecfd28fd95f30d2efe59f9d87eec40a"
 
     val json = Json {
         ignoreUnknownKeys = false

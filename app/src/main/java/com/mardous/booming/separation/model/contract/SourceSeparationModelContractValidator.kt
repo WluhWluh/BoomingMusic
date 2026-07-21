@@ -12,9 +12,9 @@ class SourceSeparationModelContractException(message: String) :
     IllegalArgumentException(message)
 
 object SourceSeparationModelContractValidator {
-    const val CONTRACT_SCHEMA_VERSION = 1
+    const val CONTRACT_SCHEMA_VERSION = 2
     const val CUSTOM_PROFILE_SCHEMA_VERSION = 1
-    const val CATALOG_SCHEMA_VERSION = 1
+    const val CATALOG_SCHEMA_VERSION = 2
     const val PIPELINE_ID = "booming-ss-mdx-stft"
     const val PIPELINE_VERSION = 1
 
@@ -41,7 +41,6 @@ object SourceSeparationModelContractValidator {
             contract.stemContract,
             contract.pipelineCompatibility,
         )
-        validateRuntimeCompatibility(contract.runtimeCompatibility)
         return contract
     }
 
@@ -99,7 +98,7 @@ object SourceSeparationModelContractValidator {
         requireContract(catalog.contractSchemaVersion == CONTRACT_SCHEMA_VERSION) {
             "Catalog contract schema does not match the supported version"
         }
-        requireContract(catalog.catalogId == "booming-ss-model-catalog-v1") {
+        requireContract(catalog.catalogId == "booming-ss-model-catalog-v2") {
             "Unsupported catalog ID: ${catalog.catalogId}"
         }
         requireSha256(catalog.inventory.sha256, "Inventory")
@@ -112,6 +111,17 @@ object SourceSeparationModelContractValidator {
         val contracts = catalog.contracts.uniqueBy("contract ID") { it.contractId }
         catalog.contracts.uniqueBy("contract model ID") { it.modelId }
         val entries = catalog.entries.uniqueBy("model ID") { it.modelId }
+        catalog.runtimeQualifications.uniqueBy("runtime qualification") {
+            listOf(
+                it.modelId,
+                it.runtimeId,
+                it.runtimeVersion,
+                it.abi.name,
+                it.backend.name,
+                it.profileId,
+                it.precision.name,
+            ).joinToString("|")
+        }
 
         catalog.sources.forEach { source ->
             requireContract(source.sourceId.isNotBlank()) { "Source ID is empty" }
@@ -141,12 +151,23 @@ object SourceSeparationModelContractValidator {
         catalog.entries.forEach { entry ->
             validateCatalogEntry(entry, artifacts, contracts)
         }
+        catalog.runtimeQualifications.forEach { qualification ->
+            validateRuntimeQualification(qualification, entries, contracts)
+        }
 
         val defaults = catalog.entries.filter(CatalogEntry::isDefault)
         requireContract(defaults.size == 1) { "Catalog must have exactly one default model" }
-        requireContract(defaults.single().activationPolicy == CatalogActivationPolicy.SelectableWhenInstalled) {
+        requireContract(defaults.single().supportLevel == CatalogSupportLevel.Recommended) {
+            "Default model must be recommended"
+        }
+        requireContract(
+            defaults.single().activationPolicy == CatalogActivationPolicy.SelectableWhenQualified
+        ) {
             "Default model must be selectable"
         }
+        requireContract(
+            catalog.entries.count { it.supportLevel == CatalogSupportLevel.Recommended } == 1
+        ) { "Catalog must have exactly one recommended model" }
         val contractReferences = catalog.entries.mapNotNull(CatalogEntry::contractId)
         requireContract(contractReferences.size == contractReferences.toSet().size) {
             "A reviewed contract cannot be shared by multiple catalog entries"
@@ -156,7 +177,10 @@ object SourceSeparationModelContractValidator {
             "Every contract must be referenced by exactly one catalog model identity"
         }
         catalog.entries
-            .filter { it.activationPolicy == CatalogActivationPolicy.SelectableWhenInstalled }
+            .filter {
+                it.activationPolicy == CatalogActivationPolicy.SelectableWhenQualified ||
+                    it.activationPolicy == CatalogActivationPolicy.SelectableExperimentalCpuOnly
+            }
             .forEach { resolveActivationContract(catalog, it.modelId) }
         return catalog
     }
@@ -167,9 +191,21 @@ object SourceSeparationModelContractValidator {
     ): SourceSeparationModelContract {
         val entry = catalog.entries.singleOrNull { it.modelId == modelId }
             ?: fail("Expected one catalog entry for $modelId")
-        requireContract(entry.activationPolicy == CatalogActivationPolicy.SelectableWhenInstalled) {
+        requireContract(
+            entry.activationPolicy == CatalogActivationPolicy.SelectableWhenQualified ||
+                entry.activationPolicy == CatalogActivationPolicy.SelectableExperimentalCpuOnly
+        ) {
             "Catalog entry $modelId is not selectable"
         }
+        return resolveReviewedContract(catalog, modelId)
+    }
+
+    fun resolveReviewedContract(
+        catalog: SourceSeparationModelCatalog,
+        modelId: String,
+    ): SourceSeparationModelContract {
+        val entry = catalog.entries.singleOrNull { it.modelId == modelId }
+            ?: fail("Expected one catalog entry for $modelId")
         val contractId = entry.contractId
             ?: fail("Catalog entry $modelId has no reviewed contract")
         val contract = catalog.contracts.singleOrNull { it.contractId == contractId }
@@ -301,16 +337,38 @@ object SourceSeparationModelContractValidator {
         }
     }
 
-    private fun validateRuntimeCompatibility(runtime: RuntimeCompatibility) {
-        requireContract(runtime.minimumAndroidApi >= 26) {
-            "Contract minimum Android API is below the application minimum"
+    private fun validateRuntimeQualification(
+        qualification: CatalogRuntimeQualification,
+        entries: Map<String, CatalogEntry>,
+        contracts: Map<String, SourceSeparationModelContract>,
+    ) {
+        val entry = entries[qualification.modelId]
+            ?: fail("Runtime qualification references a missing model")
+        val contract = contracts[qualification.contractId]
+            ?: fail("Runtime qualification references a missing contract")
+        requireContract(entry.contractId == contract.contractId) {
+            "Runtime qualification contract does not belong to its catalog entry"
         }
-        requireContract(runtime.statuses.isNotEmpty()) { "Runtime compatibility is empty" }
-        requireContract(runtime.statuses.all { it.evidence.isNotBlank() }) {
-            "Runtime compatibility evidence is incomplete"
+        requireContract(contract.modelId == qualification.modelId) {
+            "Runtime qualification model and contract IDs differ"
         }
-        requireContract(runtime.statuses.distinctBy { it.abi to it.backend }.size == runtime.statuses.size) {
-            "Runtime compatibility contains duplicate ABI/backend records"
+        requireContract(contract.artifact.sha256 == qualification.artifactSha256) {
+            "Runtime qualification artifact SHA-256 differs from the contract"
+        }
+        requireContract(qualification.runtimeId == "litert") {
+            "Unsupported runtime qualification: ${qualification.runtimeId}"
+        }
+        requireContract(qualification.runtimeVersion.isNotBlank()) {
+            "Runtime qualification version is empty"
+        }
+        requireContract(qualification.minimumAndroidApi >= 26) {
+            "Runtime minimum Android API is below the application minimum"
+        }
+        requireContract(qualification.profileId.isNotBlank()) {
+            "Runtime qualification profile ID is empty"
+        }
+        requireContract(qualification.evidence.isNotBlank()) {
+            "Runtime qualification evidence is empty"
         }
     }
 
@@ -338,6 +396,12 @@ object SourceSeparationModelContractValidator {
         when (artifact.conversionState) {
             CatalogConversionState.ConvertedUnreleased -> requireContract(artifact.tflite != null) {
                 "Converted artifact has no TFLite identity"
+            }
+
+            CatalogConversionState.Released -> requireContract(
+                artifact.tflite?.releaseAsset != null
+            ) {
+                "Released artifact has no immutable Release asset"
             }
 
             CatalogConversionState.NotConverted -> requireContract(artifact.tflite == null) {
@@ -377,24 +441,36 @@ object SourceSeparationModelContractValidator {
         }
         when (entry.supportLevel) {
             CatalogSupportLevel.Recommended -> requireContract(
-                entry.activationPolicy == CatalogActivationPolicy.SelectableWhenInstalled
+                entry.activationPolicy == CatalogActivationPolicy.SelectableWhenQualified
             ) { "Recommended model ${entry.modelId} must be selectable" }
 
             CatalogSupportLevel.Experimental -> requireContract(
-                entry.activationPolicy != CatalogActivationPolicy.DownloadOnlyGenericStem
-            ) { "Experimental model ${entry.modelId} has a download-only support policy" }
+                entry.activationPolicy == CatalogActivationPolicy.SelectableExperimentalCpuOnly
+            ) { "Experimental model ${entry.modelId} must use the warned CPU-only policy" }
 
             CatalogSupportLevel.DownloadOnly -> requireContract(
-                entry.activationPolicy == CatalogActivationPolicy.DownloadOnlyGenericStem
+                entry.activationPolicy == CatalogActivationPolicy.DownloadOnlyResourceGated ||
+                    entry.activationPolicy == CatalogActivationPolicy.BlockedUntilReviewedContract ||
+                    entry.activationPolicy == CatalogActivationPolicy.DownloadOnlyGenericStem
             ) { "Download-only model ${entry.modelId} has an activatable policy" }
         }
         when (entry.activationPolicy) {
-            CatalogActivationPolicy.SelectableWhenInstalled -> {
+            CatalogActivationPolicy.SelectableWhenQualified,
+            CatalogActivationPolicy.SelectableExperimentalCpuOnly -> {
                 requireContract(entry.contractId in contracts) {
                     "Selectable model ${entry.modelId} has no complete contract"
                 }
                 requireContract(entry.stemUi == CatalogStemUi.VocalsInstrumental) {
                     "The current selectable UI only supports vocals/instrumental contracts"
+                }
+            }
+
+            CatalogActivationPolicy.DownloadOnlyResourceGated -> {
+                requireContract(entry.contractId in contracts) {
+                    "Resource-gated model ${entry.modelId} lost its reviewed contract"
+                }
+                requireContract(entry.stemUi == CatalogStemUi.VocalsInstrumental) {
+                    "Resource-gated model has an incompatible stem UI"
                 }
             }
 

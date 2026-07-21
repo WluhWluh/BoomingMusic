@@ -10,6 +10,7 @@ import com.mardous.booming.separation.model.MdxInferenceSessionFactory
 import com.mardous.booming.separation.model.MdxLiteRtCompatibilityResolver
 import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.MdxRuntimePlatformProvider
+import com.mardous.booming.separation.model.MdxRuntimePrecision
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 
 internal enum class MdxLiteRtGpuApi {
@@ -75,6 +76,8 @@ internal class MdxLiteRtGpuInferenceSessionFactory(
             backend = backend,
             platform = platformProvider.current(),
             policy = compatibilityPolicy,
+            profileId = runtimeProfile.profileId,
+            precision = runtimeProfile.precision.toMdxRuntimePrecision(),
         )
         decision.requireAllowed()
         return sessionAllocator.create(
@@ -84,6 +87,11 @@ internal class MdxLiteRtGpuInferenceSessionFactory(
             compatibility = decision,
         )
     }
+}
+
+internal fun MdxLiteRtGpuPrecision.toMdxRuntimePrecision() = when (this) {
+    MdxLiteRtGpuPrecision.Float32 -> MdxRuntimePrecision.Fp32
+    MdxLiteRtGpuPrecision.Float16 -> MdxRuntimePrecision.Fp16
 }
 
 internal interface MdxLiteRtGpuSessionAllocator {

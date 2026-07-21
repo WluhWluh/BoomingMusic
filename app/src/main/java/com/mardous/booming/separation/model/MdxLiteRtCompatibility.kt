@@ -13,17 +13,31 @@ enum class MdxRuntimeAbi(val androidName: String) {
 
 enum class MdxRuntimeSupportStatus {
     KnownGood,
+    Candidate,
+    Rejected,
     Untested,
     Unsupported,
+}
+
+enum class MdxRuntimePrecision {
+    Fp32,
+    Fp16,
+}
+
+object MdxRuntimeProfiles {
+    const val CPU_DEFAULT_FP32 = "cpu-default-fp32-v1"
 }
 
 data class MdxRuntimeCompatibilityRecord(
     val abi: MdxRuntimeAbi,
     val backend: MdxInferenceBackend,
+    val profileId: String,
+    val precision: MdxRuntimePrecision,
     val status: MdxRuntimeSupportStatus,
     val evidence: String,
 ) {
     init {
+        require(profileId.isNotBlank()) { "Runtime compatibility profile ID is empty." }
         require(evidence.isNotBlank()) { "Runtime compatibility evidence is empty." }
     }
 }
@@ -89,6 +103,8 @@ object MdxLiteRtCompatibilityResolver {
         backend: MdxInferenceBackend,
         platform: MdxRuntimePlatform,
         policy: MdxCompatibilityPolicy,
+        profileId: String = MdxRuntimeProfiles.CPU_DEFAULT_FP32,
+        precision: MdxRuntimePrecision = MdxRuntimePrecision.Fp32,
     ): MdxCompatibilityDecision {
         if (profile.modelFormat != MdxModelFormat.Tflite) {
             return unsupported("LiteRT requires a TFLite execution profile.")
@@ -106,9 +122,13 @@ object MdxLiteRtCompatibilityResolver {
             )
         }
         val record = profile.runtimeCompatibility.singleOrNull {
-            it.abi == platform.runtimeAbi && it.backend == backend
+            it.abi == platform.runtimeAbi &&
+                it.backend == backend &&
+                it.profileId == profileId &&
+                it.precision == precision
         } ?: return unsupported(
-            "No ${backend.name} compatibility record exists for ${platform.runtimeAbi.androidName}."
+            "No ${backend.name} compatibility record exists for " +
+                "${platform.runtimeAbi.androidName}, profile=$profileId, precision=$precision."
         )
         return when (record.status) {
             MdxRuntimeSupportStatus.KnownGood -> MdxCompatibilityDecision(
@@ -117,6 +137,7 @@ object MdxLiteRtCompatibilityResolver {
                 evidence = record.evidence,
             )
 
+            MdxRuntimeSupportStatus.Candidate,
             MdxRuntimeSupportStatus.Untested -> if (
                 policy == MdxCompatibilityPolicy.AllowUntestedInternal
             ) {
@@ -131,6 +152,11 @@ object MdxLiteRtCompatibilityResolver {
                     record.evidence,
                 )
             }
+
+            MdxRuntimeSupportStatus.Rejected -> unsupported(
+                "The runtime profile was rejected by validation.",
+                record.evidence,
+            )
 
             MdxRuntimeSupportStatus.Unsupported -> unsupported(
                 "The runtime target is explicitly unsupported.",

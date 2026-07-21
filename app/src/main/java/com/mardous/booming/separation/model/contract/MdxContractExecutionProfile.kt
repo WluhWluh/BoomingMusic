@@ -6,14 +6,22 @@ import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxModelFormat
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimeCompatibilityRecord
+import com.mardous.booming.separation.model.MdxRuntimePrecision
 import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxStem
 import com.mardous.booming.separation.model.MdxTensorDataType
 import com.mardous.booming.separation.model.MdxTensorLayout
 import com.mardous.booming.separation.model.MdxTensorSpec
 
-fun SourceSeparationModelContract.toMdxExecutionProfile(): MdxExecutionProfile {
+fun SourceSeparationModelContract.toMdxExecutionProfile(
+    runtimeQualifications: List<CatalogRuntimeQualification> = emptyList(),
+): MdxExecutionProfile {
     val validated = SourceSeparationModelContractValidator.validateContract(this)
+    val qualifications = runtimeQualifications.filter { qualification ->
+        qualification.modelId == validated.modelId &&
+            qualification.contractId == validated.contractId &&
+            qualification.artifactSha256 == validated.artifact.sha256
+    }
     val dspConfig = MdxDspConfig(
         sampleRate = validated.dsp.sampleRate,
         nFft = validated.dsp.nFft,
@@ -36,11 +44,13 @@ fun SourceSeparationModelContract.toMdxExecutionProfile(): MdxExecutionProfile {
         expectedFileName = validated.artifact.fileName,
         expectedByteSize = validated.artifact.byteSize,
         expectedSha256 = validated.artifact.sha256,
-        minimumAndroidApi = validated.runtimeCompatibility.minimumAndroidApi,
-        runtimeCompatibility = validated.runtimeCompatibility.statuses.map { status ->
+        minimumAndroidApi = qualifications.maxOfOrNull(CatalogRuntimeQualification::minimumAndroidApi),
+        runtimeCompatibility = qualifications.map { status ->
             MdxRuntimeCompatibilityRecord(
                 abi = status.abi.toMdxRuntimeAbi(),
                 backend = status.backend.toMdxInferenceBackend(),
+                profileId = status.profileId,
+                precision = status.precision.toMdxRuntimePrecision(),
                 status = status.status.toMdxRuntimeSupportStatus(),
                 evidence = status.evidence,
             )
@@ -79,8 +89,15 @@ private fun ContractBackend.toMdxInferenceBackend() = when (this) {
     ContractBackend.Gpu -> MdxInferenceBackend.LiteRtGpu
 }
 
-private fun ContractRuntimeStatus.toMdxRuntimeSupportStatus() = when (this) {
-    ContractRuntimeStatus.KnownGood -> MdxRuntimeSupportStatus.KnownGood
-    ContractRuntimeStatus.Untested -> MdxRuntimeSupportStatus.Untested
-    ContractRuntimeStatus.Unsupported -> MdxRuntimeSupportStatus.Unsupported
+private fun ContractRuntimePrecision.toMdxRuntimePrecision() = when (this) {
+    ContractRuntimePrecision.Fp32 -> MdxRuntimePrecision.Fp32
+    ContractRuntimePrecision.Fp16 -> MdxRuntimePrecision.Fp16
+}
+
+private fun ContractRuntimeQualificationStatus.toMdxRuntimeSupportStatus() = when (this) {
+    ContractRuntimeQualificationStatus.KnownGood -> MdxRuntimeSupportStatus.KnownGood
+    ContractRuntimeQualificationStatus.Candidate -> MdxRuntimeSupportStatus.Candidate
+    ContractRuntimeQualificationStatus.Rejected -> MdxRuntimeSupportStatus.Rejected
+    ContractRuntimeQualificationStatus.Untested -> MdxRuntimeSupportStatus.Untested
+    ContractRuntimeQualificationStatus.Unsupported -> MdxRuntimeSupportStatus.Unsupported
 }

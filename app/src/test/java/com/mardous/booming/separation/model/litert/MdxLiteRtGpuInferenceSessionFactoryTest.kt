@@ -119,7 +119,8 @@ class MdxLiteRtGpuInferenceSessionFactoryTest {
     )
 
     private fun profile(modelId: String): MdxExecutionProfile =
-        catalog.contracts.single { it.modelId == modelId }.toMdxExecutionProfile()
+        catalog.contracts.single { it.modelId == modelId }
+            .toMdxExecutionProfile(catalog.runtimeQualifications)
 
     private fun artifact(profile: MdxExecutionProfile) = MdxModelArtifact(
         file = File("build/test-models/${profile.expectedFileName}"),

@@ -16,7 +16,6 @@ data class SourceSeparationModelContract(
     val dsp: ContractDsp,
     val stemContract: StemContract,
     val pipelineCompatibility: PipelineCompatibility,
-    val runtimeCompatibility: RuntimeCompatibility,
 )
 
 @Serializable
@@ -169,16 +168,18 @@ data class PipelineCompatibility(
 )
 
 @Serializable
-data class RuntimeCompatibility(
+data class CatalogRuntimeQualification(
+    val modelId: String,
+    val contractId: String,
+    val artifactSha256: String,
+    val runtimeId: String,
+    val runtimeVersion: String,
     val minimumAndroidApi: Int,
-    val statuses: List<RuntimeCompatibilityStatus>,
-)
-
-@Serializable
-data class RuntimeCompatibilityStatus(
     val abi: ContractAbi,
     val backend: ContractBackend,
-    val status: ContractRuntimeStatus,
+    val profileId: String,
+    val precision: ContractRuntimePrecision,
+    val status: ContractRuntimeQualificationStatus,
     val evidence: String,
 )
 
@@ -207,9 +208,24 @@ enum class ContractBackend {
 }
 
 @Serializable
-enum class ContractRuntimeStatus {
+enum class ContractRuntimePrecision {
+    @SerialName("fp32")
+    Fp32,
+
+    @SerialName("fp16")
+    Fp16,
+}
+
+@Serializable
+enum class ContractRuntimeQualificationStatus {
     @SerialName("known-good")
     KnownGood,
+
+    @SerialName("candidate")
+    Candidate,
+
+    @SerialName("rejected")
+    Rejected,
 
     @SerialName("untested")
     Untested,

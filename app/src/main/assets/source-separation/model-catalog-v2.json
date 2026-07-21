@@ -304,9 +304,9 @@
       ]
     }
   ],
-  "catalogId": "booming-ss-model-catalog-v1",
-  "catalogSchemaVersion": 1,
-  "contractSchemaVersion": 1,
+  "catalogId": "booming-ss-model-catalog-v2",
+  "catalogSchemaVersion": 2,
+  "contractSchemaVersion": 2,
   "contracts": [
     {
       "artifact": {
@@ -315,8 +315,8 @@
         "format": "tflite-flatbuffer",
         "sha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378"
       },
-      "contractId": "uvr_mdxnet_3_9662@1",
-      "contractSchemaVersion": 1,
+      "contractId": "uvr_mdxnet_3_9662@2",
+      "contractSchemaVersion": 2,
       "conversion": {
         "pipelineVersion": 1,
         "repository": "https://github.com/WluhWluh/bss-tflite",
@@ -349,41 +349,6 @@
         "maximumVersion": 1,
         "minimumVersion": 1,
         "pipelineId": "booming-ss-mdx-stft"
-      },
-      "runtimeCompatibility": {
-        "minimumAndroidApi": 26,
-        "statuses": [
-          {
-            "abi": "arm64-v8a",
-            "backend": "cpu",
-            "evidence": "BoomingSS app-packaged LiteRT 2.1.5 reports on Galaxy S10 and S25, runtime commit 8568ab9b, 2026-07-21",
-            "status": "known-good"
-          },
-          {
-            "abi": "arm64-v8a",
-            "backend": "gpu",
-            "evidence": "BoomingSS app-packaged LiteRT 2.1.5 final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 passed Coast Town and synthetic window parity plus one-way Auto fallback on Galaxy S10/S25; gpu-auto-fp16-v1 failed parity; FP32 full-song Phase 7 gates pending",
-            "status": "untested"
-          },
-          {
-            "abi": "x86",
-            "backend": "cpu",
-            "evidence": "BoomingSS API 26 x86 report at app commit 6843e435, 2026-07-21",
-            "status": "known-good"
-          },
-          {
-            "abi": "armeabi-v7a",
-            "backend": "cpu",
-            "evidence": "BoomingSS Galaxy S10 32-bit report at app commit 8568ab9b, 2026-07-21",
-            "status": "known-good"
-          },
-          {
-            "abi": "x86_64",
-            "backend": "cpu",
-            "evidence": "BoomingSS native x86_64 report at app commit 6843e435, 2026-07-21",
-            "status": "known-good"
-          }
-        ]
       },
       "source": {
         "attribution": [
@@ -441,8 +406,8 @@
         "format": "tflite-flatbuffer",
         "sha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64"
       },
-      "contractId": "uvr_mdxnet_kara@1",
-      "contractSchemaVersion": 1,
+      "contractId": "uvr_mdxnet_kara@2",
+      "contractSchemaVersion": 2,
       "conversion": {
         "pipelineVersion": 1,
         "repository": "https://github.com/WluhWluh/bss-tflite",
@@ -475,41 +440,6 @@
         "maximumVersion": 1,
         "minimumVersion": 1,
         "pipelineId": "booming-ss-mdx-stft"
-      },
-      "runtimeCompatibility": {
-        "minimumAndroidApi": 26,
-        "statuses": [
-          {
-            "abi": "arm64-v8a",
-            "backend": "cpu",
-            "evidence": "BoomingSS app-packaged LiteRT 2.1.5 reports on Galaxy S10 and S25, runtime commit 8568ab9b, 2026-07-21",
-            "status": "known-good"
-          },
-          {
-            "abi": "arm64-v8a",
-            "backend": "gpu",
-            "evidence": "BoomingSS app-packaged LiteRT 2.1.5 final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 passed Coast Town but deterministically missed the 109 dB synthetic-input SNR floor on Galaxy S10/S25; gpu-auto-fp16-v1 failed parity; neither profile enters Phase 7",
-            "status": "untested"
-          },
-          {
-            "abi": "x86",
-            "backend": "cpu",
-            "evidence": "BoomingSS API 26 x86 report at app commit 6843e435, 2026-07-21",
-            "status": "known-good"
-          },
-          {
-            "abi": "armeabi-v7a",
-            "backend": "cpu",
-            "evidence": "BoomingSS Galaxy S10 32-bit report at app commit 8568ab9b, 2026-07-21",
-            "status": "known-good"
-          },
-          {
-            "abi": "x86_64",
-            "backend": "cpu",
-            "evidence": "BoomingSS native x86_64 report at app commit 6843e435, 2026-07-21",
-            "status": "known-good"
-          }
-        ]
       },
       "source": {
         "attribution": [
@@ -567,8 +497,8 @@
         "format": "tflite-flatbuffer",
         "sha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742"
       },
-      "contractId": "uvr_mdxnet_inst_hq_4@1",
-      "contractSchemaVersion": 1,
+      "contractId": "uvr_mdxnet_inst_hq_4@2",
+      "contractSchemaVersion": 2,
       "conversion": {
         "pipelineVersion": 1,
         "repository": "https://github.com/WluhWluh/bss-tflite",
@@ -601,41 +531,6 @@
         "maximumVersion": 1,
         "minimumVersion": 1,
         "pipelineId": "booming-ss-mdx-stft"
-      },
-      "runtimeCompatibility": {
-        "minimumAndroidApi": 26,
-        "statuses": [
-          {
-            "abi": "arm64-v8a",
-            "backend": "cpu",
-            "evidence": "Window parity passed on Galaxy S10 and S25, but the approximately 1.1 GiB PSS increase exceeds the provisional 384 MiB hard limit; full-song gate pending",
-            "status": "untested"
-          },
-          {
-            "abi": "arm64-v8a",
-            "backend": "gpu",
-            "evidence": "BoomingSS final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 synthetic window parity passed on Galaxy S10/S25, but the approximately 0.76-0.80 GiB peak validation PSS increase exceeds 384 MiB and no known-good CPU fallback exists",
-            "status": "untested"
-          },
-          {
-            "abi": "x86",
-            "backend": "cpu",
-            "evidence": "BoomingSS API 26 x86 probe at app commit 6843e435: XNNPACK tensor allocation failed with 3.0 GiB RAM",
-            "status": "unsupported"
-          },
-          {
-            "abi": "armeabi-v7a",
-            "backend": "cpu",
-            "evidence": "BoomingSS Galaxy S10 32-bit report at app commit 545a1a5f: LiteRT output-buffer allocation failed before first inference",
-            "status": "unsupported"
-          },
-          {
-            "abi": "x86_64",
-            "backend": "cpu",
-            "evidence": "Window parity passed on native x86_64, but the approximately 1.3 GiB PSS increase exceeds the provisional 384 MiB hard limit; full-song gate pending",
-            "status": "untested"
-          }
-        ]
       },
       "source": {
         "attribution": [
@@ -695,8 +590,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "kim_inst",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -712,8 +608,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "kim_vocal_1",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -729,8 +626,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "kim_vocal_2",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -746,6 +644,7 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "kuielab_a_bass",
+      "releaseMaturity": "candidate",
       "stemUi": "generic-target-residual-required",
       "supportLevel": "download-only",
       "validation": {
@@ -763,6 +662,7 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "kuielab_a_drums",
+      "releaseMaturity": "candidate",
       "stemUi": "generic-target-residual-required",
       "supportLevel": "download-only",
       "validation": {
@@ -780,6 +680,7 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "kuielab_a_other",
+      "releaseMaturity": "candidate",
       "stemUi": "generic-target-residual-required",
       "supportLevel": "download-only",
       "validation": {
@@ -797,8 +698,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "kuielab_a_vocals",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -814,6 +716,7 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "kuielab_b_bass",
+      "releaseMaturity": "candidate",
       "stemUi": "generic-target-residual-required",
       "supportLevel": "download-only",
       "validation": {
@@ -831,6 +734,7 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "kuielab_b_drums",
+      "releaseMaturity": "candidate",
       "stemUi": "generic-target-residual-required",
       "supportLevel": "download-only",
       "validation": {
@@ -848,6 +752,7 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "kuielab_b_other",
+      "releaseMaturity": "candidate",
       "stemUi": "generic-target-residual-required",
       "supportLevel": "download-only",
       "validation": {
@@ -865,8 +770,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "kuielab_b_vocals",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -882,6 +788,7 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "reverb_hq_by_foxjoy",
+      "releaseMaturity": "candidate",
       "stemUi": "generic-target-residual-required",
       "supportLevel": "download-only",
       "validation": {
@@ -899,8 +806,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_inst_1",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -916,8 +824,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_inst_2",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -933,8 +842,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_inst_3",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -950,8 +860,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_inst_hq_1",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -967,8 +878,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_inst_hq_2",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -984,8 +896,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_inst_hq_3",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -995,18 +908,19 @@
       }
     },
     {
-      "activationPolicy": "selectable-when-installed",
+      "activationPolicy": "download-only-resource-gated",
       "artifactId": "uvr_mdxnet_inst_hq_4",
-      "contractId": "uvr_mdxnet_inst_hq_4@1",
+      "contractId": "uvr_mdxnet_inst_hq_4@2",
       "displayName": "UVR-MDX-NET Inst HQ 4",
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_inst_hq_4",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "recommended",
+      "supportLevel": "download-only",
       "validation": {
-        "androidCpu": "partial",
-        "androidGpu": "partial",
+        "androidCpu": "rejected",
+        "androidGpu": "rejected",
         "conversion": "passed",
         "desktopNumerical": "passed",
         "fullSong": "pending"
@@ -1019,8 +933,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_inst_hq_5",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -1036,8 +951,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_inst_main",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -1053,8 +969,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_voc_ft",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -1070,6 +987,7 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_crowd_hq_1",
+      "releaseMaturity": "candidate",
       "stemUi": "generic-target-residual-required",
       "supportLevel": "download-only",
       "validation": {
@@ -1087,8 +1005,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_1_9703",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -1104,8 +1023,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_2_9682",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -1115,13 +1035,14 @@
       }
     },
     {
-      "activationPolicy": "selectable-when-installed",
+      "activationPolicy": "selectable-when-qualified",
       "artifactId": "uvr_mdxnet_3_9662",
-      "contractId": "uvr_mdxnet_3_9662@1",
+      "contractId": "uvr_mdxnet_3_9662@2",
       "displayName": "UVR-MDX-NET 3",
       "downloadActivatesModel": false,
       "isDefault": true,
       "modelId": "uvr_mdxnet_3_9662",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
       "supportLevel": "recommended",
       "validation": {
@@ -1139,8 +1060,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_9482",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -1150,18 +1072,19 @@
       }
     },
     {
-      "activationPolicy": "selectable-when-installed",
+      "activationPolicy": "selectable-experimental-cpu-only",
       "artifactId": "uvr_mdxnet_kara",
-      "contractId": "uvr_mdxnet_kara@1",
+      "contractId": "uvr_mdxnet_kara@2",
       "displayName": "UVR-MDX-NET Karaoke",
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_kara",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "recommended",
+      "supportLevel": "experimental",
       "validation": {
         "androidCpu": "passed",
-        "androidGpu": "partial",
+        "androidGpu": "rejected",
         "conversion": "passed",
         "desktopNumerical": "passed",
         "fullSong": "pending"
@@ -1174,8 +1097,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_kara_2",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -1191,8 +1115,9 @@
       "downloadActivatesModel": false,
       "isDefault": false,
       "modelId": "uvr_mdxnet_main",
+      "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "experimental",
+      "supportLevel": "download-only",
       "validation": {
         "androidCpu": "pending",
         "androidGpu": "pending",
@@ -1207,6 +1132,260 @@
     "inventorySchemaVersion": 1,
     "sha256": "42295c6c2be8f2d2908922ec42b81e2b5199084684952cedaa045ff266b6d553"
   },
+  "runtimeQualifications": [
+    {
+      "abi": "arm64-v8a",
+      "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_3_9662@2",
+      "evidence": "BoomingSS app-packaged LiteRT 2.1.5 reports on Galaxy S10 and S25, runtime commit 8568ab9b, 2026-07-21",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_3_9662",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "known-good"
+    },
+    {
+      "abi": "x86",
+      "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_3_9662@2",
+      "evidence": "BoomingSS API 26 x86 report at app commit 6843e435, 2026-07-21",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_3_9662",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "known-good"
+    },
+    {
+      "abi": "armeabi-v7a",
+      "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_3_9662@2",
+      "evidence": "BoomingSS Galaxy S10 32-bit report at app commit 8568ab9b, 2026-07-21",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_3_9662",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "known-good"
+    },
+    {
+      "abi": "x86_64",
+      "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_3_9662@2",
+      "evidence": "BoomingSS native x86_64 report at app commit 6843e435, 2026-07-21",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_3_9662",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "known-good"
+    },
+    {
+      "abi": "arm64-v8a",
+      "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+      "backend": "gpu",
+      "contractId": "uvr_mdxnet_3_9662@2",
+      "evidence": "BoomingSS app-packaged LiteRT 2.1.5 final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 passed Coast Town and synthetic window parity plus one-way Auto fallback on Galaxy S10/S25; gpu-auto-fp16-v1 failed parity; FP32 full-song Phase 7 gates pending",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_3_9662",
+      "precision": "fp32",
+      "profileId": "gpu-auto-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "candidate"
+    },
+    {
+      "abi": "arm64-v8a",
+      "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+      "backend": "gpu",
+      "contractId": "uvr_mdxnet_3_9662@2",
+      "evidence": "BoomingSS app-packaged LiteRT 2.1.5 final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 passed Coast Town and synthetic window parity plus one-way Auto fallback on Galaxy S10/S25; gpu-auto-fp16-v1 failed parity; FP32 full-song Phase 7 gates pending",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_3_9662",
+      "precision": "fp16",
+      "profileId": "gpu-auto-fp16-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "rejected"
+    },
+    {
+      "abi": "arm64-v8a",
+      "artifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_kara@2",
+      "evidence": "BoomingSS app-packaged LiteRT 2.1.5 reports on Galaxy S10 and S25, runtime commit 8568ab9b, 2026-07-21",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_kara",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "known-good"
+    },
+    {
+      "abi": "x86",
+      "artifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_kara@2",
+      "evidence": "BoomingSS API 26 x86 report at app commit 6843e435, 2026-07-21",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_kara",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "known-good"
+    },
+    {
+      "abi": "armeabi-v7a",
+      "artifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_kara@2",
+      "evidence": "BoomingSS Galaxy S10 32-bit report at app commit 8568ab9b, 2026-07-21",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_kara",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "known-good"
+    },
+    {
+      "abi": "x86_64",
+      "artifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_kara@2",
+      "evidence": "BoomingSS native x86_64 report at app commit 6843e435, 2026-07-21",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_kara",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "known-good"
+    },
+    {
+      "abi": "arm64-v8a",
+      "artifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
+      "backend": "gpu",
+      "contractId": "uvr_mdxnet_kara@2",
+      "evidence": "BoomingSS app-packaged LiteRT 2.1.5 final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 passed Coast Town but deterministically missed the 109 dB synthetic-input SNR floor on Galaxy S10/S25; gpu-auto-fp16-v1 failed parity; neither profile enters Phase 7",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_kara",
+      "precision": "fp32",
+      "profileId": "gpu-auto-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "rejected"
+    },
+    {
+      "abi": "arm64-v8a",
+      "artifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
+      "backend": "gpu",
+      "contractId": "uvr_mdxnet_kara@2",
+      "evidence": "BoomingSS app-packaged LiteRT 2.1.5 final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 passed Coast Town but deterministically missed the 109 dB synthetic-input SNR floor on Galaxy S10/S25; gpu-auto-fp16-v1 failed parity; neither profile enters Phase 7",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_kara",
+      "precision": "fp16",
+      "profileId": "gpu-auto-fp16-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "rejected"
+    },
+    {
+      "abi": "arm64-v8a",
+      "artifactSha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_inst_hq_4@2",
+      "evidence": "Window parity passed on Galaxy S10 and S25, but the approximately 1.1 GiB PSS increase exceeds the provisional 384 MiB hard limit; full-song gate pending",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_inst_hq_4",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "rejected"
+    },
+    {
+      "abi": "x86",
+      "artifactSha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_inst_hq_4@2",
+      "evidence": "BoomingSS API 26 x86 probe at app commit 6843e435: XNNPACK tensor allocation failed with 3.0 GiB RAM",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_inst_hq_4",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "unsupported"
+    },
+    {
+      "abi": "armeabi-v7a",
+      "artifactSha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_inst_hq_4@2",
+      "evidence": "BoomingSS Galaxy S10 32-bit report at app commit 545a1a5f: LiteRT output-buffer allocation failed before first inference",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_inst_hq_4",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "unsupported"
+    },
+    {
+      "abi": "x86_64",
+      "artifactSha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742",
+      "backend": "cpu",
+      "contractId": "uvr_mdxnet_inst_hq_4@2",
+      "evidence": "Window parity passed on native x86_64, but the approximately 1.3 GiB PSS increase exceeds the provisional 384 MiB hard limit; full-song gate pending",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_inst_hq_4",
+      "precision": "fp32",
+      "profileId": "cpu-default-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "rejected"
+    },
+    {
+      "abi": "arm64-v8a",
+      "artifactSha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742",
+      "backend": "gpu",
+      "contractId": "uvr_mdxnet_inst_hq_4@2",
+      "evidence": "BoomingSS final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 synthetic window parity passed on Galaxy S10/S25, but the approximately 0.76-0.80 GiB peak validation PSS increase exceeds 384 MiB and no known-good CPU fallback exists",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_inst_hq_4",
+      "precision": "fp32",
+      "profileId": "gpu-auto-fp32-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "rejected"
+    },
+    {
+      "abi": "arm64-v8a",
+      "artifactSha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742",
+      "backend": "gpu",
+      "contractId": "uvr_mdxnet_inst_hq_4@2",
+      "evidence": "BoomingSS final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 synthetic window parity passed on Galaxy S10/S25, but the approximately 0.76-0.80 GiB peak validation PSS increase exceeds 384 MiB and no known-good CPU fallback exists",
+      "minimumAndroidApi": 26,
+      "modelId": "uvr_mdxnet_inst_hq_4",
+      "precision": "fp16",
+      "profileId": "gpu-auto-fp16-v1",
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "status": "rejected"
+    }
+  ],
   "sources": [
     {
       "aliasOfSourceId": "trvlvr-all-public-uvr-models:UVR-MDX-NET-Inst_1.onnx",

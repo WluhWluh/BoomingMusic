@@ -25,7 +25,7 @@ class MdxLiteRtCompatibilityTest {
     }
 
     @Test
-    fun `untested target is internal only and blocked from production`() {
+    fun `rejected target remains blocked internally`() {
         val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.X86_64)
 
         val production = decision(
@@ -41,8 +41,33 @@ class MdxLiteRtCompatibilityTest {
 
         assertEquals(MdxCompatibilityOutcome.Unsupported, production.outcome)
         assertFalse(production.isAllowed)
-        assertEquals(MdxCompatibilityOutcome.InternalValidationOnly, internal.outcome)
-        assertTrue(internal.isAllowed)
+        assertEquals(MdxCompatibilityOutcome.Unsupported, internal.outcome)
+        assertFalse(internal.isAllowed)
+    }
+
+    @Test
+    fun `candidate GPU profile is internal only and precision specific`() {
+        val profile = profile("uvr_mdxnet_3_9662")
+        val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a)
+        val candidate = MdxLiteRtCompatibilityResolver.resolve(
+            profile = profile,
+            backend = MdxInferenceBackend.LiteRtGpu,
+            platform = platform,
+            policy = MdxCompatibilityPolicy.AllowUntestedInternal,
+            profileId = "gpu-auto-fp32-v1",
+            precision = MdxRuntimePrecision.Fp32,
+        )
+        val rejectedFp16 = MdxLiteRtCompatibilityResolver.resolve(
+            profile = profile,
+            backend = MdxInferenceBackend.LiteRtGpu,
+            platform = platform,
+            policy = MdxCompatibilityPolicy.AllowUntestedInternal,
+            profileId = "gpu-auto-fp16-v1",
+            precision = MdxRuntimePrecision.Fp16,
+        )
+
+        assertEquals(MdxCompatibilityOutcome.InternalValidationOnly, candidate.outcome)
+        assertEquals(MdxCompatibilityOutcome.Unsupported, rejectedFp16.outcome)
     }
 
     @Test
@@ -115,7 +140,8 @@ class MdxLiteRtCompatibilityTest {
     )
 
     private fun profile(modelId: String): MdxExecutionProfile =
-        catalog.contracts.single { it.modelId == modelId }.toMdxExecutionProfile()
+        catalog.contracts.single { it.modelId == modelId }
+            .toMdxExecutionProfile(catalog.runtimeQualifications)
 
     companion object {
         private lateinit var catalog: SourceSeparationModelCatalog

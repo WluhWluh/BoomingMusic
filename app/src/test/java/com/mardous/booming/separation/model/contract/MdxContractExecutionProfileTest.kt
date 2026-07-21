@@ -15,7 +15,7 @@ class MdxContractExecutionProfileTest {
     fun `reviewed 9662 contract creates a complete LiteRT execution profile`() {
         val contract = catalog.contracts.single { it.modelId == "uvr_mdxnet_3_9662" }
 
-        val profile = contract.toMdxExecutionProfile()
+        val profile = contract.toMdxExecutionProfile(catalog.runtimeQualifications)
 
         assertEquals(MdxModelFormat.Tflite, profile.modelFormat)
         assertEquals(MdxTensorLayout.Nhwc, profile.inputTensor.layout)
@@ -27,13 +27,14 @@ class MdxContractExecutionProfileTest {
         assertEquals(1.035f, profile.modelOutputScale)
         assertEquals(MdxStem.VOCALS, profile.modelOutputStem)
         assertEquals(contract.artifact.sha256, profile.expectedSha256)
+        assertEquals(26, profile.minimumAndroidApi)
     }
 
     @Test
     fun `HQ4 profile retains its distinct DSP and 32-bit rejection`() {
         val contract = catalog.contracts.single { it.modelId == "uvr_mdxnet_inst_hq_4" }
 
-        val profile = contract.toMdxExecutionProfile()
+        val profile = contract.toMdxExecutionProfile(catalog.runtimeQualifications)
 
         assertEquals(5_120, profile.dspConfig.nFft)
         assertEquals(2_560, profile.dspConfig.dimF)

@@ -12,11 +12,11 @@ import org.junit.Test
 class SourceSeparationModelContractTest {
 
     @Test
-    fun `bundled catalog parses and validates as v1`() {
+    fun `bundled catalog parses and validates as v2`() {
         val validated = SourceSeparationModelContractValidator.validateCatalog(catalog)
 
-        assertEquals(1, validated.catalogSchemaVersion)
-        assertEquals(1, validated.contractSchemaVersion)
+        assertEquals(2, validated.catalogSchemaVersion)
+        assertEquals(2, validated.contractSchemaVersion)
         assertEquals(48, validated.sources.size)
         assertEquals(30, validated.artifacts.size)
         assertEquals(30, validated.entries.size)
@@ -25,12 +25,14 @@ class SourceSeparationModelContractTest {
     }
 
     @Test
-    fun `recommended models resolve to one pinned complete contract`() {
+    fun `only 9662 is the recommended default candidate`() {
         val recommended = catalog.entries.filter {
             it.supportLevel == CatalogSupportLevel.Recommended
         }
 
-        assertEquals(3, recommended.size)
+        assertEquals(1, recommended.size)
+        assertEquals("uvr_mdxnet_3_9662", recommended.single().modelId)
+        assertEquals(CatalogReleaseMaturity.Candidate, recommended.single().releaseMaturity)
         recommended.forEach { entry ->
             val contract = SourceSeparationModelContractValidator.resolveActivationContract(
                 catalog,
@@ -95,12 +97,47 @@ class SourceSeparationModelContractTest {
     }
 
     @Test
-    fun `experimental candidate without reviewed contract cannot activate`() {
+    fun `unreviewed candidate cannot activate`() {
         val entry = catalog.entries.single { it.modelId == "uvr_mdxnet_1_9703" }
-        assertEquals(CatalogSupportLevel.Experimental, entry.supportLevel)
+        assertEquals(CatalogSupportLevel.DownloadOnly, entry.supportLevel)
         assertEquals(CatalogActivationPolicy.BlockedUntilReviewedContract, entry.activationPolicy)
         assertThrows(SourceSeparationModelContractException::class.java) {
             SourceSeparationModelContractValidator.resolveActivationContract(catalog, entry.modelId)
+        }
+    }
+
+    @Test
+    fun `reviewed support tier and activation policy remain independent`() {
+        val karaoke = catalog.entries.single { it.modelId == "uvr_mdxnet_kara" }
+        assertEquals(CatalogSupportLevel.Experimental, karaoke.supportLevel)
+        assertEquals(
+            CatalogActivationPolicy.SelectableExperimentalCpuOnly,
+            karaoke.activationPolicy,
+        )
+        assertNotNull(
+            SourceSeparationModelContractValidator.resolveActivationContract(
+                catalog,
+                karaoke.modelId,
+            )
+        )
+
+        val hq4 = catalog.entries.single { it.modelId == "uvr_mdxnet_inst_hq_4" }
+        assertEquals(CatalogSupportLevel.DownloadOnly, hq4.supportLevel)
+        assertEquals(
+            CatalogActivationPolicy.DownloadOnlyResourceGated,
+            hq4.activationPolicy,
+        )
+        assertNotNull(
+            SourceSeparationModelContractValidator.resolveReviewedContract(
+                catalog,
+                hq4.modelId,
+            )
+        )
+        assertThrows(SourceSeparationModelContractException::class.java) {
+            SourceSeparationModelContractValidator.resolveActivationContract(
+                catalog,
+                hq4.modelId,
+            )
         }
     }
 
@@ -168,7 +205,7 @@ class SourceSeparationModelContractTest {
 
     @Test
     fun `unsupported contract schema is rejected independently of app version`() {
-        val unsupported = contract("uvr_mdxnet_3_9662").copy(contractSchemaVersion = 2)
+        val unsupported = contract("uvr_mdxnet_3_9662").copy(contractSchemaVersion = 1)
 
         assertThrows(SourceSeparationModelContractException::class.java) {
             SourceSeparationModelContractValidator.validateContract(unsupported)

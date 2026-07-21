@@ -70,8 +70,12 @@ class MdxLiteRtCpuValidationTest {
 
         try {
             val modelId = arguments.requiredString(ARG_MODEL_ID)
-            val contract = bundledContract(context, modelId)
-            val profile = contract.toMdxExecutionProfile()
+            val catalog = SourceSeparationModelMetadata.loadBundledCatalog(context)
+            val contract = SourceSeparationModelContractValidator.resolveReviewedContract(
+                catalog,
+                modelId,
+            )
+            val profile = contract.toMdxExecutionProfile(catalog.runtimeQualifications)
             val expectedRuntimeAbi = arguments.requiredString(ARG_PROCESS_ABI)
             val actualProcessAbi = currentProcessAbi().androidName
             val runtimeAbi = installedLiteRtRuntimeAbi(context)
@@ -127,8 +131,12 @@ class MdxLiteRtCpuValidationTest {
 
         try {
             val modelId = arguments.requiredString(ARG_MODEL_ID)
-            val contract = bundledContract(context, modelId)
-            val contractProfile = contract.toMdxExecutionProfile()
+            val catalog = SourceSeparationModelMetadata.loadBundledCatalog(context)
+            val contract = SourceSeparationModelContractValidator.resolveReviewedContract(
+                catalog,
+                modelId,
+            )
+            val contractProfile = contract.toMdxExecutionProfile(catalog.runtimeQualifications)
             val expectedRuntimeAbi = arguments.requiredString(ARG_PROCESS_ABI)
             val actualProcessAbi = currentProcessAbi().androidName
             val runtimeAbi = installedLiteRtRuntimeAbi(context)
@@ -705,8 +713,14 @@ class MdxLiteRtCpuValidationTest {
         secondaryModelId: String,
         stagingRoot: File,
     ): JSONObject {
-        val secondaryContract = bundledContract(context, secondaryModelId)
-        val secondaryProfile = secondaryContract.toMdxExecutionProfile()
+        val catalog = SourceSeparationModelMetadata.loadBundledCatalog(context)
+        val secondaryContract = SourceSeparationModelContractValidator.resolveReviewedContract(
+            catalog,
+            secondaryModelId,
+        )
+        val secondaryProfile = secondaryContract.toMdxExecutionProfile(
+            catalog.runtimeQualifications
+        )
         val secondaryFile = arguments.requiredStagedFile(ARG_SECONDARY_MODEL_PATH, stagingRoot)
         val secondaryIdentity = secondaryFile.identity()
         secondaryProfile.validateArtifact(secondaryIdentity)
@@ -750,11 +764,6 @@ class MdxLiteRtCpuValidationTest {
             modelOutputScale = profile.modelOutputScale,
             reconstructionMaxAbsError = maxError,
         )
-    }
-
-    private fun bundledContract(context: Context, modelId: String): SourceSeparationModelContract {
-        val catalog = SourceSeparationModelMetadata.loadBundledCatalog(context)
-        return SourceSeparationModelContractValidator.resolveActivationContract(catalog, modelId)
     }
 
     private fun currentProcessAbi(): MdxRuntimeAbi {

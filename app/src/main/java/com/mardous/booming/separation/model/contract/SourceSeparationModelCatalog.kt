@@ -13,6 +13,7 @@ data class SourceSeparationModelCatalog(
     val artifacts: List<CatalogArtifactRecord>,
     val contracts: List<SourceSeparationModelContract>,
     val entries: List<CatalogEntry>,
+    val runtimeQualifications: List<CatalogRuntimeQualification>,
 )
 
 @Serializable
@@ -46,6 +47,9 @@ enum class CatalogConversionState {
     @SerialName("converted-unreleased")
     ConvertedUnreleased,
 
+    @SerialName("released")
+    Released,
+
     @SerialName("not-converted")
     NotConverted,
 }
@@ -71,6 +75,7 @@ data class CatalogEntry(
     val displayName: String,
     val supportLevel: CatalogSupportLevel,
     val activationPolicy: CatalogActivationPolicy,
+    val releaseMaturity: CatalogReleaseMaturity,
     val downloadActivatesModel: Boolean,
     val isDefault: Boolean,
     val stemUi: CatalogStemUi,
@@ -92,14 +97,32 @@ enum class CatalogSupportLevel {
 
 @Serializable
 enum class CatalogActivationPolicy {
-    @SerialName("selectable-when-installed")
-    SelectableWhenInstalled,
+    @SerialName("selectable-when-qualified")
+    SelectableWhenQualified,
+
+    @SerialName("selectable-experimental-cpu-only")
+    SelectableExperimentalCpuOnly,
+
+    @SerialName("download-only-resource-gated")
+    DownloadOnlyResourceGated,
 
     @SerialName("blocked-until-reviewed-contract")
     BlockedUntilReviewedContract,
 
     @SerialName("download-only-generic-stem")
     DownloadOnlyGenericStem,
+}
+
+@Serializable
+enum class CatalogReleaseMaturity {
+    @SerialName("candidate")
+    Candidate,
+
+    @SerialName("beta-ready")
+    BetaReady,
+
+    @SerialName("stable")
+    Stable,
 }
 
 @Serializable
@@ -127,6 +150,9 @@ enum class CatalogValidationStatus {
 
     @SerialName("partial")
     Partial,
+
+    @SerialName("rejected")
+    Rejected,
 
     @SerialName("pending")
     Pending,
