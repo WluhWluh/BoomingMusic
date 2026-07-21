@@ -57,9 +57,14 @@ tools/run_litert_cpu_validation.ps1 `
 `gpu-auto-fp32-v1` enforces the frozen Phase 2 parity floor.
 `gpu-auto-fp16-v1` records separate numerical results without borrowing the
 FP32 pass. The runner records accelerator discovery, APK inventory,
-`libLiteRtClGlAccelerator.so` mappings, requested profile, setup/reuse timing,
-and native/graphics/aggregate memory snapshots. LiteRT 2.1.5 has no supported
-per-operator placement query, and the report states that limitation.
+`libLiteRtClGlAccelerator.so` mappings after the first and reused invocation,
+requested profile, setup/reuse timing, and native/graphics/aggregate memory
+snapshots at setup, first invocation, reuse, and close. Because Android can map
+an uncompressed native library directly from `base.apk` without retaining the
+entry name in `/proc/self/maps`, the runner resolves each APK-backed mapping by
+its ZIP data offset. A GPU parity run fails if it cannot prove that the
+accelerator entry remained mapped after both invocations. LiteRT 2.1.5 has no
+supported per-operator placement query, and the report states that limitation.
 
 For a CPU-only ABI or an ABI with no exact GPU compatibility record, combine
 `-Backend gpu` with `-PreflightOnly`. The rejecting allocator proves no native

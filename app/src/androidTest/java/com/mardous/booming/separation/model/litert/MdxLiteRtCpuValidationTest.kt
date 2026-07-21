@@ -35,6 +35,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.io.FileInputStream
+import java.io.RandomAccessFile
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
 import java.security.MessageDigest
@@ -285,6 +286,10 @@ class MdxLiteRtCpuValidationTest {
         var reusedSameSession = false
         var cancellationReport: JSONObject? = null
         var replacementReport: JSONObject? = null
+        var memoryAfterFirstInference: JSONObject? = null
+        var memoryAfterReusedInference: JSONObject? = null
+        var processAfterFirstInference: JSONObject? = null
+        var processAfterReusedInference: JSONObject? = null
         var memoryWithSession: JSONObject? = null
         try {
             val setupStarted = SystemClock.elapsedRealtime()
@@ -307,6 +312,12 @@ class MdxLiteRtCpuValidationTest {
             try {
                 firstOutput = firstSession.run(input).copyOf()
                 firstInferenceMs = SystemClock.elapsedRealtime() - firstStarted
+                memoryAfterFirstInference = memorySnapshot()
+                processAfterFirstInference = processReport(
+                    context,
+                    currentProcessAbi().androidName,
+                    runtimeAbi.androidName,
+                )
             } catch (error: Throwable) {
                 report.put(
                     "firstInferenceFailureWallMs",
@@ -324,6 +335,12 @@ class MdxLiteRtCpuValidationTest {
                 val reusedStarted = SystemClock.elapsedRealtime()
                 reusedOutput = reusedLease.session.run(input).copyOf()
                 reusedInferenceMs = SystemClock.elapsedRealtime() - reusedStarted
+                memoryAfterReusedInference = memorySnapshot()
+                processAfterReusedInference = processReport(
+                    context,
+                    currentProcessAbi().androidName,
+                    runtimeAbi.androidName,
+                )
                 val beforeInvocationCanceled = runCatching {
                     reusedLease.session.run(input) { true }
                 }.exceptionOrNull()
@@ -357,9 +374,29 @@ class MdxLiteRtCpuValidationTest {
         val reuseComparison = compareOutputs(requireNotNull(firstOutput), output)
         val thresholds = parityThresholds(contract.modelId)
         val stemValidation = validateStemMapping(input, output, profile)
+        if (backend == MdxInferenceBackend.LiteRtGpu) {
+            require(
+                requireNotNull(processAfterFirstInference)
+                    .getJSONArray("loadedGpuAcceleratorMaps")
+                    .length() > 0
+            ) {
+                "The first GPU invocation did not retain a mapped LiteRT accelerator."
+            }
+            require(
+                requireNotNull(processAfterReusedInference)
+                    .getJSONArray("loadedGpuAcceleratorMaps")
+                    .length() > 0
+            ) {
+                "The reused GPU invocation did not retain a mapped LiteRT accelerator."
+            }
+        }
         report.put("firstInferenceWallMs", firstInferenceMs)
             .put("reusedInferenceWallMs", reusedInferenceMs)
             .put("reusedSameSession", reusedSameSession)
+            .put("memoryAfterFirstInference", requireNotNull(memoryAfterFirstInference))
+            .put("memoryAfterReusedInference", requireNotNull(memoryAfterReusedInference))
+            .put("processAfterFirstInference", requireNotNull(processAfterFirstInference))
+            .put("processAfterReusedInference", requireNotNull(processAfterReusedInference))
             .put("comparisonToOrt", comparison.toJson())
             .put("reuseComparison", reuseComparison.toJson())
             .put("thresholds", thresholds.toJson())
@@ -797,12 +834,38 @@ class MdxLiteRtCpuValidationTest {
                     .put("liteRtEntries", JSONArray(entries))
             )
         }
-        val loadedRuntimeMaps = File("/proc/self/maps").useLines { lines ->
-            lines.filter { it.contains("liblitert", ignoreCase = true) }.toList()
+        val processMaps = File("/proc/self/maps").readLines()
+        val directRuntimeMaps = processMaps.filter {
+            it.contains("liblitert", ignoreCase = true)
         }
-        val loadedAcceleratorMaps = loadedRuntimeMaps.filter {
-            it.contains("libLiteRtClGlAccelerator", ignoreCase = true)
+        val mappedLiteRtEntries = JSONArray()
+        val apkBackedRuntimeMaps = mutableListOf<String>()
+        val apkBackedAcceleratorMaps = mutableListOf<String>()
+        for (path in apkPaths) {
+            for (entry in storedLiteRtEntryRanges(path)) {
+                val matchingMaps = processMaps.filter { line ->
+                    line.mapsApkEntry(path, entry)
+                }
+                mappedLiteRtEntries.put(
+                    JSONObject()
+                        .put("apkPath", path)
+                        .put("entryName", entry.name)
+                        .put("dataOffset", entry.dataOffset)
+                        .put("byteSize", entry.byteSize)
+                        .put("mapLines", JSONArray(matchingMaps))
+                )
+                apkBackedRuntimeMaps += matchingMaps
+                if (entry.name.endsWith("/libLiteRtClGlAccelerator.so")) {
+                    apkBackedAcceleratorMaps += matchingMaps
+                }
+            }
         }
+        val loadedRuntimeMaps = (directRuntimeMaps + apkBackedRuntimeMaps).distinct()
+        val loadedAcceleratorMaps = (
+            directRuntimeMaps.filter {
+                it.contains("libLiteRtClGlAccelerator", ignoreCase = true)
+            } + apkBackedAcceleratorMaps
+            ).distinct()
         val extractedRuntime = File(applicationInfo.nativeLibraryDir, "libLiteRt.so")
             .takeIf(File::isFile)
         val classLoaderRuntime = (context.classLoader as? BaseDexClassLoader)
@@ -831,6 +894,7 @@ class MdxLiteRtCpuValidationTest {
                 classLoaderAccelerator ?: JSONObject.NULL,
             )
             .put("apkInventories", apkInventories)
+            .put("mappedLiteRtEntries", mappedLiteRtEntries)
             .put("loadedRuntimeMaps", JSONArray(loadedRuntimeMaps))
             .put("loadedGpuAcceleratorMaps", JSONArray(loadedAcceleratorMaps))
             .put("totalDeviceMemoryBytes", deviceMemory.totalMem)
@@ -844,6 +908,131 @@ class MdxLiteRtCpuValidationTest {
             .put("androidApi", Build.VERSION.SDK_INT)
             .put("fingerprint", Build.FINGERPRINT)
     }
+
+    private fun storedLiteRtEntryRanges(path: String): List<StoredZipEntryRange> =
+        RandomAccessFile(path, "r").use { archive ->
+            val centralDirectory = archive.readCentralDirectoryLocation()
+            archive.seek(centralDirectory.offset)
+            buildList {
+                repeat(centralDirectory.entryCount) {
+                    require(archive.readUInt32Le() == ZIP_CENTRAL_DIRECTORY_SIGNATURE) {
+                        "Invalid ZIP central-directory entry in $path."
+                    }
+                    archive.skipBytes(4)
+                    archive.readUInt16Le()
+                    val method = archive.readUInt16Le()
+                    archive.skipBytes(8)
+                    val compressedSize = archive.readUInt32Le()
+                    val uncompressedSize = archive.readUInt32Le()
+                    val nameLength = archive.readUInt16Le()
+                    val extraLength = archive.readUInt16Le()
+                    val commentLength = archive.readUInt16Le()
+                    archive.skipBytes(8)
+                    val localHeaderOffset = archive.readUInt32Le()
+                    val name = ByteArray(nameLength).also(archive::readFully)
+                        .toString(Charsets.UTF_8)
+                    archive.skipBytes(extraLength + commentLength)
+                    if (name.matches(LITERT_APK_ENTRY_PATTERN)) {
+                        require(method == ZIP_STORED_METHOD) {
+                            "$name must be stored uncompressed for direct APK loading."
+                        }
+                        require(compressedSize == uncompressedSize) {
+                            "Stored ZIP entry $name has inconsistent sizes."
+                        }
+                        val centralPosition = archive.filePointer
+                        archive.seek(localHeaderOffset)
+                        require(archive.readUInt32Le() == ZIP_LOCAL_FILE_SIGNATURE) {
+                            "Invalid ZIP local header for $name."
+                        }
+                        archive.skipBytes(22)
+                        val localNameLength = archive.readUInt16Le()
+                        val localExtraLength = archive.readUInt16Le()
+                        val dataOffset = localHeaderOffset + ZIP_LOCAL_HEADER_SIZE +
+                            localNameLength + localExtraLength
+                        archive.seek(centralPosition)
+                        add(
+                            StoredZipEntryRange(
+                                name = name,
+                                dataOffset = dataOffset,
+                                byteSize = uncompressedSize,
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+    private fun RandomAccessFile.readCentralDirectoryLocation(): CentralDirectoryLocation {
+        val tailSize = minOf(length(), ZIP_MAX_EOCD_SEARCH).toInt()
+        val tail = ByteArray(tailSize)
+        seek(length() - tailSize)
+        readFully(tail)
+        val eocdIndex = (tail.size - ZIP_END_OF_CENTRAL_DIRECTORY_SIZE downTo 0)
+            .firstOrNull { index ->
+                tail.readUInt32Le(index) == ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE &&
+                    tail.readUInt16Le(index + 20) ==
+                    tail.size - index - ZIP_END_OF_CENTRAL_DIRECTORY_SIZE
+            } ?: error("ZIP end-of-central-directory record was not found in $this.")
+        require(tail.readUInt16Le(eocdIndex + 4) == 0) {
+            "Multi-disk validation APKs are not supported."
+        }
+        require(tail.readUInt16Le(eocdIndex + 6) == 0) {
+            "Multi-disk validation APKs are not supported."
+        }
+        val entriesOnDisk = tail.readUInt16Le(eocdIndex + 8)
+        val entryCount = tail.readUInt16Le(eocdIndex + 10)
+        val offset = tail.readUInt32Le(eocdIndex + 16)
+        require(
+            entriesOnDisk == entryCount &&
+                entryCount != ZIP64_UINT16_SENTINEL &&
+                offset != ZIP64_UINT32_SENTINEL
+        ) {
+            "ZIP64 validation APKs are not supported."
+        }
+        return CentralDirectoryLocation(offset = offset, entryCount = entryCount)
+    }
+
+    private fun RandomAccessFile.readUInt16Le(): Int {
+        val first = read()
+        val second = read()
+        require(first >= 0 && second >= 0) { "Unexpected end of ZIP file." }
+        return first or (second shl 8)
+    }
+
+    private fun RandomAccessFile.readUInt32Le(): Long =
+        readUInt16Le().toLong() or (readUInt16Le().toLong() shl 16)
+
+    private fun ByteArray.readUInt16Le(offset: Int): Int =
+        (this[offset].toInt() and 0xff) or
+            ((this[offset + 1].toInt() and 0xff) shl 8)
+
+    private fun ByteArray.readUInt32Le(offset: Int): Long =
+        readUInt16Le(offset).toLong() or (readUInt16Le(offset + 2).toLong() shl 16)
+
+    private fun String.mapsApkEntry(path: String, entry: StoredZipEntryRange): Boolean {
+        val fields = trim().split(Regex("\\s+"), limit = 6)
+        if (fields.size < 6 || fields[5] != path) return false
+        val addresses = fields[0].split('-', limit = 2)
+        if (addresses.size != 2) return false
+        val mappedLength = runCatching {
+            addresses[1].toLong(16) - addresses[0].toLong(16)
+        }.getOrNull() ?: return false
+        val fileOffset = fields[2].toLongOrNull(16) ?: return false
+        val mappedEnd = fileOffset + mappedLength
+        val entryEnd = entry.dataOffset + entry.byteSize
+        return fileOffset < entryEnd && mappedEnd > entry.dataOffset
+    }
+
+    private data class CentralDirectoryLocation(
+        val offset: Long,
+        val entryCount: Int,
+    )
+
+    private data class StoredZipEntryRange(
+        val name: String,
+        val dataOffset: Long,
+        val byteSize: Long,
+    )
 
     private fun installedLiteRtRuntimeAbi(context: Context): MdxRuntimeAbi {
         val applicationInfo = context.applicationInfo
@@ -1283,8 +1472,19 @@ class MdxLiteRtCpuValidationTest {
         private const val ARG_PROCESSOR_COUNT_OVERRIDE = "processorCountOverride"
         private const val ARG_GPU_PROFILE_ID = "gpuProfileId"
         private const val ARG_GPU_FAILPOINT = "gpuFailpoint"
+        private const val ZIP_STORED_METHOD = 0
+        private const val ZIP_LOCAL_HEADER_SIZE = 30L
+        private const val ZIP_END_OF_CENTRAL_DIRECTORY_SIZE = 22
+        private const val ZIP_MAX_EOCD_SEARCH = 65_557L
+        private const val ZIP64_UINT16_SENTINEL = 0xffff
+        private const val ZIP64_UINT32_SENTINEL = 0xffff_ffffL
+        private const val ZIP_CENTRAL_DIRECTORY_SIGNATURE = 0x0201_4b50L
+        private const val ZIP_LOCAL_FILE_SIGNATURE = 0x0403_4b50L
+        private const val ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x0605_4b50L
         private val SAFE_NAME_PATTERN = Regex("^[a-zA-Z0-9._-]{1,120}$")
         private val SHA256_PATTERN = Regex("^[a-fA-F0-9]{64}$")
+        private val LITERT_APK_ENTRY_PATTERN =
+            Regex("""^lib/[^/]+/libLiteRt(?:ClGlAccelerator)?\.so$""")
         private val MEMORY_SUMMARY_KEYS = listOf(
             "summary.java-heap",
             "summary.native-heap",
