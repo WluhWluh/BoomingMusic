@@ -6,6 +6,9 @@ param(
     [ValidateSet("arm64-v8a", "armeabi-v7a", "x86_64", "x86")]
     [string]$ProcessAbi,
 
+    [ValidateSet("cpu", "gpu", "auto-fallback")]
+    [string]$Backend = "cpu",
+
     [Parameter(Mandatory = $true)]
     [string]$ModelId,
 
@@ -17,6 +20,10 @@ param(
     [string]$SecondaryModelId = "",
     [string]$SecondaryModelPath = "",
     [string]$OutputRoot = "",
+    [ValidateSet("gpu-auto-fp32-v1", "gpu-auto-fp16-v1")]
+    [string]$GpuProfileId = "gpu-auto-fp32-v1",
+    [ValidateSet("setup", "probe", "invocation", "output-read")]
+    [string]$GpuFailpoint = "invocation",
     [int]$ProcessorCountOverride = 0,
     [switch]$TestInFlightCancellation,
     [switch]$AllowUnsupportedResourceProbe,
@@ -30,11 +37,17 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $package = "com.wluhwluh.booming.sourcesep.debug"
 $runner = "com.wluhwluh.booming.sourcesep.debug.test/androidx.test.runner.AndroidJUnitRunner"
 $testClass = "com.mardous.booming.separation.model.litert.MdxLiteRtCpuValidationTest"
+$testMethod = switch ($Backend) {
+    "cpu" { "validateStagedModel" }
+    "gpu" { "validateStagedGpuModel" }
+    "auto-fallback" { "validateStagedGpuAutoFallback" }
+}
 $adb = (Get-Command adb -ErrorAction Stop).Source
 
 if ([string]::IsNullOrWhiteSpace($RunId)) {
     $safeSerial = $Serial -replace '[^A-Za-z0-9._-]', '_'
-    $RunId = "{0}-{1}-{2}-{3:yyyyMMdd-HHmmss}" -f $safeSerial, $ProcessAbi, $ModelId, (Get-Date)
+    $RunId = "{0}-{1}-{2}-{3}-{4:yyyyMMdd-HHmmss}" -f `
+        $safeSerial, $ProcessAbi, $Backend, $ModelId, (Get-Date)
 }
 if ($RunId -notmatch '^[A-Za-z0-9._-]{1,120}$') {
     throw "RunId contains unsupported characters: $RunId"
@@ -75,6 +88,21 @@ if (-not [string]::IsNullOrWhiteSpace($SecondaryModelId)) {
 }
 if ($PreflightOnly -and $AllowUnsupportedResourceProbe) {
     throw "AllowUnsupportedResourceProbe cannot be combined with PreflightOnly."
+}
+if ($Backend -ne "cpu" -and $AllowUnsupportedResourceProbe) {
+    throw "AllowUnsupportedResourceProbe is CPU-only."
+}
+if ($Backend -ne "cpu" -and $ProcessorCountOverride -gt 0) {
+    throw "ProcessorCountOverride is CPU-only."
+}
+if ($Backend -eq "auto-fallback" -and $PreflightOnly) {
+    throw "Auto fallback validation requires staged model and fixture files."
+}
+if ($Backend -eq "auto-fallback" -and $ProcessAbi -ne "arm64-v8a") {
+    throw "Connected Auto fallback validation currently requires arm64-v8a."
+}
+if ($Backend -eq "auto-fallback" -and -not [string]::IsNullOrWhiteSpace($SecondaryModelId)) {
+    throw "Auto fallback validation does not run session replacement."
 }
 
 $remoteRelativeRoot = ""
@@ -120,7 +148,7 @@ try {
     Invoke-Adb shell mkdir -p $remoteTempRoot
     & $adb -s $Serial shell run-as $package rm -rf "cache/litert-validation/$RunId" 2>$null | Out-Null
     $instrumentArguments = @(
-        "-e", "class", "$testClass#validateStagedModel",
+        "-e", "class", "$testClass#$testMethod",
         "-e", "runId", $RunId,
         "-e", "modelId", $ModelId,
         "-e", "fixtureName", $FixtureName,
@@ -130,6 +158,16 @@ try {
         "-e", "allowUnsupportedResourceProbe", $AllowUnsupportedResourceProbe.IsPresent.ToString().ToLowerInvariant(),
         "-e", "preflightOnly", $PreflightOnly.IsPresent.ToString().ToLowerInvariant()
     )
+    if ($Backend -ne "cpu") {
+        $instrumentArguments += @(
+            "-e", "gpuProfileId", $GpuProfileId
+        )
+    }
+    if ($Backend -eq "auto-fallback") {
+        $instrumentArguments += @(
+            "-e", "gpuFailpoint", $GpuFailpoint
+        )
+    }
 
     if (-not $PreflightOnly) {
         $modelLeaf = Require-SafeLeafName $ModelPath "Model"

@@ -8,6 +8,7 @@ import android.os.Process
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.google.ai.edge.litert.Environment
 import com.mardous.booming.separation.model.MdxCompatibilityDecision
 import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.MdxExecutionProfile
@@ -51,7 +52,71 @@ import kotlin.math.sqrt
 @RunWith(AndroidJUnit4::class)
 class MdxLiteRtCpuValidationTest {
     @Test
-    fun validateStagedModel() {
+    fun validateStagedModel() = validateStagedModel(MdxInferenceBackend.LiteRtCpu)
+
+    @Test
+    fun validateStagedGpuModel() = validateStagedModel(MdxInferenceBackend.LiteRtGpu)
+
+    @Test
+    fun validateStagedGpuAutoFallback() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName("run ID")
+        val reportFile = validationReportFile(context, runId)
+        val report = baseReport(context, runId, arguments)
+            .put("requestedBackend", MdxInferenceBackend.LiteRtAuto.name)
+
+        try {
+            val modelId = arguments.requiredString(ARG_MODEL_ID)
+            val contract = bundledContract(context, modelId)
+            val profile = contract.toMdxExecutionProfile()
+            val expectedRuntimeAbi = arguments.requiredString(ARG_PROCESS_ABI)
+            val actualProcessAbi = currentProcessAbi().androidName
+            val runtimeAbi = installedLiteRtRuntimeAbi(context)
+            require(runtimeAbi.androidName == expectedRuntimeAbi) {
+                "Expected $expectedRuntimeAbi LiteRT library, got ${runtimeAbi.androidName}."
+            }
+            require(runtimeAbi == MdxRuntimeAbi.Arm64V8a) {
+                "Connected Auto fallback validation currently requires arm64-v8a."
+            }
+            report.put("contractId", contract.contractId)
+                .put("contractConversionRevision", contract.conversion.revision)
+                .put("modelId", modelId)
+                .put("process", processReport(context, actualProcessAbi, runtimeAbi.androidName))
+
+            validateGpuAutoFallbackRun(
+                context = context,
+                arguments = arguments,
+                contract = contract,
+                profile = profile,
+                runtimeAbi = runtimeAbi,
+                report = report,
+            )
+            report.put(
+                "process",
+                processReport(context, actualProcessAbi, runtimeAbi.androidName),
+            ).put("status", "complete")
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            runCatching {
+                processReport(
+                    context,
+                    currentProcessAbi().androidName,
+                    installedLiteRtRuntimeAbi(context).androidName,
+                )
+            }.getOrNull()?.let { process -> report.put("process", process) }
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+                .put("memoryAfterFailureCleanup", memorySnapshot())
+            reportFile.writeText(report.toString(2))
+            throw error
+        }
+    }
+
+    private fun validateStagedModel(backend: MdxInferenceBackend) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val arguments = InstrumentationRegistry.getArguments()
@@ -72,10 +137,14 @@ class MdxLiteRtCpuValidationTest {
             report.put("contractId", contract.contractId)
                 .put("contractConversionRevision", contract.conversion.revision)
                 .put("modelId", modelId)
+                .put("requestedBackend", backend.name)
                 .put("process", processReport(context, actualProcessAbi, runtimeAbi.androidName))
 
             val resourceProbe = arguments.getString(ARG_ALLOW_UNSUPPORTED_RESOURCE_PROBE)
                 .toBoolean()
+            require(!resourceProbe || backend == MdxInferenceBackend.LiteRtCpu) {
+                "Unsupported resource probes are CPU-only."
+            }
             require(!resourceProbe || !arguments.getString(ARG_PREFLIGHT_ONLY).toBoolean()) {
                 "An unsupported resource probe cannot also be preflight-only."
             }
@@ -87,9 +156,21 @@ class MdxLiteRtCpuValidationTest {
             report.put("compatibilityOverride", compatibilityOverride ?: JSONObject.NULL)
 
             if (arguments.getString(ARG_PREFLIGHT_ONLY).toBoolean()) {
-                validateUnsupportedPreflight(profile, runtimeAbi, report)
+                if (backend == MdxInferenceBackend.LiteRtCpu) {
+                    validateUnsupportedPreflight(profile, runtimeAbi, report)
+                } else {
+                    validateUnsupportedGpuPreflight(profile, runtimeAbi, report)
+                }
             } else {
-                validateParityRun(context, arguments, contract, profile, runtimeAbi, report)
+                validateParityRun(
+                    context,
+                    arguments,
+                    contract,
+                    profile,
+                    runtimeAbi,
+                    backend,
+                    report,
+                )
             }
             report.put(
                 "process",
@@ -121,6 +202,7 @@ class MdxLiteRtCpuValidationTest {
         contract: SourceSeparationModelContract,
         profile: MdxExecutionProfile,
         runtimeAbi: MdxRuntimeAbi,
+        backend: MdxInferenceBackend,
         report: JSONObject,
     ) {
         val stagingRoot = context.filesDir.resolve(STAGING_DIRECTORY).canonicalFile
@@ -153,18 +235,46 @@ class MdxLiteRtCpuValidationTest {
             .put("reference", referenceFile.fixtureJson(arguments.requiredString(ARG_REFERENCE_SHA256)))
             .put("processorCountOverride", processorCountOverride ?: JSONObject.NULL)
             .put("memoryBefore", processBefore)
-        val factory = if (processorCountOverride == null) {
-            MdxLiteRtCpuInferenceSessionFactory(
-                platformProvider = { MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi) },
-                compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
-            )
-        } else {
-            MdxLiteRtCpuInferenceSessionFactory(
-                platformProvider = { MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi) },
-                compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
-                availableProcessors = { processorCountOverride },
-            )
+        val platformProvider = {
+            MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi)
         }
+        val gpuRuntimeProfile = if (backend == MdxInferenceBackend.LiteRtGpu) {
+            require(processorCountOverride == null) {
+                "A CPU processor-count override cannot be used for GPU validation."
+            }
+            gpuRuntimeProfile(arguments.requiredString(ARG_GPU_PROFILE_ID))
+        } else {
+            null
+        }
+        val factory = when (backend) {
+            MdxInferenceBackend.LiteRtCpu -> if (processorCountOverride == null) {
+                MdxLiteRtCpuInferenceSessionFactory(
+                    platformProvider = platformProvider,
+                    compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+                )
+            } else {
+                MdxLiteRtCpuInferenceSessionFactory(
+                    platformProvider = platformProvider,
+                    compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+                    availableProcessors = { processorCountOverride },
+                )
+            }
+
+            MdxInferenceBackend.LiteRtGpu -> MdxLiteRtGpuInferenceSessionFactory(
+                runtimeProfile = requireNotNull(gpuRuntimeProfile),
+                platformProvider = platformProvider,
+                compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+            )
+
+            else -> error("Unsupported validation backend: $backend")
+        }
+        val enforceThresholds = gpuRuntimeProfile?.precision != MdxLiteRtGpuPrecision.Float16
+        report.put("runtimeProfileId", gpuRuntimeProfile?.profileId ?: "cpu-phase2")
+            .put("thresholdsEnforced", enforceThresholds)
+            .put(
+                "availableAcceleratorsBeforeSetup",
+                JSONArray(availableLiteRtAccelerators()),
+            )
         val provider = ReusableMdxInferenceSessionProvider(factory)
         var setupMs = 0L
         var firstInferenceMs = 0L
@@ -258,18 +368,161 @@ class MdxLiteRtCpuValidationTest {
             .put("replacement", replacementReport ?: JSONObject.NULL)
             .put("memoryWithSession", requireNotNull(memoryWithSession))
             .put("memoryAfter", memorySnapshot())
-        require(comparison.snrDb >= thresholds.minimumSnrDb) {
-            "SNR ${comparison.snrDb} is below ${thresholds.minimumSnrDb}."
-        }
-        require(comparison.cosineSimilarity >= thresholds.minimumCosine) {
-            "Cosine ${comparison.cosineSimilarity} is below ${thresholds.minimumCosine}."
-        }
-        require(comparison.maxAbsError <= thresholds.maximumAbsoluteError) {
-            "Maximum error ${comparison.maxAbsError} exceeds ${thresholds.maximumAbsoluteError}."
+        if (enforceThresholds) {
+            require(comparison.snrDb >= thresholds.minimumSnrDb) {
+                "SNR ${comparison.snrDb} is below ${thresholds.minimumSnrDb}."
+            }
+            require(comparison.cosineSimilarity >= thresholds.minimumCosine) {
+                "Cosine ${comparison.cosineSimilarity} is below ${thresholds.minimumCosine}."
+            }
+            require(comparison.maxAbsError <= thresholds.maximumAbsoluteError) {
+                "Maximum error ${comparison.maxAbsError} exceeds " +
+                    "${thresholds.maximumAbsoluteError}."
+            }
         }
         require(stemValidation.reconstructionMaxAbsError <= STEM_RECONSTRUCTION_MAX_ERROR) {
             "Stem reconstruction error ${stemValidation.reconstructionMaxAbsError} exceeds " +
                 STEM_RECONSTRUCTION_MAX_ERROR
+        }
+    }
+
+    private fun validateGpuAutoFallbackRun(
+        context: Context,
+        arguments: android.os.Bundle,
+        contract: SourceSeparationModelContract,
+        profile: MdxExecutionProfile,
+        runtimeAbi: MdxRuntimeAbi,
+        report: JSONObject,
+    ) {
+        val stagingRoot = context.filesDir.resolve(STAGING_DIRECTORY).canonicalFile
+        val modelFile = arguments.requiredStagedFile(ARG_MODEL_PATH, stagingRoot)
+        val inputFile = arguments.requiredStagedFile(ARG_INPUT_PATH, stagingRoot)
+        val referenceFile = arguments.requiredStagedFile(ARG_REFERENCE_PATH, stagingRoot)
+        val modelIdentity = modelFile.identity()
+        profile.validateArtifact(modelIdentity)
+        validateFixtureFile(
+            inputFile,
+            arguments.requiredString(ARG_INPUT_SHA256),
+            profile.inputTensor.elementCount,
+            "input",
+        )
+        validateFixtureFile(
+            referenceFile,
+            arguments.requiredString(ARG_REFERENCE_SHA256),
+            profile.outputTensor.elementCount,
+            "reference",
+        )
+        val input = readFloat32(inputFile, profile.inputTensor.elementCount)
+        val reference = readFloat32(referenceFile, profile.outputTensor.elementCount)
+        val thresholds = parityThresholds(contract.modelId)
+        val runtimeProfile = gpuRuntimeProfile(arguments.requiredString(ARG_GPU_PROFILE_ID))
+        require(runtimeProfile.precision == MdxLiteRtGpuPrecision.Float32) {
+            "Connected Auto fallback validation requires the FP32 correctness profile."
+        }
+        val failpoint = GpuAutoFailpoint.parse(arguments.requiredString(ARG_GPU_FAILPOINT))
+        val platformProvider = {
+            MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi)
+        }
+        val tracker = NativeSessionTracker()
+        val nativeGpuFactory = MdxLiteRtGpuInferenceSessionFactory(
+            runtimeProfile = runtimeProfile,
+            platformProvider = platformProvider,
+            compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+        )
+        val nativeCpuFactory = MdxLiteRtCpuInferenceSessionFactory(
+            platformProvider = platformProvider,
+            compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
+        )
+        val gpuFactory = TrackingInferenceSessionFactory(
+            delegate = nativeGpuFactory,
+            tracker = tracker,
+            failpoint = failpoint,
+        )
+        val cpuFactory = TrackingInferenceSessionFactory(
+            delegate = nativeCpuFactory,
+            tracker = tracker,
+        )
+        var probeComparison: OutputComparison? = null
+        val autoFactory = MdxLiteRtAutoInferenceSessionFactory(
+            gpuRuntimeProfile = runtimeProfile,
+            platformProvider = platformProvider,
+            gpuCompatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+            gpuEligibilityProvider = AndroidMdxLiteRtGpuEligibilityProvider(context),
+            gpuProbe = { session, _ ->
+                val output = session.run(input).copyOf()
+                probeComparison = compareOutputs(reference, output)
+                if (failpoint == GpuAutoFailpoint.Probe) {
+                    MdxLiteRtGpuProbeResult.rejected("Injected probe rejection.")
+                } else {
+                    MdxLiteRtGpuProbeResult.accepted("ORT parity probe completed.")
+                }
+            },
+            gpuFactory = gpuFactory,
+            cpuFactory = cpuFactory,
+        )
+        report.put("fixture", arguments.requiredString(ARG_FIXTURE_NAME))
+            .put("artifact", modelIdentity.toJson())
+            .put("input", inputFile.fixtureJson(arguments.requiredString(ARG_INPUT_SHA256)))
+            .put("reference", referenceFile.fixtureJson(arguments.requiredString(ARG_REFERENCE_SHA256)))
+            .put("runtimeProfileId", runtimeProfile.profileId)
+            .put("failpoint", failpoint.serializedName)
+            .put("thresholds", thresholds.toJson())
+            .put("memoryBefore", memorySnapshot())
+            .put("availableAcceleratorsBeforeSetup", JSONArray(availableLiteRtAccelerators()))
+
+        val setupStarted = SystemClock.elapsedRealtime()
+        val session = autoFactory.create(modelIdentity, profile, MdxRuntimeSettings())
+        report.put("setupWallMs", SystemClock.elapsedRealtime() - setupStarted)
+            .put("autoAfterSetup", session.autoDiagnostics().toJson())
+            .put("memoryAfterSetup", memorySnapshot())
+            .put(
+                "processWithSession",
+                processReport(
+                    context,
+                    currentProcessAbi().androidName,
+                    runtimeAbi.androidName,
+                ),
+            )
+        val started = SystemClock.elapsedRealtime()
+        val output = try {
+            session.run(input).copyOf()
+        } finally {
+            report.put("inferenceWallMs", SystemClock.elapsedRealtime() - started)
+                .put("autoAfterRun", session.autoDiagnostics().toJson())
+                .put("memoryWithSession", memorySnapshot())
+            session.close()
+        }
+        val comparison = compareOutputs(reference, output)
+        val stemValidation = validateStemMapping(input, output, profile)
+        report.put("probeComparisonToOrt", probeComparison?.toJson() ?: JSONObject.NULL)
+            .put("comparisonToOrt", comparison.toJson())
+            .put("stemValidation", stemValidation.toJson())
+            .put("sessionTracker", tracker.toJson())
+            .put("memoryAfter", memorySnapshot())
+        require(comparison.snrDb >= thresholds.minimumSnrDb) {
+            "Fallback SNR ${comparison.snrDb} is below ${thresholds.minimumSnrDb}."
+        }
+        require(comparison.cosineSimilarity >= thresholds.minimumCosine) {
+            "Fallback cosine ${comparison.cosineSimilarity} is below " +
+                "${thresholds.minimumCosine}."
+        }
+        require(comparison.maxAbsError <= thresholds.maximumAbsoluteError) {
+            "Fallback maximum error ${comparison.maxAbsError} exceeds " +
+                "${thresholds.maximumAbsoluteError}."
+        }
+        require(stemValidation.reconstructionMaxAbsError <= STEM_RECONSTRUCTION_MAX_ERROR) {
+            "Fallback stem reconstruction exceeded $STEM_RECONSTRUCTION_MAX_ERROR."
+        }
+        require(tracker.gpuCreateCount == 1) { "Expected one real GPU session." }
+        require(tracker.cpuCreateCount == 1) { "Expected one real CPU fallback session." }
+        require(!tracker.cpuCreatedWhileGpuActive) {
+            "CPU was created before the GPU session closed."
+        }
+        require(tracker.activeGpuSessions == 0 && tracker.activeCpuSessions == 0) {
+            "A native validation session remained active after close."
+        }
+        require(session.autoDiagnostics().acceptedOutputBackend == MdxInferenceBackend.LiteRtCpu) {
+            "The accepted fallback output was not produced by CPU."
         }
     }
 
@@ -301,6 +554,40 @@ class MdxLiteRtCpuValidationTest {
             .put("preflightErrorType", error.javaClass.name)
             .put("preflightErrorMessage", error.message.orEmpty())
             .put("nativeAllocatorCalls", allocator.createCount)
+            .put("modelFileExists", artifact.file.exists())
+            .put("memoryBefore", processBefore)
+            .put("memoryAfter", memorySnapshot())
+    }
+
+    private fun validateUnsupportedGpuPreflight(
+        profile: MdxExecutionProfile,
+        runtimeAbi: MdxRuntimeAbi,
+        report: JSONObject,
+    ) {
+        val allocator = RejectingGpuAllocator()
+        val factory = MdxLiteRtGpuInferenceSessionFactory(
+            runtimeProfile = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1,
+            platformProvider = { MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi) },
+            compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+            sessionAllocator = allocator,
+        )
+        val artifact = MdxModelArtifact(
+            file = File(profile.expectedFileName),
+            byteSize = requireNotNull(profile.expectedByteSize),
+            sha256 = requireNotNull(profile.expectedSha256),
+        )
+        val processBefore = memorySnapshot()
+        val error = runCatching {
+            factory.create(artifact, profile, MdxRuntimeSettings())
+        }.exceptionOrNull()
+        require(error != null) { "Unsupported GPU preflight unexpectedly created a session." }
+        require(allocator.createCount == 0) {
+            "Unsupported GPU preflight reached the native session allocator."
+        }
+        report.put("preflightOnly", true)
+            .put("preflightErrorType", error.javaClass.name)
+            .put("preflightErrorMessage", error.message.orEmpty())
+            .put("nativeGpuAllocatorCalls", allocator.createCount)
             .put("modelFileExists", artifact.file.exists())
             .put("memoryBefore", processBefore)
             .put("memoryAfter", memorySnapshot())
@@ -448,6 +735,26 @@ class MdxLiteRtCpuValidationTest {
         }
     }
 
+    private fun gpuRuntimeProfile(profileId: String): MdxLiteRtGpuRuntimeProfile =
+        when (profileId) {
+            MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1.profileId ->
+                MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1
+
+            MdxLiteRtGpuRuntimeProfile.AutomaticFp16V1.profileId ->
+                MdxLiteRtGpuRuntimeProfile.AutomaticFp16V1
+
+            else -> error("Unsupported LiteRT GPU runtime profile: $profileId")
+        }
+
+    private fun availableLiteRtAccelerators(): List<String> {
+        val environment = Environment.create()
+        return try {
+            environment.getAvailableAccelerators().map { it.name }.sorted()
+        } finally {
+            environment.close()
+        }
+    }
+
     private fun baseReport(
         context: Context,
         runId: String,
@@ -493,10 +800,15 @@ class MdxLiteRtCpuValidationTest {
         val loadedRuntimeMaps = File("/proc/self/maps").useLines { lines ->
             lines.filter { it.contains("liblitert", ignoreCase = true) }.toList()
         }
+        val loadedAcceleratorMaps = loadedRuntimeMaps.filter {
+            it.contains("libLiteRtClGlAccelerator", ignoreCase = true)
+        }
         val extractedRuntime = File(applicationInfo.nativeLibraryDir, "libLiteRt.so")
             .takeIf(File::isFile)
         val classLoaderRuntime = (context.classLoader as? BaseDexClassLoader)
             ?.findLibrary("LiteRt")
+        val classLoaderAccelerator = (context.classLoader as? BaseDexClassLoader)
+            ?.findLibrary("LiteRtClGlAccelerator")
         return JSONObject()
             .put("supportedAbis", JSONArray(Build.SUPPORTED_ABIS.toList()))
             .put("osArch", System.getProperty("os.arch").orEmpty())
@@ -514,8 +826,13 @@ class MdxLiteRtCpuValidationTest {
                 } ?: JSONObject.NULL,
             )
             .put("classLoaderResolvedRuntime", classLoaderRuntime ?: JSONObject.NULL)
+            .put(
+                "classLoaderResolvedGpuAccelerator",
+                classLoaderAccelerator ?: JSONObject.NULL,
+            )
             .put("apkInventories", apkInventories)
             .put("loadedRuntimeMaps", JSONArray(loadedRuntimeMaps))
+            .put("loadedGpuAcceleratorMaps", JSONArray(loadedAcceleratorMaps))
             .put("totalDeviceMemoryBytes", deviceMemory.totalMem)
             .put("availableDeviceMemoryBytes", deviceMemory.availMem)
             .put("lowMemory", deviceMemory.lowMemory)
@@ -550,6 +867,12 @@ class MdxLiteRtCpuValidationTest {
 
     private fun memorySnapshot(): JSONObject {
         val memory = Debug.MemoryInfo().also(Debug::getMemoryInfo)
+        val summary = JSONObject()
+        for (key in MEMORY_SUMMARY_KEYS) {
+            memory.getMemoryStat(key)?.toLongOrNull()?.let { value ->
+                summary.put(key, value)
+            }
+        }
         return JSONObject()
             .put("elapsedRealtimeMs", SystemClock.elapsedRealtime())
             .put("processCpuMs", Process.getElapsedCpuTime())
@@ -558,6 +881,7 @@ class MdxLiteRtCpuValidationTest {
             .put("dalvikPssKb", memory.dalvikPss)
             .put("otherPssKb", memory.otherPss)
             .put("nativeHeapAllocatedBytes", Debug.getNativeHeapAllocatedSize())
+            .put("summaryKb", summary)
     }
 
     private fun compareOutputs(reference: FloatArray, candidate: FloatArray): OutputComparison {
@@ -673,6 +997,25 @@ class MdxLiteRtCpuValidationTest {
         .put("byteSize", length())
         .put("sha256", expectedSha256)
 
+    private fun MdxInferenceSession.autoDiagnostics(): MdxLiteRtAutoDiagnostics =
+        (this as MdxLiteRtAutoDiagnosticsProvider).autoDiagnostics
+
+    private fun MdxLiteRtAutoDiagnostics.toJson() = JSONObject()
+        .put("state", state.name)
+        .put("gpuProfileId", gpuProfileId)
+        .put("eligibilityReason", eligibilityReason.name)
+        .put("eligibilityDetail", eligibilityDetail)
+        .put("gpuAttempted", gpuAttempted)
+        .put("activeBackend", activeBackend?.name ?: JSONObject.NULL)
+        .put("acceptedOutputBackend", acceptedOutputBackend?.name ?: JSONObject.NULL)
+        .put("fallbackStage", fallbackStage?.name ?: JSONObject.NULL)
+        .put("fallbackReason", fallbackReason ?: JSONObject.NULL)
+        .put("gpuSetupNanos", gpuSetupNanos ?: JSONObject.NULL)
+        .put("gpuProbeNanos", gpuProbeNanos ?: JSONObject.NULL)
+        .put("gpuInferenceNanos", gpuInferenceNanos ?: JSONObject.NULL)
+        .put("cpuSetupNanos", cpuSetupNanos ?: JSONObject.NULL)
+        .put("cpuInferenceNanos", cpuInferenceNanos ?: JSONObject.NULL)
+
     private data class OutputComparison(
         val snrDb: Double,
         val cosineSimilarity: Double,
@@ -710,6 +1053,185 @@ class MdxLiteRtCpuValidationTest {
             .put("reconstructionMaxAbsError", reconstructionMaxAbsError)
     }
 
+    private enum class GpuAutoFailpoint(val serializedName: String) {
+        Setup("setup"),
+        Probe("probe"),
+        Invocation("invocation"),
+        OutputRead("output-read"),
+        ;
+
+        companion object {
+            fun parse(value: String): GpuAutoFailpoint = entries.singleOrNull {
+                it.serializedName == value
+            } ?: error("Unsupported GPU Auto failpoint: $value")
+        }
+    }
+
+    private class NativeSessionTracker {
+        var gpuCreateCount = 0
+            private set
+        var cpuCreateCount = 0
+            private set
+        var activeGpuSessions = 0
+            private set
+        var activeCpuSessions = 0
+            private set
+        var maximumActiveGpuSessions = 0
+            private set
+        var maximumActiveCpuSessions = 0
+            private set
+        var cpuCreatedWhileGpuActive = false
+            private set
+        private val events = mutableListOf<String>()
+
+        @Synchronized
+        fun created(backend: MdxInferenceBackend) {
+            when (backend) {
+                MdxInferenceBackend.LiteRtGpu -> {
+                    gpuCreateCount += 1
+                    activeGpuSessions += 1
+                    maximumActiveGpuSessions = maxOf(
+                        maximumActiveGpuSessions,
+                        activeGpuSessions,
+                    )
+                    events += "gpu-created"
+                }
+
+                MdxInferenceBackend.LiteRtCpu -> {
+                    cpuCreateCount += 1
+                    if (activeGpuSessions > 0) cpuCreatedWhileGpuActive = true
+                    activeCpuSessions += 1
+                    maximumActiveCpuSessions = maxOf(
+                        maximumActiveCpuSessions,
+                        activeCpuSessions,
+                    )
+                    events += "cpu-created"
+                }
+
+                else -> error("Unexpected tracked backend: $backend")
+            }
+        }
+
+        @Synchronized
+        fun closed(backend: MdxInferenceBackend) {
+            when (backend) {
+                MdxInferenceBackend.LiteRtGpu -> {
+                    check(activeGpuSessions > 0) { "GPU session tracker underflow." }
+                    activeGpuSessions -= 1
+                    events += "gpu-closed"
+                }
+
+                MdxInferenceBackend.LiteRtCpu -> {
+                    check(activeCpuSessions > 0) { "CPU session tracker underflow." }
+                    activeCpuSessions -= 1
+                    events += "cpu-closed"
+                }
+
+                else -> error("Unexpected tracked backend: $backend")
+            }
+        }
+
+        @Synchronized
+        fun invoked(backend: MdxInferenceBackend, invocation: Int) {
+            events += "${backend.name}-run-$invocation"
+        }
+
+        @Synchronized
+        fun toJson() = JSONObject()
+            .put("gpuCreateCount", gpuCreateCount)
+            .put("cpuCreateCount", cpuCreateCount)
+            .put("activeGpuSessions", activeGpuSessions)
+            .put("activeCpuSessions", activeCpuSessions)
+            .put("maximumActiveGpuSessions", maximumActiveGpuSessions)
+            .put("maximumActiveCpuSessions", maximumActiveCpuSessions)
+            .put("cpuCreatedWhileGpuActive", cpuCreatedWhileGpuActive)
+            .put("events", JSONArray(events))
+    }
+
+    private class TrackingInferenceSessionFactory(
+        private val delegate: com.mardous.booming.separation.model.MdxInferenceSessionFactory,
+        private val tracker: NativeSessionTracker,
+        private val failpoint: GpuAutoFailpoint? = null,
+    ) : com.mardous.booming.separation.model.MdxInferenceSessionFactory {
+        override val factoryId: String = "tracked-${delegate.factoryId}"
+        override val backend: MdxInferenceBackend = delegate.backend
+
+        override fun create(
+            artifact: MdxModelArtifact,
+            profile: MdxExecutionProfile,
+            runtimeSettings: MdxRuntimeSettings,
+        ): MdxInferenceSession {
+            val session = TrackingInferenceSession(
+                delegate = delegate.create(artifact, profile, runtimeSettings),
+                tracker = tracker,
+                failpoint = failpoint,
+            )
+            if (backend == MdxInferenceBackend.LiteRtGpu &&
+                failpoint == GpuAutoFailpoint.Setup
+            ) {
+                session.close()
+                throw MdxLiteRtBackendException(
+                    stage = MdxLiteRtFailureStage.ModelCompile,
+                    isRecoverable = true,
+                    cause = IllegalStateException("Injected GPU setup failure."),
+                )
+            }
+            return session
+        }
+    }
+
+    private class TrackingInferenceSession(
+        private val delegate: MdxInferenceSession,
+        private val tracker: NativeSessionTracker,
+        private val failpoint: GpuAutoFailpoint?,
+    ) : MdxInferenceSession {
+        override val diagnostics: com.mardous.booming.separation.model.MdxRuntimeDiagnostics
+            get() = delegate.diagnostics
+        private val backend = delegate.diagnostics.backend
+        private var invocationCount = 0
+        private var closed = false
+
+        init {
+            tracker.created(backend)
+        }
+
+        override fun run(
+            inputNchw: FloatArray,
+            shouldCancel: () -> Boolean,
+        ): FloatArray {
+            invocationCount += 1
+            tracker.invoked(backend, invocationCount)
+            val output = delegate.run(inputNchw, shouldCancel)
+            if (backend == MdxInferenceBackend.LiteRtGpu && invocationCount == 2) {
+                val stage = when (failpoint) {
+                    GpuAutoFailpoint.Invocation -> MdxLiteRtFailureStage.Invocation
+                    GpuAutoFailpoint.OutputRead -> MdxLiteRtFailureStage.OutputRead
+                    else -> null
+                }
+                if (stage != null) {
+                    throw MdxLiteRtBackendException(
+                        stage = stage,
+                        isRecoverable = true,
+                        cause = IllegalStateException(
+                            "Injected GPU ${requireNotNull(failpoint).serializedName} failure."
+                        ),
+                    )
+                }
+            }
+            return output
+        }
+
+        override fun close() {
+            if (closed) return
+            closed = true
+            try {
+                delegate.close()
+            } finally {
+                tracker.closed(backend)
+            }
+        }
+    }
+
     private class RejectingAllocator : MdxLiteRtSessionAllocator {
         var createCount = 0
 
@@ -721,6 +1243,20 @@ class MdxLiteRtCpuValidationTest {
         ): MdxInferenceSession {
             createCount += 1
             error("Native allocation must not run for an unsupported target.")
+        }
+    }
+
+    private class RejectingGpuAllocator : MdxLiteRtGpuSessionAllocator {
+        var createCount = 0
+
+        override fun create(
+            artifact: MdxModelArtifact,
+            profile: MdxExecutionProfile,
+            runtimeProfile: MdxLiteRtGpuRuntimeProfile,
+            compatibility: MdxCompatibilityDecision,
+        ): MdxInferenceSession {
+            createCount += 1
+            error("Native GPU allocation must not run for an unsupported target.")
         }
     }
 
@@ -745,8 +1281,22 @@ class MdxLiteRtCpuValidationTest {
         private const val ARG_ALLOW_UNSUPPORTED_RESOURCE_PROBE =
             "allowUnsupportedResourceProbe"
         private const val ARG_PROCESSOR_COUNT_OVERRIDE = "processorCountOverride"
+        private const val ARG_GPU_PROFILE_ID = "gpuProfileId"
+        private const val ARG_GPU_FAILPOINT = "gpuFailpoint"
         private val SAFE_NAME_PATTERN = Regex("^[a-zA-Z0-9._-]{1,120}$")
         private val SHA256_PATTERN = Regex("^[a-fA-F0-9]{64}$")
+        private val MEMORY_SUMMARY_KEYS = listOf(
+            "summary.java-heap",
+            "summary.native-heap",
+            "summary.code",
+            "summary.stack",
+            "summary.graphics",
+            "summary.private-other",
+            "summary.system",
+            "summary.total-pss",
+            "summary.total-swap",
+            "summary.total-swap-pss",
+        )
 
         private fun parityThresholds(modelId: String) = when (modelId) {
             "uvr_mdxnet_3_9662" -> ParityThresholds(93.8, 0.999999999, 0.00010)
