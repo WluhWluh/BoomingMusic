@@ -1,6 +1,9 @@
 package com.mardous.booming.separation.model.preset
 
 import com.mardous.booming.separation.cache.v2.resolveActiveCacheModel
+import com.mardous.booming.separation.cache.v2.resolveActiveCacheModelResolution
+import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelResolution
+import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelUnavailableReason
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxRuntimeProfiles
@@ -53,6 +56,117 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class SourceSeparationPresetRepositoryTest {
+    @Test
+    fun `active cache model resolution distinguishes no selection and pending restore`() {
+        fixture("official-model".encodeToByteArray()).use { fixture ->
+            val none = fixture.repository.resolveActiveCacheModelResolution()
+                as SourceSeparationActiveCacheModelResolution.Unavailable
+            assertEquals(SourceSeparationActiveCacheModelUnavailableReason.NoSelection, none.reason)
+            assertEquals(null, none.reference)
+
+            val pending = SourceSeparationActiveModelReference(
+                modelId = "official_model",
+                artifactSha256 = "a".repeat(64),
+                contractSchemaVersion = 2,
+            )
+            fixture.repository.setPendingActiveModel(pending)
+
+            val restored = fixture.repository.resolveActiveCacheModelResolution()
+                as SourceSeparationActiveCacheModelResolution.Unavailable
+            assertEquals(
+                SourceSeparationActiveCacheModelUnavailableReason.PendingSelection,
+                restored.reason,
+            )
+            assertEquals(pending, restored.reference)
+        }
+    }
+
+    @Test
+    fun `active cache model resolution reports missing artifact and profile separately`() {
+        val officialPayload = "official-model".encodeToByteArray()
+        fixture(officialPayload).use { fixture ->
+            val missingArtifact = SourceSeparationActiveModelReference(
+                modelId = "official_model",
+                artifactSha256 = "a".repeat(64),
+                contractSchemaVersion = 2,
+            )
+            fixture.store.write(missingArtifact)
+            val missing = fixture.repository.resolveActiveCacheModelResolution()
+                as SourceSeparationActiveCacheModelResolution.Unavailable
+            assertEquals(
+                SourceSeparationActiveCacheModelUnavailableReason.ModelNotInstalled,
+                missing.reason,
+            )
+
+            val customPayload = "custom-model".encodeToByteArray()
+            val installed = fixture.repository.install(
+                input = ByteArrayInputStream(customPayload),
+                originalFileName = "custom.tflite",
+                origin = SourceSeparationInstalledPresetOrigin.ImportedFile,
+                customProfile = customProfile(customPayload, profileId = "custom-profile-v1"),
+            )
+            val revision = customProfile(
+                payload = customPayload,
+                profileId = "custom-profile-v2",
+                modelId = "custom_model_v2",
+            )
+            fixture.repository.saveCustomProfileRevision(
+                artifactSha256 = installed.sha256,
+                profile = revision,
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+            )
+            val activeRevision = fixture.repository.activateCustomProfile(
+                sha256 = installed.sha256,
+                profileId = revision.profileId,
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            )
+            fixture.store.write(null)
+            assertTrue(fixture.repository.deleteCustomProfile(revision.profileId))
+            fixture.store.write(activeRevision)
+
+            val missingProfile = fixture.repository.resolveActiveCacheModelResolution()
+                as SourceSeparationActiveCacheModelResolution.Unavailable
+            assertEquals(
+                SourceSeparationActiveCacheModelUnavailableReason.ProfileNotInstalled,
+                missingProfile.reason,
+            )
+            assertEquals(activeRevision, missingProfile.reference)
+        }
+    }
+
+    @Test
+    fun `active cache model resolution rejects a stale contract schema`() {
+        val payload = "official-model".encodeToByteArray()
+        fixture(
+            officialPayload = payload,
+            catalog = catalog(
+                officialPayload = payload,
+                supportLevel = CatalogSupportLevel.Recommended,
+                activationPolicy = CatalogActivationPolicy.SelectableWhenQualified,
+                includeReviewedContract = true,
+            ),
+        ).use { fixture ->
+            val installed = fixture.repository.installOfficial(
+                modelId = "official_model",
+                input = ByteArrayInputStream(payload),
+            )
+            val active = fixture.repository.activate(
+                sha256 = installed.sha256,
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            )
+            fixture.store.write(active.copy(contractSchemaVersion = 99))
+
+            val resolution = fixture.repository.resolveActiveCacheModelResolution()
+                as SourceSeparationActiveCacheModelResolution.Unavailable
+            assertEquals(
+                SourceSeparationActiveCacheModelUnavailableReason.ContractMismatch,
+                resolution.reason,
+            )
+        }
+    }
+
     @Test
     fun `active official preset resolves an immutable cache contract and artifact`() {
         val payload = "official-model".encodeToByteArray()

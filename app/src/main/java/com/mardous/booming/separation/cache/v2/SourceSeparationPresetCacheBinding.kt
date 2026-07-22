@@ -4,6 +4,7 @@ import com.mardous.booming.separation.model.MdxExecutionProfile
 import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContract
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
+import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
@@ -43,35 +44,92 @@ class SourceSeparationPresetCacheAvailabilityProvider(
 }
 
 fun SourceSeparationPresetRepository.resolveActiveCacheModel(): SourceSeparationResolvedCacheModel? {
-    return runCatching {
-        val active = activeModel() as? SourceSeparationActivePresetState.Reference
-            ?: return@runCatching null
-        val installed = active.installedModel ?: return@runCatching null
-        if (!installed.sha256.equals(active.reference.artifactSha256, ignoreCase = true) ||
-            installed.modelId != active.reference.modelId
-        ) {
-            return@runCatching null
-        }
-        val snapshot = installed.cacheContractSnapshot(this) ?: return@runCatching null
-        if (active.reference.profileId != null &&
-            active.reference.profileId != snapshot.profileRevisionId
-        ) {
-            return@runCatching null
-        }
+    return (resolveActiveCacheModelResolution() as?
+        SourceSeparationActiveCacheModelResolution.Ready)?.model
+}
+
+fun SourceSeparationPresetRepository.resolveActiveCacheModelResolution():
+        SourceSeparationActiveCacheModelResolution {
+    val active = activeModel()
+    if (active == SourceSeparationActivePresetState.None) {
+        val pending = pendingActiveModel()
+        return SourceSeparationActiveCacheModelResolution.Unavailable(
+            reason = if (pending == null) {
+                SourceSeparationActiveCacheModelUnavailableReason.NoSelection
+            } else {
+                SourceSeparationActiveCacheModelUnavailableReason.PendingSelection
+            },
+            reference = pending,
+        )
+    }
+    active as SourceSeparationActivePresetState.Reference
+    val reference = active.reference
+    val installed = active.installedModel
+        ?: return SourceSeparationActiveCacheModelResolution.Unavailable(
+            reason = if (reference.profileId != null &&
+                installedModel(reference.artifactSha256) != null
+            ) {
+                SourceSeparationActiveCacheModelUnavailableReason.ProfileNotInstalled
+            } else {
+                SourceSeparationActiveCacheModelUnavailableReason.ModelNotInstalled
+            },
+            reference = reference,
+        )
+    if (!installed.sha256.equals(reference.artifactSha256, ignoreCase = true) ||
+        installed.modelId != reference.modelId
+    ) {
+        return SourceSeparationActiveCacheModelResolution.Unavailable(
+            SourceSeparationActiveCacheModelUnavailableReason.ModelIdentityMismatch,
+            reference,
+        )
+    }
+    val snapshot = try {
+        installed.cacheContractSnapshot(this)
+    } catch (_: Throwable) {
+        return SourceSeparationActiveCacheModelResolution.Unavailable(
+            SourceSeparationActiveCacheModelUnavailableReason.ContractInvalid,
+            reference,
+        )
+    } ?: return SourceSeparationActiveCacheModelResolution.Unavailable(
+        reason = if (installed.bindingKind == SourceSeparationPresetBindingKind.CustomProfile) {
+            SourceSeparationActiveCacheModelUnavailableReason.ProfileNotInstalled
+        } else {
+            SourceSeparationActiveCacheModelUnavailableReason.ContractMismatch
+        },
+        reference = reference,
+    )
+    val expectedReferenceProfileId = snapshot.profileRevisionId.takeIf {
+        snapshot.profileOrigin == SourceSeparationCacheProfileOrigin.Custom
+    }
+    if (reference.contractSchemaVersion != snapshot.contractSchemaVersion ||
+        reference.profileId != expectedReferenceProfileId
+    ) {
+        return SourceSeparationActiveCacheModelResolution.Unavailable(
+            reason = if (snapshot.profileOrigin == SourceSeparationCacheProfileOrigin.Custom) {
+                SourceSeparationActiveCacheModelUnavailableReason.ProfileNotInstalled
+            } else {
+                SourceSeparationActiveCacheModelUnavailableReason.ContractMismatch
+            },
+            reference = reference,
+        )
+    }
+    val executionProfile = try {
         val catalog = catalogSnapshot()
-        val executionProfile = when (installed.bindingKind) {
+        when (installed.bindingKind) {
             SourceSeparationPresetBindingKind.Official,
-            SourceSeparationPresetBindingKind.Sidecar -> {
-                installed.executionContract(this)
-                    ?.toMdxExecutionProfile(catalog.runtimeQualifications)
-                    ?: return@runCatching null
-            }
-            SourceSeparationPresetBindingKind.CustomProfile -> {
-                installed.customProfile
-                    ?.toMdxExecutionProfile(catalog.runtimeQualifications)
-                    ?: return@runCatching null
-            }
+            SourceSeparationPresetBindingKind.Sidecar -> installed.executionContract(this)
+                ?.toMdxExecutionProfile(catalog.runtimeQualifications)
+
+            SourceSeparationPresetBindingKind.CustomProfile -> installed.customProfile
+                ?.toMdxExecutionProfile(catalog.runtimeQualifications)
         }
+    } catch (_: Throwable) {
+        null
+    } ?: return SourceSeparationActiveCacheModelResolution.Unavailable(
+        SourceSeparationActiveCacheModelUnavailableReason.ContractInvalid,
+        reference,
+    )
+    return SourceSeparationActiveCacheModelResolution.Ready(
         SourceSeparationResolvedCacheModel(
             installed = installed,
             contract = snapshot,
@@ -82,7 +140,7 @@ fun SourceSeparationPresetRepository.resolveActiveCacheModel(): SourceSeparation
             ),
             executionProfile = executionProfile,
         )
-    }.getOrNull()
+    )
 }
 
 private fun SourceSeparationInstalledPreset.cacheContractSnapshot(
@@ -140,3 +198,24 @@ data class SourceSeparationResolvedCacheModel(
     val artifact: MdxModelArtifact,
     val executionProfile: MdxExecutionProfile,
 )
+
+sealed interface SourceSeparationActiveCacheModelResolution {
+    data class Ready(
+        val model: SourceSeparationResolvedCacheModel,
+    ) : SourceSeparationActiveCacheModelResolution
+
+    data class Unavailable(
+        val reason: SourceSeparationActiveCacheModelUnavailableReason,
+        val reference: SourceSeparationActiveModelReference? = null,
+    ) : SourceSeparationActiveCacheModelResolution
+}
+
+enum class SourceSeparationActiveCacheModelUnavailableReason {
+    NoSelection,
+    PendingSelection,
+    ModelNotInstalled,
+    ModelIdentityMismatch,
+    ProfileNotInstalled,
+    ContractMismatch,
+    ContractInvalid,
+}
