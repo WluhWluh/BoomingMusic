@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<full-backup-content xmlns:tools="http://schemas.android.com/tools">
+<full-backup-content>
     <include domain="database" path="music_database.db"/>
-
-    <exclude domain="sharedpref" path="artist_signatures.xml" tools:ignore="FullBackupContent"/>
-    <exclude domain="sharedpref" path="custom_artist_images.xml" tools:ignore="FullBackupContent"/>
 </full-backup-content>
