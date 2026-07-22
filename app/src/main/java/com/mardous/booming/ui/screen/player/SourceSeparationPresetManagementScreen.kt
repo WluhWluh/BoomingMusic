@@ -1,6 +1,7 @@
 package com.mardous.booming.ui.screen.player
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -17,6 +18,8 @@ import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -78,6 +81,7 @@ internal fun SourceSeparationPresetManagementSheet(
     onSaveCustomProfileRevision: (SourceSeparationManualModelProfileDraft) -> Unit,
     onCancelCustomProfileEdit: () -> Unit,
     onUseCustomProfile: (String, String) -> Unit,
+    onExportCustomProfile: (String) -> Unit,
     onDeleteCustomProfile: (String) -> Unit,
 ) {
     var pendingDeleteModelId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -211,6 +215,7 @@ internal fun SourceSeparationPresetManagementSheet(
                     onDetails = onShowImportedDetails,
                     onEditProfile = onEditCustomProfile,
                     onUseProfile = onUseCustomProfile,
+                    onExportProfile = onExportCustomProfile,
                     onDeleteProfile = { _, profileId -> pendingDeleteProfileId = profileId },
                 )
             }
@@ -525,6 +530,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.importedModelSection(
     onDetails: (String, String?) -> Unit,
     onEditProfile: (String, String) -> Unit,
     onUseProfile: (String, String) -> Unit,
+    onExportProfile: (String) -> Unit,
     onDeleteProfile: (String, String) -> Unit,
 ) {
     if (entries.isEmpty()) return
@@ -548,6 +554,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.importedModelSection(
             onDetails = onDetails,
             onEditProfile = onEditProfile,
             onUseProfile = onUseProfile,
+            onExportProfile = onExportProfile,
             onDeleteProfile = onDeleteProfile,
         )
     }
@@ -770,6 +777,7 @@ private fun ImportedModelCard(
     onDetails: (String, String?) -> Unit,
     onEditProfile: (String, String) -> Unit,
     onUseProfile: (String, String) -> Unit,
+    onExportProfile: (String) -> Unit,
     onDeleteProfile: (String, String) -> Unit,
 ) {
     Card(
@@ -871,6 +879,7 @@ private fun ImportedModelCard(
                         onDetails = onDetails,
                         onEdit = onEditProfile,
                         onUse = onUseProfile,
+                        onExport = onExportProfile,
                         onDelete = onDeleteProfile,
                     )
                 }
@@ -946,8 +955,10 @@ private fun CustomProfileRevisionRow(
     onDetails: (String, String?) -> Unit,
     onEdit: (String, String) -> Unit,
     onUse: (String, String) -> Unit,
+    onExport: (String) -> Unit,
     onDelete: (String, String) -> Unit,
 ) {
+    var actionsExpanded by rememberSaveable(revision.profileId) { mutableStateOf(false) }
     Row(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -989,16 +1000,6 @@ private fun CustomProfileRevisionRow(
             )
         }
         IconButton(
-            onClick = { onEdit(artifactSha256, revision.profileId) },
-            enabled = !operationInProgress,
-            modifier = Modifier.size(40.dp),
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_edit_24dp),
-                contentDescription = stringResource(R.string.source_separation_profile_edit),
-            )
-        }
-        IconButton(
             onClick = { onUse(artifactSha256, revision.profileId) },
             enabled = !revision.active && !operationInProgress,
             modifier = Modifier.size(40.dp),
@@ -1010,16 +1011,63 @@ private fun CustomProfileRevisionRow(
                 ),
             )
         }
-        IconButton(
-            onClick = { onDelete(artifactSha256, revision.profileId) },
-            enabled = revision.canDelete && !operationInProgress,
-            modifier = Modifier.size(40.dp),
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_delete_24dp),
-                contentDescription = stringResource(R.string.source_separation_profile_delete_title),
-                tint = MaterialTheme.colorScheme.error,
-            )
+        Box {
+            IconButton(
+                onClick = { actionsExpanded = true },
+                enabled = !operationInProgress,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_more_vert_24dp),
+                    contentDescription = stringResource(R.string.action_more),
+                )
+            }
+            DropdownMenu(
+                expanded = actionsExpanded,
+                onDismissRequest = { actionsExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.source_separation_profile_edit)) },
+                    onClick = {
+                        actionsExpanded = false
+                        onEdit(artifactSha256, revision.profileId)
+                    },
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_edit_24dp),
+                            contentDescription = null,
+                        )
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.source_separation_profile_export)) },
+                    onClick = {
+                        actionsExpanded = false
+                        onExport(revision.profileId)
+                    },
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_file_export_24dp),
+                            contentDescription = null,
+                        )
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.source_separation_profile_delete_title)) },
+                    onClick = {
+                        actionsExpanded = false
+                        onDelete(artifactSha256, revision.profileId)
+                    },
+                    enabled = revision.canDelete,
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_delete_24dp),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    },
+                )
+            }
         }
     }
 }

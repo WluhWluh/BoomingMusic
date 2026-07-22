@@ -15,6 +15,7 @@ import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.ContractWindow
 import com.mardous.booming.separation.model.contract.PipelineCompatibility
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
+import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.contract.StemContract
 import com.mardous.booming.separation.model.contract.TensorContract
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
@@ -218,6 +219,18 @@ class SourceSeparationPresetManagementStateTest {
 
         assertEquals("Restored Custom Model", target.displayName)
         assertFalse(target.exactModelInstalled)
+    }
+
+    @Test
+    fun `custom profile export round trips without model or cache data`() {
+        val profile = customProfile()
+        val export = profile.toPortableExport()
+
+        assertTrue(export.fileName.startsWith("${profile.artifact.fileName}."))
+        assertTrue(export.fileName.endsWith(".profile.json"))
+        assertEquals(profile, SourceSeparationModelMetadata.decodeCustomProfile(export.contents))
+        assertFalse(export.contents.contains("content://"))
+        assertFalse(export.contents.contains("playback-settings.json"))
     }
 
     private fun item(

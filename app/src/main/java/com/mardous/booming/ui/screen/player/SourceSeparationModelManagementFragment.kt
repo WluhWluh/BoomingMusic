@@ -55,6 +55,7 @@ import com.mardous.booming.BuildConfig
 import com.mardous.booming.R
 import com.mardous.booming.extensions.files.asReadableFileSize
 import com.mardous.booming.extensions.isLandscape
+import com.mardous.booming.extensions.showToast
 import com.mardous.booming.extensions.utilities.dateStr
 import com.mardous.booming.separation.model.SourceSeparationModelSource
 import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
@@ -85,6 +86,25 @@ class SourceSeparationModelManagementFragment : BottomSheetDialogFragment() {
     ) { uri: Uri? ->
         uri ?: return@registerForActivityResult
         presetViewModel.importSidecar(uri)
+    }
+    private var pendingProfileExport: SourceSeparationCustomProfileExport? = null
+    private val exportCustomProfileLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri: Uri? ->
+        val export = pendingProfileExport.also { pendingProfileExport = null }
+            ?: return@registerForActivityResult
+        uri ?: return@registerForActivityResult
+        val exported = runCatching {
+            val output = requireNotNull(requireContext().contentResolver.openOutputStream(uri, "w"))
+            output.use { it.write(export.contents.encodeToByteArray()) }
+        }.isSuccess
+        showToast(
+            if (exported) {
+                R.string.source_separation_profile_exported
+            } else {
+                R.string.source_separation_profile_export_failed
+            },
+        )
     }
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
@@ -157,6 +177,12 @@ class SourceSeparationModelManagementFragment : BottomSheetDialogFragment() {
                             onCancelCustomProfileEdit =
                                 presetViewModel::cancelCustomProfileEdit,
                             onUseCustomProfile = presetViewModel::useCustomProfile,
+                            onExportCustomProfile = { profileId ->
+                                presetViewModel.exportCustomProfile(profileId)?.let { export ->
+                                    pendingProfileExport = export
+                                    exportCustomProfileLauncher.launch(export.fileName)
+                                }
+                            },
                             onDeleteCustomProfile = presetViewModel::deleteCustomProfile,
                         )
                     } else {

@@ -12,6 +12,7 @@ import com.mardous.booming.separation.model.contract.CatalogActivationPolicy
 import com.mardous.booming.separation.model.contract.CatalogReleaseMaturity
 import com.mardous.booming.separation.model.contract.CatalogSupportLevel
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
+import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
@@ -34,6 +35,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
 import java.util.concurrent.ConcurrentHashMap
 import java.util.Locale
 
@@ -258,6 +260,12 @@ class SourceSeparationPresetManagementViewModel internal constructor(
                 }
             publishState()
         }
+    }
+
+    fun exportCustomProfile(profileId: String): SourceSeparationCustomProfileExport? {
+        return repository.customProfiles()
+            .singleOrNull { it.profileId == profileId }
+            ?.toPortableExport()
     }
 
     fun beginImport(uri: Uri) {
@@ -724,6 +732,25 @@ data class SourceSeparationCustomProfileEditorUiState(
     val initialDraft: SourceSeparationManualModelProfileDraft,
     val saving: Boolean = false,
 )
+
+data class SourceSeparationCustomProfileExport(
+    val fileName: String,
+    val contents: String,
+)
+
+internal fun SourceSeparationCustomModelProfile.toPortableExport() =
+    SourceSeparationCustomProfileExport(
+        fileName = "${artifact.fileName}.${profileId.fileNameDigest()}.profile.json",
+        contents = SourceSeparationModelMetadata.json.encodeToString(this),
+    )
+
+private fun String.fileNameDigest(): String = java.security.MessageDigest
+    .getInstance("SHA-256")
+    .digest(toByteArray(Charsets.UTF_8))
+    .joinToString("") { byte ->
+        (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+    }
+    .take(12)
 
 sealed interface SourceSeparationPresetImportUiState {
     data object Idle : SourceSeparationPresetImportUiState

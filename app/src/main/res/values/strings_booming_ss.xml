@@ -174,6 +174,9 @@
     <string name="source_separation_profile_edit">Create revision</string>
     <string name="source_separation_profile_revision_title">New profile revision</string>
     <string name="source_separation_profile_save_revision">Save new revision</string>
+    <string name="source_separation_profile_export">Export profile revision</string>
+    <string name="source_separation_profile_exported">Profile revision exported.</string>
+    <string name="source_separation_profile_export_failed">Could not export the profile revision.</string>
     <string name="source_separation_profile_delete_title">Delete profile revision</string>
     <string name="source_separation_profile_delete_message">Delete profile revision %1$s? Model weights and separated caches are not deleted.</string>
     <string name="source_separation_model_status_title">Model status</string>
