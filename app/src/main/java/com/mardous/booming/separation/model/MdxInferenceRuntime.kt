@@ -244,7 +244,7 @@ class SingleUseMdxInferenceSessionProvider(
 }
 
 class ReusableMdxInferenceSessionProvider(
-    private val factory: MdxInferenceSessionFactory = MdxOrtInferenceSessionFactory,
+    private val factory: MdxInferenceSessionFactory,
 ) : MdxInferenceSessionProvider, AutoCloseable {
     private var cachedSession: MdxInferenceSession? = null
     private var cachedKey: SessionKey? = null
@@ -312,16 +312,6 @@ class ReusableMdxInferenceSessionProvider(
         val profileIdentity: String,
         val runtimeSettings: MdxRuntimeSettings,
     )
-}
-
-object DefaultMdxInferenceSessionProvider : MdxInferenceSessionProvider {
-    private val delegate = SingleUseMdxInferenceSessionProvider(MdxOrtInferenceSessionFactory)
-
-    override fun acquire(
-        artifact: MdxModelArtifact,
-        profile: MdxExecutionProfile,
-        runtimeSettings: MdxRuntimeSettings,
-    ): MdxInferenceSessionLease = delegate.acquire(artifact, profile, runtimeSettings)
 }
 
 internal fun throwIfMdxInferenceCanceled(shouldCancel: () -> Boolean) {

@@ -5,7 +5,8 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import java.nio.FloatBuffer
 
-object MdxOrtInferenceSessionFactory : MdxInferenceSessionFactory {
+/** Explicit Phase 6/7 regression oracle. Never register this in the application graph. */
+object SourceSeparationOrtOracle : MdxInferenceSessionFactory {
     override val factoryId: String = "onnx-runtime-cpu"
     override val backend: MdxInferenceBackend = MdxInferenceBackend.OrtCpu
 

@@ -43,7 +43,7 @@ class MdxRangeSeparator(
         resumeState: MdxRangeResumeState? = null,
         execution: MdxSeparationExecution? = null,
         expectedSourceAudioFingerprint: String? = null,
-        sessionProvider: MdxInferenceSessionProvider = DefaultMdxInferenceSessionProvider,
+        sessionProvider: MdxInferenceSessionProvider,
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
     ): MdxRangeSeparationResult {
