@@ -125,7 +125,11 @@ class SourceSeparationPresetRepository internal constructor(
                 "The active model profile must be changed before it can be deleted.",
             )
         }
-        return customProfileStore.delete(profileId)
+        val deleted = customProfileStore.delete(profileId)
+        if (deleted && activeModelStore.readPending()?.profileId == profileId) {
+            activeModelStore.writePending(null)
+        }
+        return deleted
     }
 
     fun activeModel(): SourceSeparationActivePresetState {
@@ -136,6 +140,9 @@ class SourceSeparationPresetRepository internal constructor(
         )
     }
 
+    fun pendingActiveModel(): SourceSeparationActiveModelReference? =
+        activeModelStore.readPending()
+
     /**
      * Retains a portable backup reference even when its weights are absent.
      * A later matching install can resolve it, but this method never downloads
@@ -143,8 +150,41 @@ class SourceSeparationPresetRepository internal constructor(
      */
     fun setPendingActiveModel(reference: SourceSeparationActiveModelReference?) {
         reference?.validate()
-        activeModelStore.write(reference)
+        activeModelStore.writePending(reference)
     }
+
+    /**
+     * Applies a portable active-model reference without replacing a usable
+     * selection on the destination device. The model file is deliberately
+     * never installed or downloaded by this operation.
+     */
+    fun restoreActiveModelReference(reference: SourceSeparationActiveModelReference?) =
+        synchronized(lock) {
+            reference?.validate()
+            if (reference == null) {
+                activeModelStore.writePending(null)
+                return@synchronized
+            }
+
+            val current = activeModelStore.read()
+            val currentIsUsable = current?.let(::isUsableReference) == true
+            if (currentIsUsable) {
+                if (sameReference(current, reference)) {
+                    activeModelStore.writePending(null)
+                } else {
+                    activeModelStore.writePending(reference)
+                }
+                return@synchronized
+            }
+
+            if (isUsableReference(reference)) {
+                activeModelStore.write(reference)
+                activeModelStore.writePending(null)
+            } else {
+                activeModelStore.write(null)
+                activeModelStore.writePending(reference)
+            }
+        }
 
     fun install(
         input: InputStream,
@@ -396,6 +436,9 @@ class SourceSeparationPresetRepository internal constructor(
             }
         }
         activeModelStore.write(reference)
+        if (sameReference(activeModelStore.readPending(), reference)) {
+            activeModelStore.writePending(null)
+        }
         return reference
     }
 
@@ -498,6 +541,65 @@ class SourceSeparationPresetRepository internal constructor(
             blockReason = reason,
         ),
     )
+
+    private fun isUsableReference(reference: SourceSeparationActiveModelReference): Boolean {
+        val installed = runCatching {
+            requireInstalledPreset(reference.artifactSha256)
+        }.getOrNull() ?: return false
+        if (installed.modelId != reference.modelId ||
+            !installed.sha256.equals(reference.artifactSha256, ignoreCase = true)
+        ) {
+            return false
+        }
+        return when (installed.bindingKind) {
+            SourceSeparationPresetBindingKind.CustomProfile -> {
+                val profile = installed.customProfile ?: return false
+                runCatching {
+                    SourceSeparationModelContractValidator.validateCustomProfile(profile)
+                }.isSuccess &&
+                    profile.modelId == reference.modelId &&
+                    profile.artifact.sha256.equals(reference.artifactSha256, ignoreCase = true) &&
+                    profile.profileId == reference.profileId &&
+                    profile.profileSchemaVersion == reference.contractSchemaVersion
+            }
+
+            SourceSeparationPresetBindingKind.Sidecar -> {
+                val contract = installed.sidecarContract ?: return false
+                runCatching {
+                    SourceSeparationModelContractValidator.validateContract(contract)
+                }.isSuccess &&
+                    contract.modelId == reference.modelId &&
+                    contract.artifact.sha256.equals(reference.artifactSha256, ignoreCase = true) &&
+                    contract.contractSchemaVersion == reference.contractSchemaVersion &&
+                    reference.profileId == null
+            }
+
+            SourceSeparationPresetBindingKind.Official -> {
+                val entry = catalog.entries.singleOrNull { it.modelId == reference.modelId }
+                    ?: return false
+                val contractId = entry.contractId ?: return false
+                val contract = catalog.contracts.singleOrNull { it.contractId == contractId }
+                    ?: return false
+                val artifact = catalog.artifacts.singleOrNull {
+                    it.artifactId == entry.artifactId
+                }?.tflite ?: return false
+                installed.contractId == contractId &&
+                    artifact.sha256.equals(reference.artifactSha256, ignoreCase = true) &&
+                    contract.artifact.sha256.equals(reference.artifactSha256, ignoreCase = true) &&
+                    contract.contractSchemaVersion == reference.contractSchemaVersion &&
+                    reference.profileId == null
+            }
+        }
+    }
+
+    private fun sameReference(
+        first: SourceSeparationActiveModelReference?,
+        second: SourceSeparationActiveModelReference?,
+    ): Boolean = first != null && second != null &&
+        first.modelId == second.modelId &&
+        first.artifactSha256.equals(second.artifactSha256, ignoreCase = true) &&
+        first.contractSchemaVersion == second.contractSchemaVersion &&
+        first.profileId == second.profileId
 
     private fun readInstalledPreset(directory: File): SourceSeparationInstalledPreset? {
         if (!directory.isDirectory) return null
@@ -750,16 +852,60 @@ sealed class SourceSeparationActivePresetState {
 interface SourceSeparationActiveModelStore {
     fun read(): SourceSeparationActiveModelReference?
     fun write(reference: SourceSeparationActiveModelReference?)
+    fun readPending(): SourceSeparationActiveModelReference?
+    fun writePending(reference: SourceSeparationActiveModelReference?)
 }
 
 private class SharedPreferencesSourceSeparationActiveModelStore(
     private val preferences: SharedPreferences,
 ) : SourceSeparationActiveModelStore {
     override fun read(): SourceSeparationActiveModelReference? {
-        val modelId = preferences.getString(KEY_MODEL_ID, null) ?: return null
-        val artifactSha256 = preferences.getString(KEY_ARTIFACT_SHA256, null) ?: return null
-        val schemaVersion = preferences.getInt(KEY_CONTRACT_SCHEMA_VERSION, 0)
-        val profileId = preferences.getString(KEY_PROFILE_ID, null)
+        return readReference(
+            KEY_MODEL_ID,
+            KEY_ARTIFACT_SHA256,
+            KEY_CONTRACT_SCHEMA_VERSION,
+            KEY_PROFILE_ID,
+        )
+    }
+
+    override fun write(reference: SourceSeparationActiveModelReference?) {
+        writeReference(
+            reference,
+            KEY_MODEL_ID,
+            KEY_ARTIFACT_SHA256,
+            KEY_CONTRACT_SCHEMA_VERSION,
+            KEY_PROFILE_ID,
+        )
+    }
+
+    override fun readPending(): SourceSeparationActiveModelReference? =
+        readReference(
+            KEY_PENDING_MODEL_ID,
+            KEY_PENDING_ARTIFACT_SHA256,
+            KEY_PENDING_CONTRACT_SCHEMA_VERSION,
+            KEY_PENDING_PROFILE_ID,
+        )
+
+    override fun writePending(reference: SourceSeparationActiveModelReference?) {
+        writeReference(
+            reference,
+            KEY_PENDING_MODEL_ID,
+            KEY_PENDING_ARTIFACT_SHA256,
+            KEY_PENDING_CONTRACT_SCHEMA_VERSION,
+            KEY_PENDING_PROFILE_ID,
+        )
+    }
+
+    private fun readReference(
+        modelIdKey: String,
+        artifactSha256Key: String,
+        contractSchemaVersionKey: String,
+        profileIdKey: String,
+    ): SourceSeparationActiveModelReference? {
+        val modelId = preferences.getString(modelIdKey, null) ?: return null
+        val artifactSha256 = preferences.getString(artifactSha256Key, null) ?: return null
+        val schemaVersion = preferences.getInt(contractSchemaVersionKey, 0)
+        val profileId = preferences.getString(profileIdKey, null)
         return runCatching {
             SourceSeparationActiveModelReference(
                 modelId = modelId,
@@ -770,20 +916,26 @@ private class SharedPreferencesSourceSeparationActiveModelStore(
         }.getOrNull()
     }
 
-    override fun write(reference: SourceSeparationActiveModelReference?) {
+    private fun writeReference(
+        reference: SourceSeparationActiveModelReference?,
+        modelIdKey: String,
+        artifactSha256Key: String,
+        contractSchemaVersionKey: String,
+        profileIdKey: String,
+    ) {
         preferences.edit().apply {
             if (reference == null) {
-                remove(KEY_MODEL_ID)
-                remove(KEY_ARTIFACT_SHA256)
-                remove(KEY_CONTRACT_SCHEMA_VERSION)
-                remove(KEY_PROFILE_ID)
+                remove(modelIdKey)
+                remove(artifactSha256Key)
+                remove(contractSchemaVersionKey)
+                remove(profileIdKey)
             } else {
                 reference.validate()
-                putString(KEY_MODEL_ID, reference.modelId)
-                putString(KEY_ARTIFACT_SHA256, reference.artifactSha256.lowercase())
-                putInt(KEY_CONTRACT_SCHEMA_VERSION, reference.contractSchemaVersion)
-                if (reference.profileId == null) remove(KEY_PROFILE_ID) else {
-                    putString(KEY_PROFILE_ID, reference.profileId)
+                putString(modelIdKey, reference.modelId)
+                putString(artifactSha256Key, reference.artifactSha256.lowercase())
+                putInt(contractSchemaVersionKey, reference.contractSchemaVersion)
+                if (reference.profileId == null) remove(profileIdKey) else {
+                    putString(profileIdKey, reference.profileId)
                 }
             }
         }.apply()
@@ -794,6 +946,11 @@ private class SharedPreferencesSourceSeparationActiveModelStore(
         const val KEY_ARTIFACT_SHA256 = "source_separation.active_model.sha256"
         const val KEY_CONTRACT_SCHEMA_VERSION = "source_separation.active_model.contract_schema"
         const val KEY_PROFILE_ID = "source_separation.active_model.profile_id"
+        const val KEY_PENDING_MODEL_ID = "source_separation.pending_active_model.id"
+        const val KEY_PENDING_ARTIFACT_SHA256 = "source_separation.pending_active_model.sha256"
+        const val KEY_PENDING_CONTRACT_SCHEMA_VERSION =
+            "source_separation.pending_active_model.contract_schema"
+        const val KEY_PENDING_PROFILE_ID = "source_separation.pending_active_model.profile_id"
     }
 }
 

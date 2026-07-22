@@ -108,7 +108,7 @@ class SourceSeparationPresetRepositoryTest {
                 fixture.repository.deleteCustomProfile("custom-profile")
             }
 
-            fixture.repository.setPendingActiveModel(null)
+            fixture.store.write(null)
             assertTrue(fixture.repository.delete(installed.sha256))
             assertFalse(installed.file.parentFile?.exists() ?: true)
             assertEquals("custom-profile", fixture.repository.customProfiles().single().profileId)
@@ -118,21 +118,92 @@ class SourceSeparationPresetRepositoryTest {
     }
 
     @Test
-    fun `existing active reference is retained when its installed artifact is absent`() {
+    fun `pending reference does not replace the active reference`() {
         fixture("official-model".encodeToByteArray()).use { fixture ->
-            val reference = SourceSeparationActiveModelReference(
+            val pending = SourceSeparationActiveModelReference(
                 modelId = "official_model",
                 artifactSha256 = "a".repeat(64),
                 contractSchemaVersion = 2,
             )
 
-            fixture.repository.setPendingActiveModel(reference)
+            fixture.repository.setPendingActiveModel(pending)
 
             val state = fixture.repository.activeModel()
-            assertTrue(state is SourceSeparationActivePresetState.Reference)
-            state as SourceSeparationActivePresetState.Reference
-            assertEquals(reference, state.reference)
-            assertEquals(null, state.installedModel)
+            assertEquals(SourceSeparationActivePresetState.None, state)
+            assertEquals(pending, fixture.repository.pendingActiveModel())
+        }
+    }
+
+    @Test
+    fun `restore retains a usable current model and records a different pending target`() {
+        val payload = "official-model".encodeToByteArray()
+        fixture(
+            officialPayload = payload,
+            catalog = catalog(payload, includeReviewedContract = true),
+        ).use { fixture ->
+            val installed = fixture.repository.install(
+                input = ByteArrayInputStream(payload),
+                originalFileName = "official-model.tflite",
+                origin = SourceSeparationInstalledPresetOrigin.OfficialDownload,
+            )
+            val current = SourceSeparationActiveModelReference(
+                modelId = installed.modelId,
+                artifactSha256 = installed.sha256,
+                contractSchemaVersion = 2,
+            )
+            fixture.store.write(current)
+            val restored = current.copy(
+                modelId = "other_model",
+                artifactSha256 = "b".repeat(64),
+            )
+
+            fixture.repository.restoreActiveModelReference(restored)
+
+            assertEquals(current, (fixture.repository.activeModel() as
+                SourceSeparationActivePresetState.Reference).reference)
+            assertEquals(restored, fixture.repository.pendingActiveModel())
+        }
+    }
+
+    @Test
+    fun `restore selects an exact installed model when no usable model is active`() {
+        val payload = "official-model".encodeToByteArray()
+        fixture(
+            officialPayload = payload,
+            catalog = catalog(payload, includeReviewedContract = true),
+        ).use { fixture ->
+            val installed = fixture.repository.install(
+                input = ByteArrayInputStream(payload),
+                originalFileName = "official-model.tflite",
+                origin = SourceSeparationInstalledPresetOrigin.OfficialDownload,
+            )
+            val restored = SourceSeparationActiveModelReference(
+                modelId = installed.modelId,
+                artifactSha256 = installed.sha256,
+                contractSchemaVersion = 2,
+            )
+
+            fixture.repository.restoreActiveModelReference(restored)
+
+            assertEquals(restored, (fixture.repository.activeModel() as
+                SourceSeparationActivePresetState.Reference).reference)
+            assertEquals(null, fixture.repository.pendingActiveModel())
+        }
+    }
+
+    @Test
+    fun `restore keeps a missing model pending without creating an active selection`() {
+        fixture("official-model".encodeToByteArray()).use { fixture ->
+            val restored = SourceSeparationActiveModelReference(
+                modelId = "official_model",
+                artifactSha256 = "c".repeat(64),
+                contractSchemaVersion = 2,
+            )
+
+            fixture.repository.restoreActiveModelReference(restored)
+
+            assertEquals(SourceSeparationActivePresetState.None, fixture.repository.activeModel())
+            assertEquals(restored, fixture.repository.pendingActiveModel())
         }
     }
 
@@ -183,6 +254,12 @@ class SourceSeparationPresetRepositoryTest {
                 modelId = "official_model",
                 input = ByteArrayInputStream(payload),
             )
+            val pending = SourceSeparationActiveModelReference(
+                modelId = installed.modelId,
+                artifactSha256 = installed.sha256,
+                contractSchemaVersion = 2,
+            )
+            fixture.repository.setPendingActiveModel(pending)
 
             val error = assertThrows(SourceSeparationPresetActivationException::class.java) {
                 fixture.repository.activate(
@@ -204,6 +281,7 @@ class SourceSeparationPresetRepositoryTest {
                 experimentalConfirmed = true,
             )
             assertTrue(fixture.repository.activeModel() is SourceSeparationActivePresetState.Reference)
+            assertEquals(null, fixture.repository.pendingActiveModel())
         }
     }
 
@@ -278,7 +356,7 @@ class SourceSeparationPresetRepositoryTest {
             customProfileStore = FileSourceSeparationCustomProfileStore(root.resolve("profiles")),
             structuralInspector = structuralInspector,
         )
-        return RepositoryFixture(root, repository)
+        return RepositoryFixture(root, store, repository)
     }
 
     private fun catalog(
@@ -466,6 +544,7 @@ class SourceSeparationPresetRepositoryTest {
 
     private data class RepositoryFixture(
         val root: java.io.File,
+        val store: InMemoryActiveModelStore,
         val repository: SourceSeparationPresetRepository,
     ) : AutoCloseable {
         override fun close() {
@@ -497,11 +576,18 @@ class SourceSeparationPresetRepositoryTest {
 
     private class InMemoryActiveModelStore : SourceSeparationActiveModelStore {
         private var value: SourceSeparationActiveModelReference? = null
+        private var pendingValue: SourceSeparationActiveModelReference? = null
 
         override fun read(): SourceSeparationActiveModelReference? = value
 
         override fun write(reference: SourceSeparationActiveModelReference?) {
             value = reference
+        }
+
+        override fun readPending(): SourceSeparationActiveModelReference? = pendingValue
+
+        override fun writePending(reference: SourceSeparationActiveModelReference?) {
+            pendingValue = reference
         }
     }
 }

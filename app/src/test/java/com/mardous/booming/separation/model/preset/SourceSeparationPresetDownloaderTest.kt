@@ -220,11 +220,18 @@ class SourceSeparationPresetDownloaderTest {
 
     private class InMemoryActiveModelStore : SourceSeparationActiveModelStore {
         private var value: SourceSeparationActiveModelReference? = null
+        private var pendingValue: SourceSeparationActiveModelReference? = null
 
         override fun read(): SourceSeparationActiveModelReference? = value
 
         override fun write(reference: SourceSeparationActiveModelReference?) {
             value = reference
+        }
+
+        override fun readPending(): SourceSeparationActiveModelReference? = pendingValue
+
+        override fun writePending(reference: SourceSeparationActiveModelReference?) {
+            pendingValue = reference
         }
     }
 
