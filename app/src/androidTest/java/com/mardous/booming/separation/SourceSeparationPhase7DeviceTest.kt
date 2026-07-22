@@ -3,11 +3,16 @@ package com.mardous.booming.separation
 import android.os.Build
 import android.os.Debug
 import android.os.Process
+import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractValidator
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
+import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -15,6 +20,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.koin.java.KoinJavaComponent.get
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
 import java.security.MessageDigest
@@ -81,7 +87,73 @@ class SourceSeparationPhase7DeviceTest {
             report.put("error", "${error::class.java.name}: ${error.message}")
             throw error
         } finally {
-            writeReport(context, runId, report)
+            writeReport(context, runId, "identity", report)
+        }
+    }
+
+    @Test
+    fun validatePinnedAcquisition() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val report = baseReport(context, runId, arguments)
+        try {
+            assertTrue(
+                "Pinned acquisition requires the clean-install scenario.",
+                arguments.getBoolean(ARG_CLEAN_INSTALL, true),
+            )
+            val repository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            val downloader = get<SourceSeparationPresetDownloader>(
+                SourceSeparationPresetDownloader::class.java,
+            )
+            assertTrue(repository.installedModels().isEmpty())
+            assertTrue(repository.activeModel() is SourceSeparationActivePresetState.None)
+
+            val modelId = arguments.requiredString(ARG_MODEL_ID)
+            val downloadStartedAt = SystemClock.elapsedRealtime()
+            val installed = downloader.download(modelId)
+            val downloadElapsedMs = SystemClock.elapsedRealtime() - downloadStartedAt
+            val expectedSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
+            val expectedFileName = arguments.requiredString(ARG_ARTIFACT_FILE_NAME)
+            assertEquals(expectedSha256, installed.sha256)
+            assertEquals(expectedFileName, installed.file.name)
+            assertEquals(expectedSha256, installed.file.sha256())
+            assertEquals(SourceSeparationActivePresetState.None, repository.activeModel())
+
+            val selected = repository.activate(
+                sha256 = installed.sha256,
+                platform = AndroidMdxRuntimePlatformProvider.current(),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                experimentalConfirmed = true,
+            )
+            assertEquals(modelId, selected.modelId)
+            assertEquals(expectedSha256, selected.artifactSha256)
+            val active = repository.activeModel()
+            assertTrue(active is SourceSeparationActivePresetState.Reference)
+            assertEquals(expectedSha256, (active as SourceSeparationActivePresetState.Reference)
+                .reference.artifactSha256)
+
+            report.put("status", "passed")
+            report.put("timing", report.getJSONObject("timing")
+                .put("downloadMs", downloadElapsedMs)
+                .put("installMs", JSONObject.NULL)
+            )
+            report.put("acquisition", JSONObject()
+                .put("downloadActivatesModel", false)
+                .put("explicitUseCompleted", true)
+                .put("installedFileBytes", installed.file.length())
+                .put("installedFileSha256", installed.file.sha256())
+                .put("origin", installed.origin.name)
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            writeReport(context, runId, "acquisition", report)
         }
     }
 
@@ -253,10 +325,15 @@ class SourceSeparationPhase7DeviceTest {
         }
     }
 
-    private fun writeReport(context: android.content.Context, runId: String, report: JSONObject) {
+    private fun writeReport(
+        context: android.content.Context,
+        runId: String,
+        stage: String,
+        report: JSONObject,
+    ) {
         val root = File(context.filesDir, REPORT_DIRECTORY)
         check(root.isDirectory || root.mkdirs()) { "Could not create the Phase 7 report directory." }
-        File(root, "$runId-identity.json").writeText(report.toString(2))
+        File(root, "$runId-$stage.json").writeText(report.toString(2))
     }
 
     private fun android.os.Bundle.requiredString(key: String): String =
