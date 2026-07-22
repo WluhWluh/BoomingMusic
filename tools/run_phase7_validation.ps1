@@ -7,6 +7,9 @@ param(
     [string]$ProcessAbi,
 
     [string]$ModelId = "uvr_mdxnet_3_9662",
+
+    [ValidateSet("identity", "acquisition")]
+    [string]$Stage = "identity",
     [string]$RunId = "",
     [string]$OutputRoot = "",
     [string]$RunnerRevision = "phase7-runner-v1",
@@ -19,6 +22,8 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $package = "com.wluhwluh.booming.sourcesep.debug"
 $runner = "$package.test/androidx.test.runner.AndroidJUnitRunner"
 $testClass = "com.mardous.booming.separation.SourceSeparationPhase7DeviceTest"
+$testMethod = if ($Stage -eq "acquisition") { "validatePinnedAcquisition" } else { "validateDeviceEvidenceIdentity" }
+$reportStage = $Stage
 $adb = (Get-Command adb -ErrorAction Stop).Source
 $catalogPath = Join-Path $repoRoot "app/src/main/assets/source-separation/model-catalog-v2.json"
 $thresholdsPath = Join-Path $repoRoot "docs/validation/litert-phase7/thresholds-v1.json"
@@ -26,10 +31,13 @@ $fixturesPath = Join-Path $repoRoot "docs/validation/litert-phase7/fixtures-v1.j
 
 if ([string]::IsNullOrWhiteSpace($RunId)) {
     $safeSerial = $Serial -replace '[^A-Za-z0-9._-]', '_'
-    $RunId = "{0}-{1}-identity-{2:yyyyMMdd-HHmmss}" -f $safeSerial, $ProcessAbi, (Get-Date)
+    $RunId = "{0}-{1}-{2}-{3:yyyyMMdd-HHmmss}" -f $safeSerial, $ProcessAbi, $Stage, (Get-Date)
 }
 if ($RunId -notmatch '^[A-Za-z0-9._-]{1,120}$') {
     throw "RunId contains unsupported characters: $RunId"
+}
+if ($Stage -eq "acquisition" -and $KeepAppData) {
+    throw "The pinned acquisition stage requires a clean app-data scenario."
 }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "build\phase7-validation"
@@ -108,7 +116,7 @@ try {
     & $adb -s $Serial shell pm grant $package android.permission.READ_MEDIA_AUDIO 2>$null | Out-Null
 
     $instrumentArguments = @(
-        "-e", "class", "$testClass#validateDeviceEvidenceIdentity",
+        "-e", "class", "$testClass#$testMethod",
         "-e", "runId", $RunId,
         "-e", "serial", $Serial,
         "-e", "processAbi", $ProcessAbi,
@@ -140,12 +148,12 @@ try {
     $instrumentExit = $LASTEXITCODE
     $instrumentText = $instrumentOutput -join "`n"
     Write-Host $instrumentText
-    $remoteReport = "files/phase7-validation-reports/$RunId-identity.json"
+    $remoteReport = "files/phase7-validation-reports/$RunId-$reportStage.json"
     $reportText = Read-RemoteFile $remoteReport
 
     $deviceDirectory = Join-Path $OutputRoot ($Serial -replace '[^A-Za-z0-9._-]', '_')
     New-Item -ItemType Directory -Force -Path $deviceDirectory | Out-Null
-    $reportPath = Join-Path $deviceDirectory "$RunId-identity.json"
+    $reportPath = Join-Path $deviceDirectory "$RunId-$reportStage.json"
     $reportText | Set-Content -LiteralPath $reportPath -Encoding utf8
 
     $envelope = [ordered]@{
@@ -165,9 +173,9 @@ try {
     $envelope | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $envelopePath -Encoding utf8
 
     if ($instrumentExit -ne 0 -or $instrumentText -notmatch 'OK \(1 test\)') {
-        throw "Phase 7 identity instrumentation failed. Report: $reportPath"
+        throw "Phase 7 $reportStage instrumentation failed. Report: $reportPath"
     }
-    Write-Host "Saved Phase 7 identity report to $reportPath"
+    Write-Host "Saved Phase 7 $reportStage report to $reportPath"
     Write-Host "Saved Phase 7 input envelope to $envelopePath"
 } finally {
     Pop-Location
