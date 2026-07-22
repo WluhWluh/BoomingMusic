@@ -236,11 +236,12 @@ class SourceSeparationCacheIdentityTest {
 
     private fun sourceIdentity() = SourceSeparationCacheSourceIdentity(
         audioFingerprint = "encoded-samples-v1:${"a".repeat(64)}",
-        sourceFrameCount = 44_100,
+        encodedSampleCount = 100L,
+        encodedByteCount = 1_024L,
+        mimeType = "audio/flac",
         sourceSampleRate = 44_100,
         sourceChannelCount = 2,
-        outputFrameCount = 44_100,
-        outputSampleRate = 44_100,
+        sourceDurationUs = 1_000_000L,
     )
 
     private fun officialSnapshot(): SourceSeparationCacheContractSnapshot {

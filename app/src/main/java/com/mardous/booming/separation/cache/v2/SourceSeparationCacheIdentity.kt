@@ -51,11 +51,12 @@ data class SourceSeparationCacheIdentity(
             namespace = "booming-ss-cache-identity-v$cacheIdentitySchemaVersion",
             fields = buildList {
                 add(source.audioFingerprint)
-                add(source.sourceFrameCount.toString())
+                add(source.encodedSampleCount.toString())
+                add(source.encodedByteCount.toString())
+                add(source.mimeType)
                 add(source.sourceSampleRate.toString())
                 add(source.sourceChannelCount.toString())
-                add(source.outputFrameCount.toString())
-                add(source.outputSampleRate.toString())
+                add(source.sourceDurationUs?.toString() ?: "unknown")
                 add(modelId)
                 add(artifactSha256.lowercase())
                 add(contractId)
@@ -77,21 +78,29 @@ data class SourceSeparationCacheIdentity(
 @Serializable
 data class SourceSeparationCacheSourceIdentity(
     val audioFingerprint: String,
-    val sourceFrameCount: Int,
+    val encodedSampleCount: Long,
+    val encodedByteCount: Long,
+    val mimeType: String,
     val sourceSampleRate: Int,
     val sourceChannelCount: Int,
-    val outputFrameCount: Int,
-    val outputSampleRate: Int,
+    val sourceDurationUs: Long?,
 ) {
     init {
-        require(audioFingerprint.isNotBlank() && audioFingerprint != "pending") {
+        require(FINGERPRINT_PATTERN.matches(audioFingerprint)) {
             "Final source audio fingerprint is required."
         }
-        require(sourceFrameCount > 0) { "Source frame count is invalid." }
+        require(encodedSampleCount > 0L) { "Encoded sample count is invalid." }
+        require(encodedByteCount > 0L) { "Encoded byte count is invalid." }
+        require(mimeType.isNotBlank()) { "Source MIME type is empty." }
         require(sourceSampleRate > 0) { "Source sample rate is invalid." }
         require(sourceChannelCount > 0) { "Source channel count is invalid." }
-        require(outputFrameCount > 0) { "Output frame count is invalid." }
-        require(outputSampleRate > 0) { "Output sample rate is invalid." }
+        require(sourceDurationUs == null || sourceDurationUs > 0L) {
+            "Source duration is invalid."
+        }
+    }
+
+    private companion object {
+        val FINGERPRINT_PATTERN = Regex("^[a-z0-9-]+:[0-9a-fA-F]{64}$")
     }
 }
 
