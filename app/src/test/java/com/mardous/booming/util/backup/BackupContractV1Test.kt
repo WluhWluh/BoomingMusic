@@ -170,6 +170,60 @@ class BackupContractV1Test {
     }
 
     @Test
+    fun `portable profile revisions may share one model artifact`() {
+        val contract = catalog.contracts.single { it.modelId == "uvr_mdxnet_3_9662" }
+        val first = SourceSeparationCustomModelProfile(
+            profileSchemaVersion = 1,
+            profileId = "portable-custom-profile-v1",
+            modelId = "custom_model",
+            displayName = "Custom model v1",
+            artifact = contract.artifact,
+            tensorContract = contract.tensorContract,
+            dsp = contract.dsp,
+            stemContract = contract.stemContract,
+            pipelineCompatibility = contract.pipelineCompatibility,
+            qualityUnverified = true,
+        )
+        val second = first.copy(
+            profileId = "portable-custom-profile-v2",
+            displayName = "Custom model v2",
+        )
+
+        BackupContractValidator.validateSourceSeparationSettings(
+            SourceSeparationSettingsSnapshotV1(
+                schemaVersion = 1,
+                preferences = emptyMap(),
+                customProfiles = listOf(first, second),
+            )
+        )
+
+        assertThrows(BackupContractException::class.java) {
+            BackupContractValidator.validateSourceSeparationSettings(
+                SourceSeparationSettingsSnapshotV1(
+                    schemaVersion = 1,
+                    preferences = emptyMap(),
+                    customProfiles = listOf(first, second.copy(profileId = first.profileId)),
+                )
+            )
+        }
+        assertThrows(BackupContractException::class.java) {
+            BackupContractValidator.validateSourceSeparationSettings(
+                SourceSeparationSettingsSnapshotV1(
+                    schemaVersion = 1,
+                    preferences = emptyMap(),
+                    activeModel = PortableActiveModelReference(
+                        modelId = first.modelId,
+                        artifactSha256 = first.artifact.sha256,
+                        contractSchemaVersion = 1,
+                        profileId = "missing-profile-revision",
+                    ),
+                    customProfiles = listOf(first, second),
+                )
+            )
+        }
+    }
+
+    @Test
     fun `manifest accepts canonical payloads and both filtered legacy projections`() {
         val manifest = manifest(
             payloads = listOf(

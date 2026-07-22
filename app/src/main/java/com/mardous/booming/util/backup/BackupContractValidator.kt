@@ -89,10 +89,6 @@ object BackupContractValidator {
         snapshot.activeModel?.let(::validateActiveModelReference)
         snapshot.customProfiles.forEach(SourceSeparationModelContractValidator::validateCustomProfile)
         requireBackup(
-            snapshot.customProfiles.map { it.artifact.sha256 }.toSet().size ==
-                snapshot.customProfiles.size
-        ) { "Custom profiles must be uniquely keyed by model SHA-256" }
-        requireBackup(
             snapshot.customProfiles.map { it.profileId }.toSet().size ==
                 snapshot.customProfiles.size
         ) { "Custom profile IDs must be unique" }
