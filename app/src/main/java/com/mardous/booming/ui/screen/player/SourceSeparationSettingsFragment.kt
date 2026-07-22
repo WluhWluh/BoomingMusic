@@ -116,11 +116,7 @@ class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
                 BoomingMusicTheme {
                     SourceSeparationSettingsSheet(
                         viewModel = viewModel,
-                        modelAwareCacheViewModel = if (BuildConfig.DEBUG) {
-                            modelAwareCacheViewModel
-                        } else {
-                            null
-                        },
+                        modelAwareCacheViewModel = modelAwareCacheViewModel,
                     )
                 }
             }
@@ -137,7 +133,7 @@ private enum class SourceSeparationSettingsPage {
 @Composable
 private fun SourceSeparationSettingsSheet(
     viewModel: PlayerViewModel,
-    modelAwareCacheViewModel: SourceSeparationModelAwareCacheManagementViewModel?,
+    modelAwareCacheViewModel: SourceSeparationModelAwareCacheManagementViewModel,
 ) {
     val hapticFeedback = LocalHapticFeedback.current
     val context = LocalContext.current
@@ -201,14 +197,7 @@ private fun SourceSeparationSettingsSheet(
     val autoCacheCleanupCompletedLimit by viewModel
         .sourceSeparationAutoCacheCleanupCompletedLimitFlow
         .collectAsState()
-    val cacheManagementState by viewModel
-        .sourceSeparationCacheManagementStateFlow
-        .collectAsState()
-    val modelAwareCacheState = if (modelAwareCacheViewModel != null) {
-        modelAwareCacheViewModel.state.collectAsState().value
-    } else {
-        null
-    }
+    val modelAwareCacheState by modelAwareCacheViewModel.state.collectAsState()
     var page by remember {
         mutableStateOf(SourceSeparationSettingsPage.Main)
     }
@@ -241,15 +230,11 @@ private fun SourceSeparationSettingsSheet(
         autoCacheCleanupCompletedLimit,
     ) {
         if (page == SourceSeparationSettingsPage.CacheManagement) {
-            if (modelAwareCacheViewModel != null) {
-                modelAwareCacheViewModel.updateCleanupPolicy(
-                    enabled = autoCacheCleanup,
-                    partialLimit = autoCacheCleanupPartialLimit,
-                    completedLimit = autoCacheCleanupCompletedLimit,
-                )
-            } else {
-                viewModel.refreshSourceSeparationCacheManagement()
-            }
+            modelAwareCacheViewModel.updateCleanupPolicy(
+                enabled = autoCacheCleanup,
+                partialLimit = autoCacheCleanupPartialLimit,
+                completedLimit = autoCacheCleanupCompletedLimit,
+            )
         }
     }
 
@@ -264,43 +249,24 @@ private fun SourceSeparationSettingsSheet(
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )
             if (page == SourceSeparationSettingsPage.CacheManagement) {
-                if (modelAwareCacheState != null && modelAwareCacheViewModel != null) {
-                    SourceSeparationModelAwareCacheManagementPage(
-                        state = modelAwareCacheState,
-                        autoCleanupEnabled = autoCacheCleanup,
-                        partialLimit = autoCacheCleanupPartialLimit,
-                        completedLimit = autoCacheCleanupCompletedLimit,
-                        onBack = { page = SourceSeparationSettingsPage.Main },
-                        onRefresh = modelAwareCacheViewModel::refresh,
-                        onDeleteAll = modelAwareCacheViewModel::deleteAll,
-                        onDelete = modelAwareCacheViewModel::delete,
-                        onPlay = viewModel::playSourceSeparationCompletedCache,
-                        onDismissFailure = modelAwareCacheViewModel::clearFailure,
-                        onAutoCleanupChange =
-                            viewModel::setSourceSeparationAutoCacheCleanupEnabled,
-                        onPartialLimitChange =
-                            viewModel::setSourceSeparationAutoCacheCleanupPartialLimit,
-                        onCompletedLimitChange =
-                            viewModel::setSourceSeparationAutoCacheCleanupCompletedLimit,
-                    )
-                } else {
-                    SourceSeparationCacheManagementPage(
-                        state = cacheManagementState,
-                        autoCleanupEnabled = autoCacheCleanup,
-                        partialLimit = autoCacheCleanupPartialLimit,
-                        completedLimit = autoCacheCleanupCompletedLimit,
-                        onBack = { page = SourceSeparationSettingsPage.Main },
-                        onRefresh = viewModel::refreshSourceSeparationCacheManagement,
-                        onDeleteAll = viewModel::deleteAllSourceSeparationCaches,
-                        onDelete = viewModel::deleteSourceSeparationCacheEntry,
-                        onAutoCleanupChange =
-                            viewModel::setSourceSeparationAutoCacheCleanupEnabled,
-                        onPartialLimitChange =
-                            viewModel::setSourceSeparationAutoCacheCleanupPartialLimit,
-                        onCompletedLimitChange =
-                            viewModel::setSourceSeparationAutoCacheCleanupCompletedLimit,
-                    )
-                }
+                SourceSeparationModelAwareCacheManagementPage(
+                    state = modelAwareCacheState,
+                    autoCleanupEnabled = autoCacheCleanup,
+                    partialLimit = autoCacheCleanupPartialLimit,
+                    completedLimit = autoCacheCleanupCompletedLimit,
+                    onBack = { page = SourceSeparationSettingsPage.Main },
+                    onRefresh = modelAwareCacheViewModel::refresh,
+                    onDeleteAll = modelAwareCacheViewModel::deleteAll,
+                    onDelete = modelAwareCacheViewModel::delete,
+                    onPlay = viewModel::playSourceSeparationCompletedCache,
+                    onDismissFailure = modelAwareCacheViewModel::clearFailure,
+                    onAutoCleanupChange =
+                        viewModel::setSourceSeparationAutoCacheCleanupEnabled,
+                    onPartialLimitChange =
+                        viewModel::setSourceSeparationAutoCacheCleanupPartialLimit,
+                    onCompletedLimitChange =
+                        viewModel::setSourceSeparationAutoCacheCleanupCompletedLimit,
+                )
                 return@Column
             }
             LazyColumn(

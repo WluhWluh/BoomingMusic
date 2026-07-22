@@ -51,7 +51,6 @@ import androidx.compose.ui.unit.dp
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import com.mardous.booming.BuildConfig
 import com.mardous.booming.R
 import com.mardous.booming.extensions.files.asReadableFileSize
 import com.mardous.booming.extensions.isLandscape
@@ -61,20 +60,12 @@ import com.mardous.booming.separation.model.SourceSeparationModelSource
 import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
 import com.mardous.booming.ui.component.compose.TitledCard
 import com.mardous.booming.ui.theme.BoomingMusicTheme
-import org.koin.androidx.viewmodel.ext.android.activityViewModel
 import org.koin.androidx.viewmodel.ext.android.viewModel
 import java.util.Locale
 
 class SourceSeparationModelManagementFragment : BottomSheetDialogFragment() {
 
-    private val viewModel: PlayerViewModel by activityViewModel()
     private val presetViewModel: SourceSeparationPresetManagementViewModel by viewModel()
-    private val importOnnxModelLauncher = registerForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri: Uri? ->
-        uri ?: return@registerForActivityResult
-        viewModel.importSourceSeparationModel(uri)
-    }
     private val importTfliteModelLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
@@ -126,85 +117,64 @@ class SourceSeparationModelManagementFragment : BottomSheetDialogFragment() {
             )
             setContent {
                 BoomingMusicTheme {
-                    if (BuildConfig.DEBUG) {
-                        val state by presetViewModel.state.collectAsState()
-                        SourceSeparationPresetManagementSheet(
-                            state = state,
-                            onDownload = presetViewModel::download,
-                            onCancelDownload = presetViewModel::cancelDownload,
-                            onUse = presetViewModel::requestUse,
-                            onDelete = presetViewModel::delete,
-                            onConfirmExperimental = presetViewModel::confirmExperimentalUse,
-                            onDismissExperimental = presetViewModel::dismissExperimentalUse,
-                            onClearError = presetViewModel::clearError,
-                            onClearRestoredModelTarget =
-                                presetViewModel::clearRestoredModelTarget,
-                            onRefresh = presetViewModel::refresh,
-                            onImportModel = {
-                                importTfliteModelLauncher.launch(
-                                    arrayOf(
-                                        "application/octet-stream",
-                                        "application/x-tflite",
-                                        "application/*",
-                                        "*/*",
-                                    ),
-                                )
-                            },
-                            onImportSidecar = {
-                                importTfliteSidecarLauncher.launch(
-                                    arrayOf(
-                                        "application/json",
-                                        "text/plain",
-                                        "application/*",
-                                        "*/*",
-                                    ),
-                                )
-                            },
-                            onStartManualProfile = presetViewModel::startManualProfile,
-                            onSaveManualProfile = presetViewModel::saveManualProfile,
-                            onCancelManualProfile = presetViewModel::cancelManualProfile,
-                            onRetryImport = presetViewModel::retryImport,
-                            onDiscardImport = presetViewModel::discardImport,
-                            onDismissImportSuccess = presetViewModel::dismissImportSuccess,
-                            onUseImported = presetViewModel::requestUseImported,
-                            onDeleteImported = presetViewModel::deleteImported,
-                            onShowCatalogDetails = presetViewModel::showCatalogDetails,
-                            onShowImportedDetails = presetViewModel::showImportedDetails,
-                            onDismissModelDetails = presetViewModel::dismissModelDetails,
-                            onEditCustomProfile = presetViewModel::editCustomProfile,
-                            onSaveCustomProfileRevision =
-                                presetViewModel::saveCustomProfileRevision,
-                            onCancelCustomProfileEdit =
-                                presetViewModel::cancelCustomProfileEdit,
-                            onUseCustomProfile = presetViewModel::useCustomProfile,
-                            onExportCustomProfile = { profileId ->
-                                presetViewModel.exportCustomProfile(profileId)?.let { export ->
-                                    pendingProfileExport = export
-                                    exportCustomProfileLauncher.launch(export.fileName)
-                                }
-                            },
-                            onDeleteCustomProfile = presetViewModel::deleteCustomProfile,
-                        )
-                    } else {
-                        val state by viewModel.sourceSeparationModelStateFlow.collectAsState()
-                        SourceSeparationModelManagementSheet(
-                            state = state,
-                            onImport = {
-                                importOnnxModelLauncher.launch(
-                                    arrayOf(
-                                        "application/octet-stream",
-                                        "application/x-onnx",
-                                        "application/*",
-                                        "*/*",
-                                    ),
-                                )
-                            },
-                            onDownloadPreset = viewModel::downloadPresetSourceSeparationModel,
-                            onDownloadUrl = viewModel::downloadSourceSeparationModel,
-                            onDelete = viewModel::deleteSourceSeparationModel,
-                            onRefresh = viewModel::refreshSourceSeparationModelState,
-                        )
-                    }
+                    val state by presetViewModel.state.collectAsState()
+                    SourceSeparationPresetManagementSheet(
+                        state = state,
+                        onDownload = presetViewModel::download,
+                        onCancelDownload = presetViewModel::cancelDownload,
+                        onUse = presetViewModel::requestUse,
+                        onDelete = presetViewModel::delete,
+                        onConfirmExperimental = presetViewModel::confirmExperimentalUse,
+                        onDismissExperimental = presetViewModel::dismissExperimentalUse,
+                        onClearError = presetViewModel::clearError,
+                        onClearRestoredModelTarget =
+                            presetViewModel::clearRestoredModelTarget,
+                        onRefresh = presetViewModel::refresh,
+                        onImportModel = {
+                            importTfliteModelLauncher.launch(
+                                arrayOf(
+                                    "application/octet-stream",
+                                    "application/x-tflite",
+                                    "application/*",
+                                    "*/*",
+                                ),
+                            )
+                        },
+                        onImportSidecar = {
+                            importTfliteSidecarLauncher.launch(
+                                arrayOf(
+                                    "application/json",
+                                    "text/plain",
+                                    "application/*",
+                                    "*/*",
+                                ),
+                            )
+                        },
+                        onStartManualProfile = presetViewModel::startManualProfile,
+                        onSaveManualProfile = presetViewModel::saveManualProfile,
+                        onCancelManualProfile = presetViewModel::cancelManualProfile,
+                        onRetryImport = presetViewModel::retryImport,
+                        onDiscardImport = presetViewModel::discardImport,
+                        onDismissImportSuccess = presetViewModel::dismissImportSuccess,
+                        onUseImported = presetViewModel::requestUseImported,
+                        onDeleteImported = presetViewModel::deleteImported,
+                        onShowCatalogDetails = presetViewModel::showCatalogDetails,
+                        onShowImportedDetails = presetViewModel::showImportedDetails,
+                        onDismissModelDetails = presetViewModel::dismissModelDetails,
+                        onEditCustomProfile = presetViewModel::editCustomProfile,
+                        onSaveCustomProfileRevision =
+                            presetViewModel::saveCustomProfileRevision,
+                        onCancelCustomProfileEdit =
+                            presetViewModel::cancelCustomProfileEdit,
+                        onUseCustomProfile = presetViewModel::useCustomProfile,
+                        onExportCustomProfile = { profileId ->
+                            presetViewModel.exportCustomProfile(profileId)?.let { export ->
+                                pendingProfileExport = export
+                                exportCustomProfileLauncher.launch(export.fileName)
+                            }
+                        },
+                        onDeleteCustomProfile = presetViewModel::deleteCustomProfile,
+                    )
                 }
             }
         }

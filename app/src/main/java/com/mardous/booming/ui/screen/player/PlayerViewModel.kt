@@ -981,7 +981,6 @@ class PlayerViewModel(
     }
 
     fun playSourceSeparationCompletedCache(cacheKey: String) {
-        if (!BuildConfig.DEBUG) return
         traceSourceSeparationPlaybackUserActionMarker(
             "modelAwareCache.play.userAction cache=${cacheKey.take(12)}"
         )

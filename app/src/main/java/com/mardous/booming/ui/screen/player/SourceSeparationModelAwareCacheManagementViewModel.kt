@@ -2,11 +2,10 @@ package com.mardous.booming.ui.screen.player
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.mardous.booming.BuildConfig
+import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntry
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
-import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,7 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
-    private val repository: SourceSeparationModelAwareCacheRepository,
+    private val runtime: SourceSeparationRuntimeFacade,
 ) : ViewModel() {
     private val _state = MutableStateFlow(SourceSeparationModelAwareCacheManagementUiState())
     val state = _state.asStateFlow()
@@ -22,12 +21,7 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
     private var loadJob: Job? = null
     private var cleanupPolicy: SourceSeparationModelAwareCacheCleanupPolicy? = null
 
-    init {
-        check(BuildConfig.DEBUG) {
-            "Model-aware cache management is available only in debug builds."
-        }
-        refresh()
-    }
+    init { refresh() }
 
     fun updateCleanupPolicy(enabled: Boolean, partialLimit: Int, completedLimit: Int) {
         val next = SourceSeparationModelAwareCacheCleanupPolicy(
@@ -54,7 +48,7 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
                 deletingCacheKeys = _state.value.deletingCacheKeys + cacheKey,
                 failure = null,
             )
-            val failure = repository.delete(cacheKey).toFailure()
+            val failure = runtime.delete(cacheKey).toFailure()
             loadEntries(
                 failure = failure,
                 deletingCacheKeys = _state.value.deletingCacheKeys - cacheKey,
@@ -75,7 +69,7 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
             )
             var failure: SourceSeparationModelAwareCacheManagementFailure? = null
             keys.forEach { cacheKey ->
-                val resultFailure = repository.delete(cacheKey).toFailure()
+                val resultFailure = runtime.delete(cacheKey).toFailure()
                 if (failure == null && resultFailure != null) failure = resultFailure
                 _state.value = _state.value.copy(
                     deletingCacheKeys = _state.value.deletingCacheKeys - cacheKey,
@@ -95,12 +89,12 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
             _state.value = _state.value.copy(loading = true, failure = null)
             val result = runCatching {
                 cleanupPolicy?.takeIf { pruneFirst && it.enabled }?.let { policy ->
-                    repository.prune(
+                    runtime.prune(
                         partialLimit = policy.partialLimit,
                         completedLimit = policy.completedLimit,
                     )
                 }
-                repository.entries()
+                runtime.entries()
             }
             _state.value = result.fold(
                 onSuccess = { items ->
@@ -124,7 +118,7 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
         deletingAll: Boolean = _state.value.deletingAll,
         deletingCacheKeys: Set<String> = _state.value.deletingCacheKeys,
     ) {
-        val result = runCatching(repository::entries)
+        val result = runCatching(runtime::entries)
         _state.value = result.fold(
             onSuccess = { items ->
                 SourceSeparationModelAwareCacheManagementUiState(

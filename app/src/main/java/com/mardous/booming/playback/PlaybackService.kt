@@ -984,11 +984,6 @@ class PlaybackService :
             }
 
             Playback.PLAY_SOURCE_SEPARATION_COMPLETED_CACHE -> {
-                if (!BuildConfig.DEBUG) {
-                    return Futures.immediateFuture(
-                        SessionResult(SessionError.ERROR_NOT_SUPPORTED)
-                    )
-                }
                 val cacheKey = args.getString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY)
                     .orEmpty()
                 serviceScope.future {
