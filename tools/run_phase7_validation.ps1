@@ -8,8 +8,12 @@ param(
 
     [string]$ModelId = "uvr_mdxnet_3_9662",
 
-    [ValidateSet("identity", "acquisition")]
+    [ValidateSet("identity", "acquisition", "worker")]
     [string]$Stage = "identity",
+
+    [string]$SourcePath = "",
+
+    [string]$FixtureId = "coast_town_full_mp3",
     [string]$RunId = "",
     [string]$OutputRoot = "",
     [string]$RunnerRevision = "phase7-runner-v1",
@@ -21,8 +25,16 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $package = "com.wluhwluh.booming.sourcesep.debug"
 $runner = "$package.test/androidx.test.runner.AndroidJUnitRunner"
-$testClass = "com.mardous.booming.separation.SourceSeparationPhase7DeviceTest"
-$testMethod = if ($Stage -eq "acquisition") { "validatePinnedAcquisition" } else { "validateDeviceEvidenceIdentity" }
+$testClass = if ($Stage -eq "worker") {
+    "com.mardous.booming.separation.SourceSeparationPhase7WorkerDeviceTest"
+} else {
+    "com.mardous.booming.separation.SourceSeparationPhase7DeviceTest"
+}
+$testMethod = switch ($Stage) {
+    "acquisition" { "validatePinnedAcquisition"; break }
+    "worker" { "validateProductionWorkerCpu"; break }
+    default { "validateDeviceEvidenceIdentity" }
+}
 $reportStage = $Stage
 $adb = (Get-Command adb -ErrorAction Stop).Source
 $catalogPath = Join-Path $repoRoot "app/src/main/assets/source-separation/model-catalog-v2.json"
@@ -38,6 +50,12 @@ if ($RunId -notmatch '^[A-Za-z0-9._-]{1,120}$') {
 }
 if ($Stage -eq "acquisition" -and $KeepAppData) {
     throw "The pinned acquisition stage requires a clean app-data scenario."
+}
+if ($Stage -eq "worker" -and -not $KeepAppData) {
+    throw "The worker stage expects a previously acquired model. Use -KeepAppData."
+}
+if ($Stage -eq "worker" -and [string]::IsNullOrWhiteSpace($SourcePath)) {
+    throw "SourcePath is required for the worker stage."
 }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "build\phase7-validation"
@@ -80,9 +98,23 @@ $fixtures = Get-Content -LiteralPath $fixturesPath -Raw | ConvertFrom-Json
 $catalogSourceRevision = "746bee43db9ece9ec8214c1c74269e21547aed58"
 $pipelineVersion = "$($model.Contract.pipelineCompatibility.pipelineId)-v$($model.Contract.pipelineCompatibility.minimumVersion)"
 $artifact = $model.Artifact.tflite
+$fixture = @($fixtures.fixtures) | Where-Object { $_.fixtureId -eq $FixtureId } | Select-Object -First 1
+if ($Stage -eq "worker") {
+    if ($null -eq $fixture) { throw "Fixture is absent from fixtures-v1.json: $FixtureId" }
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw "Source fixture file not found: $SourcePath"
+    }
+    $sourcePath = (Resolve-Path -LiteralPath $SourcePath).Path
+    $sourceBytes = (Get-Item -LiteralPath $sourcePath).Length
+    $sourceSha256 = Get-Sha256 $sourcePath
+    if ($sourceBytes -ne [int64]$fixture.byteSize -or $sourceSha256 -ne $fixture.sha256) {
+        throw "Source fixture identity does not match $FixtureId."
+    }
+}
 $appCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 $appApk = $null
 $testApk = $null
+$remoteSourcePath = ""
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) { throw "OutputRoot must not be empty." }
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
@@ -139,6 +171,29 @@ try {
         "-e", "fixturesVersion", $fixtures.schemaVersion,
         "-e", "cleanInstallScenario", $((-not $KeepAppData).ToString().ToLowerInvariant())
     )
+    if ($Stage -eq "worker") {
+        $sourceLeaf = Split-Path -Leaf $sourcePath
+        if ($sourceLeaf -notmatch '^[A-Za-z0-9._-]+$') {
+            throw "Source fixture filename contains unsupported characters: $sourceLeaf"
+        }
+        $remoteSourcePath = "/storage/emulated/0/Music/booming-ss-phase7-$RunId-$sourceLeaf"
+        & $adb -s $Serial shell mkdir -p /storage/emulated/0/Music
+        if ($LASTEXITCODE -ne 0) { throw "Could not create the shared Music directory." }
+        Invoke-Adb push $sourcePath $remoteSourcePath
+        Invoke-Adb shell chmod 644 $remoteSourcePath
+        $instrumentArguments += @(
+            "-e", "sourcePath", $remoteSourcePath,
+            "-e", "fixtureId", $fixture.fixtureId,
+            "-e", "fixtureFileName", $fixture.fileName,
+            "-e", "fixtureBytes", [string]$fixture.byteSize,
+            "-e", "fixtureSha256", $fixture.sha256,
+            "-e", "fixtureDurationUs", [string]$fixture.durationUs,
+            "-e", "fixtureSampleRate", [string]$fixture.sampleRate,
+            "-e", "fixtureChannels", [string]$fixture.channels,
+            "-e", "fixtureCodec", $fixture.codec,
+            "-e", "fixtureDecodeClass", $fixture.decodeClass
+        )
+    }
     if (-not [string]::IsNullOrWhiteSpace($litertSha256)) {
         $instrumentArguments += @("-e", "litertSha256", $litertSha256)
     }
@@ -155,6 +210,16 @@ try {
     New-Item -ItemType Directory -Force -Path $deviceDirectory | Out-Null
     $reportPath = Join-Path $deviceDirectory "$RunId-$reportStage.json"
     $reportText | Set-Content -LiteralPath $reportPath -Encoding utf8
+
+    foreach ($diagnostic in @(
+        @{ Name = "meminfo"; Arguments = @("shell", "dumpsys", "meminfo", $package) },
+        @{ Name = "battery"; Arguments = @("shell", "dumpsys", "battery") },
+        @{ Name = "thermal"; Arguments = @("shell", "dumpsys", "thermalservice") }
+    )) {
+        $diagnosticText = & $adb -s $Serial @($diagnostic.Arguments) 2>$null
+        ($diagnosticText -join "`n") | Set-Content -LiteralPath `
+            (Join-Path $deviceDirectory "$RunId-$($diagnostic.Name).txt") -Encoding utf8
+    }
 
     $envelope = [ordered]@{
         schemaVersion = "phase7-inputs-v1"
@@ -178,5 +243,8 @@ try {
     Write-Host "Saved Phase 7 $reportStage report to $reportPath"
     Write-Host "Saved Phase 7 input envelope to $envelopePath"
 } finally {
+    if (-not [string]::IsNullOrWhiteSpace($remoteSourcePath)) {
+        & $adb -s $Serial shell rm -f $remoteSourcePath 2>$null | Out-Null
+    }
     Pop-Location
 }
