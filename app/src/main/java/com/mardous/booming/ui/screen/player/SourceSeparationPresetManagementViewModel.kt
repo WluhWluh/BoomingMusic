@@ -364,7 +364,7 @@ class SourceSeparationPresetManagementViewModel internal constructor(
                 entries = entries,
                 importedEntries = importedEntries,
                 customProfiles = repository.customProfiles(),
-                activeReference = activeReference,
+                activeReference = usableActiveModelReference(active),
             ),
         )
     }
@@ -689,15 +689,22 @@ internal fun resolveRestoredModelTarget(
     }
     return SourceSeparationRestoredModelTargetUiState(
         modelId = reference.modelId,
-        displayName = official?.displayName
-            ?: imported?.displayName
+        displayName = imported?.displayName
             ?: customProfile?.displayName
+            ?: official?.displayName
             ?: reference.modelId,
         artifactSha256 = reference.artifactSha256.lowercase(Locale.ROOT),
         exactModelInstalled = officialArtifactInstalled || imported != null,
         currentModelRetained = activeReference != null && !activeReference.sameIdentity(reference),
     )
 }
+
+internal fun usableActiveModelReference(
+    state: SourceSeparationActivePresetState,
+): SourceSeparationActiveModelReference? =
+    (state as? SourceSeparationActivePresetState.Reference)
+        ?.takeIf { it.installedModel != null }
+        ?.reference
 
 private fun SourceSeparationActiveModelReference.sameIdentity(
     other: SourceSeparationActiveModelReference,

@@ -18,6 +18,7 @@ import com.mardous.booming.separation.model.contract.SourceSeparationCustomModel
 import com.mardous.booming.separation.model.contract.StemContract
 import com.mardous.booming.separation.model.contract.TensorContract
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
+import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPresetOrigin
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
@@ -144,6 +145,30 @@ class SourceSeparationPresetManagementStateTest {
 
         assertTrue(target.currentModelRetained)
         assertFalse(target.exactModelInstalled)
+    }
+
+    @Test
+    fun `missing current model is not reported as retained`() {
+        val state = SourceSeparationActivePresetState.Reference(
+            reference = activeReference(),
+            installedModel = null,
+        )
+
+        assertEquals(null, usableActiveModelReference(state))
+    }
+
+    @Test
+    fun `installed current model is eligible to be retained`() {
+        val installed = item(
+            supportLevel = CatalogSupportLevel.Recommended,
+            activationPolicy = CatalogActivationPolicy.SelectableWhenQualified,
+        ).installed
+        val state = SourceSeparationActivePresetState.Reference(
+            reference = activeReference(),
+            installedModel = installed,
+        )
+
+        assertEquals(activeReference(), usableActiveModelReference(state))
     }
 
     @Test
