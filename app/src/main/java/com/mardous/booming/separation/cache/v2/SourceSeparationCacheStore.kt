@@ -207,6 +207,60 @@ class SourceSeparationCacheStore(
         return resolveRelativePath(entryDirectory(cacheKey), relativePath)
     }
 
+    fun relativeEntryPath(cacheKey: String, file: File): String {
+        val entry = entryDirectory(cacheKey).canonicalFile
+        val target = file.canonicalFile
+        require(target.isWithin(entry)) { "Cache file is outside its entry directory." }
+        val relative = entry.toPath().relativize(target.toPath()).toString()
+            .replace(File.separatorChar, '/')
+        SourceSeparationCacheRelativePath.requireValid(relative)
+        return relative
+    }
+
+    fun copyIntoEntryAtomically(
+        cacheKey: String,
+        source: File,
+        relativePath: String,
+    ): SourceSeparationCacheFileIntegrity {
+        require(source.isFile) { "Cache copy source is missing." }
+        val target = resolveEntryPath(cacheKey, relativePath)
+        val targetDirectory = requireNotNull(target.parentFile) {
+            "Cache output has no parent directory."
+        }
+        require(targetDirectory.exists() || targetDirectory.mkdirs()) {
+            "Unable to create cache output directory."
+        }
+        val temporary = File.createTempFile("${target.name}.", ".tmp", targetDirectory)
+        try {
+            source.copyTo(temporary, overwrite = true)
+            val integrity = fileIntegrity(temporary)
+            replaceFile(temporary, target)
+            return integrity
+        } catch (error: Throwable) {
+            temporary.delete()
+            throw error
+        }
+    }
+
+    fun fileIntegrity(file: File): SourceSeparationCacheFileIntegrity {
+        require(file.isFile) { "Cache integrity file is missing." }
+        return SourceSeparationCacheFileIntegrity(
+            byteSize = file.length(),
+            sha256 = fileHasher.sha256(file),
+        )
+    }
+
+    fun deleteRelativePath(cacheKey: String, relativePath: String): Boolean {
+        val target = resolveEntryPath(cacheKey, relativePath)
+        return !target.exists() || if (target.isDirectory) {
+            target.deleteRecursively()
+        } else {
+            target.delete()
+        }
+    }
+
+    fun entrySize(cacheKey: String): Long = entryDirectory(cacheKey).directorySize()
+
     fun candidateManifests(
         locator: SourceSeparationCacheSongLocator,
     ): List<SourceSeparationCacheManifest> {
@@ -427,6 +481,11 @@ class SourceSeparationCacheStore(
             }
             false
         }.getOrDefault(false)
+    }
+
+    private fun File.directorySize(): Long {
+        if (!isDirectory) return 0L
+        return walkTopDown().filter(File::isFile).sumOf(File::length)
     }
 
     companion object {

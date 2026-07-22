@@ -7,7 +7,7 @@ class SourceSeparationCacheEntryLeaseRegistry {
     fun tryAcquireRead(cacheKey: String): SourceSeparationCacheEntryLease? {
         requireCacheKey(cacheKey)
         val current = states.getOrPut(cacheKey, ::LeaseState)
-        if (current.mutationActive) {
+        if (current.exclusiveActive) {
             return null
         }
         current.readerCount += 1
@@ -19,16 +19,31 @@ class SourceSeparationCacheEntryLeaseRegistry {
     }
 
     @Synchronized
-    fun tryAcquireMutation(cacheKey: String): SourceSeparationCacheEntryLease? {
+    fun tryAcquireRunWrite(cacheKey: String): SourceSeparationCacheEntryLease? {
         requireCacheKey(cacheKey)
         val current = states.getOrPut(cacheKey, ::LeaseState)
-        if (current.mutationActive || current.readerCount > 0) {
+        if (current.exclusiveActive || current.runWriterActive) {
             return null
         }
-        current.mutationActive = true
+        current.runWriterActive = true
         return SourceSeparationCacheEntryLease(
             cacheKey = cacheKey,
-            mode = SourceSeparationCacheLeaseMode.Mutation,
+            mode = SourceSeparationCacheLeaseMode.RunWrite,
+            release = ::release,
+        )
+    }
+
+    @Synchronized
+    fun tryAcquireExclusive(cacheKey: String): SourceSeparationCacheEntryLease? {
+        requireCacheKey(cacheKey)
+        val current = states.getOrPut(cacheKey, ::LeaseState)
+        if (current.exclusiveActive || current.runWriterActive || current.readerCount > 0) {
+            return null
+        }
+        current.exclusiveActive = true
+        return SourceSeparationCacheEntryLease(
+            cacheKey = cacheKey,
+            mode = SourceSeparationCacheLeaseMode.Exclusive,
             release = ::release,
         )
     }
@@ -36,7 +51,9 @@ class SourceSeparationCacheEntryLeaseRegistry {
     @Synchronized
     fun isLeased(cacheKey: String): Boolean {
         requireCacheKey(cacheKey)
-        return states[cacheKey]?.let { it.mutationActive || it.readerCount > 0 } == true
+        return states[cacheKey]?.let {
+            it.exclusiveActive || it.runWriterActive || it.readerCount > 0
+        } == true
     }
 
     @Synchronized
@@ -44,7 +61,8 @@ class SourceSeparationCacheEntryLeaseRegistry {
         return states.mapValues { (_, state) ->
             SourceSeparationCacheLeaseSnapshot(
                 readerCount = state.readerCount,
-                mutationActive = state.mutationActive,
+                runWriterActive = state.runWriterActive,
+                exclusiveActive = state.exclusiveActive,
             )
         }
     }
@@ -57,12 +75,16 @@ class SourceSeparationCacheEntryLeaseRegistry {
                 check(state.readerCount > 0) { "Cache read lease count underflow." }
                 state.readerCount -= 1
             }
-            SourceSeparationCacheLeaseMode.Mutation -> {
-                check(state.mutationActive) { "Cache mutation lease was not active." }
-                state.mutationActive = false
+            SourceSeparationCacheLeaseMode.RunWrite -> {
+                check(state.runWriterActive) { "Cache run-writer lease was not active." }
+                state.runWriterActive = false
+            }
+            SourceSeparationCacheLeaseMode.Exclusive -> {
+                check(state.exclusiveActive) { "Cache exclusive lease was not active." }
+                state.exclusiveActive = false
             }
         }
-        if (state.readerCount == 0 && !state.mutationActive) {
+        if (state.readerCount == 0 && !state.runWriterActive && !state.exclusiveActive) {
             states.remove(cacheKey)
         }
     }
@@ -73,7 +95,8 @@ class SourceSeparationCacheEntryLeaseRegistry {
 
     private data class LeaseState(
         var readerCount: Int = 0,
-        var mutationActive: Boolean = false,
+        var runWriterActive: Boolean = false,
+        var exclusiveActive: Boolean = false,
     )
 
     private companion object {
@@ -99,10 +122,12 @@ class SourceSeparationCacheEntryLease internal constructor(
 
 enum class SourceSeparationCacheLeaseMode {
     Read,
-    Mutation,
+    RunWrite,
+    Exclusive,
 }
 
 data class SourceSeparationCacheLeaseSnapshot(
     val readerCount: Int,
-    val mutationActive: Boolean,
+    val runWriterActive: Boolean,
+    val exclusiveActive: Boolean,
 )

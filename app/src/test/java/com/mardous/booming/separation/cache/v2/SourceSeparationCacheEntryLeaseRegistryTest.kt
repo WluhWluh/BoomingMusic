@@ -18,31 +18,58 @@ class SourceSeparationCacheEntryLeaseRegistryTest {
         val first = requireNotNull(registry.tryAcquireRead(KEY_A))
         val second = requireNotNull(registry.tryAcquireRead(KEY_A))
 
-        assertNull(registry.tryAcquireMutation(KEY_A))
+        assertNull(registry.tryAcquireExclusive(KEY_A))
         assertEquals(
-            SourceSeparationCacheLeaseSnapshot(readerCount = 2, mutationActive = false),
+            SourceSeparationCacheLeaseSnapshot(
+                readerCount = 2,
+                runWriterActive = false,
+                exclusiveActive = false,
+            ),
             registry.snapshot()[KEY_A],
         )
 
         first.close()
-        assertNull(registry.tryAcquireMutation(KEY_A))
+        assertNull(registry.tryAcquireExclusive(KEY_A))
         second.close()
-        assertNotNull(registry.tryAcquireMutation(KEY_A)?.also { it.close() })
+        assertNotNull(registry.tryAcquireExclusive(KEY_A)?.also { it.close() })
         assertFalse(registry.isLeased(KEY_A))
     }
 
     @Test
-    fun `mutation blocks readers but does not protect another model entry`() {
+    fun `exclusive lease blocks readers but does not protect another model entry`() {
         val registry = SourceSeparationCacheEntryLeaseRegistry()
-        val mutation = requireNotNull(registry.tryAcquireMutation(KEY_A))
+        val mutation = requireNotNull(registry.tryAcquireExclusive(KEY_A))
 
         assertNull(registry.tryAcquireRead(KEY_A))
-        assertNull(registry.tryAcquireMutation(KEY_A))
-        assertNotNull(registry.tryAcquireMutation(KEY_B)?.also { it.close() })
+        assertNull(registry.tryAcquireRunWrite(KEY_A))
+        assertNull(registry.tryAcquireExclusive(KEY_A))
+        assertNotNull(registry.tryAcquireExclusive(KEY_B)?.also { it.close() })
         assertTrue(registry.isLeased(KEY_A))
 
         mutation.close()
         assertNotNull(registry.tryAcquireRead(KEY_A)?.also { it.close() })
+        assertTrue(registry.snapshot().isEmpty())
+    }
+
+    @Test
+    fun `one run writer can coexist with playback readers`() {
+        val registry = SourceSeparationCacheEntryLeaseRegistry()
+        val writer = requireNotNull(registry.tryAcquireRunWrite(KEY_A))
+        val reader = requireNotNull(registry.tryAcquireRead(KEY_A))
+
+        assertNull(registry.tryAcquireRunWrite(KEY_A))
+        assertNull(registry.tryAcquireExclusive(KEY_A))
+        assertEquals(
+            SourceSeparationCacheLeaseSnapshot(
+                readerCount = 1,
+                runWriterActive = true,
+                exclusiveActive = false,
+            ),
+            registry.snapshot()[KEY_A],
+        )
+
+        reader.close()
+        writer.close()
         assertTrue(registry.snapshot().isEmpty())
     }
 
