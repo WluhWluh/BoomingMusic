@@ -1007,13 +1007,16 @@ Rules for switching models:
 ### Lifecycle, leases, and crash consistency
 
 The cache store must expose exact-entry leases (or equivalent ownership
-tokens), not only a set of active file paths or a protected song ID. Playback
-uses shared read leases; worker writes, manifest transitions, FLAC promotion,
-delete, and prune require an exclusive mutation lease. Cleanup must skip or
-wait for an entry with a conflicting lease, and a lease for one model entry
-must not protect another model's entry for the same song. Leases are
-process-local and never persisted as authoritative locks; after process death,
-the on-disk state recovery path decides whether data is resumable.
+tokens), not only a set of active file paths or a protected song ID. The
+implemented modes are `Read`, `RunWrite`, and `Exclusive`. Shared `Read`
+leases protect playback. One `RunWrite` lease owns an inference or hydration
+run while permitting readers to consume already atomically published output.
+`Exclusive` blocks both modes for FLAC promotion, deletion, and pruning.
+Cleanup must skip or wait for an entry with a conflicting lease, and a lease
+for one model entry must not protect another model's entry for the same song.
+Leases are process-local and never persisted as authoritative locks; after
+process death, the on-disk state recovery path decides whether data is
+resumable.
 
 Use an explicit on-disk state machine for `staging`, `running`, `completed`,
 `canceled`, and `failed` data. Write manifests and state transitions through a
@@ -1715,67 +1718,71 @@ cache migration, and must not introduce one.
 
 #### Phase 5A: Freeze cache identity and manifest v2
 
-- [ ] Define a runtime-neutral `SourceSeparationCacheIdentity` that does not
+- [x] Define a runtime-neutral `SourceSeparationCacheIdentity` that does not
   depend on `MdxModelVariant` and contains the finalized audio identity,
   model ID, artifact SHA-256, contract ID/schema, canonical contract
   fingerprint, DSP/pipeline identity, and a `renderProfileId` for
   output-affecting execution choices.
-- [ ] Canonicalize the contract fingerprint from tensor, DSP, compensation,
+- [x] Canonicalize the contract fingerprint from tensor, DSP, compensation,
   stem, and pipeline semantics only. Exclude display, provenance, and runtime
   evidence while retaining explicit contract and custom-profile revision IDs
   in the cache identity.
-- [ ] Define which runtime differences are cache identity changes. Permit CPU
+- [x] Define which runtime differences are cache identity changes. Permit CPU
   and GPU to share an entry only after their rendered output is explicitly
   validated as semantically equivalent and mapped to the same `renderProfileId`
   (for example, approved FP32 CPU/GPU). Make precision, compensation/DSP, or
   other rendering-contract changes use a new render profile. Keep backend,
   runtime qualification profile ID, thread count, and timing as diagnostics
   when they do not affect output semantics.
-- [ ] Specify a canonical, versioned identity encoding and derive a full
+- [x] Specify a canonical, versioned identity encoding and derive a full
   SHA-256 `cacheKey`. Use the key as the entry directory name and verify it
   against the identity stored in the manifest; do not truncate the digest or
   use a path/name as identity.
-- [ ] Move the existing encoded-sample fingerprint to preflight before cache
-  run creation and measure its startup cost on S10 and S25. Retain staging plus
-  atomic promotion only as the measured fallback; a provisional run may be
-  visible only through its exact in-process lease, never as reusable cache.
-- [ ] Replace the current manifest with an independent `manifestSchemaVersion`
+- [x] Move the existing encoded-sample fingerprint to preflight before cache
+  run creation. Retain staging plus atomic promotion only as a possible
+  fallback; a provisional run may be visible only through its exact
+  in-process lease, never as reusable cache.
+- [x] Measure encoded-sample fingerprint startup cost on S10 and S25 before
+  signing the Phase 5 exit gate. Keep the current preflight path: the 12-second
+  Coast Town fixture measured 107 ms on S10 and 24 ms on S25 for the first
+  model run, with no evidence that the staging fallback is needed.
+- [x] Replace the current manifest with an independent `manifestSchemaVersion`
   v2 that stores the complete immutable contract/profile snapshot, source
   identity, stem mapping, rendered-output metadata, and integrity data.
-- [ ] Version `playback-settings.json` independently and bind it to the full
+- [x] Version `playback-settings.json` independently and bind it to the full
   cache key and source fingerprint before loading or writing a per-song blend.
-- [ ] Store only entry-relative file names in manifests and playback settings;
+- [x] Store only entry-relative file names in manifests and playback settings;
   reject absolute paths, traversal, symlink escapes, and manifest identities
   whose key does not match their directory.
-- [ ] Define explicit rejection of v1/unknown manifests under the clean-install
+- [x] Define explicit rejection of v1/unknown manifests under the clean-install
   boundary. Do not add a v1 reader, migration marker, old-layout scan, or
   compatibility fallback.
-- [ ] Add pure JVM tests for canonicalization, deterministic keys across
+- [x] Add pure JVM tests for canonicalization, deterministic keys across
   process restarts, same-render-profile CPU/GPU identity sharing,
   output-affecting precision separation, profile revision identity, malformed
   manifests, and path containment.
 
 #### Phase 5B: Introduce a testable cache store and root provider
 
-- [ ] Separate cache identity, entry lifecycle, and file access from Android
+- [x] Separate cache identity, entry lifecycle, and file access from Android
   `Context` through a root provider and an injectable/testable cache store (or
   equivalent filesystem, clock, and hashing seams). Keep production model and
   runtime types out of the pure identity/manifest layer.
-- [ ] Resolve `externalCacheDir/source-separation` first and
+- [x] Resolve `externalCacheDir/source-separation` first and
   `cacheDir/source-separation` second. Keep a run and all of its entry files in
   one root; do not join entries across roots or scan the old
   `externalFilesDir(Environment.DIRECTORY_MUSIC)` tree.
-- [ ] Implement `staging`, `entries`, and temporary-manifest layout with
+- [x] Implement `staging`, `entries`, and temporary-manifest layout with
   atomic directory promotion, atomic manifest replacement, required-file
   validation, and safe orphan/staging cleanup after process restart.
-- [ ] Add a rebuildable locator index for candidate discovery only. Require
+- [x] Add a rebuildable locator index for candidate discovery only. Require
   exact source fingerprint agreement before first playback use, resume, or
   append; rebuild a stale index from validated manifests and never treat song
   ID/path as cache identity.
-- [ ] Validate every resolved path remains below its entry root before opening,
+- [x] Validate every resolved path remains below its entry root before opening,
   deleting, sharing, or promoting it. Keep diagnostic exports separate from
   the portable manifest path contract.
-- [ ] Add focused JVM tests for preferred-root and fallback-root selection,
+- [x] Add focused JVM tests for preferred-root and fallback-root selection,
   root deletion/recreation, external storage becoming unavailable, process
   restart during each state transition, stale/corrupt locator indexes, source
   replacement under the same locator, corrupt temporary files, and missing
@@ -1783,73 +1790,117 @@ cache migration, and must not introduce one.
 
 #### Phase 5C: Integrate model-aware lifecycle and playback
 
-- [ ] Adapt cache and engine APIs to accept the immutable cache identity and
+- [x] Adapt cache and engine APIs to accept the immutable cache identity and
   contract snapshot rather than a `MdxModelVariant`; capture the identity at
   run start and prevent any later active-model change from changing that run.
   Keep the v2 path behind the development gate and the normal worker on ORT
   until the ordered Phase 6 cutover; use only an isolated internal LiteRT
   harness while this phase is being validated. Do not retrofit the old v1
   cache or create a bridge between the stores.
-- [ ] Keep separate partial and completed entries for every model/profile used
+- [x] Keep separate partial and completed entries for every model/profile used
   by one song. Selecting a model must never read, append, or promote files
   belonging to another identity.
-- [ ] Make normal scheduler/playback lookup exact-active-identity only. Keep a
+- [x] Make normal scheduler/playback lookup exact-active-identity only. Keep a
   running playback session on its leased entry across an active-model change,
   and support an explicit completed-cache playback session that cannot start
   inference or alter the active model.
-- [ ] Keep completed output read-only playable after model or custom-profile
+- [x] Keep completed output read-only playable after model or custom-profile
   deletion when its files, manifest, output mapping, and contract snapshot
   validate. Keep incomplete entries stale until the exact artifact and
   profile revision return.
-- [ ] Scope per-song blend settings, hydration PCM, FLAC promotion, and any
+- [x] Scope per-song blend settings, hydration PCM, FLAC promotion, and any
   ready markers to the same cache identity. Keep per-song blend authoritative
   in the entry-local file and outside all backup payloads.
-- [ ] Replace song-level cleanup protection and path-based `activeFiles` with
-  shared-read/exclusive-mutation entry leases covering worker writes, playback
-  reads, hydration, FLAC promotion, delete, and prune. Keep leases
-  process-local. Ensure GPU failure cleanup and CPU retry retain one entry
-  write lease without exposing partial output.
-- [ ] Count each model/profile entry independently for automatic cleanup;
+- [x] Replace song-level cleanup protection and path-based `activeFiles` with
+  exact-entry `Read`, `RunWrite`, and `Exclusive` leases covering worker
+  writes, playback reads, hydration, FLAC promotion, delete, and prune. Keep
+  leases process-local. Ensure GPU failure cleanup and CPU retry retain one
+  `RunWrite` lease without exposing partial output.
+- [x] Count each model/profile entry independently for automatic cleanup;
   count stale/canceled/failed non-completed data in the partial bucket and
   validated output in the completed bucket. Deletion of an installed model
   must never rewrite or delete its cache entries or unrelated entries.
-- [ ] Define and test the state transitions for cancellation, failed
+- [x] Define and test the state transitions for cancellation, failed
   inference, failed promotion, process death, and clear-cache loss. A ready
   window or completed output may be published only after successful atomic
   write and validation.
-- [ ] Add lifecycle tests for model switching during playback, pause/resume,
-  seeking, song transitions, process recreation, concurrent cleanup/playback,
-  manual entry deletion, FLAC promotion, and GPU-to-CPU recreation.
+- [x] Add focused JVM lifecycle tests for immutable model switching, resumable
+  pause/cancel/failure state, concurrent cleanup/playback leases, manual entry
+  deletion, FLAC promotion/hydration, and GPU-to-CPU recreation.
+- [x] Complete device instrumentation for model-aware runs, independent
+  multi-model entries, FLAC promotion, PCM hydration, busy read-lease
+  protection, process restart between lifecycle and recovery checks, and
+  clear-cache recovery on S10, S25, x86, and x86_64.
+- [ ] Complete MediaSession/instrumented lifecycle tests for real playback
+  pause/resume, seeking, song transitions, concurrent cleanup during playback,
+  FLAC hydration handoff inside an active player, and GPU-to-CPU recreation.
 
 #### Phase 5D: Management UI, profile revisions, and recovery
 
-- [ ] Show model ID, artifact hash/short identity, contract/profile revision,
+- [x] Show model ID, artifact hash/short identity, contract/profile revision,
   state, format, size, and last access for each cache entry; treat same-song
   entries as independent items even when grouped visually.
-- [ ] Add a details view for every downloaded preset and imported model. Show
+- [x] Add a details view for every downloaded preset and imported model. Show
   built-in, sidecar, or manual metadata, tensor/DSP/stem semantics,
   provenance, runtime qualification, and uninstalled/unverified status.
-- [ ] Keep the v2 cache-management UI and cache playback action behind the
+- [x] Keep the v2 cache-management UI and cache playback action behind the
   development gate until Phase 6 switches the normal worker; the old cache
   screen must not silently display or mutate v2 entries.
-- [ ] Make custom profile edits create a new validated revision instead of
+- [x] Make custom profile edits create a new validated revision instead of
   mutating an identity referenced by existing caches. Keep old revisions
   inspectable and offer explicit orphan-profile delete/export actions.
-- [ ] Keep `Download`, `Use`, `Delete model`, and `Delete cache entry` as
+- [x] Keep `Download`, `Use`, `Delete model`, and `Delete cache entry` as
   separate operations. Switching or deleting a model must not clear or reuse
   another model's cache.
-- [ ] Offer an explicit `Play cached result` action for validated completed
+- [x] Offer an explicit `Play cached result` action for validated completed
   entries, including entries whose model/profile is no longer installed;
   never use this as an automatic fallback from the active model.
-- [ ] Make Android clear-cache and partial-root-loss recovery visible and
+- [x] Make Android clear-cache and partial-root-loss recovery visible and
   deterministic: installed model weights and persistent model metadata remain,
   while generated separation data is rebuilt as disposable cache.
-- [ ] Ensure backup creation never reads cache manifests,
+- [x] Ensure backup creation never reads cache manifests,
   `playback-settings.json`, hydration files, or temporary per-song blend
   keys, and that restore never creates cache entries or restores blend values.
-- [ ] Add UI/instrumentation tests for metadata inspection before and after
-  download, custom-profile revision editing, orphan handling, multiple model
-  entries, clear-cache recovery, and backup exclusion.
+- [x] Add JVM state and contract tests for metadata inspection, immutable
+  profile revision editing/export, orphan deletion rules, independent model
+  entries, cache-root recreation, and backup exclusion.
+- [ ] Add Compose/instrumentation UI tests for inspection before and after
+  download, revision actions, and the separate Download/Use/Delete controls.
+- [x] Cover multiple model entries, clear-cache recovery, busy deletion, and
+  exact completed-cache file access on S10, S25, x86, and x86_64 through the
+  Phase 5 device test. JVM backup tests cover backup/restore exclusion; a full
+  UI-driven backup/restore run remains pending.
+
+Phase 5 implementation record (2026-07-22):
+
+- `40a11e08` through `1450e2f9` freeze identity/manifest v2, add the atomic
+  cache store, preflight source identity, three-mode leases, isolated
+  lifecycle, and resumable run coordination.
+- `91ed6d1e` through `32a73d83` integrate the debug-only LiteRT engine, WAV/FLAC
+  promotion and hydration, cache-root cleanup, immutable profile revisions,
+  metadata/cache management UI, exact completed-cache playback, and hydrated
+  playback handoff.
+- `562bf507` permits multiple portable profile revisions for one artifact while
+  retaining unique profile IDs and exact active-profile references.
+- `8c6aa147` adds portable profile-revision export without model weights,
+  content URIs, or cache data.
+- `4ba1b424` adds the reusable Phase 5 device instrumentation and host runner.
+- Full GitHub debug JVM tests, debug lint, debug/release APK assembly, and
+  AndroidTest compilation passed on 2026-07-22. The release APK manifest and
+  ZIP inventory contain no debug-only source-separation receiver/activity.
+- The device runner passed on a clean debug install for all four devices:
+
+  | Device | ABI/API | 9662 backend/time | KARA backend/time | Preflight (9662/KARA) | Entries / clear-cache |
+  | --- | --- | --- | --- | --- | --- |
+  | Galaxy S10 | arm64-v8a / 31 | LiteRT GPU / 19,793 ms | LiteRT CPU / 14,226 ms | 107 / 35 ms | 2 / pass |
+  | Galaxy S25 | arm64-v8a / 35 | LiteRT GPU / 4,452 ms | LiteRT CPU / 5,925 ms | 24 / 10 ms | 2 / pass |
+  | API 26 emulator | x86 | LiteRT CPU / 9,348 ms | LiteRT CPU / 8,766 ms | 109 / 208 ms | 2 / pass |
+  | API 37 emulator | x86_64 | LiteRT CPU / 10,661 ms | LiteRT CPU / 7,753 ms | 240 / 240 ms | 2 / pass |
+
+  Each run used the 12-second Coast Town fixture and produced three windows
+  per model. These are cache/lifecycle checks, not full-song MediaSession or
+  thermal acceptance. The remaining unchecked UI and player-lifecycle items
+  therefore keep the Phase 5 exit gate open.
 
 Phase 5 exit gate:
 
@@ -2271,8 +2322,10 @@ entry-relative paths with containment checks. The preferred root is
 span roots. v1/old-layout readers and migration are out of scope under the
 clean-install boundary.
 
-Use process-local shared-read/exclusive-mutation entry leases for worker,
-playback, hydration, promotion, deletion, and cleanup. Atomic state transitions
+Use process-local `Read`, `RunWrite`, and `Exclusive` exact-entry leases.
+Playback holds shared `Read`; one inference or hydration owner holds
+`RunWrite`, which may coexist with readers of already published output; FLAC
+promotion, deletion, and cleanup require `Exclusive`. Atomic state transitions
 and startup orphan cleanup are required; completed output is playable without
 the model, while partial output is stale until its exact model/profile returns.
 Phase 5 must prove these rules with deterministic key, corruption,
