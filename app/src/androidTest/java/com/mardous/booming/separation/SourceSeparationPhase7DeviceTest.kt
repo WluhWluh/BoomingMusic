@@ -4,6 +4,7 @@ import android.os.Build
 import android.os.Debug
 import android.os.Process
 import android.os.SystemClock
+import android.content.SharedPreferences
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxRuntimeAbi
@@ -135,6 +136,10 @@ class SourceSeparationPhase7DeviceTest {
             assertTrue(active is SourceSeparationActivePresetState.Reference)
             assertEquals(expectedSha256, (active as SourceSeparationActivePresetState.Reference)
                 .reference.artifactSha256)
+            assertTrue(
+                "The active model reference was not durably committed.",
+                get<SharedPreferences>(SharedPreferences::class.java).edit().commit(),
+            )
 
             report.put("status", "passed")
             report.put("timing", report.getJSONObject("timing")
