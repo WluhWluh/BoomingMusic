@@ -358,13 +358,13 @@ class SourceSeparationCacheStore(
 
     fun recover(): SourceSeparationCacheRecoveryResult {
         ensureLayout()
-        val removedTemporaryFiles = removeTemporaryFiles(root.directory)
         val stagingDirectory = File(root.directory, STAGING_DIR_NAME)
+        val entriesDirectory = File(root.directory, ENTRIES_DIR_NAME)
+        val removedTemporaryFiles = removeTemporaryFiles(root.directory, entriesDirectory, stagingDirectory)
         val removedStagingRuns = stagingDirectory.listFiles()
             ?.filter { it.isDirectory }
             ?.count { it.deleteRecursively() }
             ?: 0
-        val entriesDirectory = File(root.directory, ENTRIES_DIR_NAME)
         val removedInvalidEntries = entriesDirectory.listFiles()
             ?.filter { it.isDirectory &&
                 (!CACHE_KEY_PATTERN.matches(it.name) || readManifestFromDirectory(it, it.name) == null)
@@ -557,9 +557,21 @@ class SourceSeparationCacheStore(
         runCatching { rebuildLocatorIndex() }
     }
 
-    private fun removeTemporaryFiles(directory: File): Int {
+    private fun removeTemporaryFiles(
+        rootDirectory: File,
+        entriesDirectory: File,
+        stagingDirectory: File,
+    ): Int {
         var removed = 0
-        directory.walkTopDown()
+        val rootTemporaryFiles = rootDirectory.listFiles()
+            ?.asSequence()
+            ?.filter(File::isFile)
+            .orEmpty()
+        val storeTemporaryFiles = sequenceOf(entriesDirectory, stagingDirectory)
+            .filter(File::isDirectory)
+            .flatMap(File::walkTopDown)
+            .filter(File::isFile)
+        (rootTemporaryFiles + storeTemporaryFiles)
             .filter { it.isFile && it.name.endsWith(".tmp") }
             .toList()
             .forEach { file ->

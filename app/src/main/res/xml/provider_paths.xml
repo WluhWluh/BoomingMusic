@@ -12,6 +12,14 @@
         name="external_files"
         path="."/>
 
+    <cache-path
+        name="cache"
+        path="." />
+
+    <external-cache-path
+        name="external_cache"
+        path="." />
+
     <root-path
         name="root"
         path="/storage/"/>

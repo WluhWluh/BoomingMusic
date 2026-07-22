@@ -19,7 +19,6 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -109,6 +108,7 @@ import com.mardous.booming.separation.SourceSeparationPlayableCacheStatus
 import com.mardous.booming.separation.SourceSeparationReadyHorizonStatus
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import com.mardous.booming.separation.cache.SourceSeparationCacheState
+import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.separation.cache.SourceSeparationOutput
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor.InputMode
@@ -243,6 +243,9 @@ class PlaybackService :
     private var sourceSeparationHydrationJob: Job? = null
     private var sourceSeparationHydrationJobKey: SourceSeparationHydrationKey? = null
     private var sourceSeparationWarmHydration: SourceSeparationWarmHydration? = null
+    private val sourceSeparationHydrationRootDirectory by lazy(LazyThreadSafetyMode.NONE) {
+        SourceSeparationCacheDirectories.legacyPlaybackHydration(this)
+    }
     private val sourceSeparationPlaybackTraceLock = Any()
     private val sourceSeparationPlaybackTraceBuffer = mutableListOf<String>()
     private val sourceSeparationPlaybackTraceSeq = AtomicLong()
@@ -2783,7 +2786,7 @@ class PlaybackService :
     }
 
     private fun sourceSeparationHydrationRootDir(): File {
-        return File(cacheDir, "source-separation/playback-hydration")
+        return sourceSeparationHydrationRootDirectory
     }
 
     private fun isSourceSeparationHydrationReady(
@@ -4170,10 +4173,7 @@ class PlaybackService :
         }
         sourceSeparationPlaybackTraceFile = runCatching {
             File(
-                File(
-                    getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir,
-                    "source-separation/debug",
-                ).apply { mkdirs() },
+                SourceSeparationCacheDirectories.debug(this).apply { mkdirs() },
                 "playback-gate.log",
             ).also { file ->
                 file.writeText(

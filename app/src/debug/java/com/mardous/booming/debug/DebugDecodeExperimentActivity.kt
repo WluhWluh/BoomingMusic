@@ -3,7 +3,6 @@ package com.mardous.booming.debug
 import android.app.Activity
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.os.SystemClock
 import android.util.Log
 import com.mardous.booming.separation.audio.AudioWindowDecodeCandidateFamily
@@ -11,6 +10,7 @@ import com.mardous.booming.separation.audio.AudioWindowDecodeCandidateFamilySumm
 import com.mardous.booming.separation.audio.AudioWindowDecodeExperiment
 import com.mardous.booming.separation.audio.AudioWindowDecodeMp3NoGaplessMetadataGate
 import com.mardous.booming.separation.audio.AudioPcmDecoder
+import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import java.io.File
 import java.util.Locale
 import kotlin.concurrent.thread
@@ -51,10 +51,7 @@ class DebugDecodeExperimentActivity : Activity() {
     ) {
         val inputDir = File(inputDirPath)
         val reportRoot = File(
-            File(
-                getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir,
-                "source-separation/debug/batch-window-decode",
-            ),
+            File(SourceSeparationCacheDirectories.debug(this), "batch-window-decode"),
             outputTag,
         )
         val detailDir = File(reportRoot, "reports")

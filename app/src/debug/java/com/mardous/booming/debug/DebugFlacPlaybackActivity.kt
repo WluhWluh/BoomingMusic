@@ -3,7 +3,6 @@ package com.mardous.booming.debug
 import android.app.Activity
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -22,6 +21,7 @@ import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.SilenceMediaSource
 import androidx.media3.extractor.DefaultExtractorsFactory
+import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import java.io.IOException
 import java.io.File
 import java.util.Locale
@@ -390,9 +390,15 @@ class DebugFlacPlaybackActivity : Activity() {
                 ?.let(::File)
                 ?.let(::add)
             if (isEmpty()) {
-                val musicRoot = getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir
-                add(File(musicRoot, "source-separation/entries"))
-                add(File(musicRoot, "source-separation/debug/flac-promotion"))
+                val cacheRoot = SourceSeparationCacheDirectories.root(this@DebugFlacPlaybackActivity)
+                add(SourceSeparationCacheDirectories.legacyOnnxEntries(this@DebugFlacPlaybackActivity))
+                add(File(cacheRoot, "entries"))
+                add(
+                    File(
+                        SourceSeparationCacheDirectories.debug(this@DebugFlacPlaybackActivity),
+                        "flac-promotion",
+                    ),
+                )
             }
         }.filter { it.isDirectory }
 
@@ -419,14 +425,7 @@ class DebugFlacPlaybackActivity : Activity() {
     private fun resolveWritableReportRoot(outputTag: String): File {
         val candidates = listOf(
             File(
-                File(
-                    getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir,
-                    "source-separation/debug/flac-playback",
-                ),
-                outputTag,
-            ),
-            File(
-                File(filesDir, "source-separation/debug/flac-playback"),
+                File(SourceSeparationCacheDirectories.debug(this), "flac-playback"),
                 outputTag,
             ),
         )

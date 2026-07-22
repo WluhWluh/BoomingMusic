@@ -4,7 +4,6 @@ import android.app.Dialog
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -81,6 +80,7 @@ import com.mardous.booming.extensions.files.getFormattedFileName
 import com.mardous.booming.extensions.isLandscape
 import com.mardous.booming.extensions.showToast
 import com.mardous.booming.extensions.utilities.dateStr
+import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
 import com.mardous.booming.ui.component.compose.TitledCard
 import com.mardous.booming.ui.theme.BoomingMusicTheme
@@ -763,10 +763,7 @@ private fun exportSourceSeparationDebugTrace(
 
 private fun Context.sourceSeparationDebugTraceFile(): File {
     return File(
-        File(
-            getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir,
-            "source-separation/debug",
-        ),
+        SourceSeparationCacheDirectories.debug(this),
         "playback-gate.log",
     )
 }

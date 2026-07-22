@@ -1,12 +1,12 @@
 package com.mardous.booming.separation
 
 import android.content.Context
-import android.os.Environment
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.audio.AudioWindowDecodeExperiment
 import com.mardous.booming.separation.audio.AudioWindowDecodeExperimentProgress
 import com.mardous.booming.separation.audio.AudioWindowDecodeExperimentResult
 import com.mardous.booming.separation.cache.SourceSeparationCache
+import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import com.mardous.booming.separation.cache.SourceSeparationCacheEntry
 import com.mardous.booming.separation.cache.SourceSeparationCachePruneResult
 import com.mardous.booming.separation.cache.SourceSeparationCacheState
@@ -454,13 +454,7 @@ class SourceSeparationEngine(
         shouldCancel: () -> Boolean = { false },
     ): AudioWindowDecodeExperimentResult {
         require(song != Song.emptySong) { "Cannot test window decoding for an empty song." }
-        val reportDir = File(
-            File(
-                context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir,
-                "source-separation",
-            ),
-            "debug",
-        )
+        val reportDir = SourceSeparationCacheDirectories.debug(context)
         return AudioWindowDecodeExperiment(context).run(
             uri = song.uri,
             displayName = song.fileName,

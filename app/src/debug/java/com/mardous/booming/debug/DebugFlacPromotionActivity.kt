@@ -3,9 +3,9 @@ package com.mardous.booming.debug
 import android.app.Activity
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.os.SystemClock
 import android.util.Log
+import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import com.mardous.booming.separation.audio.AudioPcmDecoder
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import com.mardous.booming.separation.audio.Pcm16StereoFlacStereoMode
@@ -55,10 +55,7 @@ class DebugFlacPromotionActivity : Activity() {
         includeSynthetic: Boolean,
     ) {
         val reportRoot = File(
-            File(
-                getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir,
-                "source-separation/debug/flac-promotion",
-            ),
+            File(SourceSeparationCacheDirectories.debug(this), "flac-promotion"),
             outputTag,
         )
         val outputDir = File(reportRoot, "outputs")
@@ -237,10 +234,7 @@ class DebugFlacPromotionActivity : Activity() {
         val root = inputDirPath
             ?.takeIf { it.isNotBlank() }
             ?.let(::File)
-            ?: File(
-                getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir,
-                "source-separation/entries",
-            )
+            ?: SourceSeparationCacheDirectories.legacyOnnxEntries(this)
         if (!root.isDirectory) return emptyList()
 
         return root.walkTopDown()
@@ -282,8 +276,8 @@ class DebugFlacPromotionActivity : Activity() {
         val decoded = Pcm16StereoFlacEncoder.decodeFlacFile(this)
         val outputDir = File(
             File(
-                getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: filesDir,
-                "source-separation/debug/flac-promotion/_decoded-inputs",
+                SourceSeparationCacheDirectories.debug(this@DebugFlacPromotionActivity),
+                "flac-promotion/_decoded-inputs",
             ),
             relativeTo(root).invariantSeparatorsPath.sanitizePathSegment(),
         ).apply { mkdirs() }

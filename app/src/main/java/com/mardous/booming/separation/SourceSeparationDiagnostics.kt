@@ -1,14 +1,12 @@
 package com.mardous.booming.separation
 
 import android.content.Context
-import android.os.Environment
 import com.mardous.booming.data.model.Song
+import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import java.io.File
 import java.util.Locale
 
 internal object SourceSeparationDiagnostics {
-    private const val ROOT_DIR_NAME = "source-separation"
-    private const val DEBUG_DIR_NAME = "debug"
     private const val CACHE_DIAGNOSTICS_FILE_NAME = "cache-diagnostics.jsonl"
     private const val MAX_CACHE_DIAGNOSTIC_ENTRIES = 500
 
@@ -45,11 +43,7 @@ internal object SourceSeparationDiagnostics {
     }
 
     private fun cacheDiagnosticsFile(context: Context): File {
-        val root = File(
-            context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir,
-            ROOT_DIR_NAME,
-        )
-        return File(File(root, DEBUG_DIR_NAME), CACHE_DIAGNOSTICS_FILE_NAME)
+        return File(SourceSeparationCacheDirectories.diagnostics(context), CACHE_DIAGNOSTICS_FILE_NAME)
     }
 
     private fun trimToRecentEntries(file: File) {

@@ -7,6 +7,7 @@ import com.mardous.booming.separation.audio.AudioPcmDecoder
 import com.mardous.booming.separation.audio.AudioSourceInfo
 import com.mardous.booming.separation.audio.DecodedPcmAudio
 import com.mardous.booming.separation.audio.WindowDecodedPcmAudio
+import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import java.io.File
 import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
@@ -862,7 +863,7 @@ private class Mp3NoGaplessCalibrationGate(
     }
 
     private fun cacheDir(): File {
-        return File(context.cacheDir, "source-separation/mp3-no-gapless-calibration").also {
+        return SourceSeparationCacheDirectories.mp3Calibration(context).also {
             it.mkdirs()
         }
     }

@@ -5,7 +5,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.os.Environment
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -20,6 +19,7 @@ import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.PlaybackService
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.audio.AudioWindowDecodeExperiment
+import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerDebugBridge
 import org.koin.java.KoinJavaComponent.get
 import java.io.File
@@ -305,10 +305,7 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
             ?.ifBlank { null }
             ?: "current-${System.currentTimeMillis()}"
         val reportRoot = File(
-            File(
-                context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir,
-                "source-separation/debug/current-window-decode",
-            ),
+            File(SourceSeparationCacheDirectories.debug(context), "current-window-decode"),
             outputTag,
         )
         reportRoot.mkdirs()
@@ -369,10 +366,7 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
             ?.ifBlank { null }
             ?: "current-repeat-${System.currentTimeMillis()}"
         val reportRoot = File(
-            File(
-                context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir,
-                "source-separation/debug/current-window-repeat",
-            ),
+            File(SourceSeparationCacheDirectories.debug(context), "current-window-repeat"),
             outputTag,
         )
         reportRoot.mkdirs()
@@ -423,10 +417,7 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
             ?.ifBlank { null }
             ?: "current-mp3-overlap-${System.currentTimeMillis()}"
         val reportRoot = File(
-            File(
-                context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir,
-                "source-separation/debug/current-mp3-overlap",
-            ),
+            File(SourceSeparationCacheDirectories.debug(context), "current-mp3-overlap"),
             outputTag,
         )
         reportRoot.mkdirs()
@@ -513,10 +504,7 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
 
     private fun debugDirectory(context: Context): File {
         return File(
-            File(
-                context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir,
-                "source-separation/debug",
-            ),
+            SourceSeparationCacheDirectories.debug(context),
             "adb-bridge",
         ).apply { mkdirs() }
     }

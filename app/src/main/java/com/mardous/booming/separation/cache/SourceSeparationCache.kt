@@ -1,7 +1,6 @@
 package com.mardous.booming.separation.cache
 
 import android.content.Context
-import android.os.Environment
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.SourceSeparationDiagnostics
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
@@ -20,10 +19,7 @@ import kotlin.coroutines.cancellation.CancellationException
 class SourceSeparationCache(
     private val context: Context,
 ) {
-    private val rootDir: File = File(
-        context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir,
-        "source-separation",
-    )
+    private val rootDir: File = SourceSeparationCacheDirectories.legacyOnnxEntries(context)
 
     private val json = Json {
         prettyPrint = true
