@@ -60,7 +60,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
         val report = baseReport(context, runId, arguments)
-        val startedAt = SystemClock.elapsedRealtime()
         var coordinator: SourceSeparationForegroundWorkerCoordinator? = null
         var mediaUri: Uri? = null
 
@@ -130,6 +129,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 isPlaying = false,
                 sourceSeparationBlend = TEST_BLEND,
             )
+            val workerStartedAt = SystemClock.elapsedRealtime()
             assertTrue(worker.startCurrentSong())
 
             val firstReadyAt = AtomicLong(0L)
@@ -137,11 +137,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
             var peakJavaBytes = idleMemory.getLong("javaPssBytes")
             var peakNativeBytes = idleMemory.getLong("nativePssBytes")
             var peakGraphicsBytes = idleMemory.getLong("graphicsPssBytes")
+            var decodeMode: String? = null
+            var decodeDiagnostics: String? = null
             var finalState: SourceSeparationUiState = SourceSeparationUiState.Idle
-            while (SystemClock.elapsedRealtime() - startedAt < WORKER_TIMEOUT_MS) {
+            while (SystemClock.elapsedRealtime() - workerStartedAt < WORKER_TIMEOUT_MS) {
                 finalState = worker.workerStateFlow.value
                 val now = SystemClock.elapsedRealtime()
                 val running = finalState as? SourceSeparationUiState.Running
+                running?.sourceDecodeMode?.name?.let { decodeMode = it }
+                running?.sourceDecodeDiagnostics?.let { decodeDiagnostics = it }
                 if (running?.scheduler?.playbackReadyWindowReadyCount ?: 0 >= REQUIRED_READY_WINDOWS &&
                     firstReadyAt.get() == 0L
                 ) {
@@ -167,9 +171,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             val completedAt = SystemClock.elapsedRealtime()
             val firstReadyMs = firstReadyAt.get().takeIf { it > 0L }
-                ?.minus(startedAt)
+                ?.minus(workerStartedAt)
                 ?: 0L
-            val fullSongMs = completedAt - startedAt
+            val fullSongMs = completedAt - workerStartedAt
 
             val entries = runtimeFacade.entries()
             val completedEntry = entries.singleOrNull { it.cacheKey == cacheKey }
@@ -180,6 +184,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val playback = requireNotNull(runtimeFacade.openCompletedCache(cacheKey))
             val manifest = playback.manifest
             val output = requireNotNull(manifest.output)
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val entryDirectory = store.entryDirectory(cacheKey)
+            val wavStemPaths = output.stems.associate { stem ->
+                stem.semantic.name to store.resolveRelativePath(entryDirectory, stem.wavPath)
+            }
             assertEquals(cacheKey, manifest.cacheKey)
             assertEquals(expectedArtifactSha256, manifest.identity.artifactSha256)
             assertTrue(output.outputFrameCount > 0)
@@ -210,6 +219,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
             hydrated.close()
 
             val completedAfter = runtimeFacade.entries().single { it.cacheKey == cacheKey }
+            val promotedManifest = requireNotNull(store.readManifest(cacheKey))
+            val expectedFrames = ((arguments.optionalLong(ARG_FIXTURE_DURATION_US) *
+                arguments.optionalInt(ARG_FIXTURE_SAMPLE_RATE, 1) + 500_000L) /
+                1_000_000L).toInt()
+            val frameDelta = kotlin.math.abs(output.outputFrameCount - expectedFrames)
             report.put("status", "passed")
             report.put("timing", report.getJSONObject("timing")
                 .put("firstReadyMs", firstReadyMs)
@@ -230,14 +244,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("audio", report.getJSONObject("audio")
                 .put("finite", true)
                 .put("outputFrameCount", output.outputFrameCount)
-                .put("expectedFrameCount", output.outputFrameCount)
-                .put("frameDelta", 0)
+                .put("expectedFrameCount", expectedFrames)
+                .put("frameDelta", frameDelta)
                 .put("maxAbsError", 0.0)
                 .put("stemSemantics", output.stems.joinToString(",") {
                     it.semantic.name
                 })
                 .put("decodeDiagnostics", JSONObject()
-                    .put("mode", "${manifest.sourceDiagnostics.durationMs}ms-source")
+                    .put("mode", decodeMode ?: "unknown")
+                    .put("detail", decodeDiagnostics ?: "")
                 )
             )
             report.put("cache", report.getJSONObject("cache")
@@ -248,8 +263,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     completedAfter.artifactSha256 == expectedArtifactSha256)
                 .put("completedPlayable", true)
                 .put("clearRecoveryPassed", false)
+                .put("manifestPathRelative", "entries/$cacheKey/manifest.json")
+                .put("entryDirectoryPath", entryDirectory.absolutePath)
                 .put("promotedFormat", completedAfter.format.name)
                 .put("hydrationPassed", true)
+                .put("stems", JSONArray(promotedManifest.output!!.stems.map { stem ->
+                    JSONObject()
+                        .put("semantic", stem.semantic.name)
+                        .put("wavPath", wavStemPaths.getValue(stem.semantic.name).absolutePath)
+                        .put("promotedPath", stem.promotedPath?.let { path ->
+                            store.resolveRelativePath(entryDirectory, path).absolutePath
+                        } ?: JSONObject.NULL)
+                }))
             )
             report.put("worker", JSONObject()
                 .put("sourcePath", sourcePath)
