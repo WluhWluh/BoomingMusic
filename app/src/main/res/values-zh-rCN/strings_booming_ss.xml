@@ -265,6 +265,9 @@
     <string name="source_separation_cache_contract_mismatch">已安装的元数据不匹配</string>
     <string name="source_separation_cache_entry_busy">此缓存条目正在使用，未能删除。</string>
     <string name="source_separation_cache_entry_delete_failed">无法删除缓存条目。</string>
+    <string name="source_separation_play_cached_result">播放缓存结果</string>
+    <string name="source_separation_cache_identity_invalid">缓存身份无效。</string>
+    <string name="source_separation_cache_source_changed">源音频已不再与此缓存条目匹配。</string>
     <string name="source_separation_preparing">正在准备音源分离…</string>
     <string name="source_separation_processing_windows">正在处理音频窗口</string>
     <string name="source_separation_stage_preparing_model_file">正在准备模型文件</string>

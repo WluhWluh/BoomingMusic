@@ -274,6 +274,7 @@ private fun SourceSeparationSettingsSheet(
                         onRefresh = modelAwareCacheViewModel::refresh,
                         onDeleteAll = modelAwareCacheViewModel::deleteAll,
                         onDelete = modelAwareCacheViewModel::delete,
+                        onPlay = viewModel::playSourceSeparationCompletedCache,
                         onDismissFailure = modelAwareCacheViewModel::clearFailure,
                         onAutoCleanupChange =
                             viewModel::setSourceSeparationAutoCacheCleanupEnabled,

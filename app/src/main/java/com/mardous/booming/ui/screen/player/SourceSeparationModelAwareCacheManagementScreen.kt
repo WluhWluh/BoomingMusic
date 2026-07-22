@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -51,6 +52,7 @@ internal fun SourceSeparationModelAwareCacheManagementPage(
     onRefresh: () -> Unit,
     onDeleteAll: () -> Unit,
     onDelete: (String) -> Unit,
+    onPlay: (String) -> Unit,
     onDismissFailure: () -> Unit,
     onAutoCleanupChange: (Boolean) -> Unit,
     onPartialLimitChange: (Int) -> Unit,
@@ -216,6 +218,7 @@ internal fun SourceSeparationModelAwareCacheManagementPage(
                     item = item,
                     deleting = item.cacheKey in state.deletingCacheKeys,
                     onDelete = { onDelete(item.cacheKey) },
+                    onPlay = {},
                 )
             }
         }
@@ -230,6 +233,7 @@ internal fun SourceSeparationModelAwareCacheManagementPage(
                     item = item,
                     deleting = item.cacheKey in state.deletingCacheKeys,
                     onDelete = { onDelete(item.cacheKey) },
+                    onPlay = { onPlay(item.cacheKey) },
                 )
             }
         }
@@ -241,6 +245,7 @@ private fun SourceSeparationModelAwareCacheRow(
     item: SourceSeparationModelAwareCacheEntry,
     deleting: Boolean,
     onDelete: () -> Unit,
+    onPlay: () -> Unit,
 ) {
     val context = LocalContext.current
     val title = item.title.takeIf(String::isNotBlank) ?: stringResource(R.string.unknown_song)
@@ -376,6 +381,25 @@ private fun SourceSeparationModelAwareCacheRow(
                     label = stringResource(R.string.source_separation_cache_accessed_label),
                     value = context.dateStr(item.lastAccessedAtEpochMs),
                 )
+                if (item.state == SourceSeparationModelAwareCacheEntryState.Completed) {
+                    OutlinedButton(
+                        onClick = onPlay,
+                        enabled = !deleting,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_play_24dp),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = stringResource(
+                                R.string.source_separation_play_cached_result,
+                            ),
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
                 if (deleting) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     Text(

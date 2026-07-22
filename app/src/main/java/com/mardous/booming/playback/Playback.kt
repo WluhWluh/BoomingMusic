@@ -19,6 +19,8 @@ object Playback {
     const val SET_SOURCE_SEPARATION_BLEND = "com.mardous.booming.command.source_separation.blend"
     const val NOTIFY_SOURCE_SEPARATION_CACHE_DELETED =
         "com.mardous.booming.command.source_separation.cache_deleted"
+    const val PLAY_SOURCE_SEPARATION_COMPLETED_CACHE =
+        "com.mardous.booming.command.source_separation.play_completed_cache"
     const val TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER =
         "com.mardous.booming.command.source_separation.trace_marker"
 
@@ -43,5 +45,7 @@ object Playback {
         "source_separation_allow_new_session"
     const val EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING =
         "source_separation_expect_processing"
+    const val EXTRA_SOURCE_SEPARATION_CACHE_KEY = "source_separation_cache_key"
+    const val EXTRA_SOURCE_SEPARATION_PERSIST_BLEND = "source_separation_persist_blend"
     const val EXTRA_SOURCE_SEPARATION_TRACE_MARKER = "source_separation_trace_marker"
 }

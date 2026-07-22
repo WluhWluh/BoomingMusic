@@ -111,6 +111,9 @@ import com.mardous.booming.separation.cache.SourceSeparationCacheState
 import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.separation.cache.SourceSeparationOutput
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceIdentityResolver
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCachePlayback
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor.InputMode
 import com.mardous.booming.ui.screen.MainActivity
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
@@ -194,6 +197,8 @@ class PlaybackService :
     private val audioOutputObserver: AudioOutputObserver by inject()
     private val repository: Repository by inject()
     private val sourceSeparationEngine: SourceSeparationEngine by inject()
+    private val sourceSeparationModelAwareCacheRepository:
+            SourceSeparationModelAwareCacheRepository by inject()
     private val sourceSeparationForegroundWorkerCoordinator:
             SourceSeparationForegroundWorkerCoordinator by inject()
 
@@ -467,6 +472,7 @@ class PlaybackService :
 
     override fun onDestroy() {
         traceSourceSeparationPlayback("service.onDestroy")
+        clearSourceSeparationPlayback(restoreOriginalItem = false, broadcast = false)
         flushSourceSeparationPlaybackTrace()
         sourceSeparationPreStartJob?.cancel()
         sourceSeparationPreStartJob = null
@@ -542,6 +548,11 @@ class PlaybackService :
         availableCommands.add(SessionCommand(Playback.SET_SOURCE_SEPARATION_BLEND, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.NOTIFY_SOURCE_SEPARATION_CACHE_DELETED, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER, Bundle.EMPTY))
+        if (BuildConfig.DEBUG) {
+            availableCommands.add(
+                SessionCommand(Playback.PLAY_SOURCE_SEPARATION_COMPLETED_CACHE, Bundle.EMPTY)
+            )
+        }
 
         return MediaSession.ConnectionResult.accept(
             availableCommands.build(),
@@ -903,7 +914,13 @@ class PlaybackService :
                     "blend=$blend"
                 )
                 serviceScope.future {
-                    setSourceSeparationBlend(blend)
+                    setSourceSeparationBlend(
+                        blend = blend,
+                        persist = args.getBoolean(
+                            Playback.EXTRA_SOURCE_SEPARATION_PERSIST_BLEND,
+                            true,
+                        ),
+                    )
                 }
             }
 
@@ -943,6 +960,19 @@ class PlaybackService :
                 traceSourceSeparationPlayback("command.cacheDeleted")
                 serviceScope.future {
                     handleSourceSeparationCacheDeleted()
+                }
+            }
+
+            Playback.PLAY_SOURCE_SEPARATION_COMPLETED_CACHE -> {
+                if (!BuildConfig.DEBUG) {
+                    return Futures.immediateFuture(
+                        SessionResult(SessionError.ERROR_NOT_SUPPORTED)
+                    )
+                }
+                val cacheKey = args.getString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY)
+                    .orEmpty()
+                serviceScope.future {
+                    playSourceSeparationCompletedCache(cacheKey)
                 }
             }
 
@@ -1569,6 +1599,187 @@ class PlaybackService :
         return result
     }
 
+    private suspend fun playSourceSeparationCompletedCache(cacheKey: String): SessionResult {
+        return sourceSeparationPlaybackReadinessMutex.withLock {
+            playSourceSeparationCompletedCacheLocked(cacheKey)
+        }
+    }
+
+    private suspend fun playSourceSeparationCompletedCacheLocked(
+        cacheKey: String,
+    ): SessionResult {
+        if (!MODEL_AWARE_CACHE_KEY_PATTERN.matches(cacheKey)) {
+            return sourceSeparationPlaybackUnavailable(
+                showMessage = true,
+                resultCode = SessionError.ERROR_BAD_VALUE,
+                message = getString(R.string.source_separation_cache_identity_invalid),
+            )
+        }
+        val playback = withContext(IO) {
+            sourceSeparationModelAwareCacheRepository.openCompletedCache(cacheKey)
+        } ?: return sourceSeparationPlaybackUnavailable(
+            showMessage = true,
+            resultCode = SessionError.ERROR_INVALID_STATE,
+            message = getString(R.string.source_separation_playback_cache_not_found),
+        )
+
+        var adopted = false
+        return try {
+            val song = withContext(IO) {
+                repository.songById(playback.manifest.song.songId)
+            }
+            if (song == Song.emptySong) {
+                return sourceSeparationPlaybackUnavailable(
+                    showMessage = true,
+                    resultCode = SessionError.ERROR_INVALID_STATE,
+                    message = getString(R.string.source_separation_playback_no_song),
+                )
+            }
+            val sourceIdentity = withContext(IO) {
+                SourceSeparationCacheSourceIdentityResolver(applicationContext).resolve(
+                    uri = Uri.parse(song.uri.toString()),
+                    shouldCancel = { false },
+                ).identity
+            }
+            if (sourceIdentity != playback.manifest.identity.source) {
+                return sourceSeparationPlaybackUnavailable(
+                    showMessage = true,
+                    resultCode = SessionError.ERROR_INVALID_STATE,
+                    message = getString(R.string.source_separation_cache_source_changed),
+                )
+            }
+            val blend = withContext(IO) {
+                sourceSeparationModelAwareCacheRepository.readBlend(
+                    playback.manifest.identity,
+                )
+            } ?: sourceSeparationMixProcessor.blend
+            val result = applySourceSeparationCompletedCachePlayback(
+                song = song,
+                playback = playback,
+                blend = blend,
+            )
+            adopted = result.resultCode == SessionResult.RESULT_SUCCESS
+            result
+        } catch (error: Throwable) {
+            traceSourceSeparationPlayback(
+                "modelAwareCache.play.failed",
+                "cache=${cacheKey.take(12)} error=${error.message ?: error::class.java.name}",
+            )
+            sourceSeparationPlaybackUnavailable(
+                showMessage = true,
+                resultCode = SessionError.ERROR_UNKNOWN,
+                message = getString(R.string.source_separation_playback_unavailable),
+            )
+        } finally {
+            if (!adopted) playback.close()
+        }
+    }
+
+    private fun applySourceSeparationCompletedCachePlayback(
+        song: Song,
+        playback: SourceSeparationModelAwareCachePlayback,
+        blend: Float,
+    ): SessionResult {
+        val output = playback.manifest.output
+            ?: return sourceSeparationPlaybackUnavailable(
+                showMessage = true,
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = getString(R.string.source_separation_playback_cache_not_found),
+            )
+        val channelCount = output.stems.map { it.channelCount }.distinct().singleOrNull()
+        if (channelCount != SOURCE_SEPARATION_STEM_CHANNEL_COUNT) {
+            return sourceSeparationPlaybackUnavailable(
+                showMessage = true,
+                resultCode = SessionError.ERROR_INVALID_STATE,
+                message = getString(R.string.source_separation_playback_unavailable),
+            )
+        }
+
+        val targetMediaId = song.id.toString()
+        val wasCurrentSong = player.currentMediaItem?.mediaId == targetMediaId
+        val startPositionMs = if (wasCurrentSong) {
+            player.currentPosition.coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        val originalRequested = sourceSeparationPlaybackRequested
+        sourceSeparationPlaybackRequested = false
+        return try {
+            clearSourceSeparationPlayback(restoreOriginalItem = true, broadcast = false)
+            val existingIndex = (0 until player.mediaItemCount)
+                .firstOrNull { index -> player.getMediaItemAt(index).mediaId == targetMediaId }
+            if (existingIndex == null) {
+                player.setMediaItem(song.toMediaItem(targetMediaId), startPositionMs)
+            } else if (existingIndex != player.currentMediaItemIndex) {
+                player.seekToDefaultPosition(existingIndex)
+            } else if (wasCurrentSong) {
+                player.seekTo(existingIndex, startPositionMs)
+            }
+            val index = player.currentMediaItemIndex
+            if (index == C.INDEX_UNSET || player.currentMediaItem?.mediaId != targetMediaId) {
+                return sourceSeparationPlaybackUnavailable(
+                    showMessage = true,
+                    resultCode = SessionError.ERROR_INVALID_STATE,
+                    message = getString(R.string.source_separation_playback_no_song),
+                )
+            }
+
+            val session = SourceSeparationPlaybackSession(
+                songId = song.id,
+                sessionId = ++sourceSeparationPlaybackCheckSeq,
+                mediaItemIndex = index,
+                originalMediaItem = song.toMediaItem(targetMediaId),
+                queueReplacementToken = null,
+                queueReplacementFile = null,
+                queueReplacementDurationMs =
+                    output.outputFrameCount.toLong() * 1_000L / output.outputSampleRate,
+                vocalsFile = playback.vocalsFile,
+                instrumentalFile = playback.instrumentalFile,
+                inputMode = InputMode.OriginalSource,
+                stemSampleRate = output.outputSampleRate,
+                stemChannelCount = channelCount,
+                requiresReadinessGate = false,
+                modelAwareCachePlayback = playback,
+            )
+            pauseSourceSeparationOutputForSwitch(
+                reason = "modelAwareCache",
+                waitForMixedOutput = true,
+            )
+            sourceSeparationPlaybackIsProcessing = false
+            sourceSeparationPlaybackResumeWhenReady = false
+            setSourceSeparationPlaybackExpectProcessing(false)
+            sourceSeparationMixProcessor.setBlend(blend)
+            sourceSeparationPlaybackSession = session
+            enableSourceSeparationMixProcessor(session, startPositionMs)
+            sourceSeparationMixProcessor.seekTo(startPositionMs)
+            player.prepare()
+            player.play()
+            resumeSourceSeparationOutputAfterSwitch(
+                reason = "modelAwareCache",
+                resume = true,
+            )
+            broadcastSourceSeparationPlaybackChanged()
+            updateSourceSeparationProcessingLease("modelAwareCache.ready")
+            traceSourceSeparationPlayback(
+                "modelAwareCache.play.ready",
+                "cache=${playback.manifest.cacheKey.take(12)} songId=${song.id} " +
+                    "format=${playback.vocalsFile.extension} position=$startPositionMs",
+            )
+            sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+        } catch (error: Throwable) {
+            if (sourceSeparationPlaybackSession?.modelAwareCachePlayback === playback) {
+                clearSourceSeparationPlayback(
+                    restoreOriginalItem = false,
+                    broadcast = false,
+                )
+            }
+            restoreSourceSeparationOutputVolume("modelAwareCache.failed")
+            throw error
+        } finally {
+            sourceSeparationPlaybackRequested = originalRequested
+        }
+    }
+
     private suspend fun ensureSourceSeparationPlaybackReady(
         showUnavailableMessage: Boolean = true,
         allowPauseForProcessing: Boolean = true,
@@ -1680,6 +1891,26 @@ class PlaybackService :
         }
 
         val activeSession = sourceSeparationPlaybackSession
+        if (activeSession?.modelAwareCachePlayback != null &&
+            activeSession.songId == song.id
+        ) {
+            val filesReady = activeSession.vocalsFile.isFile &&
+                activeSession.instrumentalFile.isFile
+            return if (filesReady) {
+                setSourceSeparationPlaybackExpectProcessing(false)
+                sourceSeparationPlaybackIsProcessing = false
+                sourceSeparationPlaybackResumeWhenReady = false
+                broadcastSourceSeparationPlaybackChanged()
+                sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+            } else {
+                clearSourceSeparationPlayback(restoreOriginalItem = true)
+                sourceSeparationPlaybackUnavailable(
+                    showMessage = showUnavailableMessage,
+                    resultCode = SessionError.ERROR_INVALID_STATE,
+                    message = getString(R.string.source_separation_playback_stem_files_missing),
+                )
+            }
+        }
         activeSession
             ?.takeIf { it.songId == song.id }
             ?.let {
@@ -2146,8 +2377,20 @@ class PlaybackService :
         return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
     }
 
-    private fun setSourceSeparationBlend(blend: Float): SessionResult {
+    private fun setSourceSeparationBlend(blend: Float, persist: Boolean): SessionResult {
         sourceSeparationMixProcessor.setBlend(blend)
+        val modelAwareIdentity = sourceSeparationPlaybackSession
+            ?.modelAwareCachePlayback
+            ?.manifest
+            ?.identity
+        if (persist && modelAwareIdentity != null) {
+            serviceScope.launch(IO) {
+                sourceSeparationModelAwareCacheRepository.writeBlend(
+                    identity = modelAwareIdentity,
+                    blend = blend,
+                )
+            }
+        }
         if (sourceSeparationPlaybackSession != null &&
             !player.playWhenReady &&
             !player.isPlaying &&
@@ -2350,6 +2593,13 @@ class PlaybackService :
         )
 
     private fun maybeStartSourceSeparationPcmHydration(session: SourceSeparationPlaybackSession) {
+        if (session.modelAwareCachePlayback != null) {
+            traceSourceSeparationPlayback(
+                "hydration.skip",
+                "songId=${session.songId} reason=modelAwareCache",
+            )
+            return
+        }
         if (session.requiresReadinessGate || session.usesHydratedPcm || session.hasPendingHydration) {
             traceSourceSeparationPlayback(
                 "hydration.skip",
@@ -2852,6 +3102,7 @@ class PlaybackService :
         sourceSeparationPlaybackIsProcessing = false
         sourceSeparationPausedBlendFlushPending = false
         rememberWarmSourceSeparationHydration(session)
+        session?.closeModelAwareResources()
         cleanupCompletedSourceSeparationTemporaryDirs(activeSession = session)
         updateSourceSeparationProcessingLease("clear")
 
@@ -4434,6 +4685,7 @@ class PlaybackService :
         private const val SOURCE_SEPARATION_TRACE_FLUSH_LINE_COUNT = 80
         private const val SOURCE_SEPARATION_TRACE_TIME_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS"
         private const val SOURCE_SEPARATION_HYDRATION_START_DELAY_MS = 750L
+        private val MODEL_AWARE_CACHE_KEY_PATTERN = Regex("^[0-9a-f]{64}$")
     }
 }
 
@@ -4457,6 +4709,7 @@ private data class SourceSeparationPlaybackSession(
     val pendingHydratedVocalsFile: File? = null,
     val pendingHydratedInstrumentalFile: File? = null,
     val pendingHydratedCacheDir: File? = null,
+    val modelAwareCachePlayback: SourceSeparationModelAwareCachePlayback? = null,
 ) {
     val replacesQueueMediaItem: Boolean
         get() = queueReplacementToken != null
@@ -4482,9 +4735,14 @@ private data class SourceSeparationPlaybackSession(
     fun traceSummary(): String {
         return "song=$songId id=$sessionId mode=$inputMode gate=$requiresReadinessGate " +
                 "hydrated=$usesHydratedPcm pendingHydration=$hasPendingHydration " +
+                "modelAware=${modelAwareCachePlayback?.manifest?.cacheKey?.take(12)} " +
                 "replace=$replacesQueueMediaItem vocals=${vocalsFile.extension}:${vocalsFile.length()} " +
                 "instrumental=${instrumentalFile.extension}:${instrumentalFile.length()} " +
                 "clock=${queueReplacementFile?.extension}:${queueReplacementFile?.length()}"
+    }
+
+    fun closeModelAwareResources() {
+        modelAwareCachePlayback?.close()
     }
 }
 

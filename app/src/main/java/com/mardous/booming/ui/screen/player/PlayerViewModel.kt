@@ -980,6 +980,22 @@ class PlayerViewModel(
         }
     }
 
+    fun playSourceSeparationCompletedCache(cacheKey: String) {
+        if (!BuildConfig.DEBUG) return
+        traceSourceSeparationPlaybackUserActionMarker(
+            "modelAwareCache.play.userAction cache=${cacheKey.take(12)}"
+        )
+        viewModelScope.launch {
+            val result = sendSourceSeparationPlaybackCommand(
+                action = Playback.PLAY_SOURCE_SEPARATION_COMPLETED_CACHE,
+                args = Bundle().apply {
+                    putString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY, cacheKey)
+                },
+            )
+            updateSourceSeparationPlaybackState(result)
+        }
+    }
+
     private suspend fun deleteSourceSeparationCacheEntryInternal(
         entry: SourceSeparationCacheManagementItem,
     ) {
@@ -1499,6 +1515,7 @@ class PlayerViewModel(
                 sourceSeparationBlendPreviewPending = null
                 val args = Bundle().apply {
                     putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, previewBlend)
+                    putBoolean(Playback.EXTRA_SOURCE_SEPARATION_PERSIST_BLEND, false)
                 }
                 runCatching {
                     sendSourceSeparationPlaybackCommand(
