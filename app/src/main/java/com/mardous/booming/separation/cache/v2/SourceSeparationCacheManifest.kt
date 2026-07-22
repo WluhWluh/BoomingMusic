@@ -115,7 +115,13 @@ data class SourceSeparationCacheOutput(
 
     internal fun validate(state: SourceSeparationCacheManifestState) {
         if (state == SourceSeparationCacheManifestState.Completed) {
-            require(stems.all { it.wavIntegrity != null }) {
+            require(stems.all { stem ->
+                if (stem.promotionValidated) {
+                    stem.promotedIntegrity != null
+                } else {
+                    stem.wavIntegrity != null
+                }
+            }) {
                 "Completed cache stems require integrity metadata."
             }
         }
