@@ -32,43 +32,46 @@ class SourceSeparationPresetCacheAvailabilityProvider(
 }
 
 fun SourceSeparationPresetRepository.resolveActiveCacheModel(): SourceSeparationResolvedCacheModel? {
-    val active = activeModel() as? SourceSeparationActivePresetState.Reference ?: return null
-    val installed = active.installedModel ?: return null
-    if (!installed.sha256.equals(active.reference.artifactSha256, ignoreCase = true) ||
-        installed.modelId != active.reference.modelId
-    ) {
-        return null
-    }
-    val snapshot = installed.cacheContractSnapshot(this) ?: return null
-    if (active.reference.profileId != null &&
-        active.reference.profileId != snapshot.profileRevisionId
-    ) {
-        return null
-    }
-    val catalog = catalogSnapshot()
-    val executionProfile = when (installed.bindingKind) {
-        SourceSeparationPresetBindingKind.Official,
-        SourceSeparationPresetBindingKind.Sidecar -> {
-            installed.executionContract(this)
-                ?.toMdxExecutionProfile(catalog.runtimeQualifications)
-                ?: return null
+    return runCatching {
+        val active = activeModel() as? SourceSeparationActivePresetState.Reference
+            ?: return@runCatching null
+        val installed = active.installedModel ?: return@runCatching null
+        if (!installed.sha256.equals(active.reference.artifactSha256, ignoreCase = true) ||
+            installed.modelId != active.reference.modelId
+        ) {
+            return@runCatching null
         }
-        SourceSeparationPresetBindingKind.CustomProfile -> {
-            installed.customProfile
-                ?.toMdxExecutionProfile(catalog.runtimeQualifications)
-                ?: return null
+        val snapshot = installed.cacheContractSnapshot(this) ?: return@runCatching null
+        if (active.reference.profileId != null &&
+            active.reference.profileId != snapshot.profileRevisionId
+        ) {
+            return@runCatching null
         }
-    }
-    return SourceSeparationResolvedCacheModel(
-        installed = installed,
-        contract = snapshot,
-        artifact = MdxModelArtifact(
-            file = installed.file,
-            byteSize = installed.byteSize,
-            sha256 = installed.sha256,
-        ),
-        executionProfile = executionProfile,
-    )
+        val catalog = catalogSnapshot()
+        val executionProfile = when (installed.bindingKind) {
+            SourceSeparationPresetBindingKind.Official,
+            SourceSeparationPresetBindingKind.Sidecar -> {
+                installed.executionContract(this)
+                    ?.toMdxExecutionProfile(catalog.runtimeQualifications)
+                    ?: return@runCatching null
+            }
+            SourceSeparationPresetBindingKind.CustomProfile -> {
+                installed.customProfile
+                    ?.toMdxExecutionProfile(catalog.runtimeQualifications)
+                    ?: return@runCatching null
+            }
+        }
+        SourceSeparationResolvedCacheModel(
+            installed = installed,
+            contract = snapshot,
+            artifact = MdxModelArtifact(
+                file = installed.file,
+                byteSize = installed.byteSize,
+                sha256 = installed.sha256,
+            ),
+            executionProfile = executionProfile,
+        )
+    }.getOrNull()
 }
 
 private fun SourceSeparationInstalledPreset.cacheContractSnapshot(

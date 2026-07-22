@@ -88,7 +88,8 @@ class MdxRangeSeparator(
         val (vocalsFile, instrumentalFile, timingFile) = measureElapsed(timing, "Output setup") {
             outputDir.mkdirs()
             val baseName = safeBaseName(displayName)
-            val rangeTag = "${modelVariant.outputTag}_${frameToMs(startFrame)}ms_${frameToMs(endFrame)}ms"
+            val rangeTag =
+                "${executionProfile.outputTag}_${frameToMs(startFrame)}ms_${frameToMs(endFrame)}ms"
             Triple(
                 effectiveResume?.vocalsFile
                     ?.takeIf { it.parentFile == outputDir }
