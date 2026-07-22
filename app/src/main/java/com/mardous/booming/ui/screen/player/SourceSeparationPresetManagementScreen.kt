@@ -2,10 +2,12 @@ package com.mardous.booming.ui.screen.player
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -18,6 +20,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -68,9 +71,18 @@ internal fun SourceSeparationPresetManagementSheet(
     onDismissImportSuccess: () -> Unit,
     onUseImported: (String) -> Unit,
     onDeleteImported: (String) -> Unit,
+    onShowCatalogDetails: (String) -> Unit,
+    onShowImportedDetails: (String, String?) -> Unit,
+    onDismissModelDetails: () -> Unit,
+    onEditCustomProfile: (String, String) -> Unit,
+    onSaveCustomProfileRevision: (SourceSeparationManualModelProfileDraft) -> Unit,
+    onCancelCustomProfileEdit: () -> Unit,
+    onUseCustomProfile: (String, String) -> Unit,
+    onDeleteCustomProfile: (String) -> Unit,
 ) {
     var pendingDeleteModelId by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingDeleteImportedSha256 by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingDeleteProfileId by rememberSaveable { mutableStateOf<String?>(null) }
     val pendingDeleteModel = state.entries.singleOrNull { it.modelId == pendingDeleteModelId }
     val pendingDeleteImported = state.importedEntries.singleOrNull {
         it.sha256 == pendingDeleteImportedSha256
@@ -166,6 +178,7 @@ internal fun SourceSeparationPresetManagementSheet(
                     onUse = onUse,
                     onDelete = { pendingDeleteModelId = it },
                     onClearError = onClearError,
+                    onDetails = onShowCatalogDetails,
                 )
                 modelSection(
                     titleRes = R.string.source_separation_preset_experimental_section,
@@ -177,6 +190,7 @@ internal fun SourceSeparationPresetManagementSheet(
                     onUse = onUse,
                     onDelete = { pendingDeleteModelId = it },
                     onClearError = onClearError,
+                    onDetails = onShowCatalogDetails,
                 )
                 modelSection(
                     titleRes = R.string.source_separation_preset_download_only_section,
@@ -188,11 +202,16 @@ internal fun SourceSeparationPresetManagementSheet(
                     onUse = onUse,
                     onDelete = { pendingDeleteModelId = it },
                     onClearError = onClearError,
+                    onDetails = onShowCatalogDetails,
                 )
                 importedModelSection(
                     entries = state.importedEntries,
                     onUse = onUseImported,
                     onDelete = { pendingDeleteImportedSha256 = it },
+                    onDetails = onShowImportedDetails,
+                    onEditProfile = onEditCustomProfile,
+                    onUseProfile = onUseCustomProfile,
+                    onDeleteProfile = { _, profileId -> pendingDeleteProfileId = profileId },
                 )
             }
         }
@@ -300,6 +319,61 @@ internal fun SourceSeparationPresetManagementSheet(
                     Text(stringResource(android.R.string.cancel))
                 }
             },
+        )
+    }
+
+    pendingDeleteProfileId?.let { profileId ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteProfileId = null },
+            icon = {
+                Icon(
+                    painter = painterResource(R.drawable.ic_delete_24dp),
+                    contentDescription = null,
+                )
+            },
+            title = { Text(stringResource(R.string.source_separation_profile_delete_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.source_separation_profile_delete_message,
+                        profileId,
+                    ),
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteCustomProfile(profileId)
+                        pendingDeleteProfileId = null
+                    },
+                ) {
+                    Text(stringResource(R.string.delete_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteProfileId = null }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            },
+        )
+    }
+
+    state.modelDetails?.let { details ->
+        SourceSeparationModelDetailsDialog(
+            details = details,
+            onDismiss = onDismissModelDetails,
+        )
+    }
+
+    state.profileEditor?.let { editor ->
+        ManualProfileDialog(
+            pending = editor.artifact,
+            initialDraft = editor.initialDraft,
+            onSave = onSaveCustomProfileRevision,
+            onCancel = onCancelCustomProfileEdit,
+            titleRes = R.string.source_separation_profile_revision_title,
+            saveRes = R.string.source_separation_profile_save_revision,
+            saving = editor.saving,
         )
     }
 
@@ -416,6 +490,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.modelSection(
     onUse: (String) -> Unit,
     onDelete: (String) -> Unit,
     onClearError: (String?) -> Unit,
+    onDetails: (String) -> Unit,
 ) {
     if (entries.isEmpty()) return
     item(key = "section-$titleRes") {
@@ -438,6 +513,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.modelSection(
             onUse = onUse,
             onDelete = onDelete,
             onClearError = onClearError,
+            onDetails = onDetails,
         )
     }
 }
@@ -446,6 +522,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.importedModelSection(
     entries: List<SourceSeparationImportedModelManagementItem>,
     onUse: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onDetails: (String, String?) -> Unit,
+    onEditProfile: (String, String) -> Unit,
+    onUseProfile: (String, String) -> Unit,
+    onDeleteProfile: (String, String) -> Unit,
 ) {
     if (entries.isEmpty()) return
     item(key = "section-imported") {
@@ -465,6 +545,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.importedModelSection(
             model = entries[index],
             onUse = onUse,
             onDelete = onDelete,
+            onDetails = onDetails,
+            onEditProfile = onEditProfile,
+            onUseProfile = onUseProfile,
+            onDeleteProfile = onDeleteProfile,
         )
     }
 }
@@ -477,6 +561,7 @@ private fun PresetModelCard(
     onUse: (String) -> Unit,
     onDelete: (String) -> Unit,
     onClearError: (String?) -> Unit,
+    onDetails: (String) -> Unit,
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -509,14 +594,27 @@ private fun PresetModelCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                if (model.active) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_check_24dp),
-                        contentDescription = stringResource(
-                            R.string.source_separation_preset_selected_for_validation,
-                        ),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (model.active) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_check_24dp),
+                            contentDescription = stringResource(
+                                R.string.source_separation_preset_selected_for_validation,
+                            ),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    IconButton(
+                        onClick = { onDetails(model.modelId) },
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_info_24dp),
+                            contentDescription = stringResource(
+                                R.string.source_separation_model_details_title,
+                            ),
+                        )
+                    }
                 }
             }
 
@@ -669,6 +767,10 @@ private fun ImportedModelCard(
     model: SourceSeparationImportedModelManagementItem,
     onUse: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onDetails: (String, String?) -> Unit,
+    onEditProfile: (String, String) -> Unit,
+    onUseProfile: (String, String) -> Unit,
+    onDeleteProfile: (String, String) -> Unit,
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -705,14 +807,27 @@ private fun ImportedModelCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                if (model.active) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_check_24dp),
-                        contentDescription = stringResource(
-                            R.string.source_separation_preset_selected_for_validation,
-                        ),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (model.active) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_check_24dp),
+                            contentDescription = stringResource(
+                                R.string.source_separation_preset_selected_for_validation,
+                            ),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    IconButton(
+                        onClick = { onDetails(model.sha256, null) },
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_info_24dp),
+                            contentDescription = stringResource(
+                                R.string.source_separation_model_details_title,
+                            ),
+                        )
+                    }
                 }
             }
 
@@ -739,6 +854,26 @@ private fun ImportedModelCard(
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
+            }
+
+            if (model.profileRevisions.isNotEmpty()) {
+                HorizontalDivider()
+                Text(
+                    text = stringResource(R.string.source_separation_profile_revisions_title),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                model.profileRevisions.forEach { revision ->
+                    CustomProfileRevisionRow(
+                        artifactSha256 = model.sha256,
+                        revision = revision,
+                        operationInProgress = model.transferState != null,
+                        onDetails = onDetails,
+                        onEdit = onEditProfile,
+                        onUse = onUseProfile,
+                        onDelete = onDeleteProfile,
+                    )
+                }
             }
 
             when (model.transferState) {
@@ -802,6 +937,346 @@ private fun ImportedModelCard(
         }
     }
 }
+
+@Composable
+private fun CustomProfileRevisionRow(
+    artifactSha256: String,
+    revision: SourceSeparationCustomProfileRevisionUiState,
+    operationInProgress: Boolean,
+    onDetails: (String, String?) -> Unit,
+    onEdit: (String, String) -> Unit,
+    onUse: (String, String) -> Unit,
+    onDelete: (String, String) -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = revision.displayName,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = revision.profileId,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            val state = when {
+                revision.active -> R.string.source_separation_profile_active
+                revision.defaultBinding -> R.string.source_separation_profile_default
+                else -> R.string.source_separation_profile_saved
+            }
+            Text(
+                text = stringResource(state),
+                color = if (revision.active) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        IconButton(
+            onClick = { onDetails(artifactSha256, revision.profileId) },
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_info_24dp),
+                contentDescription = stringResource(R.string.source_separation_model_details_title),
+            )
+        }
+        IconButton(
+            onClick = { onEdit(artifactSha256, revision.profileId) },
+            enabled = !operationInProgress,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_edit_24dp),
+                contentDescription = stringResource(R.string.source_separation_profile_edit),
+            )
+        }
+        IconButton(
+            onClick = { onUse(artifactSha256, revision.profileId) },
+            enabled = !revision.active && !operationInProgress,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_play_24dp),
+                contentDescription = stringResource(
+                    R.string.source_separation_preset_use_for_validation,
+                ),
+            )
+        }
+        IconButton(
+            onClick = { onDelete(artifactSha256, revision.profileId) },
+            enabled = revision.canDelete && !operationInProgress,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_delete_24dp),
+                contentDescription = stringResource(R.string.source_separation_profile_delete_title),
+                tint = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SourceSeparationModelDetailsDialog(
+    details: SourceSeparationModelDetailsUiState,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_info_24dp),
+                contentDescription = null,
+            )
+        },
+        title = { Text(details.displayName) },
+        text = {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.heightIn(max = 520.dp),
+            ) {
+                item {
+                    ModelDetailSection(R.string.source_separation_model_details_identity) {
+                        ModelDetailValue(R.string.source_separation_model_details_model_id, details.modelId)
+                        ModelDetailValue(
+                            R.string.source_separation_model_details_metadata_origin,
+                            details.metadataOrigin.displayText(),
+                        )
+                        ModelDetailValue(
+                            R.string.source_separation_model_details_install_state,
+                            stringResource(
+                                if (details.installed) {
+                                    R.string.source_separation_preset_installed
+                                } else {
+                                    R.string.source_separation_preset_not_installed
+                                },
+                            ),
+                        )
+                    }
+                }
+                item {
+                    ModelDetailSection(R.string.source_separation_model_details_artifact) {
+                        ModelDetailValue(R.string.source_separation_model_file_label, details.fileName)
+                        details.byteSize?.let { size ->
+                            ModelDetailValue(
+                                R.string.source_separation_cache_size_label,
+                                size.asReadableFileSize(),
+                            )
+                        }
+                        ModelDetailValue(
+                            R.string.source_separation_model_actual_hash_label,
+                            details.artifactSha256,
+                        )
+                    }
+                }
+                details.contract?.let { contract ->
+                    item {
+                        ModelDetailSection(R.string.source_separation_model_details_contract) {
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_contract_id,
+                                contract.identity,
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_schema,
+                                contract.schemaVersion.toString(),
+                            )
+                            details.profileRevisionId?.let { revision ->
+                                ModelDetailValue(
+                                    R.string.source_separation_model_details_profile_revision,
+                                    revision,
+                                )
+                            }
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_input_tensor,
+                                "${contract.inputTensorName}: " +
+                                    contract.inputTensorShape.joinToString(" x "),
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_output_tensor,
+                                "${contract.outputTensorName}: " +
+                                    contract.outputTensorShape.joinToString(" x "),
+                            )
+                        }
+                    }
+                    item {
+                        ModelDetailSection(R.string.source_separation_model_details_dsp) {
+                            ModelDetailValue(
+                                R.string.source_separation_preset_import_sample_rate,
+                                contract.sampleRate.toString(),
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_preset_import_fft_size,
+                                contract.nFft.toString(),
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_preset_import_hop_length,
+                                contract.hopLength.toString(),
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_preset_import_dim_f,
+                                contract.dimF.toString(),
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_preset_import_dim_t_power,
+                                contract.dimTPower.toString(),
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_preset_import_output_scale,
+                                contract.modelOutputScale.toString(),
+                            )
+                        }
+                    }
+                    item {
+                        ModelDetailSection(R.string.source_separation_model_details_stems) {
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_model_output,
+                                contract.modelOutputStem,
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_residual,
+                                contract.residualStem,
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_pipeline,
+                                "${contract.pipelineId} " +
+                                    "${contract.pipelineMinimumVersion}-${contract.pipelineMaximumVersion}",
+                            )
+                        }
+                    }
+                }
+                details.source?.let { source ->
+                    item {
+                        ModelDetailSection(R.string.source_separation_model_details_provenance) {
+                            ModelDetailValue(
+                                R.string.source_separation_model_file_label,
+                                source.fileName,
+                            )
+                            source.url?.let { url ->
+                                ModelDetailValue(
+                                    R.string.source_separation_model_details_source_url,
+                                    url,
+                                )
+                            }
+                            ModelDetailValue(
+                                R.string.source_separation_model_actual_hash_label,
+                                source.sha256,
+                            )
+                            if (source.attribution.isNotEmpty()) {
+                                ModelDetailValue(
+                                    R.string.source_separation_model_details_attribution,
+                                    source.attribution.joinToString(),
+                                )
+                            }
+                        }
+                    }
+                }
+                details.conversion?.let { conversion ->
+                    item {
+                        ModelDetailSection(R.string.source_separation_model_details_conversion) {
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_repository,
+                                conversion.repository,
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_revision,
+                                conversion.revision,
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_tools,
+                                conversion.toolVersions.entries.joinToString { (name, version) ->
+                                    "$name $version"
+                                },
+                            )
+                        }
+                    }
+                }
+                if (details.runtimeQualifications.isNotEmpty()) {
+                    item {
+                        ModelDetailSection(R.string.source_separation_model_details_runtime) {
+                            details.runtimeQualifications.forEach { runtime ->
+                                Text(
+                                    text = "${runtime.abi} / ${runtime.backend} / " +
+                                        "${runtime.profileId} / ${runtime.precision}: ${runtime.status}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    text = runtime.evidence,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (details.qualityUnverified) {
+                    item {
+                        Text(
+                            text = stringResource(
+                                R.string.source_separation_preset_import_quality_unverified,
+                            ),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close_action))
+            }
+        },
+    )
+}
+
+@Composable
+private fun ModelDetailSection(
+    titleRes: Int,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = stringResource(titleRes),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        content()
+    }
+}
+
+@Composable
+private fun ModelDetailValue(labelRes: Int, value: String) {
+    Text(
+        text = stringResource(
+            R.string.source_separation_model_details_value,
+            stringResource(labelRes),
+            value,
+        ),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall,
+    )
+}
+
+@Composable
+private fun SourceSeparationModelMetadataOrigin.displayText(): String = stringResource(
+    when (this) {
+        SourceSeparationModelMetadataOrigin.BuiltInCatalog ->
+            R.string.source_separation_model_details_origin_catalog
+        SourceSeparationModelMetadataOrigin.ImportedSidecar ->
+            R.string.source_separation_model_details_origin_sidecar
+        SourceSeparationModelMetadataOrigin.ManualProfile ->
+            R.string.source_separation_model_details_origin_manual
+    },
+)
 
 @Composable
 private fun ModelOperationError(message: String, onDismiss: () -> Unit) {

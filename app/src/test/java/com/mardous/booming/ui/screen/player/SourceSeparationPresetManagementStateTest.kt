@@ -79,6 +79,33 @@ class SourceSeparationPresetManagementStateTest {
     }
 
     @Test
+    fun `only inactive non-default custom profile revisions can be deleted`() {
+        val active = SourceSeparationCustomProfileRevisionUiState(
+            profileId = "active",
+            displayName = "Active",
+            modelId = "model",
+            active = true,
+            defaultBinding = false,
+        )
+        val original = active.copy(
+            profileId = "original",
+            displayName = "Original",
+            active = false,
+            defaultBinding = true,
+        )
+        val orphan = active.copy(
+            profileId = "orphan",
+            displayName = "Orphan",
+            active = false,
+            defaultBinding = false,
+        )
+
+        assertFalse(active.canDelete)
+        assertFalse(original.canDelete)
+        assertTrue(orphan.canDelete)
+    }
+
+    @Test
     fun `missing restored official model is exposed without an active selection`() {
         val reference = activeReference()
 

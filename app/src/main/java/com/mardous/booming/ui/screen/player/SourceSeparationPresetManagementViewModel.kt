@@ -27,6 +27,7 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelecti
 import com.mardous.booming.separation.model.preset.SourceSeparationPendingModelImport
 import com.mardous.booming.separation.model.preset.SourceSeparationManualModelProfileDraft
 import com.mardous.booming.separation.model.preset.SourceSeparationManualModelStem
+import com.mardous.booming.separation.model.preset.toManualDraft
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -156,6 +157,109 @@ class SourceSeparationPresetManagementViewModel internal constructor(
         deleteInstalled(item.installed, item.operationKey)
     }
 
+    fun showCatalogDetails(modelId: String) {
+        _state.value = _state.value.copy(modelDetails = repository.catalogModelDetails(modelId))
+    }
+
+    fun showImportedDetails(sha256: String, profileId: String? = null) {
+        _state.value = _state.value.copy(
+            modelDetails = repository.importedModelDetails(sha256, profileId),
+        )
+    }
+
+    fun dismissModelDetails() {
+        _state.value = _state.value.copy(modelDetails = null)
+    }
+
+    fun editCustomProfile(sha256: String, profileId: String) {
+        val installed = repository.installedModel(sha256) ?: return
+        val profile = repository.customProfiles().singleOrNull { it.profileId == profileId }
+            ?: return
+        _state.value = _state.value.copy(
+            profileEditor = SourceSeparationCustomProfileEditorUiState(
+                artifactSha256 = installed.sha256,
+                sourceProfileId = profile.profileId,
+                artifact = SourceSeparationPendingModelImport(
+                    fileName = installed.file.name,
+                    byteSize = installed.byteSize,
+                    sha256 = installed.sha256,
+                ),
+                initialDraft = profile.toManualDraft(),
+            ),
+            errorMessage = null,
+        )
+    }
+
+    fun saveCustomProfileRevision(draft: SourceSeparationManualModelProfileDraft) {
+        val editor = _state.value.profileEditor ?: return
+        if (editor.saving) return
+        _state.value = _state.value.copy(profileEditor = editor.copy(saving = true))
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val profile = draft.toProfile(editor.artifact)
+                repository.saveCustomProfileRevision(
+                    artifactSha256 = editor.artifactSha256,
+                    profile = profile,
+                    platform = platformProvider.current(),
+                )
+                val previous = _state.value
+                _state.value = buildState().copy(
+                    confirmationModelId = previous.confirmationModelId,
+                    errorMessage = null,
+                    importState = previous.importState,
+                    modelDetails = repository.importedModelDetails(
+                        editor.artifactSha256,
+                        profile.profileId,
+                    ),
+                    profileEditor = null,
+                )
+            } catch (error: Throwable) {
+                _state.value = _state.value.copy(
+                    profileEditor = editor.copy(saving = false),
+                    errorMessage = error.message.orEmpty(),
+                )
+            }
+        }
+    }
+
+    fun cancelCustomProfileEdit() {
+        if (_state.value.profileEditor?.saving == true) return
+        _state.value = _state.value.copy(profileEditor = null)
+    }
+
+    fun useCustomProfile(sha256: String, profileId: String) {
+        val operationKey = importOperationKey(sha256)
+        if (transferStates[operationKey].isOperationInProgress) return
+        transferStates[operationKey] = SourceSeparationPresetTransferState.Activating
+        publishState()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.activateCustomProfile(
+                    sha256 = sha256,
+                    profileId = profileId,
+                    platform = platformProvider.current(),
+                    scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                )
+                transferStates.remove(operationKey)
+            } catch (error: Throwable) {
+                transferStates.remove(operationKey)
+                _state.value = _state.value.copy(errorMessage = error.message.orEmpty())
+            } finally {
+                publishState()
+            }
+        }
+    }
+
+    fun deleteCustomProfile(profileId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { repository.deleteCustomProfile(profileId) }
+                .onFailure { error ->
+                    _state.value = _state.value.copy(errorMessage = error.message.orEmpty())
+                }
+            publishState()
+        }
+    }
+
     fun beginImport(uri: Uri) {
         if (importJob?.isActive == true || _state.value.importState.blocksNewImport) return
         setImportState(SourceSeparationPresetImportUiState.PreparingModel)
@@ -281,6 +385,8 @@ class SourceSeparationPresetManagementViewModel internal constructor(
             confirmationModelId = previous.confirmationModelId,
             errorMessage = previous.errorMessage,
             importState = previous.importState,
+            modelDetails = previous.modelDetails,
+            profileEditor = previous.profileEditor,
         )
     }
 
@@ -288,6 +394,7 @@ class SourceSeparationPresetManagementViewModel internal constructor(
         val platform = runCatching(platformProvider::current).getOrNull()
         val active = repository.activeModel()
         val activeReference = (active as? SourceSeparationActivePresetState.Reference)?.reference
+        val customProfiles = repository.customProfiles()
         val installedByHash = repository.installedModels().associateBy { it.sha256.lowercase() }
         val entries = repository.catalogEntries().map { entry ->
             val officialPreset = runCatching { repository.officialPreset(entry.modelId) }.getOrNull()
@@ -351,6 +458,25 @@ class SourceSeparationPresetManagementViewModel internal constructor(
                     useBlockReason = useBlockReason,
                     transferState = transferStates[importOperationKey(installed.sha256)],
                     operationKey = importOperationKey(installed.sha256),
+                    profileRevisions = customProfiles
+                        .filter { profile ->
+                            profile.artifact.sha256.equals(installed.sha256, ignoreCase = true)
+                        }
+                        .map { profile ->
+                            SourceSeparationCustomProfileRevisionUiState(
+                                profileId = profile.profileId,
+                                displayName = profile.displayName,
+                                modelId = profile.modelId,
+                                active = activeReference?.profileId == profile.profileId &&
+                                    activeReference.artifactSha256.equals(
+                                        installed.sha256,
+                                        ignoreCase = true,
+                                    ),
+                                defaultBinding = installed.customProfile?.profileId ==
+                                    profile.profileId,
+                            )
+                        }
+                        .sortedBy(SourceSeparationCustomProfileRevisionUiState::profileId),
                 )
             }
             .sortedBy { it.displayName.lowercase(Locale.ROOT) }
@@ -363,7 +489,7 @@ class SourceSeparationPresetManagementViewModel internal constructor(
                 reference = repository.pendingActiveModel(),
                 entries = entries,
                 importedEntries = importedEntries,
-                customProfiles = repository.customProfiles(),
+                customProfiles = customProfiles,
                 activeReference = usableActiveModelReference(active),
             ),
         )
@@ -514,6 +640,8 @@ data class SourceSeparationPresetManagementUiState(
     val confirmationModelId: String? = null,
     val errorMessage: String? = null,
     val importState: SourceSeparationPresetImportUiState = SourceSeparationPresetImportUiState.Idle,
+    val modelDetails: SourceSeparationModelDetailsUiState? = null,
+    val profileEditor: SourceSeparationCustomProfileEditorUiState? = null,
 ) {
     val confirmationModel: SourceSeparationPresetManagementItem?
         get() = entries.singleOrNull { it.modelId == confirmationModelId }
@@ -572,10 +700,30 @@ data class SourceSeparationImportedModelManagementItem(
     val useBlockReason: SourceSeparationPresetSelectionBlockReason?,
     val transferState: SourceSeparationPresetTransferState?,
     val operationKey: String,
+    val profileRevisions: List<SourceSeparationCustomProfileRevisionUiState> = emptyList(),
 ) {
     val canDelete: Boolean
         get() = !active && !operationInProgress
 }
+
+data class SourceSeparationCustomProfileRevisionUiState(
+    val profileId: String,
+    val displayName: String,
+    val modelId: String,
+    val active: Boolean,
+    val defaultBinding: Boolean,
+) {
+    val canDelete: Boolean
+        get() = !active && !defaultBinding
+}
+
+data class SourceSeparationCustomProfileEditorUiState(
+    val artifactSha256: String,
+    val sourceProfileId: String,
+    val artifact: SourceSeparationPendingModelImport,
+    val initialDraft: SourceSeparationManualModelProfileDraft,
+    val saving: Boolean = false,
+)
 
 sealed interface SourceSeparationPresetImportUiState {
     data object Idle : SourceSeparationPresetImportUiState

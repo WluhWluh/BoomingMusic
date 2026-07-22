@@ -148,6 +148,16 @@ class SourceSeparationModelManagementFragment : BottomSheetDialogFragment() {
                             onDismissImportSuccess = presetViewModel::dismissImportSuccess,
                             onUseImported = presetViewModel::requestUseImported,
                             onDeleteImported = presetViewModel::deleteImported,
+                            onShowCatalogDetails = presetViewModel::showCatalogDetails,
+                            onShowImportedDetails = presetViewModel::showImportedDetails,
+                            onDismissModelDetails = presetViewModel::dismissModelDetails,
+                            onEditCustomProfile = presetViewModel::editCustomProfile,
+                            onSaveCustomProfileRevision =
+                                presetViewModel::saveCustomProfileRevision,
+                            onCancelCustomProfileEdit =
+                                presetViewModel::cancelCustomProfileEdit,
+                            onUseCustomProfile = presetViewModel::useCustomProfile,
+                            onDeleteCustomProfile = presetViewModel::deleteCustomProfile,
                         )
                     } else {
                         val state by viewModel.sourceSeparationModelStateFlow.collectAsState()

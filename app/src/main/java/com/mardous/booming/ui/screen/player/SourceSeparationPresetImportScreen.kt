@@ -235,11 +235,14 @@ private fun SourceSeparationPresetImportFailureStage.message(): String = when (t
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ManualProfileDialog(
+internal fun ManualProfileDialog(
     pending: SourceSeparationPendingModelImport,
     initialDraft: SourceSeparationManualModelProfileDraft,
     onSave: (SourceSeparationManualModelProfileDraft) -> Unit,
     onCancel: () -> Unit,
+    titleRes: Int = R.string.source_separation_preset_import_manual_title,
+    saveRes: Int = R.string.source_separation_preset_import_save_profile,
+    saving: Boolean = false,
 ) {
     var modelId by rememberSaveable(pending.sha256) { mutableStateOf(initialDraft.modelId) }
     var displayName by rememberSaveable(pending.sha256) { mutableStateOf(initialDraft.displayName) }
@@ -280,7 +283,7 @@ private fun ManualProfileDialog(
         runCatching { candidate.toProfile(pending) }.isSuccess
     }
 
-    Dialog(onDismissRequest = onCancel) {
+    Dialog(onDismissRequest = { if (!saving) onCancel() }) {
         Surface(
             shape = MaterialTheme.shapes.extraLarge,
             tonalElevation = 6.dp,
@@ -294,7 +297,7 @@ private fun ManualProfileDialog(
                     modifier = Modifier.padding(24.dp),
                 ) {
                     Text(
-                        text = stringResource(R.string.source_separation_preset_import_manual_title),
+                        text = stringResource(titleRes),
                         style = MaterialTheme.typography.headlineSmall,
                     )
                     Text(
@@ -423,14 +426,14 @@ private fun ManualProfileDialog(
                         .fillMaxWidth()
                         .padding(16.dp),
                 ) {
-                    TextButton(onClick = onCancel) {
+                    TextButton(onClick = onCancel, enabled = !saving) {
                         Text(stringResource(android.R.string.cancel))
                     }
                     Button(
                         onClick = { draft?.let(onSave) },
-                        enabled = draft != null,
+                        enabled = draft != null && !saving,
                     ) {
-                        Text(stringResource(R.string.source_separation_preset_import_save_profile))
+                        Text(stringResource(saveRes))
                     }
                 }
             }
