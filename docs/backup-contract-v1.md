@@ -1,9 +1,12 @@
 # Backup contract v1
 
-This document freezes the portable settings contract before the existing
-`.bmgbak` writer and restore path are replaced. The current `BackupHelper`
-still copies package-named preferences XML; implementing the new archive flow
-belongs to the later persistence phase.
+This document freezes the portable settings contract implemented by the
+versioned `.bmgbak` archive flow. `BackupHelper` stages and validates the
+canonical JSON payloads, emits filtered package-named XML compatibility
+projections, and restores canonical JSON before falling back to legacy XML
+archives. The Android system-backup rules are separate and intentionally
+allowlist only the music database; they do not carry this portable settings
+archive or any source-separation model data.
 
 ## Independent versions
 

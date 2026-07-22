@@ -1475,50 +1475,53 @@ canonical candidates intended for the first broad testing wave. Entries whose
 DSP or stem semantics remain incomplete may still be published as
 `download-only`; artifact availability must not upgrade activation support.
 
-- [ ] Add contract schema v2 without mutable runtime qualification, regenerate
+- [x] Add contract schema v2 without mutable runtime qualification, regenerate
   the three reviewed contracts and exact-name sidecars, and reject v1 as an
   official-release contract under the clean-install boundary.
-- [ ] Add a catalog schema/revision that separates contract review, product
+- [x] Add a catalog schema/revision that separates contract review, product
   tier, activation policy, release maturity, and profile-aware runtime evidence;
   retain the Phase 1 catalog as an immutable historical snapshot.
-- [ ] Reclassify 9662 FP32 as the sole recommended/default candidate, KARA FP32
+- [x] Reclassify 9662 FP32 as the sole recommended/default candidate, KARA FP32
   as CPU-only experimental, and HQ4 as resource-gated download-only without
   deleting either reviewed contract.
-- [ ] Record rejected FP16 and KARA GPU profiles by exact execution-profile ID;
+- [x] Record rejected FP16 and KARA GPU profiles by exact execution-profile ID;
   permit a future new profile to be tested without overwriting that evidence.
-- [ ] Replace `MdxModelVariant.MDXNET_9482` as the sole active path with a
+- [x] Replace `MdxModelVariant.MDXNET_9482` as the sole active path with a
   catalog-backed model ID in the new repository and selection state, without
   yet changing the feature-gated production worker.
-- [ ] Pin the immutable `bss-tflite` Release tag, asset URLs, byte sizes, and
+- [x] Pin the immutable `bss-tflite` Release tag, asset URLs, byte sizes, and
   hashes in a reviewed catalog revision; never resolve `latest` at runtime.
-- [ ] Install every artifact under a separate hash-aware model directory.
-- [ ] Track download/import state per model.
-- [ ] Add separate download, active-model selection, and manual deletion
+- [x] Install every artifact under a separate hash-aware model directory.
+- [x] Track download/import state per model.
+- [x] Add separate download, active-model selection, and manual deletion
   operations.
-- [ ] Prevent a completed download from changing the active model.
-- [ ] Keep inactive downloaded models until the user explicitly deletes them.
-- [ ] Display the sole recommended/default model, explicitly warned selectable
+- [x] Prevent a completed download from changing the active model.
+- [x] Keep inactive downloaded models until the user explicitly deletes them.
+- [x] Display the sole recommended/default model, explicitly warned selectable
   experimental models, and download-only candidates with distinct activation
   rules.
-- [ ] Apply tier-specific `Use` gates: a recommended release model requires its
+- [x] Apply tier-specific `Use` gates: a recommended release model requires its
   Phase 7 stable evidence; an experimental model requires its Phase 7 CPU
   evidence and manual user confirmation; download-only entries have no normal
   `Use` action. A window-level `known-good` CPU record alone is not a release
   promotion.
-- [ ] Require a matching `known-good` CPU profile for every selectable
+- [x] Require a matching `known-good` CPU profile for every selectable
   model/ABI. `Auto` may add only an individually approved GPU profile and must
   retain that CPU fallback; `untested`, rejected, missing, and `unsupported`
   profiles remain downloadable but not usable outside internal validation.
 - [x] Implement the import priority: built-in contract by SHA-256, matching
   sidecar, then advanced profile form with an unverifiable-quality warning.
-- [ ] Keep every download or import inactive until the user explicitly chooses
+- [x] Keep every download or import inactive until the user explicitly chooses
   `Use`.
-- [ ] Persist the active model as a stable ID/hash/contract reference rather
+- [x] Persist the active model as a stable ID/hash/contract reference rather
   than a model path; keep installed weights and official manifests outside
   manual and system backups.
-- [ ] Persist portable custom profile metadata separately from imported model
+- [x] Persist portable custom profile metadata separately from imported model
   files, content URIs, and download state.
-- [ ] Align Android full-backup/data-extraction rules with the same policy so
+- [x] Show a restored pending model target with its model ID and short hash;
+  distinguish missing weights from an installed-but-inactive target, retain a
+  different active model, and provide an explicit discard action.
+- [x] Align Android full-backup/data-extraction rules with the same policy so
   model weights and source-separation cache cannot enter system backup.
 
 Acceptance criteria:
