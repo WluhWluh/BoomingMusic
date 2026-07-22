@@ -64,6 +64,7 @@ import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.SourceSeparationModelAwareEngine
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheEntryLeaseRegistry
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
@@ -196,6 +197,7 @@ private val mainModule = module {
         )
     }
     single { SourceSeparationCacheRunCoordinator(store = get(), repository = get()) }
+    single { SourceSeparationCacheHydrator(store = get(), repository = get()) }
     single {
         SourceSeparationModelAwareEngine.createDevelopment(
             context = androidContext(),

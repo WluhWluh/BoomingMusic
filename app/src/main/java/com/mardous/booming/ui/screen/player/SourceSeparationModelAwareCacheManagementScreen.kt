@@ -381,7 +381,9 @@ private fun SourceSeparationModelAwareCacheRow(
                     label = stringResource(R.string.source_separation_cache_accessed_label),
                     value = context.dateStr(item.lastAccessedAtEpochMs),
                 )
-                if (item.state == SourceSeparationModelAwareCacheEntryState.Completed) {
+                if (item.state == SourceSeparationModelAwareCacheEntryState.Completed &&
+                    item.supportsStandardPlayback
+                ) {
                     OutlinedButton(
                         onClick = onPlay,
                         enabled = !deleting,

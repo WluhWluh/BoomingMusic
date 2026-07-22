@@ -50,6 +50,12 @@ class SourceSeparationModelAwareCacheRepository(
                 sizeBytes = store.entryDirectory(manifest.cacheKey).directorySize(),
                 updatedAtEpochMs = manifest.updatedAtEpochMs,
                 lastAccessedAtEpochMs = manifest.lastAccessedAtEpochMs,
+                supportsStandardPlayback = manifest.output?.stems
+                    ?.map(SourceSeparationCacheRenderedStem::semantic)
+                    ?.toSet() == setOf(
+                    ContractStemSemantic.Vocals,
+                    ContractStemSemantic.Instrumental,
+                ),
             )
         }
     }
@@ -306,6 +312,7 @@ data class SourceSeparationModelAwareCacheEntry(
     val sizeBytes: Long,
     val updatedAtEpochMs: Long,
     val lastAccessedAtEpochMs: Long,
+    val supportsStandardPlayback: Boolean = true,
 )
 
 enum class SourceSeparationModelAwareCacheEntryState {
