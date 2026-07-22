@@ -1509,7 +1509,7 @@ DSP or stem semantics remain incomplete may still be published as
   model/ABI. `Auto` may add only an individually approved GPU profile and must
   retain that CPU fallback; `untested`, rejected, missing, and `unsupported`
   profiles remain downloadable but not usable outside internal validation.
-- [ ] Implement the import priority: built-in contract by SHA-256, matching
+- [x] Implement the import priority: built-in contract by SHA-256, matching
   sidecar, then advanced profile form with an unverifiable-quality warning.
 - [ ] Keep every download or import inactive until the user explicitly chooses
   `Use`.

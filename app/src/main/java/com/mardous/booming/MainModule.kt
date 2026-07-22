@@ -62,7 +62,9 @@ import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.model.SourceSeparationModelRepository
+import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPresetStructuralInspector
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportCoordinator
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.ui.screen.equalizer.EqualizerViewModel
 import com.mardous.booming.ui.screen.info.InfoViewModel
@@ -161,6 +163,16 @@ private val mainModule = module {
     }
     single {
         SourceSeparationPresetDownloader(repository = get())
+    }
+    single {
+        SourceSeparationPresetImportCoordinator(
+            repository = get(),
+            stagingDirectory = java.io.File(
+                androidContext().cacheDir,
+                SourceSeparationPresetImportCoordinator.STAGING_DIRECTORY,
+            ),
+            structuralInspector = AndroidSourceSeparationPresetStructuralInspector,
+        )
     }
     single {
         SourceSeparationEngine(context = androidContext())
@@ -317,8 +329,10 @@ private val viewModule = module {
 
     viewModel {
         SourceSeparationPresetManagementViewModel(
+            contentResolver = get(),
             repository = get(),
             downloader = get(),
+            importCoordinator = get(),
         )
     }
 

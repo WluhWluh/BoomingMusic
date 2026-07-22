@@ -52,6 +52,15 @@ class SourceSeparationPresetManagementStateTest {
         assertFalse(item.canDelete)
     }
 
+    @Test
+    fun `imported active or busy models cannot be deleted`() {
+        val active = importedItem(active = true)
+        val deleting = importedItem(transferState = SourceSeparationPresetTransferState.Deleting)
+
+        assertFalse(active.canDelete)
+        assertFalse(deleting.canDelete)
+    }
+
     private fun item(
         supportLevel: CatalogSupportLevel,
         activationPolicy: CatalogActivationPolicy,
@@ -84,5 +93,36 @@ class SourceSeparationPresetManagementStateTest {
         canUseForValidation = canUseForValidation,
         useBlockReason = null,
         transferState = null,
+        operationKey = "catalog:model",
+    )
+
+    private fun importedItem(
+        active: Boolean = false,
+        transferState: SourceSeparationPresetTransferState? = null,
+    ) = SourceSeparationImportedModelManagementItem(
+        modelId = "imported_model",
+        displayName = "Imported Model",
+        sha256 = "b".repeat(64),
+        byteSize = 1L,
+        bindingKind = SourceSeparationPresetBindingKind.CustomProfile,
+        qualityUnverified = true,
+        installed = SourceSeparationInstalledPreset(
+            modelId = "imported_model",
+            displayName = "Imported Model",
+            file = File("imported-model.tflite"),
+            byteSize = 1L,
+            sha256 = "b".repeat(64),
+            origin = SourceSeparationInstalledPresetOrigin.ImportedFile,
+            bindingKind = SourceSeparationPresetBindingKind.CustomProfile,
+            contractId = null,
+            sidecarContract = null,
+            customProfile = null,
+            installedAtEpochMs = 1L,
+        ),
+        active = active,
+        canUseForValidation = true,
+        useBlockReason = null,
+        transferState = transferState,
+        operationKey = "imported:${"b".repeat(64)}",
     )
 }

@@ -41,6 +41,8 @@ import com.mardous.booming.extensions.files.asReadableFileSize
 import com.mardous.booming.separation.model.contract.CatalogActivationPolicy
 import com.mardous.booming.separation.model.contract.CatalogReleaseMaturity
 import com.mardous.booming.separation.model.contract.CatalogSupportLevel
+import com.mardous.booming.separation.model.preset.SourceSeparationManualModelProfileDraft
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
 import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,9 +57,23 @@ internal fun SourceSeparationPresetManagementSheet(
     onDismissExperimental: () -> Unit,
     onClearError: (String?) -> Unit,
     onRefresh: () -> Unit,
+    onImportModel: () -> Unit,
+    onImportSidecar: () -> Unit,
+    onStartManualProfile: () -> Unit,
+    onSaveManualProfile: (SourceSeparationManualModelProfileDraft) -> Unit,
+    onCancelManualProfile: () -> Unit,
+    onRetryImport: () -> Unit,
+    onDiscardImport: () -> Unit,
+    onDismissImportSuccess: () -> Unit,
+    onUseImported: (String) -> Unit,
+    onDeleteImported: (String) -> Unit,
 ) {
     var pendingDeleteModelId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingDeleteImportedSha256 by rememberSaveable { mutableStateOf<String?>(null) }
     val pendingDeleteModel = state.entries.singleOrNull { it.modelId == pendingDeleteModelId }
+    val pendingDeleteImported = state.importedEntries.singleOrNull {
+        it.sha256 == pendingDeleteImportedSha256
+    }
 
     BottomSheetDialogSurface {
         Column(
@@ -88,6 +104,24 @@ internal fun SourceSeparationPresetManagementSheet(
                                 contentDescription = stringResource(R.string.refresh_action),
                             )
                         }
+                    }
+                }
+
+                item {
+                    OutlinedButton(
+                        onClick = onImportModel,
+                        enabled = state.importState == SourceSeparationPresetImportUiState.Idle,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_file_open_24dp),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.source_separation_preset_import_tflite),
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
                     }
                 }
 
@@ -144,6 +178,11 @@ internal fun SourceSeparationPresetManagementSheet(
                     onUse = onUse,
                     onDelete = { pendingDeleteModelId = it },
                     onClearError = onClearError,
+                )
+                importedModelSection(
+                    entries = state.importedEntries,
+                    onUse = onUseImported,
+                    onDelete = { pendingDeleteImportedSha256 = it },
                 )
             }
         }
@@ -217,6 +256,53 @@ internal fun SourceSeparationPresetManagementSheet(
             },
         )
     }
+
+    pendingDeleteImported?.let { model ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteImportedSha256 = null },
+            icon = {
+                Icon(
+                    painter = painterResource(R.drawable.ic_delete_24dp),
+                    contentDescription = null,
+                )
+            },
+            title = { Text(stringResource(R.string.source_separation_delete_model)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.source_separation_preset_delete_confirm_message,
+                        model.displayName,
+                    ),
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteImported(model.sha256)
+                        pendingDeleteImportedSha256 = null
+                    },
+                ) {
+                    Text(stringResource(R.string.delete_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteImportedSha256 = null }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            },
+        )
+    }
+
+    SourceSeparationPresetImportDialogs(
+        importState = state.importState,
+        onImportSidecar = onImportSidecar,
+        onStartManualProfile = onStartManualProfile,
+        onSaveManualProfile = onSaveManualProfile,
+        onCancelManualProfile = onCancelManualProfile,
+        onRetry = onRetryImport,
+        onDiscard = onDiscardImport,
+        onDismissSuccess = onDismissImportSuccess,
+    )
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.modelSection(
@@ -249,6 +335,33 @@ private fun androidx.compose.foundation.lazy.LazyListScope.modelSection(
             onUse = onUse,
             onDelete = onDelete,
             onClearError = onClearError,
+        )
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.importedModelSection(
+    entries: List<SourceSeparationImportedModelManagementItem>,
+    onUse: (String) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    if (entries.isEmpty()) return
+    item(key = "section-imported") {
+        Text(
+            text = stringResource(R.string.source_separation_preset_imported_section),
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+    items(
+        count = entries.size,
+        key = { index -> "imported-${entries[index].sha256}" },
+    ) { index ->
+        ImportedModelCard(
+            model = entries[index],
+            onUse = onUse,
+            onDelete = onDelete,
         )
     }
 }
@@ -449,6 +562,145 @@ private fun PresetModelCard(
 }
 
 @Composable
+private fun ImportedModelCard(
+    model: SourceSeparationImportedModelManagementItem,
+    onUse: (String) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(16.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = model.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = if (model.active) {
+                            stringResource(R.string.source_separation_preset_selected_for_validation)
+                        } else {
+                            stringResource(R.string.source_separation_preset_installed)
+                        },
+                        color = if (model.active) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (model.active) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_check_24dp),
+                        contentDescription = stringResource(
+                            R.string.source_separation_preset_selected_for_validation,
+                        ),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            Text(
+                text = model.bindingText(),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = model.byteSize.asReadableFileSize(),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (model.qualityUnverified) {
+                Text(
+                    text = stringResource(R.string.source_separation_preset_import_quality_unverified),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            model.useBlockReason?.let {
+                Text(
+                    text = stringResource(R.string.source_separation_preset_import_use_blocked),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            when (model.transferState) {
+                SourceSeparationPresetTransferState.Activating -> {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(
+                        text = stringResource(R.string.source_separation_preset_selecting),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
+                SourceSeparationPresetTransferState.Deleting -> {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(
+                        text = stringResource(R.string.source_separation_model_deleting),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
+                else -> Unit
+            }
+
+            if (model.transferState == null) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    OutlinedButton(
+                        onClick = { onUse(model.sha256) },
+                        enabled = model.canUseForValidation && !model.active,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_play_24dp),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.source_separation_preset_use_for_validation),
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                    IconButton(
+                        onClick = { onDelete(model.sha256) },
+                        enabled = model.canDelete,
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_delete_24dp),
+                            contentDescription = stringResource(
+                                R.string.source_separation_delete_model,
+                            ),
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ModelOperationError(message: String, onDismiss: () -> Unit) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -495,4 +747,14 @@ private fun SourceSeparationPresetManagementItem.activationText(): String = when
         stringResource(R.string.source_separation_preset_contract_pending)
     CatalogActivationPolicy.DownloadOnlyGenericStem ->
         stringResource(R.string.source_separation_preset_generic_stem_pending)
+}
+
+@Composable
+private fun SourceSeparationImportedModelManagementItem.bindingText(): String = when (bindingKind) {
+    SourceSeparationPresetBindingKind.Official ->
+        stringResource(R.string.source_separation_preset_imported_official)
+    SourceSeparationPresetBindingKind.Sidecar ->
+        stringResource(R.string.source_separation_preset_imported_sidecar)
+    SourceSeparationPresetBindingKind.CustomProfile ->
+        stringResource(R.string.source_separation_preset_imported_custom_profile)
 }

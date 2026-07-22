@@ -68,11 +68,23 @@ class SourceSeparationModelManagementFragment : BottomSheetDialogFragment() {
 
     private val viewModel: PlayerViewModel by activityViewModel()
     private val presetViewModel: SourceSeparationPresetManagementViewModel by viewModel()
-    private val importModelLauncher = registerForActivityResult(
+    private val importOnnxModelLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         uri ?: return@registerForActivityResult
         viewModel.importSourceSeparationModel(uri)
+    }
+    private val importTfliteModelLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        uri ?: return@registerForActivityResult
+        presetViewModel.beginImport(uri)
+    }
+    private val importTfliteSidecarLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        uri ?: return@registerForActivityResult
+        presetViewModel.importSidecar(uri)
     }
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
@@ -106,13 +118,41 @@ class SourceSeparationModelManagementFragment : BottomSheetDialogFragment() {
                             onDismissExperimental = presetViewModel::dismissExperimentalUse,
                             onClearError = presetViewModel::clearError,
                             onRefresh = presetViewModel::refresh,
+                            onImportModel = {
+                                importTfliteModelLauncher.launch(
+                                    arrayOf(
+                                        "application/octet-stream",
+                                        "application/x-tflite",
+                                        "application/*",
+                                        "*/*",
+                                    ),
+                                )
+                            },
+                            onImportSidecar = {
+                                importTfliteSidecarLauncher.launch(
+                                    arrayOf(
+                                        "application/json",
+                                        "text/plain",
+                                        "application/*",
+                                        "*/*",
+                                    ),
+                                )
+                            },
+                            onStartManualProfile = presetViewModel::startManualProfile,
+                            onSaveManualProfile = presetViewModel::saveManualProfile,
+                            onCancelManualProfile = presetViewModel::cancelManualProfile,
+                            onRetryImport = presetViewModel::retryImport,
+                            onDiscardImport = presetViewModel::discardImport,
+                            onDismissImportSuccess = presetViewModel::dismissImportSuccess,
+                            onUseImported = presetViewModel::requestUseImported,
+                            onDeleteImported = presetViewModel::deleteImported,
                         )
                     } else {
                         val state by viewModel.sourceSeparationModelStateFlow.collectAsState()
                         SourceSeparationModelManagementSheet(
                             state = state,
                             onImport = {
-                                importModelLauncher.launch(
+                                importOnnxModelLauncher.launch(
                                     arrayOf(
                                         "application/octet-stream",
                                         "application/x-onnx",
