@@ -130,6 +130,51 @@ class SourceSeparationModelAwareCacheRepositoryTest {
     }
 
     @Test
+    fun `status and ready horizon expose exact entry state`() {
+        val store = store()
+        val running = runningManifest(store, "uvr_mdxnet_3_9662", 'a')
+        val completed = completedManifest(store, "uvr_mdxnet_kara", 'b').copy(
+            cleanup = SourceSeparationCacheCleanup(paths = listOf("work")),
+        )
+        store.writeManifest(running)
+        store.writeManifest(completed)
+        val repository = repository(store)
+
+        val runningStatus = repository.status(running.identity)
+            as SourceSeparationModelAwareCacheStatus.Incomplete
+        assertEquals(2, runningStatus.readySegments)
+        assertEquals(2, runningStatus.totalSegments)
+
+        val horizon = repository.readyHorizon(running.identity, playbackPositionMs = 0L)
+            as SourceSeparationModelAwareReadyHorizonStatus.Ready
+        assertEquals(0, horizon.segmentIndex)
+        assertEquals(1, horizon.readyThroughSegmentIndex)
+        assertTrue(horizon.readyThroughEnd)
+
+        val completedStatus = repository.status(completed.identity)
+            as SourceSeparationModelAwareCacheStatus.Completed
+        assertTrue(completedStatus.cleanupPending)
+        assertTrue(completedStatus.canPromote)
+    }
+
+    @Test
+    fun `status reports busy while an exact entry is exclusively leased`() {
+        val store = store()
+        val manifest = completedManifest(store, "uvr_mdxnet_3_9662", 'a')
+        store.writeManifest(manifest)
+        val repository = repository(store)
+        val lease = requireNotNull(repository.tryAcquireExclusive(manifest.cacheKey))
+
+        assertEquals(
+            SourceSeparationModelAwareCacheStatus.Busy,
+            repository.status(manifest.identity),
+        )
+        lease.close()
+        assertTrue(repository.status(manifest.identity) is
+            SourceSeparationModelAwareCacheStatus.Completed)
+    }
+
+    @Test
     fun `cleanup limits count each model entry independently and respect exact protection`() {
         val store = store()
         val completedA = completedManifest(store, "uvr_mdxnet_3_9662", 'a', updatedAt = 10L)

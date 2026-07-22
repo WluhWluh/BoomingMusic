@@ -65,6 +65,110 @@ class SourceSeparationModelAwareCacheRepository(
             ?.takeIf { it.identity == identity }
     }
 
+    fun status(
+        identity: SourceSeparationCacheIdentity,
+    ): SourceSeparationModelAwareCacheStatus {
+        val lease = leases.tryAcquireRead(identity.cacheKey)
+            ?: return SourceSeparationModelAwareCacheStatus.Busy
+        return lease.use {
+            val manifest = manifest(identity)
+                ?: return@use SourceSeparationModelAwareCacheStatus.Missing
+            when (manifest.state) {
+                SourceSeparationCacheManifestState.Completed -> {
+                    if (store.validateCompletedEntry(manifest, verifyHashes = false) !=
+                        SourceSeparationCacheValidationResult.Valid
+                    ) {
+                        SourceSeparationModelAwareCacheStatus.Corrupt(manifest)
+                    } else {
+                        SourceSeparationModelAwareCacheStatus.Completed(
+                            manifest = manifest,
+                            cleanupPending = manifest.cleanup != null,
+                            canPromote = manifest.canPromote(),
+                        )
+                    }
+                }
+
+                SourceSeparationCacheManifestState.Running,
+                SourceSeparationCacheManifestState.Canceled,
+                SourceSeparationCacheManifestState.Failed ->
+                    SourceSeparationModelAwareCacheStatus.Incomplete(
+                        manifest = manifest,
+                        readySegments = manifest.segmentPlan?.segments?.count {
+                            it.state.isPlaybackReady
+                        } ?: 0,
+                        totalSegments = manifest.segmentPlan?.segmentCount ?: 0,
+                    )
+            }
+        }
+    }
+
+    fun readyHorizon(
+        identity: SourceSeparationCacheIdentity,
+        playbackPositionMs: Long,
+    ): SourceSeparationModelAwareReadyHorizonStatus {
+        val lease = leases.tryAcquireRead(identity.cacheKey)
+            ?: return SourceSeparationModelAwareReadyHorizonStatus.Busy
+        return lease.use {
+            val manifest = manifest(identity)
+                ?: return@use SourceSeparationModelAwareReadyHorizonStatus.Unavailable
+            if (manifest.state == SourceSeparationCacheManifestState.Completed) {
+                return@use if (store.validateCompletedEntry(manifest, verifyHashes = false) ==
+                    SourceSeparationCacheValidationResult.Valid
+                ) {
+                    SourceSeparationModelAwareReadyHorizonStatus.Completed(manifest)
+                } else {
+                    SourceSeparationModelAwareReadyHorizonStatus.Unavailable
+                }
+            }
+            if (manifest.state != SourceSeparationCacheManifestState.Running) {
+                return@use SourceSeparationModelAwareReadyHorizonStatus.Unavailable
+            }
+            val output = manifest.output
+                ?: return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
+            if (output.stems.any { stem ->
+                    !store.resolveEntryPath(manifest.cacheKey, stem.playbackPath()).isFile
+                }
+            ) {
+                return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
+            }
+            val plan = manifest.segmentPlan
+                ?: return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
+            val sampleRate = plan.sampleRate.takeIf { it > 0 }
+                ?: return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
+            if (plan.segments.isEmpty()) {
+                return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
+            }
+            val positionMs = playbackPositionMs.coerceAtLeast(0L)
+            val frame = ((positionMs * sampleRate) / 1_000L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            val segmentIndex = plan.segmentIndexForFrame(frame)
+            val current = plan.segments.getOrNull(segmentIndex)
+                ?: return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
+            if (!current.isReady(manifest.cacheKey)) {
+                return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
+            }
+            var readyThroughSegmentIndex = segmentIndex
+            var readyUntilFrame = current.playbackEndFrame
+            for (index in (segmentIndex + 1)..plan.segments.lastIndex) {
+                val segment = plan.segments[index]
+                if (!segment.isReady(manifest.cacheKey)) break
+                readyThroughSegmentIndex = index
+                readyUntilFrame = segment.playbackEndFrame
+            }
+            val readyUntilMs = (readyUntilFrame.toLong() * 1_000L) / sampleRate
+            SourceSeparationModelAwareReadyHorizonStatus.Ready(
+                manifest = manifest,
+                positionMs = positionMs,
+                readyUntilMs = readyUntilMs,
+                readyAheadMs = (readyUntilMs - positionMs).coerceAtLeast(0L),
+                segmentIndex = segmentIndex,
+                readyThroughSegmentIndex = readyThroughSegmentIndex,
+                readyThroughEnd = readyThroughSegmentIndex == plan.segments.lastIndex,
+            )
+        }
+    }
+
     fun playableStatus(
         identity: SourceSeparationCacheIdentity,
         playbackPositionMs: Long,
@@ -212,6 +316,13 @@ class SourceSeparationModelAwareCacheRepository(
 
     fun isLeased(cacheKey: String): Boolean = leases.isLeased(cacheKey)
 
+    fun completedCleanupKeys(): List<String> = store.listManifests()
+        .filter { manifest ->
+            manifest.state == SourceSeparationCacheManifestState.Completed &&
+                manifest.cleanup != null
+        }
+        .map(SourceSeparationCacheManifest::cacheKey)
+
     private fun openPlayback(
         manifest: SourceSeparationCacheManifest,
     ): SourceSeparationModelAwareCachePlayback? {
@@ -272,6 +383,21 @@ class SourceSeparationModelAwareCacheRepository(
             SourceSeparationCacheManifestState.Failed ->
                 SourceSeparationModelAwareCacheEntryState.Failed
         }
+    }
+
+    private fun SourceSeparationCacheManifest.canPromote(): Boolean {
+        val stems = output?.stems ?: return false
+        return stems.any { !it.promotionValidated } && stems.all { stem ->
+            store.resolveEntryPath(cacheKey, stem.wavPath).isFile
+        }
+    }
+
+    private fun com.mardous.booming.separation.cache.SourceSeparationSegment.isReady(
+        cacheKey: String,
+    ): Boolean {
+        return state.isPlaybackReady &&
+            store.resolveEntryPath(cacheKey, vocalsPath).isFile &&
+            store.resolveEntryPath(cacheKey, instrumentalPath).isFile
     }
 
     private fun File.directorySize(): Long {
@@ -366,3 +492,44 @@ data class SourceSeparationModelAwareCachePruneResult(
     val deletedEntries: Int,
     val deletedBytes: Long,
 )
+
+sealed interface SourceSeparationModelAwareCacheStatus {
+    data object Missing : SourceSeparationModelAwareCacheStatus
+    data object Busy : SourceSeparationModelAwareCacheStatus
+
+    data class Incomplete(
+        val manifest: SourceSeparationCacheManifest,
+        val readySegments: Int,
+        val totalSegments: Int,
+    ) : SourceSeparationModelAwareCacheStatus
+
+    data class Completed(
+        val manifest: SourceSeparationCacheManifest,
+        val cleanupPending: Boolean,
+        val canPromote: Boolean,
+    ) : SourceSeparationModelAwareCacheStatus
+
+    data class Corrupt(
+        val manifest: SourceSeparationCacheManifest,
+    ) : SourceSeparationModelAwareCacheStatus
+}
+
+sealed interface SourceSeparationModelAwareReadyHorizonStatus {
+    data class Ready(
+        val manifest: SourceSeparationCacheManifest,
+        val positionMs: Long,
+        val readyUntilMs: Long,
+        val readyAheadMs: Long,
+        val segmentIndex: Int,
+        val readyThroughSegmentIndex: Int,
+        val readyThroughEnd: Boolean,
+    ) : SourceSeparationModelAwareReadyHorizonStatus
+
+    data class Completed(
+        val manifest: SourceSeparationCacheManifest,
+    ) : SourceSeparationModelAwareReadyHorizonStatus
+
+    data object Processing : SourceSeparationModelAwareReadyHorizonStatus
+    data object Unavailable : SourceSeparationModelAwareReadyHorizonStatus
+    data object Busy : SourceSeparationModelAwareReadyHorizonStatus
+}
