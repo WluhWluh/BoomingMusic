@@ -300,18 +300,11 @@ class SourceSeparationForegroundWorkerCoordinator(
 
     fun runningSongId(): Long? = workerSongId
 
+    fun runningCacheKey(): String? = activeWorkerSong?.cacheKey
+
     fun pendingSongId(): Long? = pendingStartRequest?.song?.id
 
     fun protectedCacheKeys(): Set<String> = setOfNotNull(activeWorkerSong?.cacheKey)
-
-    @Deprecated("Legacy v1 cache protection; remove with the Phase 6C management cutover.")
-    fun protectedSongIds(): Set<Long> = buildSet {
-        _playbackStateFlow.value.song.id
-            .takeIf { it != Song.emptySong.id }
-            ?.let(::add)
-        workerSongId?.let(::add)
-        pendingStartRequest?.song?.id?.let(::add)
-    }
 
     suspend fun autoStartDecision(
         song: Song,
@@ -744,6 +737,7 @@ class SourceSeparationForegroundWorkerCoordinator(
             pruneCachesIfEnabled()
             callbacks?.onSourceSeparationWorkerCompleted(
                 song = song,
+                cacheKey = resolved.cacheKey,
                 shouldPromoteCompletedStems = shouldPromoteCompletedStems,
             )
         } catch (_: SourceSeparationPausedException) {
@@ -1054,6 +1048,7 @@ interface SourceSeparationForegroundWorkerCallbacks {
     fun onSourceSeparationWorkerPrepared(song: Song)
     fun onSourceSeparationWorkerCompleted(
         song: Song,
+        cacheKey: String,
         shouldPromoteCompletedStems: Boolean,
     )
     fun onSourceSeparationWorkerPaused(song: Song)

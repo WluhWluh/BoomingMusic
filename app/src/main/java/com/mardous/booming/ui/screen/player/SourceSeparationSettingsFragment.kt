@@ -156,13 +156,11 @@ private fun SourceSeparationSettingsSheet(
     val currentSongCacheState by viewModel
         .currentSourceSeparationCacheStateFlow
         .collectAsState()
+    val currentSongCacheKey by viewModel.currentSourceSeparationCacheKeyFlow.collectAsState()
     val currentSong by viewModel.currentSongFlow.collectAsState()
     val pendingAction by viewModel.sourceSeparationPendingActionFlow.collectAsState()
     val flacPromotionState by viewModel
         .sourceSeparationFlacPromotionStateFlow
-        .collectAsState()
-    val windowDecodeExperimentState by viewModel
-        .sourceSeparationWindowDecodeExperimentStateFlow
         .collectAsState()
     val autoFlacCompression by viewModel
         .sourceSeparationAutoFlacCompressionFlow
@@ -204,8 +202,8 @@ private fun SourceSeparationSettingsSheet(
 
     val separatedPlaybackEnabled = blendMode != SourceSeparationBlendMode.Off
     val currentSongId = currentSong.id
-    val currentSongFlacPromotionQueued = flacPromotionState.isQueued(currentSongId)
-    val currentSongFlacPromotionRunning = flacPromotionState.isRunning(currentSongId)
+    val currentSongFlacPromotionQueued = flacPromotionState.isQueued(currentSongCacheKey)
+    val currentSongFlacPromotionRunning = flacPromotionState.isRunning(currentSongCacheKey)
     val currentSongFlacPromotionActive =
         currentSongFlacPromotionQueued || currentSongFlacPromotionRunning
     var blend by remember {
@@ -462,7 +460,7 @@ private fun SourceSeparationSettingsSheet(
 
                             AnimatedVisibility(
                                 visible = separationState !is SourceSeparationUiState.Running &&
-                                        !currentSongCacheState.isCompleted
+                                        currentSongCacheState.canStartSeparation
                             ) {
                                 Button(
                                     onClick = {
@@ -547,27 +545,6 @@ private fun SourceSeparationSettingsSheet(
                                 }
                             }
 
-                            if (BuildConfig.DEBUG) {
-                                OutlinedButton(
-                                    onClick = {
-                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
-                                        viewModel.runWindowDecodeExperimentForCurrentSong()
-                                    },
-                                    enabled = windowDecodeExperimentState !is
-                                            SourceSeparationWindowDecodeExperimentUiState.Running,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        stringResource(
-                                            R.string.source_separation_window_decode_experiment
-                                        )
-                                    )
-                                }
-
-                                SourceSeparationWindowDecodeExperimentStatusText(
-                                    windowDecodeExperimentState
-                                )
-                            }
                         }
                     }
                 }
@@ -1268,57 +1245,6 @@ private fun SourceSeparationSchedulerText(
 }
 
 @Composable
-private fun SourceSeparationWindowDecodeExperimentStatusText(
-    state: SourceSeparationWindowDecodeExperimentUiState
-) {
-    val text = when (state) {
-        SourceSeparationWindowDecodeExperimentUiState.Idle -> null
-        is SourceSeparationWindowDecodeExperimentUiState.Running -> {
-            val probeText = if (state.probeIndex != null && state.probeCount != null) {
-                stringResource(
-                    R.string.source_separation_window_decode_probe_progress,
-                    state.probeIndex,
-                    state.probeCount,
-                )
-            } else {
-                stringResource(R.string.source_separation_window_decode_probe_preparing)
-            }
-            stringResource(
-                R.string.source_separation_window_decode_running,
-                state.percent,
-                state.completedSteps,
-                state.totalSteps,
-                probeText,
-                state.stage,
-            )
-        }
-        is SourceSeparationWindowDecodeExperimentUiState.Completed -> {
-            stringResource(
-                R.string.source_separation_window_decode_completed,
-                state.reportPath,
-                state.fullDecodeMs,
-                state.probeCount,
-                state.totalWindowDecodeMs,
-                state.worstOffsetFrames,
-                state.worstMeanAbsoluteError,
-            )
-        }
-        is SourceSeparationWindowDecodeExperimentUiState.Failed -> {
-            stringResource(
-                R.string.source_separation_window_decode_failed,
-                state.message.orEmpty(),
-            )
-        }
-    } ?: return
-
-    Text(
-        text = text,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        style = MaterialTheme.typography.bodySmall
-    )
-}
-
-@Composable
 private fun SourceSeparationStatusText(
     state: SourceSeparationUiState,
     cacheState: SourceSeparationCacheUiState,
@@ -1341,6 +1267,12 @@ private fun SourceSeparationStatusText(
             }
             is SourceSeparationCacheUiState.Completed -> {
                 stringResource(R.string.source_separation_status_completed_cache)
+            }
+            SourceSeparationCacheUiState.Corrupt -> {
+                stringResource(R.string.source_separation_cache_state_corrupt)
+            }
+            SourceSeparationCacheUiState.Busy -> {
+                stringResource(R.string.source_separation_cache_entry_busy)
             }
         }
         is SourceSeparationUiState.Running -> {
@@ -1568,9 +1500,46 @@ private val SourceSeparationCacheUiState.canPromoteCompletedStems: Boolean
         is SourceSeparationCacheUiState.Completed -> canPromoteCompletedStems
         is SourceSeparationCacheUiState.CompletedWithTemporaryFiles -> canPromoteCompletedStems
         SourceSeparationCacheUiState.NotStarted,
+        SourceSeparationCacheUiState.Busy,
+        SourceSeparationCacheUiState.Corrupt,
         is SourceSeparationCacheUiState.Partial -> false
     }
 
 private val SourceSeparationCacheUiState.isCompleted: Boolean
     get() = this is SourceSeparationCacheUiState.Completed ||
             this is SourceSeparationCacheUiState.CompletedWithTemporaryFiles
+
+private val SourceSeparationCacheUiState.canStartSeparation: Boolean
+    get() = this == SourceSeparationCacheUiState.NotStarted ||
+            this is SourceSeparationCacheUiState.Partial
+
+private data class SourceSeparationCacheManagementUiState(
+    val loading: Boolean = false,
+    val items: List<SourceSeparationCacheManagementItem> = emptyList(),
+    val deletingAll: Boolean = false,
+    val deletingEntryIds: Set<String> = emptySet(),
+    val errorMessage: String? = null,
+) {
+    val totalSizeBytes: Long
+        get() = items.sumOf(SourceSeparationCacheManagementItem::sizeBytes)
+}
+
+private data class SourceSeparationCacheManagementItem(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val state: SourceSeparationCacheManagementItemState,
+    val readySegments: Int?,
+    val totalSegments: Int?,
+    val format: SourceSeparationCacheManagementItemFormat,
+    val sizeBytes: Long,
+    val updatedAtEpochMs: Long,
+    val lastAccessedAtEpochMs: Long,
+    val modelVariant: String,
+    val pipelineVersion: Int,
+    val temporaryFilesPending: Boolean,
+)
+
+private enum class SourceSeparationCacheManagementItemState { Partial, Completed }
+
+private enum class SourceSeparationCacheManagementItemFormat { WAV, FLAC, Unknown }

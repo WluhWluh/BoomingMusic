@@ -372,8 +372,7 @@ private val viewModule = module {
             appContext = androidContext(),
             preferences = get(),
             repository = get(),
-            sourceSeparationEngine = get(),
-            sourceSeparationModelRepository = get(),
+            sourceSeparationRuntime = get(),
             sourceSeparationForegroundWorkerCoordinator = get(),
         )
     }

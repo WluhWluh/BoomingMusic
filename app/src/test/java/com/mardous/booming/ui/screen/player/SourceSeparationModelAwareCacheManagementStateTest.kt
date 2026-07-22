@@ -48,6 +48,22 @@ class SourceSeparationModelAwareCacheManagementStateTest {
         assertEquals(otherStates.map { it.cacheKey }, state.incompleteItems.map { it.cacheKey })
     }
 
+    @Test
+    fun `flac promotion state distinguishes model caches for the same song`() {
+        val runningKey = "a".repeat(64)
+        val queuedKey = "b".repeat(64)
+        val state = SourceSeparationFlacPromotionUiState(
+            runningCacheKey = runningKey,
+            queuedCacheKeys = setOf(queuedKey),
+        )
+
+        assertEquals(true, state.isRunning(runningKey))
+        assertEquals(false, state.isRunning(queuedKey))
+        assertEquals(true, state.isQueued(queuedKey))
+        assertEquals(false, state.isQueued(runningKey))
+        assertEquals(false, state.isActive("c".repeat(64)))
+    }
+
     private fun entry(
         cacheKeySeed: Char,
         modelId: String,
