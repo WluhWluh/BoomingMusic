@@ -31,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mardous.booming.R
@@ -459,6 +461,45 @@ private fun SourceSeparationCacheModelAvailability.displayText(): String = when 
         stringResource(R.string.source_separation_cache_contract_mismatch)
     SourceSeparationCacheModelAvailability.Unknown ->
         stringResource(R.string.source_separation_model_source_unknown)
+}
+
+@Composable
+private fun SourceSeparationCacheSectionHeader(
+    title: String,
+) {
+    Text(
+        text = title,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp),
+    )
+}
+
+@Composable
+private fun SourceSeparationCacheMetadataRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = label,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(0.42f),
+        )
+        Text(
+            text = value,
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(0.58f),
+        )
+    }
 }
 
 @Composable

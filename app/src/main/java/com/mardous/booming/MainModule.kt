@@ -60,7 +60,6 @@ import com.mardous.booming.playback.equalizer.EqualizerManager
 import com.mardous.booming.playback.processor.BalanceAudioProcessor
 import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
-import com.mardous.booming.separation.SourceSeparationEngine
 import com.mardous.booming.separation.AndroidSourceSeparationModelAwarePreflightResolver
 import com.mardous.booming.separation.AndroidSourceSeparationRuntimeCompatibilityResolver
 import com.mardous.booming.separation.DefaultSourceSeparationRuntimeFacade
@@ -75,7 +74,6 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
 import com.mardous.booming.separation.cache.v2.SourceSeparationPresetCacheAvailabilityProvider
 import com.mardous.booming.separation.cache.v2.resolveActiveCacheModelResolution
-import com.mardous.booming.separation.model.SourceSeparationModelRepository
 import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPresetStructuralInspector
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportCoordinator
@@ -168,9 +166,6 @@ private val mainModule = module {
         AudioOutputObserver(context = androidContext())
     }
     single {
-        SourceSeparationModelRepository(context = androidContext())
-    }
-    single {
         SourceSeparationPresetRepository(
             context = androidContext(),
             preferences = get(),
@@ -211,9 +206,6 @@ private val mainModule = module {
             presetRepository = get(),
             coordinator = get(),
         )
-    }
-    single {
-        SourceSeparationEngine(context = androidContext())
     }
     single {
         val presetRepository = get<SourceSeparationPresetRepository>()

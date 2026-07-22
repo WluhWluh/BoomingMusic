@@ -17,9 +17,10 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.PlaybackService
-import com.mardous.booming.separation.SourceSeparationEngine
+import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.audio.AudioWindowDecodeExperiment
 import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerDebugBridge
 import org.koin.java.KoinJavaComponent.get
 import java.io.File
@@ -452,11 +453,14 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
     }
 
     private fun clearSourceSeparationCaches(context: Context) {
-        val engine = get<SourceSeparationEngine>(SourceSeparationEngine::class.java)
-        val entries = runCatching { engine.listCacheEntries() }.getOrDefault(emptyList())
+        val runtime = get<SourceSeparationRuntimeFacade>(SourceSeparationRuntimeFacade::class.java)
+        val entries = runCatching { runtime.entries() }.getOrDefault(emptyList())
         var deletedCount = 0
         entries.forEach { entry ->
-            if (runCatching { engine.deleteCacheEntry(entry.id) }.getOrDefault(false)) {
+            if (runCatching {
+                    runtime.delete(entry.cacheKey) == SourceSeparationCacheMutationResult.Completed
+                }.getOrDefault(false)
+            ) {
                 deletedCount++
             }
         }
