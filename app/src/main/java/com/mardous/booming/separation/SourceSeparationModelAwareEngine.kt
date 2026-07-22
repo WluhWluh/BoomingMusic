@@ -2,7 +2,6 @@ package com.mardous.booming.separation
 
 import android.content.Context
 import android.net.Uri
-import com.mardous.booming.BuildConfig
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
@@ -26,17 +25,13 @@ import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import java.util.concurrent.CancellationException
 
-/**
- * Development-only integration path for the v2 cache and LiteRT stack.
- *
- * The production scheduler remains on the legacy ONNX worker until Phase 6.
- */
+/** Runs one contract-bound source-separation request through the v2 cache and runtime stack. */
 internal class SourceSeparationModelAwareEngine(
     private val activeModelResolver: () -> SourceSeparationResolvedCacheModel?,
     private val preflightResolver: SourceSeparationModelAwarePreflightResolver,
     private val coordinator: SourceSeparationCacheRunCoordinator,
     private val rangeExecutor: SourceSeparationModelAwareRangeExecutor,
-    private val developmentGate: () -> Boolean,
+    private val constructionGate: () -> Boolean,
 ) {
     fun separate(
         input: SourceSeparationModelAwareSongInput,
@@ -49,8 +44,8 @@ internal class SourceSeparationModelAwareEngine(
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
     ): SourceSeparationModelAwareEngineResult {
-        check(developmentGate()) {
-            "The model-aware LiteRT engine is available only behind the development gate."
+        check(constructionGate()) {
+            "The model-aware LiteRT engine is disabled by its construction gate."
         }
         val model = activeModelResolver()
             ?: return SourceSeparationModelAwareEngineResult.ActiveModelUnavailable
@@ -83,8 +78,8 @@ internal class SourceSeparationModelAwareEngine(
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
     ): SourceSeparationModelAwareEngineResult {
-        check(developmentGate()) {
-            "The model-aware LiteRT engine is available only behind the development gate."
+        check(constructionGate()) {
+            "The model-aware LiteRT engine is disabled by its construction gate."
         }
         val identity = model.contract.identity(preflight.identity)
         val runRequest = SourceSeparationCacheRunRequest(
@@ -176,7 +171,7 @@ internal class SourceSeparationModelAwareEngine(
     }
 
     companion object {
-        fun createDevelopment(
+        fun createProduction(
             context: Context,
             presetRepository: SourceSeparationPresetRepository,
         ): SourceSeparationModelAwareEngine {
@@ -190,14 +185,14 @@ internal class SourceSeparationModelAwareEngine(
                     presetRepository,
                 ),
             )
-            return createDevelopment(
+            return createProduction(
                 context = appContext,
                 presetRepository = presetRepository,
                 coordinator = SourceSeparationCacheRunCoordinator(store, cacheRepository),
             )
         }
 
-        fun createDevelopment(
+        fun createProduction(
             context: Context,
             presetRepository: SourceSeparationPresetRepository,
             coordinator: SourceSeparationCacheRunCoordinator,
@@ -208,7 +203,7 @@ internal class SourceSeparationModelAwareEngine(
                 preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(appContext),
                 coordinator = coordinator,
                 rangeExecutor = MdxSourceSeparationModelAwareRangeExecutor(appContext),
-                developmentGate = { BuildConfig.DEBUG },
+                constructionGate = { true },
             )
         }
 

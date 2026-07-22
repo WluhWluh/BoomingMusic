@@ -17,7 +17,7 @@ import com.mardous.booming.separation.model.litert.MdxLiteRtGpuRuntimeProfile
 internal class MdxSourceSeparationModelAwareRangeExecutor(
     context: Context,
     private val sessionProviderFactory: () -> MdxInferenceSessionProvider = {
-        createDevelopmentLiteRtSessionProvider(context.applicationContext)
+        createAutoLiteRtSessionProvider(context.applicationContext)
     },
 ) : SourceSeparationModelAwareRangeExecutor {
     private val applicationContext = context.applicationContext
@@ -52,7 +52,7 @@ internal class MdxSourceSeparationModelAwareRangeExecutor(
     )
 }
 
-private fun createDevelopmentLiteRtSessionProvider(
+private fun createAutoLiteRtSessionProvider(
     context: Context,
 ): MdxInferenceSessionProvider {
     val gpuProfile = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1

@@ -50,9 +50,9 @@ class SourceSeparationModelAwareEngineTest {
     val temporary = TemporaryFolder()
 
     @Test
-    fun `development gate and missing active model stop before preflight`() {
+    fun `construction gate and missing active model stop before preflight`() {
         val fixture = fixture()
-        val blocked = fixture.engine(developmentGate = false)
+        val blocked = fixture.engine(constructionGate = false)
 
         assertThrows(IllegalStateException::class.java) {
             blocked.separate(fixture.input)
@@ -257,7 +257,7 @@ class SourceSeparationModelAwareEngineTest {
         )
 
         fun engine(
-            developmentGate: Boolean = true,
+            constructionGate: Boolean = true,
             executor: SourceSeparationModelAwareRangeExecutor = SourceSeparationModelAwareRangeExecutor {
                 request -> complete(request, prepare(request))
             },
@@ -270,7 +270,7 @@ class SourceSeparationModelAwareEngineTest {
             },
             coordinator = coordinator,
             rangeExecutor = executor,
-            developmentGate = { developmentGate },
+            constructionGate = { constructionGate },
         )
 
         fun resolvedModel(modelId: String): SourceSeparationResolvedCacheModel {

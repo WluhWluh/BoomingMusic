@@ -200,7 +200,7 @@ class SourceSeparationRuntimeFacadeTest {
                 preflightResolver = preflightResolver,
                 coordinator = coordinator,
                 rangeExecutor = executor,
-                developmentGate = { true },
+                constructionGate = { true },
             )
             return DefaultSourceSeparationRuntimeFacade(
                 activeModelResolver = { activeResolution },

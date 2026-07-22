@@ -206,7 +206,7 @@ private val mainModule = module {
     single { SourceSeparationCacheFlacPromoter(store = get(), repository = get()) }
     single { SourceSeparationCacheHydrator(store = get(), repository = get()) }
     single {
-        SourceSeparationModelAwareEngine.createDevelopment(
+        SourceSeparationModelAwareEngine.createProduction(
             context = androidContext(),
             presetRepository = get(),
             coordinator = get(),
@@ -359,7 +359,7 @@ private val viewModule = module {
         SourceSeparationForegroundWorkerCoordinator(
             context = androidContext(),
             preferences = get(),
-            sourceSeparationEngine = get(),
+            sourceSeparationRuntime = get(),
         )
     }
 
