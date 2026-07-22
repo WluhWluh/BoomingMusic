@@ -132,6 +132,44 @@ class SourceSeparationCacheStore(
         }.getOrNull()?.takeIf { it.matches(manifest) }
     }
 
+    fun writeHydrationMarker(
+        manifest: SourceSeparationCacheManifest,
+        marker: SourceSeparationCacheHydrationMarker,
+    ) {
+        require(marker.matches(manifest)) {
+            "Hydration marker does not match its completed cache entry."
+        }
+        val markerFile = resolveEntryPath(manifest.cacheKey, HYDRATION_MARKER_FILE_NAME)
+        writeJsonFile(
+            directory = requireNotNull(markerFile.parentFile),
+            targetName = markerFile.name,
+            serializer = SourceSeparationCacheHydrationMarker.serializer(),
+            value = marker,
+        )
+    }
+
+    fun readHydrationMarker(
+        manifest: SourceSeparationCacheManifest,
+    ): SourceSeparationCacheHydrationMarker? {
+        val directory = entryDirectory(manifest.cacheKey)
+        val file = resolveRelativePath(directory, HYDRATION_MARKER_FILE_NAME)
+        if (!file.isFile) return null
+        return runCatching {
+            json.decodeFromString(
+                SourceSeparationCacheHydrationMarker.serializer(),
+                file.readText(Charsets.UTF_8),
+            )
+        }.getOrNull()?.takeIf { marker ->
+            marker.matches(manifest) && marker.stems.all { stem ->
+                validateFile(
+                    file = resolveRelativePath(directory, stem.pcmPath),
+                    expected = stem.integrity,
+                    verifyHash = true,
+                )
+            }
+        }
+    }
+
     fun deleteEntry(cacheKey: String): Boolean {
         val directory = entryDirectory(cacheKey)
         val deleted = !directory.exists() || directory.deleteRecursively()
@@ -164,6 +202,22 @@ class SourceSeparationCacheStore(
                     )
                 ) {
                     return SourceSeparationCacheValidationResult.Invalid("promoted-invalid")
+                }
+                val promotedIndexPath = stem.promotedIndexPath
+                    ?: return SourceSeparationCacheValidationResult.Invalid(
+                        "promoted-index-path-missing"
+                    )
+                val promotedIndexIntegrity = stem.promotedIndexIntegrity
+                    ?: return SourceSeparationCacheValidationResult.Invalid(
+                        "promoted-index-integrity-missing"
+                    )
+                if (!validateFile(
+                        file = resolveRelativePath(directory, promotedIndexPath),
+                        expected = promotedIndexIntegrity,
+                        verifyHash = verifyHashes,
+                    )
+                ) {
+                    return SourceSeparationCacheValidationResult.Invalid("promoted-index-invalid")
                 }
             } else {
                 val wavIntegrity = stem.wavIntegrity
@@ -317,12 +371,55 @@ class SourceSeparationCacheStore(
             }
             ?.count { it.deleteRecursively() }
             ?: 0
+        val removedDerivedArtifacts = listManifests().sumOf(::recoverDerivedArtifacts)
         rebuildLocatorIndex()
         return SourceSeparationCacheRecoveryResult(
             removedTemporaryFiles = removedTemporaryFiles,
             removedStagingRuns = removedStagingRuns,
             removedInvalidEntries = removedInvalidEntries,
+            removedDerivedArtifacts = removedDerivedArtifacts,
         )
+    }
+
+    private fun recoverDerivedArtifacts(manifest: SourceSeparationCacheManifest): Int {
+        var removed = 0
+        listOf(
+            SourceSeparationCacheFlacPromoter.PROMOTION_STAGING_DIRECTORY,
+            SourceSeparationCacheHydrator.HYDRATION_STAGING_DIRECTORY,
+        ).forEach { path ->
+            val directory = resolveEntryPath(manifest.cacheKey, path)
+            if (directory.exists() && deleteRelativePath(manifest.cacheKey, path)) {
+                removed += 1
+            }
+        }
+
+        val hydrationDirectory = resolveEntryPath(
+            manifest.cacheKey,
+            SourceSeparationCacheHydrator.HYDRATION_OUTPUT_DIRECTORY,
+        )
+        if (hydrationDirectory.exists() && readHydrationMarker(manifest) == null &&
+            deleteRelativePath(
+                manifest.cacheKey,
+                SourceSeparationCacheHydrator.HYDRATION_OUTPUT_DIRECTORY,
+            )
+        ) {
+            removed += 1
+        }
+
+        val referencedPromotedPaths = manifest.output?.stems.orEmpty()
+            .flatMap { stem -> listOfNotNull(stem.promotedPath, stem.promotedIndexPath) }
+            .toSet()
+        val completedDirectory = resolveEntryPath(manifest.cacheKey, "completed")
+        completedDirectory.listFiles()
+            ?.filter { file ->
+                file.isFile &&
+                    (file.name.endsWith(".flac") || file.name.endsWith(".flac.frames")) &&
+                    relativeEntryPath(manifest.cacheKey, file) !in referencedPromotedPaths
+            }
+            ?.forEach { file ->
+                if (file.delete()) removed += 1
+            }
+        return removed
     }
 
     private fun readLocatorIndex(): SourceSeparationCacheLocatorIndex? {
@@ -493,6 +590,7 @@ class SourceSeparationCacheStore(
         const val STAGING_DIR_NAME = "staging"
         const val MANIFEST_FILE_NAME = "manifest.json"
         const val PLAYBACK_SETTINGS_FILE_NAME = "playback-settings.json"
+        const val HYDRATION_MARKER_FILE_NAME = "hydration/v1/marker.json"
         const val LOCATOR_INDEX_FILE_NAME = "locator-index.json"
 
         private val CACHE_KEY_PATTERN = Regex("^[0-9a-f]{64}$")
@@ -540,4 +638,5 @@ data class SourceSeparationCacheRecoveryResult(
     val removedTemporaryFiles: Int,
     val removedStagingRuns: Int,
     val removedInvalidEntries: Int,
+    val removedDerivedArtifacts: Int = 0,
 )

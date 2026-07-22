@@ -192,6 +192,14 @@ class SourceSeparationModelAwareCacheRepository(
         return leases.tryAcquireRunWrite(identity.cacheKey)
     }
 
+    fun tryAcquireRunWrite(cacheKey: String): SourceSeparationCacheEntryLease? {
+        return leases.tryAcquireRunWrite(cacheKey)
+    }
+
+    fun tryAcquireRead(cacheKey: String): SourceSeparationCacheEntryLease? {
+        return leases.tryAcquireRead(cacheKey)
+    }
+
     fun tryAcquireExclusive(cacheKey: String): SourceSeparationCacheEntryLease? {
         return leases.tryAcquireExclusive(cacheKey)
     }

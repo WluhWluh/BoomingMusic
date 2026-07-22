@@ -159,12 +159,22 @@ class SourceSeparationCacheStoreTest {
         store.beginStaging("abandoned").directory.resolve("partial.wav").writeText("partial")
         val invalidEntry = store.entryDirectory("0".repeat(64)).apply { mkdirs() }
         File(invalidEntry, SourceSeparationCacheStore.MANIFEST_FILE_NAME).writeText("not-json")
+        store.resolveEntryPath(
+            valid.cacheKey,
+            SourceSeparationCacheFlacPromoter.PROMOTION_STAGING_DIRECTORY,
+        ).apply { mkdirs() }.resolve("partial.flac").writeText("partial")
+        store.resolveEntryPath(
+            valid.cacheKey,
+            SourceSeparationCacheHydrator.HYDRATION_OUTPUT_DIRECTORY,
+        ).apply { mkdirs() }.resolve("partial.pcm").writeText("partial")
+        store.resolveEntryPath(valid.cacheKey, "completed/orphan.flac").writeText("orphan")
 
         val result = store.recover()
 
         assertEquals(1, result.removedTemporaryFiles)
         assertEquals(1, result.removedStagingRuns)
         assertEquals(1, result.removedInvalidEntries)
+        assertEquals(3, result.removedDerivedArtifacts)
         assertNotNull(store.readManifest(valid.cacheKey))
         assertFalse(tempFile.exists())
         assertFalse(invalidEntry.exists())

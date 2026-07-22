@@ -136,11 +136,13 @@ data class SourceSeparationCacheRenderedStem(
     val promotedPath: String? = null,
     val promotedFormat: SourceSeparationCacheAudioFormat? = null,
     val promotionValidated: Boolean = false,
+    val promotedIndexPath: String? = null,
     val channelCount: Int,
     val sampleRate: Int,
     val frameCount: Int,
     val wavIntegrity: SourceSeparationCacheFileIntegrity? = null,
     val promotedIntegrity: SourceSeparationCacheFileIntegrity? = null,
+    val promotedIndexIntegrity: SourceSeparationCacheFileIntegrity? = null,
 ) {
     init {
         require(displayLabel.isNotBlank()) { "Cache output stem label is empty." }
@@ -154,6 +156,12 @@ data class SourceSeparationCacheRenderedStem(
         }
         require(!promotionValidated || promotedIntegrity != null) {
             "Validated cache promotion has no integrity metadata."
+        }
+        require((promotedIndexPath == null) == (promotedIndexIntegrity == null)) {
+            "Cache promoted index path and integrity must be provided together."
+        }
+        require(!promotionValidated || promotedIndexPath != null) {
+            "Validated cache promotion has no frame index."
         }
         require(channelCount > 0) { "Cache stem channel count is invalid." }
         require(sampleRate > 0) { "Cache stem sample rate is invalid." }
@@ -258,4 +266,75 @@ object SourceSeparationCacheRelativePath {
     }
 
     private val WINDOWS_DRIVE_PATH = Regex("^[A-Za-z]:.*")
+}
+
+@Serializable
+data class SourceSeparationCacheHydrationMarker(
+    val hydrationSchemaVersion: Int = SCHEMA_VERSION,
+    val cacheKey: String,
+    val sources: List<SourceSeparationCacheHydrationSource>,
+    val stems: List<SourceSeparationCacheHydratedStem>,
+    val createdAtEpochMs: Long,
+) {
+    init {
+        require(hydrationSchemaVersion == SCHEMA_VERSION) {
+            "Unsupported cache hydration schema: $hydrationSchemaVersion"
+        }
+        require(CACHE_KEY_PATTERN.matches(cacheKey)) { "Hydration cache key is invalid." }
+        require(sources.size == 2 && stems.size == 2) {
+            "Hydration requires exactly two source and PCM stems."
+        }
+        require(sources.map { it.semantic }.distinct().size == sources.size) {
+            "Hydration source semantics must be unique."
+        }
+        require(stems.map { it.semantic }.distinct().size == stems.size) {
+            "Hydration PCM semantics must be unique."
+        }
+        require(createdAtEpochMs >= 0L) { "Hydration creation time is invalid." }
+    }
+
+    fun matches(manifest: SourceSeparationCacheManifest): Boolean {
+        if (manifest.cacheKey != cacheKey ||
+            manifest.state != SourceSeparationCacheManifestState.Completed
+        ) {
+            return false
+        }
+        val outputStems = manifest.output?.stems.orEmpty().associateBy { it.semantic }
+        return sources.all { source ->
+            val output = outputStems[source.semantic] ?: return@all false
+            val integrity = if (output.promotionValidated) {
+                output.promotedIntegrity
+            } else {
+                output.wavIntegrity
+            }
+            source.path == output.playbackPath() && source.integrity == integrity
+        }
+    }
+
+    companion object {
+        const val SCHEMA_VERSION = 1
+        private val CACHE_KEY_PATTERN = Regex("^[0-9a-f]{64}$")
+    }
+}
+
+@Serializable
+data class SourceSeparationCacheHydrationSource(
+    val semantic: ContractStemSemantic,
+    val path: String,
+    val integrity: SourceSeparationCacheFileIntegrity,
+) {
+    init {
+        SourceSeparationCacheRelativePath.requireValid(path)
+    }
+}
+
+@Serializable
+data class SourceSeparationCacheHydratedStem(
+    val semantic: ContractStemSemantic,
+    val pcmPath: String,
+    val integrity: SourceSeparationCacheFileIntegrity,
+) {
+    init {
+        SourceSeparationCacheRelativePath.requireValid(pcmPath)
+    }
 }

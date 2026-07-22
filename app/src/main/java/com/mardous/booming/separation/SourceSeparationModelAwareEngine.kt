@@ -149,7 +149,7 @@ internal class SourceSeparationModelAwareEngine(
             val appContext = context.applicationContext
             val store = SourceSeparationCacheStore(
                 AndroidSourceSeparationCacheRootProvider(appContext).resolveRoot(),
-            )
+            ).also(SourceSeparationCacheStore::recover)
             val cacheRepository = SourceSeparationModelAwareCacheRepository(
                 store = store,
                 modelAvailability = SourceSeparationPresetCacheAvailabilityProvider(
