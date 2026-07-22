@@ -61,6 +61,13 @@ import com.mardous.booming.playback.processor.BalanceAudioProcessor
 import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.separation.SourceSeparationEngine
+import com.mardous.booming.separation.SourceSeparationModelAwareEngine
+import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheEntryLeaseRegistry
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
+import com.mardous.booming.separation.cache.v2.SourceSeparationPresetCacheAvailabilityProvider
 import com.mardous.booming.separation.model.SourceSeparationModelRepository
 import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPresetStructuralInspector
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
@@ -79,6 +86,7 @@ import com.mardous.booming.ui.screen.library.years.YearDetailViewModel
 import com.mardous.booming.ui.screen.lyrics.LyricsViewModel
 import com.mardous.booming.ui.screen.player.PlayerViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
+import com.mardous.booming.ui.screen.player.SourceSeparationModelAwareCacheManagementViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationPresetManagementViewModel
 import com.mardous.booming.ui.screen.sleeptimer.SleepTimerViewModel
 import com.mardous.booming.ui.screen.tageditor.TagEditorViewModel
@@ -172,6 +180,27 @@ private val mainModule = module {
                 SourceSeparationPresetImportCoordinator.STAGING_DIRECTORY,
             ),
             structuralInspector = AndroidSourceSeparationPresetStructuralInspector,
+        )
+    }
+    single {
+        SourceSeparationCacheStore(
+            AndroidSourceSeparationCacheRootProvider(androidContext()).resolveRoot(),
+        ).also(SourceSeparationCacheStore::recover)
+    }
+    single { SourceSeparationCacheEntryLeaseRegistry() }
+    single {
+        SourceSeparationModelAwareCacheRepository(
+            store = get(),
+            leases = get(),
+            modelAvailability = SourceSeparationPresetCacheAvailabilityProvider(get()),
+        )
+    }
+    single { SourceSeparationCacheRunCoordinator(store = get(), repository = get()) }
+    single {
+        SourceSeparationModelAwareEngine.createDevelopment(
+            context = androidContext(),
+            presetRepository = get(),
+            coordinator = get(),
         )
     }
     single {
@@ -334,6 +363,10 @@ private val viewModule = module {
             downloader = get(),
             importCoordinator = get(),
         )
+    }
+
+    viewModel {
+        SourceSeparationModelAwareCacheManagementViewModel(repository = get())
     }
 
     viewModel {

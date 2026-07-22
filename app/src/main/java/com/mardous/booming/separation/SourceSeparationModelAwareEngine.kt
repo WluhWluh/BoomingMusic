@@ -156,10 +156,23 @@ internal class SourceSeparationModelAwareEngine(
                     presetRepository,
                 ),
             )
+            return createDevelopment(
+                context = appContext,
+                presetRepository = presetRepository,
+                coordinator = SourceSeparationCacheRunCoordinator(store, cacheRepository),
+            )
+        }
+
+        fun createDevelopment(
+            context: Context,
+            presetRepository: SourceSeparationPresetRepository,
+            coordinator: SourceSeparationCacheRunCoordinator,
+        ): SourceSeparationModelAwareEngine {
+            val appContext = context.applicationContext
             return SourceSeparationModelAwareEngine(
                 activeModelResolver = presetRepository::resolveActiveCacheModel,
                 preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(appContext),
-                coordinator = SourceSeparationCacheRunCoordinator(store, cacheRepository),
+                coordinator = coordinator,
                 rangeExecutor = MdxSourceSeparationModelAwareRangeExecutor(appContext),
                 developmentGate = { BuildConfig.DEBUG },
             )
