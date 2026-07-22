@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "phase7-thresholds-v1",
+  "frozenBeforeMatrix": true,
+  "numerical": {
+    "reconstructionMaxAbsError": 0.00001,
+    "fullTrackMinimumSnrDb": 80.0,
+    "fullTrackMaximumAbsError": 0.001,
+    "maximumJoinDiscontinuity": 0.005,
+    "maximumPlayerTimestampDriftMs": 50,
+    "maximumFrameDelta": 2048,
+    "modelWindowParity": {
+      "uvr_mdxnet_3_9662": {
+        "minimumSnrDb": 93.8,
+        "minimumCosineSimilarity": 0.999999999,
+        "maximumAbsError": 0.0001
+      },
+      "uvr_mdxnet_kara": {
+        "minimumSnrDb": 109.0,
+        "minimumCosineSimilarity": 0.999999999,
+        "maximumAbsError": 0.00003
+      },
+      "uvr_mdxnet_inst_hq_4": {
+        "minimumSnrDb": 89.4,
+        "minimumCosineSimilarity": 0.999999999,
+        "maximumAbsError": 0.0006
+      }
+    }
+  },
+  "lifecycle": {
+    "minimumReadyWindows": 2,
+    "maximumCancellationLatencyMs": 30000,
+    "requiredFallbackOrder": ["gpu-closed", "cpu-created"]
+  },
+  "resource": {
+    "hq4": {
+      "modelBytesTarget": 67108864,
+      "peakPssDeltaTargetBytes": 268435456,
+      "peakPssDeltaHardLimitBytes": 402653184
+    },
+    "litertRuntime": {
+      "incrementTargetBytes": 10485760,
+      "incrementHardLimitBytes": 16777216
+    }
+  },
+  "measurement": {
+    "coldSessionDefinition": "new app process and inference session inside a clean-install scenario",
+    "warmRepetitions": 3,
+    "emulatorThermalDataIsDiagnosticOnly": true,
+    "performanceStatisticsBackedUp": false
+  }
+}

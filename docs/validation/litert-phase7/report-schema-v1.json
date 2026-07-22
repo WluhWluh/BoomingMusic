@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/WluhWluh/BoomingSS/blob/feature/litert-multi-model-presets/docs/validation/litert-phase7/report-schema-v1.json",
+  "title": "Booming SS LiteRT Phase 7 validation report",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "status",
+    "stage",
+    "matrixKey",
+    "identity",
+    "device",
+    "fixture",
+    "run",
+    "timing",
+    "memory",
+    "thermal",
+    "lifecycle",
+    "audio",
+    "cache"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "phase7-report-v1"
+    },
+    "status": {
+      "enum": [
+        "passed",
+        "failed",
+        "rejected",
+        "unsupported",
+        "not-tested"
+      ]
+    },
+    "stage": {
+      "enum": [
+        "acquisition",
+        "worker-player",
+        "resource",
+        "experimental",
+        "promotion"
+      ]
+    },
+    "matrixKey": {
+      "type": "object",
+      "required": [
+        "modelId",
+        "artifactSha256",
+        "contractId",
+        "contractSchemaVersion",
+        "abi",
+        "backend",
+        "profileId",
+        "precision"
+      ],
+      "properties": {
+        "modelId": { "type": "string", "minLength": 1 },
+        "artifactSha256": { "$ref": "#/$defs/sha256" },
+        "contractId": { "type": "string", "minLength": 1 },
+        "contractSchemaVersion": { "type": "integer", "minimum": 1 },
+        "abi": { "enum": ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"] },
+        "backend": { "enum": ["LiteRtCpu", "LiteRtGpu", "LiteRtAuto"] },
+        "profileId": { "type": "string", "minLength": 1 },
+        "precision": { "enum": ["Float32", "Float16"] }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "required": [
+        "appCommit",
+        "appApkSha256",
+        "catalogSha256",
+        "catalogSourceRevision",
+        "modelReleaseTag",
+        "artifactFileName",
+        "artifactSha256",
+        "contractId",
+        "contractSchemaVersion",
+        "pipelineCompatibilityVersion",
+        "litertVersion",
+        "runnerRevision",
+        "thresholdsVersion",
+        "fixturesVersion"
+      ],
+      "properties": {
+        "appCommit": { "type": "string", "minLength": 7 },
+        "appApkSha256": { "$ref": "#/$defs/sha256" },
+        "testApkSha256": { "$ref": "#/$defs/sha256" },
+        "catalogSha256": { "$ref": "#/$defs/sha256" },
+        "catalogSourceRevision": { "type": "string", "minLength": 7 },
+        "modelReleaseTag": { "type": "string", "minLength": 1 },
+        "artifactFileName": { "type": "string", "minLength": 1 },
+        "artifactSha256": { "$ref": "#/$defs/sha256" },
+        "contractId": { "type": "string", "minLength": 1 },
+        "contractSchemaVersion": { "type": "integer", "minimum": 1 },
+        "pipelineCompatibilityVersion": { "type": "string", "minLength": 1 },
+        "litertVersion": { "type": "string", "minLength": 1 },
+        "runnerRevision": { "type": "string", "minLength": 1 },
+        "thresholdsVersion": { "type": "string", "minLength": 1 },
+        "fixturesVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "device": {
+      "type": "object",
+      "required": [
+        "serial",
+        "manufacturer",
+        "model",
+        "androidApi",
+        "buildFingerprint",
+        "processAbi",
+        "runtimeAbi",
+        "bitness"
+      ],
+      "properties": {
+        "serial": { "type": "string", "minLength": 1 },
+        "manufacturer": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "androidApi": { "type": "integer", "minimum": 26 },
+        "buildFingerprint": { "type": "string", "minLength": 1 },
+        "processAbi": { "type": "string", "minLength": 1 },
+        "runtimeAbi": { "type": "string", "minLength": 1 },
+        "bitness": { "enum": [32, 64] },
+        "availableProcessors": { "type": "integer", "minimum": 1 },
+        "battery": { "type": "object" },
+        "thermalBefore": { "type": "object" },
+        "thermalAfter": { "type": "object" }
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "required": [
+        "fixtureId",
+        "fileName",
+        "byteSize",
+        "sha256",
+        "durationUs",
+        "sampleRate",
+        "channels",
+        "codec",
+        "decodeClass"
+      ],
+      "properties": {
+        "fixtureId": { "type": "string", "minLength": 1 },
+        "fileName": { "type": "string", "minLength": 1 },
+        "byteSize": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "durationUs": { "type": "integer", "minimum": 0 },
+        "sampleRate": { "type": "integer", "minimum": 1 },
+        "channels": { "type": "integer", "minimum": 1 },
+        "codec": { "type": "string", "minLength": 1 },
+        "decodeClass": { "type": "string", "minLength": 1 },
+        "referenceOutputs": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "runId",
+        "class",
+        "cpuThreads",
+        "windowDecodeEnabled",
+        "cleanInstallScenario"
+      ],
+      "properties": {
+        "runId": { "type": "string", "minLength": 1 },
+        "class": { "enum": ["cold-session", "warm-session"] },
+        "cpuThreads": { "type": "integer", "minimum": 1 },
+        "windowDecodeEnabled": { "type": "boolean" },
+        "cleanInstallScenario": { "type": "boolean" },
+        "backendRequested": { "type": "string" },
+        "backendUsed": { "type": "string" },
+        "fallbackStage": { "type": ["string", "null"] },
+        "fallbackReason": { "type": ["string", "null"] }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "required": [
+        "firstReadyMs",
+        "fullSongMs",
+        "cancellationLatencyMs"
+      ],
+      "properties": {
+        "downloadMs": { "type": ["integer", "null"], "minimum": 0 },
+        "installMs": { "type": ["integer", "null"], "minimum": 0 },
+        "firstReadyMs": { "type": "integer", "minimum": 0 },
+        "fullSongMs": { "type": "integer", "minimum": 0 },
+        "cancellationLatencyMs": { "type": "integer", "minimum": 0 },
+        "windowMs": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "required": [
+        "idlePssBytes",
+        "peakPssBytes",
+        "peakPssDeltaBytes",
+        "peakJavaBytes",
+        "peakNativeBytes",
+        "peakGraphicsBytes"
+      ],
+      "properties": {
+        "idlePssBytes": { "type": "integer", "minimum": 0 },
+        "peakPssBytes": { "type": "integer", "minimum": 0 },
+        "peakPssDeltaBytes": { "type": "integer", "minimum": 0 },
+        "peakJavaBytes": { "type": "integer", "minimum": 0 },
+        "peakNativeBytes": { "type": "integer", "minimum": 0 },
+        "peakGraphicsBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "thermal": {
+      "type": "object",
+      "required": ["available", "samples"],
+      "properties": {
+        "available": { "type": "boolean" },
+        "samples": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "required": [
+        "workerCompleted",
+        "mediaSessionConnected",
+        "pauseResumePassed",
+        "seekPassed",
+        "processRecreationPassed",
+        "cancellationPassed"
+      ],
+      "properties": {
+        "workerCompleted": { "type": "boolean" },
+        "mediaSessionConnected": { "type": "boolean" },
+        "pauseResumePassed": { "type": "boolean" },
+        "seekPassed": { "type": "boolean" },
+        "transitionPassed": { "type": "boolean" },
+        "prefetchPassed": { "type": "boolean" },
+        "processRecreationPassed": { "type": "boolean" },
+        "cancellationPassed": { "type": "boolean" },
+        "modelSwitchPassed": { "type": "boolean" }
+      }
+    },
+    "audio": {
+      "type": "object",
+      "required": [
+        "finite",
+        "outputFrameCount",
+        "expectedFrameCount",
+        "frameDelta",
+        "snrDb",
+        "maxAbsError",
+        "maxJoinDiscontinuity",
+        "stemSemantics"
+      ],
+      "properties": {
+        "finite": { "type": "boolean" },
+        "outputFrameCount": { "type": "integer", "minimum": 0 },
+        "expectedFrameCount": { "type": "integer", "minimum": 0 },
+        "frameDelta": { "type": "integer", "minimum": 0 },
+        "snrDb": { "type": "number" },
+        "maxAbsError": { "type": "number", "minimum": 0 },
+        "reconstructionMaxAbsError": { "type": "number", "minimum": 0 },
+        "maxJoinDiscontinuity": { "type": "number", "minimum": 0 },
+        "playerTimestampDriftMs": { "type": "integer", "minimum": 0 },
+        "stemSemantics": { "type": "string", "minLength": 1 },
+        "decodeDiagnostics": { "type": "object" }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "required": [
+        "cacheKey",
+        "entryCountBefore",
+        "entryCountAfter",
+        "exactIdentity",
+        "completedPlayable",
+        "clearRecoveryPassed"
+      ],
+      "properties": {
+        "cacheKey": { "type": "string", "minLength": 1 },
+        "entryCountBefore": { "type": "integer", "minimum": 0 },
+        "entryCountAfter": { "type": "integer", "minimum": 0 },
+        "exactIdentity": { "type": "boolean" },
+        "completedPlayable": { "type": "boolean" },
+        "clearRecoveryPassed": { "type": "boolean" },
+        "modelSwitchCreatedDistinctEntry": { "type": "boolean" },
+        "manifestPathRelative": { "type": "string" }
+      }
+    },
+    "error": {
+      "type": ["object", "null"]
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    }
+  }
+}
