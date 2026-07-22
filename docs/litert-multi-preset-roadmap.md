@@ -92,6 +92,7 @@ rebased upstream branch:
 - completed Phase 3 tip: `9c574447`
 - completed Phase 4 tip: `b302e66e`
 - accepted Phase 5 storage/cache tip: `7a26f2b1`
+- accepted Phase 6 production-cutover tip: `bfd50b8a`
 - model conversion repository:
   [`WluhWluh/bss-tflite`](https://github.com/WluhWluh/bss-tflite)
 - supplemental x86 runtime repository:
@@ -2163,116 +2164,253 @@ Phase 6 route/cutover exit gate (met):
 
 ### Phase 7: Full-device validation and tier promotion
 
-Phase 7 is a promotion-or-decline gate, not an excuse to repeat every Phase 3
-experiment or defer basic route correctness from Phase 6. It decides the first
-release's model tiers from full worker, playback, audio, resource, and lifecycle
-evidence. A model that has only window parity remains a candidate even if it is
-downloadable. Player lifecycle is repeated here only as part of the full-song
-device matrix; backup interoperability belongs to Phase 9 Beta readiness.
+Phase 7 is a promotion-or-decline gate, not a second implementation phase. It
+decides model and runtime tiers from full-song worker, playback, audio,
+resource, and lifecycle evidence. A model that has only window parity remains a
+candidate even if it is downloadable. The phase has five ordered gates. Do not
+change the catalog tier while an earlier gate is open; backup interoperability
+remains part of Phase 9 Beta readiness. Product behavior remains frozen except
+for validation-only injection/observability, fixes found by the matrix, and the
+evidence-driven release-graph/catalog decision in Phase 7E. A product-code fix
+changes the app identity and reruns every affected row.
 
-- [ ] Run full worker/playback comparisons for 9662 FP32 on S10 and S25 CPU.
-  Run `gpu-auto-fp32-v1` only as its sole eligible GPU-promotion profile, and
-  exercise its CPU fallback path. CPU-first remains an acceptable production
-  result if the GPU profile does not pass every gate.
-- [ ] Run KARA FP32 full worker/playback and representative listening checks on
-  S10 and S25 CPU. Do not treat its rejected GPU profile as a Phase 7 candidate;
-  KARA can become selectable only as an explicitly warned CPU-only experimental
-  model.
-- [ ] Leave HQ4 download-only for the current artifact and profiles. Revisit it
-  only after a materially changed artifact/runtime path first demonstrates a
-  resource-safe CPU fallback and a new preflight evidence record; do not repeat
-  the known-disqualified full-song allocation merely to populate a matrix.
-- [ ] Install the `armeabi-v7a` split on S10 and run full worker/playback tests
-  for 9662 and any experimental model that requests arm32 selection. Confirm
-  HQ4 rejection occurs in compatibility preflight without allocating its model.
-- [ ] Run full worker/playback tests for 9662 and any experimentally selectable
-  model on an x86_64 emulator using the official LiteRT runtime.
-- [ ] Run conversion and LiteRT smoke validation for every published candidate
-  artifact, recording download-only, rejected, and unsupported states without
-  granting activation from a successful conversion alone.
-- [ ] Test 9662 and KARA with the supplemental CPU runtime on an API 26 pure
-  x86 emulator, including model load, one-window parity, cancellation, and
-  session recreation. Retain KARA only if its experimental CPU gate succeeds.
-- [ ] Confirm HQ4 is reported as unsupported on the expanded 3,036 MiB x86 AVD
-  without repeating the opt-in allocation already known to fail.
-- [ ] Test a missing, altered, or wrong-architecture supplemental runtime and
-  confirm that build verification or the localized runtime error fails clearly
-  rather than loading another inference engine.
-- [ ] Start every installation and device-validation run after clearing all
-  application data.
-- [ ] Compare the initial CPU thread formula with neighboring thread counts on
-  S10 and S25 using full-song time, peak PSS, thermal behavior, cancellation,
-  and playback readiness before changing the default.
-- [ ] Validate GPU library/accelerator discovery, GPU-only compilation, memory
-  eligibility, bounded probe, and one-way fallback for 9662 FP32 on both
-  devices. Record false-positive and false-negative decisions without claiming
-  unavailable per-operator coverage data.
-- [ ] Inspect all four ABI APKs plus the universal APK for native-library
-  duplication, x86 hash agreement, and the expected LiteRT inventory. The
-  final absence-of-ORT check belongs to Phase 8.
-- [ ] Measure peak PSS, graphics/native memory, thermal behavior, and full-song
-  wall time for every selectable preset/backend. Record dual-runtime package
-  size only as a development baseline; final install-size acceptance follows
-  ORT removal.
-- [ ] Retain HQ4's 64 MiB model and 256/384 MiB PSS gates. A changed HQ4 path
-  must pass them on S10 before it can leave download-only; S25 does not waive a
-  lower-device failure.
-- [ ] Decide from the 9662 FP32 full-song matrix whether production `Auto`
-  should prefer `gpu-auto-fp32-v1` or remain CPU-first. Any selected profile
-  requires new catalog evidence; an FP32 result cannot approve FP16.
+#### Phase 7A: Freeze the validation inputs and evidence format
+
+- [ ] Freeze the exact app commit, bundled catalog SHA-256, `bss-tflite`
+  Release tag, artifact SHA-256, contract ID/schema, pipeline revision, and
+  LiteRT runtime revision in every report. The current acquisition baseline is
+  the published prerelease `v0.1.0-candidates.1`; it is not a stable model
+  release and must not be silently replaced by a mutable branch asset.
+- [ ] Freeze the digital fixtures and their hashes. Keep the existing 12-second
+  Coast Town source and a synthetic mixture as parity/control fixtures, but add
+  at least one representative full-length track for worker, playback, resource,
+  and thermal evidence. Add a source-format corpus covering every production
+  window-decode class and full-song fallback class, with the expected decode
+  mode recorded for each file. Generate matching desktop references through
+  `MusicSourceSeparation`; record source duration, sample rate, channel count,
+  codec/container, redistribution status, and expected output stem semantics.
+  A short fixture cannot satisfy a full-song gate; non-redistributable media
+  and full reference outputs stay out of the app repository, with hashes and
+  acquisition/reproduction instructions retained instead.
+- [ ] Freeze numerical and behavioral pass thresholds before running the
+  promotion matrix: finite output, sample count and timeline drift, full-track
+  SNR/error against desktop references, join discontinuity, ready-window and
+  seek tolerance, cancellation latency, and resource limits. Changing a
+  threshold creates a new evidence revision and reruns affected rows; it cannot
+  retroactively turn an existing report into a pass.
+- [ ] Define and independently version one JSON report schema containing model
+  identity, device/build fingerprint, Android API, process ABI, backend/profile/
+  precision, CPU thread count, cold-session or warm-session run class, fixture
+  hashes, first-ready time, full-song time, cancellation result, cache key, runtime
+  diagnostics, idle and peak Java/native/graphics/PSS memory, and thermal/power
+  observations. Record the app APK SHA-256, runner revision, and schema version
+  in each report. Define `cold-session` as a new app process and inference session
+  inside a clean-install scenario; do not imply that unprivileged tests have
+  dropped the kernel page cache. A report without these identity fields is not
+  promotion evidence.
+- [ ] Add a Phase 7 host runner and Android instrumentation suite that drives
+  the production facade, foreground worker, MediaSession/player, and management
+  graph. Backend/thread/failpoint selection must be construction-time,
+  debug/test-only injection with no preference, backup key, or release-graph
+  reference. Existing one-window and direct-engine tools remain narrow probes,
+  not substitutes for this runner.
+- [ ] Separate acquisition and execution tests. First clear app data and test
+  the pinned Release download, SHA-256 verification, install, metadata display,
+  and explicit `Use`. Then use the same verified artifact for runtime tests.
+  Warm performance repetitions may reuse the installed model and OS/runtime
+  warm state inside one declared scenario, but inference timing must delete the
+  exact completed cache or use a fresh source identity before each repetition.
+  They must not be mixed with cold-install or download timing.
+- [ ] Build ABI splits and the AndroidTest APK in separate Gradle invocations.
+  Requesting an AndroidTest task disables ABI splits in the current build
+  configuration. The host runner must install the requested standalone split
+  after the builds, install the test APK separately, invoke instrumentation
+  directly, and assert the actual process ABI/bitness. Do not let a connected
+  test task reinstall its universal app APK over an arm32 or x86 target. Run the
+  native inventory verifier on the split directory and universal APK separately,
+  including duplicate detection and the pinned supplemental x86 hash.
+
+#### Phase 7B: Full-song correctness and production playback
+
+- [ ] Run the 9662 FP32 CPU baseline on Galaxy S10 and S25 arm64, then on the
+  S10 `armeabi-v7a` split, API 26 pure x86, and API 37 x86_64. The CPU baseline
+  is a test-only LiteRT CPU injection used for comparison; it is not a user
+  setting and does not alter the production `Auto` policy.
+- [ ] Exercise the real worker/player sequence for 9662 on every claimed CPU
+  ABI: acquisition and explicit selection, full-song separation, partial
+  ready-window playback, pause/resume, seek across ready and pending windows,
+  background continuation, song transition and next-song prefetch,
+  cancellation, process recreation, FLAC promotion/hydration, blend changes,
+  and exact completed-cache playback. Capture digital output joins and
+  timestamps on every target; perform representative listening and the full
+  gesture-level UI pass on S10 and S25.
+- [ ] Run the frozen source-format corpus through the production worker and
+  verify the expected local-window or full-song decode route, output duration,
+  source fingerprint, join placement, and fallback reason. A format-specific
+  decoder regression blocks stable promotion even when the canonical full-track
+  fixture passes.
+- [ ] Switch models while a run and a separated playback session are active.
+  Verify that admitted work and the active playback session retain their exact
+  cache identity, that a later run creates a different entry, and that no
+  output is spliced or silently re-inferred under the new model.
+- [ ] Run `gpu-auto-fp32-v1` through the same full-song flow on S10 and S25
+  only when eligibility permits it. Exercise setup/probe/invocation failure
+  before output and after ready windows have been published through the debug
+  validation harness, then verify one-way recreation of the same run on LiteRT
+  CPU without changing its render/cache identity. Do not add a force-GPU or
+  force-CPU user preference to make this test possible.
+- [ ] Treat a successful window comparison as necessary but insufficient:
+  full-song stem joins, output scale/residual compensation, duration, cache
+  append, and player timestamps must all pass before 9662 receives stable
+  release maturity for that ABI/profile.
+
+#### Phase 7C: Resource, thread, and thermal gates
+
+- [ ] For each supported 9662 CPU target, collect one cold-session run and at
+  least three warm-session repetitions. Record wall time, first-ready time,
+  full-song time, idle/peak/delta PSS, Java heap, native heap, graphics
+  allocation where available, cancellation latency, and thermal state. Keep
+  model download and APK install space in separate measurements. Emulator
+  timing and thermal data are regression diagnostics, not a substitute for
+  physical-device performance or resource qualification.
+- [ ] Compare the default thread formula
+  `max(2, min(4, availableProcessors - 1))` with neighboring counts on S10 and
+  S25. Change the default only when repeated full-song evidence improves the
+  target metric without violating playback readiness, cancellation, memory, or
+  thermal gates.
+- [ ] Measure GPU and CPU separately on S10/S25. GPU eligibility must include
+  library discovery, GPU-only compilation, memory decision, bounded probe, and
+  fallback evidence; do not infer delegated operator coverage from LiteRT's
+  public API. If GPU is not consistently better or less resource-intensive,
+  bind the release graph directly to the LiteRT CPU provider and keep `Auto`
+  internal; do not describe the current GPU-first `Auto` controller as
+  CPU-first.
+- [ ] Keep the existing resource gates: HQ4 remains a 64 MiB model with a
+  256 MiB target and 384 MiB hard PSS-increase limit. A changed HQ4 artifact or
+  runtime must pass the hard gate on S10 before any allocation beyond preflight
+  is allowed; S25 success cannot waive an S10 failure.
+- [ ] Record missing, altered, and wrong-architecture supplemental-runtime
+  results as build or localized terminal failures. They must never trigger ORT,
+  another model, or a second large allocation.
+- [ ] Record the dual-runtime Phase 7 APK and installed-size inventory per ABI
+  as the comparison baseline. It is not final size acceptance while ORT remains;
+  Phase 8 owns the post-removal 10/16 MiB runtime gate.
+
+#### Phase 7D: Experimental and download-only catalog validation
+
+- [ ] Run KARA FP32 CPU full-song, playback, resource, cancellation, and
+  representative listening checks on the ABIs for which it may be selectable.
+  Its rejected GPU profiles remain rejected. It can become a warned CPU-only
+  experimental model only with complete per-ABI evidence; otherwise keep it
+  download-only or restrict activation to the qualified ABI set.
+- [ ] Keep HQ4 download-only for the current artifact. Use compatibility and
+  preflight tests to confirm rejection without model allocation, including the
+  expanded x86 AVD; do not repeat the known-disqualified full-song allocation
+  merely to fill a matrix.
+- [ ] For every other published candidate, verify pinned download, contract and
+  sidecar inspection, structural/TFLite smoke on a compatible target, and an
+  explicit download-only, rejected, or unsupported state. Do not reconvert the
+  model in this repository or grant activation from conversion success alone;
+  conversion reproducibility belongs to `bss-tflite`.
+- [ ] Keep target-stem-plus-residual candidates download-only until neutral
+  stem labels and the generic playback/cache UI have passed their own full-song
+  gate. Never expose them as vocals/instrumental based on filename inference.
+
+#### Phase 7E: Promotion decision and catalog revision
+
+- [ ] Generate a promotion matrix keyed by
+  `(modelId, artifactSha256, contractId, contractSchemaVersion, abi, backend,
+  profileId, precision)`. Each row must be `passed`, `rejected`,
+  `unsupported`, or `not-tested`, with links to immutable reports. A failure
+  for one backend or ABI must not erase evidence for another row.
+- [ ] Promote 9662 FP32 to the sole stable recommended/default model only if
+  its CPU rows pass on every ABI that the release claims to support. Promote
+  `gpu-auto-fp32-v1` independently only if its S10 and S25 rows pass; otherwise
+  bind the normal release route to LiteRT CPU and retain `Auto` as an internal
+  validation path. FP32 evidence cannot promote FP16.
+- [ ] Promote KARA only as a warned CPU-only experimental model after its own
+  qualified-ABI rows pass. Keep HQ4 and all remaining candidates
+  resource-gated or download-only according to their individual matrices.
+- [ ] Before assigning stable maturity, publish an immutable non-prerelease
+  `bss-tflite` Release containing the exact validated 9662 artifact, sidecar,
+  full candidate manifest, and checksums. The Release may retain experimental
+  and download-only assets, but their per-artifact tiers must remain explicit.
+  Reusing the validated bytes needs only hash/URL verification; any artifact or
+  contract hash change reopens every affected promotion row.
+- [ ] Update the bundled catalog, release maturity, runtime qualifications,
+  changelog, and evidence manifest in one reviewed commit. The app must not
+  change a tier or activation policy before the corresponding report and
+  catalog revision are present.
+- [ ] Build and install the exact decision commit after its catalog and release
+  graph change, then rerun clean-install acquisition, production-graph, exact
+  active-model, worker/playback smoke, and native-inventory checks on every
+  claimed ABI. A runtime, profile, artifact, or contract change reopens the
+  affected full matrix rather than being covered by this final smoke.
 
 Acceptance criteria:
 
-- 9662 FP32 becomes the sole stable recommended/default preset only after its
-  full CPU, playback, cache, lifecycle, resource, and required device gates
-  pass. A GPU pass is required only to enable that exact GPU profile, not to
-  keep CPU-first 9662 available.
-- KARA FP32 becomes selectable only if its CPU full-song and listening evidence
-  passes on its requested ABIs; it remains explicitly experimental and CPU-only.
-  Otherwise it remains download-only.
-- HQ4 remains download-only until a newly evidenced implementation meets the
-  fallback and resource gates. FP16 and all unreviewed candidates remain
-  non-selectable.
-- No regression occurs in continuous separated playback, seeking, blend
-  changes, GPU failure recovery, or process/lifecycle recreation.
-- Performance and memory reports are stored with the model/catalog revision.
-- Any change to the provisional thread, probe, GPU eligibility, or resource
-  targets is justified by recorded S10 and S25 results and preserves the hard
-  fallback/disable behavior.
+- 9662 FP32 has complete full-song CPU evidence on every ABI claimed by the
+  release, with no output-join, timestamp, cache-identity, lifecycle, memory,
+  or cancellation regression. It becomes the only stable recommended/default
+  preset after the Phase 7E review.
+- A GPU profile is an independent qualification. GPU failure never blocks the
+  CPU model, and an Auto result cannot be promoted without its own S10/S25
+  reports and one-way fallback evidence.
+- KARA is selectable only as an explicitly warned CPU-only experimental model
+  on ABIs with complete evidence; otherwise it remains download-only.
+- HQ4 remains download-only unless a new artifact/runtime passes its resource
+  and fallback gates on S10. FP16, generic target-stem, and unreviewed models
+  remain non-selectable.
+- Every report is reproducible from immutable catalog/artifact/fixture hashes,
+  and every promoted row is traceable to a report. Full-song performance data
+  is not placed in backups.
+- Any change to CPU threads, probe, GPU eligibility, runtime profile, or hard
+  resource limits is justified by new S10/S25 evidence and a catalog revision.
 
 ### Phase 8: Retire ONNX Runtime
 
-Begin this phase only after Phase 7 has established the first selectable
-release matrix. Removing ORT before that point would make a regression oracle
-disappear before the production LiteRT path has completed full-device testing.
+Begin Phase 8 only after Phase 7E has produced the reviewed promotion matrix,
+the first selectable release catalog, and immutable desktop/device reports.
+Archive the ORT comparison reports before deleting the oracle; the oracle is no
+longer needed once every release-selectable row has equivalent LiteRT evidence.
 
-- [ ] Remove ONNX model URLs, import validation, and user-facing ONNX text.
-- [ ] Remove `onnxruntime.android` and all ONNX native libraries from release
-  artifacts.
-- [ ] Remove obsolete ONNX-only tests and diagnostics after equivalent LiteRT
-  coverage exists; retain immutable desktop reference reports in validation
-  artifacts, not in the release app.
+- [ ] Freeze the Phase 7 promotion matrix, catalog revision, and desktop ORT
+  references in validation artifacts. No Phase 8 code change may alter the
+  evidence used for model promotion.
+- [ ] Remove legacy ONNX acquisition URLs, import validation, loader metadata,
+  and user-facing ONNX runtime text from the app. Preserve original ONNX source
+  URLs and attribution where the TFLite contract needs provenance, but never
+  expose them as executable model-download or import targets. Keep immutable
+  validation reports outside the release app.
+- [ ] Remove `SourceSeparationOrtOracle`, `onnxruntime.android`, and all ONNX
+  native libraries after the final LiteRT route audit. Delete obsolete
+  ONNX-only tests and diagnostics only after equivalent LiteRT checks are
+  retained in the repository or validation artifacts.
 - [ ] Remove the temporary legacy 9482 execution profile, old model repository,
-  and `MdxModelVariant` routing after all production and test-oracle references
-  are gone.
-- [ ] Remove legacy ONNX model, manifest, and cache discovery paths instead of
-  retaining compatibility readers.
-- [ ] Re-run clean-install smoke, selected-model worker/playback, model switch,
-  cancellation, and APK/native-inventory checks after removal.
-- [ ] Measure final package and installed size per ABI against the 10/16 MiB
-  LiteRT-runtime budget, and inspect all four ABI APKs plus the universal APK
-  for native-library duplication, x86 hash agreement, and no ONNX runtime.
+  `MdxModelVariant` routing, legacy model manifest, and legacy cache discovery
+  paths. The clean-install boundary means no compatibility reader or migration
+  marker is required.
+- [ ] Run a clean-install smoke, pinned TFLite acquisition, explicit model
+  selection, full worker/playback flow, model switch, cancellation, cache
+  clear, and APK/native-inventory audit after each removal stage.
+- [ ] Build ABI splits and the universal APK in standalone invocations, verify
+  the final LiteRT inventory and x86 hash, and measure final APK and installed
+  runtime size against the 10/16 MiB LiteRT-runtime budget. Do not count model
+  weights or separation cache in the runtime budget.
 
 Acceptance criteria:
 
-- `rg` finds no production ONNX Runtime dependency or model-loading path.
+- Source and release packaging scans find no production ONNX Runtime dependency
+  or model-loading path. Historical reports and explicitly marked source
+  provenance may still mention ORT.
 - Release APKs contain no `libonnxruntime*.so`.
 - Every release-selectable model/backend/ABI combination passed its Phase 7
   tier gate; an untested combination cannot become active merely because its
   native library is present.
 - Every ABI APK contains the expected LiteRT inventory, and the x86 APK
   contains exactly the pinned supplemental `libLiteRt.so`.
-- A clean install can download and use a TFLite preset without any ONNX file.
+- A clean install can download, inspect, explicitly select, and use a TFLite
+  preset without any ONNX file, legacy model directory, or legacy cache path.
 
 ### Phase 9: Beta readiness
 
@@ -2282,6 +2420,9 @@ Acceptance criteria:
   localization set, including `bqi` and `ta` introduced by the rebase.
 - [ ] Review every LiteRT-specific string for terminology consistency.
 - [ ] Build GitHub and F-Droid release variants only.
+- [ ] Keep the Play Store variant out of Booming SS CI, release artifacts, and
+  publication. Do not use a Play Store/AAB build as evidence for the GitHub or
+  F-Droid product.
 - [ ] Include the supplemental runtime source link, Release tag, checksum,
   LiteRT license, third-party notices, and provenance verification guidance in
   release documentation.
@@ -2328,16 +2469,17 @@ Every runtime or model change should run the narrowest applicable checks:
 | Acquisition | Download, verify, install, tier-specific `Use` gate, manual delete, and reinstall |
 | Contract | Release schema v2, historical v1 rejection, sidecar/hash pairing, shape, dtype, layout, DSP, stem mapping, runtime-evidence exclusion, and cache-contract fingerprint |
 | Conversion | Desktop LiteRT/TFLite output versus ORT reference |
-| Runtime | Runtime-neutral production facade, explicit ORT oracle through Phase 7, cutover graph audit, no ORT fallback, NCHW/NHWC conversion, raw parity, output compensation/residual, CPU thread matrix, versioned GPU profiles, eligibility/probe, one-way LiteRT GPU-to-CPU fallback, close/recreate, and cancellation |
+| Evidence | Independently versioned report schema, immutable app/catalog/artifact/fixture identities, cold/warm classification, production worker/player runner, promotion matrix, and report links |
+| Runtime | Runtime-neutral production facade, explicit ORT oracle through Phase 7, cutover graph audit, no ORT fallback, production worker/player instrumentation, NCHW/NHWC conversion, raw parity, output compensation/residual, CPU thread matrix, versioned GPU profiles, eligibility/probe, one-way LiteRT GPU-to-CPU fallback, close/recreate, and cancellation |
 | Playback | Start, pause/resume, seek, song transition, blend update, exact-active cache lookup, explicit completed-cache playback, and no model-output splice during selection changes |
-| Audio | Full-song joins and representative listening for every model requesting selection; window parity alone is insufficient |
+| Audio | Full-length source, digital output joins/timestamps, and representative listening for every model requesting selection; short-fixture or window parity alone is insufficient |
 | Cache | Canonical identity/key determinism, manifest v2 and relative-path validation, multiple models per song, profile revisions, deleted custom profile, partial stale/resume, read-only completed playback, FLAC promotion, entry leases, crash consistency, delete/cleanup, and system clear-cache recovery |
 | Persistence/Backup | Format/schema v1, key allowlists, pending active model, unknown fork payload, canonical/legacy priority, both package directions, and excluded model/cache/per-song data |
 | Lifecycle | Activity recreation, process restart, background worker continuation |
-| Device | Galaxy S10/S25 arm64 9662 CPU and eligible GPU evidence, CPU-only KARA promotion evidence, S10 armeabi-v7a CPU, official x86_64 CPU plus GPU packaging/API evidence, API 26 pure x86 CPU for 9662/KARA, actual process-ABI evidence, and explicit HQ4 resource rejection |
+| Device | Galaxy S10/S25 arm64 9662 CPU and eligible GPU evidence, CPU-only KARA promotion evidence, S10 armeabi-v7a CPU, official x86_64 CPU/runtime evidence without GPU promotion, API 26 pure x86 CPU for 9662/KARA, actual process-ABI evidence, and explicit HQ4 resource rejection |
 | Resource budgets | Model/runtime install size, peak PSS, graphics/native memory, thermal behavior, and target/hard-limit decisions |
 | Native supply chain | Pinned source/toolchain, Release hash, ELF/JNI audit, checksums, notices, and GitHub provenance |
-| Packaging | Four ABI splits plus universal APK, one runtime per ABI, native inventory, and APK/install size |
+| Packaging | Four ABI splits plus universal APK built separately from AndroidTest, one runtime per ABI, native inventory, and APK/install size |
 | Localization | Fork string completeness and terminology review |
 
 The most important correctness test is an end-to-end full-song comparison. A
@@ -2394,8 +2536,8 @@ reverse the associated correctness, identity, fallback, or backup rule.
 ### Contract schema and sidecars
 
 Phase 1 adopted contract schema v1 with `contractSchemaVersion` independent
-from the app and pipeline versions. Phase 4 must replace it for official
-release use with schema v2 because v1 incorrectly embedded mutable runtime
+from the app and pipeline versions. Phase 4 replaced it for official release
+use with schema v2 because v1 incorrectly embedded mutable runtime
 qualification. Schema v2 preserves model/artifact, tensor, DSP, stem, source,
 conversion, and pipeline facts, but ABI, backend, LiteRT version, precision,
 device, and execution-profile evidence live only in catalog qualification
@@ -2546,13 +2688,17 @@ both outcomes.
 
 ### GPU eligibility and CPU threads
 
-Adopt `Auto` as the only initial accelerated mode, but keep it internal until
-Phase 7 chooses whether production should prefer GPU. The pinned LiteRT 2.1.5
-API can report available accelerators and can create a GPU-only compiled model;
-it cannot report delegated operator coverage or the OpenCL/OpenGL backend chosen
-by `AUTOMATIC`. Eligibility therefore combines ABI/library preflight, exact
-runtime records, a known-good CPU fallback, accelerator discovery, successful
-GPU-only compilation, memory gates, and a bounded deterministic probe.
+Use `Auto` as the development graph's only accelerated mode, but keep it
+internal until Phase 7 decides whether the release graph should retain it. The
+current controller is GPU-first whenever eligibility passes; it is not a
+CPU-first policy. If its Phase 7 profile fails promotion, bind the release graph
+directly to LiteRT CPU and keep `Auto` debug/internal rather than adding a
+misleading user mode. The pinned LiteRT 2.1.5 API can report available
+accelerators and can create a GPU-only compiled model; it cannot report
+delegated operator coverage or the OpenCL/OpenGL backend chosen by `AUTOMATIC`.
+Eligibility therefore combines ABI/library preflight, exact runtime records, a
+known-good CPU fallback, accelerator discovery, successful GPU-only
+compilation, memory gates, and a bounded deterministic probe.
 
 Version GPU options independently from the model contract. Phase 3 tested
 explicit `AUTOMATIC + FP32` and separate `AUTOMATIC + FP16` profiles. Only 9662
