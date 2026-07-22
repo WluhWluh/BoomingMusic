@@ -89,6 +89,29 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
     }
 
     @Test
+    fun `missing CPU runtime on a CPU-only ABI fails without trying GPU`() {
+        val profile = profile("uvr_mdxnet_3_9662")
+        val gpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtGpu)
+        val missingRuntime = UnsatisfiedLinkError("missing libLiteRt.so")
+        val cpuFactory = RecordingFactory(
+            backend = MdxInferenceBackend.LiteRtCpu,
+            createFailure = missingRuntime,
+        )
+
+        val error = assertThrows(UnsatisfiedLinkError::class.java) {
+            factory(
+                abi = MdxRuntimeAbi.X86,
+                gpuFactory = gpuFactory,
+                cpuFactory = cpuFactory,
+            ).create(artifact(profile), profile, MdxRuntimeSettings())
+        }
+
+        assertSame(missingRuntime, error)
+        assertEquals(0, gpuFactory.createCount)
+        assertEquals(1, cpuFactory.createCount)
+    }
+
+    @Test
     fun `successful probe keeps GPU active and reports accepted GPU output`() {
         val profile = profile("uvr_mdxnet_3_9662")
         val gpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtGpu) {
