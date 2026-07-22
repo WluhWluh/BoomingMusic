@@ -7,6 +7,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
@@ -54,6 +55,10 @@ interface SourceSeparationRuntimeFacade {
     fun readBlend(song: SourceSeparationRuntimeSong): Float?
 
     fun writeBlend(song: SourceSeparationRuntimeSong, blend: Float): Boolean
+
+    fun readBlend(identity: SourceSeparationCacheIdentity): Float?
+
+    fun writeBlend(identity: SourceSeparationCacheIdentity, blend: Float): Boolean
 
     fun separate(
         song: SourceSeparationRuntimeSong,
@@ -189,6 +194,12 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
 
     override fun writeBlend(song: SourceSeparationRuntimeSong, blend: Float): Boolean =
         cacheRepository.writeBlend(song.identity, blend.coerceIn(0f, 1f))
+
+    override fun readBlend(identity: SourceSeparationCacheIdentity): Float? =
+        cacheRepository.readBlend(identity)
+
+    override fun writeBlend(identity: SourceSeparationCacheIdentity, blend: Float): Boolean =
+        cacheRepository.writeBlend(identity, blend.coerceIn(0f, 1f))
 
     override fun separate(
         song: SourceSeparationRuntimeSong,

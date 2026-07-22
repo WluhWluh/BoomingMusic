@@ -72,6 +72,7 @@ class SourceSeparationModelAwareCacheRepositoryTest {
             assertNotNull(playback)
             assertTrue(playback!!.vocalsFile.isFile)
             assertTrue(playback.instrumentalFile.isFile)
+            assertEquals("timing", playback.timingFile?.readText())
         }
     }
 

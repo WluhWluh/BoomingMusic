@@ -343,6 +343,9 @@ class SourceSeparationModelAwareCacheRepository(
                 manifest = manifest,
                 vocalsFile = vocals,
                 instrumentalFile = instrumental,
+                timingFile = manifest.output?.timingPath?.let { path ->
+                    store.resolveEntryPath(manifest.cacheKey, path).takeIf(File::isFile)
+                },
                 closeAction = {
                     lease.close()
                     touchAfterPlayback(manifest)
@@ -460,6 +463,7 @@ class SourceSeparationModelAwareCachePlayback internal constructor(
     val manifest: SourceSeparationCacheManifest,
     val vocalsFile: File,
     val instrumentalFile: File,
+    val timingFile: File?,
     private val closeAction: () -> Unit,
 ) : AutoCloseable {
     private var closed = false
