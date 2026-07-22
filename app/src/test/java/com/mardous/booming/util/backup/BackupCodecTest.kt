@@ -181,6 +181,93 @@ class BackupCodecTest {
     }
 
     @Test
+    fun `canonical settings win over conflicting compatibility XML`() {
+        temporaryDirectory().useDirectory { root ->
+            val canonical = root.resolve("common.json").apply {
+                writeText(
+                    BackupContractJson.json.encodeToString(
+                        CommonSettingsSnapshotV1(
+                            schemaVersion = 1,
+                            preferences = mapOf("black_theme" to JsonPrimitive(true)),
+                        ),
+                    ),
+                )
+            }
+            val projection = root.resolve("projection.xml").apply {
+                writeBytes(
+                    BackupPreferenceCodec.encodeLegacyXml(
+                        mapOf("black_theme" to JsonPrimitive(false)),
+                        BackupSettingsPolicy.commonSettingsByKey,
+                    ),
+                )
+            }
+            val payloads = listOf(
+                BackupArchivePayload(
+                    path = BackupFormatV1.COMMON_SETTINGS_PATH,
+                    kind = BackupPayloadKinds.COMMON_SETTINGS,
+                    schemaVersion = 1,
+                    optional = false,
+                    file = canonical,
+                ),
+                BackupArchivePayload(
+                    path = BackupFormatV1.BOOMING_SS_LEGACY_PROJECTION_PATH,
+                    kind = BackupPayloadKinds.LEGACY_SETTINGS_PROJECTION,
+                    file = projection,
+                ),
+            )
+            val manifest = BackupArchiveCodec.createManifest(
+                producerPackage = "com.wluhwluh.booming.sourcesep",
+                producerFlavor = "github",
+                applicationVersion = "test",
+                generatedAtUtc = "2026-07-21T12:00:00Z",
+                payloads = payloads,
+            )
+            val archiveBytes = ByteArrayOutputStream().also { output ->
+                BackupArchiveCodec.write(output, "Booming SS", manifest, payloads)
+            }.toByteArray()
+
+            BackupArchiveCodec.extract(
+                ByteArrayInputStream(archiveBytes),
+                root.resolve("restore-canonical"),
+            ).use { archive ->
+                val decoded = BackupSettingsRestoreDecoder.decode(
+                    archive,
+                    "com.wluhwluh.booming.sourcesep",
+                )
+                assertEquals(JsonPrimitive(true), decoded.commonPreferences["black_theme"])
+            }
+        }
+    }
+
+    @Test
+    fun `legacy settings choose a fixed package priority independent of ZIP order`() {
+        temporaryDirectory().useDirectory { root ->
+            val upstream = BackupPreferenceCodec.encodeLegacyXml(
+                mapOf("general_theme" to JsonPrimitive("light")),
+                BackupSettingsPolicy.commonSettingsByKey,
+            )
+            val fork = BackupPreferenceCodec.encodeLegacyXml(
+                mapOf("general_theme" to JsonPrimitive("dark")),
+                BackupSettingsPolicy.commonSettingsByKey,
+            )
+            val bytes = zipOf(
+                BackupFormatV1.UPSTREAM_LEGACY_PROJECTION_PATH to upstream,
+                BackupFormatV1.BOOMING_SS_LEGACY_PROJECTION_PATH to fork,
+            )
+            BackupArchiveCodec.extract(
+                ByteArrayInputStream(bytes),
+                root.resolve("restore-legacy"),
+            ).use { archive ->
+                val decoded = BackupSettingsRestoreDecoder.decode(
+                    archive,
+                    "com.wluhwluh.booming.sourcesep.debug",
+                )
+                assertEquals(JsonPrimitive("dark"), decoded.commonPreferences["general_theme"])
+            }
+        }
+    }
+
+    @Test
     fun `known payload kinds are restricted to their format v1 directories`() {
         val invalid = listOf(
             payload("other/list.m3u", BackupPayloadKinds.PLAYLIST),

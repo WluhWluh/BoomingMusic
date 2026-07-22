@@ -110,11 +110,12 @@ object M3UWriter : KoinComponent {
         exportFile: File,
         playlist: PlaylistWithSongs,
         headerComments: List<String> = emptyList(),
+        allowEmpty: Boolean = false,
     ): File {
         exportFile.parentFile?.mkdirs()
         if (exportFile.createNewFile()) {
             exportFile.bufferedWriter().use {
-                if (!writeImpl(it, playlist.songs, headerComments)) {
+                if (!writeImpl(it, playlist.songs, headerComments, allowEmpty)) {
                     exportFile.delete()
                 }
             }
@@ -127,11 +128,12 @@ object M3UWriter : KoinComponent {
         bw: BufferedWriter,
         songs: List<SongEntity>,
         headerComments: List<String> = emptyList(),
+        allowEmpty: Boolean = false,
     ): Boolean {
         val songs: List<Song> = songs.sortedBy {
             it.songPrimaryKey
         }.toSongs()
-        if (songs.isNotEmpty()) {
+        if (songs.isNotEmpty() || allowEmpty) {
             bw.write(M3UConstants.HEADER)
             headerComments.forEach { comment ->
                 require(comment.startsWith('#')) { "M3U header comments must begin with #." }
