@@ -58,6 +58,51 @@ fun SourceSeparationModelContract.toMdxExecutionProfile(
     )
 }
 
+fun SourceSeparationCustomModelProfile.toMdxExecutionProfile(
+    runtimeQualifications: List<CatalogRuntimeQualification> = emptyList(),
+): MdxExecutionProfile {
+    val validated = SourceSeparationModelContractValidator.validateCustomProfile(this)
+    val qualifications = runtimeQualifications.filter { qualification ->
+        qualification.modelId == validated.modelId &&
+            qualification.contractId == validated.profileId &&
+            qualification.artifactSha256 == validated.artifact.sha256
+    }
+    val dspConfig = MdxDspConfig(
+        sampleRate = validated.dsp.sampleRate,
+        nFft = validated.dsp.nFft,
+        hopLength = validated.dsp.hopLength,
+        dimF = validated.dsp.dimF,
+        dimTPower = validated.dsp.dimTPower,
+    )
+    return MdxExecutionProfile(
+        profileId = validated.profileId,
+        displayName = validated.displayName,
+        outputTag = validated.modelId,
+        modelFormat = MdxModelFormat.Tflite,
+        inputTensor = validated.tensorContract.input.toMdxTensorSpec(),
+        outputTensor = validated.tensorContract.output.toMdxTensorSpec(),
+        dspConfig = dspConfig,
+        modelOutputScale = validated.dsp.modelOutputScale.toFloat(),
+        modelOutputStem = validated.stemContract.modelOutput.semantic.toMdxStem(),
+        pipelineId = validated.pipelineCompatibility.pipelineId,
+        pipelineVersion = SourceSeparationModelContractValidator.PIPELINE_VERSION,
+        expectedFileName = validated.artifact.fileName,
+        expectedByteSize = validated.artifact.byteSize,
+        expectedSha256 = validated.artifact.sha256,
+        minimumAndroidApi = qualifications.maxOfOrNull(CatalogRuntimeQualification::minimumAndroidApi),
+        runtimeCompatibility = qualifications.map { status ->
+            MdxRuntimeCompatibilityRecord(
+                abi = status.abi.toMdxRuntimeAbi(),
+                backend = status.backend.toMdxInferenceBackend(),
+                profileId = status.profileId,
+                precision = status.precision.toMdxRuntimePrecision(),
+                status = status.status.toMdxRuntimeSupportStatus(),
+                evidence = status.evidence,
+            )
+        },
+    )
+}
+
 private fun ContractTensor.toMdxTensorSpec() = MdxTensorSpec(
     name = name,
     shape = shape,

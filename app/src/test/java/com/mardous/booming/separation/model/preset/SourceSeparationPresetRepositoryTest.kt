@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.model.preset
 
+import com.mardous.booming.separation.cache.v2.resolveActiveCacheModel
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxRuntimeProfiles
@@ -52,6 +53,37 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class SourceSeparationPresetRepositoryTest {
+    @Test
+    fun `active official preset resolves an immutable cache contract and artifact`() {
+        val payload = "official-model".encodeToByteArray()
+        fixture(
+            officialPayload = payload,
+            catalog = catalog(
+                officialPayload = payload,
+                supportLevel = CatalogSupportLevel.Recommended,
+                activationPolicy = CatalogActivationPolicy.SelectableWhenQualified,
+                includeReviewedContract = true,
+            ),
+        ).use { fixture ->
+            val installed = fixture.repository.installOfficial(
+                modelId = "official_model",
+                input = ByteArrayInputStream(payload),
+            )
+            fixture.repository.activate(
+                sha256 = installed.sha256,
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            )
+
+            val resolved = requireNotNull(fixture.repository.resolveActiveCacheModel())
+
+            assertEquals("official_model", resolved.contract.modelId)
+            assertEquals("official_model@2", resolved.contract.contractId)
+            assertEquals(installed.sha256, resolved.artifact.sha256)
+            assertEquals("official_model@2", resolved.executionProfile.profileId)
+        }
+    }
+
     @Test
     fun `official installation is hash aware and does not become active`() {
         val payload = "official-model".encodeToByteArray()

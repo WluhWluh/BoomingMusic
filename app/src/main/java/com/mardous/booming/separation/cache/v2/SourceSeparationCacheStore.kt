@@ -141,6 +141,7 @@ class SourceSeparationCacheStore(
 
     fun validateCompletedEntry(
         manifest: SourceSeparationCacheManifest,
+        verifyHashes: Boolean = true,
     ): SourceSeparationCacheValidationResult {
         if (manifest.state != SourceSeparationCacheManifestState.Completed) {
             return SourceSeparationCacheValidationResult.Invalid("entry-not-completed")
@@ -156,13 +157,23 @@ class SourceSeparationCacheStore(
                     ?: return SourceSeparationCacheValidationResult.Invalid(
                         "promoted-integrity-missing"
                     )
-                if (!validateFile(resolveRelativePath(directory, promotedPath), promotedIntegrity)) {
+                if (!validateFile(
+                        file = resolveRelativePath(directory, promotedPath),
+                        expected = promotedIntegrity,
+                        verifyHash = verifyHashes,
+                    )
+                ) {
                     return SourceSeparationCacheValidationResult.Invalid("promoted-invalid")
                 }
             } else {
                 val wavIntegrity = stem.wavIntegrity
                     ?: return SourceSeparationCacheValidationResult.Invalid("wav-integrity-missing")
-                if (!validateFile(resolveRelativePath(directory, stem.wavPath), wavIntegrity)) {
+                if (!validateFile(
+                        file = resolveRelativePath(directory, stem.wavPath),
+                        expected = wavIntegrity,
+                        verifyHash = verifyHashes,
+                    )
+                ) {
                     return SourceSeparationCacheValidationResult.Invalid("wav-invalid")
                 }
             }
@@ -382,11 +393,12 @@ class SourceSeparationCacheStore(
     private fun validateFile(
         file: File,
         expected: SourceSeparationCacheFileIntegrity,
+        verifyHash: Boolean,
     ): Boolean {
         return runCatching {
             file.isFile &&
                 file.length() == expected.byteSize &&
-                fileHasher.sha256(file).equals(expected.sha256, ignoreCase = true)
+                (!verifyHash || fileHasher.sha256(file).equals(expected.sha256, ignoreCase = true))
         }.getOrDefault(false)
     }
 
