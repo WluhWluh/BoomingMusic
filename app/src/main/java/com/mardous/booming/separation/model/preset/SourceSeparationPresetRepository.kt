@@ -129,6 +129,11 @@ class SourceSeparationPresetRepository internal constructor(
                 "The active model profile must be changed before it can be deleted.",
             )
         }
+        if (installedModels().any { it.customProfile?.profileId == profileId }) {
+            throw SourceSeparationPresetProfileException(
+                "The profile is still the installed model's default binding.",
+            )
+        }
         val deleted = customProfileStore.delete(profileId)
         if (deleted && activeModelStore.readPending()?.profileId == profileId) {
             activeModelStore.writePending(null)
@@ -140,8 +145,35 @@ class SourceSeparationPresetRepository internal constructor(
         val reference = activeModelStore.read() ?: return SourceSeparationActivePresetState.None
         return SourceSeparationActivePresetState.Reference(
             reference = reference,
-            installedModel = installedModel(reference.artifactSha256),
+            installedModel = installedModelForReference(reference),
         )
+    }
+
+    fun saveCustomProfileRevision(
+        artifactSha256: String,
+        profile: SourceSeparationCustomModelProfile,
+        platform: MdxRuntimePlatform,
+    ): SourceSeparationCustomModelProfile = synchronized(lock) {
+        val installed = requireInstalledPreset(artifactSha256)
+        require(installed.bindingKind == SourceSeparationPresetBindingKind.CustomProfile) {
+            "Only a manual-profile model can receive a custom profile revision."
+        }
+        SourceSeparationModelContractValidator.validateCustomProfile(profile)
+        require(profile.artifact.sha256.equals(installed.sha256, ignoreCase = true) &&
+            profile.artifact.byteSize == installed.byteSize &&
+            profile.artifact.fileName == installed.file.name
+        ) {
+            "The custom profile revision does not match the installed model artifact."
+        }
+        when (val inspection = structuralInspector.inspect(installed.file, platform)) {
+            is SourceSeparationPresetStructuralInspection.Compatible -> Unit
+            is SourceSeparationPresetStructuralInspection.Unavailable ->
+                throw SourceSeparationPresetProfileException(inspection.reason)
+            is SourceSeparationPresetStructuralInspection.Incompatible ->
+                throw SourceSeparationPresetProfileException(inspection.reason)
+        }
+        customProfileStore.write(profile)
+        profile
     }
 
     fun pendingActiveModel(): SourceSeparationActiveModelReference? =
@@ -365,7 +397,47 @@ class SourceSeparationPresetRepository internal constructor(
         scope: SourceSeparationPresetSelectionScope,
         experimentalConfirmed: Boolean = false,
     ): SourceSeparationActiveModelReference = synchronized(lock) {
+        activateInstalled(
+            installed = requireInstalledPreset(sha256),
+            platform = platform,
+            scope = scope,
+            experimentalConfirmed = experimentalConfirmed,
+        )
+    }
+
+    fun activateCustomProfile(
+        sha256: String,
+        profileId: String,
+        platform: MdxRuntimePlatform,
+        scope: SourceSeparationPresetSelectionScope,
+    ): SourceSeparationActiveModelReference = synchronized(lock) {
         val installed = requireInstalledPreset(sha256)
+        require(installed.bindingKind == SourceSeparationPresetBindingKind.CustomProfile) {
+            "The installed model does not use custom profiles."
+        }
+        val profile = customProfileStore.profile(profileId)
+            ?: throw SourceSeparationPresetProfileException("Custom profile revision is missing.")
+        require(profile.artifact.sha256.equals(installed.sha256, ignoreCase = true)) {
+            "Custom profile revision belongs to a different model artifact."
+        }
+        activateInstalled(
+            installed = installed.copy(
+                modelId = profile.modelId,
+                displayName = profile.displayName,
+                customProfile = profile,
+            ),
+            platform = platform,
+            scope = scope,
+            experimentalConfirmed = false,
+        )
+    }
+
+    private fun activateInstalled(
+        installed: SourceSeparationInstalledPreset,
+        platform: MdxRuntimePlatform,
+        scope: SourceSeparationPresetSelectionScope,
+        experimentalConfirmed: Boolean,
+    ): SourceSeparationActiveModelReference {
         val reference = when (installed.bindingKind) {
             SourceSeparationPresetBindingKind.Official -> {
                 val eligibility = SourceSeparationPresetActivationResolver.resolve(
@@ -547,9 +619,10 @@ class SourceSeparationPresetRepository internal constructor(
     )
 
     private fun isUsableReference(reference: SourceSeparationActiveModelReference): Boolean {
-        val installed = runCatching {
-            requireInstalledPreset(reference.artifactSha256)
-        }.getOrNull() ?: return false
+        val installed = installedModelForReference(reference) ?: return false
+        if (!runCatching { installed.file.sha256Hex() }.getOrNull()
+                .equals(reference.artifactSha256, ignoreCase = true)
+        ) return false
         if (installed.modelId != reference.modelId ||
             !installed.sha256.equals(reference.artifactSha256, ignoreCase = true)
         ) {
@@ -594,6 +667,21 @@ class SourceSeparationPresetRepository internal constructor(
                     reference.profileId == null
             }
         }
+    }
+
+    private fun installedModelForReference(
+        reference: SourceSeparationActiveModelReference,
+    ): SourceSeparationInstalledPreset? {
+        val installed = installedModel(reference.artifactSha256) ?: return null
+        val profileId = reference.profileId ?: return installed
+        if (installed.bindingKind != SourceSeparationPresetBindingKind.CustomProfile) return null
+        val profile = customProfileStore.profile(profileId) ?: return null
+        if (!profile.artifact.sha256.equals(installed.sha256, ignoreCase = true)) return null
+        return installed.copy(
+            modelId = profile.modelId,
+            displayName = profile.displayName,
+            customProfile = profile,
+        )
     }
 
     private fun sameReference(

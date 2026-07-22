@@ -150,6 +150,55 @@ class SourceSeparationPresetRepositoryTest {
     }
 
     @Test
+    fun `custom profile revisions share one artifact and active reference keeps its revision`() {
+        val payload = "custom-model".encodeToByteArray()
+        fixture("official-model".encodeToByteArray()).use { fixture ->
+            val installed = fixture.repository.install(
+                input = ByteArrayInputStream(payload),
+                originalFileName = "custom.tflite",
+                origin = SourceSeparationInstalledPresetOrigin.ImportedFile,
+                customProfile = customProfile(payload, profileId = "custom-profile-v1"),
+            )
+            fixture.repository.activate(
+                sha256 = installed.sha256,
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            )
+
+            val revision = customProfile(
+                payload,
+                profileId = "custom-profile-v2",
+                modelId = "custom_model_v2",
+            )
+            fixture.repository.saveCustomProfileRevision(
+                artifactSha256 = installed.sha256,
+                profile = revision,
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+            )
+
+            val activeBeforeSwitch = fixture.repository.activeModel()
+                as SourceSeparationActivePresetState.Reference
+            assertEquals("custom-profile-v1", activeBeforeSwitch.reference.profileId)
+            assertEquals("custom-profile-v1", activeBeforeSwitch.installedModel?.customProfile?.profileId)
+            assertEquals(
+                setOf("custom-profile-v1", "custom-profile-v2"),
+                fixture.repository.customProfiles().map { it.profileId }.toSet(),
+            )
+
+            fixture.repository.activateCustomProfile(
+                sha256 = installed.sha256,
+                profileId = "custom-profile-v2",
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            )
+            val activeAfterSwitch = fixture.repository.activeModel()
+                as SourceSeparationActivePresetState.Reference
+            assertEquals("custom-profile-v2", activeAfterSwitch.reference.profileId)
+            assertEquals("custom_model_v2", activeAfterSwitch.installedModel?.modelId)
+        }
+    }
+
+    @Test
     fun `pending reference does not replace the active reference`() {
         fixture("official-model".encodeToByteArray()).use { fixture ->
             val pending = SourceSeparationActiveModelReference(

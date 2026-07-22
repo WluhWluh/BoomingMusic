@@ -15,6 +15,7 @@ import com.mardous.booming.separation.model.contract.ContractWindow
 import com.mardous.booming.separation.model.contract.PipelineCompatibility
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractValidator
+import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.contract.StemContract
 import com.mardous.booming.separation.model.contract.TensorContract
 import java.io.ByteArrayOutputStream
@@ -282,9 +283,9 @@ data class SourceSeparationManualModelProfileDraft(
         val modelTimeFrames = 1 shl dimTPower
         val modelStem = modelOutputStem.toContractStem()
         val residualStem = modelOutputStem.residual().toContractStem()
-        return SourceSeparationCustomModelProfile(
+        val provisional = SourceSeparationCustomModelProfile(
             profileSchemaVersion = SourceSeparationModelContractValidator.CUSTOM_PROFILE_SCHEMA_VERSION,
-            profileId = "custom-${artifact.sha256.take(16)}",
+            profileId = "pending-revision",
             modelId = modelId.trim(),
             displayName = displayName.trim(),
             artifact = ContractArtifact(
@@ -331,8 +332,40 @@ data class SourceSeparationManualModelProfileDraft(
                 maximumVersion = SourceSeparationModelContractValidator.PIPELINE_VERSION,
             ),
             qualityUnverified = true,
+        )
+        val revisionHash = MessageDigest.getInstance("SHA-256")
+            .digest(SourceSeparationModelMetadata.json.encodeToString(provisional).toByteArray())
+            .joinToString("") { byte ->
+                (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+            }
+        return provisional.copy(
+            profileId = "custom-${artifact.sha256.take(12)}-${revisionHash.take(16)}",
         ).also(SourceSeparationModelContractValidator::validateCustomProfile)
     }
+}
+
+internal fun SourceSeparationCustomModelProfile.toManualDraft():
+    SourceSeparationManualModelProfileDraft {
+    val outputStem = when (stemContract.modelOutput.semantic) {
+        ContractStemSemantic.Vocals -> SourceSeparationManualModelStem.Vocals
+        ContractStemSemantic.Instrumental -> SourceSeparationManualModelStem.Instrumental
+        else -> throw SourceSeparationPresetProfileException(
+            "The custom profile uses a stem semantic that the manual editor cannot represent.",
+        )
+    }
+    return SourceSeparationManualModelProfileDraft(
+        modelId = modelId,
+        displayName = displayName,
+        inputTensorName = tensorContract.input.name,
+        outputTensorName = tensorContract.output.name,
+        sampleRate = dsp.sampleRate,
+        nFft = dsp.nFft,
+        hopLength = dsp.hopLength,
+        dimF = dsp.dimF,
+        dimTPower = dsp.dimTPower,
+        modelOutputScale = dsp.modelOutputScale,
+        modelOutputStem = outputStem,
+    )
 }
 
 enum class SourceSeparationManualModelStem {

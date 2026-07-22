@@ -6,6 +6,7 @@ import com.mardous.booming.separation.model.contract.SourceSeparationModelMetada
 import kotlinx.serialization.SerializationException
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 
 interface SourceSeparationCustomProfileStore {
     fun profiles(): List<SourceSeparationCustomModelProfile>
@@ -56,7 +57,7 @@ internal class FileSourceSeparationCustomProfileStore(
         }
         try {
             combined.forEach { profile ->
-                profileFile(staged, profile.artifact.sha256).writeText(
+                profileFile(staged, profile.profileId).writeText(
                     SourceSeparationModelMetadata.json.encodeToString(profile),
                 )
             }
@@ -82,7 +83,7 @@ internal class FileSourceSeparationCustomProfileStore(
 
     override fun delete(profileId: String): Boolean = synchronized(lock) {
         val profile = profile(profileId) ?: return false
-        val file = profileFile(profile.artifact.sha256)
+        val file = profileFile(profile.profileId)
         if (!file.delete()) {
             throw SourceSeparationPresetProfileException(
                 "Unable to delete custom model profile.",
@@ -92,9 +93,11 @@ internal class FileSourceSeparationCustomProfileStore(
     }
 
     private fun readProfile(file: File): SourceSeparationCustomModelProfile? = try {
-        SourceSeparationModelMetadata.decodeCustomProfile(file.readText()).also { profile ->
+            SourceSeparationModelMetadata.decodeCustomProfile(file.readText()).also { profile ->
             SourceSeparationModelContractValidator.validateCustomProfile(profile)
-            if (file.name != "${profile.artifact.sha256}$PROFILE_SUFFIX") return null
+            if (file.name != profileFile(requireNotNull(file.parentFile), profile.profileId).name) {
+                return null
+            }
         }
     } catch (_: SerializationException) {
         null
@@ -104,10 +107,10 @@ internal class FileSourceSeparationCustomProfileStore(
         null
     }
 
-    private fun profileFile(sha256: String): File = profileFile(rootDirectory, sha256)
+    private fun profileFile(profileId: String): File = profileFile(rootDirectory, profileId)
 
-    private fun profileFile(root: File, sha256: String): File =
-        File(root, "${sha256.lowercase()}$PROFILE_SUFFIX")
+    private fun profileFile(root: File, profileId: String): File =
+        File(root, "${profileId.sha256()}$PROFILE_SUFFIX")
 
     private fun recoverInterruptedMerge() {
         val parent = rootDirectory.parentFile ?: return
@@ -136,15 +139,17 @@ internal class FileSourceSeparationCustomProfileStore(
         val combined = existing + incoming
         val profileIdConflicts = combined.groupBy { it.profileId }.values
             .any { matches -> matches.distinct().size > 1 }
-        val artifactConflicts = combined.groupBy { it.artifact.sha256.lowercase() }.values
-            .any { matches -> matches.distinct().size > 1 }
-        if (profileIdConflicts || artifactConflicts) {
+        if (profileIdConflicts) {
             throw SourceSeparationPresetProfileException(
-                "Custom profiles must have unique IDs and model hashes.",
+                "Custom profiles must have unique immutable IDs.",
             )
         }
         return combined.distinct().sortedBy(SourceSeparationCustomModelProfile::profileId)
     }
+
+    private fun String.sha256(): String = MessageDigest.getInstance("SHA-256")
+        .digest(toByteArray(Charsets.UTF_8))
+        .joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     private companion object {
         const val PROFILE_SUFFIX = ".profile.json"

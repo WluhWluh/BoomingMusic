@@ -17,7 +17,18 @@ class SourceSeparationPresetCacheAvailabilityProvider(
     ): SourceSeparationCacheModelAvailability {
         val installed = repository.installedModel(manifest.identity.artifactSha256)
             ?: return SourceSeparationCacheModelAvailability.ModelNotInstalled
-        val snapshot = installed.cacheContractSnapshot(repository)
+        val snapshot = if (manifest.contract.profileOrigin ==
+            SourceSeparationCacheProfileOrigin.Custom
+        ) {
+            repository.customProfiles()
+                .singleOrNull { profile ->
+                    profile.profileId == manifest.identity.profileRevisionId &&
+                        profile.artifact.sha256.equals(installed.sha256, ignoreCase = true)
+                }
+                ?.let(SourceSeparationCacheContractSnapshot::fromCustom)
+        } else {
+            installed.cacheContractSnapshot(repository)
+        }
             ?: return if (installed.bindingKind == SourceSeparationPresetBindingKind.CustomProfile) {
                 SourceSeparationCacheModelAvailability.ProfileNotInstalled
             } else {

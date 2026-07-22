@@ -34,6 +34,7 @@ import com.mardous.booming.separation.model.contract.StemContract
 import com.mardous.booming.separation.model.contract.TensorContract
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -43,6 +44,22 @@ import java.nio.file.Files
 import java.security.MessageDigest
 
 class SourceSeparationPresetImportCoordinatorTest {
+    @Test
+    fun `manual profile revision identity is deterministic and content addressed`() {
+        val artifact = SourceSeparationPendingModelImport(
+            fileName = "custom.tflite",
+            byteSize = 1_024L,
+            sha256 = "a".repeat(64),
+        )
+        val first = manualDraft().toProfile(artifact)
+        val repeated = manualDraft().toProfile(artifact)
+        val changed = manualDraft().copy(modelOutputScale = 1.1).toProfile(artifact)
+
+        assertEquals(first.profileId, repeated.profileId)
+        assertNotEquals(first.profileId, changed.profileId)
+        assertTrue(first.profileId.startsWith("custom-${"a".repeat(12)}-"))
+    }
+
     @Test
     fun `known hash installs as an official preset without changing active model`() {
         val payload = "official-model".encodeToByteArray()
