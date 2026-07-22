@@ -119,6 +119,10 @@ class SourceSeparationPresetRepository internal constructor(
         customProfileStore.write(profile)
     }
 
+    fun restoreCustomProfiles(profiles: List<SourceSeparationCustomModelProfile>) {
+        customProfileStore.merge(profiles)
+    }
+
     fun deleteCustomProfile(profileId: String): Boolean {
         if (activeModelStore.read()?.profileId == profileId) {
             throw SourceSeparationPresetProfileException(

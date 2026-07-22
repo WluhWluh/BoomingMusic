@@ -41,10 +41,9 @@ object BackupContractValidator {
         requireBackup(manifest.commonSettingsSchema == BackupFormatV1.COMMON_SETTINGS_SCHEMA) {
             "Unsupported common settings schema"
         }
-        requireBackup(
-            manifest.sourceSeparationSettingsSchema ==
-                BackupFormatV1.SOURCE_SEPARATION_SETTINGS_SCHEMA
-        ) { "Unsupported source-separation settings schema" }
+        requireBackup(manifest.sourceSeparationSettingsSchema > 0) {
+            "Source-separation settings schema must be positive"
+        }
         requireBackup(manifest.producerPackage.isNotBlank()) { "Producer package is empty" }
         requireBackup(manifest.producerFlavor.isNotBlank()) { "Producer flavor is empty" }
         requireBackup(manifest.applicationVersion.isNotBlank()) { "Application version is empty" }
@@ -54,7 +53,7 @@ object BackupContractValidator {
         requireBackup(manifest.payloads.map(BackupPayloadDescriptor::path).toSet().size == manifest.payloads.size) {
             "Backup manifest contains duplicate payload paths"
         }
-        manifest.payloads.forEach(::validatePayload)
+        manifest.payloads.forEach { payload -> validatePayload(manifest, payload) }
         requireBackup(
             manifest.payloads.count { it.kind == BackupPayloadKinds.COMMON_SETTINGS } <= 1
         ) { "Backup manifest declares more than one common settings payload" }
@@ -105,7 +104,10 @@ object BackupContractValidator {
         return snapshot
     }
 
-    private fun validatePayload(payload: BackupPayloadDescriptor) {
+    private fun validatePayload(
+        manifest: BackupManifestV1,
+        payload: BackupPayloadDescriptor,
+    ) {
         requireSafeRelativePath(payload.path)
         requireBackup(payload.byteSize >= 0L) { "Payload size cannot be negative" }
         requireSha256(payload.sha256, "Payload ${payload.path}")
@@ -130,9 +132,14 @@ object BackupContractValidator {
                 requireBackup(payload.path == BackupFormatV1.SOURCE_SEPARATION_SETTINGS_PATH) {
                     "Source-separation settings payload uses the wrong path"
                 }
-                requireBackup(
-                    payload.schemaVersion == BackupFormatV1.SOURCE_SEPARATION_SETTINGS_SCHEMA
-                ) { "Source-separation settings payload uses the wrong schema" }
+                requireBackup(payload.schemaVersion == manifest.sourceSeparationSettingsSchema) {
+                    "Source-separation payload schema does not match the manifest"
+                }
+                if (!isSupportedSourceSeparationSchema(manifest.sourceSeparationSettingsSchema)) {
+                    requireBackup(payload.optional) {
+                        "Unsupported source-separation settings payload must be optional"
+                    }
+                }
             }
 
             BackupPayloadKinds.LEGACY_SETTINGS_PROJECTION -> {
@@ -145,13 +152,52 @@ object BackupContractValidator {
                 }
             }
 
+            BackupPayloadKinds.PLAYLIST -> {
+                requireBackup(
+                    payload.path.startsWith("${BackupFormatV1.PLAYLISTS_DIRECTORY}/") &&
+                        payload.path.endsWith(".m3u", ignoreCase = true) &&
+                        payload.path.count { it == '/' } == 1
+                ) { "Playlist payload uses an unsupported path" }
+                requireBackup(payload.schemaVersion == null) {
+                    "Playlist payload must not claim a settings schema"
+                }
+            }
+
+            BackupPayloadKinds.LYRICS -> {
+                requireBackup(payload.path == BackupFormatV1.LYRICS_PATH) {
+                    "Lyrics payload uses an unsupported path"
+                }
+                requireBackup(payload.schemaVersion == null) {
+                    "Lyrics payload must not claim a settings schema"
+                }
+            }
+
+            BackupPayloadKinds.ARTIST_IMAGE -> {
+                requireBackup(
+                    payload.path.startsWith("${BackupFormatV1.ARTIST_IMAGES_DIRECTORY}/") &&
+                        payload.path.count { it == '/' } == 2
+                ) { "Artist image payload uses an unsupported path" }
+                requireBackup(payload.schemaVersion == null) {
+                    "Artist image payload must not claim a settings schema"
+                }
+            }
+
+            BackupPayloadKinds.ARTIST_PREFERENCES -> {
+                requireBackup(payload.path == BackupFormatV1.ARTIST_PREFERENCES_PATH) {
+                    "Artist preferences payload uses an unsupported path"
+                }
+                requireBackup(payload.schemaVersion == null) {
+                    "Artist preferences payload must not claim a settings schema"
+                }
+            }
+
             else -> requireBackup(payload.schemaVersion == null) {
                 "Non-settings payload must not claim a settings schema"
             }
         }
     }
 
-    private fun validatePreferenceMap(
+    fun validatePreferenceMap(
         preferences: Map<String, JsonElement>,
         definitions: Map<String, PortablePreferenceDefinition>,
     ) {
@@ -231,6 +277,9 @@ object BackupContractValidator {
             "$label SHA-256 must contain 64 lowercase hexadecimal characters"
         }
     }
+
+    fun isSupportedSourceSeparationSchema(schemaVersion: Int): Boolean =
+        schemaVersion == BackupFormatV1.SOURCE_SEPARATION_SETTINGS_SCHEMA
 
     private inline fun requireBackup(condition: Boolean, message: () -> String) {
         if (!condition) throw BackupContractException(message())

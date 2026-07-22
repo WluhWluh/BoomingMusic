@@ -102,9 +102,19 @@ object M3UWriter : KoinComponent {
     @Throws(IOException::class)
     fun writeToDirectory(dir: File, playlist: PlaylistWithSongs): File {
         val exportFile = File(dir, String.format("%s.%s", playlist.playlistEntity.playlistName, M3UConstants.EXTENSION))
+        return writeToFile(exportFile, playlist)
+    }
+
+    @Throws(IOException::class)
+    fun writeToFile(
+        exportFile: File,
+        playlist: PlaylistWithSongs,
+        headerComments: List<String> = emptyList(),
+    ): File {
+        exportFile.parentFile?.mkdirs()
         if (exportFile.createNewFile()) {
             exportFile.bufferedWriter().use {
-                if (!writeImpl(it, playlist.songs)) {
+                if (!writeImpl(it, playlist.songs, headerComments)) {
                     exportFile.delete()
                 }
             }
@@ -113,12 +123,21 @@ object M3UWriter : KoinComponent {
     }
 
     @Throws(IOException::class)
-    private fun writeImpl(bw: BufferedWriter, songs: List<SongEntity>): Boolean {
+    private fun writeImpl(
+        bw: BufferedWriter,
+        songs: List<SongEntity>,
+        headerComments: List<String> = emptyList(),
+    ): Boolean {
         val songs: List<Song> = songs.sortedBy {
             it.songPrimaryKey
         }.toSongs()
         if (songs.isNotEmpty()) {
             bw.write(M3UConstants.HEADER)
+            headerComments.forEach { comment ->
+                require(comment.startsWith('#')) { "M3U header comments must begin with #." }
+                bw.newLine()
+                bw.write(comment.replace('\n', ' ').replace('\r', ' '))
+            }
             for (song in songs) {
                 bw.newLine()
                 bw.write("${M3UConstants.ENTRY}${song.duration}${M3UConstants.DURATION_SEPARATOR}${song.artistName} - ${song.title}")

@@ -60,6 +60,11 @@ object BackupFormatV1 {
         "prefs/com.mardous.booming_preferences.xml"
     const val BOOMING_SS_LEGACY_PROJECTION_PATH =
         "prefs/com.wluhwluh.booming.sourcesep_preferences.xml"
+    const val PLAYLISTS_DIRECTORY = "Playlists"
+    const val LYRICS_PATH = "lyrics/lyrics.json"
+    const val ARTIST_IMAGES_DIRECTORY = "artistImages/custom_artist_images"
+    const val ARTIST_PREFERENCES_PATH =
+        "artistImages/prefs/custom_artist_images.xml"
 }
 
 object BackupPayloadKinds {
