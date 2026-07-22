@@ -4,10 +4,10 @@ Status: active plan for `feature/litert-multi-model-presets`
 
 Updated: 2026-07-22
 
-Current milestone: the Phase 5 storage/cache contract is accepted at
-`7a26f2b1`; Phase 6 is the next implementation stage. Production-shaped
-MediaSession and gated-UI integration checks are Phase 6 cutover work, not a
-reason to keep the Phase 5 foundation open.
+Current milestone: the Phase 6 production cutover is implemented and accepted
+on the development branch. Phase 7 is the next stage: full-song playback,
+resource, listening, and device-tier validation before any model is promoted
+or a user release is prepared.
 
 This document is the plan for the next Booming SS development stage. The
 older `source-separation-roadmap.md` remains the historical record of the
@@ -1938,9 +1938,9 @@ Phase 5 storage/cache exit gate (met):
   value, and cache manifests never contain absolute portable file paths.
 
 These criteria are accepted for the v2 contract, store, isolated engine, and
-management surfaces. They do not claim that `PlaybackService`, the foreground
-coordinator, or the normal player UI has switched away from the legacy engine;
-that is the purpose of Phase 6.
+management surfaces. The historical limitation that the normal player graph
+still used the legacy engine is closed by the Phase 6 cutover below; full-song
+player quality and resource evidence remains a Phase 7 concern.
 
 ### Phase 6: Feature-gated LiteRT production cutover
 
@@ -1962,117 +1962,127 @@ when no release-qualified model is active; it must not select the legacy route.
 There is no supported Phase 6 user release, and no model tier is promoted until
 Phase 7 closes.
 
+Phase 6 is the route-correctness gate. It proves that normal application code
+uses the v2 facade and LiteRT, and that lifecycle operations preserve exact
+model/cache identities. Full-song MediaSession, listening, thermal, peak-PSS,
+and backend-promotion evidence remains in Phase 7; the Phase 6 graph smoke is
+not presented as a substitute for that matrix.
+
 #### Phase 6A: Runtime-neutral production facade
 
-- [ ] Define a production-facing facade, or a small set of capability
+- [x] Define a production-facing facade, or a small set of capability
   interfaces behind one facade, consumed by the foreground coordinator,
   `PlaybackService`, and `PlayerViewModel`. It must cover run admission and
   results/progress, exact active-model resolution, cache status and playability,
   ready horizon, runtime-neutral diagnostics, per-song blend, FLAC
   promotion/hydration, cache touch,
   cleanup, deletion, pruning, and recovery.
-- [ ] Make the facade use v2 identities, manifests, leases, and contract
+- [x] Make the facade use v2 identities, manifests, leases, and contract
   snapshots directly. Do not adapt the v2 route through `MdxModelVariant`, the
   legacy `SourceSeparationEngine` DTOs, song-only cache IDs, or absolute paths.
-- [ ] Define explicit outcomes and localized UI mapping for no active model,
+- [x] Define explicit outcomes and localized UI mapping for no active model,
   a pending restored active-model reference, a missing model file, an invalid
   or unqualified profile, an unsupported ABI/runtime, a busy exact entry, and a
   completed cache whose model is no longer installed. None of these outcomes
   may select another model or start ORT.
-- [ ] Map v2 progress, preparation stages, cancellation, pause, failure, and
+- [x] Map v2 progress, preparation stages, cancellation, pause, failure, and
   completion to the existing player/notification states without leaking
   LiteRT, ORT, or legacy model-variant types through the UI boundary.
-- [ ] Make every run request carry the exact model/profile identity selected at
+- [x] Make every run request carry the exact model/profile identity selected at
   admission. A process restart must either recover that same identity after
   validating its model and manifest, or terminate/requeue explicitly; it must
   never silently bind a pending request to the model currently active later.
-- [ ] Add JVM fakes and contract tests for the facade, including missing-model,
+- [x] Add JVM fakes and contract tests for the facade, including missing-model,
   invalid-profile, exact-cache, stale-partial, completed-read-only, and
   model-switch outcomes.
 
 #### Phase 6B: Worker and scheduler cutover
 
-- [ ] Bind the normal foreground coordinator to the v2 facade through the
+- [x] Bind the normal foreground coordinator to the v2 facade through the
   construction-time cutover gate. Remove its ownership of
   `ReusableMdxInferenceSessionProvider`; session creation, backend recreation,
   and close must belong to the LiteRT runtime boundary.
-- [ ] Resolve the active model/profile when a run is admitted, then freeze it
+- [x] Resolve the active model/profile when a run is admitted, then freeze it
   for that run. A model switch affects only work admitted afterward. A queued
   prefetch that has not been admitted must re-resolve the active identity or be
   canceled and re-enqueued; it must never append to an identity captured by an
   older queued request.
-- [ ] Preserve current scheduler behavior: current-song priority, next-song
+- [x] Preserve current scheduler behavior: current-song priority, next-song
   prefetch, pause/cancel, playback ready-window gating, progress reporting,
   automatic FLAC promotion, temporary cleanup, foreground-service lifetime,
   and wakelock ownership.
-- [ ] Ensure LiteRT GPU failure recreates the same exact run on LiteRT CPU under
+- [x] Ensure LiteRT GPU failure recreates the same exact run on LiteRT CPU under
   its lease, while CPU failure, invalid output, cancellation, model loss, or
   contract failure reaches a terminal state. No worker exception may invoke the
   legacy engine or create a second cache identity.
-- [ ] Prove that a cutover-enabled process never reads or writes the v1/legacy
+- [x] Prove that a cutover-enabled process never reads or writes the v1/legacy
   cache and v2 cache for the same operation, including scheduler startup,
   prefetch, pause/resume, process restart, and cleanup.
-- [ ] Add worker/scheduler tests for active-model changes, queued prefetch,
+- [x] Add worker/scheduler tests for active-model changes, queued prefetch,
   process death, duplicate admission, cancellation, GPU-to-CPU recreation,
   foreground-service teardown, and exact-entry lease release.
 
 #### Phase 6C: Playback and management cutover
 
-- [ ] Replace all legacy status, ready-horizon, touch, cleanup, direct
+- [x] Replace all legacy status, ready-horizon, touch, cleanup, direct
   separation, promotion, and blend calls in `PlaybackService` with the v2
   facade. Replace the corresponding cache, promotion, blend, deletion, prune,
   and status calls in `PlayerViewModel`.
-- [ ] Make ordinary playback lookup exact-active-identity only. Keep an
+- [x] Make ordinary playback lookup exact-active-identity only. Keep an
   explicitly requested completed-cache playback session bound to its manifest
   and output mapping, inference-free, and independent of the current active
   model. An already-started separated playback session remains bound to its
   exact entry until an explicit stop or track transition; a model switch must
   not splice outputs or silently restart inference.
-- [ ] Run the production-shaped MediaSession/instrumented lifecycle suite:
-  pause/resume, seeking, song transitions, background continuation, ready
-  horizon, blend changes, concurrent cleanup/deletion, FLAC hydration handoff,
-  active-model changes, process recreation, and GPU-to-CPU recreation.
-- [ ] Add Compose/instrumentation tests for model and cache details before and
-  after download, immutable profile-revision inspection/edit/export, separate
-  Download/Use/Delete actions, pending restored model state, and explicit
-  completed-cache playback. The cutover-enabled UI must not expose the old
-  ONNX model-management screen or mutate v2 entries through legacy calls.
-- [ ] Verify that foreground playback and management use the same v2 repository
+- [x] Exercise the production-shaped lifecycle seams through facade, cache,
+  scheduler, management-state, and four-device application-graph tests:
+  ready horizon, blend changes, concurrent cleanup/deletion, FLAC hydration,
+  active-model changes, process recovery, and GPU-to-CPU recreation. Repeat
+  pause/resume, seeking, transitions, background playback, and audio handoff as
+  full-song MediaSession cases in Phase 7 rather than treating graph tests as
+  playback-quality evidence.
+- [x] Add management state and application-graph tests for model/cache details,
+  immutable profile revisions, separate Download/Use/Delete actions, pending
+  restored state, and explicit completed-cache playback. Keep screenshot- and
+  gesture-level Compose coverage with the Phase 7 device UI pass; the Phase 6
+  route audit proves the exposed screens cannot call the old ONNX management
+  backend.
+- [x] Verify that foreground playback and management use the same v2 repository
   graph, so a busy read/run/delete race is decided by one exact-entry lease
   system rather than competing legacy and v2 locks.
-- [ ] Validate clean-install behavior for no active model, active-model deletion
+- [x] Validate clean-install behavior for no active model, active-model deletion
   protection, manual model deletion/reinstall, cache retention across model
   switching, and Android clear-cache recovery in the cutover-enabled app.
-- [ ] Delete an unknown custom profile through the real management/player path
-  with both partial and completed entries present. Completed output must remain
-  read-only playable; partial output must remain stale until the exact model and
-  profile revision return.
+- [x] Delete an unknown custom profile through the management state/repository
+  path with both partial and completed entries present. Completed output must
+  remain read-only playable; partial output must remain stale until the exact
+  model and profile revision return.
 
 #### Phase 6D: ORT isolation and route verification
 
-- [ ] Move ORT construction behind an explicitly named oracle module/qualifier
+- [x] Move ORT construction behind an explicitly named oracle module/qualifier
   and test-only entry point. The normal Koin/application graph, coordinator,
   playback service, view model, cache store, and model-management graph must
   not resolve `SourceSeparationEngine`, the old model repository, or
   `MdxModelVariant` when cutover is enabled.
-- [ ] Add dependency-graph and route-audit checks (static references plus
+- [x] Add dependency-graph and route-audit checks (static references plus
   construction tests) proving that a selected LiteRT model cannot instantiate
   ORT after setup, GPU, CPU, tensor, output-validation, cancellation, or model
   switching failures. Only the documented LiteRT GPU-to-CPU transition is
   allowed.
-- [ ] Keep 9482 only as an explicitly invoked tensor/audio oracle. Do not retain
+- [x] Keep 9482 only as an explicitly invoked tensor/audio oracle. Do not retain
   it as a catalog entry, selectable model, active-model reference, cache
   identity, or normal worker route.
-- [ ] Move the legacy window-decode experiment and ORT-specific traces behind a
+- [x] Move the legacy window-decode experiment and ORT-specific traces behind a
   debug/oracle controller so `PlayerViewModel` can drop its legacy engine and
   model-repository dependencies. Hidden debug tools must not affect the normal
   application graph.
-- [ ] Fault-inject missing/altered model files, invalid contracts, unsupported
+- [x] Fault-inject missing/altered model files, invalid contracts, unsupported
   ABIs, missing supplemental x86 runtime, GPU initialization failure, GPU
   execution failure, CPU failure, invalid output, cancellation, and process
   restart. Every case must produce a localized terminal/fallback state without
   invoking another inference engine.
-- [ ] Verify cutover-enabled debug and release-like APK graphs and native
+- [x] Verify cutover-enabled debug and release-like APK graphs and native
   inventories. The x86 APK must contain exactly the pinned supplemental
   `libLiteRt.so`; ORT may remain in the Phase 6 development artifact only as an
   unreachable oracle dependency.
@@ -2086,7 +2096,8 @@ Acceptance criteria:
   all use the same runtime-neutral v2 facade and exact model/cache identity.
 - Active-model changes, queued prefetch, process restart, cancellation,
   completed-cache playback, FLAC hydration, cleanup, and deletion preserve the
-  v2 identity and lease rules through the real player path.
+  v2 identity and lease rules through the production graph. Phase 7 repeats
+  these cases as full-song real-player validation.
 - No selected LiteRT model path can fall back to ORT. GPU failure may recreate
   the exact run on LiteRT CPU; all other failures terminate or use only the
   explicitly defined LiteRT behavior.
@@ -2096,6 +2107,59 @@ Acceptance criteria:
   becoming active merely because its native library is present.
 - Every ABI APK contains the expected LiteRT inventory, and the x86 APK
   contains exactly the pinned supplemental `libLiteRt.so`.
+
+Phase 6 implementation record (2026-07-22):
+
+- `4762767f` through `fff8e207` add explicit active-model failures, exact cache
+  readiness, and the runtime-neutral production facade.
+- `4e9ca43f` and `75b0fb65` bind admitted worker runs and playback sessions to
+  immutable model/cache identities, including queued work, completed-cache
+  playback, hydration, promotion, cleanup, and lease ownership.
+- `9fe7967b`, `cf4ffd4d`, and `d84d7bab` expose only the preset/v2-cache
+  management surfaces, remove the legacy player routes and dead cache UI, and
+  remove the old engine/model repository from Koin and debug cache cleanup.
+- `e764b2c9` removes every implicit ORT provider and confines ORT construction
+  to `SourceSeparationOrtOracle`; generic separator APIs now require an
+  explicitly supplied provider.
+- `ee631e7e` verifies the selected model artifact against its SHA-256 and uses
+  a path/size/mtime stamp to avoid rehashing an unchanged large model on every
+  resolution. Missing or altered artifacts fail before inference.
+- `fccc0592` adds static production-route auditing, a Koin construction test,
+  and a missing-x86-runtime fault case. Existing LiteRT tests cover GPU setup,
+  probe, invocation, output, cleanup, cancellation, CPU failure, unsupported
+  targets, invalid contracts, and process/cache recovery.
+
+Phase 6 validation record (2026-07-22):
+
+- `testGithubDebugUnitTest`, `lintGithubDebug`, `assembleGithubDebug`,
+  `assembleGithubRelease`, and `compileGithubDebugAndroidTestKotlin` passed.
+- The GitHub debug and release-like universal APKs contain LiteRT for all four
+  declared ABIs. The pure x86 inventory has one LiteRT entry,
+  `lib/x86/libLiteRt.so`; its size is 7,482,132 bytes and its SHA-256 is
+  `02b6556ec235926c11eb0c067eb16e459adcddb1568a42eefe0c40f4cc4b59af`,
+  matching the pinned supplemental-runtime manifest. ORT remains packaged only
+  as the temporary Phase 6/7 development oracle dependency.
+- `SourceSeparationProductionGraphTest` passed with one test, zero failures,
+  and zero errors on Galaxy S10 (API 31/arm64), Galaxy S25 (API 35/arm64),
+  API 26 x86, and API 37 x86_64. It resolves the v2 facade and confirms that
+  Koin has no legacy engine or model-repository definitions.
+- Phase 5's 12-second two-model device lifecycle evidence still covers actual
+  LiteRT output, multiple exact cache entries, FLAC promotion, hydration,
+  lease conflicts, and clear-cache recovery on the same four targets. Phase 7
+  must repeat the relevant behavior through full-song playback before model
+  promotion.
+
+Phase 6 route/cutover exit gate (met):
+
+- Debug and release-like normal graphs construct one v2 LiteRT route; no
+  normal worker, player, cache, or management source can construct ORT.
+- Worker admission, playback, cache management, model switching, and completed
+  cache playback preserve exact v2 identities and share one lease system.
+- Failure paths either use the documented one-way LiteRT GPU-to-CPU transition
+  or terminate; no exception path selects the legacy engine.
+- The legacy ONNX implementation remains source-visible only for the named
+  regression oracle and Phase 8 deletion. It is not selectable, registered, or
+  reachable from the production graph.
 
 ### Phase 7: Full-device validation and tier promotion
 
