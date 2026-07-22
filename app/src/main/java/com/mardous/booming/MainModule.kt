@@ -61,14 +61,20 @@ import com.mardous.booming.playback.processor.BalanceAudioProcessor
 import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.separation.SourceSeparationEngine
+import com.mardous.booming.separation.AndroidSourceSeparationModelAwarePreflightResolver
+import com.mardous.booming.separation.AndroidSourceSeparationRuntimeCompatibilityResolver
+import com.mardous.booming.separation.DefaultSourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationModelAwareEngine
+import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheEntryLeaseRegistry
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
 import com.mardous.booming.separation.cache.v2.SourceSeparationPresetCacheAvailabilityProvider
+import com.mardous.booming.separation.cache.v2.resolveActiveCacheModelResolution
 import com.mardous.booming.separation.model.SourceSeparationModelRepository
 import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPresetStructuralInspector
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
@@ -197,6 +203,7 @@ private val mainModule = module {
         )
     }
     single { SourceSeparationCacheRunCoordinator(store = get(), repository = get()) }
+    single { SourceSeparationCacheFlacPromoter(store = get(), repository = get()) }
     single { SourceSeparationCacheHydrator(store = get(), repository = get()) }
     single {
         SourceSeparationModelAwareEngine.createDevelopment(
@@ -208,6 +215,19 @@ private val mainModule = module {
     single {
         SourceSeparationEngine(context = androidContext())
     }
+    single {
+        val presetRepository = get<SourceSeparationPresetRepository>()
+        DefaultSourceSeparationRuntimeFacade(
+            activeModelResolver = presetRepository::resolveActiveCacheModelResolution,
+            compatibilityResolver = AndroidSourceSeparationRuntimeCompatibilityResolver,
+            preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(androidContext()),
+            engine = get(),
+            cacheRepository = get(),
+            runCoordinator = get(),
+            flacPromoter = get(),
+            hydrator = get(),
+        )
+    } bind SourceSeparationRuntimeFacade::class
 }
 
 private val roomModule = module {

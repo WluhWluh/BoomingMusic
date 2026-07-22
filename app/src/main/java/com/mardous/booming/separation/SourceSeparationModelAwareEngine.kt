@@ -45,6 +45,7 @@ internal class SourceSeparationModelAwareEngine(
         playbackPositionMsProvider: () -> Long? = { null },
         playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
         windowDecodeEnabled: Boolean = true,
+        onPrepared: (SourceSeparationCacheManifest) -> Unit = {},
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
     ): SourceSeparationModelAwareEngineResult {
@@ -54,6 +55,37 @@ internal class SourceSeparationModelAwareEngine(
         val model = activeModelResolver()
             ?: return SourceSeparationModelAwareEngineResult.ActiveModelUnavailable
         val preflight = preflightResolver.resolve(input.sourceUri, shouldCancel)
+        return separateResolved(
+            input = input,
+            model = model,
+            preflight = preflight,
+            runtimeSettings = runtimeSettings,
+            onProgress = onProgress,
+            playbackPositionMsProvider = playbackPositionMsProvider,
+            playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
+            windowDecodeEnabled = windowDecodeEnabled,
+            onPrepared = onPrepared,
+            shouldPause = shouldPause,
+            shouldCancel = shouldCancel,
+        )
+    }
+
+    fun separateResolved(
+        input: SourceSeparationModelAwareSongInput,
+        model: SourceSeparationResolvedCacheModel,
+        preflight: SourceSeparationCacheSourcePreflight,
+        runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
+        onProgress: (MdxRangeProgress) -> Unit = {},
+        playbackPositionMsProvider: () -> Long? = { null },
+        playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
+        windowDecodeEnabled: Boolean = true,
+        onPrepared: (SourceSeparationCacheManifest) -> Unit = {},
+        shouldPause: () -> Boolean = { false },
+        shouldCancel: () -> Boolean = { false },
+    ): SourceSeparationModelAwareEngineResult {
+        check(developmentGate()) {
+            "The model-aware LiteRT engine is available only behind the development gate."
+        }
         val identity = model.contract.identity(preflight.identity)
         val runRequest = SourceSeparationCacheRunRequest(
             identity = identity,
@@ -81,6 +113,7 @@ internal class SourceSeparationModelAwareEngine(
                 playbackPositionMsProvider = playbackPositionMsProvider,
                 playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
                 windowDecodeEnabled = windowDecodeEnabled,
+                onPrepared = onPrepared,
                 shouldPause = shouldPause,
                 shouldCancel = shouldCancel,
             )
@@ -97,6 +130,7 @@ internal class SourceSeparationModelAwareEngine(
         playbackPositionMsProvider: () -> Long?,
         playbackReadyWindowCountProvider: () -> Int,
         windowDecodeEnabled: Boolean,
+        onPrepared: (SourceSeparationCacheManifest) -> Unit,
         shouldPause: () -> Boolean,
         shouldCancel: () -> Boolean,
     ): SourceSeparationModelAwareEngineResult {
@@ -111,7 +145,7 @@ internal class SourceSeparationModelAwareEngine(
                     runtimeSettings = runtimeSettings,
                     onProgress = onProgress,
                     onPrepared = { preparation ->
-                        coordinator.updatePreparation(run, preparation)
+                        onPrepared(coordinator.updatePreparation(run, preparation))
                     },
                     onSegmentStateChanged = { index, state ->
                         coordinator.updateSegmentState(run, index, state)
@@ -189,7 +223,7 @@ internal fun interface SourceSeparationModelAwarePreflightResolver {
     ): SourceSeparationCacheSourcePreflight
 }
 
-private class AndroidSourceSeparationModelAwarePreflightResolver(
+internal class AndroidSourceSeparationModelAwarePreflightResolver(
     context: Context,
 ) : SourceSeparationModelAwarePreflightResolver {
     private val delegate = SourceSeparationCacheSourceIdentityResolver(context)
@@ -255,7 +289,7 @@ internal data class SourceSeparationModelAwareSongInput(
     }
 }
 
-internal sealed class SourceSeparationModelAwareEngineResult {
+sealed class SourceSeparationModelAwareEngineResult {
     data class Completed(
         val manifest: SourceSeparationCacheManifest,
         val result: MdxRangeSeparationResult,

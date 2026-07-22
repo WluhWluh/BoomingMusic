@@ -188,16 +188,21 @@ class SourceSeparationModelAwareEngineTest {
     fun `completed exact entry bypasses executor but still measures preflight`() {
         val fixture = fixture()
         var executionCount = 0
+        var preparedManifestState: SourceSeparationCacheManifestState? = null
         val engine = fixture.engine { request ->
             executionCount += 1
             fixture.complete(request, fixture.prepare(request))
         }
 
-        engine.separate(fixture.input)
+        engine.separate(
+            input = fixture.input,
+            onPrepared = { preparedManifestState = it.state },
+        )
         val second = engine.separate(fixture.input)
 
         assertTrue(second is SourceSeparationModelAwareEngineResult.AlreadyCompleted)
         assertEquals(1, executionCount)
+        assertEquals(SourceSeparationCacheManifestState.Running, preparedManifestState)
         assertEquals(2, fixture.preflightCount)
     }
 

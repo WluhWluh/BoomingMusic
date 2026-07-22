@@ -1,0 +1,349 @@
+package com.mardous.booming.separation
+
+import com.mardous.booming.data.model.Song
+import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelResolution
+import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelUnavailableReason
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrationResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourcePreflight
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntry
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCachePlayback
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCachePruneResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareHydratedPlayback
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareReadyHorizonStatus
+import com.mardous.booming.separation.cache.v2.SourceSeparationResolvedCacheModel
+import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
+import com.mardous.booming.separation.model.MdxCompatibilityPolicy
+import com.mardous.booming.separation.model.MdxInferenceBackend
+import com.mardous.booming.separation.model.MdxLiteRtCompatibilityResolver
+import com.mardous.booming.separation.model.MdxRangeProgress
+import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
+import java.util.concurrent.CancellationException
+
+interface SourceSeparationRuntimeFacade {
+    fun activeModelResolution(): SourceSeparationActiveCacheModelResolution
+
+    fun resolve(
+        song: Song,
+        shouldCancel: () -> Boolean = { false },
+    ): SourceSeparationRuntimeSongResolution
+
+    fun cacheStatus(song: SourceSeparationRuntimeSong): SourceSeparationModelAwareCacheStatus
+
+    fun playableStatus(
+        song: SourceSeparationRuntimeSong,
+        playbackPositionMs: Long,
+        readyWindowCount: Int,
+    ): SourceSeparationModelAwarePlayableStatus
+
+    fun readyHorizon(
+        song: SourceSeparationRuntimeSong,
+        playbackPositionMs: Long,
+    ): SourceSeparationModelAwareReadyHorizonStatus
+
+    fun readBlend(song: SourceSeparationRuntimeSong): Float?
+
+    fun writeBlend(song: SourceSeparationRuntimeSong, blend: Float): Boolean
+
+    fun separate(
+        song: SourceSeparationRuntimeSong,
+        runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
+        onProgress: (MdxRangeProgress) -> Unit = {},
+        onPrepared: (SourceSeparationCacheManifest) -> Unit = {},
+        playbackPositionMsProvider: () -> Long? = { null },
+        playbackReadyWindowCountProvider: () -> Int = { DEFAULT_READY_WINDOW_COUNT },
+        windowDecodeEnabled: Boolean = true,
+        shouldPause: () -> Boolean = { false },
+        shouldCancel: () -> Boolean = { false },
+    ): SourceSeparationModelAwareEngineResult
+
+    fun promote(
+        cacheKey: String,
+        shouldCancel: () -> Boolean = { false },
+    ): SourceSeparationCacheFlacPromotionResult
+
+    fun cleanCompletedTemporaryFiles(cacheKey: String): Boolean
+
+    fun cleanPendingCompletedTemporaryFiles(): Int
+
+    fun entries(): List<SourceSeparationModelAwareCacheEntry>
+
+    fun delete(cacheKey: String): SourceSeparationCacheMutationResult
+
+    fun prune(
+        partialLimit: Int,
+        completedLimit: Int,
+        protectedCacheKeys: Set<String> = emptySet(),
+    ): SourceSeparationModelAwareCachePruneResult
+
+    fun openCompletedCache(cacheKey: String): SourceSeparationModelAwareCachePlayback?
+
+    fun hydrate(
+        cacheKey: String,
+        shouldCancel: () -> Boolean = { false },
+    ): SourceSeparationCacheHydrationResult
+
+    fun openHydratedCache(cacheKey: String): SourceSeparationModelAwareHydratedPlayback?
+
+    private companion object {
+        const val DEFAULT_READY_WINDOW_COUNT = 2
+    }
+}
+
+class DefaultSourceSeparationRuntimeFacade internal constructor(
+    private val activeModelResolver: () -> SourceSeparationActiveCacheModelResolution,
+    private val compatibilityResolver: SourceSeparationRuntimeCompatibilityResolver,
+    private val preflightResolver: SourceSeparationModelAwarePreflightResolver,
+    private val inputFactory: SourceSeparationRuntimeSongInputFactory =
+        SourceSeparationRuntimeSongInputFactory(SourceSeparationModelAwareSongInput::from),
+    private val engine: SourceSeparationModelAwareEngine,
+    private val cacheRepository: SourceSeparationModelAwareCacheRepository,
+    private val runCoordinator: SourceSeparationCacheRunCoordinator,
+    private val flacPromoter: SourceSeparationCacheFlacPromoter,
+    private val hydrator: SourceSeparationCacheHydrator,
+) : SourceSeparationRuntimeFacade {
+    override fun activeModelResolution(): SourceSeparationActiveCacheModelResolution =
+        activeModelResolver()
+
+    override fun resolve(
+        song: Song,
+        shouldCancel: () -> Boolean,
+    ): SourceSeparationRuntimeSongResolution {
+        if (song == Song.emptySong) {
+            return SourceSeparationRuntimeSongResolution.Unavailable(
+                SourceSeparationRuntimeUnavailableReason.NoSong,
+            )
+        }
+        val model = when (val active = activeModelResolver()) {
+            is SourceSeparationActiveCacheModelResolution.Ready -> active.model
+            is SourceSeparationActiveCacheModelResolution.Unavailable -> {
+                return SourceSeparationRuntimeSongResolution.Unavailable(
+                    reason = active.reason.toRuntimeReason(),
+                    reference = active.reference,
+                )
+            }
+        }
+        compatibilityResolver.unsupportedReason(model)?.let { reason ->
+            return SourceSeparationRuntimeSongResolution.Unavailable(
+                reason = SourceSeparationRuntimeUnavailableReason.RuntimeUnsupported,
+                reference = model.activeReference(),
+                detail = reason,
+            )
+        }
+        val input = inputFactory.create(song)
+        val preflight = try {
+            preflightResolver.resolve(input.sourceUri, shouldCancel)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            return SourceSeparationRuntimeSongResolution.Unavailable(
+                reason = SourceSeparationRuntimeUnavailableReason.SourceUnavailable,
+                reference = model.activeReference(),
+                detail = error.message,
+            )
+        }
+        return SourceSeparationRuntimeSongResolution.Ready(
+            SourceSeparationRuntimeSong(
+                song = song,
+                model = model,
+                input = input,
+                preflight = preflight,
+            )
+        )
+    }
+
+    override fun cacheStatus(
+        song: SourceSeparationRuntimeSong,
+    ): SourceSeparationModelAwareCacheStatus = cacheRepository.status(song.identity)
+
+    override fun playableStatus(
+        song: SourceSeparationRuntimeSong,
+        playbackPositionMs: Long,
+        readyWindowCount: Int,
+    ): SourceSeparationModelAwarePlayableStatus = cacheRepository.playableStatus(
+        identity = song.identity,
+        playbackPositionMs = playbackPositionMs,
+        readyWindowCount = readyWindowCount,
+    )
+
+    override fun readyHorizon(
+        song: SourceSeparationRuntimeSong,
+        playbackPositionMs: Long,
+    ): SourceSeparationModelAwareReadyHorizonStatus = cacheRepository.readyHorizon(
+        identity = song.identity,
+        playbackPositionMs = playbackPositionMs,
+    )
+
+    override fun readBlend(song: SourceSeparationRuntimeSong): Float? =
+        cacheRepository.readBlend(song.identity)
+
+    override fun writeBlend(song: SourceSeparationRuntimeSong, blend: Float): Boolean =
+        cacheRepository.writeBlend(song.identity, blend.coerceIn(0f, 1f))
+
+    override fun separate(
+        song: SourceSeparationRuntimeSong,
+        runtimeSettings: MdxRuntimeSettings,
+        onProgress: (MdxRangeProgress) -> Unit,
+        onPrepared: (SourceSeparationCacheManifest) -> Unit,
+        playbackPositionMsProvider: () -> Long?,
+        playbackReadyWindowCountProvider: () -> Int,
+        windowDecodeEnabled: Boolean,
+        shouldPause: () -> Boolean,
+        shouldCancel: () -> Boolean,
+    ): SourceSeparationModelAwareEngineResult = engine.separateResolved(
+        input = song.input,
+        model = song.model,
+        preflight = song.preflight,
+        runtimeSettings = runtimeSettings,
+        onProgress = onProgress,
+        onPrepared = onPrepared,
+        playbackPositionMsProvider = playbackPositionMsProvider,
+        playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
+        windowDecodeEnabled = windowDecodeEnabled,
+        shouldPause = shouldPause,
+        shouldCancel = shouldCancel,
+    )
+
+    override fun promote(
+        cacheKey: String,
+        shouldCancel: () -> Boolean,
+    ): SourceSeparationCacheFlacPromotionResult = flacPromoter.promote(cacheKey, shouldCancel)
+
+    override fun cleanCompletedTemporaryFiles(cacheKey: String): Boolean =
+        runCoordinator.cleanCompletedTemporaryFiles(cacheKey)
+
+    override fun cleanPendingCompletedTemporaryFiles(): Int =
+        cacheRepository.completedCleanupKeys().count(runCoordinator::cleanCompletedTemporaryFiles)
+
+    override fun entries(): List<SourceSeparationModelAwareCacheEntry> = cacheRepository.entries()
+
+    override fun delete(cacheKey: String): SourceSeparationCacheMutationResult =
+        cacheRepository.delete(cacheKey)
+
+    override fun prune(
+        partialLimit: Int,
+        completedLimit: Int,
+        protectedCacheKeys: Set<String>,
+    ): SourceSeparationModelAwareCachePruneResult = cacheRepository.prune(
+        partialLimit = partialLimit,
+        completedLimit = completedLimit,
+        protectedCacheKeys = protectedCacheKeys,
+    )
+
+    override fun openCompletedCache(cacheKey: String): SourceSeparationModelAwareCachePlayback? =
+        cacheRepository.openCompletedCache(cacheKey)
+
+    override fun hydrate(
+        cacheKey: String,
+        shouldCancel: () -> Boolean,
+    ): SourceSeparationCacheHydrationResult = hydrator.hydrate(cacheKey, shouldCancel)
+
+    override fun openHydratedCache(cacheKey: String): SourceSeparationModelAwareHydratedPlayback? =
+        hydrator.open(cacheKey)
+}
+
+class SourceSeparationRuntimeSong internal constructor(
+    val song: Song,
+    internal val model: SourceSeparationResolvedCacheModel,
+    internal val input: SourceSeparationModelAwareSongInput,
+    internal val preflight: SourceSeparationCacheSourcePreflight,
+) {
+    val identity = model.contract.identity(preflight.identity)
+    val cacheKey: String
+        get() = identity.cacheKey
+    val modelId: String
+        get() = identity.modelId
+    val artifactSha256: String
+        get() = identity.artifactSha256
+    val profileRevisionId: String
+        get() = identity.profileRevisionId
+}
+
+sealed interface SourceSeparationRuntimeSongResolution {
+    data class Ready(
+        val song: SourceSeparationRuntimeSong,
+    ) : SourceSeparationRuntimeSongResolution
+
+    data class Unavailable(
+        val reason: SourceSeparationRuntimeUnavailableReason,
+        val reference: SourceSeparationActiveModelReference? = null,
+        val detail: String? = null,
+    ) : SourceSeparationRuntimeSongResolution
+}
+
+enum class SourceSeparationRuntimeUnavailableReason {
+    NoSong,
+    NoSelection,
+    PendingSelection,
+    ModelNotInstalled,
+    ModelIdentityMismatch,
+    ProfileNotInstalled,
+    ContractMismatch,
+    ContractInvalid,
+    RuntimeUnsupported,
+    SourceUnavailable,
+}
+
+internal fun interface SourceSeparationRuntimeCompatibilityResolver {
+    fun unsupportedReason(model: SourceSeparationResolvedCacheModel): String?
+}
+
+internal fun interface SourceSeparationRuntimeSongInputFactory {
+    fun create(song: Song): SourceSeparationModelAwareSongInput
+}
+
+internal object AndroidSourceSeparationRuntimeCompatibilityResolver :
+    SourceSeparationRuntimeCompatibilityResolver {
+    override fun unsupportedReason(model: SourceSeparationResolvedCacheModel): String? {
+        val platform = try {
+            AndroidMdxRuntimePlatformProvider.current()
+        } catch (error: Throwable) {
+            return error.message ?: "The process ABI is unsupported."
+        }
+        val decision = MdxLiteRtCompatibilityResolver.resolve(
+            profile = model.executionProfile,
+            backend = MdxInferenceBackend.LiteRtCpu,
+            platform = platform,
+            policy = MdxCompatibilityPolicy.KnownGoodOnly,
+        )
+        return decision.reason.takeUnless { decision.isAllowed }
+    }
+}
+
+private fun SourceSeparationActiveCacheModelUnavailableReason.toRuntimeReason():
+        SourceSeparationRuntimeUnavailableReason = when (this) {
+    SourceSeparationActiveCacheModelUnavailableReason.NoSelection ->
+        SourceSeparationRuntimeUnavailableReason.NoSelection
+    SourceSeparationActiveCacheModelUnavailableReason.PendingSelection ->
+        SourceSeparationRuntimeUnavailableReason.PendingSelection
+    SourceSeparationActiveCacheModelUnavailableReason.ModelNotInstalled ->
+        SourceSeparationRuntimeUnavailableReason.ModelNotInstalled
+    SourceSeparationActiveCacheModelUnavailableReason.ModelIdentityMismatch ->
+        SourceSeparationRuntimeUnavailableReason.ModelIdentityMismatch
+    SourceSeparationActiveCacheModelUnavailableReason.ProfileNotInstalled ->
+        SourceSeparationRuntimeUnavailableReason.ProfileNotInstalled
+    SourceSeparationActiveCacheModelUnavailableReason.ContractMismatch ->
+        SourceSeparationRuntimeUnavailableReason.ContractMismatch
+    SourceSeparationActiveCacheModelUnavailableReason.ContractInvalid ->
+        SourceSeparationRuntimeUnavailableReason.ContractInvalid
+}
+
+private fun SourceSeparationResolvedCacheModel.activeReference() =
+    SourceSeparationActiveModelReference(
+        modelId = contract.modelId,
+        artifactSha256 = artifact.sha256,
+        contractSchemaVersion = contract.contractSchemaVersion,
+        profileId = contract.profileRevisionId.takeIf {
+            installed.bindingKind == SourceSeparationPresetBindingKind.CustomProfile
+        },
+    )
