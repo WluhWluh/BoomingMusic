@@ -83,6 +83,12 @@ fun SourceSeparationPresetRepository.resolveActiveCacheModelResolution():
             reference,
         )
     }
+    if (!isInstalledArtifactIntact(installed)) {
+        return SourceSeparationActiveCacheModelResolution.Unavailable(
+            SourceSeparationActiveCacheModelUnavailableReason.ModelIdentityMismatch,
+            reference,
+        )
+    }
     val snapshot = try {
         installed.cacheContractSnapshot(this)
     } catch (_: Throwable) {

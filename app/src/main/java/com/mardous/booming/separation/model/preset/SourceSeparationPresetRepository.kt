@@ -53,6 +53,7 @@ class SourceSeparationPresetRepository internal constructor(
     )
 
     private val lock = Any()
+    private val verifiedArtifactStamps = mutableMapOf<String, InstalledArtifactStamp>()
 
     fun catalogEntries() = catalog.entries
 
@@ -530,6 +531,7 @@ class SourceSeparationPresetRepository internal constructor(
         if (!directory.deleteRecursively()) {
             throw SourceSeparationPresetDeletionException("Unable to delete installed model.")
         }
+        verifiedArtifactStamps.remove(sha256.lowercase())
         true
     }
 
@@ -542,7 +544,30 @@ class SourceSeparationPresetRepository internal constructor(
                 "Installed model hash does not match its record: $sha256",
             )
         }
+        installed.file.artifactStamp(installed.byteSize)?.let { stamp ->
+            verifiedArtifactStamps[installed.sha256.lowercase()] = stamp
+        }
         installed
+    }
+
+    internal fun isInstalledArtifactIntact(installed: SourceSeparationInstalledPreset): Boolean {
+        val key = installed.sha256.lowercase()
+        val before = installed.file.artifactStamp(installed.byteSize) ?: return false
+        synchronized(lock) {
+            if (verifiedArtifactStamps[key] == before) return true
+        }
+
+        val actualHash = runCatching { installed.file.sha256Hex() }.getOrNull()
+        val after = installed.file.artifactStamp(installed.byteSize)
+        val intact = before == after && actualHash.equals(installed.sha256, ignoreCase = true)
+        synchronized(lock) {
+            if (intact) {
+                verifiedArtifactStamps[key] = before
+            } else {
+                verifiedArtifactStamps.remove(key)
+            }
+        }
+        return intact
     }
 
     private fun resolveBinding(
@@ -786,6 +811,15 @@ class SourceSeparationPresetRepository internal constructor(
         return digest.digest().toHex()
     }
 
+    private fun File.artifactStamp(expectedByteSize: Long): InstalledArtifactStamp? {
+        if (!isFile || length() != expectedByteSize) return null
+        return InstalledArtifactStamp(
+            absolutePath = absolutePath,
+            byteSize = expectedByteSize,
+            lastModifiedEpochMs = lastModified(),
+        )
+    }
+
     private fun ByteArray.toHex(): String = joinToString("") { byte ->
         (byte.toInt() and 0xff).toString(16).padStart(2, '0')
     }
@@ -811,6 +845,12 @@ class SourceSeparationPresetRepository internal constructor(
     private data class CopiedModel(
         val byteSize: Long,
         val sha256: String,
+    )
+
+    private data class InstalledArtifactStamp(
+        val absolutePath: String,
+        val byteSize: Long,
+        val lastModifiedEpochMs: Long,
     )
 
     private data class ResolvedPresetBinding(

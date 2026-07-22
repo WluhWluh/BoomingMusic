@@ -168,6 +168,45 @@ class SourceSeparationPresetRepositoryTest {
     }
 
     @Test
+    fun `active cache model resolution rejects an altered installed artifact`() {
+        val payload = "official-model".encodeToByteArray()
+        fixture(
+            officialPayload = payload,
+            catalog = catalog(
+                officialPayload = payload,
+                supportLevel = CatalogSupportLevel.Recommended,
+                activationPolicy = CatalogActivationPolicy.SelectableWhenQualified,
+                includeReviewedContract = true,
+            ),
+        ).use { fixture ->
+            val installed = fixture.repository.installOfficial(
+                modelId = "official_model",
+                input = ByteArrayInputStream(payload),
+            )
+            fixture.repository.activate(
+                sha256 = installed.sha256,
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            )
+            assertTrue(
+                fixture.repository.resolveActiveCacheModelResolution() is
+                    SourceSeparationActiveCacheModelResolution.Ready,
+            )
+
+            val originalModified = installed.file.lastModified()
+            installed.file.writeBytes(payload.reversedArray())
+            assertTrue(installed.file.setLastModified(originalModified + 2_000L))
+
+            val resolution = fixture.repository.resolveActiveCacheModelResolution()
+                as SourceSeparationActiveCacheModelResolution.Unavailable
+            assertEquals(
+                SourceSeparationActiveCacheModelUnavailableReason.ModelIdentityMismatch,
+                resolution.reason,
+            )
+        }
+    }
+
+    @Test
     fun `active official preset resolves an immutable cache contract and artifact`() {
         val payload = "official-model".encodeToByteArray()
         fixture(
