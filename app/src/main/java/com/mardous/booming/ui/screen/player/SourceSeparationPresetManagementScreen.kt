@@ -56,6 +56,7 @@ internal fun SourceSeparationPresetManagementSheet(
     onConfirmExperimental: () -> Unit,
     onDismissExperimental: () -> Unit,
     onClearError: (String?) -> Unit,
+    onClearRestoredModelTarget: () -> Unit,
     onRefresh: () -> Unit,
     onImportModel: () -> Unit,
     onImportSidecar: () -> Unit,
@@ -133,6 +134,15 @@ internal fun SourceSeparationPresetManagementSheet(
                             ),
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+
+                state.restoredModelTarget?.let { target ->
+                    item(key = "restored-model-target") {
+                        RestoredModelTargetCard(
+                            target = target,
+                            onDiscard = onClearRestoredModelTarget,
                         )
                     }
                 }
@@ -303,6 +313,99 @@ internal fun SourceSeparationPresetManagementSheet(
         onDiscard = onDiscardImport,
         onDismissSuccess = onDismissImportSuccess,
     )
+}
+
+@Composable
+private fun RestoredModelTargetCard(
+    target: SourceSeparationRestoredModelTargetUiState,
+    onDiscard: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(16.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_history_24dp),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(
+                            R.string.source_separation_preset_restored_target_title,
+                        ),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = target.displayName,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+            Text(
+                text = stringResource(
+                    R.string.source_separation_preset_restored_target_identity,
+                    target.modelId,
+                    target.shortSha256,
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = stringResource(
+                    if (target.exactModelInstalled) {
+                        R.string.source_separation_preset_restored_target_installed
+                    } else {
+                        R.string.source_separation_preset_restored_target_missing
+                    },
+                ),
+                color = if (target.exactModelInstalled) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (target.currentModelRetained) {
+                Text(
+                    text = stringResource(
+                        R.string.source_separation_preset_restored_target_current_retained,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            OutlinedButton(
+                onClick = onDiscard,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_close_24dp),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = stringResource(
+                        R.string.source_separation_preset_restored_target_discard,
+                    ),
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+        }
+    }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.modelSection(

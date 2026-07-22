@@ -208,6 +208,44 @@ class SourceSeparationPresetRepositoryTest {
     }
 
     @Test
+    fun `explicit activation clears a matching restored target`() {
+        val payload = "official-model".encodeToByteArray()
+        fixture(
+            officialPayload = payload,
+            catalog = catalog(
+                officialPayload = payload,
+                supportLevel = CatalogSupportLevel.Recommended,
+                activationPolicy = CatalogActivationPolicy.SelectableWhenQualified,
+                includeReviewedContract = true,
+            ),
+        ).use { fixture ->
+            val installed = fixture.repository.installOfficial(
+                modelId = "official_model",
+                input = ByteArrayInputStream(payload),
+            )
+            val restored = SourceSeparationActiveModelReference(
+                modelId = installed.modelId,
+                artifactSha256 = installed.sha256,
+                contractSchemaVersion = 2,
+            )
+            fixture.repository.setPendingActiveModel(restored)
+
+            assertEquals(SourceSeparationActivePresetState.None, fixture.repository.activeModel())
+            assertEquals(restored, fixture.repository.pendingActiveModel())
+
+            fixture.repository.activate(
+                sha256 = installed.sha256,
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            )
+
+            assertEquals(restored, (fixture.repository.activeModel() as
+                SourceSeparationActivePresetState.Reference).reference)
+            assertEquals(null, fixture.repository.pendingActiveModel())
+        }
+    }
+
+    @Test
     fun `manual custom profile cannot activate when structural inspection is unavailable`() {
         val payload = "custom-model".encodeToByteArray()
         fixture(

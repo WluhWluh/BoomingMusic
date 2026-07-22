@@ -80,6 +80,12 @@
     <string name="source_separation_preset_experimental_section">实验性</string>
     <string name="source_separation_preset_download_only_section">仅供下载的候选模型</string>
     <string name="source_separation_preset_active_missing">已选择的开发模型尚未安装。</string>
+    <string name="source_separation_preset_restored_target_title">已恢复的模型目标</string>
+    <string name="source_separation_preset_restored_target_identity">模型 ID：%1$s\nSHA-256：%2$s</string>
+    <string name="source_separation_preset_restored_target_missing">此模型尚未安装。请安装完全匹配的模型，再明确选择使用；恢复操作不会自动下载或启用模型。</string>
+    <string name="source_separation_preset_restored_target_installed">完全匹配的模型已安装，但在你明确选择使用前仍不会启用。</string>
+    <string name="source_separation_preset_restored_target_current_retained">当前模型仍保持选中。</string>
+    <string name="source_separation_preset_restored_target_discard">放弃恢复目标</string>
     <string name="source_separation_preset_experimental_confirm_title">使用实验性模型？</string>
     <string name="source_separation_preset_experimental_confirm_message">%1$s 是仅使用 CPU 的实验性模型，尚未完成发布验证，运行速度或输出结果可能不符合预期。</string>
     <string name="source_separation_preset_use_for_validation">用于开发验证</string>

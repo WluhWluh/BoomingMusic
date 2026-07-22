@@ -117,6 +117,8 @@ class SourceSeparationModelManagementFragment : BottomSheetDialogFragment() {
                             onConfirmExperimental = presetViewModel::confirmExperimentalUse,
                             onDismissExperimental = presetViewModel::dismissExperimentalUse,
                             onClearError = presetViewModel::clearError,
+                            onClearRestoredModelTarget =
+                                presetViewModel::clearRestoredModelTarget,
                             onRefresh = presetViewModel::refresh,
                             onImportModel = {
                                 importTfliteModelLauncher.launch(

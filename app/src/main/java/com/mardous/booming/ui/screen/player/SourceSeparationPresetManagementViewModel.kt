@@ -11,7 +11,9 @@ import com.mardous.booming.separation.model.MdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.contract.CatalogActivationPolicy
 import com.mardous.booming.separation.model.contract.CatalogReleaseMaturity
 import com.mardous.booming.separation.model.contract.CatalogSupportLevel
+import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
+import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetActivationResolver
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
@@ -55,6 +57,11 @@ class SourceSeparationPresetManagementViewModel internal constructor(
     val state = _state.asStateFlow()
 
     fun refresh() {
+        publishState()
+    }
+
+    fun clearRestoredModelTarget() {
+        repository.setPendingActiveModel(null)
         publishState()
     }
 
@@ -352,6 +359,13 @@ class SourceSeparationPresetManagementViewModel internal constructor(
             importedEntries = importedEntries,
             activeReferenceMissing = active is SourceSeparationActivePresetState.Reference &&
                 active.installedModel == null,
+            restoredModelTarget = resolveRestoredModelTarget(
+                reference = repository.pendingActiveModel(),
+                entries = entries,
+                importedEntries = importedEntries,
+                customProfiles = repository.customProfiles(),
+                activeReference = activeReference,
+            ),
         )
     }
 
@@ -496,12 +510,28 @@ data class SourceSeparationPresetManagementUiState(
     val entries: List<SourceSeparationPresetManagementItem> = emptyList(),
     val importedEntries: List<SourceSeparationImportedModelManagementItem> = emptyList(),
     val activeReferenceMissing: Boolean = false,
+    val restoredModelTarget: SourceSeparationRestoredModelTargetUiState? = null,
     val confirmationModelId: String? = null,
     val errorMessage: String? = null,
     val importState: SourceSeparationPresetImportUiState = SourceSeparationPresetImportUiState.Idle,
 ) {
     val confirmationModel: SourceSeparationPresetManagementItem?
         get() = entries.singleOrNull { it.modelId == confirmationModelId }
+}
+
+data class SourceSeparationRestoredModelTargetUiState(
+    val modelId: String,
+    val displayName: String,
+    val artifactSha256: String,
+    val exactModelInstalled: Boolean,
+    val currentModelRetained: Boolean,
+) {
+    val shortSha256: String
+        get() = artifactSha256.take(SHORT_SHA256_LENGTH)
+
+    private companion object {
+        const val SHORT_SHA256_LENGTH = 12
+    }
 }
 
 data class SourceSeparationPresetManagementItem(
@@ -635,3 +665,43 @@ private val CatalogSupportLevel.sortOrder: Int
         CatalogSupportLevel.Experimental -> 1
         CatalogSupportLevel.DownloadOnly -> 2
     }
+
+internal fun resolveRestoredModelTarget(
+    reference: SourceSeparationActiveModelReference?,
+    entries: List<SourceSeparationPresetManagementItem>,
+    importedEntries: List<SourceSeparationImportedModelManagementItem>,
+    customProfiles: List<SourceSeparationCustomModelProfile> = emptyList(),
+    activeReference: SourceSeparationActiveModelReference?,
+): SourceSeparationRestoredModelTargetUiState? {
+    reference ?: return null
+    val official = entries.singleOrNull { entry -> entry.modelId == reference.modelId }
+    val officialArtifactInstalled = official?.takeIf { entry ->
+        entry.sha256.equals(reference.artifactSha256, ignoreCase = true)
+    }?.installed != null
+    val imported = importedEntries.singleOrNull { entry ->
+        entry.modelId == reference.modelId &&
+            entry.sha256.equals(reference.artifactSha256, ignoreCase = true)
+    }
+    val customProfile = customProfiles.singleOrNull { profile ->
+        profile.profileId == reference.profileId &&
+            profile.modelId == reference.modelId &&
+            profile.artifact.sha256.equals(reference.artifactSha256, ignoreCase = true)
+    }
+    return SourceSeparationRestoredModelTargetUiState(
+        modelId = reference.modelId,
+        displayName = official?.displayName
+            ?: imported?.displayName
+            ?: customProfile?.displayName
+            ?: reference.modelId,
+        artifactSha256 = reference.artifactSha256.lowercase(Locale.ROOT),
+        exactModelInstalled = officialArtifactInstalled || imported != null,
+        currentModelRetained = activeReference != null && !activeReference.sameIdentity(reference),
+    )
+}
+
+private fun SourceSeparationActiveModelReference.sameIdentity(
+    other: SourceSeparationActiveModelReference,
+): Boolean = modelId == other.modelId &&
+    artifactSha256.equals(other.artifactSha256, ignoreCase = true) &&
+    contractSchemaVersion == other.contractSchemaVersion &&
+    profileId == other.profileId

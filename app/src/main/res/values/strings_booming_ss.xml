@@ -80,6 +80,12 @@
     <string name="source_separation_preset_experimental_section">Experimental</string>
     <string name="source_separation_preset_download_only_section">Download-only candidates</string>
     <string name="source_separation_preset_active_missing">The selected development model is not installed.</string>
+    <string name="source_separation_preset_restored_target_title">Restored model target</string>
+    <string name="source_separation_preset_restored_target_identity">Model ID: %1$s\nSHA-256: %2$s</string>
+    <string name="source_separation_preset_restored_target_missing">This model is not installed. Install the exact model, then choose Use; restore will not download or activate it.</string>
+    <string name="source_separation_preset_restored_target_installed">The exact model is installed but remains inactive until you choose Use.</string>
+    <string name="source_separation_preset_restored_target_current_retained">Your current model remains selected.</string>
+    <string name="source_separation_preset_restored_target_discard">Discard restored target</string>
     <string name="source_separation_preset_experimental_confirm_title">Use experimental model?</string>
     <string name="source_separation_preset_experimental_confirm_message">%1$s is an experimental CPU-only model. It has not completed release validation and may be slower or produce unexpected output.</string>
     <string name="source_separation_preset_use_for_validation">Use for validation</string>
