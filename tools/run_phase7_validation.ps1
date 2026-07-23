@@ -17,8 +17,9 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v3",
+    [string]$RunnerRevision = "phase7-runner-v4",
     [int]$ProcessorCount = 0,
+    [int]$XnnPackFlags = -1,
     [ValidateSet("cold-session", "warm-session")]
     [string]$RunClass = "cold-session",
     [ValidateSet("pause-resume", "seek", "cancellation", "sequential")]
@@ -76,10 +77,14 @@ if ($Stage -in $sourceStages -and [string]::IsNullOrWhiteSpace($SourcePath)) {
 if ($ProcessorCount -lt 0) {
     throw "ProcessorCount must be zero (device default) or a positive integer."
 }
-if ($Stage -notin $sourceStages -and ($ProcessorCount -gt 0 -or $ExportCacheAudio -or
+if ($XnnPackFlags -lt -1) {
+    throw "XnnPackFlags must be -1 (runtime default) or a non-negative bitfield."
+}
+if ($Stage -notin $sourceStages -and ($ProcessorCount -gt 0 -or $XnnPackFlags -ge 0 -or
+        $ExportCacheAudio -or
         $RunClass -ne "cold-session" -or $CleanInstallScenario -or
         -not $WindowDecode)) {
-    throw "ProcessorCount, RunClass, WindowDecode, CleanInstallScenario, and ExportCacheAudio apply only to the worker stage."
+    throw "Runtime overrides apply only to worker, lifecycle, recreation, and playback stages."
 }
 if ($PreserveMediaStoreSource -and $Stage -ne "worker") {
     throw "PreserveMediaStoreSource applies only to the worker stage."
@@ -186,6 +191,11 @@ $fixtures = Get-Content -LiteralPath $fixturesPath -Raw | ConvertFrom-Json
 $catalogSourceRevision = "746bee43db9ece9ec8214c1c74269e21547aed58"
 $pipelineVersion = "$($model.Contract.pipelineCompatibility.pipelineId)-v$($model.Contract.pipelineCompatibility.minimumVersion)"
 $artifact = $model.Artifact.tflite
+$cpuProfileId = if ($XnnPackFlags -ge 0) {
+    "cpu-xnnpack-flags-$XnnPackFlags-fp32-v1"
+} else {
+    "cpu-default-fp32-v1"
+}
 $fixture = @($fixtures.fixtures) | Where-Object { $_.fixtureId -eq $FixtureId } | Select-Object -First 1
 if ($Stage -in $sourceStages) {
     if ($null -eq $fixture) { throw "Fixture is absent from fixtures-v1.json: $FixtureId" }
@@ -248,7 +258,7 @@ try {
         "-e", "artifactFileName", $artifact.fileName,
         "-e", "contractId", $model.Entry.contractId,
         "-e", "contractSchemaVersion", [string]$model.Contract.contractSchemaVersion,
-        "-e", "profileId", "cpu-default-fp32-v1",
+        "-e", "profileId", $cpuProfileId,
         "-e", "appCommit", $appCommit,
         "-e", "appApkSha256", $appApkSha256,
         "-e", "testApkSha256", $testApkSha256,
@@ -309,6 +319,9 @@ try {
         }
         if ($ProcessorCount -gt 0) {
             $instrumentArguments += @("-e", "processorCount", [string]$ProcessorCount)
+        }
+        if ($XnnPackFlags -ge 0) {
+            $instrumentArguments += @("-e", "xnnPackFlags", [string]$XnnPackFlags)
         }
     }
     if (-not [string]::IsNullOrWhiteSpace($litertSha256)) {
@@ -431,6 +444,7 @@ try {
                 windowDecodeEnabled = $WindowDecode
                 preserveMediaStoreSource = [bool]$PreserveMediaStoreSource
                 processorCountOverride = if ($ProcessorCount -gt 0) { $ProcessorCount } else { $null }
+                xnnPackFlags = if ($XnnPackFlags -ge 0) { $XnnPackFlags } else { $null }
                 lifecycleScenario = if ($Stage -eq "lifecycle") { $LifecycleScenario } else { $null }
                 lifecycleSessionMode = if ($Stage -eq "lifecycle") { $LifecycleSessionMode } else { $null }
             }

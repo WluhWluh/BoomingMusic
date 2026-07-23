@@ -73,6 +73,11 @@ provider, closes the provider at test teardown, and records the native session
 creation count. It does not alter the application graph and cannot be used as
 promotion evidence. This control distinguishes an operation failure from a
 failure caused by repeatedly allocating large LiteRT sessions in one process.
+`-XnnPackFlags 32` is a separate construction-time diagnostic for XNNPACK's
+transient indirection-buffer mode. Reports use a distinct profile ID and retain
+the bitfield in their run envelope. The override is not an app preference and
+must not be promoted without full numerical, lifecycle, performance, and
+memory evidence; omitting it preserves LiteRT's runtime defaults.
 After a normal short-fixture worker run, `-Stage recreation` force-stops the
 app through the standard runner setup and verifies that a new process can
 resolve the exact completed cache, both playback positions, and hydrated PCM.

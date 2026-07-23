@@ -21,8 +21,18 @@ internal class MdxLiteRtCpuInferenceSessionFactory(
     private val compatibilityPolicy: MdxCompatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
     private val sessionAllocator: MdxLiteRtSessionAllocator = MdxLiteRtNativeSessionAllocator,
     private val availableProcessors: () -> Int = { Runtime.getRuntime().availableProcessors() },
+    private val xnnPackFlags: Int? = null,
 ) : MdxInferenceSessionFactory {
-    override val factoryId: String = "litert-2.1.5-cpu-${compatibilityPolicy.name}"
+    init {
+        require(xnnPackFlags == null || xnnPackFlags >= 0) {
+            "XNNPACK flags must be non-negative."
+        }
+    }
+
+    override val factoryId: String = buildString {
+        append("litert-2.1.5-cpu-").append(compatibilityPolicy.name)
+        xnnPackFlags?.let { append("-xnnpack-flags-").append(it) }
+    }
     override val backend: MdxInferenceBackend = MdxInferenceBackend.LiteRtCpu
 
     override fun create(
@@ -43,6 +53,7 @@ internal class MdxLiteRtCpuInferenceSessionFactory(
             artifact = artifact,
             profile = profile,
             cpuThreads = resolveLiteRtCpuThreadCount(availableProcessors()),
+            xnnPackFlags = xnnPackFlags,
             compatibility = decision,
         )
     }
@@ -53,6 +64,7 @@ internal interface MdxLiteRtSessionAllocator {
         artifact: MdxModelArtifact,
         profile: MdxExecutionProfile,
         cpuThreads: Int,
+        xnnPackFlags: Int?,
         compatibility: MdxCompatibilityDecision,
     ): MdxInferenceSession
 }

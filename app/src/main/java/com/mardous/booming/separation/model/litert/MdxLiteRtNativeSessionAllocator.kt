@@ -47,19 +47,23 @@ internal object MdxLiteRtNativeSessionAllocator : MdxLiteRtSessionAllocator {
         artifact: MdxModelArtifact,
         profile: MdxExecutionProfile,
         cpuThreads: Int,
+        xnnPackFlags: Int?,
         compatibility: MdxCompatibilityDecision,
     ): MdxInferenceSession = createNativeLiteRtSession(
         artifact = artifact,
         profile = profile,
         requiredAccelerator = Accelerator.CPU,
         options = CompiledModel.Options(Accelerator.CPU).apply {
-            this.cpuOptions = CompiledModel.CpuOptions(cpuThreads, null, null)
+            this.cpuOptions = CompiledModel.CpuOptions(cpuThreads, xnnPackFlags, null)
         },
         diagnostics = MdxRuntimeDiagnostics(
             runtimeName = "LiteRT 2.1.5",
             backend = MdxInferenceBackend.LiteRtCpu,
             cpuThreads = cpuThreads,
-            detail = compatibilityDetail(compatibility),
+            detail = buildString {
+                append(compatibilityDetail(compatibility))
+                xnnPackFlags?.let { append(", xnnpackFlags=").append(it) }
+            },
         ),
     )
 }

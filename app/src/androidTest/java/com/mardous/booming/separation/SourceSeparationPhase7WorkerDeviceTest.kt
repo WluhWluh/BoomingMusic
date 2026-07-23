@@ -130,6 +130,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 processorCount = arguments.getString(ARG_PROCESSOR_COUNT)
                     ?.toIntOrNull()
                     ?.takeIf { it > 0 },
+                xnnPackFlags = arguments.getString(ARG_XNNPACK_FLAGS)
+                    ?.toIntOrNull()
+                    ?.takeIf { it >= 0 },
             )
             val resolved = runtimeFacade.resolve(source)
             val runtimeSong = (resolved as? SourceSeparationRuntimeSongResolution.Ready)?.song
@@ -427,6 +430,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                             ?.takeIf { it > 0 }
                             ?: Runtime.getRuntime().availableProcessors()
                     },
+                    xnnPackFlags = arguments.getString(ARG_XNNPACK_FLAGS)
+                        ?.toIntOrNull()
+                        ?.takeIf { it >= 0 },
                 ),
                 createCount = sessionCreateCount,
             )
@@ -1014,6 +1020,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         preferences: SharedPreferences,
         presetRepository: SourceSeparationPresetRepository,
         processorCount: Int?,
+        xnnPackFlags: Int? = null,
         sessionProviderFactoryOverride: (() -> MdxInferenceSessionProvider)? = null,
     ): SourceSeparationRuntimeFacade {
         val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
@@ -1033,6 +1040,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 availableProcessors = {
                     processorCount ?: Runtime.getRuntime().availableProcessors()
                 },
+                xnnPackFlags = xnnPackFlags,
             )
             val singleUseFactory: () -> MdxInferenceSessionProvider = {
                 SingleUseMdxInferenceSessionProvider(cpuFactory)
@@ -1316,6 +1324,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("cpuThreads", resolveCpuThreads(arguments.getString(ARG_PROCESSOR_COUNT)?.toIntOrNull()))
                 .put("windowDecodeEnabled", arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true))
                 .put("cleanInstallScenario", arguments.optionalBoolean(ARG_CLEAN_INSTALL, false))
+                .put(
+                    "xnnPackFlags",
+                    arguments.getString(ARG_XNNPACK_FLAGS)?.toIntOrNull() ?: JSONObject.NULL,
+                )
                 .put("backendRequested", "LiteRtCpu")
                 .put("backendUsed", "LiteRtCpu")
                 .put("fallbackStage", JSONObject.NULL)
@@ -1515,6 +1527,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_FIXTURES_VERSION = "fixturesVersion"
         const val ARG_SOURCE_PATH = "sourcePath"
         const val ARG_PROCESSOR_COUNT = "processorCount"
+        const val ARG_XNNPACK_FLAGS = "xnnPackFlags"
         const val ARG_WINDOW_DECODE_ENABLED = "windowDecodeEnabled"
         const val ARG_PRESERVE_MEDIA_STORE_SOURCE = "preserveMediaStoreSource"
         const val ARG_EXPORT_CACHE_AUDIO = "exportCacheAudio"

@@ -1437,6 +1437,7 @@ class MdxLiteRtCpuValidationTest {
             artifact: MdxModelArtifact,
             profile: MdxExecutionProfile,
             cpuThreads: Int,
+            xnnPackFlags: Int?,
             compatibility: MdxCompatibilityDecision,
         ): MdxInferenceSession {
             createCount += 1

@@ -61,6 +61,23 @@ class MdxLiteRtCpuInferenceSessionFactoryTest {
     }
 
     @Test
+    fun `explicit XNNPACK flags are part of factory identity and reach allocator`() {
+        val allocator = RecordingAllocator()
+        val profile = profile("uvr_mdxnet_3_9662")
+        val factory = factory(
+            abi = MdxRuntimeAbi.X86,
+            allocator = allocator,
+            processors = 6,
+            xnnPackFlags = 32,
+        )
+
+        factory.create(artifact(profile), profile, MdxRuntimeSettings())
+
+        assertEquals(32, allocator.xnnPackFlags)
+        assertTrue(factory.factoryId.endsWith("-xnnpack-flags-32"))
+    }
+
+    @Test
     fun `CPU thread policy leaves one core free within two to four threads`() {
         assertEquals(2, resolveLiteRtCpuThreadCount(1))
         assertEquals(2, resolveLiteRtCpuThreadCount(2))
@@ -129,11 +146,13 @@ class MdxLiteRtCpuInferenceSessionFactoryTest {
         abi: MdxRuntimeAbi,
         allocator: RecordingAllocator,
         processors: Int,
+        xnnPackFlags: Int? = null,
     ) = MdxLiteRtCpuInferenceSessionFactory(
         platformProvider = { MdxRuntimePlatform(35, abi) },
         compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
         sessionAllocator = allocator,
         availableProcessors = { processors },
+        xnnPackFlags = xnnPackFlags,
     )
 
     private fun profile(modelId: String): MdxExecutionProfile =
@@ -149,15 +168,18 @@ class MdxLiteRtCpuInferenceSessionFactoryTest {
     private class RecordingAllocator : MdxLiteRtSessionAllocator {
         var createCount = 0
         var cpuThreads: Int? = null
+        var xnnPackFlags: Int? = null
 
         override fun create(
             artifact: MdxModelArtifact,
             profile: MdxExecutionProfile,
             cpuThreads: Int,
+            xnnPackFlags: Int?,
             compatibility: MdxCompatibilityDecision,
         ): MdxInferenceSession {
             createCount += 1
             this.cpuThreads = cpuThreads
+            this.xnnPackFlags = xnnPackFlags
             return FakeSession(cpuThreads)
         }
     }
