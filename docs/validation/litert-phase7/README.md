@@ -120,6 +120,77 @@ It connects to the real `PlaybackService` session and exercises completed-cache
 adoption, pause, seek, resume, and blend commands. The debug-only cache command
 is intentionally not part of the release graph.
 
+## Model and queue lifecycle stages
+
+`switching` downloads a secondary preset without selecting it, changes the
+active model after the primary run has published a ready window, and verifies
+that the admitted run finishes under its original identity. The next run must
+create a separate cache entry under the secondary model:
+
+```powershell
+.\tools\run_phase7_validation.ps1 `
+  -Serial <serial> `
+  -ProcessAbi arm64-v8a `
+  -Stage switching `
+  -BackendMode cpu `
+  -KeepAppData `
+  -ModelId uvr_mdxnet_3_9662 `
+  -SecondaryModelId uvr_mdxnet_kara `
+  -SourcePath <short-fixture-path> `
+  -FixtureId coast_town_short_wav `
+  -PreserveMediaStoreSource
+```
+
+Pass the primary cache key from that report to `playback`, together with the
+same `SecondaryModelId`, to change the active model while the real
+MediaSession holds the primary cache read lease. Pause, seek, resume, and blend
+must continue using the original manifest and stems.
+
+`background` invokes the real offline-separation session command, waits for
+the first playable window, sends Home, and requires the service-owned run to
+finish under the same identity:
+
+```powershell
+.\tools\run_phase7_validation.ps1 `
+  -Serial <serial> `
+  -ProcessAbi arm64-v8a `
+  -Stage background `
+  -BackendMode auto `
+  -KeepAppData `
+  -SourcePath <full-wav-fixture-path> `
+  -FixtureId coast_town_full_wav
+```
+
+The host temporarily wakes the device and extends its screen-off timeout to 30
+minutes so this stage isolates Home/background behavior from an OEM lock-screen
+app-kill policy. The original timeout is restored in `finally` and the override
+is recorded in the input envelope. Media preparation is retried only if the
+service's asynchronous startup restoration removes the requested item.
+
+`prefetch` uses two different, frozen audio identities. The current fixture is
+completed first; the next fixture must stop after the requested two ready
+windows and then finish under the same cache key after the simulated song
+transition:
+
+```powershell
+.\tools\run_phase7_validation.ps1 `
+  -Serial <serial> `
+  -ProcessAbi arm64-v8a `
+  -Stage prefetch `
+  -BackendMode auto `
+  -KeepAppData `
+  -CurrentSourcePath <synthetic-mix-path> `
+  -CurrentFixtureId synthetic_mix `
+  -SourcePath <short-fixture-path> `
+  -FixtureId coast_town_short_wav
+```
+
+The host verifies both files against `fixtures-v1.json` before pushing them.
+Using the same audio for both songs is invalid because exact cache identity is
+content-based, not MediaStore-row-based. `background` and `prefetch` require
+`BackendMode=auto` because they deliberately exercise the production service
+graph.
+
 Reports generated before the v2 revision retain `phase7-thresholds-v1` in
 their identity and are historical evidence only. The promotion matrix must be
 rerun with v2 after the runner/app decision commit is frozen.

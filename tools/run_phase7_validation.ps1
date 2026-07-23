@@ -7,17 +7,30 @@ param(
     [string]$ProcessAbi,
 
     [string]$ModelId = "uvr_mdxnet_3_9662",
+    [string]$SecondaryModelId = "",
 
-    [ValidateSet("identity", "acquisition", "worker", "lifecycle", "recreation", "playback")]
+    [ValidateSet(
+        "identity",
+        "acquisition",
+        "worker",
+        "lifecycle",
+        "recreation",
+        "playback",
+        "switching",
+        "background",
+        "prefetch"
+    )]
     [string]$Stage = "identity",
 
     [string]$SourcePath = "",
+    [string]$CurrentSourcePath = "",
 
     [string]$FixtureId = "coast_town_full_mp3",
+    [string]$CurrentFixtureId = "",
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v5",
+    [string]$RunnerRevision = "phase7-runner-v10",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet("none", "setup", "probe", "invocation-after-ready")]
@@ -42,7 +55,15 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $package = "com.wluhwluh.booming.sourcesep.debug"
 $runner = "$package.test/androidx.test.runner.AndroidJUnitRunner"
-$sourceStages = @("worker", "lifecycle", "recreation", "playback")
+$sourceStages = @(
+    "worker",
+    "lifecycle",
+    "recreation",
+    "playback",
+    "switching",
+    "background",
+    "prefetch"
+)
 $testClass = if ($Stage -in $sourceStages) {
     "com.mardous.booming.separation.SourceSeparationPhase7WorkerDeviceTest"
 } else {
@@ -54,6 +75,9 @@ $testMethod = switch ($Stage) {
     "lifecycle" { "validateWorkerLifecycle"; break }
     "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
     "playback" { "validateMediaSessionPlayback"; break }
+    "switching" { "validateActiveModelSwitch"; break }
+    "background" { "validateBackgroundServiceContinuation"; break }
+    "prefetch" { "validateNextSongPrefetch"; break }
     default { "validateDeviceEvidenceIdentity" }
 }
 $reportStage = $Stage
@@ -96,8 +120,8 @@ if ($BackendMode -eq "auto" -and ($ProcessorCount -gt 0 -or $XnnPackFlags -ge 0)
 if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "worker")) {
     throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
 }
-if ($PreserveMediaStoreSource -and $Stage -ne "worker") {
-    throw "PreserveMediaStoreSource applies only to the worker stage."
+if ($PreserveMediaStoreSource -and $Stage -notin @("worker", "switching")) {
+    throw "PreserveMediaStoreSource applies only to worker and switching stages."
 }
 if ($Stage -ne "lifecycle" -and
         ($LifecycleScenario -ne "sequential" -or $LifecycleSessionMode -ne "single-use")) {
@@ -109,6 +133,21 @@ if ($BackendMode -eq "auto" -and $Stage -eq "lifecycle" -and
 }
 if ($Stage -eq "playback" -and $CacheKey -notmatch '^[0-9a-f]{64}$') {
     throw "Playback stage requires a 64-character lowercase cache key."
+}
+if ($Stage -eq "switching" -and [string]::IsNullOrWhiteSpace($SecondaryModelId)) {
+    throw "Switching stage requires SecondaryModelId."
+}
+if (-not [string]::IsNullOrWhiteSpace($SecondaryModelId) -and
+        $SecondaryModelId -eq $ModelId) {
+    throw "SecondaryModelId must differ from ModelId."
+}
+if ($Stage -in @("background", "prefetch") -and $BackendMode -ne "auto") {
+    throw "$Stage uses the production service graph and requires BackendMode=auto."
+}
+if ($Stage -eq "prefetch" -and
+        ([string]::IsNullOrWhiteSpace($CurrentSourcePath) -or
+        [string]::IsNullOrWhiteSpace($CurrentFixtureId))) {
+    throw "Prefetch requires CurrentSourcePath and CurrentFixtureId."
 }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "build\phase7-validation"
@@ -220,6 +259,11 @@ function Get-CatalogModel([string]$Id) {
 }
 
 $model = Get-CatalogModel $ModelId
+$secondaryModel = if ([string]::IsNullOrWhiteSpace($SecondaryModelId)) {
+    $null
+} else {
+    Get-CatalogModel $SecondaryModelId
+}
 $catalogSha256 = Get-Sha256 $catalogPath
 $thresholds = Get-Content -LiteralPath $thresholdsPath -Raw | ConvertFrom-Json
 $fixtures = Get-Content -LiteralPath $fixturesPath -Raw | ConvertFrom-Json
@@ -235,6 +279,13 @@ $profileId = if ($BackendMode -eq "auto") {
 }
 $backendName = if ($BackendMode -eq "auto") { "LiteRtAuto" } else { "LiteRtCpu" }
 $fixture = @($fixtures.fixtures) | Where-Object { $_.fixtureId -eq $FixtureId } | Select-Object -First 1
+$currentFixture = if ($Stage -eq "prefetch") {
+    @($fixtures.fixtures) |
+        Where-Object { $_.fixtureId -eq $CurrentFixtureId } |
+        Select-Object -First 1
+} else {
+    $null
+}
 if ($Stage -in $sourceStages) {
     if ($null -eq $fixture) { throw "Fixture is absent from fixtures-v1.json: $FixtureId" }
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
@@ -247,12 +298,31 @@ if ($Stage -in $sourceStages) {
         throw "Source fixture identity does not match $FixtureId."
     }
 }
+if ($Stage -eq "prefetch") {
+    if ($null -eq $currentFixture) {
+        throw "Fixture is absent from fixtures-v1.json: $CurrentFixtureId"
+    }
+    if (-not (Test-Path -LiteralPath $CurrentSourcePath -PathType Leaf)) {
+        throw "Current source fixture file not found: $CurrentSourcePath"
+    }
+    $currentSourcePath = (Resolve-Path -LiteralPath $CurrentSourcePath).Path
+    $currentSourceBytes = (Get-Item -LiteralPath $currentSourcePath).Length
+    $currentSourceSha256 = Get-Sha256 $currentSourcePath
+    if ($currentSourceBytes -ne [int64]$currentFixture.byteSize -or
+            $currentSourceSha256 -ne $currentFixture.sha256) {
+        throw "Current source fixture identity does not match $CurrentFixtureId."
+    }
+}
 $appCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 $appApk = $null
 $testApk = $null
 $remoteSourcePath = ""
+$remoteCurrentSourcePath = ""
 $remoteArtifactDirectory = ""
 $expectedRemoteArtifactDirectory = "files/phase7-validation-artifacts/$RunId"
+$backgroundScreenTimeoutMs = 30 * 60 * 1000
+$originalScreenOffTimeout = ""
+$screenTimeoutChanged = $false
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) { throw "OutputRoot must not be empty." }
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
@@ -315,6 +385,14 @@ try {
         "-e", "fixturesVersion", $fixtures.schemaVersion,
         "-e", "cleanInstallScenario", $((-not $KeepAppData).ToString().ToLowerInvariant())
     )
+    if ($null -ne $secondaryModel) {
+        $instrumentArguments += @(
+            "-e", "secondaryModelId", $SecondaryModelId,
+            "-e", "secondaryArtifactSha256", $secondaryModel.Artifact.tflite.sha256,
+            "-e", "secondaryContractId", $secondaryModel.Entry.contractId,
+            "-e", "secondaryContractSchemaVersion", [string]$secondaryModel.Contract.contractSchemaVersion
+        )
+    }
     if ($Stage -in $sourceStages) {
         $sourceLeaf = Split-Path -Leaf $sourcePath
         if ($sourceLeaf -notmatch '^[A-Za-z0-9._-]+$') {
@@ -337,6 +415,27 @@ try {
             "-e", "fixtureCodec", $fixture.codec,
             "-e", "fixtureDecodeClass", $fixture.decodeClass
         )
+        if ($Stage -eq "prefetch") {
+            $currentSourceLeaf = Split-Path -Leaf $currentSourcePath
+            if ($currentSourceLeaf -notmatch '^[A-Za-z0-9._-]+$') {
+                throw "Current source fixture filename contains unsupported characters: $currentSourceLeaf"
+            }
+            $remoteCurrentSourcePath = "/storage/emulated/0/Music/booming-ss-phase7-$RunId-current-$currentSourceLeaf"
+            Invoke-Adb push $currentSourcePath $remoteCurrentSourcePath
+            Invoke-Adb shell chmod 644 $remoteCurrentSourcePath
+            $instrumentArguments += @(
+                "-e", "currentSourcePath", $remoteCurrentSourcePath,
+                "-e", "currentFixtureId", $currentFixture.fixtureId,
+                "-e", "currentFixtureFileName", $currentFixture.fileName,
+                "-e", "currentFixtureBytes", [string]$currentFixture.byteSize,
+                "-e", "currentFixtureSha256", $currentFixture.sha256,
+                "-e", "currentFixtureDurationUs", [string]$currentFixture.durationUs,
+                "-e", "currentFixtureSampleRate", [string]$currentFixture.sampleRate,
+                "-e", "currentFixtureChannels", [string]$currentFixture.channels,
+                "-e", "currentFixtureCodec", $currentFixture.codec,
+                "-e", "currentFixtureDecodeClass", $currentFixture.decodeClass
+            )
+        }
         $instrumentArguments += @(
             "-e", "runClass", $RunClass,
             "-e", "cleanInstallScenario", $CleanInstallScenario.ToString().ToLowerInvariant(),
@@ -351,7 +450,7 @@ try {
                 "-e", "lifecycleSessionMode", $LifecycleSessionMode
             )
         }
-        if ($Stage -eq "worker" -and $PreserveMediaStoreSource) {
+        if ($Stage -in @("worker", "switching") -and $PreserveMediaStoreSource) {
             $instrumentArguments += @(
                 "-e", "preserveMediaStoreSource",
                 "true"
@@ -369,6 +468,19 @@ try {
     }
     if (-not [string]::IsNullOrWhiteSpace($litertSha256)) {
         $instrumentArguments += @("-e", "litertSha256", $litertSha256)
+    }
+
+    if ($Stage -eq "background") {
+        $originalScreenOffTimeout = (
+            & $adb -s $Serial shell settings get system screen_off_timeout
+        ).Trim()
+        if ($LASTEXITCODE -ne 0 -or $originalScreenOffTimeout -notmatch '^\d+$') {
+            throw "Could not read the device screen-off timeout."
+        }
+        Invoke-Adb shell settings put system screen_off_timeout $backgroundScreenTimeoutMs
+        $screenTimeoutChanged = $true
+        Invoke-Adb shell input keyevent KEYCODE_WAKEUP
+        Invoke-Adb shell wm dismiss-keyguard
     }
 
     Invoke-Adb shell am force-stop $package
@@ -476,6 +588,16 @@ try {
         testApk = [ordered]@{ path = $testApk.Name; sha256 = $testApkSha256; bytes = $testApk.Length }
         catalog = [ordered]@{ path = "app/src/main/assets/source-separation/model-catalog-v2.json"; sha256 = $catalogSha256; sourceRevision = $catalogSourceRevision }
         model = [ordered]@{ modelId = $ModelId; releaseTag = $artifact.releaseAsset.tag; fileName = $artifact.fileName; sha256 = $artifact.sha256; contractId = $model.Entry.contractId; contractSchemaVersion = $model.Contract.contractSchemaVersion; pipelineCompatibilityVersion = $pipelineVersion }
+        secondaryModel = if ($null -ne $secondaryModel) {
+            [ordered]@{
+                modelId = $SecondaryModelId
+                releaseTag = $secondaryModel.Artifact.tflite.releaseAsset.tag
+                fileName = $secondaryModel.Artifact.tflite.fileName
+                sha256 = $secondaryModel.Artifact.tflite.sha256
+                contractId = $secondaryModel.Entry.contractId
+                contractSchemaVersion = $secondaryModel.Contract.contractSchemaVersion
+            }
+        } else { $null }
         runtime = [ordered]@{ id = "litert"; version = "2.1.5"; abi = $ProcessAbi; nativeLibrarySha256 = $litertSha256 }
         thresholdsVersion = $thresholds.schemaVersion
         fixturesVersion = $fixtures.schemaVersion
@@ -491,8 +613,24 @@ try {
                 backendMode = $BackendMode
                 backend = $backendName
                 autoFailpoint = $AutoFailpoint
+                screenTimeoutOverrideMs = if ($Stage -eq "background") {
+                    $backgroundScreenTimeoutMs
+                } else { $null }
                 lifecycleScenario = if ($Stage -eq "lifecycle") { $LifecycleScenario } else { $null }
                 lifecycleSessionMode = if ($Stage -eq "lifecycle") { $LifecycleSessionMode } else { $null }
+                currentFixture = if ($null -ne $currentFixture) {
+                    [ordered]@{
+                        fixtureId = $currentFixture.fixtureId
+                        fileName = $currentFixture.fileName
+                        byteSize = [int64]$currentFixture.byteSize
+                        sha256 = $currentFixture.sha256
+                        durationUs = [int64]$currentFixture.durationUs
+                        sampleRate = [int]$currentFixture.sampleRate
+                        channels = [int]$currentFixture.channels
+                        codec = $currentFixture.codec
+                        decodeClass = $currentFixture.decodeClass
+                    }
+                } else { $null }
             }
         } else { $null }
     }
@@ -505,8 +643,15 @@ try {
     Write-Host "Saved Phase 7 $reportStage report to $reportPath"
     Write-Host "Saved Phase 7 input envelope to $envelopePath"
 } finally {
+    if ($screenTimeoutChanged) {
+        & $adb -s $Serial shell settings put system screen_off_timeout `
+            $originalScreenOffTimeout 2>$null | Out-Null
+    }
     if (-not [string]::IsNullOrWhiteSpace($remoteSourcePath)) {
         & $adb -s $Serial shell rm -f $remoteSourcePath 2>$null | Out-Null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($remoteCurrentSourcePath)) {
+        & $adb -s $Serial shell rm -f $remoteCurrentSourcePath 2>$null | Out-Null
     }
     if ($remoteArtifactDirectory -eq $expectedRemoteArtifactDirectory) {
         & $adb -s $Serial shell run-as $package rm -rf -- `

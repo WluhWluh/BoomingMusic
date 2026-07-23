@@ -2196,15 +2196,26 @@ The S25 GPU export compared with the desktop ORT reference at PCM16
 quantization equivalence: exact frame counts, maximum one-LSB sample delta,
 and maximum two-LSB join delta. S25 MediaSession playback and both-device
 Auto lifecycle scenarios passed. Production-worker fault injection also
-passed for setup, probe, and invocation-after-ready; each report proves GPU
-cleanup before CPU creation and preserves the same cache identity.
+passed for setup, probe, and invocation-after-ready on both devices; each
+report proves GPU cleanup before CPU creation and preserves the same cache
+identity.
+
+Runner v10 also passed active-model changes during an admitted run and during
+a completed-cache MediaSession lease. S10 passed both 9662-to-KARA and
+KARA-to-9662; S25 passed 9662-to-KARA. The original run/playback identity was
+retained and the subsequent model received a separate cache entry. Home after
+the first ready window completed the full WAV on S10 and S25 under the same
+service-owned run. Two-window next-song prefetch stopped incomplete and then
+completed under the same key after transition on both devices. The prefetch
+case uses different frozen current/next audio identities so content-addressed
+cache reuse cannot produce a false pass.
 
 These are not promotion results yet. The v2 threshold revision must be used to
 rerun the affected rows after the final decision commit. S10 GPU audio export,
-repeated warm/resource/thermal measurements, full playback coverage on both
-phones, source-format corpus coverage, model switching, KARA, and the final
-catalog promotion matrix remain open. Pure x86 retains ordinary playback but
-its repeated source-separation session allocation is rejected; x86_64 remains
+repeated warm/resource/thermal measurements, representative listening and UI
+coverage, source-format corpus coverage, KARA full-song qualification, and the
+final catalog promotion matrix remain open. Pure x86 retains ordinary playback
+but source separation now fails closed before native allocation; x86_64 remains
 CPU evidence only until a separate GPU qualification exists.
 
 #### Phase 7A: Freeze the validation inputs and evidence format
@@ -2282,11 +2293,11 @@ CPU evidence only until a separate GPU qualification exists.
   source fingerprint, join placement, and fallback reason. A format-specific
   decoder regression blocks stable promotion even when the canonical full-track
   fixture passes.
-- [ ] Switch models while a run and a separated playback session are active.
+- [x] Switch models while a run and a separated playback session are active.
   Verify that admitted work and the active playback session retain their exact
   cache identity, that a later run creates a different entry, and that no
   output is spliced or silently re-inferred under the new model.
-- [ ] Run `gpu-auto-fp32-v1` through the same full-song flow on S10 and S25
+- [x] Run `gpu-auto-fp32-v1` through the same full-song flow on S10 and S25
   only when eligibility permits it. Exercise setup/probe/invocation failure
   before output and after ready windows have been published through the debug
   validation harness, then verify one-way recreation of the same run on LiteRT

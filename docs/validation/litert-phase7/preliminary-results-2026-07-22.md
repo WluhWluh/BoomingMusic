@@ -1,7 +1,9 @@
 # Phase 7 Preliminary Results
 
 These results are local, pre-promotion evidence for the 9662 FP32 contract
-`uvr_mdxnet_3_9662@2` and LiteRT 2.1.5. The corresponding reports are ignored
+`uvr_mdxnet_3_9662@2` and LiteRT 2.1.5. Performance rows produced before the
+v2 threshold remain historical; the later lifecycle rows use
+`phase7-thresholds-v2` and runner v10. The corresponding reports are ignored
 working artifacts. They are identified here by runner ID so the evidence can
 be reproduced without storing audio in this repository.
 
@@ -45,6 +47,9 @@ Each run proved one GPU session was closed before the CPU session was created.
 | Target | Failpoint | Backend used | Fallback stage | Result |
 | --- | --- | --- | --- | --- |
 | Galaxy S10 arm64 | setup | `LiteRtCpu` | `GpuSetup` | passed |
+| Galaxy S10 arm64 | probe | `LiteRtCpu` | `GpuProbeValidation` | passed |
+| Galaxy S10 arm64 | invocation after ready windows | `LiteRtCpu` | `GpuInvocation` | passed |
+| Galaxy S25 arm64 | setup | `LiteRtCpu` | `GpuSetup` | passed |
 | Galaxy S25 arm64 | probe | `LiteRtCpu` | `GpuProbeValidation` | passed |
 | Galaxy S25 arm64 | invocation after ready windows | `LiteRtCpu` | `GpuInvocation` | passed |
 
@@ -53,21 +58,49 @@ completed the full track on CPU. Cancellation is not treated as a fallback.
 
 ## Lifecycle Matrix
 
-The sequential `single-use` lifecycle scenario passed on both S10 arm64 and
-S25 arm64 with Auto: pause/resume, a seek from ready into pending work, and
-cancellation. The S25 report is
-`s25-arm64-9662-auto-lifecycle-short-v2`; its retained completed manifest
-records `LiteRtGpu`. The shared-reusable mode remains diagnostic CPU evidence
-and is not used for Auto promotion.
+The sequential `single-use` lifecycle scenario passed on S10 arm64, S25 arm64,
+and API 37 x86_64: pause/resume, a seek from ready into pending work, and
+cancellation. Auto passed on both physical devices and retained `LiteRtGpu` in
+the completed manifests. The shared-reusable mode remains diagnostic CPU
+evidence and is not used for Auto promotion.
+
+Production model, MediaSession, and queue lifecycle evidence is:
+
+| Target | Active-model switch | Playback-time switch | Home/background full WAV | Next-song prefetch |
+| --- | --- | --- | --- | --- |
+| Galaxy S10 arm64 | 9662 to KARA and KARA to 9662 passed | 9662 lease retained after KARA selection | 187474 ms; first ready 8959 ms | two windows in 12433 ms; same key completed after transition |
+| Galaxy S25 arm64 | 9662 to KARA passed | 9662 lease retained after KARA selection | 41564 ms; first ready 2828 ms | two windows in 2809 ms; same key completed after transition |
+
+The switching tests prove that an admitted run retains its original model and
+contract after selection changes, while the next run creates a second exact
+cache entry. Playback-time switching keeps the original read lease through
+pause, seek, resume, and blend. Prefetch uses the frozen synthetic mix as the
+current song and the 12-second Coast Town WAV as the next song, so content-based
+cache identity cannot collapse the two rows.
+
+An initial S25 background attempt was force-stopped by Samsung MARs after the
+30-second display timeout. Runner v10 temporarily extends and then restores the
+screen timeout, isolating Home/background continuation from lock-screen OEM
+policy. The S10 startup also exposed a service-restoration race; the bounded
+media preparation retry needed two attempts in the v10 run and then completed
+normally.
+
+Pure API 26 x86 preflight now rejects 9662, KARA, and HQ4 as `unsupported`
+without any native allocator call. This preserves ordinary x86 playback while
+preventing the lifecycle-unsafe source-separation route.
 
 ## Open Evidence
 
-- Rerun all promotion rows with `phase7-thresholds-v2`.
-- Complete three warm repetitions, thermal/resource measurements, and playback
-  coverage on both physical devices.
+- Rerun the final promotion rows from the frozen decision commit; current local
+  reports still identify the preceding app commit.
+- Complete three warm repetitions, continuous thermal/resource measurements,
+  source-format coverage, and representative listening/UI coverage on both
+  physical devices.
 - Compare the S10 GPU export with the desktop reference after freeing or
   staging sufficient local storage.
-- Test KARA, model switching, background continuation, next-song prefetch,
-  and the source-format corpus.
+- Complete KARA CPU full-song, cancellation, playback, resource, and listening
+  rows on every ABI for which it may become selectable.
+- Finish the source-format corpus and recover the overloaded API 37 x86_64 AVD
+  before rerunning any remaining process-recovery rows there.
 - Keep pure x86 ordinary-playback support, but mark source separation
   `unsupported` until a lifecycle-safe runtime strategy exists.
