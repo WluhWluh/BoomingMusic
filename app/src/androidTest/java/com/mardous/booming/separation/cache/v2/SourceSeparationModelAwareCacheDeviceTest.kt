@@ -307,6 +307,7 @@ class SourceSeparationModelAwareCacheDeviceTest {
                     .put("runtimeProfileId", record.runtimeProfileId)
                     .put("precision", record.precision)
                     .put("elapsedMs", record.elapsedMs)
+                    .put("fallbackStage", record.fallbackStage)
                     .put("fallbackReason", record.fallbackReason)
             }))
     }

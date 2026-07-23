@@ -343,6 +343,9 @@ class MdxRangeSeparator(
                             timing = timing,
                             shouldCancel = shouldCancel,
                         )
+                        // Auto may switch from GPU to CPU during invocation; capture the
+                        // post-run diagnostics so the completed cache records the real path.
+                        runtimeDiagnostics = session.diagnostics
                         throwIfCanceled(shouldCancel)
                         val scaledModelOutputWindow = measureElapsed(timing, "Output compensation") {
                             compensateMdxModelOutput(

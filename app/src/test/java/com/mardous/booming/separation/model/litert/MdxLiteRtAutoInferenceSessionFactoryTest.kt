@@ -164,6 +164,8 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
         assertEquals(MdxLiteRtAutoSessionState.CpuFallback, diagnostics.state)
         assertEquals(MdxLiteRtAutoFailureStage.GpuSetup, diagnostics.fallbackStage)
         assertEquals(MdxInferenceBackend.LiteRtCpu, diagnostics.acceptedOutputBackend)
+        assertEquals(MdxLiteRtAutoFailureStage.GpuSetup.name, session.diagnostics.fallbackStage)
+        assertEquals(gpuFailure.message, session.diagnostics.fallbackReason)
         session.close()
     }
 
@@ -197,9 +199,10 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
     @Test
     fun `GPU invocation failure retries same input once and latches CPU`() {
         val profile = profile("uvr_mdxnet_3_9662")
+        val gpuFailure = backendFailure(MdxLiteRtFailureStage.Invocation)
         val gpuSession = RecordingSession(
             backend = MdxInferenceBackend.LiteRtGpu,
-            runFailure = backendFailure(MdxLiteRtFailureStage.Invocation),
+            runFailure = gpuFailure,
         )
         val cpuSession = RecordingSession(
             backend = MdxInferenceBackend.LiteRtCpu,
@@ -226,6 +229,8 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
         assertEquals(MdxLiteRtAutoSessionState.CpuFallback, diagnostics.state)
         assertEquals(MdxLiteRtAutoFailureStage.GpuInvocation, diagnostics.fallbackStage)
         assertEquals(MdxInferenceBackend.LiteRtCpu, diagnostics.acceptedOutputBackend)
+        assertEquals(MdxLiteRtAutoFailureStage.GpuInvocation.name, session.diagnostics.fallbackStage)
+        assertEquals(gpuFailure.message, session.diagnostics.fallbackReason)
         session.close()
     }
 

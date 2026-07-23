@@ -209,6 +209,7 @@ data class SourceSeparationCacheRuntimeRecord(
     val runtimeProfileId: String,
     val precision: String,
     val elapsedMs: Long,
+    val fallbackStage: String? = null,
     val fallbackReason: String? = null,
 ) {
     init {

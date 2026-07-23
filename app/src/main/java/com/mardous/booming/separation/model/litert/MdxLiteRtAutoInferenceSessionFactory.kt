@@ -540,6 +540,8 @@ private class MdxLiteRtAutoInferenceSession(
                     snapshot.fallbackStage?.let { append(", fallbackStage=").append(it.name) }
                     snapshot.fallbackReason?.let { append(", fallbackReason=").append(it) }
                 },
+                fallbackStage = snapshot.fallbackStage?.name,
+                fallbackReason = snapshot.fallbackReason,
             )
         }
 

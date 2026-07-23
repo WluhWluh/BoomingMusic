@@ -212,6 +212,8 @@ class SourceSeparationCacheRunCoordinator(
                 runtimeProfileId = result.executionProfile.profileId,
                 precision = "fp32",
                 elapsedMs = result.elapsedMs,
+                fallbackStage = result.runtimeDiagnostics.fallbackStage,
+                fallbackReason = result.runtimeDiagnostics.fallbackReason,
             ),
             updatedAtEpochMs = nowEpochMs(),
         )

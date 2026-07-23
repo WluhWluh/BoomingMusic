@@ -101,6 +101,30 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `completion preserves the concrete backend and auto fallback diagnostics`() {
+        val fixture = fixture()
+        val run = fixture.beginReady()
+        val preparation = fixture.preparation(run, SourceSeparationSegmentState.Ready)
+        fixture.coordinator.updatePreparation(run, preparation)
+        val result = fixture.result(preparation)
+        val completed = fixture.coordinator.complete(
+            run,
+            result.copy(
+                runtimeDiagnostics = result.runtimeDiagnostics.copy(
+                    backend = MdxInferenceBackend.LiteRtCpu,
+                    fallbackStage = "GpuInvocation",
+                    fallbackReason = "Injected GPU invocation failure.",
+                ),
+            ),
+        )
+
+        val record = completed.runtimeRecords.single()
+        assertEquals(MdxInferenceBackend.LiteRtCpu.name, record.backend)
+        assertEquals("GpuInvocation", record.fallbackStage)
+        assertEquals("Injected GPU invocation failure.", record.fallbackReason)
+    }
+
+    @Test
     fun `source replacement cannot complete or publish a ready cache`() {
         val fixture = fixture()
         val run = fixture.beginReady()

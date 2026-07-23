@@ -176,6 +176,8 @@ data class MdxRuntimeDiagnostics(
     val backend: MdxInferenceBackend,
     val cpuThreads: Int?,
     val detail: String,
+    val fallbackStage: String? = null,
+    val fallbackReason: String? = null,
 ) {
     fun toDisplayText(): String = buildString {
         append("Runtime: ").append(runtimeName)
