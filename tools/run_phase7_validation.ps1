@@ -20,6 +20,7 @@ param(
     [int]$ProcessorCount = 0,
     [ValidateSet("cold-session", "warm-session")]
     [string]$RunClass = "cold-session",
+    [bool]$WindowDecode = $true,
     [switch]$SkipBuild,
     [switch]$KeepAppData,
     [switch]$CleanInstallScenario,
@@ -66,8 +67,9 @@ if ($ProcessorCount -lt 0) {
     throw "ProcessorCount must be zero (device default) or a positive integer."
 }
 if ($Stage -ne "worker" -and ($ProcessorCount -gt 0 -or $ExportCacheAudio -or
-        $RunClass -ne "cold-session" -or $CleanInstallScenario)) {
-    throw "ProcessorCount, RunClass, CleanInstallScenario, and ExportCacheAudio apply only to the worker stage."
+        $RunClass -ne "cold-session" -or $CleanInstallScenario -or
+        -not $WindowDecode)) {
+    throw "ProcessorCount, RunClass, WindowDecode, CleanInstallScenario, and ExportCacheAudio apply only to the worker stage."
 }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "build\phase7-validation"
@@ -238,7 +240,8 @@ try {
         )
         $instrumentArguments += @(
             "-e", "runClass", $RunClass,
-            "-e", "cleanInstallScenario", $CleanInstallScenario.ToString().ToLowerInvariant()
+            "-e", "cleanInstallScenario", $CleanInstallScenario.ToString().ToLowerInvariant(),
+            "-e", "windowDecodeEnabled", $WindowDecode.ToString().ToLowerInvariant()
         )
         if ($ProcessorCount -gt 0) {
             $instrumentArguments += @("-e", "processorCount", [string]$ProcessorCount)
@@ -327,6 +330,7 @@ try {
             [ordered]@{
                 class = $RunClass
                 cleanInstallScenario = [bool]$CleanInstallScenario
+                windowDecodeEnabled = $WindowDecode
                 processorCountOverride = if ($ProcessorCount -gt 0) { $ProcessorCount } else { $null }
             }
         } else { $null }

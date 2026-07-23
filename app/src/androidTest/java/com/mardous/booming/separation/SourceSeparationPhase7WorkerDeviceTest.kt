@@ -68,9 +68,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val registeredUri = registerSourceInMediaStore(context, sourcePath, runId)
             mediaUri = registeredUri
             val source = resolveMediaStoreSong(context, registeredUri, sourcePath)
+            val windowDecodeEnabled = arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true)
             val preferences = get<SharedPreferences>(SharedPreferences::class.java)
             preferences.edit()
-                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, false)
+                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, windowDecodeEnabled)
                 .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
                 .putInt(
                     SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
@@ -280,7 +281,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("sourcePath", sourcePath)
                 .put("songId", source.id)
                 .put("songDurationMs", source.duration)
-                .put("windowDecodeEnabled", false)
+                .put("windowDecodeEnabled", windowDecodeEnabled)
                 .put("cpuThreads", runCallbacks.cpuThreads)
                 .put("runtimeDiagnostics", manifest.runtimeRecords.map { it.backend + "/" + it.runtimeProfileId }
                     .joinToString(","))
@@ -535,7 +536,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("runId", runId)
                 .put("class", arguments.getString(ARG_RUN_CLASS) ?: "cold-session")
                 .put("cpuThreads", resolveCpuThreads(arguments.getString(ARG_PROCESSOR_COUNT)?.toIntOrNull()))
-                .put("windowDecodeEnabled", false)
+                .put("windowDecodeEnabled", arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true))
                 .put("cleanInstallScenario", arguments.optionalBoolean(ARG_CLEAN_INSTALL, false))
                 .put("backendRequested", "LiteRtCpu")
                 .put("backendUsed", "LiteRtCpu")
@@ -666,6 +667,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_FIXTURES_VERSION = "fixturesVersion"
         const val ARG_SOURCE_PATH = "sourcePath"
         const val ARG_PROCESSOR_COUNT = "processorCount"
+        const val ARG_WINDOW_DECODE_ENABLED = "windowDecodeEnabled"
         const val ARG_RUN_CLASS = "runClass"
         const val ARG_CLEAN_INSTALL = "cleanInstallScenario"
         const val ARG_FIXTURE_ID = "fixtureId"

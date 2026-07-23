@@ -40,6 +40,8 @@ the artifact retained by a preceding clean acquisition:
 Use `-RunClass warm-session` for declared repetitions. `-ProcessorCount N`
 overrides the processor count seen by the test-only CPU session factory so the
 thread matrix can be reproduced without adding an application preference.
+Window decoding is enabled by default; pass `-WindowDecode:$false` only when
+the full-song fallback path is the explicitly measured case.
 `-ExportCacheAudio` writes the worker's WAV and promoted FLAC stems plus a
 SHA-256 manifest under the ignored `build/phase7-validation` directory. These
 local artifacts may be compared with the frozen desktop ORT references, but
