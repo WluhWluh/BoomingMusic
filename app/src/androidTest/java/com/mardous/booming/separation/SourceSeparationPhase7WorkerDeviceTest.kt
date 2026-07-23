@@ -1276,7 +1276,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("contractSchemaVersion", arguments.requiredInt(ARG_CONTRACT_SCHEMA_VERSION))
                 .put("abi", abi)
                 .put("backend", "LiteRtCpu")
-                .put("profileId", "cpu-default-fp32-v1")
+                .put(
+                    "profileId",
+                    arguments.getString(ARG_PROFILE_ID) ?: "cpu-default-fp32-v1",
+                )
                 .put("precision", "Float32")
             )
             .put("identity", JSONObject()
@@ -1512,6 +1515,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_MODEL_ID = "modelId"
         const val ARG_ARTIFACT_SHA256 = "artifactSha256"
         const val ARG_ARTIFACT_FILE_NAME = "artifactFileName"
+        const val ARG_PROFILE_ID = "profileId"
         const val ARG_CONTRACT_ID = "contractId"
         const val ARG_CONTRACT_SCHEMA_VERSION = "contractSchemaVersion"
         const val ARG_APP_COMMIT = "appCommit"
