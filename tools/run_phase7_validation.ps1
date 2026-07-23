@@ -128,6 +128,27 @@ function Get-Sha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Get-AbiApkFromMetadata([string]$Directory, [string]$Abi) {
+    $metadataPath = Join-Path $Directory "output-metadata.json"
+    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
+        throw "APK output metadata is missing: $metadataPath"
+    }
+    $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+    $element = @($metadata.elements) | Where-Object {
+        @($_.filters) | Where-Object {
+            $_.filterType -eq "ABI" -and $_.value -eq $Abi
+        }
+    } | Select-Object -First 1
+    if ($null -eq $element) {
+        throw "No $Abi app split was declared in $metadataPath."
+    }
+    $path = Join-Path $Directory ([string]$element.outputFile)
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "The declared $Abi app split is missing: $path"
+    }
+    return Get-Item -LiteralPath $path
+}
+
 function Assert-ExportedFile(
     [string]$Path,
     [int64]$ExpectedBytes,
@@ -234,14 +255,17 @@ New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 Push-Location $repoRoot
 try {
     if (-not $SkipBuild) {
-        & .\gradlew.bat :app:assembleGithubDebug --console=plain
-        if ($LASTEXITCODE -ne 0) { throw "Phase 7 app assembly failed." }
         & .\gradlew.bat :app:assembleGithubDebugAndroidTest --console=plain
         if ($LASTEXITCODE -ne 0) { throw "Phase 7 AndroidTest assembly failed." }
+        # AndroidTest configuration emits a universal app APK. Rebuild the app
+        # last so output metadata and files describe the requested ABI splits.
+        & .\gradlew.bat :app:assembleGithubDebug --console=plain
+        if ($LASTEXITCODE -ne 0) { throw "Phase 7 app assembly failed." }
     }
 
-    $appApk = Get-ChildItem "app\build\outputs\apk\github\debug" -Filter "*-$ProcessAbi.apk" |
-        Select-Object -First 1
+    $appApk = Get-AbiApkFromMetadata `
+        -Directory "app\build\outputs\apk\github\debug" `
+        -Abi $ProcessAbi
     $testApk = Get-ChildItem "app\build\outputs\apk\androidTest\github\debug" -Filter "*.apk" |
         Select-Object -First 1
     if ($null -eq $appApk) { throw "No $ProcessAbi app split was found." }
