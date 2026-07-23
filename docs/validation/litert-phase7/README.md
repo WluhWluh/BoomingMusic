@@ -55,6 +55,9 @@ must not be committed to this repository.
 Use `-Stage lifecycle` with the short fixture to exercise pause/resume and
 cancellation against the same production worker and cache coordinator. It
 expects the preceding pinned acquisition and does not export full audio.
+After a normal short-fixture worker run, `-Stage recreation` force-stops the
+app through the standard runner setup and verifies that a new process can
+resolve the exact completed cache, both playback positions, and hydrated PCM.
 
 The local fixture source is the companion
 [`MusicSourceSeparation`](https://github.com/WluhWluh/MusicSourceSeparation)

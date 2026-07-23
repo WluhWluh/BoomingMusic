@@ -513,6 +513,109 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
     }
 
+    @Test
+    fun validateCompletedCacheAfterProcessRestart() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val report = baseReport(context, runId, arguments)
+        var mediaUri: Uri? = null
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            mediaUri = registerSourceInMediaStore(context, sourcePath, runId)
+            val source = resolveMediaStoreSong(context, mediaUri, sourcePath)
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            val active = presetRepository.activeModel()
+            assertTrue(active is SourceSeparationActivePresetState.Reference)
+            val expectedArtifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
+            assertEquals(
+                expectedArtifactSha256,
+                (active as SourceSeparationActivePresetState.Reference).reference.artifactSha256,
+            )
+
+            val runtimeFacade = createCpuRuntimeFacade(
+                context = context,
+                preferences = preferences,
+                presetRepository = presetRepository,
+                processorCount = arguments.getString(ARG_PROCESSOR_COUNT)
+                    ?.toIntOrNull()
+                    ?.takeIf { it > 0 },
+            )
+            val resolution = runtimeFacade.resolve(source)
+            val runtimeSong = (resolution as? SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The recreated process could not resolve the source: $resolution")
+            val status = runtimeFacade.cacheStatus(runtimeSong)
+            assertTrue(status is SourceSeparationModelAwareCacheStatus.Completed)
+            val completed = status as SourceSeparationModelAwareCacheStatus.Completed
+            val output = requireNotNull(completed.manifest.output)
+            assertEquals(expectedArtifactSha256, completed.manifest.identity.artifactSha256)
+            assertTrue(output.outputFrameCount > 0)
+
+            val completedPlayback = requireNotNull(
+                runtimeFacade.openCompletedCache(runtimeSong.cacheKey),
+            )
+            assertTrue(completedPlayback.vocalsFile.isFile)
+            assertTrue(completedPlayback.instrumentalFile.isFile)
+            completedPlayback.close()
+
+            val startPlayback = runtimeFacade.playableStatus(
+                song = runtimeSong,
+                playbackPositionMs = 0L,
+                readyWindowCount = 1,
+            )
+            assertTrue(startPlayback is SourceSeparationModelAwarePlayableStatus.Ready)
+            (startPlayback as SourceSeparationModelAwarePlayableStatus.Ready).playback.close()
+            val tailPlayback = runtimeFacade.playableStatus(
+                song = runtimeSong,
+                playbackPositionMs = (source.duration - SEEK_FROM_END_MS).coerceAtLeast(0L),
+                readyWindowCount = 1,
+            )
+            assertTrue(tailPlayback is SourceSeparationModelAwarePlayableStatus.Ready)
+            (tailPlayback as SourceSeparationModelAwarePlayableStatus.Ready).playback.close()
+
+            val hydrated = requireNotNull(runtimeFacade.openHydratedCache(runtimeSong.cacheKey))
+            assertTrue(hydrated.vocalsPcmFile.isFile)
+            assertTrue(hydrated.instrumentalPcmFile.isFile)
+            hydrated.close()
+
+            report.put("status", "passed")
+            report.put("lifecycle", report.getJSONObject("lifecycle")
+                .put("workerCompleted", true)
+                .put("processRecreationPassed", true)
+            )
+            report.put("audio", report.getJSONObject("audio")
+                .put("finite", true)
+                .put("outputFrameCount", output.outputFrameCount)
+                .put("expectedFrameCount", output.outputFrameCount)
+                .put("frameDelta", 0)
+                .put("stemSemantics", output.stems.joinToString(",") {
+                    it.semantic.name
+                })
+            )
+            report.put("cache", report.getJSONObject("cache")
+                .put("cacheKey", runtimeSong.cacheKey)
+                .put("exactIdentity", true)
+                .put("completedPlayable", true)
+                .put("hydratedPlayable", true)
+                .put("manifestState", completed.manifest.state.name)
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            mediaUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            writeReport(context, runId, "recreation", report)
+        }
+    }
+
     private fun waitForReady(
         worker: SourceSeparationForegroundWorkerCoordinator,
         minimumReadyWindows: Int,

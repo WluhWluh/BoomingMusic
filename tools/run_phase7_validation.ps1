@@ -8,7 +8,7 @@ param(
 
     [string]$ModelId = "uvr_mdxnet_3_9662",
 
-    [ValidateSet("identity", "acquisition", "worker", "lifecycle")]
+    [ValidateSet("identity", "acquisition", "worker", "lifecycle", "recreation")]
     [string]$Stage = "identity",
 
     [string]$SourcePath = "",
@@ -31,7 +31,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $package = "com.wluhwluh.booming.sourcesep.debug"
 $runner = "$package.test/androidx.test.runner.AndroidJUnitRunner"
-$testClass = if ($Stage -in @("worker", "lifecycle")) {
+$sourceStages = @("worker", "lifecycle", "recreation")
+$testClass = if ($Stage -in $sourceStages) {
     "com.mardous.booming.separation.SourceSeparationPhase7WorkerDeviceTest"
 } else {
     "com.mardous.booming.separation.SourceSeparationPhase7DeviceTest"
@@ -40,6 +41,7 @@ $testMethod = switch ($Stage) {
     "acquisition" { "validatePinnedAcquisition"; break }
     "worker" { "validateProductionWorkerCpu"; break }
     "lifecycle" { "validateWorkerLifecycle"; break }
+    "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
     default { "validateDeviceEvidenceIdentity" }
 }
 $reportStage = $Stage
@@ -58,16 +60,16 @@ if ($RunId -notmatch '^[A-Za-z0-9._-]{1,120}$') {
 if ($Stage -eq "acquisition" -and $KeepAppData) {
     throw "The pinned acquisition stage requires a clean app-data scenario."
 }
-if ($Stage -in @("worker", "lifecycle") -and -not $KeepAppData) {
+if ($Stage -in $sourceStages -and -not $KeepAppData) {
     throw "The $Stage stage expects a previously acquired model. Use -KeepAppData."
 }
-if ($Stage -in @("worker", "lifecycle") -and [string]::IsNullOrWhiteSpace($SourcePath)) {
+if ($Stage -in $sourceStages -and [string]::IsNullOrWhiteSpace($SourcePath)) {
     throw "SourcePath is required for the $Stage stage."
 }
 if ($ProcessorCount -lt 0) {
     throw "ProcessorCount must be zero (device default) or a positive integer."
 }
-if ($Stage -notin @("worker", "lifecycle") -and ($ProcessorCount -gt 0 -or $ExportCacheAudio -or
+if ($Stage -notin $sourceStages -and ($ProcessorCount -gt 0 -or $ExportCacheAudio -or
         $RunClass -ne "cold-session" -or $CleanInstallScenario -or
         -not $WindowDecode)) {
     throw "ProcessorCount, RunClass, WindowDecode, CleanInstallScenario, and ExportCacheAudio apply only to the worker stage."
@@ -145,7 +147,7 @@ $catalogSourceRevision = "746bee43db9ece9ec8214c1c74269e21547aed58"
 $pipelineVersion = "$($model.Contract.pipelineCompatibility.pipelineId)-v$($model.Contract.pipelineCompatibility.minimumVersion)"
 $artifact = $model.Artifact.tflite
 $fixture = @($fixtures.fixtures) | Where-Object { $_.fixtureId -eq $FixtureId } | Select-Object -First 1
-if ($Stage -eq "worker") {
+if ($Stage -in $sourceStages) {
     if ($null -eq $fixture) { throw "Fixture is absent from fixtures-v1.json: $FixtureId" }
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
         throw "Source fixture file not found: $SourcePath"
@@ -217,7 +219,7 @@ try {
         "-e", "fixturesVersion", $fixtures.schemaVersion,
         "-e", "cleanInstallScenario", $((-not $KeepAppData).ToString().ToLowerInvariant())
     )
-    if ($Stage -in @("worker", "lifecycle")) {
+    if ($Stage -in $sourceStages) {
         $sourceLeaf = Split-Path -Leaf $sourcePath
         if ($sourceLeaf -notmatch '^[A-Za-z0-9._-]+$') {
             throw "Source fixture filename contains unsupported characters: $sourceLeaf"
@@ -336,7 +338,7 @@ try {
         thresholdsVersion = $thresholds.schemaVersion
         fixturesVersion = $fixtures.schemaVersion
         runnerRevision = $RunnerRevision
-        run = if ($Stage -in @("worker", "lifecycle")) {
+        run = if ($Stage -in $sourceStages) {
             [ordered]@{
                 class = $RunClass
                 cleanInstallScenario = [bool]$CleanInstallScenario
