@@ -318,6 +318,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             check(preferences.edit()
                 .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, windowDecodeEnabled)
                 .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
                 .commit()
             ) { "Could not persist lifecycle test preferences." }
 
@@ -369,6 +370,33 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             assertTrue(pauseWorker.startCurrentSong())
             waitForReady(pauseWorker, minimumReadyWindows = 1)
+            val seekPositionMs = (source.duration - SEEK_FROM_END_MS).coerceAtLeast(0L)
+            val beforeSeek = runtimeFacade.playableStatus(
+                song = runtimeSong,
+                playbackPositionMs = seekPositionMs,
+                readyWindowCount = 1,
+            )
+            if (beforeSeek is SourceSeparationModelAwarePlayableStatus.Ready) {
+                beforeSeek.playback.close()
+            }
+            assertTrue(
+                "The seek target was expected to be pending: $beforeSeek",
+                beforeSeek is SourceSeparationModelAwarePlayableStatus.Processing,
+            )
+            pauseWorker.updatePosition(
+                positionMs = seekPositionMs,
+                durationMs = source.duration,
+                isPlaying = false,
+                sourceSeparationBlend = TEST_BLEND,
+            )
+            waitForReady(pauseWorker, minimumReadyWindows = 1)
+            val afterSeek = runtimeFacade.playableStatus(
+                song = runtimeSong,
+                playbackPositionMs = seekPositionMs,
+                readyWindowCount = 1,
+            )
+            assertTrue(afterSeek is SourceSeparationModelAwarePlayableStatus.Ready)
+            (afterSeek as SourceSeparationModelAwarePlayableStatus.Ready).playback.close()
             pauseWorker.pauseCurrentSong(source)
             waitForPaused(pauseWorker)
             val pausedStatus = runtimeFacade.cacheStatus(runtimeSong)
@@ -421,7 +449,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("status", "passed")
             report.put("lifecycle", report.getJSONObject("lifecycle")
                 .put("pauseResumePassed", true)
+                .put("seekPassed", true)
                 .put("cancellationPassed", true)
+                .put("seekPositionMs", seekPositionMs)
+                .put("seekStartedPending", true)
                 .put("pauseStatus", pausedStatus::class.java.simpleName)
                 .put("resumedStatus", resumedStatus::class.java.simpleName)
                 .put("canceledStatus", canceledStatus::class.java.simpleName)
@@ -903,6 +934,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val REPORT_DIRECTORY = "phase7-validation-reports"
         const val REQUIRED_READY_WINDOWS = 2
         const val TEST_BLEND = 0.23f
+        const val SEEK_FROM_END_MS = 1_000L
         const val POLL_INTERVAL_MS = 250L
         const val WORKER_TIMEOUT_MS = 20 * 60 * 1000L
         const val LIFECYCLE_TIMEOUT_MS = 5 * 60 * 1000L
