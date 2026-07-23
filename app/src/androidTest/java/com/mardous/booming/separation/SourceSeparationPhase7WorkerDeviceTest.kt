@@ -10,6 +10,8 @@ import android.os.Bundle
 import android.os.Build
 import android.os.Debug
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.provider.MediaStore
@@ -39,6 +41,7 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetReposit
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCallbacks
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
+import com.mardous.booming.util.MINIMUM_SONG_DURATION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
@@ -55,6 +58,7 @@ import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -85,14 +89,17 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val source = resolveMediaStoreSong(context, registeredUri, sourcePath)
             val windowDecodeEnabled = arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true)
             val preferences = get<SharedPreferences>(SharedPreferences::class.java)
-            preferences.edit()
+            val preferencesEditor = preferences.edit()
                 .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, windowDecodeEnabled)
                 .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
                 .putInt(
                     SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
                     REQUIRED_READY_WINDOWS,
                 )
-                .apply()
+            if (preserveMediaStoreSource) {
+                preferencesEditor.putInt(MINIMUM_SONG_DURATION, 0)
+            }
+            preferencesEditor.apply()
 
             val presetRepository = get<SourceSeparationPresetRepository>(
                 SourceSeparationPresetRepository::class.java,
@@ -670,42 +677,65 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             assertTrue(
                 "PlaybackService did not expose the debug cache command.",
-                mediaController.availableSessionCommands.contains(playCommand),
-            )
-            val playResult = mediaController.sendCustomCommand(
-                playCommand,
-                Bundle().apply {
-                    putString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY, cacheKey)
+                onMediaControllerThread(mediaController) {
+                    mediaController.availableSessionCommands.contains(playCommand)
                 },
-            ).get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            assertEquals(SessionResult.RESULT_SUCCESS, playResult.resultCode)
-            waitForMediaController("cache playback adoption") {
+            )
+            val playResultFuture = onMediaControllerThread(mediaController) {
+                mediaController.sendCustomCommand(
+                    playCommand,
+                    Bundle().apply {
+                        putString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY, cacheKey)
+                    },
+                )
+            }
+            val playResult = playResultFuture.get(
+                MEDIA_SESSION_TIMEOUT_SECONDS,
+                TimeUnit.SECONDS,
+            )
+            assertEquals(
+                "PlaybackService rejected the completed cache: " +
+                    playResult.extras.getString(
+                        Playback.EXTRA_SOURCE_SEPARATION_MESSAGE,
+                    ).orEmpty(),
+                SessionResult.RESULT_SUCCESS,
+                playResult.resultCode,
+            )
+            waitForMediaController(mediaController, "cache playback adoption") {
                 mediaController.currentMediaItem?.mediaId == manifest.song.songId.toString() &&
                     mediaController.duration > 0L
             }
 
-            mediaController.pause()
-            waitForMediaController("pause") {
+            onMediaControllerThread(mediaController) { mediaController.pause() }
+            waitForMediaController(mediaController, "pause") {
                 !mediaController.playWhenReady && !mediaController.isPlaying
             }
-            val targetPositionMs = (mediaController.duration - SEEK_FROM_END_MS)
-                .coerceAtLeast(0L)
-                .coerceAtMost(5_000L)
-            mediaController.seekTo(targetPositionMs)
-            waitForMediaController("seek") {
+            val targetPositionMs = onMediaControllerThread(mediaController) {
+                (mediaController.duration - SEEK_FROM_END_MS)
+                    .coerceAtLeast(0L)
+                    .coerceAtMost(5_000L)
+            }
+            onMediaControllerThread(mediaController) { mediaController.seekTo(targetPositionMs) }
+            waitForMediaController(mediaController, "seek") {
                 abs(mediaController.currentPosition - targetPositionMs) <=
                     MEDIA_SESSION_SEEK_TOLERANCE_MS
             }
-            mediaController.play()
-            waitForMediaController("resume") { mediaController.playWhenReady }
+            onMediaControllerThread(mediaController) { mediaController.play() }
+            waitForMediaController(mediaController, "resume") { mediaController.playWhenReady }
 
-            val blendResult = mediaController.sendCustomCommand(
-                SessionCommand(Playback.SET_SOURCE_SEPARATION_BLEND, Bundle.EMPTY),
-                Bundle().apply {
-                    putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
-                    putBoolean(Playback.EXTRA_SOURCE_SEPARATION_PERSIST_BLEND, false)
-                },
-            ).get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            val blendResultFuture = onMediaControllerThread(mediaController) {
+                mediaController.sendCustomCommand(
+                    SessionCommand(Playback.SET_SOURCE_SEPARATION_BLEND, Bundle.EMPTY),
+                    Bundle().apply {
+                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_PERSIST_BLEND, false)
+                    },
+                )
+            }
+            val blendResult = blendResultFuture.get(
+                MEDIA_SESSION_TIMEOUT_SECONDS,
+                TimeUnit.SECONDS,
+            )
             assertEquals(SessionResult.RESULT_SUCCESS, blendResult.resultCode)
 
             report.put("status", "passed")
@@ -736,8 +766,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("error", "${error::class.java.name}: ${error.message}")
             throw error
         } finally {
-            controller?.pause()
-            controller?.release()
+            controller?.let { mediaController ->
+                runCatching {
+                    onMediaControllerThread(mediaController) {
+                        mediaController.pause()
+                        mediaController.release()
+                    }
+                }
+            }
             sourceUri?.let { uri ->
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
@@ -746,15 +782,43 @@ class SourceSeparationPhase7WorkerDeviceTest {
     }
 
     private fun waitForMediaController(
+        controller: MediaController,
         operation: String,
         predicate: () -> Boolean,
     ) {
         val deadline = SystemClock.elapsedRealtime() + MEDIA_SESSION_TIMEOUT_MS
         while (SystemClock.elapsedRealtime() < deadline) {
-            if (predicate()) return
+            if (onMediaControllerThread(controller, predicate)) return
             SystemClock.sleep(POLL_INTERVAL_MS)
         }
         error("MediaController did not complete $operation in time.")
+    }
+
+    private fun <T> onMediaControllerThread(
+        controller: MediaController,
+        block: () -> T,
+    ): T {
+        if (Looper.myLooper() == controller.applicationLooper) return block()
+
+        val result = AtomicReference<T?>()
+        val error = AtomicReference<Throwable?>()
+        val completed = CountDownLatch(1)
+        Handler(controller.applicationLooper).post {
+            try {
+                result.set(block())
+            } catch (throwable: Throwable) {
+                error.set(throwable)
+            } finally {
+                completed.countDown()
+            }
+        }
+        assertTrue(
+            "MediaController application thread did not complete the operation.",
+            completed.await(MEDIA_SESSION_TIMEOUT_MS, TimeUnit.MILLISECONDS),
+        )
+        error.get()?.let { throw it }
+        @Suppress("UNCHECKED_CAST")
+        return result.get() as T
     }
 
     private fun waitForReady(
