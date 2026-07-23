@@ -125,6 +125,35 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `completion preserves structured source decode diagnostics`() {
+        val fixture = fixture()
+        val run = fixture.beginReady()
+        val preparation = fixture.preparation(run, SourceSeparationSegmentState.Ready)
+        fixture.coordinator.updatePreparation(run, preparation)
+        val result = fixture.result(preparation)
+        val completed = fixture.coordinator.complete(
+            run,
+            result.copy(
+                sourceDecodeDiagnostics = result.sourceDecodeDiagnostics.copy(
+                    mode = MdxSourceDecodeMode.FullSong,
+                    profile = null,
+                    mimeType = "audio/mp4a-latm",
+                    fallbackReason = "Window decode is not enabled for this MIME/sample-rate profile.",
+                ),
+            ),
+        )
+
+        val record = completed.runtimeRecords.single()
+        assertEquals(MdxSourceDecodeMode.FullSong.name, record.sourceDecodeMode)
+        assertNull(record.sourceDecodeProfile)
+        assertEquals("audio/mp4a-latm", record.sourceDecodeMimeType)
+        assertEquals(
+            "Window decode is not enabled for this MIME/sample-rate profile.",
+            record.sourceDecodeFallbackReason,
+        )
+    }
+
+    @Test
     fun `source replacement cannot complete or publish a ready cache`() {
         val fixture = fixture()
         val run = fixture.beginReady()

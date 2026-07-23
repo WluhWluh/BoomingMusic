@@ -211,6 +211,10 @@ data class SourceSeparationCacheRuntimeRecord(
     val elapsedMs: Long,
     val fallbackStage: String? = null,
     val fallbackReason: String? = null,
+    val sourceDecodeMode: String? = null,
+    val sourceDecodeProfile: String? = null,
+    val sourceDecodeMimeType: String? = null,
+    val sourceDecodeFallbackReason: String? = null,
 ) {
     init {
         require(backend.isNotBlank()) { "Cache runtime backend is empty." }

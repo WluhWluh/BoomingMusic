@@ -214,6 +214,10 @@ class SourceSeparationCacheRunCoordinator(
                 elapsedMs = result.elapsedMs,
                 fallbackStage = result.runtimeDiagnostics.fallbackStage,
                 fallbackReason = result.runtimeDiagnostics.fallbackReason,
+                sourceDecodeMode = result.sourceDecodeDiagnostics.mode.name,
+                sourceDecodeProfile = result.sourceDecodeDiagnostics.profile,
+                sourceDecodeMimeType = result.sourceDecodeDiagnostics.mimeType,
+                sourceDecodeFallbackReason = result.sourceDecodeDiagnostics.fallbackReason,
             ),
             updatedAtEpochMs = nowEpochMs(),
         )
