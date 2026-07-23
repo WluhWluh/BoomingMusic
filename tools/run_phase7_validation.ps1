@@ -45,6 +45,7 @@ param(
     [string]$LifecycleSessionMode = "single-use",
     [bool]$WindowDecode = $true,
     [switch]$SkipBuild,
+    [switch]$SkipInstall,
     [switch]$KeepAppData,
     [switch]$CleanInstallScenario,
     [switch]$PreserveMediaStoreSource,
@@ -99,6 +100,9 @@ if ($RunId -notmatch '^[A-Za-z0-9._-]{1,120}$') {
 }
 if ($Stage -eq "acquisition" -and $KeepAppData) {
     throw "The pinned acquisition stage requires a clean app-data scenario."
+}
+if ($SkipInstall -and $Stage -notin $sourceStages) {
+    throw "SkipInstall applies only to an execution stage with an already installed APK."
 }
 if ($Stage -in $sourceStages -and -not $KeepAppData) {
     throw "The $Stage stage expects a previously acquired model. Use -KeepAppData."
@@ -161,6 +165,38 @@ function Invoke-Adb {
     & $adb -s $Serial @args
     if ($LASTEXITCODE -ne 0) {
         throw "adb failed with exit code ${LASTEXITCODE}: $args"
+    }
+}
+
+function Get-InstalledApkSha256([string]$PackageName) {
+    $packagePaths = @(
+        & $adb -s $Serial shell pm path $PackageName |
+            ForEach-Object {
+                $line = ([string]$_).Trim()
+                if ($line.StartsWith("package:", [System.StringComparison]::Ordinal)) {
+                    $line.Substring("package:".Length)
+                }
+            } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if ($LASTEXITCODE -ne 0 -or $packagePaths.Count -ne 1) {
+        throw "Expected one installed base APK for $PackageName; found $($packagePaths.Count)."
+    }
+    $hashLine = (& $adb -s $Serial shell sha256sum $packagePaths[0]).Trim()
+    if ($LASTEXITCODE -ne 0 -or $hashLine -notmatch '^([0-9a-fA-F]{64})\s+') {
+        throw "Could not hash the installed base APK for $PackageName."
+    }
+    return $Matches[1].ToLowerInvariant()
+}
+
+function Assert-InstalledApk(
+    [string]$PackageName,
+    [string]$ExpectedSha256
+) {
+    $actualSha256 = Get-InstalledApkSha256 $PackageName
+    if ($actualSha256 -ne $ExpectedSha256) {
+        throw ("Installed APK hash mismatch for {0}: expected {1}, actual {2}." -f
+            $PackageName, $ExpectedSha256, $actualSha256)
     }
 }
 
@@ -358,8 +394,13 @@ try {
     $runtimeAsset = Get-ChildItem "app\build\intermediates\merged_native_libs\githubDebug\out\lib\$ProcessAbi\libLiteRt.so" -ErrorAction SilentlyContinue
     if ($null -ne $runtimeAsset) { $litertSha256 = Get-Sha256 $runtimeAsset.FullName }
 
-    Invoke-Adb install -r -t $appApk.FullName
-    Invoke-Adb install -r -t $testApk.FullName
+    if ($SkipInstall) {
+        Assert-InstalledApk -PackageName $package -ExpectedSha256 $appApkSha256
+        Assert-InstalledApk -PackageName ($package + ".test") -ExpectedSha256 $testApkSha256
+    } else {
+        Invoke-Adb install -r -t $appApk.FullName
+        Invoke-Adb install -r -t $testApk.FullName
+    }
     if (-not $KeepAppData) { Invoke-Adb shell pm clear $package }
     & $adb -s $Serial shell pm grant $package android.permission.READ_EXTERNAL_STORAGE 2>$null | Out-Null
     & $adb -s $Serial shell pm grant $package android.permission.WRITE_EXTERNAL_STORAGE 2>$null | Out-Null
@@ -693,6 +734,7 @@ try {
                 preserveMediaStoreSource = [bool]$PreserveMediaStoreSource
                 processorCountOverride = if ($ProcessorCount -gt 0) { $ProcessorCount } else { $null }
                 xnnPackFlags = if ($XnnPackFlags -ge 0) { $XnnPackFlags } else { $null }
+                installSkipped = $SkipInstall
                 backendMode = $BackendMode
                 backend = $backendName
                 autoFailpoint = $AutoFailpoint

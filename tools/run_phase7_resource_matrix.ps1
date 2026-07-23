@@ -163,6 +163,7 @@ try {
                 RunId = $runId
                 OutputRoot = $OutputRoot
                 RunClass = $runClass
+                SkipInstall = $true
             }
             if (-not $buildNeeded) { $arguments.SkipBuild = $true }
             if ($index -eq 0 -and $firstRun) {
