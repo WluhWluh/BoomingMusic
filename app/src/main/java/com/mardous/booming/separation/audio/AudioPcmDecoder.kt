@@ -724,8 +724,15 @@ data class AudioSourceInfo(
     val frameCount: Int?
         get() = durationUs
             ?.let { (it.toDouble() * sampleRate.toDouble() / MICROS_PER_SECOND).roundToLong() }
+            ?.minus(gaplessTrimFrames())
             ?.coerceIn(0L, Int.MAX_VALUE.toLong())
             ?.toInt()
+
+    private fun gaplessTrimFrames(): Long {
+        val delay = trackMetadata.encoderDelayFrames?.takeIf { it >= 0 } ?: return 0L
+        val padding = trackMetadata.encoderPaddingFrames?.takeIf { it >= 0 } ?: return 0L
+        return delay.toLong() + padding.toLong()
+    }
 
     private companion object {
         const val MICROS_PER_SECOND = 1_000_000L

@@ -160,6 +160,8 @@ internal interface MdxSourceInput {
                 sourceFrameCount = sourceInfo.frameCount,
                 outputFrameCount = null,
                 fallbackReason = fallbackReason,
+                encoderDelayFrames = sourceInfo.trackMetadata.encoderDelayFrames,
+                encoderPaddingFrames = sourceInfo.trackMetadata.encoderPaddingFrames,
             )
             onProgress(
                 MdxRangeProgress.preparing(
@@ -172,7 +174,14 @@ internal interface MdxSourceInput {
             }
             val sourceFrameCount = source.frameCount
             val sourceSampleRate = source.sampleRate
-            val decodedOutputFrameCount = targetFrameCountFor(
+            val inspectedOutputFrameCount = sourceInfo.frameCount?.let { inspectedFrameCount ->
+                targetFrameCountFor(
+                    sourceFrameCount = inspectedFrameCount,
+                    sourceSampleRate = sourceInfo.sampleRate,
+                    targetSampleRate = config.sampleRate,
+                )
+            }
+            val decodedOutputFrameCount = inspectedOutputFrameCount ?: targetFrameCountFor(
                 sourceFrameCount = sourceFrameCount,
                 sourceSampleRate = sourceSampleRate,
                 targetSampleRate = config.sampleRate,
@@ -189,9 +198,10 @@ internal interface MdxSourceInput {
                     diagnostics = decodedFallbackDiagnostics,
                 )
             )
-            val decoded = measureElapsed(timing, "Resample") {
+            val resampled = measureElapsed(timing, "Resample") {
                 source.resampleTo(config.sampleRate, shouldCancel = shouldCancel)
             }
+            val decoded = inspectedOutputFrameCount?.let(resampled::fitToFrameCount) ?: resampled
             throwIfCanceled(shouldCancel)
             return FullSongMdxSourceInput(
                 decoder = decoder,
@@ -267,6 +277,8 @@ private class WindowDecodeMdxSourceInput(
         ),
         fallbackReason = null,
         experimental = profile.experimental,
+        encoderDelayFrames = sourceInfo.trackMetadata.encoderDelayFrames,
+        encoderPaddingFrames = sourceInfo.trackMetadata.encoderPaddingFrames,
     )
     override val sourceFrameCount: Int = safeSourceFrameCount
     override val sourceSampleRate: Int = sourceInfo.sampleRate
@@ -538,6 +550,8 @@ data class MdxSourceDecodeDiagnostics(
     val fallbackReason: String?,
     val experimental: Boolean = false,
     val calibration: String? = null,
+    val encoderDelayFrames: Int? = null,
+    val encoderPaddingFrames: Int? = null,
 ) {
     fun toDisplayText(): String {
         return buildString {
@@ -564,6 +578,13 @@ data class MdxSourceDecodeDiagnostics(
                 append(sourceFrameCount ?: "unknown")
                 append(", output=")
                 append(outputFrameCount ?: "unknown")
+            }
+            if (encoderDelayFrames != null || encoderPaddingFrames != null) {
+                appendLine()
+                append("Gapless: delay=")
+                append(encoderDelayFrames ?: "unknown")
+                append(", padding=")
+                append(encoderPaddingFrames ?: "unknown")
             }
             calibration?.let {
                 appendLine()

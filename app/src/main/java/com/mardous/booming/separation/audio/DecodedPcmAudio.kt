@@ -73,6 +73,16 @@ data class DecodedPcmAudio(
         )
     }
 
+    fun fitToFrameCount(targetFrameCount: Int): DecodedPcmAudio {
+        require(targetFrameCount >= 0) { "Target frame count must not be negative." }
+        if (targetFrameCount == frameCount) return this
+        val targetByteCount = Math.multiplyExact(
+            targetFrameCount,
+            channelCount * Short.SIZE_BYTES,
+        )
+        return copy(pcm16 = pcm16.copyOf(targetByteCount))
+    }
+
     fun toStereoFloat(startFrame: Int = 0, maxFrames: Int? = null): Array<FloatArray> {
         require(startFrame >= 0) { "Start frame must not be negative." }
         require(startFrame <= frameCount) { "Start frame exceeds decoded audio length." }

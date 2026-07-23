@@ -151,6 +151,10 @@ class SourceSeparationCacheRunCoordinatorTest {
             "Window decode is not enabled for this MIME/sample-rate profile.",
             record.sourceDecodeFallbackReason,
         )
+        assertEquals(44_100, record.sourceDecodeSampleRate)
+        assertEquals(2, record.sourceDecodeChannelCount)
+        assertEquals(88_200, record.sourceDecodeSourceFrameCount)
+        assertEquals(88_200, record.sourceDecodeOutputFrameCount)
     }
 
     @Test

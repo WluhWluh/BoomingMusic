@@ -215,6 +215,12 @@ data class SourceSeparationCacheRuntimeRecord(
     val sourceDecodeProfile: String? = null,
     val sourceDecodeMimeType: String? = null,
     val sourceDecodeFallbackReason: String? = null,
+    val sourceDecodeSampleRate: Int? = null,
+    val sourceDecodeChannelCount: Int? = null,
+    val sourceDecodeSourceFrameCount: Int? = null,
+    val sourceDecodeOutputFrameCount: Int? = null,
+    val sourceDecodeEncoderDelayFrames: Int? = null,
+    val sourceDecodeEncoderPaddingFrames: Int? = null,
 ) {
     init {
         require(backend.isNotBlank()) { "Cache runtime backend is empty." }

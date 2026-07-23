@@ -218,6 +218,14 @@ class SourceSeparationCacheRunCoordinator(
                 sourceDecodeProfile = result.sourceDecodeDiagnostics.profile,
                 sourceDecodeMimeType = result.sourceDecodeDiagnostics.mimeType,
                 sourceDecodeFallbackReason = result.sourceDecodeDiagnostics.fallbackReason,
+                sourceDecodeSampleRate = result.sourceDecodeDiagnostics.sampleRate,
+                sourceDecodeChannelCount = result.sourceDecodeDiagnostics.channelCount,
+                sourceDecodeSourceFrameCount = result.sourceDecodeDiagnostics.sourceFrameCount,
+                sourceDecodeOutputFrameCount = result.sourceDecodeDiagnostics.outputFrameCount,
+                sourceDecodeEncoderDelayFrames =
+                    result.sourceDecodeDiagnostics.encoderDelayFrames,
+                sourceDecodeEncoderPaddingFrames =
+                    result.sourceDecodeDiagnostics.encoderPaddingFrames,
             ),
             updatedAtEpochMs = nowEpochMs(),
         )
