@@ -2174,9 +2174,42 @@ for validation-only injection/observability, fixes found by the matrix, and the
 evidence-driven release-graph/catalog decision in Phase 7E. A product-code fix
 changes the app identity and reruns every affected row.
 
+#### Phase 7 progress snapshot (2026-07-22)
+
+The validation graph and preliminary device evidence are now real, but the
+promotion gate is still open. The current reports use the prerelease catalog
+artifact `uvr_mdxnet_3_9662`, contract `uvr_mdxnet_3_9662@2`, and LiteRT 2.1.5.
+The runner now records the requested `LiteRtAuto` profile separately from the
+concrete backend that completed the cache, including structured fallback stage
+and reason.
+
+Preliminary full-song results (historical `phase7-thresholds-v1` reports) are:
+
+| Target | Profile | Backend | Full song | Peak PSS delta |
+| --- | --- | --- | ---: | ---: |
+| Galaxy S10 arm64 | `cpu-default-fp32-v1` | CPU | 228.2 s | 781.5 MiB |
+| Galaxy S10 arm64 | `gpu-auto-fp32-v1` | GPU | 205.2 s | 411.2 MiB |
+| Galaxy S25 arm64 | `cpu-default-fp32-v1` | CPU | 123.7 s | 748.0 MiB |
+| Galaxy S25 arm64 | `gpu-auto-fp32-v1` | GPU | 37.1 s | 504.5 MiB |
+
+The S25 GPU export compared with the desktop ORT reference at PCM16
+quantization equivalence: exact frame counts, maximum one-LSB sample delta,
+and maximum two-LSB join delta. S25 MediaSession playback and both-device
+Auto lifecycle scenarios passed. Production-worker fault injection also
+passed for setup, probe, and invocation-after-ready; each report proves GPU
+cleanup before CPU creation and preserves the same cache identity.
+
+These are not promotion results yet. The v2 threshold revision must be used to
+rerun the affected rows after the final decision commit. S10 GPU audio export,
+repeated warm/resource/thermal measurements, full playback coverage on both
+phones, source-format corpus coverage, model switching, KARA, and the final
+catalog promotion matrix remain open. Pure x86 retains ordinary playback but
+its repeated source-separation session allocation is rejected; x86_64 remains
+CPU evidence only until a separate GPU qualification exists.
+
 #### Phase 7A: Freeze the validation inputs and evidence format
 
-- [ ] Freeze the exact app commit, bundled catalog SHA-256, `bss-tflite`
+- [x] Freeze the exact app commit, bundled catalog SHA-256, `bss-tflite`
   Release tag, artifact SHA-256, contract ID/schema, pipeline revision, and
   LiteRT runtime revision in every report. The current acquisition baseline is
   the published prerelease `v0.1.0-candidates.1`; it is not a stable model
@@ -2192,13 +2225,13 @@ changes the app identity and reruns every affected row.
   A short fixture cannot satisfy a full-song gate; non-redistributable media
   and full reference outputs stay out of the app repository, with hashes and
   acquisition/reproduction instructions retained instead.
-- [ ] Freeze numerical and behavioral pass thresholds before running the
+- [x] Freeze numerical and behavioral pass thresholds before running the
   promotion matrix: finite output, sample count and timeline drift, full-track
   SNR/error against desktop references, join discontinuity, ready-window and
   seek tolerance, cancellation latency, and resource limits. Changing a
   threshold creates a new evidence revision and reruns affected rows; it cannot
   retroactively turn an existing report into a pass.
-- [ ] Define and independently version one JSON report schema containing model
+- [x] Define and independently version one JSON report schema containing model
   identity, device/build fingerprint, Android API, process ABI, backend/profile/
   precision, CPU thread count, cold-session or warm-session run class, fixture
   hashes, first-ready time, full-song time, cancellation result, cache key, runtime
@@ -2208,20 +2241,20 @@ changes the app identity and reruns every affected row.
   inside a clean-install scenario; do not imply that unprivileged tests have
   dropped the kernel page cache. A report without these identity fields is not
   promotion evidence.
-- [ ] Add a Phase 7 host runner and Android instrumentation suite that drives
+- [x] Add a Phase 7 host runner and Android instrumentation suite that drives
   the production facade, foreground worker, MediaSession/player, and management
   graph. Backend/thread/failpoint selection must be construction-time,
   debug/test-only injection with no preference, backup key, or release-graph
   reference. Existing one-window and direct-engine tools remain narrow probes,
   not substitutes for this runner.
-- [ ] Separate acquisition and execution tests. First clear app data and test
+- [x] Separate acquisition and execution tests. First clear app data and test
   the pinned Release download, SHA-256 verification, install, metadata display,
   and explicit `Use`. Then use the same verified artifact for runtime tests.
   Warm performance repetitions may reuse the installed model and OS/runtime
   warm state inside one declared scenario, but inference timing must delete the
   exact completed cache or use a fresh source identity before each repetition.
   They must not be mixed with cold-install or download timing.
-- [ ] Build ABI splits and the AndroidTest APK in separate Gradle invocations.
+- [x] Build ABI splits and the AndroidTest APK in separate Gradle invocations.
   Requesting an AndroidTest task disables ABI splits in the current build
   configuration. The host runner must install the requested standalone split
   after the builds, install the test APK separately, invoke instrumentation
@@ -2232,7 +2265,7 @@ changes the app identity and reruns every affected row.
 
 #### Phase 7B: Full-song correctness and production playback
 
-- [ ] Run the 9662 FP32 CPU baseline on Galaxy S10 and S25 arm64, then on the
+- [x] Run the 9662 FP32 CPU baseline on Galaxy S10 and S25 arm64, then on the
   S10 `armeabi-v7a` split, API 26 pure x86, and API 37 x86_64. The CPU baseline
   is a test-only LiteRT CPU injection used for comparison; it is not a user
   setting and does not alter the production `Auto` policy.

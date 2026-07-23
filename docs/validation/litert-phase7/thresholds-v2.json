@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "phase7-thresholds-v2",
+  "supersedes": "phase7-thresholds-v1",
+  "frozenBeforePromotionMatrix": true,
+  "revisionReason": "Treat PCM16 quantization-equivalent output as a pass instead of requiring an SNR that can reject one-LSB differences.",
+  "numerical": {
+    "fullTrack": {
+      "requireExactFrameCount": true,
+      "maximumFrameDelta": 0,
+      "requireQuantizedEquivalent": true,
+      "maximumPcm16Delta": 1,
+      "maximumAbsError": 0.000030517578125,
+      "maximumJoinDiscontinuity": 0.00006103515625,
+      "snrDb": {
+        "role": "diagnostic-only",
+        "minimum": null
+      }
+    },
+    "reconstruction": {
+      "comparison": "actual_output_sum_error_minus_reference_output_sum_error",
+      "maximumAbsError": 0.00006103515625
+    },
+    "modelWindowParity": {
+      "uvr_mdxnet_3_9662": {
+        "minimumSnrDb": 93.8,
+        "minimumCosineSimilarity": 0.999999999,
+        "maximumAbsError": 0.0001
+      },
+      "uvr_mdxnet_kara": {
+        "minimumSnrDb": 109.0,
+        "minimumCosineSimilarity": 0.999999999,
+        "maximumAbsError": 0.00003
+      },
+      "uvr_mdxnet_inst_hq_4": {
+        "minimumSnrDb": 89.4,
+        "minimumCosineSimilarity": 0.999999999,
+        "maximumAbsError": 0.0006
+      }
+    }
+  },
+  "lifecycle": {
+    "minimumReadyWindows": 2,
+    "maximumCancellationLatencyMs": 30000,
+    "requiredFallbackOrder": ["gpu-closed", "cpu-created"]
+  },
+  "resource": {
+    "hq4": {
+      "modelBytesTarget": 67108864,
+      "peakPssDeltaTargetBytes": 268435456,
+      "peakPssDeltaHardLimitBytes": 402653184
+    },
+    "litertRuntime": {
+      "incrementTargetBytes": 10485760,
+      "incrementHardLimitBytes": 16777216
+    }
+  },
+  "measurement": {
+    "coldSessionDefinition": "new app process and inference session inside a clean-install scenario",
+    "warmRepetitions": 3,
+    "emulatorThermalDataIsDiagnosticOnly": true,
+    "performanceStatisticsBackedUp": false
+  }
+}

@@ -59,7 +59,7 @@ $testMethod = switch ($Stage) {
 $reportStage = $Stage
 $adb = (Get-Command adb -ErrorAction Stop).Source
 $catalogPath = Join-Path $repoRoot "app/src/main/assets/source-separation/model-catalog-v2.json"
-$thresholdsPath = Join-Path $repoRoot "docs/validation/litert-phase7/thresholds-v1.json"
+$thresholdsPath = Join-Path $repoRoot "docs/validation/litert-phase7/thresholds-v2.json"
 $fixturesPath = Join-Path $repoRoot "docs/validation/litert-phase7/fixtures-v1.json"
 
 if ([string]::IsNullOrWhiteSpace($RunId)) {
