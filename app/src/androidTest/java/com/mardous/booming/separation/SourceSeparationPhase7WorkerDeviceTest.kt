@@ -460,6 +460,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             var seekStatus: SourceSeparationModelAwareCacheStatus? = null
             var canceledStatus: SourceSeparationModelAwareCacheStatus? = null
             var seekPositionMs: Long? = null
+            var seekStartedPending = false
 
             if (lifecycleScenario.includesPauseResume) {
                 val pauseWorker = SourceSeparationForegroundWorkerCoordinator(
@@ -527,13 +528,17 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     playbackPositionMs = targetSeekPositionMs,
                     readyWindowCount = 1,
                 )
-                if (beforeSeek is SourceSeparationModelAwarePlayableStatus.Ready) {
-                    beforeSeek.playback.close()
+                when (beforeSeek) {
+                    is SourceSeparationModelAwarePlayableStatus.Ready -> {
+                        beforeSeek.playback.close()
+                    }
+                    SourceSeparationModelAwarePlayableStatus.Processing -> {
+                        seekStartedPending = true
+                    }
+                    SourceSeparationModelAwarePlayableStatus.Unavailable -> {
+                        error("The seek target became unavailable.")
+                    }
                 }
-                assertTrue(
-                    "The seek target was expected to be pending: $beforeSeek",
-                    beforeSeek is SourceSeparationModelAwarePlayableStatus.Processing,
-                )
                 seekWorker.updatePosition(
                     positionMs = targetSeekPositionMs,
                     durationMs = source.duration,
@@ -588,7 +593,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("seekPassed", lifecycleScenario.includesSeek)
                 .put("cancellationPassed", lifecycleScenario.includesCancellation)
                 .put("seekPositionMs", seekPositionMs ?: JSONObject.NULL)
-                .put("seekStartedPending", lifecycleScenario.includesSeek)
+                .put("seekStartedPending", seekStartedPending)
                 .put("pauseStatus", pausedStatus?.javaClass?.simpleName ?: JSONObject.NULL)
                 .put("resumedStatus", resumedStatus?.javaClass?.simpleName ?: JSONObject.NULL)
                 .put("seekStatus", seekStatus?.javaClass?.simpleName ?: JSONObject.NULL)

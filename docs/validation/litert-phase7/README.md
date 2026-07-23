@@ -64,6 +64,9 @@ expects the preceding pinned acquisition and does not export full audio.
 
 The lifecycle runner can isolate an operation in a fresh instrumentation
 process with `-LifecycleScenario pause-resume`, `seek`, or `cancellation`.
+The report records whether the seek target was still pending; use a long
+fixture when that pending-window transition is the evidence under test because
+the short fixture may finish before the first readiness poll returns.
 `-LifecycleSessionMode shared-reusable` is a diagnostic-only control: it gives
 all range executions in that one test process the same bounded reusable
 provider, closes the provider at test teardown, and records the native session
