@@ -15,6 +15,8 @@ precision. A successful short-window probe is not a Phase 7 promotion result.
   keeps SNR diagnostic rather than rejecting an otherwise exact render.
 - `preliminary-results-2026-07-22.md` summarizes current device evidence and
   explicitly lists the rows that remain open.
+- `source-format-results-2026-07-23.md` records the completed v2 decoder
+  corpus matrix and the timeline fixes found by it.
 - `fixtures-v2.json` identifies the local research fixtures and the generated
   source-format corpus by hash without copying model weights, full audio, or
   reference stems into Booming SS.

@@ -2,7 +2,7 @@
 
 Status: active plan for `feature/litert-multi-model-presets`
 
-Updated: 2026-07-22
+Updated: 2026-07-23
 
 Current milestone: the Phase 6 production cutover is implemented and accepted
 on the development branch. Phase 7 is the next stage: full-song playback,
@@ -2200,7 +2200,7 @@ passed for setup, probe, and invocation-after-ready on both devices; each
 report proves GPU cleanup before CPU creation and preserves the same cache
 identity.
 
-Runner v10 also passed active-model changes during an admitted run and during
+Runner v10 passed active-model changes during an admitted run and during
 a completed-cache MediaSession lease. S10 passed both 9662-to-KARA and
 KARA-to-9662; S25 passed 9662-to-KARA. The original run/playback identity was
 retained and the subsequent model received a separate cache entry. Home after
@@ -2210,13 +2210,23 @@ completed under the same key after transition on both devices. The prefetch
 case uses different frozen current/next audio identities so content-addressed
 cache reuse cannot produce a false pass.
 
+Runner v11 retains those lifecycle stages and adds the frozen source-format
+contract, structured decode evidence, and app-private fixture staging.
+
+The v2 source-format corpus subsequently passed all nine routes on S25 arm64
+Auto, S10 arm64 Auto, S10 armeabi-v7a CPU, and API 37 x86_64 CPU. It found and
+fixed MP3 gapless overrun and API-dependent AAC edit-list handling; x86_64
+FLAC safely uses an explicit full-song fallback because that extractor reports
+`audio/raw`. See
+[`validation/litert-phase7/source-format-results-2026-07-23.md`](validation/litert-phase7/source-format-results-2026-07-23.md).
+
 These are not promotion results yet. The v2 threshold revision must be used to
 rerun the affected rows after the final decision commit. S10 GPU audio export,
 repeated warm/resource/thermal measurements, representative listening and UI
-coverage, source-format corpus coverage, KARA full-song qualification, and the
-final catalog promotion matrix remain open. Pure x86 retains ordinary playback
-but source separation now fails closed before native allocation; x86_64 remains
-CPU evidence only until a separate GPU qualification exists.
+coverage, KARA full-song qualification, and the final catalog promotion matrix
+remain open. Pure x86 retains ordinary playback but source separation now fails
+closed before native allocation; x86_64 remains CPU evidence only until a
+separate GPU qualification exists.
 
 #### Phase 7A: Freeze the validation inputs and evidence format
 
@@ -2288,7 +2298,7 @@ CPU evidence only until a separate GPU qualification exists.
   and exact completed-cache playback. Capture digital output joins and
   timestamps on every target; perform representative listening and the full
   gesture-level UI pass on S10 and S25.
-- [ ] Run the frozen source-format corpus through the production worker and
+- [x] Run the frozen source-format corpus through the production worker and
   verify the expected local-window or full-song decode route, output duration,
   source fingerprint, join placement, and fallback reason. A format-specific
   decoder regression blocks stable promotion even when the canonical full-track

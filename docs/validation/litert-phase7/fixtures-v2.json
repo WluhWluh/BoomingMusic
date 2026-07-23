@@ -2,6 +2,7 @@
   "schemaVersion": "phase7-fixtures-v2",
   "sourceRepository": "https://github.com/WluhWluh/MusicSourceSeparation",
   "sourceRevision": "58fcedc9005a9dbfb2de728b66a21de8a0a5d7b5",
+  "expectedStemSemantics": ["Vocals", "Instrumental"],
   "formatCorpus": {
     "schemaVersion": "phase7-source-format-corpus-v1",
     "generator": "tools/generate_phase7_format_corpus.py",
