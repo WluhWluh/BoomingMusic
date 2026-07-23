@@ -60,6 +60,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
         val report = baseReport(context, runId, arguments)
+        val preserveMediaStoreSource = arguments.optionalBoolean(
+            ARG_PRESERVE_MEDIA_STORE_SOURCE,
+            false,
+        )
         var coordinator: SourceSeparationForegroundWorkerCoordinator? = null
         var mediaUri: Uri? = null
 
@@ -279,9 +283,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             report.put("worker", JSONObject()
                 .put("sourcePath", sourcePath)
+                .put("mediaUri", mediaUri.toString())
                 .put("songId", source.id)
                 .put("songDurationMs", source.duration)
                 .put("windowDecodeEnabled", windowDecodeEnabled)
+                .put("preservedMediaStoreSource", preserveMediaStoreSource)
                 .put("cpuThreads", runCallbacks.cpuThreads)
                 .put("runtimeDiagnostics", manifest.runtimeRecords.map { it.backend + "/" + it.runtimeProfileId }
                     .joinToString(","))
@@ -292,8 +298,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             throw error
         } finally {
             coordinator?.cancel()
-            mediaUri?.let { uri ->
-                runCatching { context.contentResolver.delete(uri, null, null) }
+            if (!preserveMediaStoreSource) {
+                mediaUri?.let { uri ->
+                    runCatching { context.contentResolver.delete(uri, null, null) }
+                }
             }
             writeReport(context, runId, report)
         }
@@ -1073,6 +1081,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_SOURCE_PATH = "sourcePath"
         const val ARG_PROCESSOR_COUNT = "processorCount"
         const val ARG_WINDOW_DECODE_ENABLED = "windowDecodeEnabled"
+        const val ARG_PRESERVE_MEDIA_STORE_SOURCE = "preserveMediaStoreSource"
         const val ARG_RUN_CLASS = "runClass"
         const val ARG_CLEAN_INSTALL = "cleanInstallScenario"
         const val ARG_FIXTURE_ID = "fixtureId"

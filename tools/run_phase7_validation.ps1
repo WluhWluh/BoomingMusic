@@ -24,6 +24,7 @@ param(
     [switch]$SkipBuild,
     [switch]$KeepAppData,
     [switch]$CleanInstallScenario,
+    [switch]$PreserveMediaStoreSource,
     [switch]$ExportCacheAudio
 )
 
@@ -73,6 +74,9 @@ if ($Stage -notin $sourceStages -and ($ProcessorCount -gt 0 -or $ExportCacheAudi
         $RunClass -ne "cold-session" -or $CleanInstallScenario -or
         -not $WindowDecode)) {
     throw "ProcessorCount, RunClass, WindowDecode, CleanInstallScenario, and ExportCacheAudio apply only to the worker stage."
+}
+if ($PreserveMediaStoreSource -and $Stage -ne "worker") {
+    throw "PreserveMediaStoreSource applies only to the worker stage."
 }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "build\phase7-validation"
@@ -246,6 +250,12 @@ try {
             "-e", "cleanInstallScenario", $CleanInstallScenario.ToString().ToLowerInvariant(),
             "-e", "windowDecodeEnabled", $WindowDecode.ToString().ToLowerInvariant()
         )
+        if ($Stage -eq "worker") {
+            $instrumentArguments += @(
+                "-e", "preserveMediaStoreSource",
+                $PreserveMediaStoreSource.ToString().ToLowerInvariant()
+            )
+        }
         if ($ProcessorCount -gt 0) {
             $instrumentArguments += @("-e", "processorCount", [string]$ProcessorCount)
         }
@@ -343,6 +353,7 @@ try {
                 class = $RunClass
                 cleanInstallScenario = [bool]$CleanInstallScenario
                 windowDecodeEnabled = $WindowDecode
+                preserveMediaStoreSource = [bool]$PreserveMediaStoreSource
                 processorCountOverride = if ($ProcessorCount -gt 0) { $ProcessorCount } else { $null }
             }
         } else { $null }
