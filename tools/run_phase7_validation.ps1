@@ -271,6 +271,13 @@ try {
         }
         $artifactDirectory = Join-Path $deviceDirectory "$RunId-artifacts"
         $exportedArtifacts = @()
+        $cacheEntryDirectory = [string]$reportObject.cache.entryDirectoryPath
+        if ([string]::IsNullOrWhiteSpace($cacheEntryDirectory)) {
+            throw "The worker report did not provide a cache entry directory."
+        }
+        $cacheManifestRemotePath = "$cacheEntryDirectory/manifest.json"
+        $cacheManifestLocalPath = Join-Path $artifactDirectory "cache-manifest.json"
+        Export-RemoteFile -RemotePath $cacheManifestRemotePath -LocalPath $cacheManifestLocalPath
         foreach ($stem in @($reportObject.cache.stems)) {
             $semantic = ([string]$stem.semantic).ToLowerInvariant() -replace '[^a-z0-9._-]', '-'
             foreach ($format in @(
@@ -296,6 +303,8 @@ try {
             cacheKey = [string]$reportObject.cache.cacheKey
             fixtureSha256 = [string]$reportObject.fixture.sha256
             modelArtifactSha256 = [string]$reportObject.identity.artifactSha256
+            cacheManifestFileName = Split-Path -Leaf $cacheManifestLocalPath
+            cacheManifestSha256 = Get-Sha256 $cacheManifestLocalPath
             artifacts = $exportedArtifacts
         }
         $artifactManifestPath = Join-Path $artifactDirectory "manifest.json"
