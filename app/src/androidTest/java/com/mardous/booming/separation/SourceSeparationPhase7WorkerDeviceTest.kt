@@ -389,14 +389,13 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 isPlaying = false,
                 sourceSeparationBlend = TEST_BLEND,
             )
-            waitForReady(pauseWorker, minimumReadyWindows = 1)
-            val afterSeek = runtimeFacade.playableStatus(
+            val afterSeek = waitForPlayable(
+                runtimeFacade = runtimeFacade,
                 song = runtimeSong,
                 playbackPositionMs = seekPositionMs,
                 readyWindowCount = 1,
             )
-            assertTrue(afterSeek is SourceSeparationModelAwarePlayableStatus.Ready)
-            (afterSeek as SourceSeparationModelAwarePlayableStatus.Ready).playback.close()
+            afterSeek.playback.close()
             pauseWorker.pauseCurrentSong(source)
             waitForPaused(pauseWorker)
             val pausedStatus = runtimeFacade.cacheStatus(runtimeSong)
@@ -520,6 +519,28 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
         }
         error("Worker did not complete in time.")
+    }
+
+    private fun waitForPlayable(
+        runtimeFacade: SourceSeparationRuntimeFacade,
+        song: SourceSeparationRuntimeSong,
+        playbackPositionMs: Long,
+        readyWindowCount: Int,
+    ): SourceSeparationModelAwarePlayableStatus.Ready {
+        val deadline = SystemClock.elapsedRealtime() + LIFECYCLE_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            when (val status = runtimeFacade.playableStatus(
+                song = song,
+                playbackPositionMs = playbackPositionMs,
+                readyWindowCount = readyWindowCount,
+            )) {
+                is SourceSeparationModelAwarePlayableStatus.Ready -> return status
+                SourceSeparationModelAwarePlayableStatus.Processing,
+                SourceSeparationModelAwarePlayableStatus.Unavailable,
+                -> SystemClock.sleep(POLL_INTERVAL_MS)
+            }
+        }
+        error("Seek target did not become playable in time.")
     }
 
     private fun waitForInactive(worker: SourceSeparationForegroundWorkerCoordinator) {
