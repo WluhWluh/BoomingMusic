@@ -20,6 +20,8 @@ param(
     [string]$RunnerRevision = "phase7-runner-v5",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
+    [ValidateSet("none", "setup", "probe", "invocation-after-ready")]
+    [string]$AutoFailpoint = "none",
     [int]$ProcessorCount = 0,
     [int]$XnnPackFlags = -1,
     [ValidateSet("cold-session", "warm-session")]
@@ -90,6 +92,9 @@ if ($Stage -notin $sourceStages -and ($ProcessorCount -gt 0 -or $XnnPackFlags -g
 }
 if ($BackendMode -eq "auto" -and ($ProcessorCount -gt 0 -or $XnnPackFlags -ge 0)) {
     throw "ProcessorCount and XnnPackFlags are CPU-only diagnostics and cannot be combined with BackendMode=auto."
+}
+if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "worker")) {
+    throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
 }
 if ($PreserveMediaStoreSource -and $Stage -ne "worker") {
     throw "PreserveMediaStoreSource applies only to the worker stage."
@@ -296,6 +301,7 @@ try {
         "-e", "contractSchemaVersion", [string]$model.Contract.contractSchemaVersion,
         "-e", "profileId", $profileId,
         "-e", "backendMode", $BackendMode,
+        "-e", "autoFailpoint", $AutoFailpoint,
         "-e", "appCommit", $appCommit,
         "-e", "appApkSha256", $appApkSha256,
         "-e", "testApkSha256", $testApkSha256,
@@ -484,6 +490,7 @@ try {
                 xnnPackFlags = if ($XnnPackFlags -ge 0) { $XnnPackFlags } else { $null }
                 backendMode = $BackendMode
                 backend = $backendName
+                autoFailpoint = $AutoFailpoint
                 lifecycleScenario = if ($Stage -eq "lifecycle") { $LifecycleScenario } else { $null }
                 lifecycleSessionMode = if ($Stage -eq "lifecycle") { $LifecycleSessionMode } else { $null }
             }

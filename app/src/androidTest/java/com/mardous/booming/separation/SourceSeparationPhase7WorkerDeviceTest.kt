@@ -86,7 +86,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
         val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
+        val autoFailpoint = Phase7AutoFailpoint.parse(arguments.getString(ARG_AUTO_FAILPOINT))
+        require(autoFailpoint == Phase7AutoFailpoint.None || backendMode == BackendMode.Auto) {
+            "Phase 7 Auto fault injection requires BackendMode=auto."
+        }
         val report = baseReport(context, runId, arguments)
+        if (autoFailpoint != Phase7AutoFailpoint.None) {
+            report.put("diagnosticOnly", true)
+        }
         val preserveMediaStoreSource = arguments.optionalBoolean(
             ARG_PRESERVE_MEDIA_STORE_SOURCE,
             false,
@@ -125,6 +132,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertEquals(expectedModelId, activeReference.modelId)
             assertEquals(expectedArtifactSha256, activeReference.artifactSha256)
 
+            val autoFaultController = autoFailpoint
+                .takeUnless { it == Phase7AutoFailpoint.None }
+                ?.let(::Phase7AutoFaultController)
             val runtimeFacade = createCpuRuntimeFacade(
                 context = context,
                 preferences = preferences,
@@ -136,6 +146,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 xnnPackFlags = arguments.getString(ARG_XNNPACK_FLAGS)
                     ?.toIntOrNull()
                     ?.takeIf { it >= 0 },
+                sessionProviderFactoryOverride = autoFaultController
+                    ?.createSessionProviderFactory(context),
             )
             val resolved = runtimeFacade.resolve(source)
             val runtimeSong = (resolved as? SourceSeparationRuntimeSongResolution.Ready)?.song
@@ -241,6 +253,16 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     "Auto must finish on a concrete LiteRT backend: ${runtimeRecord.backend}",
                     runtimeRecord.backend == MdxInferenceBackend.LiteRtGpu.name ||
                         runtimeRecord.backend == MdxInferenceBackend.LiteRtCpu.name,
+                )
+            }
+            autoFaultController?.let { controller ->
+                validateAutoFaultEvidence(
+                    report = report,
+                    controller = controller,
+                    runtimeRecordBackend = runtimeRecord.backend,
+                    runtimeRecordFallbackStage = runtimeRecord.fallbackStage,
+                    runtimeRecordFallbackReason = runtimeRecord.fallbackReason,
+                    firstReadyAtElapsedMs = firstReadyAt.get(),
                 )
             }
             playback.close()
@@ -369,6 +391,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("preservedMediaStoreSource", preserveMediaStoreSource)
                 .put("cpuThreads", runCallbacks.cpuThreads)
                 .put("backendMode", backendMode.argumentValue)
+                .put("autoFailpoint", autoFailpoint.argumentValue)
                 .put("runtimeDiagnostics", manifest.runtimeRecords.map { it.backend + "/" + it.runtimeProfileId }
                     .joinToString(","))
             )
@@ -490,6 +513,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             var resumedStatus: SourceSeparationModelAwareCacheStatus? = null
             var seekStatus: SourceSeparationModelAwareCacheStatus? = null
             var canceledStatus: SourceSeparationModelAwareCacheStatus? = null
+            var runtimeEvidenceManifest: SourceSeparationCacheManifest? = null
             var seekPositionMs: Long? = null
             var seekStartedPending = false
 
@@ -530,6 +554,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 waitForCompleted(pauseWorker)
                 resumedStatus = runtimeFacade.cacheStatus(runtimeSong)
                 assertTrue(resumedStatus is SourceSeparationModelAwareCacheStatus.Completed)
+                runtimeEvidenceManifest = (resumedStatus as
+                    SourceSeparationModelAwareCacheStatus.Completed).manifest
                 pauseWorker.cancel()
                 waitForInactive(pauseWorker)
             }
@@ -586,6 +612,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 waitForCompleted(seekWorker)
                 seekStatus = runtimeFacade.cacheStatus(runtimeSong)
                 assertTrue(seekStatus is SourceSeparationModelAwareCacheStatus.Completed)
+                runtimeEvidenceManifest = (seekStatus as
+                    SourceSeparationModelAwareCacheStatus.Completed).manifest
                 seekWorker.cancel()
                 waitForInactive(seekWorker)
             }
@@ -649,9 +677,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("lifecycleSessionMode", sessionMode.argumentValue)
                 .put("sessionCreateCount", sessionCreateCount.get())
             )
-            get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
-                .readManifest(cacheKey)
-                ?.let { manifest -> applyRuntimeEvidence(report, manifest) }
+            (runtimeEvidenceManifest ?: get<SourceSeparationCacheStore>(
+                SourceSeparationCacheStore::class.java,
+            ).readManifest(cacheKey))?.let { manifest ->
+                applyRuntimeEvidence(report, manifest)
+            }
         } catch (error: Throwable) {
             report.put("status", "failed")
             report.put("error", "${error::class.java.name}: ${error.message}")
@@ -1375,6 +1405,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     "xnnPackFlags",
                     arguments.getString(ARG_XNNPACK_FLAGS)?.toIntOrNull() ?: JSONObject.NULL,
                 )
+                .put(
+                    "autoFailpoint",
+                    arguments.getString(ARG_AUTO_FAILPOINT)
+                        ?: Phase7AutoFailpoint.None.argumentValue,
+                )
                 .put("backendRequested", backendMode.reportBackend)
                 .put(
                     "backendUsed",
@@ -1453,6 +1488,57 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("fallbackStage", record.fallbackStage ?: JSONObject.NULL)
                 .put("fallbackReason", record.fallbackReason ?: JSONObject.NULL)
         }
+    }
+
+    private fun validateAutoFaultEvidence(
+        report: JSONObject,
+        controller: Phase7AutoFaultController,
+        runtimeRecordBackend: String,
+        runtimeRecordFallbackStage: String?,
+        runtimeRecordFallbackReason: String?,
+        firstReadyAtElapsedMs: Long,
+    ) {
+        val snapshot = controller.snapshot()
+        val expectedStage = requireNotNull(snapshot.failpoint.expectedFallbackStage)
+        assertEquals(MdxInferenceBackend.LiteRtCpu.name, runtimeRecordBackend)
+        assertEquals(expectedStage.name, runtimeRecordFallbackStage)
+        assertTrue(
+            "The injected fallback reason was not retained: $runtimeRecordFallbackReason",
+            runtimeRecordFallbackReason?.contains("Injected Phase 7") == true,
+        )
+        assertEquals(1, snapshot.gpuCreateCount)
+        assertEquals(1, snapshot.gpuCloseCount)
+        assertEquals(1, snapshot.cpuCreateCount)
+        assertEquals(1, snapshot.cpuCloseCount)
+        assertTrue(snapshot.injectedAtElapsedMs > 0L)
+        val gpuCloseIndex = snapshot.events.indexOf("${MdxInferenceBackend.LiteRtGpu.name}-close")
+        val cpuCreateIndex = snapshot.events.indexOf("${MdxInferenceBackend.LiteRtCpu.name}-create")
+        assertTrue(
+            "CPU fallback was created before the GPU session closed: ${snapshot.events}",
+            gpuCloseIndex >= 0 && cpuCreateIndex > gpuCloseIndex,
+        )
+        if (snapshot.failpoint == Phase7AutoFailpoint.InvocationAfterReady) {
+            assertTrue(
+                "No playback-ready windows were observed before injected fallback.",
+                firstReadyAtElapsedMs > 0L,
+            )
+            assertTrue(
+                "The invocation failure occurred before playback readiness.",
+                firstReadyAtElapsedMs < snapshot.injectedAtElapsedMs,
+            )
+        }
+        report.put("autoFaultInjection", JSONObject()
+            .put("failpoint", snapshot.failpoint.argumentValue)
+            .put("expectedFallbackStage", expectedStage.name)
+            .put("injectedAtElapsedMs", snapshot.injectedAtElapsedMs)
+            .put("firstReadyAtElapsedMs", firstReadyAtElapsedMs)
+            .put("gpuCreateCount", snapshot.gpuCreateCount)
+            .put("gpuCloseCount", snapshot.gpuCloseCount)
+            .put("gpuInvocationCount", snapshot.gpuInvocationCount)
+            .put("cpuCreateCount", snapshot.cpuCreateCount)
+            .put("cpuCloseCount", snapshot.cpuCloseCount)
+            .put("events", JSONArray(snapshot.events))
+        )
     }
 
     private fun writeReport(context: Context, runId: String, report: JSONObject) {
@@ -1618,6 +1704,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_FIXTURES_VERSION = "fixturesVersion"
         const val ARG_SOURCE_PATH = "sourcePath"
         const val ARG_BACKEND_MODE = "backendMode"
+        const val ARG_AUTO_FAILPOINT = "autoFailpoint"
         const val ARG_PROCESSOR_COUNT = "processorCount"
         const val ARG_XNNPACK_FLAGS = "xnnPackFlags"
         const val ARG_WINDOW_DECODE_ENABLED = "windowDecodeEnabled"
