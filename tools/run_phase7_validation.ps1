@@ -256,10 +256,10 @@ try {
             "-e", "windowDecodeEnabled", $WindowDecode.ToString().ToLowerInvariant(),
             "-e", "cacheKey", $CacheKey
         )
-        if ($Stage -eq "worker") {
+        if ($Stage -eq "worker" -and $PreserveMediaStoreSource) {
             $instrumentArguments += @(
                 "-e", "preserveMediaStoreSource",
-                $PreserveMediaStoreSource.ToString().ToLowerInvariant()
+                "true"
             )
         }
         if ($ProcessorCount -gt 0) {
