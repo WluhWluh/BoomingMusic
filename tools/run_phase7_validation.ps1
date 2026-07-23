@@ -16,9 +16,14 @@ param(
     [string]$FixtureId = "coast_town_full_mp3",
     [string]$RunId = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v1",
+    [string]$RunnerRevision = "phase7-runner-v2",
+    [int]$ProcessorCount = 0,
+    [ValidateSet("cold-session", "warm-session")]
+    [string]$RunClass = "cold-session",
     [switch]$SkipBuild,
-    [switch]$KeepAppData
+    [switch]$KeepAppData,
+    [switch]$CleanInstallScenario,
+    [switch]$ExportCacheAudio
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,6 +62,13 @@ if ($Stage -eq "worker" -and -not $KeepAppData) {
 if ($Stage -eq "worker" -and [string]::IsNullOrWhiteSpace($SourcePath)) {
     throw "SourcePath is required for the worker stage."
 }
+if ($ProcessorCount -lt 0) {
+    throw "ProcessorCount must be zero (device default) or a positive integer."
+}
+if ($Stage -ne "worker" -and ($ProcessorCount -gt 0 -or $ExportCacheAudio -or
+        $RunClass -ne "cold-session" -or $CleanInstallScenario)) {
+    throw "ProcessorCount, RunClass, CleanInstallScenario, and ExportCacheAudio apply only to the worker stage."
+}
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "build\phase7-validation"
 }
@@ -78,6 +90,37 @@ function Read-RemoteFile([string]$RelativePath) {
 
 function Get-Sha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Export-RemoteFile([string]$RemotePath, [string]$LocalPath) {
+    $parent = Split-Path -Parent $LocalPath
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $adb
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @("-s", $Serial, "exec-out", "run-as", $package, "cat", $RemotePath)) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    $errorTask = $process.StandardError.ReadToEndAsync()
+    try {
+        $output = [System.IO.File]::Create($LocalPath)
+        try {
+            $process.StandardOutput.BaseStream.CopyTo($output)
+        } finally {
+            $output.Dispose()
+        }
+        $process.WaitForExit()
+        $errorText = $errorTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            Remove-Item -LiteralPath $LocalPath -Force -ErrorAction SilentlyContinue
+            throw "Could not export remote file '$RemotePath': $errorText"
+        }
+    } finally {
+        $process.Dispose()
+    }
 }
 
 function Get-CatalogModel([string]$Id) {
@@ -193,6 +236,13 @@ try {
             "-e", "fixtureCodec", $fixture.codec,
             "-e", "fixtureDecodeClass", $fixture.decodeClass
         )
+        $instrumentArguments += @(
+            "-e", "runClass", $RunClass,
+            "-e", "cleanInstallScenario", $CleanInstallScenario.ToString().ToLowerInvariant()
+        )
+        if ($ProcessorCount -gt 0) {
+            $instrumentArguments += @("-e", "processorCount", [string]$ProcessorCount)
+        }
     }
     if (-not [string]::IsNullOrWhiteSpace($litertSha256)) {
         $instrumentArguments += @("-e", "litertSha256", $litertSha256)
@@ -210,6 +260,46 @@ try {
     New-Item -ItemType Directory -Force -Path $deviceDirectory | Out-Null
     $reportPath = Join-Path $deviceDirectory "$RunId-$reportStage.json"
     $reportText | Set-Content -LiteralPath $reportPath -Encoding utf8
+
+    if ($Stage -eq "worker" -and $ExportCacheAudio) {
+        $reportObject = $reportText | ConvertFrom-Json
+        if ($reportObject.status -ne "passed") {
+            throw "Cannot export cache audio from a failed worker report: $reportPath"
+        }
+        $artifactDirectory = Join-Path $deviceDirectory "$RunId-artifacts"
+        $exportedArtifacts = @()
+        foreach ($stem in @($reportObject.cache.stems)) {
+            $semantic = ([string]$stem.semantic).ToLowerInvariant() -replace '[^a-z0-9._-]', '-'
+            foreach ($format in @(
+                @{ Name = "wav"; RemotePath = [string]$stem.wavPath },
+                @{ Name = "flac"; RemotePath = [string]$stem.promotedPath }
+            )) {
+                if ([string]::IsNullOrWhiteSpace($format.RemotePath)) { continue }
+                $localPath = Join-Path $artifactDirectory "$semantic.$($format.Name)"
+                Export-RemoteFile -RemotePath $format.RemotePath -LocalPath $localPath
+                $exportedArtifacts += [ordered]@{
+                    semantic = [string]$stem.semantic
+                    format = $format.Name
+                    fileName = Split-Path -Leaf $localPath
+                    bytes = (Get-Item -LiteralPath $localPath).Length
+                    sha256 = Get-Sha256 $localPath
+                }
+            }
+        }
+        $artifactManifest = [ordered]@{
+            schemaVersion = "phase7-artifacts-v1"
+            runId = $RunId
+            reportFileName = Split-Path -Leaf $reportPath
+            cacheKey = [string]$reportObject.cache.cacheKey
+            fixtureSha256 = [string]$reportObject.fixture.sha256
+            modelArtifactSha256 = [string]$reportObject.identity.artifactSha256
+            artifacts = $exportedArtifacts
+        }
+        $artifactManifestPath = Join-Path $artifactDirectory "manifest.json"
+        $artifactManifest | ConvertTo-Json -Depth 8 |
+            Set-Content -LiteralPath $artifactManifestPath -Encoding utf8
+        Write-Host "Exported Phase 7 cache audio to $artifactDirectory"
+    }
 
     foreach ($diagnostic in @(
         @{ Name = "meminfo"; Arguments = @("shell", "dumpsys", "meminfo", $package) },
@@ -233,6 +323,13 @@ try {
         thresholdsVersion = $thresholds.schemaVersion
         fixturesVersion = $fixtures.schemaVersion
         runnerRevision = $RunnerRevision
+        run = if ($Stage -eq "worker") {
+            [ordered]@{
+                class = $RunClass
+                cleanInstallScenario = [bool]$CleanInstallScenario
+                processorCountOverride = if ($ProcessorCount -gt 0) { $ProcessorCount } else { $null }
+            }
+        } else { $null }
     }
     $envelopePath = Join-Path $deviceDirectory "$RunId-inputs.json"
     $envelope | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $envelopePath -Encoding utf8
