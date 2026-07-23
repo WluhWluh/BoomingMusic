@@ -56,9 +56,20 @@ The instrumentation process first stages those files under its internal
 host verifies every staged file against the cache manifest's byte count and
 SHA-256 before deleting the device-side staging directory.
 
-Use `-Stage lifecycle` with the short fixture to exercise pause/resume and
-cancellation against the same production worker and cache coordinator. It
+Use `-Stage lifecycle` with the short fixture to exercise pause/resume, a seek
+from a ready window into a pending window, and cancellation against the same
+production worker and cache coordinator. The default `sequential` scenario
+runs all three operations with production-shaped `single-use` sessions. It
 expects the preceding pinned acquisition and does not export full audio.
+
+The lifecycle runner can isolate an operation in a fresh instrumentation
+process with `-LifecycleScenario pause-resume`, `seek`, or `cancellation`.
+`-LifecycleSessionMode shared-reusable` is a diagnostic-only control: it gives
+all range executions in that one test process the same bounded reusable
+provider, closes the provider at test teardown, and records the native session
+creation count. It does not alter the application graph and cannot be used as
+promotion evidence. This control distinguishes an operation failure from a
+failure caused by repeatedly allocating large LiteRT sessions in one process.
 After a normal short-fixture worker run, `-Stage recreation` force-stops the
 app through the standard runner setup and verifies that a new process can
 resolve the exact completed cache, both playback positions, and hydrated PCM.

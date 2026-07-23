@@ -17,10 +17,14 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v2",
+    [string]$RunnerRevision = "phase7-runner-v3",
     [int]$ProcessorCount = 0,
     [ValidateSet("cold-session", "warm-session")]
     [string]$RunClass = "cold-session",
+    [ValidateSet("pause-resume", "seek", "cancellation", "sequential")]
+    [string]$LifecycleScenario = "sequential",
+    [ValidateSet("single-use", "shared-reusable")]
+    [string]$LifecycleSessionMode = "single-use",
     [bool]$WindowDecode = $true,
     [switch]$SkipBuild,
     [switch]$KeepAppData,
@@ -79,6 +83,10 @@ if ($Stage -notin $sourceStages -and ($ProcessorCount -gt 0 -or $ExportCacheAudi
 }
 if ($PreserveMediaStoreSource -and $Stage -ne "worker") {
     throw "PreserveMediaStoreSource applies only to the worker stage."
+}
+if ($Stage -ne "lifecycle" -and
+        ($LifecycleScenario -ne "sequential" -or $LifecycleSessionMode -ne "single-use")) {
+    throw "LifecycleScenario and LifecycleSessionMode apply only to the lifecycle stage."
 }
 if ($Stage -eq "playback" -and $CacheKey -notmatch '^[0-9a-f]{64}$') {
     throw "Playback stage requires a 64-character lowercase cache key."
@@ -284,6 +292,12 @@ try {
         if ($Stage -eq "playback") {
             $instrumentArguments += @("-e", "cacheKey", $CacheKey)
         }
+        if ($Stage -eq "lifecycle") {
+            $instrumentArguments += @(
+                "-e", "lifecycleScenario", $LifecycleScenario,
+                "-e", "lifecycleSessionMode", $LifecycleSessionMode
+            )
+        }
         if ($Stage -eq "worker" -and $PreserveMediaStoreSource) {
             $instrumentArguments += @(
                 "-e", "preserveMediaStoreSource",
@@ -417,6 +431,8 @@ try {
                 windowDecodeEnabled = $WindowDecode
                 preserveMediaStoreSource = [bool]$PreserveMediaStoreSource
                 processorCountOverride = if ($ProcessorCount -gt 0) { $ProcessorCount } else { $null }
+                lifecycleScenario = if ($Stage -eq "lifecycle") { $LifecycleScenario } else { $null }
+                lifecycleSessionMode = if ($Stage -eq "lifecycle") { $LifecycleSessionMode } else { $null }
             }
         } else { $null }
     }

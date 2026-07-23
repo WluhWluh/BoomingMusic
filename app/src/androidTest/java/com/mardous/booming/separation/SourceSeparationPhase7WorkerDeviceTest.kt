@@ -35,6 +35,15 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheSt
 import com.mardous.booming.separation.cache.v2.resolveActiveCacheModel
 import com.mardous.booming.separation.cache.v2.resolveActiveCacheModelResolution
 import com.mardous.booming.separation.model.MdxCompatibilityPolicy
+import com.mardous.booming.separation.model.MdxExecutionProfile
+import com.mardous.booming.separation.model.MdxInferenceBackend
+import com.mardous.booming.separation.model.MdxInferenceSession
+import com.mardous.booming.separation.model.MdxInferenceSessionFactory
+import com.mardous.booming.separation.model.MdxInferenceSessionProvider
+import com.mardous.booming.separation.model.MdxModelArtifact
+import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.ReusableMdxInferenceSessionProvider
+import com.mardous.booming.separation.model.SingleUseMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSessionFactory
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
@@ -60,6 +69,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
@@ -366,8 +376,22 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val context = instrumentation.targetContext
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val lifecycleScenario = LifecycleScenario.parse(
+            arguments.getString(ARG_LIFECYCLE_SCENARIO),
+        )
+        val sessionMode = LifecycleSessionMode.parse(
+            arguments.getString(ARG_LIFECYCLE_SESSION_MODE),
+        )
         val report = baseReport(context, runId, arguments)
+        report.getJSONObject("lifecycle")
+            .put("diagnosticOnly", lifecycleScenario != LifecycleScenario.Sequential ||
+                sessionMode != LifecycleSessionMode.SingleUse)
+            .put("scenario", lifecycleScenario.argumentValue)
+            .put("sessionMode", sessionMode.argumentValue)
+            .put("sessionCreateCount", 0)
         val coordinators = mutableListOf<SourceSeparationForegroundWorkerCoordinator>()
+        val sessionCreateCount = AtomicInteger()
+        var reusableSessionProvider: ReusableMdxInferenceSessionProvider? = null
         var mediaUri: Uri? = null
 
         try {
@@ -394,6 +418,28 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertEquals(expectedModelId, activeReference.modelId)
             assertEquals(expectedArtifactSha256, activeReference.artifactSha256)
 
+            val cpuFactory = CountingMdxInferenceSessionFactory(
+                delegate = MdxLiteRtCpuInferenceSessionFactory(
+                    compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
+                    availableProcessors = {
+                        arguments.getString(ARG_PROCESSOR_COUNT)
+                            ?.toIntOrNull()
+                            ?.takeIf { it > 0 }
+                            ?: Runtime.getRuntime().availableProcessors()
+                    },
+                ),
+                createCount = sessionCreateCount,
+            )
+            val sessionProviderFactory: () -> MdxInferenceSessionProvider = when (sessionMode) {
+                LifecycleSessionMode.SingleUse -> {
+                    { SingleUseMdxInferenceSessionProvider(cpuFactory) }
+                }
+                LifecycleSessionMode.SharedReusable -> {
+                    val provider = ReusableMdxInferenceSessionProvider(cpuFactory)
+                    reusableSessionProvider = provider
+                    { provider }
+                }
+            }
             val runtimeFacade = createCpuRuntimeFacade(
                 context = context,
                 preferences = preferences,
@@ -401,155 +447,158 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 processorCount = arguments.getString(ARG_PROCESSOR_COUNT)
                     ?.toIntOrNull()
                     ?.takeIf { it > 0 },
+                sessionProviderFactoryOverride = sessionProviderFactory,
             )
             val resolved = runtimeFacade.resolve(source)
             val runtimeSong = (resolved as? SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The lifecycle source could not be admitted: $resolved")
             val cacheKey = runtimeSong.cacheKey
-            runtimeFacade.entries()
-                .filter { it.cacheKey == cacheKey }
-                .forEach { entry ->
-                    assertEquals(
-                        SourceSeparationCacheMutationResult.Completed,
-                        runtimeFacade.delete(entry.cacheKey),
-                    )
-                }
+            clearExactCacheEntry(runtimeFacade, cacheKey)
 
-            val pauseWorker = SourceSeparationForegroundWorkerCoordinator(
-                context = context,
-                preferences = preferences,
-                sourceSeparationRuntime = runtimeFacade,
-            )
-            coordinators += pauseWorker
-            pauseWorker.attachCallbacks(RecordingCallbacks())
-            pauseWorker.updateSong(
-                song = source,
-                positionMs = 0L,
-                durationMs = source.duration,
-                isPlaying = false,
-                sourceSeparationBlend = TEST_BLEND,
-            )
-            assertTrue(pauseWorker.startCurrentSong())
-            waitForReady(pauseWorker, minimumReadyWindows = 1)
-            pauseWorker.pauseCurrentSong(source)
-            waitForPaused(pauseWorker)
-            val pausedStatus = runtimeFacade.cacheStatus(runtimeSong)
-            assertTrue(
-                "Pause must leave a resumable or empty entry: $pausedStatus",
-                pausedStatus is SourceSeparationModelAwareCacheStatus.Missing ||
-                    pausedStatus is SourceSeparationModelAwareCacheStatus.Incomplete,
-            )
+            var pausedStatus: SourceSeparationModelAwareCacheStatus? = null
+            var resumedStatus: SourceSeparationModelAwareCacheStatus? = null
+            var seekStatus: SourceSeparationModelAwareCacheStatus? = null
+            var canceledStatus: SourceSeparationModelAwareCacheStatus? = null
+            var seekPositionMs: Long? = null
 
-            pauseWorker.updateSong(
-                song = source,
-                positionMs = 0L,
-                durationMs = source.duration,
-                isPlaying = false,
-                sourceSeparationBlend = TEST_BLEND,
-            )
-            assertTrue(pauseWorker.startCurrentSong())
-            waitForCompleted(pauseWorker)
-            val resumedStatus = runtimeFacade.cacheStatus(runtimeSong)
-            assertTrue(resumedStatus is SourceSeparationModelAwareCacheStatus.Completed)
-            pauseWorker.cancel()
-            waitForInactive(pauseWorker)
+            if (lifecycleScenario.includesPauseResume) {
+                val pauseWorker = SourceSeparationForegroundWorkerCoordinator(
+                    context = context,
+                    preferences = preferences,
+                    sourceSeparationRuntime = runtimeFacade,
+                )
+                coordinators += pauseWorker
+                pauseWorker.attachCallbacks(RecordingCallbacks())
+                pauseWorker.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = source.duration,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+                assertTrue(pauseWorker.startCurrentSong())
+                waitForReady(pauseWorker, minimumReadyWindows = 1)
+                pauseWorker.pauseCurrentSong(source)
+                waitForPaused(pauseWorker)
+                pausedStatus = runtimeFacade.cacheStatus(runtimeSong)
+                assertTrue(
+                    "Pause must leave a resumable or empty entry: $pausedStatus",
+                    pausedStatus is SourceSeparationModelAwareCacheStatus.Missing ||
+                        pausedStatus is SourceSeparationModelAwareCacheStatus.Incomplete,
+                )
 
-            assertEquals(
-                SourceSeparationCacheMutationResult.Completed,
-                runtimeFacade.delete(cacheKey),
-            )
-            val seekWorker = SourceSeparationForegroundWorkerCoordinator(
-                context = context,
-                preferences = preferences,
-                sourceSeparationRuntime = runtimeFacade,
-            )
-            coordinators += seekWorker
-            seekWorker.attachCallbacks(RecordingCallbacks())
-            seekWorker.updateSong(
-                song = source,
-                positionMs = 0L,
-                durationMs = source.duration,
-                isPlaying = false,
-                sourceSeparationBlend = TEST_BLEND,
-            )
-            assertTrue(seekWorker.startCurrentSong())
-            waitForReady(seekWorker, minimumReadyWindows = 1)
-            val seekPositionMs = (source.duration - SEEK_FROM_END_MS).coerceAtLeast(0L)
-            val beforeSeek = runtimeFacade.playableStatus(
-                song = runtimeSong,
-                playbackPositionMs = seekPositionMs,
-                readyWindowCount = 1,
-            )
-            if (beforeSeek is SourceSeparationModelAwarePlayableStatus.Ready) {
-                beforeSeek.playback.close()
+                pauseWorker.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = source.duration,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+                assertTrue(pauseWorker.startCurrentSong())
+                waitForCompleted(pauseWorker)
+                resumedStatus = runtimeFacade.cacheStatus(runtimeSong)
+                assertTrue(resumedStatus is SourceSeparationModelAwareCacheStatus.Completed)
+                pauseWorker.cancel()
+                waitForInactive(pauseWorker)
             }
-            assertTrue(
-                "The seek target was expected to be pending: $beforeSeek",
-                beforeSeek is SourceSeparationModelAwarePlayableStatus.Processing,
-            )
-            seekWorker.updatePosition(
-                positionMs = seekPositionMs,
-                durationMs = source.duration,
-                isPlaying = false,
-                sourceSeparationBlend = TEST_BLEND,
-            )
-            val afterSeek = waitForPlayable(
-                runtimeFacade = runtimeFacade,
-                song = runtimeSong,
-                playbackPositionMs = seekPositionMs,
-                readyWindowCount = 1,
-            )
-            afterSeek.playback.close()
-            waitForCompleted(seekWorker)
-            val seekStatus = runtimeFacade.cacheStatus(runtimeSong)
-            assertTrue(seekStatus is SourceSeparationModelAwareCacheStatus.Completed)
-            seekWorker.cancel()
-            waitForInactive(seekWorker)
 
-            assertEquals(
-                SourceSeparationCacheMutationResult.Completed,
-                runtimeFacade.delete(cacheKey),
-            )
-            val cancelWorker = SourceSeparationForegroundWorkerCoordinator(
-                context = context,
-                preferences = preferences,
-                sourceSeparationRuntime = runtimeFacade,
-            )
-            coordinators += cancelWorker
-            cancelWorker.attachCallbacks(RecordingCallbacks())
-            cancelWorker.updateSong(
-                song = source,
-                positionMs = 0L,
-                durationMs = source.duration,
-                isPlaying = false,
-                sourceSeparationBlend = TEST_BLEND,
-            )
-            assertTrue(cancelWorker.startCurrentSong())
-            waitForReady(cancelWorker, minimumReadyWindows = 1)
-            cancelWorker.cancel()
-            waitForInactive(cancelWorker)
-            val canceledStatus = runtimeFacade.cacheStatus(runtimeSong)
-            assertTrue(
-                "Cancellation must not publish a completed entry: $canceledStatus",
-                canceledStatus !is SourceSeparationModelAwareCacheStatus.Completed,
-            )
+            if (lifecycleScenario.includesSeek) {
+                clearExactCacheEntry(runtimeFacade, cacheKey)
+                val seekWorker = SourceSeparationForegroundWorkerCoordinator(
+                    context = context,
+                    preferences = preferences,
+                    sourceSeparationRuntime = runtimeFacade,
+                )
+                coordinators += seekWorker
+                seekWorker.attachCallbacks(RecordingCallbacks())
+                seekWorker.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = source.duration,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+                assertTrue(seekWorker.startCurrentSong())
+                waitForReady(seekWorker, minimumReadyWindows = 1)
+                val targetSeekPositionMs = (source.duration - SEEK_FROM_END_MS).coerceAtLeast(0L)
+                seekPositionMs = targetSeekPositionMs
+                val beforeSeek = runtimeFacade.playableStatus(
+                    song = runtimeSong,
+                    playbackPositionMs = targetSeekPositionMs,
+                    readyWindowCount = 1,
+                )
+                if (beforeSeek is SourceSeparationModelAwarePlayableStatus.Ready) {
+                    beforeSeek.playback.close()
+                }
+                assertTrue(
+                    "The seek target was expected to be pending: $beforeSeek",
+                    beforeSeek is SourceSeparationModelAwarePlayableStatus.Processing,
+                )
+                seekWorker.updatePosition(
+                    positionMs = targetSeekPositionMs,
+                    durationMs = source.duration,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+                val afterSeek = waitForPlayable(
+                    runtimeFacade = runtimeFacade,
+                    song = runtimeSong,
+                    playbackPositionMs = targetSeekPositionMs,
+                    readyWindowCount = 1,
+                )
+                afterSeek.playback.close()
+                waitForCompleted(seekWorker)
+                seekStatus = runtimeFacade.cacheStatus(runtimeSong)
+                assertTrue(seekStatus is SourceSeparationModelAwareCacheStatus.Completed)
+                seekWorker.cancel()
+                waitForInactive(seekWorker)
+            }
+
+            if (lifecycleScenario.includesCancellation) {
+                clearExactCacheEntry(runtimeFacade, cacheKey)
+                val cancelWorker = SourceSeparationForegroundWorkerCoordinator(
+                    context = context,
+                    preferences = preferences,
+                    sourceSeparationRuntime = runtimeFacade,
+                )
+                coordinators += cancelWorker
+                cancelWorker.attachCallbacks(RecordingCallbacks())
+                cancelWorker.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = source.duration,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+                assertTrue(cancelWorker.startCurrentSong())
+                waitForReady(cancelWorker, minimumReadyWindows = 1)
+                cancelWorker.cancel()
+                waitForInactive(cancelWorker)
+                canceledStatus = runtimeFacade.cacheStatus(runtimeSong)
+                assertTrue(
+                    "Cancellation must not publish a completed entry: $canceledStatus",
+                    canceledStatus !is SourceSeparationModelAwareCacheStatus.Completed,
+                )
+            }
 
             report.put("status", "passed")
             report.put("lifecycle", report.getJSONObject("lifecycle")
-                .put("pauseResumePassed", true)
-                .put("seekPassed", true)
-                .put("cancellationPassed", true)
-                .put("seekPositionMs", seekPositionMs)
-                .put("seekStartedPending", true)
-                .put("pauseStatus", pausedStatus::class.java.simpleName)
-                .put("resumedStatus", resumedStatus::class.java.simpleName)
-                .put("seekStatus", seekStatus::class.java.simpleName)
-                .put("canceledStatus", canceledStatus::class.java.simpleName)
+                .put("sessionCreateCount", sessionCreateCount.get())
+                .put("pauseResumePassed", lifecycleScenario.includesPauseResume)
+                .put("seekPassed", lifecycleScenario.includesSeek)
+                .put("cancellationPassed", lifecycleScenario.includesCancellation)
+                .put("seekPositionMs", seekPositionMs ?: JSONObject.NULL)
+                .put("seekStartedPending", lifecycleScenario.includesSeek)
+                .put("pauseStatus", pausedStatus?.javaClass?.simpleName ?: JSONObject.NULL)
+                .put("resumedStatus", resumedStatus?.javaClass?.simpleName ?: JSONObject.NULL)
+                .put("seekStatus", seekStatus?.javaClass?.simpleName ?: JSONObject.NULL)
+                .put("canceledStatus", canceledStatus?.javaClass?.simpleName ?: JSONObject.NULL)
             )
             report.put("cache", report.getJSONObject("cache")
                 .put("cacheKey", cacheKey)
                 .put("exactIdentity", true)
-                .put("completedPlayable", true)
+                .put("completedPlayable", resumedStatus is SourceSeparationModelAwareCacheStatus.Completed ||
+                    seekStatus is SourceSeparationModelAwareCacheStatus.Completed)
                 .put("clearRecoveryPassed", false)
             )
             report.put("worker", JSONObject()
@@ -560,13 +609,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("cpuThreads", resolveCpuThreads(
                     arguments.getString(ARG_PROCESSOR_COUNT)?.toIntOrNull(),
                 ))
+                .put("lifecycleScenario", lifecycleScenario.argumentValue)
+                .put("lifecycleSessionMode", sessionMode.argumentValue)
+                .put("sessionCreateCount", sessionCreateCount.get())
             )
         } catch (error: Throwable) {
             report.put("status", "failed")
             report.put("error", "${error::class.java.name}: ${error.message}")
+            report.getJSONObject("lifecycle")
+                .put("sessionCreateCount", sessionCreateCount.get())
             throw error
         } finally {
             coordinators.forEach { coordinator -> coordinator.cancel() }
+            reusableSessionProvider?.close()
             mediaUri?.let { uri ->
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
@@ -935,11 +990,26 @@ class SourceSeparationPhase7WorkerDeviceTest {
         error("Worker did not reach its paused idle state in time.")
     }
 
+    private fun clearExactCacheEntry(
+        runtimeFacade: SourceSeparationRuntimeFacade,
+        cacheKey: String,
+    ) {
+        runtimeFacade.entries()
+            .filter { it.cacheKey == cacheKey }
+            .forEach { entry ->
+                assertEquals(
+                    SourceSeparationCacheMutationResult.Completed,
+                    runtimeFacade.delete(entry.cacheKey),
+                )
+            }
+    }
+
     private fun createCpuRuntimeFacade(
         context: Context,
         preferences: SharedPreferences,
         presetRepository: SourceSeparationPresetRepository,
         processorCount: Int?,
+        sessionProviderFactoryOverride: (() -> MdxInferenceSessionProvider)? = null,
     ): SourceSeparationRuntimeFacade {
         val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
         val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
@@ -952,17 +1022,26 @@ class SourceSeparationPhase7WorkerDeviceTest {
             SourceSeparationCacheFlacPromoter::class.java,
         )
         val hydrator = get<SourceSeparationCacheHydrator>(SourceSeparationCacheHydrator::class.java)
-        val cpuFactory = MdxLiteRtCpuInferenceSessionFactory(
-            compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
-            availableProcessors = { processorCount ?: Runtime.getRuntime().availableProcessors() },
-        )
+        val sessionProviderFactory = sessionProviderFactoryOverride ?: run {
+            val cpuFactory = MdxLiteRtCpuInferenceSessionFactory(
+                compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
+                availableProcessors = {
+                    processorCount ?: Runtime.getRuntime().availableProcessors()
+                },
+            )
+            val singleUseFactory: () -> MdxInferenceSessionProvider = {
+                SingleUseMdxInferenceSessionProvider(cpuFactory)
+            }
+            singleUseFactory
+        }
         val engine = SourceSeparationModelAwareEngine(
             activeModelResolver = presetRepository::resolveActiveCacheModel,
             preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(context),
             coordinator = runCoordinator,
-            rangeExecutor = MdxSourceSeparationModelAwareRangeExecutor(context) {
-                com.mardous.booming.separation.model.SingleUseMdxInferenceSessionProvider(cpuFactory)
-            },
+            rangeExecutor = MdxSourceSeparationModelAwareRangeExecutor(
+                context,
+                sessionProviderFactory,
+            ),
             constructionGate = { true },
         )
         return DefaultSourceSeparationRuntimeFacade(
@@ -1361,6 +1440,54 @@ class SourceSeparationPhase7WorkerDeviceTest {
         require(SAFE_NAME.matches(it)) { "Unsafe Phase 7 validation run ID." }
     }
 
+    private class CountingMdxInferenceSessionFactory(
+        private val delegate: MdxInferenceSessionFactory,
+        private val createCount: AtomicInteger,
+    ) : MdxInferenceSessionFactory {
+        override val factoryId: String = delegate.factoryId
+        override val backend: MdxInferenceBackend = delegate.backend
+
+        override fun create(
+            artifact: MdxModelArtifact,
+            profile: MdxExecutionProfile,
+            runtimeSettings: MdxRuntimeSettings,
+        ): MdxInferenceSession {
+            createCount.incrementAndGet()
+            return delegate.create(artifact, profile, runtimeSettings)
+        }
+    }
+
+    private enum class LifecycleScenario(
+        val argumentValue: String,
+        val includesPauseResume: Boolean,
+        val includesSeek: Boolean,
+        val includesCancellation: Boolean,
+    ) {
+        PauseResume("pause-resume", true, false, false),
+        Seek("seek", false, true, false),
+        Cancellation("cancellation", false, false, true),
+        Sequential("sequential", true, true, true),
+        ;
+
+        companion object {
+            fun parse(value: String?): LifecycleScenario = values().singleOrNull {
+                it.argumentValue == (value ?: Sequential.argumentValue)
+            } ?: error("Unsupported lifecycle scenario: $value")
+        }
+    }
+
+    private enum class LifecycleSessionMode(val argumentValue: String) {
+        SingleUse("single-use"),
+        SharedReusable("shared-reusable"),
+        ;
+
+        companion object {
+            fun parse(value: String?): LifecycleSessionMode = values().singleOrNull {
+                it.argumentValue == (value ?: SingleUse.argumentValue)
+            } ?: error("Unsupported lifecycle session mode: $value")
+        }
+    }
+
     private companion object {
         const val ARG_RUN_ID = "runId"
         const val ARG_SERIAL = "serial"
@@ -1398,6 +1525,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_FIXTURE_CODEC = "fixtureCodec"
         const val ARG_FIXTURE_DECODE_CLASS = "fixtureDecodeClass"
         const val ARG_CACHE_KEY = "cacheKey"
+        const val ARG_LIFECYCLE_SCENARIO = "lifecycleScenario"
+        const val ARG_LIFECYCLE_SESSION_MODE = "lifecycleSessionMode"
         const val REPORT_DIRECTORY = "phase7-validation-reports"
         const val ARTIFACT_EXPORT_DIRECTORY = "phase7-validation-artifacts"
         const val REQUIRED_READY_WINDOWS = 2
