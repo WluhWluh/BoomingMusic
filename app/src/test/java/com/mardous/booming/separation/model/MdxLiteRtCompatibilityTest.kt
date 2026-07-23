@@ -71,7 +71,14 @@ class MdxLiteRtCompatibilityTest {
     }
 
     @Test
-    fun `explicitly unsupported and missing targets remain blocked internally`() {
+    fun `explicitly unsupported catalog targets and missing targets remain blocked internally`() {
+        val lifecycleUnsafeX86 = listOf("uvr_mdxnet_3_9662", "uvr_mdxnet_kara").map { modelId ->
+            decision(
+                modelId,
+                MdxRuntimePlatform(26, MdxRuntimeAbi.X86),
+                MdxCompatibilityPolicy.AllowUntestedInternal,
+            )
+        }
         val hq4X86 = decision(
             "uvr_mdxnet_inst_hq_4",
             MdxRuntimePlatform(26, MdxRuntimeAbi.X86),
@@ -89,6 +96,10 @@ class MdxLiteRtCompatibilityTest {
             MdxCompatibilityPolicy.AllowUntestedInternal,
         )
 
+        lifecycleUnsafeX86.forEach { decision ->
+            assertEquals(MdxCompatibilityOutcome.Unsupported, decision.outcome)
+            assertTrue(decision.evidence.orEmpty().contains("repeated LiteRT/XNNPACK"))
+        }
         assertEquals(MdxCompatibilityOutcome.Unsupported, hq4X86.outcome)
         assertTrue(hq4X86.evidence.orEmpty().contains("XNNPACK tensor allocation failed"))
         assertEquals(MdxCompatibilityOutcome.Unsupported, missing.outcome)

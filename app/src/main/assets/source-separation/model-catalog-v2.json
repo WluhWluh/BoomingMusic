@@ -1407,14 +1407,14 @@
       "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
       "backend": "cpu",
       "contractId": "uvr_mdxnet_3_9662@2",
-      "evidence": "BoomingSS API 26 x86 report at app commit 6843e435, 2026-07-21",
+      "evidence": "BoomingSS API 26 x86 report at app commit 6843e435, 2026-07-21: one worker could complete, but repeated LiteRT/XNNPACK session allocation failed; source separation is not lifecycle-safe on this ABI",
       "minimumAndroidApi": 26,
       "modelId": "uvr_mdxnet_3_9662",
       "precision": "fp32",
       "profileId": "cpu-default-fp32-v1",
       "runtimeId": "litert",
       "runtimeVersion": "2.1.5",
-      "status": "known-good"
+      "status": "unsupported"
     },
     {
       "abi": "armeabi-v7a",
@@ -1491,14 +1491,14 @@
       "artifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
       "backend": "cpu",
       "contractId": "uvr_mdxnet_kara@2",
-      "evidence": "BoomingSS API 26 x86 report at app commit 6843e435, 2026-07-21",
+      "evidence": "BoomingSS API 26 x86 report at app commit 6843e435, 2026-07-21: one worker could complete, but repeated LiteRT/XNNPACK session allocation failed; source separation is not lifecycle-safe on this ABI",
       "minimumAndroidApi": 26,
       "modelId": "uvr_mdxnet_kara",
       "precision": "fp32",
       "profileId": "cpu-default-fp32-v1",
       "runtimeId": "litert",
       "runtimeVersion": "2.1.5",
-      "status": "known-good"
+      "status": "unsupported"
     },
     {
       "abi": "armeabi-v7a",
