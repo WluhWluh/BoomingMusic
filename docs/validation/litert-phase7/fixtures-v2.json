@@ -110,6 +110,17 @@
         "mimeType": "audio/flac",
         "fallbackReason": null
       },
+      "expectedDecodeOverrides": [
+        {
+          "processAbi": "x86_64",
+          "expectedDecode": {
+            "mode": "FullSong",
+            "profile": null,
+            "mimeType": "audio/raw",
+            "fallbackReason": "WAV MIME was reported without a .wav file name."
+          }
+        }
+      ],
       "expectedOutputSampleRate": 44100,
       "expectedOutputFrameCount": 661500
     },
@@ -225,6 +236,17 @@
         "mimeType": "audio/flac",
         "fallbackReason": "FLAC window decode is currently enabled only for 44.1 kHz sources."
       },
+      "expectedDecodeOverrides": [
+        {
+          "processAbi": "x86_64",
+          "expectedDecode": {
+            "mode": "FullSong",
+            "profile": null,
+            "mimeType": "audio/raw",
+            "fallbackReason": "WAV MIME was reported without a .wav file name."
+          }
+        }
+      ],
       "expectedOutputSampleRate": 44100,
       "expectedOutputFrameCount": 661500
     },

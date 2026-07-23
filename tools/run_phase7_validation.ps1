@@ -436,25 +436,32 @@ try {
             "-e", "fixtureCodec", $fixture.codec,
             "-e", "fixtureDecodeClass", $fixture.decodeClass
         )
-        if ($null -ne $fixture.expectedDecode) {
-            $expectedProfile = if ($null -eq $fixture.expectedDecode.profile) {
+        $expectedDecode = $fixture.expectedDecode
+        $expectedDecodeOverride = @($fixture.expectedDecodeOverrides) |
+            Where-Object { $_.processAbi -eq $ProcessAbi } |
+            Select-Object -First 1
+        if ($null -ne $expectedDecodeOverride) {
+            $expectedDecode = $expectedDecodeOverride.expectedDecode
+        }
+        if ($null -ne $expectedDecode) {
+            $expectedProfile = if ($null -eq $expectedDecode.profile) {
                 "__none__"
             } else {
                 [Convert]::ToBase64String(
-                    [Text.Encoding]::UTF8.GetBytes([string]$fixture.expectedDecode.profile)
+                    [Text.Encoding]::UTF8.GetBytes([string]$expectedDecode.profile)
                 )
             }
-            $expectedFallbackReason = if ($null -eq $fixture.expectedDecode.fallbackReason) {
+            $expectedFallbackReason = if ($null -eq $expectedDecode.fallbackReason) {
                 "__none__"
             } else {
                 [Convert]::ToBase64String(
-                    [Text.Encoding]::UTF8.GetBytes([string]$fixture.expectedDecode.fallbackReason)
+                    [Text.Encoding]::UTF8.GetBytes([string]$expectedDecode.fallbackReason)
                 )
             }
             $instrumentArguments += @(
-                "-e", "fixtureExpectedDecodeMode", [string]$fixture.expectedDecode.mode,
+                "-e", "fixtureExpectedDecodeMode", [string]$expectedDecode.mode,
                 "-e", "fixtureExpectedDecodeProfileBase64", $expectedProfile,
-                "-e", "fixtureExpectedDecodeMime", [string]$fixture.expectedDecode.mimeType,
+                "-e", "fixtureExpectedDecodeMime", [string]$expectedDecode.mimeType,
                 "-e", "fixtureExpectedFallbackReasonBase64", $expectedFallbackReason
             )
         }
