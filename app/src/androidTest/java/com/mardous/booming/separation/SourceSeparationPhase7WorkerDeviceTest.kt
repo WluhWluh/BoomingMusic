@@ -370,32 +370,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             assertTrue(pauseWorker.startCurrentSong())
             waitForReady(pauseWorker, minimumReadyWindows = 1)
-            val seekPositionMs = (source.duration - SEEK_FROM_END_MS).coerceAtLeast(0L)
-            val beforeSeek = runtimeFacade.playableStatus(
-                song = runtimeSong,
-                playbackPositionMs = seekPositionMs,
-                readyWindowCount = 1,
-            )
-            if (beforeSeek is SourceSeparationModelAwarePlayableStatus.Ready) {
-                beforeSeek.playback.close()
-            }
-            assertTrue(
-                "The seek target was expected to be pending: $beforeSeek",
-                beforeSeek is SourceSeparationModelAwarePlayableStatus.Processing,
-            )
-            pauseWorker.updatePosition(
-                positionMs = seekPositionMs,
-                durationMs = source.duration,
-                isPlaying = false,
-                sourceSeparationBlend = TEST_BLEND,
-            )
-            val afterSeek = waitForPlayable(
-                runtimeFacade = runtimeFacade,
-                song = runtimeSong,
-                playbackPositionMs = seekPositionMs,
-                readyWindowCount = 1,
-            )
-            afterSeek.playback.close()
             pauseWorker.pauseCurrentSong(source)
             waitForPaused(pauseWorker)
             val pausedStatus = runtimeFacade.cacheStatus(runtimeSong)
@@ -416,6 +390,60 @@ class SourceSeparationPhase7WorkerDeviceTest {
             waitForCompleted(pauseWorker)
             val resumedStatus = runtimeFacade.cacheStatus(runtimeSong)
             assertTrue(resumedStatus is SourceSeparationModelAwareCacheStatus.Completed)
+            pauseWorker.cancel()
+            waitForInactive(pauseWorker)
+
+            assertEquals(
+                SourceSeparationCacheMutationResult.Completed,
+                runtimeFacade.delete(cacheKey),
+            )
+            val seekWorker = SourceSeparationForegroundWorkerCoordinator(
+                context = context,
+                preferences = preferences,
+                sourceSeparationRuntime = runtimeFacade,
+            )
+            coordinators += seekWorker
+            seekWorker.attachCallbacks(RecordingCallbacks())
+            seekWorker.updateSong(
+                song = source,
+                positionMs = 0L,
+                durationMs = source.duration,
+                isPlaying = false,
+                sourceSeparationBlend = TEST_BLEND,
+            )
+            assertTrue(seekWorker.startCurrentSong())
+            waitForReady(seekWorker, minimumReadyWindows = 1)
+            val seekPositionMs = (source.duration - SEEK_FROM_END_MS).coerceAtLeast(0L)
+            val beforeSeek = runtimeFacade.playableStatus(
+                song = runtimeSong,
+                playbackPositionMs = seekPositionMs,
+                readyWindowCount = 1,
+            )
+            if (beforeSeek is SourceSeparationModelAwarePlayableStatus.Ready) {
+                beforeSeek.playback.close()
+            }
+            assertTrue(
+                "The seek target was expected to be pending: $beforeSeek",
+                beforeSeek is SourceSeparationModelAwarePlayableStatus.Processing,
+            )
+            seekWorker.updatePosition(
+                positionMs = seekPositionMs,
+                durationMs = source.duration,
+                isPlaying = false,
+                sourceSeparationBlend = TEST_BLEND,
+            )
+            val afterSeek = waitForPlayable(
+                runtimeFacade = runtimeFacade,
+                song = runtimeSong,
+                playbackPositionMs = seekPositionMs,
+                readyWindowCount = 1,
+            )
+            afterSeek.playback.close()
+            waitForCompleted(seekWorker)
+            val seekStatus = runtimeFacade.cacheStatus(runtimeSong)
+            assertTrue(seekStatus is SourceSeparationModelAwareCacheStatus.Completed)
+            seekWorker.cancel()
+            waitForInactive(seekWorker)
 
             assertEquals(
                 SourceSeparationCacheMutationResult.Completed,
@@ -454,6 +482,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("seekStartedPending", true)
                 .put("pauseStatus", pausedStatus::class.java.simpleName)
                 .put("resumedStatus", resumedStatus::class.java.simpleName)
+                .put("seekStatus", seekStatus::class.java.simpleName)
                 .put("canceledStatus", canceledStatus::class.java.simpleName)
             )
             report.put("cache", report.getJSONObject("cache")
