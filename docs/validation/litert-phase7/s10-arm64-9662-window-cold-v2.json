@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "phase7-evidence-summary-v1",
+  "runId": "s10-arm64-9662-window-cold-v2",
+  "stage": "worker-player",
+  "status": "blocked-for-promotion",
+  "identity": {
+    "appCommit": "35a73dc6ca2f059ac7efb430f95bf85a1b11bc66",
+    "catalogSha256": "f1fed9d5a15e8a66d84c87623fbaf380c0183d6c76bde13b6c9aeb80192651cd",
+    "catalogSourceRevision": "746bee43db9ece9ec8214c1c74269e21547aed58",
+    "modelId": "uvr_mdxnet_3_9662",
+    "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "contractSchemaVersion": 2,
+    "modelReleaseTag": "v0.1.0-candidates.1",
+    "litertVersion": "2.1.5",
+    "processAbi": "arm64-v8a",
+    "runtimeLibrarySha256": "366e3e040b00692158f9f8f9105870672c93348a3d8e9024120b40045a074b0b",
+    "fixtureId": "coast_town_full_wav",
+    "fixtureSha256": "e845e52aeeeb69be702d3a28d756eaf7a3137dbe5338ea50fb0ac3d8c4f9bd89",
+    "desktopReferenceSourceRevision": "456a09e",
+    "comparisonToolRevision": "d38def6"
+  },
+  "device": {
+    "model": "SM-G9730",
+    "androidApi": 31,
+    "runClass": "cold-session",
+    "windowDecodeEnabled": true,
+    "cpuThreads": 4
+  },
+  "timing": {
+    "firstReadyMs": 9897,
+    "fullSongMs": 212121
+  },
+  "memory": {
+    "idlePssBytes": 208575488,
+    "peakPssBytes": 993163264,
+    "peakPssDeltaBytes": 784587776,
+    "peakNativeBytes": 672874496,
+    "resourceTargetPssDeltaBytes": 268435456,
+    "resourceHardLimitPssDeltaBytes": 402653184,
+    "resourceGate": "failed"
+  },
+  "audio": {
+    "outputFrameCount": 12070130,
+    "expectedFrameCount": 12070130,
+    "frameDelta": 0,
+    "stemSemantics": "Vocals,Instrumental",
+    "allQuantizedEquivalentToDesktopReference": true,
+    "maximumPcm16Delta": 1,
+    "maximumAbsError": 0.000030517578125,
+    "minimumSnrDb": 71.44512791100539,
+    "frozenFullTrackMinimumSnrDb": 80.0,
+    "frozenSnrGate": "failed",
+    "maximumJoinDiscontinuity": 0.00006103515625,
+    "frozenJoinLimit": 0.005,
+    "joinGate": "passed",
+    "segmentCount": 48
+  },
+  "cache": {
+    "exactIdentity": true,
+    "completedPlayable": true,
+    "flacPromotion": true,
+    "hydration": true
+  },
+  "promotionDecision": {
+    "cpuArm64": "not-promoted",
+    "reason": [
+      "resource PSS delta exceeds the hard limit",
+      "frozen full-track SNR gate is not met by the quantized vocal comparison"
+    ],
+    "nextAction": "complete the remaining ABI, lifecycle, resource, and threshold review before changing catalog maturity"
+  }
+}
