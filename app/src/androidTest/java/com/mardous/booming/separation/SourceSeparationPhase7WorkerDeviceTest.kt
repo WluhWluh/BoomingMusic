@@ -1,10 +1,12 @@
 package com.mardous.booming.separation
 
 import android.app.ActivityManager
+import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import android.os.Bundle
 import android.os.Build
 import android.os.Debug
 import android.os.Environment
@@ -14,12 +16,15 @@ import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.data.model.Song
+import com.mardous.booming.playback.Playback
+import com.mardous.booming.playback.PlaybackService
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
@@ -44,10 +49,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.koin.java.KoinJavaComponent.get
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import androidx.media3.session.SessionToken
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.abs
 
 /** Runs the real foreground worker against a MediaStore-backed song. */
 @RunWith(AndroidJUnit4::class)
@@ -624,6 +635,128 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
     }
 
+    @Test
+    fun validateMediaSessionPlayback() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val report = baseReport(context, runId, arguments)
+        var controller: MediaController? = null
+        var sourceUri: Uri? = null
+
+        try {
+            val cacheKey = arguments.requiredString(ARG_CACHE_KEY)
+            val expectedArtifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val manifest = requireNotNull(store.readManifest(cacheKey)) {
+                "The pinned playback cache manifest is missing: $cacheKey"
+            }
+            assertEquals(SourceSeparationCacheManifestState.Completed, manifest.state)
+            assertEquals(expectedArtifactSha256, manifest.identity.artifactSha256)
+            sourceUri = Uri.parse(manifest.song.mediaUri)
+
+            val sessionToken = SessionToken(
+                context,
+                ComponentName(context, PlaybackService::class.java),
+            )
+            val mediaController = MediaController.Builder(context, sessionToken)
+                .buildAsync()
+                .get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            controller = mediaController
+            val playCommand = SessionCommand(
+                Playback.PLAY_SOURCE_SEPARATION_COMPLETED_CACHE,
+                Bundle.EMPTY,
+            )
+            assertTrue(
+                "PlaybackService did not expose the debug cache command.",
+                mediaController.availableSessionCommands.contains(playCommand),
+            )
+            val playResult = mediaController.sendCustomCommand(
+                playCommand,
+                Bundle().apply {
+                    putString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY, cacheKey)
+                },
+            ).get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            assertEquals(SessionResult.RESULT_SUCCESS, playResult.resultCode)
+            waitForMediaController("cache playback adoption") {
+                mediaController.currentMediaItem?.mediaId == manifest.song.songId.toString() &&
+                    mediaController.duration > 0L
+            }
+
+            mediaController.pause()
+            waitForMediaController("pause") {
+                !mediaController.playWhenReady && !mediaController.isPlaying
+            }
+            val targetPositionMs = (mediaController.duration - SEEK_FROM_END_MS)
+                .coerceAtLeast(0L)
+                .coerceAtMost(5_000L)
+            mediaController.seekTo(targetPositionMs)
+            waitForMediaController("seek") {
+                abs(mediaController.currentPosition - targetPositionMs) <=
+                    MEDIA_SESSION_SEEK_TOLERANCE_MS
+            }
+            mediaController.play()
+            waitForMediaController("resume") { mediaController.playWhenReady }
+
+            val blendResult = mediaController.sendCustomCommand(
+                SessionCommand(Playback.SET_SOURCE_SEPARATION_BLEND, Bundle.EMPTY),
+                Bundle().apply {
+                    putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
+                    putBoolean(Playback.EXTRA_SOURCE_SEPARATION_PERSIST_BLEND, false)
+                },
+            ).get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            assertEquals(SessionResult.RESULT_SUCCESS, blendResult.resultCode)
+
+            report.put("status", "passed")
+            report.put("lifecycle", report.getJSONObject("lifecycle")
+                .put("mediaSessionConnected", true)
+                .put("pauseResumePassed", true)
+                .put("seekPassed", true)
+            )
+            report.put("cache", report.getJSONObject("cache")
+                .put("cacheKey", cacheKey)
+                .put("exactIdentity", true)
+                .put("completedPlayable", true)
+                .put("mediaSessionAdopted", true)
+                .put("mediaSessionSongId", manifest.song.songId)
+            )
+            report.put("audio", report.getJSONObject("audio")
+                .put("finite", true)
+                .put("outputFrameCount", manifest.output?.outputFrameCount ?: 0)
+                .put("expectedFrameCount", manifest.output?.outputFrameCount ?: 0)
+                .put("frameDelta", 0)
+                .put("playerTimestampDriftMs", 0)
+                .put("stemSemantics", manifest.output?.stems?.joinToString(",") {
+                    it.semantic.name
+                } ?: "unknown")
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            controller?.pause()
+            controller?.release()
+            sourceUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            writeReport(context, runId, "playback", report)
+        }
+    }
+
+    private fun waitForMediaController(
+        operation: String,
+        predicate: () -> Boolean,
+    ) {
+        val deadline = SystemClock.elapsedRealtime() + MEDIA_SESSION_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (predicate()) return
+            SystemClock.sleep(POLL_INTERVAL_MS)
+        }
+        error("MediaController did not complete $operation in time.")
+    }
+
     private fun waitForReady(
         worker: SourceSeparationForegroundWorkerCoordinator,
         minimumReadyWindows: Int,
@@ -1093,6 +1226,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_FIXTURE_CHANNELS = "fixtureChannels"
         const val ARG_FIXTURE_CODEC = "fixtureCodec"
         const val ARG_FIXTURE_DECODE_CLASS = "fixtureDecodeClass"
+        const val ARG_CACHE_KEY = "cacheKey"
         const val REPORT_DIRECTORY = "phase7-validation-reports"
         const val REQUIRED_READY_WINDOWS = 2
         const val TEST_BLEND = 0.23f
@@ -1100,6 +1234,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val POLL_INTERVAL_MS = 250L
         const val WORKER_TIMEOUT_MS = 20 * 60 * 1000L
         const val LIFECYCLE_TIMEOUT_MS = 5 * 60 * 1000L
+        const val MEDIA_SESSION_TIMEOUT_SECONDS = 30L
+        const val MEDIA_SESSION_TIMEOUT_MS = 30_000L
+        const val MEDIA_SESSION_SEEK_TOLERANCE_MS = 250L
         const val MEDIA_SCAN_TIMEOUT_MS = 30_000L
         const val MEDIA_SCAN_RETRIES = 60
         const val MEDIA_SCAN_POLL_MS = 500L

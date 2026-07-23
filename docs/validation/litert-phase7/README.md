@@ -61,6 +61,22 @@ resolve the exact completed cache, both playback positions, and hydrated PCM.
 `-PreserveMediaStoreSource` is reserved for a worker run immediately followed
 by the MediaSession stage. It keeps the manifest's source row queryable by
 `PlaybackService`; ordinary worker runs continue to remove the temporary row.
+The MediaSession stage is then invoked with the exact cache key:
+
+```powershell
+.\tools\run_phase7_validation.ps1 `
+  -Serial <serial> `
+  -ProcessAbi arm64-v8a `
+  -Stage playback `
+  -KeepAppData `
+  -CacheKey <completed-cache-key> `
+  -SourcePath <same-fixture-path> `
+  -FixtureId coast_town_short_wav
+```
+
+It connects to the real `PlaybackService` session and exercises completed-cache
+adoption, pause, seek, resume, and blend commands. The debug-only cache command
+is intentionally not part of the release graph.
 
 The local fixture source is the companion
 [`MusicSourceSeparation`](https://github.com/WluhWluh/MusicSourceSeparation)

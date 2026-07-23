@@ -8,13 +8,14 @@ param(
 
     [string]$ModelId = "uvr_mdxnet_3_9662",
 
-    [ValidateSet("identity", "acquisition", "worker", "lifecycle", "recreation")]
+    [ValidateSet("identity", "acquisition", "worker", "lifecycle", "recreation", "playback")]
     [string]$Stage = "identity",
 
     [string]$SourcePath = "",
 
     [string]$FixtureId = "coast_town_full_mp3",
     [string]$RunId = "",
+    [string]$CacheKey = "",
     [string]$OutputRoot = "",
     [string]$RunnerRevision = "phase7-runner-v2",
     [int]$ProcessorCount = 0,
@@ -32,7 +33,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $package = "com.wluhwluh.booming.sourcesep.debug"
 $runner = "$package.test/androidx.test.runner.AndroidJUnitRunner"
-$sourceStages = @("worker", "lifecycle", "recreation")
+$sourceStages = @("worker", "lifecycle", "recreation", "playback")
 $testClass = if ($Stage -in $sourceStages) {
     "com.mardous.booming.separation.SourceSeparationPhase7WorkerDeviceTest"
 } else {
@@ -43,6 +44,7 @@ $testMethod = switch ($Stage) {
     "worker" { "validateProductionWorkerCpu"; break }
     "lifecycle" { "validateWorkerLifecycle"; break }
     "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
+    "playback" { "validateMediaSessionPlayback"; break }
     default { "validateDeviceEvidenceIdentity" }
 }
 $reportStage = $Stage
@@ -77,6 +79,9 @@ if ($Stage -notin $sourceStages -and ($ProcessorCount -gt 0 -or $ExportCacheAudi
 }
 if ($PreserveMediaStoreSource -and $Stage -ne "worker") {
     throw "PreserveMediaStoreSource applies only to the worker stage."
+}
+if ($Stage -eq "playback" -and $CacheKey -notmatch '^[0-9a-f]{64}$') {
+    throw "Playback stage requires a 64-character lowercase cache key."
 }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "build\phase7-validation"
@@ -248,7 +253,8 @@ try {
         $instrumentArguments += @(
             "-e", "runClass", $RunClass,
             "-e", "cleanInstallScenario", $CleanInstallScenario.ToString().ToLowerInvariant(),
-            "-e", "windowDecodeEnabled", $WindowDecode.ToString().ToLowerInvariant()
+            "-e", "windowDecodeEnabled", $WindowDecode.ToString().ToLowerInvariant(),
+            "-e", "cacheKey", $CacheKey
         )
         if ($Stage -eq "worker") {
             $instrumentArguments += @(
