@@ -43,6 +43,45 @@ class AudioTimelineTest {
     }
 
     @Test
+    fun `legacy AAC inspection recovers a material edit-list duration`() {
+        val corrected = correctedAacPresentationDurationUs(
+            encodedDurationUs = 15_023_220,
+            presentationDurationUs = 15_000_000,
+            sampleRate = SAMPLE_RATE,
+            mimeType = "audio/mp4a-latm",
+            hasCompleteGaplessMetadata = false,
+        )
+
+        assertEquals(15_000_000L, corrected)
+    }
+
+    @Test
+    fun `AAC duration keeps extractor precision for rounding-only differences`() {
+        val corrected = correctedAacPresentationDurationUs(
+            encodedDurationUs = 15_000_090,
+            presentationDurationUs = 15_000_000,
+            sampleRate = SAMPLE_RATE,
+            mimeType = "audio/mp4a-latm",
+            hasCompleteGaplessMetadata = false,
+        )
+
+        assertEquals(15_000_090L, corrected)
+    }
+
+    @Test
+    fun `AAC duration leaves complete gapless metadata authoritative`() {
+        val corrected = correctedAacPresentationDurationUs(
+            encodedDurationUs = 15_023_220,
+            presentationDurationUs = 15_000_000,
+            sampleRate = SAMPLE_RATE,
+            mimeType = "audio/mp4a-latm",
+            hasCompleteGaplessMetadata = true,
+        )
+
+        assertEquals(15_023_220L, corrected)
+    }
+
+    @Test
     fun `decoded PCM fits the inspected timeline by trimming or zero padding`() {
         val source = DecodedPcmAudio(
             sampleRate = 44_100,
