@@ -65,7 +65,7 @@ class MdxLiteRtCpuInferenceSessionFactoryTest {
         val allocator = RecordingAllocator()
         val profile = profile("uvr_mdxnet_3_9662")
         val factory = factory(
-            abi = MdxRuntimeAbi.X86,
+            abi = MdxRuntimeAbi.X86_64,
             allocator = allocator,
             processors = 6,
             xnnPackFlags = 32,

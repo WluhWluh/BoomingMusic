@@ -29,7 +29,7 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
     @Test
     fun `CPU-only ABIs bypass GPU eligibility and allocation`() {
         val profile = profile("uvr_mdxnet_3_9662")
-        for (abi in listOf(MdxRuntimeAbi.ArmeabiV7a, MdxRuntimeAbi.X86, MdxRuntimeAbi.X86_64)) {
+        for (abi in listOf(MdxRuntimeAbi.ArmeabiV7a, MdxRuntimeAbi.X86_64)) {
             var eligibilityCalls = 0
             val gpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtGpu)
             val cpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtCpu)
@@ -59,6 +59,30 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
             assertEquals(MdxInferenceBackend.LiteRtCpu, diagnostics.acceptedOutputBackend)
             session.close()
         }
+    }
+
+    @Test
+    fun `lifecycle unsafe x86 is rejected before GPU eligibility or allocation`() {
+        val profile = profile("uvr_mdxnet_3_9662")
+        var eligibilityCalls = 0
+        val gpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtGpu)
+        val cpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtCpu)
+
+        assertThrows(MdxInferenceCompatibilityException::class.java) {
+            factory(
+                abi = MdxRuntimeAbi.X86,
+                gpuFactory = gpuFactory,
+                cpuFactory = cpuFactory,
+                eligibilityProvider = { _, _, _ ->
+                    eligibilityCalls += 1
+                    eligible()
+                },
+            ).create(artifact(profile), profile, MdxRuntimeSettings())
+        }
+
+        assertEquals(0, eligibilityCalls)
+        assertEquals(0, gpuFactory.createCount)
+        assertEquals(0, cpuFactory.createCount)
     }
 
     @Test
@@ -100,7 +124,7 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
 
         val error = assertThrows(UnsatisfiedLinkError::class.java) {
             factory(
-                abi = MdxRuntimeAbi.X86,
+                abi = MdxRuntimeAbi.ArmeabiV7a,
                 gpuFactory = gpuFactory,
                 cpuFactory = cpuFactory,
             ).create(artifact(profile), profile, MdxRuntimeSettings())
