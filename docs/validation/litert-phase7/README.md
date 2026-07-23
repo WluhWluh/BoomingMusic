@@ -15,8 +15,9 @@ precision. A successful short-window probe is not a Phase 7 promotion result.
   keeps SNR diagnostic rather than rejecting an otherwise exact render.
 - `preliminary-results-2026-07-22.md` summarizes current device evidence and
   explicitly lists the rows that remain open.
-- `fixtures-v1.json` identifies the local research fixtures by hash without
-  copying model weights, full audio, or reference stems into Booming SS.
+- `fixtures-v2.json` identifies the local research fixtures and the generated
+  source-format corpus by hash without copying model weights, full audio, or
+  reference stems into Booming SS.
 - `phase7-inputs-v1.json` will pin the exact app commit, catalog, model Release,
   runtime, APK hashes, and fixture references once the Phase 7 runner build is
   frozen.
@@ -59,6 +60,23 @@ The instrumentation process first stages those files under its internal
 `filesDir` so export remains valid under newer Android storage isolation. The
 host verifies every staged file against the cache manifest's byte count and
 SHA-256 before deleting the device-side staging directory.
+
+Run the complete generated source-format matrix after the pinned model has
+been acquired and selected on a device:
+
+```powershell
+.\tools\run_phase7_format_corpus.ps1 `
+  -Serial <serial> `
+  -ProcessAbi arm64-v8a `
+  -BackendMode auto
+```
+
+The wrapper verifies the companion repository revision, runs all nine v2
+format fixtures through the production worker, and continues after an
+individual failure so one invocation captures the full decoder matrix. Use
+`-BackendMode cpu` for claimed CPU ABIs and `-FixtureId <id>` to repeat a
+single route. Pure x86 is intentionally excluded because source separation is
+unsupported there.
 
 CPU is the default validation backend. Pass `-BackendMode auto` on S10 or S25
 to exercise the production `gpu-auto-fp32-v1` provider, including its real GPU
@@ -185,7 +203,7 @@ transition:
   -FixtureId coast_town_short_wav
 ```
 
-The host verifies both files against `fixtures-v1.json` before pushing them.
+The host verifies both files against `fixtures-v2.json` before pushing them.
 Using the same audio for both songs is invalid because exact cache identity is
 content-based, not MediaStore-row-based. `background` and `prefetch` require
 `BackendMode=auto` because they deliberately exercise the production service
@@ -199,3 +217,8 @@ The local fixture source is the companion
 [`MusicSourceSeparation`](https://github.com/WluhWluh/MusicSourceSeparation)
 repository. Full audio and generated reference stems are intentionally kept
 outside this repository; reports retain hashes and reproduction instructions.
+Run `tools/generate_phase7_format_corpus.py` at the pinned companion revision
+to reproduce the nine 15-second format fixtures. Each v2 fixture records its
+expected final window/full-song route, profile, MIME, fallback reason, output
+sample rate, and frame count. Worker reports retain the encoded-sample
+fingerprint and actual segment join frames from the completed cache manifest.

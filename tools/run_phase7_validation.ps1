@@ -30,7 +30,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v10",
+    [string]$RunnerRevision = "phase7-runner-v11",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet("none", "setup", "probe", "invocation-after-ready")]
@@ -82,9 +82,13 @@ $testMethod = switch ($Stage) {
 }
 $reportStage = $Stage
 $adb = (Get-Command adb -ErrorAction Stop).Source
+$deviceUserId = (& $adb -s $Serial shell am get-current-user).Trim()
+if ($LASTEXITCODE -ne 0 -or $deviceUserId -notmatch '^\d+$') {
+    throw "Could not resolve the numeric current Android user for $Serial."
+}
 $catalogPath = Join-Path $repoRoot "app/src/main/assets/source-separation/model-catalog-v2.json"
 $thresholdsPath = Join-Path $repoRoot "docs/validation/litert-phase7/thresholds-v2.json"
-$fixturesPath = Join-Path $repoRoot "docs/validation/litert-phase7/fixtures-v1.json"
+$fixturesPath = Join-Path $repoRoot "docs/validation/litert-phase7/fixtures-v2.json"
 
 if ([string]::IsNullOrWhiteSpace($RunId)) {
     $safeSerial = $Serial -replace '[^A-Za-z0-9._-]', '_'
@@ -287,7 +291,7 @@ $currentFixture = if ($Stage -eq "prefetch") {
     $null
 }
 if ($Stage -in $sourceStages) {
-    if ($null -eq $fixture) { throw "Fixture is absent from fixtures-v1.json: $FixtureId" }
+    if ($null -eq $fixture) { throw "Fixture is absent from fixtures-v2.json: $FixtureId" }
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
         throw "Source fixture file not found: $SourcePath"
     }
@@ -300,7 +304,7 @@ if ($Stage -in $sourceStages) {
 }
 if ($Stage -eq "prefetch") {
     if ($null -eq $currentFixture) {
-        throw "Fixture is absent from fixtures-v1.json: $CurrentFixtureId"
+        throw "Fixture is absent from fixtures-v2.json: $CurrentFixtureId"
     }
     if (-not (Test-Path -LiteralPath $CurrentSourcePath -PathType Leaf)) {
         throw "Current source fixture file not found: $CurrentSourcePath"
@@ -317,7 +321,9 @@ $appCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 $appApk = $null
 $testApk = $null
 $remoteSourcePath = ""
+$remoteSourceRelativePath = ""
 $remoteCurrentSourcePath = ""
+$remoteCurrentSourceRelativePath = ""
 $remoteArtifactDirectory = ""
 $expectedRemoteArtifactDirectory = "files/phase7-validation-artifacts/$RunId"
 $backgroundScreenTimeoutMs = 30 * 60 * 1000
@@ -358,6 +364,15 @@ try {
     & $adb -s $Serial shell pm grant $package android.permission.READ_EXTERNAL_STORAGE 2>$null | Out-Null
     & $adb -s $Serial shell pm grant $package android.permission.WRITE_EXTERNAL_STORAGE 2>$null | Out-Null
     & $adb -s $Serial shell pm grant $package android.permission.READ_MEDIA_AUDIO 2>$null | Out-Null
+    $appDataRoot = if ($Stage -in $sourceStages) {
+        (& $adb -s $Serial shell run-as $package pwd).Trim()
+    } else {
+        ""
+    }
+    if ($Stage -in $sourceStages -and
+            ($LASTEXITCODE -ne 0 -or $appDataRoot -notmatch '^/data/')) {
+        throw "Could not resolve the app-private Phase 7 staging directory."
+    }
 
     $instrumentArguments = @(
         "-e", "class", "$testClass#$testMethod",
@@ -398,11 +413,17 @@ try {
         if ($sourceLeaf -notmatch '^[A-Za-z0-9._-]+$') {
             throw "Source fixture filename contains unsupported characters: $sourceLeaf"
         }
-        $remoteSourcePath = "/storage/emulated/0/Music/booming-ss-phase7-$RunId-$sourceLeaf"
-        & $adb -s $Serial shell mkdir -p /storage/emulated/0/Music
-        if ($LASTEXITCODE -ne 0) { throw "Could not create the shared Music directory." }
-        Invoke-Adb push $sourcePath $remoteSourcePath
-        Invoke-Adb shell chmod 644 $remoteSourcePath
+        $sourceTempPath = "/data/local/tmp/booming-ss-phase7-$RunId-$sourceLeaf"
+        $remoteSourceRelativePath = "files/phase7-validation-inputs/$RunId-$sourceLeaf"
+        $remoteSourcePath = "$appDataRoot/$remoteSourceRelativePath"
+        try {
+            Invoke-Adb push $sourcePath $sourceTempPath
+            Invoke-Adb shell chmod 644 $sourceTempPath
+            Invoke-Adb shell run-as $package mkdir -p files/phase7-validation-inputs
+            Invoke-Adb shell run-as $package cp $sourceTempPath $remoteSourceRelativePath
+        } finally {
+            & $adb -s $Serial shell rm -f $sourceTempPath 2>$null | Out-Null
+        }
         $instrumentArguments += @(
             "-e", "sourcePath", $remoteSourcePath,
             "-e", "fixtureId", $fixture.fixtureId,
@@ -415,14 +436,57 @@ try {
             "-e", "fixtureCodec", $fixture.codec,
             "-e", "fixtureDecodeClass", $fixture.decodeClass
         )
+        if ($null -ne $fixture.expectedDecode) {
+            $expectedProfile = if ($null -eq $fixture.expectedDecode.profile) {
+                "__none__"
+            } else {
+                [Convert]::ToBase64String(
+                    [Text.Encoding]::UTF8.GetBytes([string]$fixture.expectedDecode.profile)
+                )
+            }
+            $expectedFallbackReason = if ($null -eq $fixture.expectedDecode.fallbackReason) {
+                "__none__"
+            } else {
+                [Convert]::ToBase64String(
+                    [Text.Encoding]::UTF8.GetBytes([string]$fixture.expectedDecode.fallbackReason)
+                )
+            }
+            $instrumentArguments += @(
+                "-e", "fixtureExpectedDecodeMode", [string]$fixture.expectedDecode.mode,
+                "-e", "fixtureExpectedDecodeProfileBase64", $expectedProfile,
+                "-e", "fixtureExpectedDecodeMime", [string]$fixture.expectedDecode.mimeType,
+                "-e", "fixtureExpectedFallbackReasonBase64", $expectedFallbackReason
+            )
+        }
+        if ($null -ne $fixture.expectedOutputSampleRate) {
+            $instrumentArguments += @(
+                "-e", "fixtureExpectedOutputSampleRate",
+                [string]$fixture.expectedOutputSampleRate
+            )
+        }
+        if ($null -ne $fixture.expectedOutputFrameCount) {
+            $instrumentArguments += @(
+                "-e", "fixtureExpectedOutputFrames",
+                [string]$fixture.expectedOutputFrameCount
+            )
+        }
         if ($Stage -eq "prefetch") {
             $currentSourceLeaf = Split-Path -Leaf $currentSourcePath
             if ($currentSourceLeaf -notmatch '^[A-Za-z0-9._-]+$') {
                 throw "Current source fixture filename contains unsupported characters: $currentSourceLeaf"
             }
-            $remoteCurrentSourcePath = "/storage/emulated/0/Music/booming-ss-phase7-$RunId-current-$currentSourceLeaf"
-            Invoke-Adb push $currentSourcePath $remoteCurrentSourcePath
-            Invoke-Adb shell chmod 644 $remoteCurrentSourcePath
+            $currentSourceTempPath = "/data/local/tmp/booming-ss-phase7-$RunId-current-$currentSourceLeaf"
+            $remoteCurrentSourceRelativePath =
+                "files/phase7-validation-inputs/$RunId-current-$currentSourceLeaf"
+            $remoteCurrentSourcePath = "$appDataRoot/$remoteCurrentSourceRelativePath"
+            try {
+                Invoke-Adb push $currentSourcePath $currentSourceTempPath
+                Invoke-Adb shell chmod 644 $currentSourceTempPath
+                Invoke-Adb shell run-as $package cp $currentSourceTempPath `
+                    $remoteCurrentSourceRelativePath
+            } finally {
+                & $adb -s $Serial shell rm -f $currentSourceTempPath 2>$null | Out-Null
+            }
             $instrumentArguments += @(
                 "-e", "currentSourcePath", $remoteCurrentSourcePath,
                 "-e", "currentFixtureId", $currentFixture.fixtureId,
@@ -483,13 +547,25 @@ try {
         Invoke-Adb shell wm dismiss-keyguard
     }
 
-    Invoke-Adb shell am force-stop $package
-    $instrumentOutput = & $adb -s $Serial shell am instrument -w -r @instrumentArguments $runner
-    $instrumentExit = $LASTEXITCODE
-    $instrumentText = $instrumentOutput -join "`n"
+    $instrumentAttempt = 0
+    do {
+        $instrumentAttempt += 1
+        Invoke-Adb shell am force-stop --user $deviceUserId $package
+        $instrumentOutput = & $adb -s $Serial shell am instrument --user $deviceUserId `
+            -w -r @instrumentArguments $runner
+        $instrumentExit = $LASTEXITCODE
+        $instrumentText = $instrumentOutput -join "`n"
+        if ($instrumentText -notmatch 'Invalid userId' -or $instrumentAttempt -ge 2) {
+            break
+        }
+        Start-Sleep -Milliseconds 750
+    } while ($true)
     Write-Host $instrumentText
     $remoteReport = "files/phase7-validation-reports/$RunId-$reportStage.json"
     $reportText = Read-RemoteFile $remoteReport
+    if ($reportText.TrimStart() -notmatch '^\{') {
+        throw "Phase 7 instrumentation did not create a JSON report for $RunId."
+    }
 
     $deviceDirectory = Join-Path $OutputRoot ($Serial -replace '[^A-Za-z0-9._-]', '_')
     New-Item -ItemType Directory -Force -Path $deviceDirectory | Out-Null
@@ -647,11 +723,13 @@ try {
         & $adb -s $Serial shell settings put system screen_off_timeout `
             $originalScreenOffTimeout 2>$null | Out-Null
     }
-    if (-not [string]::IsNullOrWhiteSpace($remoteSourcePath)) {
-        & $adb -s $Serial shell rm -f $remoteSourcePath 2>$null | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($remoteSourceRelativePath)) {
+        & $adb -s $Serial shell run-as $package rm -f -- `
+            $remoteSourceRelativePath 2>$null | Out-Null
     }
-    if (-not [string]::IsNullOrWhiteSpace($remoteCurrentSourcePath)) {
-        & $adb -s $Serial shell rm -f $remoteCurrentSourcePath 2>$null | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($remoteCurrentSourceRelativePath)) {
+        & $adb -s $Serial shell run-as $package rm -f -- `
+            $remoteCurrentSourceRelativePath 2>$null | Out-Null
     }
     if ($remoteArtifactDirectory -eq $expectedRemoteArtifactDirectory) {
         & $adb -s $Serial shell run-as $package rm -rf -- `

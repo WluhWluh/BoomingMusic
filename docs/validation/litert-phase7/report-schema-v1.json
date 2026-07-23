@@ -151,6 +151,9 @@
         "channels": { "type": "integer", "minimum": 1 },
         "codec": { "type": "string", "minLength": 1 },
         "decodeClass": { "type": "string", "minLength": 1 },
+        "expectedDecode": { "type": ["object", "null"] },
+        "expectedOutputSampleRate": { "type": ["integer", "null"], "minimum": 1 },
+        "expectedOutputFrameCount": { "type": ["integer", "null"], "minimum": 1 },
         "referenceOutputs": { "type": "array", "items": { "type": "object" } }
       }
     },
@@ -263,6 +266,15 @@
         "maxJoinDiscontinuity": { "type": "number", "minimum": 0 },
         "playerTimestampDriftMs": { "type": "integer", "minimum": 0 },
         "stemSemantics": { "type": "string", "minLength": 1 },
+        "sourceAudioFingerprint": {
+          "type": "string",
+          "pattern": "^encoded-samples-v1:[0-9a-f]{64}$"
+        },
+        "joinFrames": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "joinPlacementValid": { "type": "boolean" },
         "decodeDiagnostics": { "type": "object" }
       }
     },

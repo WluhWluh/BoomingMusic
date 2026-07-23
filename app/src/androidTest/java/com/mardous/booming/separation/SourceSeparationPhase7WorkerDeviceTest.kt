@@ -15,6 +15,7 @@ import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.provider.MediaStore
+import android.util.Base64
 import android.webkit.MimeTypeMap
 import androidx.media3.common.Player
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -254,6 +255,13 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertTrue(output.outputFrameCount > 0)
             assertTrue(output.windowCount > 0)
             val runtimeRecord = requireNotNull(manifest.runtimeRecords.lastOrNull())
+            report.getJSONObject("audio")
+                .put("outputFrameCount", output.outputFrameCount)
+                .put("sourceAudioFingerprint", manifest.identity.source.audioFingerprint)
+                .put(
+                    "decodeDiagnostics",
+                    sourceDecodeJson(runtimeRecord, decodeDiagnostics ?: ""),
+                )
             if (backendMode == BackendMode.Cpu) {
                 assertEquals(MdxInferenceBackend.LiteRtCpu.name, runtimeRecord.backend)
             } else {
@@ -273,6 +281,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     firstReadyAtElapsedMs = firstReadyAt.get(),
                 )
             }
+            assertExpectedSourceDecode(arguments, runtimeRecord)
             playback.close()
 
             val playable = runtimeFacade.playableStatus(
@@ -311,10 +320,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
             } else {
                 null
             }
-            val expectedFrames = ((arguments.optionalLong(ARG_FIXTURE_DURATION_US) *
-                arguments.optionalInt(ARG_FIXTURE_SAMPLE_RATE, 1) + 500_000L) /
-                1_000_000L).toInt()
+            val expectedFrames = arguments.getString(ARG_FIXTURE_EXPECTED_OUTPUT_FRAMES)
+                ?.toIntOrNull()
+                ?: ((arguments.optionalLong(ARG_FIXTURE_DURATION_US) *
+                    arguments.optionalInt(ARG_FIXTURE_SAMPLE_RATE, 1) + 500_000L) /
+                    1_000_000L).toInt()
             val frameDelta = kotlin.math.abs(output.outputFrameCount - expectedFrames)
+            val segmentPlan = requireNotNull(promotedManifest.segmentPlan)
+            val joinFrames = segmentPlan.segments.drop(1).map { it.playbackStartFrame }
+            val joinPlacementValid = segmentPlan.rangeStartFrame == 0 &&
+                segmentPlan.rangeEndFrame == output.outputFrameCount &&
+                segmentPlan.segments.zipWithNext().all { (current, next) ->
+                    current.playbackEndFrame == next.playbackStartFrame
+                }
             report.put("status", "passed")
             report.put("timing", report.getJSONObject("timing")
                 .put("firstReadyMs", firstReadyMs)
@@ -341,11 +359,25 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("stemSemantics", output.stems.joinToString(",") {
                     it.semantic.name
                 })
-                .put("decodeDiagnostics", JSONObject()
-                    .put("mode", decodeMode ?: "unknown")
-                    .put("detail", decodeDiagnostics ?: "")
-                )
+                .put("sourceAudioFingerprint", manifest.identity.source.audioFingerprint)
+                .put("joinFrames", JSONArray(joinFrames))
+                .put("joinPlacementValid", joinPlacementValid)
+                .put("decodeDiagnostics", sourceDecodeJson(runtimeRecord,
+                    decodeDiagnostics ?: "", decodeMode))
             )
+            arguments.getString(ARG_FIXTURE_EXPECTED_OUTPUT_FRAMES)?.let {
+                assertEquals(
+                    "Unexpected format-corpus output frame count.",
+                    expectedFrames,
+                    output.outputFrameCount,
+                )
+            }
+            arguments.getString(ARG_FIXTURE_EXPECTED_OUTPUT_SAMPLE_RATE)
+                ?.toIntOrNull()
+                ?.let { expectedSampleRate ->
+                    assertEquals(expectedSampleRate, output.outputSampleRate)
+                }
+            assertTrue("Completed cache segment joins are not contiguous.", joinPlacementValid)
             val cacheReport = report.getJSONObject("cache")
                 .put("cacheKey", cacheKey)
                 .put("entryCountBefore", entriesBefore)
@@ -1780,6 +1812,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val displayName = "booming-ss-phase7-$runId.$extension"
         val mimeType = MimeTypeMap.getSingleton()
             .getMimeTypeFromExtension(extension)
+            ?: "audio/x-wav".takeIf { extension == "wave" }
             ?: "audio/*"
         val values = ContentValues().apply {
             put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
@@ -1856,7 +1889,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     val volumeIndex = cursor.getColumnIndex(MediaStore.Audio.Media.VOLUME_NAME)
                     return Song(
                         id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)),
-                        data = cursor.stringOrFallback(MediaStore.Audio.Media.DATA, sourcePath),
+                        // MediaStore may rewrite an unknown source suffix from its MIME type.
+                        data = sourcePath,
                         title = cursor.stringOrFallback(MediaStore.Audio.Media.TITLE, "Phase 7 source"),
                         trackNumber = cursor.intOrDefault(MediaStore.Audio.Media.TRACK),
                         year = cursor.intOrDefault(MediaStore.Audio.Media.YEAR),
@@ -1965,6 +1999,62 @@ class SourceSeparationPhase7WorkerDeviceTest {
     private fun Debug.MemoryInfo.summaryBytes(key: String, fallbackKb: Int): Long =
         (memoryStats[key]?.toLongOrNull() ?: fallbackKb.toLong()) * 1024L
 
+    private fun assertExpectedSourceDecode(
+        arguments: Bundle,
+        record: com.mardous.booming.separation.cache.v2.SourceSeparationCacheRuntimeRecord,
+    ) {
+        arguments.getString(ARG_FIXTURE_EXPECTED_DECODE_MODE)?.let { expected ->
+            assertEquals("Unexpected source decode mode.", expected, record.sourceDecodeMode)
+        }
+        arguments.getString(ARG_FIXTURE_EXPECTED_DECODE_PROFILE_BASE64)?.let { encoded ->
+            assertEquals(
+                "Unexpected source decode profile.",
+                decodeExpectedNullable(encoded),
+                record.sourceDecodeProfile,
+            )
+        }
+        arguments.getString(ARG_FIXTURE_EXPECTED_DECODE_MIME)?.let { expected ->
+            assertEquals("Unexpected source decode MIME.", expected, record.sourceDecodeMimeType)
+        }
+        arguments.getString(ARG_FIXTURE_EXPECTED_FALLBACK_REASON_BASE64)?.let { encoded ->
+            assertEquals(
+                "Unexpected source decode fallback reason.",
+                decodeExpectedNullable(encoded),
+                record.sourceDecodeFallbackReason,
+            )
+        }
+    }
+
+    private fun sourceDecodeJson(
+        record: com.mardous.booming.separation.cache.v2.SourceSeparationCacheRuntimeRecord,
+        detail: String,
+        observedMode: String? = null,
+    ): JSONObject {
+        return JSONObject()
+            .put("mode", record.sourceDecodeMode ?: observedMode ?: "unknown")
+            .put("profile", record.sourceDecodeProfile ?: JSONObject.NULL)
+            .put("mimeType", record.sourceDecodeMimeType ?: JSONObject.NULL)
+            .put("sampleRate", record.sourceDecodeSampleRate ?: JSONObject.NULL)
+            .put("channelCount", record.sourceDecodeChannelCount ?: JSONObject.NULL)
+            .put("sourceFrameCount", record.sourceDecodeSourceFrameCount ?: JSONObject.NULL)
+            .put("outputFrameCount", record.sourceDecodeOutputFrameCount ?: JSONObject.NULL)
+            .put("encoderDelayFrames", record.sourceDecodeEncoderDelayFrames ?: JSONObject.NULL)
+            .put(
+                "encoderPaddingFrames",
+                record.sourceDecodeEncoderPaddingFrames ?: JSONObject.NULL,
+            )
+            .put(
+                "fallbackReason",
+                record.sourceDecodeFallbackReason ?: JSONObject.NULL,
+            )
+            .put("detail", detail)
+    }
+
+    private fun decodeExpectedNullable(encoded: String): String? {
+        if (encoded == EXPECTED_NULL_VALUE) return null
+        return String(Base64.decode(encoded, Base64.NO_WRAP), Charsets.UTF_8)
+    }
+
     private fun baseReport(
         context: Context,
         runId: String,
@@ -2030,6 +2120,38 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("channels", arguments.optionalInt(ARG_FIXTURE_CHANNELS, 1))
                 .put("codec", arguments.getString(ARG_FIXTURE_CODEC) ?: "unknown")
                 .put("decodeClass", arguments.getString(ARG_FIXTURE_DECODE_CLASS) ?: "unknown")
+                .put(
+                    "expectedDecode",
+                    arguments.getString(ARG_FIXTURE_EXPECTED_DECODE_MODE)?.let { mode ->
+                        JSONObject()
+                            .put("mode", mode)
+                            .put(
+                                "profile",
+                                arguments.getString(ARG_FIXTURE_EXPECTED_DECODE_PROFILE_BASE64)
+                                    ?.let(::decodeExpectedNullable) ?: JSONObject.NULL,
+                            )
+                            .put(
+                                "mimeType",
+                                arguments.getString(ARG_FIXTURE_EXPECTED_DECODE_MIME)
+                                    ?: JSONObject.NULL,
+                            )
+                            .put(
+                                "fallbackReason",
+                                arguments.getString(ARG_FIXTURE_EXPECTED_FALLBACK_REASON_BASE64)
+                                    ?.let(::decodeExpectedNullable) ?: JSONObject.NULL,
+                            )
+                    } ?: JSONObject.NULL,
+                )
+                .put(
+                    "expectedOutputSampleRate",
+                    arguments.getString(ARG_FIXTURE_EXPECTED_OUTPUT_SAMPLE_RATE)
+                        ?.toIntOrNull() ?: JSONObject.NULL,
+                )
+                .put(
+                    "expectedOutputFrameCount",
+                    arguments.getString(ARG_FIXTURE_EXPECTED_OUTPUT_FRAMES)
+                        ?.toIntOrNull() ?: JSONObject.NULL,
+                )
             )
             .put("run", JSONObject()
                 .put("runId", runId)
@@ -2365,6 +2487,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_FIXTURE_CHANNELS = "fixtureChannels"
         const val ARG_FIXTURE_CODEC = "fixtureCodec"
         const val ARG_FIXTURE_DECODE_CLASS = "fixtureDecodeClass"
+        const val ARG_FIXTURE_EXPECTED_DECODE_MODE = "fixtureExpectedDecodeMode"
+        const val ARG_FIXTURE_EXPECTED_DECODE_PROFILE_BASE64 =
+            "fixtureExpectedDecodeProfileBase64"
+        const val ARG_FIXTURE_EXPECTED_DECODE_MIME = "fixtureExpectedDecodeMime"
+        const val ARG_FIXTURE_EXPECTED_FALLBACK_REASON_BASE64 =
+            "fixtureExpectedFallbackReasonBase64"
+        const val ARG_FIXTURE_EXPECTED_OUTPUT_SAMPLE_RATE = "fixtureExpectedOutputSampleRate"
+        const val ARG_FIXTURE_EXPECTED_OUTPUT_FRAMES = "fixtureExpectedOutputFrames"
         const val ARG_CURRENT_FIXTURE_ID = "currentFixtureId"
         const val ARG_CURRENT_FIXTURE_FILE_NAME = "currentFixtureFileName"
         const val ARG_CURRENT_FIXTURE_BYTES = "currentFixtureBytes"
@@ -2379,6 +2509,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_LIFECYCLE_SESSION_MODE = "lifecycleSessionMode"
         const val REPORT_DIRECTORY = "phase7-validation-reports"
         const val ARTIFACT_EXPORT_DIRECTORY = "phase7-validation-artifacts"
+        const val EXPECTED_NULL_VALUE = "__none__"
         const val REQUIRED_READY_WINDOWS = 2
         const val TEST_BLEND = 0.23f
         const val TEST_KEY_PLAYBACK_ENABLED = "source_separation.playback_enabled"
