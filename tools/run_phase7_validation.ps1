@@ -253,9 +253,11 @@ try {
         $instrumentArguments += @(
             "-e", "runClass", $RunClass,
             "-e", "cleanInstallScenario", $CleanInstallScenario.ToString().ToLowerInvariant(),
-            "-e", "windowDecodeEnabled", $WindowDecode.ToString().ToLowerInvariant(),
-            "-e", "cacheKey", $CacheKey
+            "-e", "windowDecodeEnabled", $WindowDecode.ToString().ToLowerInvariant()
         )
+        if ($Stage -eq "playback") {
+            $instrumentArguments += @("-e", "cacheKey", $CacheKey)
+        }
         if ($Stage -eq "worker" -and $PreserveMediaStoreSource) {
             $instrumentArguments += @(
                 "-e", "preserveMediaStoreSource",
