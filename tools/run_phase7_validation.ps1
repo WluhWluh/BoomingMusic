@@ -202,6 +202,7 @@ try {
     Invoke-Adb install -r -t $testApk.FullName
     if (-not $KeepAppData) { Invoke-Adb shell pm clear $package }
     & $adb -s $Serial shell pm grant $package android.permission.READ_EXTERNAL_STORAGE 2>$null | Out-Null
+    & $adb -s $Serial shell pm grant $package android.permission.WRITE_EXTERNAL_STORAGE 2>$null | Out-Null
     & $adb -s $Serial shell pm grant $package android.permission.READ_MEDIA_AUDIO 2>$null | Out-Null
 
     $instrumentArguments = @(
