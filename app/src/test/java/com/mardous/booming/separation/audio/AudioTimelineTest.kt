@@ -44,41 +44,38 @@ class AudioTimelineTest {
 
     @Test
     fun `legacy AAC inspection recovers a material edit-list duration`() {
-        val corrected = correctedAacPresentationDurationUs(
+        val corrected = correctedAacPresentationFrameCount(
             encodedDurationUs = 15_023_220,
             presentationDurationUs = 15_000_000,
             sampleRate = SAMPLE_RATE,
             mimeType = "audio/mp4a-latm",
-            hasCompleteGaplessMetadata = false,
         )
 
-        assertEquals(15_000_000L, corrected)
+        assertEquals(661_500, corrected)
     }
 
     @Test
-    fun `AAC duration keeps extractor precision for rounding-only differences`() {
-        val corrected = correctedAacPresentationDurationUs(
+    fun `AAC presentation frames accept an already-trimmed extractor duration`() {
+        val corrected = correctedAacPresentationFrameCount(
             encodedDurationUs = 15_000_090,
             presentationDurationUs = 15_000_000,
             sampleRate = SAMPLE_RATE,
             mimeType = "audio/mp4a-latm",
-            hasCompleteGaplessMetadata = false,
         )
 
-        assertEquals(15_000_090L, corrected)
+        assertEquals(661_500, corrected)
     }
 
     @Test
-    fun `AAC duration leaves complete gapless metadata authoritative`() {
-        val corrected = correctedAacPresentationDurationUs(
-            encodedDurationUs = 15_023_220,
+    fun `AAC presentation frames reject an implausibly distant movie duration`() {
+        val corrected = correctedAacPresentationFrameCount(
+            encodedDurationUs = 16_000_000,
             presentationDurationUs = 15_000_000,
             sampleRate = SAMPLE_RATE,
             mimeType = "audio/mp4a-latm",
-            hasCompleteGaplessMetadata = true,
         )
 
-        assertEquals(15_023_220L, corrected)
+        assertEquals(null, corrected)
     }
 
     @Test

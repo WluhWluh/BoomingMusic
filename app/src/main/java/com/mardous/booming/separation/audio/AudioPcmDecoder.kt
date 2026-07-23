@@ -32,10 +32,10 @@ class AudioPcmDecoder(private val context: Context) {
             val encodedDurationUs = format.optionalLong(MediaFormat.KEY_DURATION)
                 ?.takeIf { it > 0L }
             val trackMetadata = audioTrackMetadata(format, mime)
-            val durationUs = correctedAacPresentationDurationUs(
+            val presentationFrameCount = correctedAacPresentationFrameCount(
                 encodedDurationUs = encodedDurationUs,
                 presentationDurationUs = if (
-                    mime == AAC_MIME_TYPE && !trackMetadata.hasCompleteGaplessMetadata
+                    mime == AAC_MIME_TYPE
                 ) {
                     Mp4PresentationDurationReader(context).read(uri)
                 } else {
@@ -43,14 +43,14 @@ class AudioPcmDecoder(private val context: Context) {
                 },
                 sampleRate = sampleRate,
                 mimeType = mime,
-                hasCompleteGaplessMetadata = trackMetadata.hasCompleteGaplessMetadata,
             )
             return AudioSourceInfo(
                 mimeType = mime,
                 sampleRate = sampleRate,
                 channelCount = channelCount,
-                durationUs = durationUs,
+                durationUs = encodedDurationUs,
                 trackMetadata = trackMetadata,
+                presentationFrameCount = presentationFrameCount,
             )
         } finally {
             extractor.release()
@@ -723,27 +723,31 @@ class AudioPcmDecoder(private val context: Context) {
     }
 }
 
-internal fun correctedAacPresentationDurationUs(
+internal fun correctedAacPresentationFrameCount(
     encodedDurationUs: Long?,
     presentationDurationUs: Long?,
     sampleRate: Int,
     mimeType: String,
-    hasCompleteGaplessMetadata: Boolean,
-): Long? {
+): Int? {
     if (encodedDurationUs == null || presentationDurationUs == null ||
-        mimeType != "audio/mp4a-latm" || hasCompleteGaplessMetadata
+        mimeType != "audio/mp4a-latm"
     ) {
-        return encodedDurationUs
+        return null
     }
-    val correctionFrames = ((encodedDurationUs - presentationDurationUs).toDouble() *
-        sampleRate.toDouble() / 1_000_000.0).roundToLong()
-    return if (correctionFrames in AAC_DURATION_CORRECTION_MIN_FRAMES..
-        AAC_DURATION_CORRECTION_MAX_FRAMES
+    val encodedFrames = durationUsToFrames(encodedDurationUs, sampleRate)
+    val presentationFrames = durationUsToFrames(presentationDurationUs, sampleRate)
+    val correctionFrames = encodedFrames - presentationFrames
+    return if (presentationFrames > 0L &&
+        correctionFrames in 0L..AAC_DURATION_CORRECTION_MAX_FRAMES
     ) {
-        presentationDurationUs
+        presentationFrames.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     } else {
-        encodedDurationUs
+        null
     }
+}
+
+private fun durationUsToFrames(durationUs: Long, sampleRate: Int): Long {
+    return (durationUs.toDouble() * sampleRate.toDouble() / 1_000_000.0).roundToLong()
 }
 
 data class EncodedAudioSamplesHash(
@@ -758,9 +762,10 @@ data class AudioSourceInfo(
     val channelCount: Int,
     val durationUs: Long?,
     val trackMetadata: AudioDecodeTrackMetadata,
+    val presentationFrameCount: Int? = null,
 ) {
     val frameCount: Int?
-        get() = durationUs
+        get() = presentationFrameCount ?: durationUs
             ?.let { (it.toDouble() * sampleRate.toDouble() / MICROS_PER_SECOND).roundToLong() }
             ?.minus(gaplessTrimFrames())
             ?.coerceIn(0L, Int.MAX_VALUE.toLong())
@@ -793,10 +798,6 @@ data class AudioDecodeTrackMetadata(
     val mimeType: String,
     val encoderDelayFrames: Int?,
     val encoderPaddingFrames: Int?,
-) {
-    val hasCompleteGaplessMetadata: Boolean
-        get() = encoderDelayFrames != null && encoderPaddingFrames != null
-}
+)
 
-private const val AAC_DURATION_CORRECTION_MIN_FRAMES = 512L
 private const val AAC_DURATION_CORRECTION_MAX_FRAMES = 16_384L
