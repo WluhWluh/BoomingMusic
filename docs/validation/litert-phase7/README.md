@@ -51,6 +51,10 @@ the full-song fallback path is the explicitly measured case.
 SHA-256 manifest under the ignored `build/phase7-validation` directory. These
 local artifacts may be compared with the frozen desktop ORT references, but
 must not be committed to this repository.
+The instrumentation process first stages those files under its internal
+`filesDir` so export remains valid under newer Android storage isolation. The
+host verifies every staged file against the cache manifest's byte count and
+SHA-256 before deleting the device-side staging directory.
 
 Use `-Stage lifecycle` with the short fixture to exercise pause/resume and
 cancellation against the same production worker and cache coordinator. It

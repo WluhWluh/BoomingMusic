@@ -106,6 +106,29 @@ function Get-Sha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Assert-ExportedFile(
+    [string]$Path,
+    [int64]$ExpectedBytes,
+    [string]$ExpectedSha256
+) {
+    if ($ExpectedBytes -le 0 -or $ExpectedSha256 -notmatch '^[0-9a-f]{64}$') {
+        throw "The device report contains an invalid artifact identity: $Path"
+    }
+    $actualBytes = (Get-Item -LiteralPath $Path).Length
+    $actualSha256 = Get-Sha256 $Path
+    if ($actualBytes -ne $ExpectedBytes -or $actualSha256 -ne $ExpectedSha256) {
+        throw "Exported artifact identity mismatch: $Path"
+    }
+}
+
+function Assert-RemoteArtifactPath([string]$Path, [string]$Directory) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or
+            -not $Path.StartsWith("$Directory/", [System.StringComparison]::Ordinal) -or
+            $Path.Contains("..", [System.StringComparison]::Ordinal)) {
+        throw "The device report contains an unsafe artifact path: $Path"
+    }
+}
+
 function Export-RemoteFile([string]$RemotePath, [string]$LocalPath) {
     $parent = Split-Path -Parent $LocalPath
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
@@ -172,6 +195,8 @@ $appCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 $appApk = $null
 $testApk = $null
 $remoteSourcePath = ""
+$remoteArtifactDirectory = ""
+$expectedRemoteArtifactDirectory = "files/phase7-validation-artifacts/$RunId"
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) { throw "OutputRoot must not be empty." }
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
@@ -265,6 +290,9 @@ try {
                 "true"
             )
         }
+        if ($Stage -eq "worker" -and $ExportCacheAudio) {
+            $instrumentArguments += @("-e", "exportCacheAudio", "true")
+        }
         if ($ProcessorCount -gt 0) {
             $instrumentArguments += @("-e", "processorCount", [string]$ProcessorCount)
         }
@@ -293,22 +321,47 @@ try {
         }
         $artifactDirectory = Join-Path $deviceDirectory "$RunId-artifacts"
         $exportedArtifacts = @()
-        $cacheEntryDirectory = [string]$reportObject.cache.entryDirectoryPath
-        if ([string]::IsNullOrWhiteSpace($cacheEntryDirectory)) {
-            throw "The worker report did not provide a cache entry directory."
+        $artifactExport = $reportObject.cache.artifactExport
+        $remoteArtifactDirectory = [string]$artifactExport.directoryPathRelative
+        if ($remoteArtifactDirectory -ne $expectedRemoteArtifactDirectory) {
+            throw "The worker report provided an unexpected artifact directory."
         }
-        $cacheManifestRemotePath = "$cacheEntryDirectory/manifest.json"
+        $cacheManifestRemotePath = [string]$artifactExport.manifestPathRelative
+        Assert-RemoteArtifactPath `
+            -Path $cacheManifestRemotePath `
+            -Directory $remoteArtifactDirectory
         $cacheManifestLocalPath = Join-Path $artifactDirectory "cache-manifest.json"
         Export-RemoteFile -RemotePath $cacheManifestRemotePath -LocalPath $cacheManifestLocalPath
+        Assert-ExportedFile `
+            -Path $cacheManifestLocalPath `
+            -ExpectedBytes ([int64]$artifactExport.manifestByteSize) `
+            -ExpectedSha256 ([string]$artifactExport.manifestSha256)
         foreach ($stem in @($reportObject.cache.stems)) {
             $semantic = ([string]$stem.semantic).ToLowerInvariant() -replace '[^a-z0-9._-]', '-'
             foreach ($format in @(
-                @{ Name = "wav"; RemotePath = [string]$stem.wavPath },
-                @{ Name = "flac"; RemotePath = [string]$stem.promotedPath }
+                @{
+                    Name = "wav"
+                    RemotePath = [string]$stem.exportWavPathRelative
+                    ExpectedBytes = [int64]$stem.wavByteSize
+                    ExpectedSha256 = [string]$stem.wavSha256
+                },
+                @{
+                    Name = "flac"
+                    RemotePath = [string]$stem.exportPromotedPathRelative
+                    ExpectedBytes = [int64]$stem.promotedByteSize
+                    ExpectedSha256 = [string]$stem.promotedSha256
+                }
             )) {
                 if ([string]::IsNullOrWhiteSpace($format.RemotePath)) { continue }
+                Assert-RemoteArtifactPath `
+                    -Path $format.RemotePath `
+                    -Directory $remoteArtifactDirectory
                 $localPath = Join-Path $artifactDirectory "$semantic.$($format.Name)"
                 Export-RemoteFile -RemotePath $format.RemotePath -LocalPath $localPath
+                Assert-ExportedFile `
+                    -Path $localPath `
+                    -ExpectedBytes $format.ExpectedBytes `
+                    -ExpectedSha256 $format.ExpectedSha256
                 $exportedArtifacts += [ordered]@{
                     semantic = [string]$stem.semantic
                     format = $format.Name
@@ -378,6 +431,10 @@ try {
 } finally {
     if (-not [string]::IsNullOrWhiteSpace($remoteSourcePath)) {
         & $adb -s $Serial shell rm -f $remoteSourcePath 2>$null | Out-Null
+    }
+    if ($remoteArtifactDirectory -eq $expectedRemoteArtifactDirectory) {
+        & $adb -s $Serial shell run-as $package rm -rf -- `
+            $remoteArtifactDirectory 2>$null | Out-Null
     }
     Pop-Location
 }

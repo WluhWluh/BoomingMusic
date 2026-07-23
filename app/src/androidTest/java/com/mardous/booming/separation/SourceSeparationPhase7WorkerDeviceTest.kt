@@ -79,6 +79,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             ARG_PRESERVE_MEDIA_STORE_SOURCE,
             false,
         )
+        val exportCacheAudio = arguments.optionalBoolean(ARG_EXPORT_CACHE_AUDIO, false)
         var coordinator: SourceSeparationForegroundWorkerCoordinator? = null
         var mediaUri: Uri? = null
 
@@ -243,6 +244,17 @@ class SourceSeparationPhase7WorkerDeviceTest {
 
             val completedAfter = runtimeFacade.entries().single { it.cacheKey == cacheKey }
             val promotedManifest = requireNotNull(store.readManifest(cacheKey))
+            val artifactExport = if (exportCacheAudio) {
+                exportCacheArtifacts(
+                    context = context,
+                    runId = runId,
+                    entryDirectory = entryDirectory,
+                    manifest = promotedManifest,
+                    store = store,
+                )
+            } else {
+                null
+            }
             val expectedFrames = ((arguments.optionalLong(ARG_FIXTURE_DURATION_US) *
                 arguments.optionalInt(ARG_FIXTURE_SAMPLE_RATE, 1) + 500_000L) /
                 1_000_000L).toInt()
@@ -278,7 +290,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     .put("detail", decodeDiagnostics ?: "")
                 )
             )
-            report.put("cache", report.getJSONObject("cache")
+            val cacheReport = report.getJSONObject("cache")
                 .put("cacheKey", cacheKey)
                 .put("entryCountBefore", entriesBefore)
                 .put("entryCountAfter", runtimeFacade.entries().size)
@@ -291,14 +303,37 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("promotedFormat", completedAfter.format.name)
                 .put("hydrationPassed", true)
                 .put("stems", JSONArray(promotedManifest.output!!.stems.map { stem ->
+                    val exportedStem = artifactExport?.stems?.get(stem.semantic.name)
+                    val wavIntegrity = requireNotNull(stem.wavIntegrity)
+                    val promotedIntegrity = requireNotNull(stem.promotedIntegrity)
                     JSONObject()
                         .put("semantic", stem.semantic.name)
                         .put("wavPath", wavStemPaths.getValue(stem.semantic.name).absolutePath)
+                        .put("wavByteSize", wavIntegrity.byteSize)
+                        .put("wavSha256", wavIntegrity.sha256)
+                        .put(
+                            "exportWavPathRelative",
+                            exportedStem?.wavPathRelative ?: JSONObject.NULL,
+                        )
                         .put("promotedPath", stem.promotedPath?.let { path ->
                             store.resolveRelativePath(entryDirectory, path).absolutePath
                         } ?: JSONObject.NULL)
+                        .put("promotedByteSize", promotedIntegrity.byteSize)
+                        .put("promotedSha256", promotedIntegrity.sha256)
+                        .put(
+                            "exportPromotedPathRelative",
+                            exportedStem?.promotedPathRelative ?: JSONObject.NULL,
+                        )
                 }))
-            )
+            artifactExport?.let { export ->
+                cacheReport.put("artifactExport", JSONObject()
+                    .put("directoryPathRelative", export.directoryPathRelative)
+                    .put("manifestPathRelative", export.manifestPathRelative)
+                    .put("manifestByteSize", export.manifestByteSize)
+                    .put("manifestSha256", export.manifestSha256)
+                )
+            }
+            report.put("cache", cacheReport)
             report.put("worker", JSONObject()
                 .put("sourcePath", sourcePath)
                 .put("mediaUri", mediaUri.toString())
@@ -1056,6 +1091,64 @@ class SourceSeparationPhase7WorkerDeviceTest {
     private fun android.database.Cursor.longOrDefault(column: String, fallback: Long = 0L): Long =
         getColumnIndex(column).takeIf { it >= 0 && !isNull(it) }?.let(::getLong) ?: fallback
 
+    private fun exportCacheArtifacts(
+        context: Context,
+        runId: String,
+        entryDirectory: File,
+        manifest: com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest,
+        store: SourceSeparationCacheStore,
+    ): Phase7CacheArtifactExport {
+        val directoryRelative = "$ARTIFACT_EXPORT_DIRECTORY/$runId"
+        val exportDirectory = File(context.filesDir, directoryRelative)
+        if (exportDirectory.exists()) {
+            check(exportDirectory.deleteRecursively()) {
+                "Could not clear the previous Phase 7 artifact export."
+            }
+        }
+        check(exportDirectory.mkdirs()) { "Could not create the Phase 7 artifact export." }
+
+        val manifestSource = File(entryDirectory, "manifest.json")
+        val manifestDestination = File(exportDirectory, "cache-manifest.json")
+        copyArtifact(manifestSource, manifestDestination)
+        val stemExports = requireNotNull(manifest.output).stems.associate { stem ->
+            val filePrefix = stem.semantic.name.lowercase()
+            val wavDestination = File(exportDirectory, "$filePrefix.wav")
+            copyArtifact(
+                store.resolveRelativePath(entryDirectory, stem.wavPath),
+                wavDestination,
+            )
+            val promotedDestination = stem.promotedPath?.let { promotedPath ->
+                File(exportDirectory, "$filePrefix.flac").also { destination ->
+                    copyArtifact(
+                        store.resolveRelativePath(entryDirectory, promotedPath),
+                        destination,
+                    )
+                }
+            }
+            stem.semantic.name to Phase7StemArtifactExport(
+                wavPathRelative = "files/$directoryRelative/${wavDestination.name}",
+                promotedPathRelative = promotedDestination?.let { destination ->
+                    "files/$directoryRelative/${destination.name}"
+                },
+            )
+        }
+        return Phase7CacheArtifactExport(
+            directoryPathRelative = "files/$directoryRelative",
+            manifestPathRelative = "files/$directoryRelative/${manifestDestination.name}",
+            manifestByteSize = manifestDestination.length(),
+            manifestSha256 = manifestDestination.sha256(),
+            stems = stemExports,
+        )
+    }
+
+    private fun copyArtifact(source: File, destination: File) {
+        check(source.isFile) { "Phase 7 artifact source is missing: ${source.name}" }
+        source.copyTo(destination, overwrite = true)
+        check(destination.isFile && destination.length() == source.length()) {
+            "Phase 7 artifact copy is incomplete: ${source.name}"
+        }
+    }
+
     private fun memorySnapshot(context: Context): JSONObject {
         val info = Debug.MemoryInfo()
         Debug.getMemoryInfo(info)
@@ -1224,6 +1317,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
         override fun onSourceSeparationWorkerModelLoadFailed(message: String) = Unit
     }
 
+    private data class Phase7CacheArtifactExport(
+        val directoryPathRelative: String,
+        val manifestPathRelative: String,
+        val manifestByteSize: Long,
+        val manifestSha256: String,
+        val stems: Map<String, Phase7StemArtifactExport>,
+    )
+
+    private data class Phase7StemArtifactExport(
+        val wavPathRelative: String,
+        val promotedPathRelative: String?,
+    )
+
     private fun File.sha256(): String = inputStream().use {
         MessageDigest.getInstance("SHA-256").digest(it.readBytes()).joinToString("") { byte ->
             "%02x".format(byte)
@@ -1279,6 +1385,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_PROCESSOR_COUNT = "processorCount"
         const val ARG_WINDOW_DECODE_ENABLED = "windowDecodeEnabled"
         const val ARG_PRESERVE_MEDIA_STORE_SOURCE = "preserveMediaStoreSource"
+        const val ARG_EXPORT_CACHE_AUDIO = "exportCacheAudio"
         const val ARG_RUN_CLASS = "runClass"
         const val ARG_CLEAN_INSTALL = "cleanInstallScenario"
         const val ARG_FIXTURE_ID = "fixtureId"
@@ -1292,6 +1399,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_FIXTURE_DECODE_CLASS = "fixtureDecodeClass"
         const val ARG_CACHE_KEY = "cacheKey"
         const val REPORT_DIRECTORY = "phase7-validation-reports"
+        const val ARTIFACT_EXPORT_DIRECTORY = "phase7-validation-artifacts"
         const val REQUIRED_READY_WINDOWS = 2
         const val TEST_BLEND = 0.23f
         const val SEEK_FROM_END_MS = 1_000L
