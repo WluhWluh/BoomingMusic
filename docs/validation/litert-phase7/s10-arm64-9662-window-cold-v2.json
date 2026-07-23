@@ -2,7 +2,7 @@
   "schemaVersion": "phase7-evidence-summary-v1",
   "runId": "s10-arm64-9662-window-cold-v2",
   "stage": "worker-player",
-  "status": "blocked-for-promotion",
+  "status": "pending-promotion-review",
   "identity": {
     "appCommit": "35a73dc6ca2f059ac7efb430f95bf85a1b11bc66",
     "catalogSha256": "f1fed9d5a15e8a66d84c87623fbaf380c0183d6c76bde13b6c9aeb80192651cd",
@@ -38,7 +38,8 @@
     "peakNativeBytes": 672874496,
     "resourceTargetPssDeltaBytes": 268435456,
     "resourceHardLimitPssDeltaBytes": 402653184,
-    "resourceGate": "failed"
+    "resourceGate": "9662-policy-not-yet-frozen",
+    "comparisonToHq4Budget": "exceeds-hq4-budget-but-hq4-budget-is-not-an-9662-gate"
   },
   "audio": {
     "outputFrameCount": 12070130,
@@ -65,8 +66,9 @@
   "promotionDecision": {
     "cpuArm64": "not-promoted",
     "reason": [
-      "resource PSS delta exceeds the hard limit",
-      "frozen full-track SNR gate is not met by the quantized vocal comparison"
+      "9662-specific full-song resource policy is not yet frozen",
+      "frozen full-track SNR gate is not met by the quantized vocal comparison",
+      "lifecycle, multi-device, and repeated resource evidence remain incomplete"
     ],
     "nextAction": "complete the remaining ABI, lifecycle, resource, and threshold review before changing catalog maturity"
   }
