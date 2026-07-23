@@ -299,6 +299,207 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
     }
 
+    @Test
+    fun validateWorkerLifecycle() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val report = baseReport(context, runId, arguments)
+        val coordinators = mutableListOf<SourceSeparationForegroundWorkerCoordinator>()
+        var mediaUri: Uri? = null
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            mediaUri = registerSourceInMediaStore(context, sourcePath, runId)
+            val source = resolveMediaStoreSong(context, mediaUri, sourcePath)
+            val windowDecodeEnabled = arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true)
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            check(preferences.edit()
+                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, windowDecodeEnabled)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .commit()
+            ) { "Could not persist lifecycle test preferences." }
+
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            val active = presetRepository.activeModel()
+            assertTrue(active is SourceSeparationActivePresetState.Reference)
+            val expectedModelId = arguments.requiredString(ARG_MODEL_ID)
+            val expectedArtifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
+            val activeReference = (active as SourceSeparationActivePresetState.Reference).reference
+            assertEquals(expectedModelId, activeReference.modelId)
+            assertEquals(expectedArtifactSha256, activeReference.artifactSha256)
+
+            val runtimeFacade = createCpuRuntimeFacade(
+                context = context,
+                preferences = preferences,
+                presetRepository = presetRepository,
+                processorCount = arguments.getString(ARG_PROCESSOR_COUNT)
+                    ?.toIntOrNull()
+                    ?.takeIf { it > 0 },
+            )
+            val resolved = runtimeFacade.resolve(source)
+            val runtimeSong = (resolved as? SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The lifecycle source could not be admitted: $resolved")
+            val cacheKey = runtimeSong.cacheKey
+            runtimeFacade.entries()
+                .filter { it.cacheKey == cacheKey }
+                .forEach { entry ->
+                    assertEquals(
+                        SourceSeparationCacheMutationResult.Completed,
+                        runtimeFacade.delete(entry.cacheKey),
+                    )
+                }
+
+            val pauseWorker = SourceSeparationForegroundWorkerCoordinator(
+                context = context,
+                preferences = preferences,
+                sourceSeparationRuntime = runtimeFacade,
+            )
+            coordinators += pauseWorker
+            pauseWorker.attachCallbacks(RecordingCallbacks())
+            pauseWorker.updateSong(
+                song = source,
+                positionMs = 0L,
+                durationMs = source.duration,
+                isPlaying = false,
+                sourceSeparationBlend = TEST_BLEND,
+            )
+            assertTrue(pauseWorker.startCurrentSong())
+            waitForReady(pauseWorker, minimumReadyWindows = 1)
+            pauseWorker.pauseCurrentSong(source)
+            waitForInactive(pauseWorker)
+            val pausedStatus = runtimeFacade.cacheStatus(runtimeSong)
+            assertTrue(
+                "Pause must leave a resumable or empty entry: $pausedStatus",
+                pausedStatus is SourceSeparationModelAwareCacheStatus.Missing ||
+                    pausedStatus is SourceSeparationModelAwareCacheStatus.Incomplete,
+            )
+
+            pauseWorker.updateSong(
+                song = source,
+                positionMs = 0L,
+                durationMs = source.duration,
+                isPlaying = false,
+                sourceSeparationBlend = TEST_BLEND,
+            )
+            assertTrue(pauseWorker.startCurrentSong())
+            waitForCompleted(pauseWorker)
+            val resumedStatus = runtimeFacade.cacheStatus(runtimeSong)
+            assertTrue(resumedStatus is SourceSeparationModelAwareCacheStatus.Completed)
+
+            assertEquals(
+                SourceSeparationCacheMutationResult.Completed,
+                runtimeFacade.delete(cacheKey),
+            )
+            val cancelWorker = SourceSeparationForegroundWorkerCoordinator(
+                context = context,
+                preferences = preferences,
+                sourceSeparationRuntime = runtimeFacade,
+            )
+            coordinators += cancelWorker
+            cancelWorker.attachCallbacks(RecordingCallbacks())
+            cancelWorker.updateSong(
+                song = source,
+                positionMs = 0L,
+                durationMs = source.duration,
+                isPlaying = false,
+                sourceSeparationBlend = TEST_BLEND,
+            )
+            assertTrue(cancelWorker.startCurrentSong())
+            waitForReady(cancelWorker, minimumReadyWindows = 1)
+            cancelWorker.cancel()
+            waitForInactive(cancelWorker)
+            val canceledStatus = runtimeFacade.cacheStatus(runtimeSong)
+            assertTrue(
+                "Cancellation must not publish a completed entry: $canceledStatus",
+                canceledStatus !is SourceSeparationModelAwareCacheStatus.Completed,
+            )
+
+            report.put("status", "passed")
+            report.put("lifecycle", report.getJSONObject("lifecycle")
+                .put("pauseResumePassed", true)
+                .put("cancellationPassed", true)
+                .put("pauseStatus", pausedStatus::class.java.simpleName)
+                .put("resumedStatus", resumedStatus::class.java.simpleName)
+                .put("canceledStatus", canceledStatus::class.java.simpleName)
+            )
+            report.put("cache", report.getJSONObject("cache")
+                .put("cacheKey", cacheKey)
+                .put("exactIdentity", true)
+                .put("completedPlayable", true)
+                .put("clearRecoveryPassed", false)
+            )
+            report.put("worker", JSONObject()
+                .put("sourcePath", sourcePath)
+                .put("songId", source.id)
+                .put("songDurationMs", source.duration)
+                .put("windowDecodeEnabled", windowDecodeEnabled)
+                .put("cpuThreads", resolveCpuThreads(
+                    arguments.getString(ARG_PROCESSOR_COUNT)?.toIntOrNull(),
+                ))
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            coordinators.forEach { coordinator -> coordinator.cancel() }
+            mediaUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            writeReport(context, runId, "lifecycle", report)
+        }
+    }
+
+    private fun waitForReady(
+        worker: SourceSeparationForegroundWorkerCoordinator,
+        minimumReadyWindows: Int,
+    ) {
+        val deadline = SystemClock.elapsedRealtime() + LIFECYCLE_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            when (val state = worker.workerStateFlow.value) {
+                is SourceSeparationUiState.Running -> {
+                    if ((state.scheduler?.playbackReadyWindowReadyCount ?: 0) >=
+                        minimumReadyWindows
+                    ) return
+                }
+                is SourceSeparationUiState.Failed,
+                is SourceSeparationUiState.Canceled,
+                is SourceSeparationUiState.Completed,
+                -> error("Worker reached an unexpected terminal state: $state")
+                else -> Unit
+            }
+            SystemClock.sleep(POLL_INTERVAL_MS)
+        }
+        error("Worker did not publish $minimumReadyWindows ready windows in time.")
+    }
+
+    private fun waitForCompleted(worker: SourceSeparationForegroundWorkerCoordinator) {
+        val deadline = SystemClock.elapsedRealtime() + LIFECYCLE_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            when (val state = worker.workerStateFlow.value) {
+                is SourceSeparationUiState.Completed -> return
+                is SourceSeparationUiState.Failed,
+                is SourceSeparationUiState.Canceled,
+                -> error("Worker did not resume to completion: $state")
+                else -> SystemClock.sleep(POLL_INTERVAL_MS)
+            }
+        }
+        error("Worker did not complete in time.")
+    }
+
+    private fun waitForInactive(worker: SourceSeparationForegroundWorkerCoordinator) {
+        val deadline = SystemClock.elapsedRealtime() + LIFECYCLE_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (!worker.isWorkerActive()) return
+            SystemClock.sleep(POLL_INTERVAL_MS)
+        }
+        error("Worker did not leave its active job in time.")
+    }
+
     private fun createCpuRuntimeFacade(
         context: Context,
         preferences: SharedPreferences,
@@ -591,9 +792,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
     }
 
     private fun writeReport(context: Context, runId: String, report: JSONObject) {
+        writeReport(context, runId, "worker", report)
+    }
+
+    private fun writeReport(
+        context: Context,
+        runId: String,
+        stage: String,
+        report: JSONObject,
+    ) {
         val root = File(context.filesDir, REPORT_DIRECTORY)
         check(root.isDirectory || root.mkdirs()) { "Could not create the Phase 7 report directory." }
-        File(root, "$runId-worker.json").writeText(report.toString(2))
+        File(root, "$runId-$stage.json").writeText(report.toString(2))
     }
 
     private class RecordingCallbacks : SourceSeparationForegroundWorkerCallbacks {
@@ -684,6 +894,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val TEST_BLEND = 0.23f
         const val POLL_INTERVAL_MS = 250L
         const val WORKER_TIMEOUT_MS = 20 * 60 * 1000L
+        const val LIFECYCLE_TIMEOUT_MS = 5 * 60 * 1000L
         const val MEDIA_SCAN_TIMEOUT_MS = 30_000L
         const val MEDIA_SCAN_RETRIES = 60
         const val MEDIA_SCAN_POLL_MS = 500L

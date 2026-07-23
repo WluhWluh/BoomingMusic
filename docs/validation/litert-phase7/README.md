@@ -52,6 +52,10 @@ SHA-256 manifest under the ignored `build/phase7-validation` directory. These
 local artifacts may be compared with the frozen desktop ORT references, but
 must not be committed to this repository.
 
+Use `-Stage lifecycle` with the short fixture to exercise pause/resume and
+cancellation against the same production worker and cache coordinator. It
+expects the preceding pinned acquisition and does not export full audio.
+
 The local fixture source is the companion
 [`MusicSourceSeparation`](https://github.com/WluhWluh/MusicSourceSeparation)
 repository. Full audio and generated reference stems are intentionally kept
