@@ -370,7 +370,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertTrue(pauseWorker.startCurrentSong())
             waitForReady(pauseWorker, minimumReadyWindows = 1)
             pauseWorker.pauseCurrentSong(source)
-            waitForInactive(pauseWorker)
+            waitForPaused(pauseWorker)
             val pausedStatus = runtimeFacade.cacheStatus(runtimeSong)
             assertTrue(
                 "Pause must leave a resumable or empty entry: $pausedStatus",
@@ -498,6 +498,17 @@ class SourceSeparationPhase7WorkerDeviceTest {
             SystemClock.sleep(POLL_INTERVAL_MS)
         }
         error("Worker did not leave its active job in time.")
+    }
+
+    private fun waitForPaused(worker: SourceSeparationForegroundWorkerCoordinator) {
+        val deadline = SystemClock.elapsedRealtime() + LIFECYCLE_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (worker.runningSongId() == null &&
+                worker.workerStateFlow.value is SourceSeparationUiState.Idle
+            ) return
+            SystemClock.sleep(POLL_INTERVAL_MS)
+        }
+        error("Worker did not reach its paused idle state in time.")
     }
 
     private fun createCpuRuntimeFacade(
