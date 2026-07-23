@@ -171,6 +171,11 @@ class SourceSeparationPhase7DeviceTest {
         val artifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
         val contractId = arguments.requiredString(ARG_CONTRACT_ID)
         val abi = arguments.requiredString(ARG_PROCESS_ABI)
+        val requestedBackend = when (arguments.getString(ARG_BACKEND_MODE) ?: "cpu") {
+            "cpu" -> "LiteRtCpu"
+            "auto" -> "LiteRtAuto"
+            else -> error("Unsupported Phase 7 backend mode.")
+        }
         return JSONObject()
             .put("schemaVersion", "phase7-report-v1")
             .put("status", "not-tested")
@@ -181,7 +186,7 @@ class SourceSeparationPhase7DeviceTest {
                 .put("contractId", contractId)
                 .put("contractSchemaVersion", arguments.requiredInt(ARG_CONTRACT_SCHEMA_VERSION))
                 .put("abi", abi)
-                .put("backend", "LiteRtCpu")
+                .put("backend", requestedBackend)
                 .put("profileId", arguments.getString(ARG_PROFILE_ID) ?: "cpu-default-fp32-v1")
                 .put("precision", "Float32")
             )
@@ -230,7 +235,7 @@ class SourceSeparationPhase7DeviceTest {
                 .put("cpuThreads", arguments.getInt(ARG_CPU_THREADS, 0).coerceAtLeast(1))
                 .put("windowDecodeEnabled", false)
                 .put("cleanInstallScenario", arguments.getBoolean(ARG_CLEAN_INSTALL, true))
-                .put("backendRequested", "identity-only")
+                .put("backendRequested", requestedBackend)
                 .put("backendUsed", "identity-only")
                 .put("fallbackStage", JSONObject.NULL)
                 .put("fallbackReason", JSONObject.NULL)
@@ -397,6 +402,7 @@ class SourceSeparationPhase7DeviceTest {
         const val ARG_FIXTURES_VERSION = "fixturesVersion"
         const val ARG_FIXTURE_ID = "fixtureId"
         const val ARG_FIXTURE_FILE_NAME = "fixtureFileName"
+        const val ARG_BACKEND_MODE = "backendMode"
         const val ARG_RUN_CLASS = "runClass"
         const val ARG_CPU_THREADS = "cpuThreads"
         const val ARG_CLEAN_INSTALL = "cleanInstallScenario"

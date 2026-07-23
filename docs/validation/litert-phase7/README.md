@@ -56,6 +56,16 @@ The instrumentation process first stages those files under its internal
 host verifies every staged file against the cache manifest's byte count and
 SHA-256 before deleting the device-side staging directory.
 
+CPU is the default validation backend. Pass `-BackendMode auto` on S10 or S25
+to exercise the production `gpu-auto-fp32-v1` provider, including its real GPU
+eligibility, finite-output probe, and one-way CPU fallback. Auto cannot be
+combined with `-ProcessorCount`, `-XnnPackFlags`, or the diagnostic shared
+lifecycle session. Its report keeps `LiteRtAuto` as the requested matrix row
+and records the concrete `LiteRtGpu` or `LiteRtCpu` backend that produced the
+completed cache, plus any fallback stage and reason. A short Auto run verifies
+the route and report contract only; promotion still requires the Phase 7
+full-song, lifecycle, resource, playback, and parity matrix.
+
 Use `-Stage lifecycle` with the short fixture to exercise pause/resume, a seek
 from a ready window into a pending window, and cancellation against the same
 production worker and cache coordinator. The default `sequential` scenario

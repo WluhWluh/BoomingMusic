@@ -22,6 +22,7 @@ import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.PlaybackService
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrationResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
@@ -79,11 +80,12 @@ import kotlin.math.abs
 class SourceSeparationPhase7WorkerDeviceTest {
 
     @Test
-    fun validateProductionWorkerCpu() {
+    fun validateProductionWorker() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
         val report = baseReport(context, runId, arguments)
         val preserveMediaStoreSource = arguments.optionalBoolean(
             ARG_PRESERVE_MEDIA_STORE_SOURCE,
@@ -127,6 +129,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 context = context,
                 preferences = preferences,
                 presetRepository = presetRepository,
+                backendMode = backendMode,
                 processorCount = arguments.getString(ARG_PROCESSOR_COUNT)
                     ?.toIntOrNull()
                     ?.takeIf { it > 0 },
@@ -230,7 +233,16 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertEquals(expectedArtifactSha256, manifest.identity.artifactSha256)
             assertTrue(output.outputFrameCount > 0)
             assertTrue(output.windowCount > 0)
-            assertTrue(manifest.runtimeRecords.any { it.backend == "LiteRtCpu" })
+            val runtimeRecord = requireNotNull(manifest.runtimeRecords.lastOrNull())
+            if (backendMode == BackendMode.Cpu) {
+                assertEquals(MdxInferenceBackend.LiteRtCpu.name, runtimeRecord.backend)
+            } else {
+                assertTrue(
+                    "Auto must finish on a concrete LiteRT backend: ${runtimeRecord.backend}",
+                    runtimeRecord.backend == MdxInferenceBackend.LiteRtGpu.name ||
+                        runtimeRecord.backend == MdxInferenceBackend.LiteRtCpu.name,
+                )
+            }
             playback.close()
 
             val playable = runtimeFacade.playableStatus(
@@ -257,6 +269,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
 
             val completedAfter = runtimeFacade.entries().single { it.cacheKey == cacheKey }
             val promotedManifest = requireNotNull(store.readManifest(cacheKey))
+            applyRuntimeEvidence(report, promotedManifest)
             val artifactExport = if (exportCacheAudio) {
                 exportCacheArtifacts(
                     context = context,
@@ -355,6 +368,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("windowDecodeEnabled", windowDecodeEnabled)
                 .put("preservedMediaStoreSource", preserveMediaStoreSource)
                 .put("cpuThreads", runCallbacks.cpuThreads)
+                .put("backendMode", backendMode.argumentValue)
                 .put("runtimeDiagnostics", manifest.runtimeRecords.map { it.backend + "/" + it.runtimeProfileId }
                     .joinToString(","))
             )
@@ -379,12 +393,16 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val context = instrumentation.targetContext
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
         val lifecycleScenario = LifecycleScenario.parse(
             arguments.getString(ARG_LIFECYCLE_SCENARIO),
         )
         val sessionMode = LifecycleSessionMode.parse(
             arguments.getString(ARG_LIFECYCLE_SESSION_MODE),
         )
+        if (backendMode == BackendMode.Auto && sessionMode != LifecycleSessionMode.SingleUse) {
+            error("BackendMode=auto requires the production single-use session provider.")
+        }
         val report = baseReport(context, runId, arguments)
         report.getJSONObject("lifecycle")
             .put("diagnosticOnly", lifecycleScenario != LifecycleScenario.Sequential ||
@@ -421,35 +439,42 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertEquals(expectedModelId, activeReference.modelId)
             assertEquals(expectedArtifactSha256, activeReference.artifactSha256)
 
-            val cpuFactory = CountingMdxInferenceSessionFactory(
-                delegate = MdxLiteRtCpuInferenceSessionFactory(
-                    compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
-                    availableProcessors = {
-                        arguments.getString(ARG_PROCESSOR_COUNT)
+            val sessionProviderFactory: (() -> MdxInferenceSessionProvider)? = if (
+                backendMode == BackendMode.Cpu
+            ) {
+                val cpuFactory = CountingMdxInferenceSessionFactory(
+                    delegate = MdxLiteRtCpuInferenceSessionFactory(
+                        compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
+                        availableProcessors = {
+                            arguments.getString(ARG_PROCESSOR_COUNT)
+                                ?.toIntOrNull()
+                                ?.takeIf { it > 0 }
+                                ?: Runtime.getRuntime().availableProcessors()
+                        },
+                        xnnPackFlags = arguments.getString(ARG_XNNPACK_FLAGS)
                             ?.toIntOrNull()
-                            ?.takeIf { it > 0 }
-                            ?: Runtime.getRuntime().availableProcessors()
-                    },
-                    xnnPackFlags = arguments.getString(ARG_XNNPACK_FLAGS)
-                        ?.toIntOrNull()
-                        ?.takeIf { it >= 0 },
-                ),
-                createCount = sessionCreateCount,
-            )
-            val sessionProviderFactory: () -> MdxInferenceSessionProvider = when (sessionMode) {
-                LifecycleSessionMode.SingleUse -> {
-                    { SingleUseMdxInferenceSessionProvider(cpuFactory) }
+                            ?.takeIf { it >= 0 },
+                    ),
+                    createCount = sessionCreateCount,
+                )
+                when (sessionMode) {
+                    LifecycleSessionMode.SingleUse -> {
+                        { SingleUseMdxInferenceSessionProvider(cpuFactory) }
+                    }
+                    LifecycleSessionMode.SharedReusable -> {
+                        val provider = ReusableMdxInferenceSessionProvider(cpuFactory)
+                        reusableSessionProvider = provider
+                        { provider }
+                    }
                 }
-                LifecycleSessionMode.SharedReusable -> {
-                    val provider = ReusableMdxInferenceSessionProvider(cpuFactory)
-                    reusableSessionProvider = provider
-                    { provider }
-                }
+            } else {
+                null
             }
             val runtimeFacade = createCpuRuntimeFacade(
                 context = context,
                 preferences = preferences,
                 presetRepository = presetRepository,
+                backendMode = backendMode,
                 processorCount = arguments.getString(ARG_PROCESSOR_COUNT)
                     ?.toIntOrNull()
                     ?.takeIf { it > 0 },
@@ -624,6 +649,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("lifecycleSessionMode", sessionMode.argumentValue)
                 .put("sessionCreateCount", sessionCreateCount.get())
             )
+            get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+                .readManifest(cacheKey)
+                ?.let { manifest -> applyRuntimeEvidence(report, manifest) }
         } catch (error: Throwable) {
             report.put("status", "failed")
             report.put("error", "${error::class.java.name}: ${error.message}")
@@ -646,6 +674,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val context = instrumentation.targetContext
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
         val report = baseReport(context, runId, arguments)
         var mediaUri: Uri? = null
 
@@ -669,6 +698,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 context = context,
                 preferences = preferences,
                 presetRepository = presetRepository,
+                backendMode = backendMode,
                 processorCount = arguments.getString(ARG_PROCESSOR_COUNT)
                     ?.toIntOrNull()
                     ?.takeIf { it > 0 },
@@ -679,6 +709,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val status = runtimeFacade.cacheStatus(runtimeSong)
             assertTrue(status is SourceSeparationModelAwareCacheStatus.Completed)
             val completed = status as SourceSeparationModelAwareCacheStatus.Completed
+            applyRuntimeEvidence(report, completed.manifest)
             val output = requireNotNull(completed.manifest.output)
             assertEquals(expectedArtifactSha256, completed.manifest.identity.artifactSha256)
             assertTrue(output.outputFrameCount > 0)
@@ -762,6 +793,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
             assertEquals(SourceSeparationCacheManifestState.Completed, manifest.state)
             assertEquals(expectedArtifactSha256, manifest.identity.artifactSha256)
+            applyRuntimeEvidence(report, manifest)
             sourceUri = Uri.parse(manifest.song.mediaUri)
 
             val sessionToken = SessionToken(
@@ -1019,6 +1051,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         context: Context,
         preferences: SharedPreferences,
         presetRepository: SourceSeparationPresetRepository,
+        backendMode: BackendMode = BackendMode.Cpu,
         processorCount: Int?,
         xnnPackFlags: Int? = null,
         sessionProviderFactoryOverride: (() -> MdxInferenceSessionProvider)? = null,
@@ -1034,27 +1067,37 @@ class SourceSeparationPhase7WorkerDeviceTest {
             SourceSeparationCacheFlacPromoter::class.java,
         )
         val hydrator = get<SourceSeparationCacheHydrator>(SourceSeparationCacheHydrator::class.java)
-        val sessionProviderFactory = sessionProviderFactoryOverride ?: run {
-            val cpuFactory = MdxLiteRtCpuInferenceSessionFactory(
-                compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
-                availableProcessors = {
-                    processorCount ?: Runtime.getRuntime().availableProcessors()
-                },
-                xnnPackFlags = xnnPackFlags,
-            )
-            val singleUseFactory: () -> MdxInferenceSessionProvider = {
-                SingleUseMdxInferenceSessionProvider(cpuFactory)
+        val sessionProviderFactory: (() -> MdxInferenceSessionProvider)? =
+            sessionProviderFactoryOverride ?: if (backendMode == BackendMode.Cpu) {
+                val cpuFactory = MdxLiteRtCpuInferenceSessionFactory(
+                    compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
+                    availableProcessors = {
+                        processorCount ?: Runtime.getRuntime().availableProcessors()
+                    },
+                    xnnPackFlags = xnnPackFlags,
+                )
+                val singleUseFactory: () -> MdxInferenceSessionProvider = {
+                    SingleUseMdxInferenceSessionProvider(cpuFactory)
+                }
+                singleUseFactory
+            } else {
+                null
             }
-            singleUseFactory
+        val rangeExecutor = if (
+            backendMode == BackendMode.Auto && sessionProviderFactory == null
+        ) {
+            MdxSourceSeparationModelAwareRangeExecutor(context)
+        } else {
+            MdxSourceSeparationModelAwareRangeExecutor(
+                context,
+                requireNotNull(sessionProviderFactory),
+            )
         }
         val engine = SourceSeparationModelAwareEngine(
             activeModelResolver = presetRepository::resolveActiveCacheModel,
             preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(context),
             coordinator = runCoordinator,
-            rangeExecutor = MdxSourceSeparationModelAwareRangeExecutor(
-                context,
-                sessionProviderFactory,
-            ),
+            rangeExecutor = rangeExecutor,
             constructionGate = { true },
         )
         return DefaultSourceSeparationRuntimeFacade(
@@ -1265,6 +1308,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val modelId = arguments.requiredString(ARG_MODEL_ID)
         val artifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
         val contractId = arguments.requiredString(ARG_CONTRACT_ID)
+        val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
         return JSONObject()
             .put("schemaVersion", "phase7-report-v1")
             .put("status", "not-tested")
@@ -1275,7 +1319,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("contractId", contractId)
                 .put("contractSchemaVersion", arguments.requiredInt(ARG_CONTRACT_SCHEMA_VERSION))
                 .put("abi", abi)
-                .put("backend", "LiteRtCpu")
+                .put("backend", backendMode.reportBackend)
                 .put(
                     "profileId",
                     arguments.getString(ARG_PROFILE_ID) ?: "cpu-default-fp32-v1",
@@ -1331,8 +1375,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     "xnnPackFlags",
                     arguments.getString(ARG_XNNPACK_FLAGS)?.toIntOrNull() ?: JSONObject.NULL,
                 )
-                .put("backendRequested", "LiteRtCpu")
-                .put("backendUsed", "LiteRtCpu")
+                .put("backendRequested", backendMode.reportBackend)
+                .put(
+                    "backendUsed",
+                    if (backendMode == BackendMode.Cpu) backendMode.reportBackend else "not-tested",
+                )
                 .put("fallbackStage", JSONObject.NULL)
                 .put("fallbackReason", JSONObject.NULL)
             )
@@ -1381,6 +1428,31 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("completedPlayable", false)
                 .put("clearRecoveryPassed", false)
             )
+    }
+
+    private fun applyRuntimeEvidence(
+        report: JSONObject,
+        manifest: SourceSeparationCacheManifest,
+    ) {
+        val runtimeRecords = manifest.runtimeRecords
+        report.getJSONObject("cache").put(
+            "runtimeRecords",
+            JSONArray(runtimeRecords.map { record ->
+                JSONObject()
+                    .put("backend", record.backend)
+                    .put("runtimeProfileId", record.runtimeProfileId)
+                    .put("precision", record.precision)
+                    .put("elapsedMs", record.elapsedMs)
+                    .put("fallbackStage", record.fallbackStage ?: JSONObject.NULL)
+                    .put("fallbackReason", record.fallbackReason ?: JSONObject.NULL)
+            }),
+        )
+        runtimeRecords.lastOrNull()?.let { record ->
+            report.getJSONObject("run")
+                .put("backendUsed", record.backend)
+                .put("fallbackStage", record.fallbackStage ?: JSONObject.NULL)
+                .put("fallbackReason", record.fallbackReason ?: JSONObject.NULL)
+        }
     }
 
     private fun writeReport(context: Context, runId: String, report: JSONObject) {
@@ -1477,6 +1549,21 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
     }
 
+    private enum class BackendMode(
+        val argumentValue: String,
+        val reportBackend: String,
+    ) {
+        Cpu("cpu", "LiteRtCpu"),
+        Auto("auto", "LiteRtAuto"),
+        ;
+
+        companion object {
+            fun parse(value: String?): BackendMode = values().singleOrNull {
+                it.argumentValue == (value ?: Cpu.argumentValue)
+            } ?: error("Unsupported Phase 7 backend mode: $value")
+        }
+    }
+
     private enum class LifecycleScenario(
         val argumentValue: String,
         val includesPauseResume: Boolean,
@@ -1530,6 +1617,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_THRESHOLDS_VERSION = "thresholdsVersion"
         const val ARG_FIXTURES_VERSION = "fixturesVersion"
         const val ARG_SOURCE_PATH = "sourcePath"
+        const val ARG_BACKEND_MODE = "backendMode"
         const val ARG_PROCESSOR_COUNT = "processorCount"
         const val ARG_XNNPACK_FLAGS = "xnnPackFlags"
         const val ARG_WINDOW_DECODE_ENABLED = "windowDecodeEnabled"

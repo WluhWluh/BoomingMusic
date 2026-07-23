@@ -17,7 +17,9 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v4",
+    [string]$RunnerRevision = "phase7-runner-v5",
+    [ValidateSet("cpu", "auto")]
+    [string]$BackendMode = "cpu",
     [int]$ProcessorCount = 0,
     [int]$XnnPackFlags = -1,
     [ValidateSet("cold-session", "warm-session")]
@@ -46,7 +48,7 @@ $testClass = if ($Stage -in $sourceStages) {
 }
 $testMethod = switch ($Stage) {
     "acquisition" { "validatePinnedAcquisition"; break }
-    "worker" { "validateProductionWorkerCpu"; break }
+    "worker" { "validateProductionWorker"; break }
     "lifecycle" { "validateWorkerLifecycle"; break }
     "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
     "playback" { "validateMediaSessionPlayback"; break }
@@ -86,12 +88,19 @@ if ($Stage -notin $sourceStages -and ($ProcessorCount -gt 0 -or $XnnPackFlags -g
         -not $WindowDecode)) {
     throw "Runtime overrides apply only to worker, lifecycle, recreation, and playback stages."
 }
+if ($BackendMode -eq "auto" -and ($ProcessorCount -gt 0 -or $XnnPackFlags -ge 0)) {
+    throw "ProcessorCount and XnnPackFlags are CPU-only diagnostics and cannot be combined with BackendMode=auto."
+}
 if ($PreserveMediaStoreSource -and $Stage -ne "worker") {
     throw "PreserveMediaStoreSource applies only to the worker stage."
 }
 if ($Stage -ne "lifecycle" -and
         ($LifecycleScenario -ne "sequential" -or $LifecycleSessionMode -ne "single-use")) {
     throw "LifecycleScenario and LifecycleSessionMode apply only to the lifecycle stage."
+}
+if ($BackendMode -eq "auto" -and $Stage -eq "lifecycle" -and
+        $LifecycleSessionMode -ne "single-use") {
+    throw "BackendMode=auto uses the production single-use session provider; shared-reusable is CPU-only."
 }
 if ($Stage -eq "playback" -and $CacheKey -notmatch '^[0-9a-f]{64}$') {
     throw "Playback stage requires a 64-character lowercase cache key."
@@ -191,11 +200,14 @@ $fixtures = Get-Content -LiteralPath $fixturesPath -Raw | ConvertFrom-Json
 $catalogSourceRevision = "746bee43db9ece9ec8214c1c74269e21547aed58"
 $pipelineVersion = "$($model.Contract.pipelineCompatibility.pipelineId)-v$($model.Contract.pipelineCompatibility.minimumVersion)"
 $artifact = $model.Artifact.tflite
-$cpuProfileId = if ($XnnPackFlags -ge 0) {
+$profileId = if ($BackendMode -eq "auto") {
+    "gpu-auto-fp32-v1"
+} elseif ($XnnPackFlags -ge 0) {
     "cpu-xnnpack-flags-$XnnPackFlags-fp32-v1"
 } else {
     "cpu-default-fp32-v1"
 }
+$backendName = if ($BackendMode -eq "auto") { "LiteRtAuto" } else { "LiteRtCpu" }
 $fixture = @($fixtures.fixtures) | Where-Object { $_.fixtureId -eq $FixtureId } | Select-Object -First 1
 if ($Stage -in $sourceStages) {
     if ($null -eq $fixture) { throw "Fixture is absent from fixtures-v1.json: $FixtureId" }
@@ -258,7 +270,8 @@ try {
         "-e", "artifactFileName", $artifact.fileName,
         "-e", "contractId", $model.Entry.contractId,
         "-e", "contractSchemaVersion", [string]$model.Contract.contractSchemaVersion,
-        "-e", "profileId", $cpuProfileId,
+        "-e", "profileId", $profileId,
+        "-e", "backendMode", $BackendMode,
         "-e", "appCommit", $appCommit,
         "-e", "appApkSha256", $appApkSha256,
         "-e", "testApkSha256", $testApkSha256,
@@ -445,6 +458,8 @@ try {
                 preserveMediaStoreSource = [bool]$PreserveMediaStoreSource
                 processorCountOverride = if ($ProcessorCount -gt 0) { $ProcessorCount } else { $null }
                 xnnPackFlags = if ($XnnPackFlags -ge 0) { $XnnPackFlags } else { $null }
+                backendMode = $BackendMode
+                backend = $backendName
                 lifecycleScenario = if ($Stage -eq "lifecycle") { $LifecycleScenario } else { $null }
                 lifecycleSessionMode = if ($Stage -eq "lifecycle") { $LifecycleSessionMode } else { $null }
             }
