@@ -13,6 +13,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Base64
@@ -191,6 +192,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 sourceSeparationBlend = TEST_BLEND,
             )
             val workerStartedAt = SystemClock.elapsedRealtime()
+            val workerStartedCpuMs = Process.getElapsedCpuTime()
+            val thermalSampler = Phase7ThermalSampler(context, workerStartedAt)
+            thermalSampler.sample(workerStartedAt, force = true)
             assertTrue(worker.startCurrentSong())
 
             val firstReadyAt = AtomicLong(0L)
@@ -204,6 +208,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             while (SystemClock.elapsedRealtime() - workerStartedAt < WORKER_TIMEOUT_MS) {
                 finalState = worker.workerStateFlow.value
                 val now = SystemClock.elapsedRealtime()
+                thermalSampler.sample(now)
                 val running = finalState as? SourceSeparationUiState.Running
                 running?.sourceDecodeMode?.name?.let { decodeMode = it }
                 running?.sourceDecodeDiagnostics?.let { decodeDiagnostics = it }
@@ -231,6 +236,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 runCallbacks.completedCacheKey.get() == cacheKey,
             )
             val completedAt = SystemClock.elapsedRealtime()
+            thermalSampler.sample(completedAt, force = true)
+            val processCpuMs = (Process.getElapsedCpuTime() - workerStartedCpuMs)
+                .coerceAtLeast(0L)
             val firstReadyMs = firstReadyAt.get().takeIf { it > 0L }
                 ?.minus(workerStartedAt)
                 ?: 0L
@@ -337,6 +345,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("timing", report.getJSONObject("timing")
                 .put("firstReadyMs", firstReadyMs)
                 .put("fullSongMs", fullSongMs)
+                .put("processCpuMs", processCpuMs)
             )
             report.put("memory", JSONObject()
                 .put("idlePssBytes", idleMemory.getLong("totalPssBytes"))
@@ -347,6 +356,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("peakNativeBytes", peakNativeBytes)
                 .put("peakGraphicsBytes", peakGraphicsBytes)
             )
+            report.put("thermal", thermalSampler.toJson())
             report.put("lifecycle", report.getJSONObject("lifecycle")
                 .put("workerCompleted", true)
             )
@@ -1999,6 +2009,47 @@ class SourceSeparationPhase7WorkerDeviceTest {
     private fun Debug.MemoryInfo.summaryBytes(key: String, fallbackKb: Int): Long =
         (memoryStats[key]?.toLongOrNull() ?: fallbackKb.toLong()) * 1024L
 
+    private class Phase7ThermalSampler(
+        context: Context,
+        private val startedAtElapsedMs: Long,
+    ) {
+        private val powerManager = context.getSystemService(PowerManager::class.java)
+        private val samples = mutableListOf<Phase7ThermalSample>()
+        private var lastSampleAtElapsedMs = Long.MIN_VALUE
+
+        fun sample(nowElapsedMs: Long, force: Boolean = false) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || powerManager == null) return
+            if (!force && lastSampleAtElapsedMs != Long.MIN_VALUE &&
+                nowElapsedMs - lastSampleAtElapsedMs < THERMAL_SAMPLE_INTERVAL_MS
+            ) {
+                return
+            }
+            val status = runCatching { powerManager.currentThermalStatus }.getOrNull() ?: return
+            samples += Phase7ThermalSample(
+                elapsedMs = (nowElapsedMs - startedAtElapsedMs).coerceAtLeast(0L),
+                status = status,
+            )
+            lastSampleAtElapsedMs = nowElapsedMs
+        }
+
+        fun toJson(): JSONObject {
+            return JSONObject()
+                .put("available", samples.isNotEmpty())
+                .put("sampleIntervalMs", THERMAL_SAMPLE_INTERVAL_MS)
+                .put("peakStatus", samples.maxOfOrNull { it.status } ?: JSONObject.NULL)
+                .put("samples", JSONArray(samples.map { sample ->
+                    JSONObject()
+                        .put("elapsedMs", sample.elapsedMs)
+                        .put("status", sample.status)
+                }))
+        }
+    }
+
+    private data class Phase7ThermalSample(
+        val elapsedMs: Long,
+        val status: Int,
+    )
+
     private fun assertExpectedSourceDecode(
         arguments: Bundle,
         record: com.mardous.booming.separation.cache.v2.SourceSeparationCacheRuntimeRecord,
@@ -2510,6 +2561,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val REPORT_DIRECTORY = "phase7-validation-reports"
         const val ARTIFACT_EXPORT_DIRECTORY = "phase7-validation-artifacts"
         const val EXPECTED_NULL_VALUE = "__none__"
+        const val THERMAL_SAMPLE_INTERVAL_MS = 2_000L
         const val REQUIRED_READY_WINDOWS = 2
         const val TEST_BLEND = 0.23f
         const val TEST_KEY_PLAYBACK_ENABLED = "source_separation.playback_enabled"

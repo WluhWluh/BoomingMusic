@@ -190,6 +190,7 @@
         "installMs": { "type": ["integer", "null"], "minimum": 0 },
         "firstReadyMs": { "type": "integer", "minimum": 0 },
         "fullSongMs": { "type": "integer", "minimum": 0 },
+        "processCpuMs": { "type": "integer", "minimum": 0 },
         "cancellationLatencyMs": { "type": "integer", "minimum": 0 },
         "windowMs": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
       }
