@@ -392,6 +392,12 @@ class SourceSeparationModelAwareEngineTest {
                 SourceSeparationExecutionHostControlResult.AlreadyApplied,
                 host.pause("run-pause", 9L),
             )
+            val snapshot = requireNotNull(host.snapshot("run-pause", 9L))
+            assertEquals("run-pause", snapshot.diagnostics.runId)
+            assertEquals(9L, snapshot.diagnostics.processGeneration)
+            assertEquals(SourceSeparationExecutionHostLifecycle.Prepared,
+                snapshot.diagnostics.lifecycle)
+            assertTrue(snapshot.diagnostics.latestEventSequence > 0L)
             release.countDown()
             val error = assertThrows(ExecutionException::class.java) {
                 future.get(5, TimeUnit.SECONDS)
@@ -410,6 +416,11 @@ class SourceSeparationModelAwareEngineTest {
             manifest.segmentPlan?.segments?.get(1)?.state)
         assertFalse(fixture.repository.isLeased(manifest.cacheKey))
         assertEquals(null, host.snapshot("run-pause", 9L))
+        host.close()
+        assertEquals(
+            SourceSeparationExecutionHostControlResult.HostClosed,
+            host.pause("run-pause", 9L),
+        )
     }
 
     @Test
