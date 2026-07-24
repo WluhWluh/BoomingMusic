@@ -134,7 +134,7 @@ class SourceSeparationModelAwareEngineTest {
                 request.onSegmentStateChanged(1, SourceSeparationSegmentState.Running)
                 throw SourceSeparationPausedException()
             }
-            val resume = requireNotNull(request.run.resumeState)
+            val resume = requireNotNull(request.workspace.resumeState)
             assertEquals(SourceSeparationSegmentState.Ready, resume.segmentPlan.segments[0].state)
             assertEquals(SourceSeparationSegmentState.Queued, resume.segmentPlan.segments[1].state)
             fixture.complete(request, fixture.prepare(request, preserveFiles = true))
@@ -176,10 +176,10 @@ class SourceSeparationModelAwareEngineTest {
         val fixture = fixture()
         val events = mutableListOf<String>()
         val engine = fixture.engine { request ->
-            val key = request.run.identity.cacheKey
+            val key = request.workspace.identity.cacheKey
             events += "gpu-active"
             assertTrue(fixture.repository.isLeased(key))
-            assertEquals(null, fixture.repository.tryAcquireRunWrite(request.run.identity))
+            assertEquals(null, fixture.repository.tryAcquireRunWrite(request.workspace.identity))
             events += "gpu-closed"
             assertTrue(fixture.repository.isLeased(key))
             events += "cpu-created"
@@ -431,8 +431,8 @@ class SourceSeparationModelAwareEngineTest {
         val executor = SourceSeparationModelAwareRangeExecutor { request ->
             request.onPrepared(fixture.prepare(request))
             request.onSegmentStateChanged(0, SourceSeparationSegmentState.Running)
-            assertTrue(fixture.repository.isLeased(request.run.identity.cacheKey))
-            assertEquals(null, fixture.repository.tryAcquireRunWrite(request.run.identity))
+            assertTrue(fixture.repository.isLeased(request.workspace.identity.cacheKey))
+            assertEquals(null, fixture.repository.tryAcquireRunWrite(request.workspace.identity))
             started.countDown()
             check(release.await(5, TimeUnit.SECONDS)) { "Cancel test timed out." }
             if (request.shouldCancel()) throw CancellationException("host cancel")
@@ -585,13 +585,13 @@ class SourceSeparationModelAwareEngineTest {
             request: SourceSeparationModelAwareExecutionRequest,
             preserveFiles: Boolean = false,
         ): MdxRangePreparation {
-            val vocals = File(request.run.workDirectory, "vocals.wav").apply {
+            val vocals = File(request.workspace.workDirectory, "vocals.wav").apply {
                 if (!preserveFiles || !exists()) writeText("vocals")
             }
-            val instrumental = File(request.run.workDirectory, "instrumental.wav").apply {
+            val instrumental = File(request.workspace.workDirectory, "instrumental.wav").apply {
                 if (!preserveFiles || !exists()) writeText("instrumental")
             }
-            val timing = File(request.run.workDirectory, "timing.txt").apply {
+            val timing = File(request.workspace.workDirectory, "timing.txt").apply {
                 if (!preserveFiles || !exists()) writeText("timing")
             }
             val plan = SourceSeparationSegmentPlan.build(
@@ -605,7 +605,7 @@ class SourceSeparationModelAwareEngineTest {
             )
             plan.segments.forEach { segment ->
                 listOf(segment.vocalsPath, segment.instrumentalPath).forEach { path ->
-                    store.resolveEntryPath(request.run.identity.cacheKey, path).apply {
+                    store.resolveEntryPath(request.workspace.identity.cacheKey, path).apply {
                         parentFile?.mkdirs()
                         if (!preserveFiles || !exists()) writeText(path)
                     }
@@ -619,7 +619,7 @@ class SourceSeparationModelAwareEngineTest {
                 endMs = 2_000L,
                 frames = 88_200,
                 windowCount = 2,
-                sourceAudioFingerprint = request.run.identity.source.audioFingerprint,
+                sourceAudioFingerprint = request.workspace.identity.source.audioFingerprint,
                 sourceFrameCount = 88_200,
                 sourceSampleRate = 44_100,
                 sourceChannelCount = 2,

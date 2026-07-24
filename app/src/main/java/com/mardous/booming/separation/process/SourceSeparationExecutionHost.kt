@@ -456,6 +456,9 @@ internal data class SourceSeparationExecutionCompletion(
     val runtimeSettings: SourceSeparationExecutionRuntimeSettings,
     val runtimeDiagnostics: SourceSeparationExecutionRuntimeDiagnostics,
     val sourceDecodeDiagnostics: SourceSeparationExecutionSourceDecodeDiagnostics,
+    val timingAudioDurationSeconds: Double,
+    val timingStageMs: Map<String, Long>,
+    val modelVariant: String?,
 ) {
     init {
         SourceSeparationCacheRelativePath.requireValid(vocalsPath)

@@ -8,6 +8,11 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagno
 import com.mardous.booming.separation.model.MdxRangePreparation
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
+import com.mardous.booming.separation.model.MdxRangeTimingReport
+import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
+import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.MdxInferenceBackend
+import com.mardous.booming.separation.model.MdxModelVariant
 import com.mardous.booming.separation.model.MdxSegmentSchedulerProgress
 import com.mardous.booming.separation.model.MdxSourceDecodeDiagnostics
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
@@ -227,7 +232,7 @@ internal class InProcessSourceSeparationExecutionHost(
                 emit(
                     active = this,
                     payload = SourceSeparationExecutionHostEventPayload.Prepared(
-                        preparation.toExecutionPreparation(original.run.entryDirectory),
+                        preparation.toExecutionPreparation(original.workspace.entryDirectory),
                     ),
                     lifecycle = SourceSeparationExecutionHostLifecycle.Prepared,
                 )
@@ -284,16 +289,16 @@ private fun SourceSeparationExecutionHostRequest.requireExactDescriptor() {
     val descriptor = descriptor
     val model = execution.model
     val profile = model.executionProfile
-    require(descriptor.cacheIdentity == execution.run.identity) {
+    require(descriptor.cacheIdentity == execution.workspace.identity) {
         "Execution descriptor does not match the admitted cache identity."
     }
-    require(descriptor.contract == execution.run.contract) {
+    require(descriptor.contract == execution.workspace.contract) {
         "Execution descriptor does not match the admitted cache contract."
     }
     require(descriptor.source.sourceUri == execution.sourceUri &&
         descriptor.source.displayName == execution.displayName &&
         descriptor.source.expectedAudioFingerprint ==
-        execution.run.identity.source.audioFingerprint
+        execution.workspace.identity.source.audioFingerprint
     ) {
         "Execution descriptor does not match the admitted source."
     }
@@ -327,12 +332,12 @@ internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
     initialPlaybackReadyWindowCount: Int,
 ): SourceSeparationExecutionDescriptor {
     val profile = model.executionProfile
-    val contract = run.contract
+    val contract = workspace.contract
     return SourceSeparationExecutionDescriptor(
         runId = runId,
         processGeneration = processGeneration,
-        cacheKey = run.identity.cacheKey,
-        cacheIdentity = run.identity,
+        cacheKey = workspace.identity.cacheKey,
+        cacheIdentity = workspace.identity,
         contract = contract,
         model = SourceSeparationExecutionModelIdentity(
             modelId = contract.modelId,
@@ -351,7 +356,7 @@ internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
         source = SourceSeparationExecutionSourceIdentity(
             sourceUri = sourceUri,
             displayName = displayName,
-            expectedAudioFingerprint = run.identity.source.audioFingerprint,
+            expectedAudioFingerprint = workspace.identity.source.audioFingerprint,
             diagnostics = sourceDiagnostics,
         ),
         runtime = SourceSeparationExecutionRuntimeIdentity(
@@ -369,11 +374,13 @@ internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
 
 internal fun SourceSeparationModelAwareExecutionRequest.resumeDescriptor():
     SourceSeparationExecutionResumeState? {
-    val resume = run.resumeState ?: return null
+    val resume = workspace.resumeState ?: return null
     return SourceSeparationExecutionResumeState(
-        vocalsPath = relativeEntryPath(run.entryDirectory, resume.vocalsFile),
-        instrumentalPath = relativeEntryPath(run.entryDirectory, resume.instrumentalFile),
-        timingPath = resume.timingFile?.let { relativeEntryPath(run.entryDirectory, it) },
+        vocalsPath = relativeEntryPath(workspace.entryDirectory, resume.vocalsFile),
+        instrumentalPath = relativeEntryPath(workspace.entryDirectory, resume.instrumentalFile),
+        timingPath = resume.timingFile?.let {
+            relativeEntryPath(workspace.entryDirectory, it)
+        },
         segmentPlan = resume.segmentPlan,
     )
 }
@@ -426,7 +433,7 @@ private fun SourceSeparationExecutionSchedulerProgress.toMdxProgress() =
         playbackReadyWindowPendingCount = playbackReadyWindowPendingCount,
     )
 
-private fun MdxSourceDecodeDiagnostics.toExecutionDiagnostics() =
+internal fun MdxSourceDecodeDiagnostics.toExecutionDiagnostics() =
     SourceSeparationExecutionSourceDecodeDiagnostics(
         mode = mode.name,
         profile = profile,
@@ -442,7 +449,7 @@ private fun MdxSourceDecodeDiagnostics.toExecutionDiagnostics() =
         encoderPaddingFrames = encoderPaddingFrames,
     )
 
-private fun SourceSeparationExecutionSourceDecodeDiagnostics.toMdxDiagnostics() =
+internal fun SourceSeparationExecutionSourceDecodeDiagnostics.toMdxDiagnostics() =
     MdxSourceDecodeDiagnostics(
         mode = MdxSourceDecodeMode.valueOf(mode),
         profile = profile,
@@ -494,12 +501,12 @@ internal fun SourceSeparationExecutionPreparation.toMdxRangePreparation(
     segmentPlan = segmentPlan,
 )
 
-private fun MdxRangeSeparationResult.toExecutionCompletion(
+internal fun MdxRangeSeparationResult.toExecutionCompletion(
     request: SourceSeparationModelAwareExecutionRequest,
 ) = SourceSeparationExecutionCompletion(
-    vocalsPath = relativeEntryPath(request.run.entryDirectory, vocalsFile),
-    instrumentalPath = relativeEntryPath(request.run.entryDirectory, instrumentalFile),
-    timingPath = relativeEntryPath(request.run.entryDirectory, timingFile),
+    vocalsPath = relativeEntryPath(request.workspace.entryDirectory, vocalsFile),
+    instrumentalPath = relativeEntryPath(request.workspace.entryDirectory, instrumentalFile),
+    timingPath = relativeEntryPath(request.workspace.entryDirectory, timingFile),
     startMs = startMs,
     endMs = endMs,
     frames = frames,
@@ -524,7 +531,63 @@ private fun MdxRangeSeparationResult.toExecutionCompletion(
         fallbackReason = runtimeDiagnostics.fallbackReason,
     ),
     sourceDecodeDiagnostics = sourceDecodeDiagnostics.toExecutionDiagnostics(),
+    timingAudioDurationSeconds = timingReport.audioDurationSeconds,
+    timingStageMs = timingReport.stageMs,
+    modelVariant = modelVariant?.name,
 )
+
+internal fun SourceSeparationExecutionCompletion.toMdxRangeSeparationResult(
+    request: SourceSeparationModelAwareExecutionRequest,
+): MdxRangeSeparationResult {
+    val runtimeSettings = MdxRuntimeSettings(
+        cpuThreads = this.runtimeSettings.cpuThreads,
+        useXnnpack = this.runtimeSettings.useXnnpack,
+    )
+    val runtimeDiagnostics = MdxRuntimeDiagnostics(
+        runtimeName = this.runtimeDiagnostics.runtimeName,
+        backend = MdxInferenceBackend.valueOf(this.runtimeDiagnostics.backend),
+        cpuThreads = this.runtimeDiagnostics.cpuThreads,
+        detail = this.runtimeDiagnostics.detail,
+        fallbackStage = this.runtimeDiagnostics.fallbackStage,
+        fallbackReason = this.runtimeDiagnostics.fallbackReason,
+    )
+    val sourceDiagnostics = sourceDecodeDiagnostics.toMdxDiagnostics()
+    val profile = request.model.executionProfile
+    return MdxRangeSeparationResult(
+        vocalsFile = resolveEntryPath(request.workspace.entryDirectory, vocalsPath),
+        instrumentalFile = resolveEntryPath(
+            request.workspace.entryDirectory,
+            instrumentalPath,
+        ),
+        timingFile = resolveEntryPath(request.workspace.entryDirectory, timingPath),
+        startMs = startMs,
+        endMs = endMs,
+        frames = frames,
+        windowCount = windowCount,
+        elapsedMs = elapsedMs,
+        sourceAudioFingerprint = sourceAudioFingerprint,
+        sourceFrameCount = sourceFrameCount,
+        sourceSampleRate = sourceSampleRate,
+        sourceChannelCount = sourceChannelCount,
+        outputSampleRate = outputSampleRate,
+        segmentPlan = segmentPlan,
+        timingReport = MdxRangeTimingReport(
+            audioDurationSeconds = timingAudioDurationSeconds,
+            windowCount = windowCount,
+            totalMs = elapsedMs,
+            runtimeSettings = runtimeSettings,
+            runtimeDiagnostics = runtimeDiagnostics,
+            executionProfile = profile,
+            sourceDecodeDiagnostics = sourceDiagnostics,
+            stageMs = timingStageMs,
+        ),
+        runtimeSettings = runtimeSettings,
+        runtimeDiagnostics = runtimeDiagnostics,
+        modelVariant = modelVariant?.let(MdxModelVariant::valueOf),
+        executionProfile = profile,
+        sourceDecodeDiagnostics = sourceDiagnostics,
+    )
+}
 
 private fun SourceSeparationExecutionHostEvent.toDiagnostics(
     mode: SourceSeparationExecutionHostMode,

@@ -161,7 +161,7 @@ internal class SourceSeparationModelAwareEngine(
                 sourceUri = input.sourceUri,
                 displayName = input.displayName,
                 model = model,
-                run = run,
+                workspace = SourceSeparationModelAwareExecutionWorkspace.from(run),
                 runtimeSettings = runtimeSettings,
                 onProgress = {},
                 onPrepared = {},
@@ -340,7 +340,7 @@ internal data class SourceSeparationModelAwareExecutionRequest(
     val sourceUri: String,
     val displayName: String,
     val model: SourceSeparationResolvedCacheModel,
-    val run: SourceSeparationModelAwareCacheRun,
+    val workspace: SourceSeparationModelAwareExecutionWorkspace,
     val runtimeSettings: MdxRuntimeSettings,
     val onProgress: (MdxRangeProgress) -> Unit,
     val onPrepared: (com.mardous.booming.separation.model.MdxRangePreparation) -> Unit,
@@ -351,6 +351,40 @@ internal data class SourceSeparationModelAwareExecutionRequest(
     val shouldPause: () -> Boolean,
     val shouldCancel: () -> Boolean,
 )
+
+internal data class SourceSeparationModelAwareExecutionWorkspace(
+    val identity: com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity,
+    val contract: com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot,
+    val entryDirectory: java.io.File,
+    val workDirectory: java.io.File,
+    val segmentsDirectory: java.io.File,
+    val resumeState: com.mardous.booming.separation.model.MdxRangeResumeState?,
+) {
+    init {
+        require(identity.cacheKey == entryDirectory.name) {
+            "Execution workspace directory does not match its cache identity."
+        }
+        require(workDirectory.parentFile == entryDirectory) {
+            "Execution work directory is outside its cache entry."
+        }
+        require(segmentsDirectory.parentFile == entryDirectory) {
+            "Execution segment directory is outside its cache entry."
+        }
+    }
+
+    companion object {
+        fun from(
+            run: SourceSeparationModelAwareCacheRun,
+        ) = SourceSeparationModelAwareExecutionWorkspace(
+            identity = run.identity,
+            contract = run.contract,
+            entryDirectory = run.entryDirectory,
+            workDirectory = run.workDirectory,
+            segmentsDirectory = run.segmentsDirectory,
+            resumeState = run.resumeState,
+        )
+    }
+}
 
 internal data class SourceSeparationModelAwareSongInput(
     val sourceUri: String,
