@@ -136,8 +136,9 @@ if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "work
     throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
 }
 if ($ExecutionHostMode -eq "bound-remote" -and
-        ($Stage -ne "worker" -or $BackendMode -ne "auto" -or $AutoFailpoint -ne "none")) {
-    throw "BoundRemote requires Stage=worker, BackendMode=auto, and AutoFailpoint=none."
+        ($Stage -notin @("worker", "background") -or
+        $BackendMode -ne "auto" -or $AutoFailpoint -ne "none")) {
+    throw "BoundRemote requires Stage=worker/background, BackendMode=auto, and AutoFailpoint=none."
 }
 if ($PreserveMediaStoreSource -and $Stage -notin @("worker", "switching")) {
     throw "PreserveMediaStoreSource applies only to worker and switching stages."

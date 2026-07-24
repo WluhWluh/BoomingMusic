@@ -75,6 +75,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.koin.core.context.GlobalContext
 import org.koin.java.KoinJavaComponent.get
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
@@ -1011,9 +1012,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val context = instrumentation.targetContext
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val executionHostMode = Phase7ExecutionHostMode.parse(
+            arguments.getString(ARG_EXECUTION_HOST_MODE),
+        )
         val report = baseReport(context, runId, arguments)
         var controller: MediaController? = null
         var mediaUri: Uri? = null
+        var boundRemoteHost: BoundRemoteSourceSeparationExecutionHost? = null
+        var remoteWorker: SourceSeparationForegroundWorkerCoordinator? = null
+        var originalRuntime: SourceSeparationRuntimeFacade? = null
+        var originalWorker: SourceSeparationForegroundWorkerCoordinator? = null
+        val hostEvents = Collections.synchronizedList(
+            mutableListOf<SourceSeparationExecutionHostEvent>(),
+        )
 
         try {
             require(BackendMode.parse(arguments.getString(ARG_BACKEND_MODE)) == BackendMode.Auto) {
@@ -1030,9 +1041,31 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .commit()
             ) { "Could not persist background-continuation test preferences." }
             assertExpectedActivePreset(arguments)
-            val runtimeFacade = get<SourceSeparationRuntimeFacade>(
-                SourceSeparationRuntimeFacade::class.java,
-            )
+            val runtimeFacade = if (executionHostMode == Phase7ExecutionHostMode.BoundRemote) {
+                val koin = GlobalContext.get()
+                originalRuntime = koin.get()
+                originalWorker = koin.get()
+                val remoteRuntime = createCpuRuntimeFacade(
+                    context = context,
+                    preferences = preferences,
+                    presetRepository = get(SourceSeparationPresetRepository::class.java),
+                    backendMode = BackendMode.Auto,
+                    processorCount = null,
+                    executionHostMode = executionHostMode,
+                    executionHostEventSink = hostEvents::add,
+                    boundRemoteHostSink = { boundRemoteHost = it },
+                )
+                val worker = SourceSeparationForegroundWorkerCoordinator(
+                    context = context,
+                    preferences = preferences,
+                    sourceSeparationRuntime = remoteRuntime,
+                ).also { remoteWorker = it }
+                koin.declare<SourceSeparationRuntimeFacade>(remoteRuntime)
+                koin.declare(worker)
+                remoteRuntime
+            } else {
+                get(SourceSeparationRuntimeFacade::class.java)
+            }
             val runtimeSong = (runtimeFacade.resolve(source) as?
                 SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The background source could not be resolved.")
@@ -1107,6 +1140,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("exactIdentity", true)
                 .put("completedPlayable", true)
             )
+            report.put(
+                "executionHost",
+                if (executionHostMode == Phase7ExecutionHostMode.BoundRemote) {
+                    executionHostReport(
+                        mode = executionHostMode,
+                        events = synchronized(hostEvents) { hostEvents.toList() },
+                        remoteHost = boundRemoteHost,
+                    )
+                } else {
+                    JSONObject().put("mode", executionHostMode.argumentValue)
+                },
+            )
         } catch (error: Throwable) {
             report.put("status", "failed")
             report.put("error", "${error::class.java.name}: ${error.message}")
@@ -1121,6 +1166,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     }
                 }
             }
+            remoteWorker?.cancel()
+            if (originalRuntime != null && originalWorker != null) {
+                GlobalContext.get().declare<SourceSeparationRuntimeFacade>(
+                    requireNotNull(originalRuntime),
+                )
+                GlobalContext.get().declare(requireNotNull(originalWorker))
+            }
+            boundRemoteHost?.close()
             mediaUri?.let { uri ->
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
