@@ -64,6 +64,11 @@ cancellation. Auto passed on both physical devices and retained `LiteRtGpu` in
 the completed manifests. The shared-reusable mode remains diagnostic CPU
 evidence and is not used for Auto promotion.
 
+The isolated default-thread cancellation matrix also passed on S25 arm64, S10
+arm64, S10 arm32, and x86_64. Measured coordinator latency was 1-9 ms against
+the 30,000 ms threshold; every cache remained `Incomplete` and each run created
+one CPU session.
+
 Production model, MediaSession, and queue lifecycle evidence is:
 
 | Target | Active-model switch | Playback-time switch | Home/background full WAV | Next-song prefetch |
@@ -89,18 +94,28 @@ Pure API 26 x86 preflight now rejects 9662, KARA, and HQ4 as `unsupported`
 without any native allocator call. This preserves ordinary x86 playback while
 preventing the lifecycle-unsafe source-separation route.
 
+## Resource and Thread Matrix
+
+One cold and three warm default-CPU repetitions passed on S25 arm64, S10
+arm64, S10 arm32, and the diagnostic x86_64 AVD. The corresponding Auto matrix
+passed four GPU repetitions on both physical devices. S25 GPU was consistently
+faster and lower-PSS; S10 GPU timing varied around CPU while remaining roughly
+280-315 MiB lower-PSS. The four-thread default is retained because three
+threads were 8-10 percent slower on S10 even though they matched four threads
+on S25. See
+[`resource-results-2026-07-24.md`](resource-results-2026-07-24.md) for the
+complete ranges and decisions.
+
 ## Open Evidence
 
 - Rerun the final promotion rows from the frozen decision commit; current local
   reports still identify the preceding app commit.
-- Complete three warm repetitions, continuous thermal/resource measurements,
-  source-format coverage, and representative listening/UI coverage on both
-  physical devices.
+- Complete representative listening/UI coverage on both physical devices.
 - Compare the S10 GPU export with the desktop reference after freeing or
   staging sufficient local storage.
 - Complete KARA CPU full-song, cancellation, playback, resource, and listening
   rows on every ABI for which it may become selectable.
-- Finish the source-format corpus and recover the overloaded API 37 x86_64 AVD
-  before rerunning any remaining process-recovery rows there.
+- Complete HQ4 no-allocation preflight, supplemental x86 runtime failure, and
+  dual-runtime size-inventory rows.
 - Keep pure x86 ordinary-playback support, but mark source separation
   `unsupported` until a lifecycle-safe runtime strategy exists.

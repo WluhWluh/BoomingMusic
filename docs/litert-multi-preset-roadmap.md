@@ -2174,7 +2174,7 @@ for validation-only injection/observability, fixes found by the matrix, and the
 evidence-driven release-graph/catalog decision in Phase 7E. A product-code fix
 changes the app identity and reruns every affected row.
 
-#### Phase 7 progress snapshot (2026-07-22)
+#### Phase 7 progress snapshot (2026-07-24)
 
 The validation graph and preliminary device evidence are now real, but the
 promotion gate is still open. The current reports use the prerelease catalog
@@ -2220,13 +2220,23 @@ FLAC safely uses an explicit full-song fallback because that extractor reports
 `audio/raw`. See
 [`validation/litert-phase7/source-format-results-2026-07-23.md`](validation/litert-phase7/source-format-results-2026-07-23.md).
 
+The repeated v2 resource matrix now has one cold and three warm 9662 CPU rows
+on S25 arm64, S10 arm64, S10 arm32, and diagnostic x86_64, plus four Auto GPU
+rows on each physical device. S25 GPU is decisively faster and lower-PSS. S10
+GPU timing varies around CPU but remains about 280-315 MiB lower-PSS, so
+GPU-first Auto is retained. Neighboring thread measurements retain the current
+four-thread default because three threads are 8-10 percent slower on S10. The
+default-thread cancellation matrix passes at 1-9 ms on all four CPU targets.
+See
+[`validation/litert-phase7/resource-results-2026-07-24.md`](validation/litert-phase7/resource-results-2026-07-24.md).
+
 These are not promotion results yet. The v2 threshold revision must be used to
 rerun the affected rows after the final decision commit. S10 GPU audio export,
-repeated warm/resource/thermal measurements, representative listening and UI
-coverage, KARA full-song qualification, and the final catalog promotion matrix
-remain open. Pure x86 retains ordinary playback but source separation now fails
-closed before native allocation; x86_64 remains CPU evidence only until a
-separate GPU qualification exists.
+representative listening and UI coverage, HQ4 and supplemental-runtime gates,
+KARA full-song qualification, and the final catalog promotion matrix remain
+open. Pure x86 retains ordinary playback but source separation now fails closed
+before native allocation; x86_64 remains CPU evidence only until a separate
+GPU qualification exists.
 
 #### Phase 7A: Freeze the validation inputs and evidence format
 
@@ -2320,19 +2330,19 @@ separate GPU qualification exists.
 
 #### Phase 7C: Resource, thread, and thermal gates
 
-- [ ] For each supported 9662 CPU target, collect one cold-session run and at
+- [x] For each supported 9662 CPU target, collect one cold-session run and at
   least three warm-session repetitions. Record wall time, first-ready time,
   full-song time, idle/peak/delta PSS, Java heap, native heap, graphics
   allocation where available, cancellation latency, and thermal state. Keep
   model download and APK install space in separate measurements. Emulator
   timing and thermal data are regression diagnostics, not a substitute for
   physical-device performance or resource qualification.
-- [ ] Compare the default thread formula
+- [x] Compare the default thread formula
   `max(2, min(4, availableProcessors - 1))` with neighboring counts on S10 and
   S25. Change the default only when repeated full-song evidence improves the
   target metric without violating playback readiness, cancellation, memory, or
   thermal gates.
-- [ ] Measure GPU and CPU separately on S10/S25. GPU eligibility must include
+- [x] Measure GPU and CPU separately on S10/S25. GPU eligibility must include
   library discovery, GPU-only compilation, memory decision, bounded probe, and
   fallback evidence; do not infer delegated operator coverage from LiteRT's
   public API. If GPU is not consistently better or less resource-intensive,
