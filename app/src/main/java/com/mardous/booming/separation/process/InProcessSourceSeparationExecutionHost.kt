@@ -4,6 +4,7 @@ import com.mardous.booming.separation.SourceSeparationModelAwareExecutionRequest
 import com.mardous.booming.separation.SourceSeparationModelAwareRangeExecutor
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRelativePath
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
 import com.mardous.booming.separation.model.MdxRangePreparation
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
@@ -41,13 +42,12 @@ internal class InProcessSourceSeparationExecutionHost(
             request.requireExactDescriptor()
             ActiveRun(request).also { activeRun = it }
         }
-        emit(
-            active = active,
-            payload = SourceSeparationExecutionHostEventPayload.Accepted(request.descriptor),
-            lifecycle = SourceSeparationExecutionHostLifecycle.Running,
-        )
-
         return try {
+            emit(
+                active = active,
+                payload = SourceSeparationExecutionHostEventPayload.Accepted(request.descriptor),
+                lifecycle = SourceSeparationExecutionHostLifecycle.Running,
+            )
             val result = rangeExecutor.separate(active.executionRequest())
             val event = emit(
                 active = active,
@@ -319,7 +319,55 @@ private fun SourceSeparationExecutionHostRequest.requireExactDescriptor() {
     }
 }
 
-private fun SourceSeparationModelAwareExecutionRequest.resumeDescriptor():
+internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
+    runId: String,
+    processGeneration: Long,
+    sourceDiagnostics: SourceSeparationCacheSourceDiagnostics,
+    initialPlaybackPositionMs: Long?,
+    initialPlaybackReadyWindowCount: Int,
+): SourceSeparationExecutionDescriptor {
+    val profile = model.executionProfile
+    val contract = run.contract
+    return SourceSeparationExecutionDescriptor(
+        runId = runId,
+        processGeneration = processGeneration,
+        cacheKey = run.identity.cacheKey,
+        cacheIdentity = run.identity,
+        contract = contract,
+        model = SourceSeparationExecutionModelIdentity(
+            modelId = contract.modelId,
+            artifactFileName = model.artifact.file.name,
+            artifactByteSize = model.artifact.byteSize,
+            artifactSha256 = model.artifact.sha256,
+            contractId = contract.contractId,
+            contractSchemaVersion = contract.contractSchemaVersion,
+            contractFingerprint = contract.contractFingerprint,
+            profileRevisionId = contract.profileRevisionId,
+            executionProfileId = profile.profileId,
+            executionSessionIdentity = profile.sessionIdentity,
+            pipelineId = contract.pipelineId,
+            pipelineVersion = contract.pipelineVersion,
+        ),
+        source = SourceSeparationExecutionSourceIdentity(
+            sourceUri = sourceUri,
+            displayName = displayName,
+            expectedAudioFingerprint = run.identity.source.audioFingerprint,
+            diagnostics = sourceDiagnostics,
+        ),
+        runtime = SourceSeparationExecutionRuntimeIdentity(
+            executionProfileId = profile.profileId,
+            executionSessionIdentity = profile.sessionIdentity,
+            cpuThreads = runtimeSettings.cpuThreads,
+            useXnnpack = runtimeSettings.useXnnpack,
+            windowDecodeEnabled = windowDecodeEnabled,
+            initialPlaybackPositionMs = initialPlaybackPositionMs,
+            initialPlaybackReadyWindowCount = initialPlaybackReadyWindowCount,
+        ),
+        resume = resumeDescriptor(),
+    )
+}
+
+internal fun SourceSeparationModelAwareExecutionRequest.resumeDescriptor():
     SourceSeparationExecutionResumeState? {
     val resume = run.resumeState ?: return null
     return SourceSeparationExecutionResumeState(

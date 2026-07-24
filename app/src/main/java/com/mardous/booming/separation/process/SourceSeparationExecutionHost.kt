@@ -255,13 +255,13 @@ internal data class SourceSeparationExecutionResumeState(
 }
 
 @Serializable
-internal enum class SourceSeparationExecutionHostMode {
+enum class SourceSeparationExecutionHostMode {
     InProcess,
     BoundRemote,
 }
 
 @Serializable
-internal enum class SourceSeparationExecutionHostLifecycle {
+enum class SourceSeparationExecutionHostLifecycle {
     Starting,
     Running,
     Prepared,
@@ -285,7 +285,7 @@ internal enum class SourceSeparationExecutionHostControlResult {
 }
 
 @Serializable
-internal data class SourceSeparationExecutionHostDiagnostics(
+data class SourceSeparationExecutionHostDiagnostics(
     val mode: SourceSeparationExecutionHostMode,
     val runId: String,
     val processGeneration: Long,

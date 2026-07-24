@@ -23,6 +23,18 @@ import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.process.InProcessSourceSeparationExecutionHost
+import com.mardous.booming.separation.process.SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION
+import com.mardous.booming.separation.process.SourceSeparationExecutionHost
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostDiagnostics
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
+import com.mardous.booming.separation.process.toExecutionDescriptor
+import com.mardous.booming.separation.process.toMdxRangePreparation
+import com.mardous.booming.separation.process.toMdxRangeProgress
+import java.util.UUID
 import java.util.concurrent.CancellationException
 
 /** Runs one contract-bound source-separation request through the v2 cache and runtime stack. */
@@ -30,8 +42,12 @@ internal class SourceSeparationModelAwareEngine(
     private val activeModelResolver: () -> SourceSeparationResolvedCacheModel?,
     private val preflightResolver: SourceSeparationModelAwarePreflightResolver,
     private val coordinator: SourceSeparationCacheRunCoordinator,
-    private val rangeExecutor: SourceSeparationModelAwareRangeExecutor,
+    rangeExecutor: SourceSeparationModelAwareRangeExecutor,
+    private val executionHost: SourceSeparationExecutionHost =
+        InProcessSourceSeparationExecutionHost(rangeExecutor),
     private val constructionGate: () -> Boolean,
+    private val runIdFactory: () -> String = { UUID.randomUUID().toString() },
+    private val executionHostEventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
 ) {
     fun separate(
         input: SourceSeparationModelAwareSongInput,
@@ -129,34 +145,103 @@ internal class SourceSeparationModelAwareEngine(
         shouldPause: () -> Boolean,
         shouldCancel: () -> Boolean,
     ): SourceSeparationModelAwareEngineResult {
+        val runId = runIdFactory().also {
+            require(it.isNotBlank()) { "Execution run ID factory returned an empty ID." }
+        }
+        val processGeneration = executionHost.processGeneration
+        var hostRunAccepted = false
         return try {
             if (shouldCancel()) throw CancellationException("Source separation canceled.")
-            val result = rangeExecutor.separate(
-                SourceSeparationModelAwareExecutionRequest(
-                    sourceUri = input.sourceUri,
-                    displayName = input.displayName,
-                    model = model,
-                    run = run,
-                    runtimeSettings = runtimeSettings,
-                    onProgress = onProgress,
-                    onPrepared = { preparation ->
-                        onPrepared(coordinator.updatePreparation(run, preparation))
+            val initialPlaybackPositionMs = playbackPositionMsProvider()
+                ?.takeIf { it >= 0L }
+            val initialPlaybackReadyWindowCount = playbackReadyWindowCountProvider()
+                .coerceAtLeast(1)
+            val executionRequest = SourceSeparationModelAwareExecutionRequest(
+                sourceUri = input.sourceUri,
+                displayName = input.displayName,
+                model = model,
+                run = run,
+                runtimeSettings = runtimeSettings,
+                onProgress = {},
+                onPrepared = {},
+                onSegmentStateChanged = { _, _ -> },
+                playbackPositionMsProvider = playbackPositionMsProvider,
+                playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
+                windowDecodeEnabled = windowDecodeEnabled,
+                shouldPause = shouldPause,
+                shouldCancel = shouldCancel,
+            )
+            val descriptor = executionRequest.toExecutionDescriptor(
+                runId = runId,
+                processGeneration = processGeneration,
+                sourceDiagnostics = input.sourceDiagnostics,
+                initialPlaybackPositionMs = initialPlaybackPositionMs,
+                initialPlaybackReadyWindowCount = initialPlaybackReadyWindowCount,
+            )
+            var latestEventSequence = 0L
+            val hosted = executionHost.start(
+                SourceSeparationExecutionHostRequest(
+                    descriptor = descriptor,
+                    executionRequest = executionRequest,
+                    onEvent = { event ->
+                        require(event.protocolVersion ==
+                            SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION
+                        ) {
+                            "Execution host event uses an unsupported protocol version."
+                        }
+                        require(event.runId == runId &&
+                            event.processGeneration == processGeneration
+                        ) {
+                            "Execution host event targets a stale run or generation."
+                        }
+                        require(event.sequence > latestEventSequence) {
+                            "Execution host event sequence is stale."
+                        }
+                        when (val payload = event.payload) {
+                            is SourceSeparationExecutionHostEventPayload.Accepted -> {
+                                require(payload.descriptor == descriptor) {
+                                    "Execution host accepted a different descriptor."
+                                }
+                                hostRunAccepted = true
+                            }
+
+                            is SourceSeparationExecutionHostEventPayload.Progress ->
+                                onProgress(payload.progress.toMdxRangeProgress())
+
+                            is SourceSeparationExecutionHostEventPayload.Prepared ->
+                                onPrepared(
+                                    coordinator.updatePreparation(
+                                        run,
+                                        payload.preparation.toMdxRangePreparation(
+                                            run.entryDirectory,
+                                        ),
+                                    )
+                                )
+
+                            is SourceSeparationExecutionHostEventPayload.SegmentStateChanged ->
+                                coordinator.updateSegmentState(
+                                    run,
+                                    payload.segmentIndex,
+                                    payload.state,
+                                )
+
+                            is SourceSeparationExecutionHostEventPayload.Completed,
+                            is SourceSeparationExecutionHostEventPayload.Paused,
+                            is SourceSeparationExecutionHostEventPayload.Canceled,
+                            is SourceSeparationExecutionHostEventPayload.Failed,
+                            -> Unit
+                        }
+                        executionHostEventSink(event)
+                        latestEventSequence = event.sequence
                     },
-                    onSegmentStateChanged = { index, state ->
-                        coordinator.updateSegmentState(run, index, state)
-                    },
-                    playbackPositionMsProvider = playbackPositionMsProvider,
-                    playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
-                    windowDecodeEnabled = windowDecodeEnabled,
-                    shouldPause = shouldPause,
-                    shouldCancel = shouldCancel,
                 )
             )
             if (shouldCancel()) throw CancellationException("Source separation canceled.")
             SourceSeparationModelAwareEngineResult.Completed(
-                manifest = coordinator.complete(run, result),
-                result = result,
+                manifest = coordinator.complete(run, hosted.result),
+                result = hosted.result,
                 preflightElapsedMs = preflightElapsedMs,
+                hostDiagnostics = hosted.diagnostics,
             )
         } catch (error: SourceSeparationPausedException) {
             coordinator.pause(run)
@@ -167,6 +252,15 @@ internal class SourceSeparationModelAwareEngine(
         } catch (error: Throwable) {
             coordinator.fail(run, error)
             throw error
+        } finally {
+            if (hostRunAccepted) {
+                check(
+                    executionHost.closeRun(runId, processGeneration) ==
+                        SourceSeparationExecutionHostControlResult.Applied
+                ) {
+                    "Execution host did not close the terminal run."
+                }
+            }
         }
     }
 
@@ -289,6 +383,7 @@ sealed class SourceSeparationModelAwareEngineResult {
         val manifest: SourceSeparationCacheManifest,
         val result: MdxRangeSeparationResult,
         val preflightElapsedMs: Long,
+        val hostDiagnostics: SourceSeparationExecutionHostDiagnostics,
     ) : SourceSeparationModelAwareEngineResult()
 
     data class AlreadyCompleted(
