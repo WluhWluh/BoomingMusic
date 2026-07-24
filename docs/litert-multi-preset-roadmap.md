@@ -2263,12 +2263,19 @@ completion and two-window next-song prefetch under retained cache identities.
 See
 [`validation/litert-phase7/9662-objective-2026-07-24/README.md`](validation/litert-phase7/9662-objective-2026-07-24/README.md).
 
+The matching 9662 production Auto full-song path now passes on S10 and S25.
+Both rows selected `LiteRtGpu` without fallback, produced exact-frame and
+one-LSB-equivalent stems, survived process recreation and PCM hydration, and
+passed real MediaSession pause/seek/resume/blend with zero timestamp drift. See
+[`validation/litert-phase7/9662-auto-gpu-2026-07-24/README.md`](validation/litert-phase7/9662-auto-gpu-2026-07-24/README.md).
+
 These are not promotion results yet. The v2 threshold revision must be used to
-rerun the affected rows after the final decision commit. S10 GPU audio export,
-representative listening and UI coverage, KARA's human review, and the final
-catalog promotion matrix remain open. Pure x86 retains ordinary
-playback but source separation now fails closed before native allocation;
-x86_64 remains CPU evidence only until a separate GPU qualification exists.
+rerun the affected rows after the final decision commit. Representative
+listening and UI coverage, KARA's human review, the immutable non-prerelease
+model Release, and the final catalog promotion matrix remain open. Pure x86
+retains ordinary playback but source separation now fails closed before native
+allocation; x86_64 remains CPU evidence only until a separate GPU qualification
+exists.
 
 #### Phase 7A: Freeze the validation inputs and evidence format
 
@@ -2356,7 +2363,10 @@ x86_64 remains CPU evidence only until a separate GPU qualification exists.
   before output and after ready windows have been published through the debug
   validation harness, then verify one-way recreation of the same run on LiteRT
   CPU without changing its render/cache identity. Do not add a force-GPU or
-  force-CPU user preference to make this test possible.
+  force-CPU user preference to make this test possible. The exact Auto worker,
+  recreation, MediaSession, and desktop-comparison rows pass on both phones in
+  `9662-auto-gpu-2026-07-24/`; the existing failure-injection rows cover the
+  separate one-way fallback paths.
 - [x] Treat a successful window comparison as necessary but insufficient:
   full-song stem joins, output scale/residual compensation, duration, cache
   append, and player timestamps must all pass before 9662 receives stable

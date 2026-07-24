@@ -1,0 +1,146 @@
+{
+  "schemaVersion": "phase7-9662-auto-gpu-summary-v1",
+  "status": "objective-gates-passed-final-decision-and-human-review-pending",
+  "identity": {
+    "appCommit": "b01b7c0e577b5d04c61ea370fc51b674aee19131",
+    "appApkSha256": "499b3c1f193a9a6988254185245d99fb1cf9db13e3f374335740758ce69eeaa1",
+    "testApkSha256": "89ff3ed8712ac4508870b562704b3b81d7b8bca23cd97f88fa1ce90121dab7d3",
+    "catalogSha256": "a553f227588313578321c07c73ff99654eff7795727d825d16b191aa0f879e1f",
+    "catalogSourceRevision": "28d9a076c8a44980085a059e6224768ae77f9c8a",
+    "modelId": "uvr_mdxnet_3_9662",
+    "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "contractSchemaVersion": 2,
+    "modelReleaseTag": "v0.1.0-candidates.1",
+    "litertVersion": "2.1.5",
+    "runnerRevision": "phase7-runner-v11",
+    "thresholdsVersion": "phase7-thresholds-v2",
+    "fixturesVersion": "phase7-fixtures-v2",
+    "runtimeProfileId": "gpu-auto-fp32-v1",
+    "precision": "Float32"
+  },
+  "fixture": {
+    "fixtureId": "coast_town_full_wav",
+    "sha256": "e845e52aeeeb69be702d3a28d756eaf7a3137dbe5338ea50fb0ac3d8c4f9bd89",
+    "durationUs": 273699093,
+    "outputFrames": 12070130
+  },
+  "desktopReference": {
+    "repository": "https://github.com/WluhWluh/MusicSourceSeparation",
+    "revision": "58fcedc9005a9dbfb2de728b66a21de8a0a5d7b5",
+    "canonicalOnnxSha256": "e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc",
+    "referenceScriptSha256": "6edb7e9224de37f6e0fefc864433267093c5b5b5e2577ce6450bc3cf3f36382e",
+    "comparisonScriptSha256": "d185aadd98e106ed78b9092104579018eafb332253fb4849334f4fcdf3269e01",
+    "vocalsWavSha256": "6d1fbc52b977bed2d8f21bee930d2231e8de3ad5e36fdecee10a30dd81ac34b2",
+    "instrumentalWavSha256": "0203b18a0b78c39bad7705732620aaf3bc37b87cc0c420b5f8566e2969f96e3b"
+  },
+  "runs": [
+    {
+      "target": "s10-arm64",
+      "device": "SM-G9730",
+      "androidApi": 31,
+      "abi": "arm64-v8a",
+      "reports": {
+        "worker": "192.168.8.181_35975/phase7-9662-s10-arm64-auto-full-worker-v1-worker.json",
+        "recreation": "192.168.8.181_35975/phase7-9662-s10-arm64-auto-recreation-v1-recreation.json",
+        "playback": "192.168.8.181_35975/phase7-9662-s10-arm64-auto-mediasession-v1-playback.json"
+      },
+      "runtime": {
+        "requested": "LiteRtAuto",
+        "actual": "LiteRtGpu",
+        "fallbackStage": null,
+        "fallbackReason": null
+      },
+      "worker": {
+        "firstReadyMs": 11560,
+        "fullSongMs": 165698,
+        "processCpuMs": 93409,
+        "peakPssDeltaBytes": 458968064,
+        "peakJavaBytes": 77549568,
+        "peakNativeBytes": 129417216,
+        "peakGraphicsBytes": 278745088,
+        "peakThermalStatus": 1,
+        "outputFrames": 12070130,
+        "cacheKey": "469fd161f404025c8ee1abf9fc6c26c753894ba18347a1dfedd3b0c88c19dd34",
+        "completedPlayable": true
+      },
+      "recreation": {
+        "passed": true,
+        "hydratedPlayable": true,
+        "exactIdentity": true
+      },
+      "playback": {
+        "mediaSessionConnected": true,
+        "pauseResumePassed": true,
+        "seekPassed": true,
+        "playerTimestampDriftMs": 0,
+        "exactIdentity": true
+      },
+      "audioComparison": {
+        "exactFrames": true,
+        "quantizedEquivalent": true,
+        "maximumPcm16Delta": 1,
+        "minimumSnrDb": 71.44439455297164,
+        "maximumJoinDiscontinuity": 0.00006103515625,
+        "maximumReconstructionErrorDelta": 0.00006103515625
+      }
+    },
+    {
+      "target": "s25-arm64",
+      "device": "SM-S9310",
+      "androidApi": 35,
+      "abi": "arm64-v8a",
+      "reports": {
+        "worker": "192.168.8.197_42509/phase7-9662-s25-arm64-auto-full-worker-v1-worker.json",
+        "recreation": "192.168.8.197_42509/phase7-9662-s25-arm64-auto-recreation-v1-recreation.json",
+        "playback": "192.168.8.197_42509/phase7-9662-s25-arm64-auto-mediasession-v1-playback.json"
+      },
+      "runtime": {
+        "requested": "LiteRtAuto",
+        "actual": "LiteRtGpu",
+        "fallbackStage": null,
+        "fallbackReason": null
+      },
+      "worker": {
+        "firstReadyMs": 3656,
+        "fullSongMs": 49553,
+        "processCpuMs": 38838,
+        "peakPssDeltaBytes": 532576256,
+        "peakJavaBytes": 102084608,
+        "peakNativeBytes": 112087040,
+        "peakGraphicsBytes": 295936000,
+        "peakThermalStatus": 2,
+        "outputFrames": 12070130,
+        "cacheKey": "469fd161f404025c8ee1abf9fc6c26c753894ba18347a1dfedd3b0c88c19dd34",
+        "completedPlayable": true
+      },
+      "recreation": {
+        "passed": true,
+        "hydratedPlayable": true,
+        "exactIdentity": true
+      },
+      "playback": {
+        "mediaSessionConnected": true,
+        "pauseResumePassed": true,
+        "seekPassed": true,
+        "playerTimestampDriftMs": 0,
+        "exactIdentity": true
+      },
+      "audioComparison": {
+        "exactFrames": true,
+        "quantizedEquivalent": true,
+        "maximumPcm16Delta": 1,
+        "minimumSnrDb": 71.44439455297164,
+        "maximumJoinDiscontinuity": 0.00006103515625,
+        "maximumReconstructionErrorDelta": 0.00006103515625
+      }
+    }
+  ],
+  "decision": {
+    "gpuAutoFp32Arm64": "objective-gates-passed-on-s10-and-s25",
+    "successPathFallback": "not-triggered",
+    "failurePathFallbackEvidence": "passed-in-existing-phase7-fault-injection-reports",
+    "catalogTierChange": "blocked-on-representative-listening-ui-immutable-release-and-final-decision-build",
+    "intendedTier": "sole-stable-recommended-default"
+  }
+}

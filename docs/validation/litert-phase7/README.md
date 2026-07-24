@@ -31,6 +31,9 @@ precision. A successful short-window probe is not a Phase 7 promotion result.
   desktop-reference, process-recreation, MediaSession, sequential lifecycle,
   background, and next-song prefetch evidence. Human listening/UI review is
   still excluded.
+- `9662-auto-gpu-2026-07-24/` contains the matching S10/S25 production Auto
+  full-song, process-recreation, MediaSession, and desktop-reference evidence.
+  Both success rows used `LiteRtGpu` without fallback.
 - `dual-runtime-inventory-2026-07-24.json` retains exact split, native runtime,
   and installed code-path sizes for the temporary ORT plus LiteRT build.
 - `hq4-preflight/` contains five checked no-allocation device reports and their
