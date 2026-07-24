@@ -83,6 +83,14 @@ function Get-ReportPath([string]$RunId) {
     return Join-Path $deviceDirectory "$RunId-worker.json"
 }
 
+function Get-DeviceProperty([string]$Name) {
+    $value = & adb -s $Serial shell getprop $Name 2>$null
+    if ($LASTEXITCODE -ne 0 -or $null -eq $value) { return $null }
+    $text = ([string]($value | Select-Object -First 1)).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+    return $text
+}
+
 function Add-Report([string]$RunId, [string]$RunClass, [int]$ProcessorCount) {
     $reportPath = Get-ReportPath $RunId
     if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
@@ -186,13 +194,14 @@ try {
     }
 } finally {
     $generatedAt = (Get-Date).ToUniversalTime().ToString("o")
+    $androidApi = Get-DeviceProperty "ro.build.version.sdk"
     $deviceInfo = [ordered]@{
         serial = $Serial
-        model = (& adb -s $Serial shell getprop ro.product.model).Trim()
-        manufacturer = (& adb -s $Serial shell getprop ro.product.manufacturer).Trim()
-        androidApi = [int]((& adb -s $Serial shell getprop ro.build.version.sdk).Trim())
+        model = Get-DeviceProperty "ro.product.model"
+        manufacturer = Get-DeviceProperty "ro.product.manufacturer"
+        androidApi = if ($androidApi -match '^\d+$') { [int]$androidApi } else { $null }
         processAbi = $ProcessAbi
-        abiList = (& adb -s $Serial shell getprop ro.product.cpu.abilist).Trim()
+        abiList = Get-DeviceProperty "ro.product.cpu.abilist"
     }
     $summary = [ordered]@{
         schemaVersion = "phase7-resource-matrix-v1"

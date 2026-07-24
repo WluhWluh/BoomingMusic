@@ -83,7 +83,12 @@ $testMethod = switch ($Stage) {
 }
 $reportStage = $Stage
 $adb = (Get-Command adb -ErrorAction Stop).Source
-$deviceUserId = (& $adb -s $Serial shell am get-current-user).Trim()
+$deviceUserOutput = & $adb -s $Serial shell am get-current-user 2>$null
+$deviceUserId = if ($null -eq $deviceUserOutput) {
+    ""
+} else {
+    ([string]($deviceUserOutput | Select-Object -First 1)).Trim()
+}
 if ($LASTEXITCODE -ne 0 -or $deviceUserId -notmatch '^\d+$') {
     throw "Could not resolve the numeric current Android user for $Serial."
 }
