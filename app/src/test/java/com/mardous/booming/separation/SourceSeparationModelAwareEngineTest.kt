@@ -350,6 +350,32 @@ class SourceSeparationModelAwareEngineTest {
     }
 
     @Test
+    fun `host connection failure records a failed run and releases its lease`() {
+        val fixture = fixture()
+        val executor = SourceSeparationModelAwareRangeExecutor { request ->
+            fixture.complete(request, fixture.prepare(request))
+        }
+        val delegate = InProcessSourceSeparationExecutionHost(executor)
+        val unavailableHost = object : SourceSeparationExecutionHost by delegate {
+            override val processGeneration: Long
+                get() = throw IllegalStateException("injected connection failure")
+        }
+        val engine = fixture.engine(
+            executionHost = unavailableHost,
+            executor = executor,
+        )
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            engine.separate(fixture.input)
+        }
+
+        assertEquals("injected connection failure", error.message)
+        val manifest = fixture.store.listManifests().single()
+        assertEquals(SourceSeparationCacheManifestState.Failed, manifest.state)
+        assertFalse(fixture.repository.isLeased(manifest.cacheKey))
+    }
+
+    @Test
     fun `host pause command reaches the admitted run and preserves resumable state`() {
         val fixture = fixture()
         val started = CountDownLatch(1)
