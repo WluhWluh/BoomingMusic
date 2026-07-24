@@ -2,7 +2,7 @@
 
 Status: active plan for `feature/litert-multi-model-presets`
 
-Updated: 2026-07-23
+Updated: 2026-07-24
 
 Current milestone: the Phase 6 production cutover is implemented and accepted
 on the development branch. Phase 7 is the next stage: full-song playback,
@@ -14,6 +14,14 @@ older `source-separation-roadmap.md` remains the historical record of the
 ONNX-based prototype. This document supersedes its runtime and model-acquisition
 plan, but keeps the playback, cache, and UI behavior already implemented by
 Booming SS unless a phase below explicitly changes it.
+
+Inference process placement and independent Android background execution are
+governed by the separate
+[LiteRT Inference Process and Background Execution Roadmap](litert-inference-process-roadmap.md).
+That companion plan first isolates the runtime under the current background
+semantics, then evaluates an independently foregrounded inference service as a
+separate experiment. It does not authorize changes to the established
+window-decode or MP3 fallback policy.
 
 ## Direction
 
