@@ -207,6 +207,11 @@ android {
 
 androidComponents {
     onVariants { variant ->
+        if (variant.buildType == "debug") {
+            // Keep the unminified multidex payload file-backed across app processes.
+            variant.packaging.dex.useLegacyPackaging.set(false)
+        }
+
         val gitHash = runGitCommand("git rev-parse --short=7 HEAD")
 
         val isCI = System.getenv("RELEASE_TYPE") == "CI"

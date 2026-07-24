@@ -126,18 +126,6 @@ val networkModule = module {
     }
 }
 
-private val sourceSeparationInferenceModule = module {
-    single {
-        PreferenceManager.getDefaultSharedPreferences(androidContext())
-    }
-    single {
-        SourceSeparationPresetRepository(
-            context = androidContext(),
-            preferences = get(),
-        )
-    }
-}
-
 private val mainModule = module {
     single {
         androidContext().contentResolver
@@ -469,4 +457,3 @@ private val viewModule = module {
 }
 
 val appModules = listOf(networkModule, mainModule, roomModule, dataModule, viewModule)
-val sourceSeparationInferenceModules = listOf(sourceSeparationInferenceModule)
