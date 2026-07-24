@@ -1022,6 +1022,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         var remoteWorker: SourceSeparationForegroundWorkerCoordinator? = null
         var originalRuntime: SourceSeparationRuntimeFacade? = null
         var originalWorker: SourceSeparationForegroundWorkerCoordinator? = null
+        var screenOffIssued = false
         val hostEvents = Collections.synchronizedList(
             mutableListOf<SourceSeparationExecutionHostEvent>(),
         )
@@ -1114,6 +1115,43 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .close()
             SystemClock.sleep(BACKGROUND_SETTLE_MS)
             val importanceAfterHome = currentProcessImportance()
+            val screenOffAfterReady = arguments.optionalBoolean(
+                ARG_SCREEN_OFF_AFTER_READY,
+                false,
+            )
+            val eventsBeforeScreenOff = synchronized(hostEvents) { hostEvents.size }
+            var screenOffObserved = false
+            var completedWhileScreenOff = false
+            if (screenOffAfterReady) {
+                instrumentation.uiAutomation
+                    .executeShellCommand("input keyevent KEYCODE_SLEEP")
+                    .close()
+                screenOffIssued = true
+                val powerManager = context.getSystemService(PowerManager::class.java)
+                val screenOffDeadline = SystemClock.elapsedRealtime() + SCREEN_STATE_TIMEOUT_MS
+                while (powerManager.isInteractive &&
+                    SystemClock.elapsedRealtime() < screenOffDeadline
+                ) {
+                    SystemClock.sleep(POLL_INTERVAL_MS)
+                }
+                screenOffObserved = !powerManager.isInteractive
+                val observationDeadline = SystemClock.elapsedRealtime() +
+                    SCREEN_OFF_OBSERVATION_MS
+                while (!resultFuture.isDone &&
+                    SystemClock.elapsedRealtime() < observationDeadline
+                ) {
+                    SystemClock.sleep(POLL_INTERVAL_MS)
+                }
+                completedWhileScreenOff = resultFuture.isDone
+                instrumentation.uiAutomation
+                    .executeShellCommand("input keyevent KEYCODE_WAKEUP")
+                    .close()
+                instrumentation.uiAutomation
+                    .executeShellCommand("wm dismiss-keyguard")
+                    .close()
+                screenOffIssued = false
+            }
+            val eventsAfterScreenOff = synchronized(hostEvents) { hostEvents.size }
             val result = resultFuture.get(WORKER_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             assertEquals(SessionResult.RESULT_SUCCESS, result.resultCode)
 
@@ -1134,6 +1172,13 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("processImportanceAfterHome", importanceAfterHome)
                 .put("instrumentationProcessRetained", true)
                 .put("sourcePreparationAttempts", sourcePreparationAttempts)
+                .put("screenOffRequested", screenOffAfterReady)
+                .put("screenOffObserved", screenOffObserved)
+                .put("completedWhileScreenOff", completedWhileScreenOff)
+                .put(
+                    "eventsAdvancedWhileScreenOff",
+                    eventsAfterScreenOff > eventsBeforeScreenOff,
+                )
             )
             report.put("cache", report.getJSONObject("cache")
                 .put("cacheKey", runtimeSong.cacheKey)
@@ -1174,6 +1219,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 GlobalContext.get().declare(requireNotNull(originalWorker))
             }
             boundRemoteHost?.close()
+            if (screenOffIssued) {
+                instrumentation.uiAutomation
+                    .executeShellCommand("input keyevent KEYCODE_WAKEUP")
+                    .close()
+                instrumentation.uiAutomation
+                    .executeShellCommand("wm dismiss-keyguard")
+                    .close()
+            }
             mediaUri?.let { uri ->
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
@@ -2741,6 +2794,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_CURRENT_SOURCE_PATH = "currentSourcePath"
         const val ARG_BACKEND_MODE = "backendMode"
         const val ARG_EXECUTION_HOST_MODE = "executionHostMode"
+        const val ARG_SCREEN_OFF_AFTER_READY = "screenOffAfterReady"
         const val ARG_AUTO_FAILPOINT = "autoFailpoint"
         const val ARG_PROCESSOR_COUNT = "processorCount"
         const val ARG_XNNPACK_FLAGS = "xnnPackFlags"
@@ -2799,6 +2853,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val MEDIA_SCAN_RETRIES = 60
         const val MEDIA_SCAN_POLL_MS = 500L
         const val BACKGROUND_SETTLE_MS = 1_000L
+        const val SCREEN_STATE_TIMEOUT_MS = 5_000L
+        const val SCREEN_OFF_OBSERVATION_MS = 60_000L
         const val ZERO_SHA256 = "0000000000000000000000000000000000000000000000000000000000000000"
         val SAFE_NAME = Regex("^[A-Za-z0-9._-]{1,120}$")
         val SAFE_EXTENSION = Regex("^[a-z0-9]{1,8}$")

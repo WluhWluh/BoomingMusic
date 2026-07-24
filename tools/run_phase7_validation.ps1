@@ -51,7 +51,8 @@ param(
     [switch]$KeepAppData,
     [switch]$CleanInstallScenario,
     [switch]$PreserveMediaStoreSource,
-    [switch]$ExportCacheAudio
+    [switch]$ExportCacheAudio,
+    [switch]$ScreenOffAfterReady
 )
 
 $ErrorActionPreference = "Stop"
@@ -142,6 +143,9 @@ if ($ExecutionHostMode -eq "bound-remote" -and
 }
 if ($PreserveMediaStoreSource -and $Stage -notin @("worker", "switching")) {
     throw "PreserveMediaStoreSource applies only to worker and switching stages."
+}
+if ($ScreenOffAfterReady -and $Stage -ne "background") {
+    throw "ScreenOffAfterReady applies only to the background stage."
 }
 if ($Stage -ne "lifecycle" -and
         ($LifecycleScenario -ne "sequential" -or $LifecycleSessionMode -ne "single-use")) {
@@ -659,8 +663,14 @@ try {
         $instrumentArguments += @("-e", "litertSha256", $litertSha256)
     }
 
-    if ($Stage -eq "background") {
-        $originalScreenOffTimeout = (
+        if ($Stage -eq "background") {
+            $instrumentArguments += @(
+                "-e", "screenOffAfterReady",
+                $ScreenOffAfterReady.ToString().ToLowerInvariant()
+            )
+        }
+        if ($Stage -eq "background") {
+            $originalScreenOffTimeout = (
             & $adb -s $Serial shell settings get system screen_off_timeout
         ).Trim()
         if ($LASTEXITCODE -ne 0 -or $originalScreenOffTimeout -notmatch '^\d+$') {
@@ -814,6 +824,7 @@ try {
                 installSkipped = $SkipInstall
                 backendMode = $BackendMode
                 executionHostMode = $ExecutionHostMode
+                screenOffAfterReady = [bool]$ScreenOffAfterReady
                 backend = $backendName
                 autoFailpoint = $AutoFailpoint
                 screenTimeoutOverrideMs = if ($Stage -eq "background") {
