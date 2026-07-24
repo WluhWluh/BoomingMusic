@@ -25,9 +25,10 @@ import org.koin.android.ext.android.inject
 internal class SourceSeparationExecutionService : Service() {
     private val presetRepository: SourceSeparationPresetRepository by inject()
     private val stateLock = Any()
+    private val environmentLock = Any()
     private val processGeneration by lazy(::createProcessGeneration)
     private val commandLedger = SourceSeparationIpcCommandLedger()
-    private lateinit var environment: SourceSeparationRemoteExecutionEnvironment
+    private var executionEnvironment: SourceSeparationRemoteExecutionEnvironment? = null
     private var clientCallback: ISourceSeparationExecutionCallback? = null
     private var clientDeathRecipient: IBinder.DeathRecipient? = null
     private var activeRun: ActiveRemoteRun? = null
@@ -38,7 +39,6 @@ internal class SourceSeparationExecutionService : Service() {
         check(process.isSourceSeparationProcess) {
             "Source-separation execution service started in the wrong process."
         }
-        environment = SourceSeparationRemoteExecutionEnvironment(this, presetRepository)
     }
 
     override fun onBind(intent: Intent?): IBinder {
@@ -50,7 +50,7 @@ internal class SourceSeparationExecutionService : Service() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         synchronized(stateLock) {
-            activeRun?.requestPause()
+            abandonClientLocked()
         }
         return false
     }
@@ -78,8 +78,8 @@ internal class SourceSeparationExecutionService : Service() {
             requireSameUidCaller()
             val request = SourceSeparationExecutionIpcCodec.decodeConnectRequest(requestJson)
             synchronized(stateLock) {
-                if (!commandLedger.record(request.commandId) && clientCallback == null) {
-                    throw IllegalArgumentException("Duplicate IPC connect command.")
+                require(commandLedger.record(request.commandId)) {
+                    "Duplicate IPC connect command."
                 }
                 check(activeRun == null) {
                     "The IPC callback cannot be replaced during an active run."
@@ -276,7 +276,14 @@ internal class SourceSeparationExecutionService : Service() {
         )
         val sender = SourceSeparationRemoteEventSender(callback) {
             control.requestPause()
+            synchronized(stateLock) {
+                if (clientCallback?.asBinder() === callback.asBinder()) {
+                    unlinkClientDeathLocked()
+                    clientCallback = null
+                }
+            }
         }
+        val environment = executionEnvironment()
         val executionRequest = try {
             environment.prepare(command.descriptor, control)
         } catch (error: Throwable) {
@@ -324,6 +331,8 @@ internal class SourceSeparationExecutionService : Service() {
             terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Canceled, error)
         } catch (error: Throwable) {
             terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Failed, error)
+        } finally {
+            closeAbandonedRun(active)
         }
     }
 
@@ -332,7 +341,8 @@ internal class SourceSeparationExecutionService : Service() {
         status: SourceSeparationIpcStatus,
         error: Throwable,
     ): String {
-        runCatching { synchronized(stateLock) { activeRun?.sender?.closeAndAwait() } }
+        val sender = synchronized(stateLock) { activeRun?.sender }
+        runCatching { sender?.closeAndAwait() }
         return SourceSeparationExecutionIpcCodec.encodeStartResponse(
             SourceSeparationIpcStartResponse(
                 commandId = commandId,
@@ -384,9 +394,34 @@ internal class SourceSeparationExecutionService : Service() {
 
     private fun handleClientDeath() {
         synchronized(stateLock) {
-            activeRun?.requestPause()
-            clientCallback = null
-            clientDeathRecipient = null
+            abandonClientLocked()
+        }
+    }
+
+    private fun abandonClientLocked() {
+        val active = activeRun
+        active?.requestPause()
+        val closeResult = active?.host?.closeRun(
+            active.descriptor.runId,
+            active.descriptor.processGeneration,
+        )
+        if (closeResult == SourceSeparationExecutionHostControlResult.Applied) {
+            active.close()
+            activeRun = null
+        }
+        unlinkClientDeathLocked()
+        clientCallback = null
+    }
+
+    private fun closeAbandonedRun(active: ActiveRemoteRun) {
+        synchronized(stateLock) {
+            if (clientCallback != null || activeRun !== active) return
+            active.host.closeRun(
+                active.descriptor.runId,
+                active.descriptor.processGeneration,
+            )
+            active.close()
+            activeRun = null
         }
     }
 
@@ -394,7 +429,7 @@ internal class SourceSeparationExecutionService : Service() {
         val callback = clientCallback
         val recipient = clientDeathRecipient
         if (callback != null && recipient != null) {
-            callback.asBinder().unlinkToDeath(recipient, 0)
+            runCatching { callback.asBinder().unlinkToDeath(recipient, 0) }
         }
         clientDeathRecipient = null
     }
@@ -402,6 +437,14 @@ internal class SourceSeparationExecutionService : Service() {
     private fun requireSameUidCaller() {
         require(Binder.getCallingUid() == applicationInfo.uid) {
             "Source-separation IPC caller UID is not allowed."
+        }
+    }
+
+    private fun executionEnvironment(): SourceSeparationRemoteExecutionEnvironment {
+        synchronized(environmentLock) {
+            executionEnvironment?.let { return it }
+            return SourceSeparationRemoteExecutionEnvironment(this, presetRepository)
+                .also { executionEnvironment = it }
         }
     }
 

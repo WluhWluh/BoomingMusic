@@ -191,32 +191,55 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     }
 
     override fun close() {
-        val request = connectionLock.withLock {
+        val shutdown = connectionLock.withLock {
             if (connectionState == SourceSeparationRemoteConnectionState.Closed) return
             connectionState = SourceSeparationRemoteConnectionState.Closed
-            activePump?.close()
+            val state = ShutdownState(
+                request = activeRequest,
+                pump = activePump,
+                service = remoteService,
+                binder = remoteBinder,
+                wasBound = bound,
+            )
             activePump = null
-            activeRequest
-        }
-        if (request != null) {
-            runCatching {
-                cancel(request.descriptor.runId, request.descriptor.processGeneration)
-            }
-        }
-        val shouldUnbind = connectionLock.withLock {
-            val value = bound
             bound = false
-            remoteBinder?.unlinkToDeath(serviceDeathRecipient, 0)
             remoteBinder = null
             remoteService = null
             connectResponse = null
             activeRequest = null
             connectionChanged.signalAll()
-            value
+            state
         }
-        if (shouldUnbind) {
+        shutdown.pump?.close()
+        if (shutdown.request != null && shutdown.service != null) {
+            runCatching { sendShutdownCancel(shutdown.service, shutdown.request) }
+        }
+        shutdown.binder?.let { binder ->
+            runCatching { binder.unlinkToDeath(serviceDeathRecipient, 0) }
+        }
+        if (shutdown.wasBound) {
             runCatching { applicationContext.unbindService(serviceConnection) }
         }
+    }
+
+    private fun sendShutdownCancel(
+        service: ISourceSeparationExecutionService,
+        request: SourceSeparationExecutionHostRequest,
+    ) {
+        val descriptor = request.descriptor
+        val command = SourceSeparationIpcControlCommand(
+            commandId = nextCommandId("shutdown-cancel"),
+            runId = descriptor.runId,
+            processGeneration = descriptor.processGeneration,
+            controlSequence = controlSequence.incrementAndGet(),
+            action = SourceSeparationIpcControlAction.Cancel,
+            hasPlaybackPositionUpdate = false,
+            playbackPositionMs = null,
+            playbackReadyWindowCount = null,
+        )
+        SourceSeparationExecutionIpcCodec.decodeOperationResponse(
+            service.updateControl(SourceSeparationExecutionIpcCodec.encodeControlCommand(command)),
+        )
     }
 
     private fun ensureConnected(): SourceSeparationIpcConnectResponse {
@@ -453,12 +476,14 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     }
 
     private fun clearActiveRequest() {
-        connectionLock.withLock {
-            activePump?.close()
+        val pump = connectionLock.withLock {
+            val value = activePump
             activePump = null
             activeRequest = null
             controlSequence.set(0L)
+            value
         }
+        pump?.close()
     }
 
     private fun nextCommandId(prefix: String): String {
@@ -563,6 +588,14 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         const val CONTROL_THREAD_NAME = "SourceSeparationIpcControl"
         const val CONTROL_CLOSE_TIMEOUT_MS = 2_000L
     }
+
+    private data class ShutdownState(
+        val request: SourceSeparationExecutionHostRequest?,
+        val pump: RemoteControlPump?,
+        val service: ISourceSeparationExecutionService?,
+        val binder: IBinder?,
+        val wasBound: Boolean,
+    )
 }
 
 internal enum class SourceSeparationRemoteConnectionState {

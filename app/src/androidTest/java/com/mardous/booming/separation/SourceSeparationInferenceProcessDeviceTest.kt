@@ -59,6 +59,22 @@ class SourceSeparationInferenceProcessDeviceTest {
             SourceSeparationRemoteConnectionState.Closed,
             host.connectionDiagnostics.state,
         )
+
+        val reboundHost = BoundRemoteSourceSeparationExecutionHost(context)
+        try {
+            assertTrue(reboundHost.processGeneration > 0L)
+            assertEquals(
+                SourceSeparationRemoteConnectionState.Connected,
+                reboundHost.connectionDiagnostics.state,
+            )
+        } finally {
+            reboundHost.close()
+        }
+        reboundHost.close()
+        assertEquals(
+            SourceSeparationRemoteConnectionState.Closed,
+            reboundHost.connectionDiagnostics.state,
+        )
     }
 
     private companion object {
