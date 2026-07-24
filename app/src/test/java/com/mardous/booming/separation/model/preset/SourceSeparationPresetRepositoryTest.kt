@@ -2,6 +2,9 @@ package com.mardous.booming.separation.model.preset
 
 import com.mardous.booming.separation.cache.v2.resolveActiveCacheModel
 import com.mardous.booming.separation.cache.v2.resolveActiveCacheModelResolution
+import com.mardous.booming.separation.cache.v2.resolveExactCacheModel
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
+import com.mardous.booming.separation.cache.v2.SourceSeparationExactCacheModelException
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelResolution
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelUnavailableReason
 import com.mardous.booming.separation.model.MdxRuntimeAbi
@@ -234,6 +237,44 @@ class SourceSeparationPresetRepositoryTest {
             assertEquals("official_model@2", resolved.contract.contractId)
             assertEquals(installed.sha256, resolved.artifact.sha256)
             assertEquals("official_model@2", resolved.executionProfile.profileId)
+        }
+    }
+
+    @Test
+    fun `exact cache model resolution ignores active selection and rejects contract drift`() {
+        val payload = "official-model".encodeToByteArray()
+        fixture(
+            officialPayload = payload,
+            catalog = catalog(
+                officialPayload = payload,
+                supportLevel = CatalogSupportLevel.Recommended,
+                activationPolicy = CatalogActivationPolicy.SelectableWhenQualified,
+                includeReviewedContract = true,
+            ),
+        ).use { fixture ->
+            val installed = fixture.repository.installOfficial(
+                modelId = "official_model",
+                input = ByteArrayInputStream(payload),
+            )
+            fixture.store.write(
+                SourceSeparationActiveModelReference(
+                    modelId = "different_model",
+                    artifactSha256 = "f".repeat(64),
+                    contractSchemaVersion = 99,
+                )
+            )
+            val expected = SourceSeparationCacheContractSnapshot.fromOfficial(contract(payload))
+
+            val resolved = fixture.repository.resolveExactCacheModel(expected)
+
+            assertEquals(installed.sha256, resolved.artifact.sha256)
+            assertEquals(expected, resolved.contract)
+            assertEquals("official_model@2", resolved.executionProfile.profileId)
+            assertThrows(SourceSeparationExactCacheModelException::class.java) {
+                fixture.repository.resolveExactCacheModel(
+                    expected.copy(displayName = "Changed contract"),
+                )
+            }
         }
     }
 

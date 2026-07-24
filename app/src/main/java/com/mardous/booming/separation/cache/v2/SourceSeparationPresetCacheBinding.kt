@@ -119,19 +119,9 @@ fun SourceSeparationPresetRepository.resolveActiveCacheModelResolution():
             reference = reference,
         )
     }
-    val executionProfile = try {
-        val catalog = catalogSnapshot()
-        when (installed.bindingKind) {
-            SourceSeparationPresetBindingKind.Official,
-            SourceSeparationPresetBindingKind.Sidecar -> installed.executionContract(this)
-                ?.toMdxExecutionProfile(catalog.runtimeQualifications)
-
-            SourceSeparationPresetBindingKind.CustomProfile -> installed.customProfile
-                ?.toMdxExecutionProfile(catalog.runtimeQualifications)
-        }
-    } catch (_: Throwable) {
-        null
-    } ?: return SourceSeparationActiveCacheModelResolution.Unavailable(
+    val executionProfile = runCatching {
+        installed.executionProfile(this)
+    }.getOrNull() ?: return SourceSeparationActiveCacheModelResolution.Unavailable(
         SourceSeparationActiveCacheModelUnavailableReason.ContractInvalid,
         reference,
     )
@@ -146,6 +136,84 @@ fun SourceSeparationPresetRepository.resolveActiveCacheModelResolution():
             ),
             executionProfile = executionProfile,
         )
+    )
+}
+
+/**
+ * Resolves one already-installed model from immutable execution identity only.
+ *
+ * This path deliberately does not read or modify the active-model preference.
+ */
+fun SourceSeparationPresetRepository.resolveExactCacheModel(
+    expected: SourceSeparationCacheContractSnapshot,
+): SourceSeparationResolvedCacheModel {
+    val baseInstalled = try {
+        requireInstalledPreset(expected.artifactSha256)
+    } catch (error: Throwable) {
+        throw SourceSeparationExactCacheModelException(
+            "The exact execution model is not installed or failed hash validation.",
+            error,
+        )
+    }
+    val installed = if (expected.profileOrigin == SourceSeparationCacheProfileOrigin.Custom) {
+        val profile = customProfiles().singleOrNull { candidate ->
+            candidate.profileId == expected.profileRevisionId &&
+                candidate.modelId == expected.modelId &&
+                candidate.artifact.sha256.equals(expected.artifactSha256, ignoreCase = true)
+        } ?: throw SourceSeparationExactCacheModelException(
+            "The exact custom execution profile is not installed.",
+        )
+        baseInstalled.copy(
+            modelId = profile.modelId,
+            displayName = profile.displayName,
+            customProfile = profile,
+        )
+    } else {
+        baseInstalled
+    }
+    if (installed.modelId != expected.modelId ||
+        installed.file.name != expected.artifactFileName ||
+        installed.byteSize != expected.artifactByteSize ||
+        !installed.sha256.equals(expected.artifactSha256, ignoreCase = true)
+    ) {
+        throw SourceSeparationExactCacheModelException(
+            "The installed artifact does not match the exact execution identity.",
+        )
+    }
+    val actual = runCatching {
+        installed.cacheContractSnapshot(this)
+    }.getOrElse { error ->
+        throw SourceSeparationExactCacheModelException(
+            "The installed execution contract is invalid.",
+            error,
+        )
+    } ?: throw SourceSeparationExactCacheModelException(
+        "The installed execution contract is unavailable.",
+    )
+    if (actual != expected) {
+        throw SourceSeparationExactCacheModelException(
+            "The installed execution contract does not match the admitted contract.",
+        )
+    }
+    val executionProfile = runCatching {
+        installed.executionProfile(this)
+    }.getOrElse { error ->
+        throw SourceSeparationExactCacheModelException(
+            "The installed execution profile is invalid.",
+            error,
+        )
+    } ?: throw SourceSeparationExactCacheModelException(
+        "The installed execution profile is unavailable.",
+    )
+    return SourceSeparationResolvedCacheModel(
+        installed = installed,
+        contract = actual,
+        artifact = MdxModelArtifact(
+            file = installed.file,
+            byteSize = installed.byteSize,
+            sha256 = installed.sha256,
+        ),
+        executionProfile = executionProfile,
     )
 }
 
@@ -182,6 +250,20 @@ private fun SourceSeparationInstalledPreset.executionContract(
         }
         SourceSeparationPresetBindingKind.Sidecar -> sidecarContract
         SourceSeparationPresetBindingKind.CustomProfile -> null
+    }
+}
+
+private fun SourceSeparationInstalledPreset.executionProfile(
+    repository: SourceSeparationPresetRepository,
+): MdxExecutionProfile? {
+    val catalog = repository.catalogSnapshot()
+    return when (bindingKind) {
+        SourceSeparationPresetBindingKind.Official,
+        SourceSeparationPresetBindingKind.Sidecar -> executionContract(repository)
+            ?.toMdxExecutionProfile(catalog.runtimeQualifications)
+
+        SourceSeparationPresetBindingKind.CustomProfile -> customProfile
+            ?.toMdxExecutionProfile(catalog.runtimeQualifications)
     }
 }
 
@@ -225,3 +307,8 @@ enum class SourceSeparationActiveCacheModelUnavailableReason {
     ContractMismatch,
     ContractInvalid,
 }
+
+class SourceSeparationExactCacheModelException(
+    message: String,
+    cause: Throwable? = null,
+) : IllegalStateException(message, cause)

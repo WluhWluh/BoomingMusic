@@ -59,13 +59,22 @@ import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.startKoin
 
 class App : Application(), SingletonImageLoader.Factory {
+    private lateinit var processIdentity: AppProcessIdentity
 
     override fun onCreate() {
         super.onCreate()
+        processIdentity = AppProcessResolver.resolve(this)
         startKoin {
             androidContext(this@App)
-            modules(appModules)
+            modules(
+                if (processIdentity.isSourceSeparationProcess) {
+                    sourceSeparationInferenceModules
+                } else {
+                    appModules
+                }
+            )
         }
+        if (processIdentity.isSourceSeparationProcess) return
 
         if (BuildConfig.DEBUG) enableStrictMode()
 
@@ -91,6 +100,9 @@ class App : Application(), SingletonImageLoader.Factory {
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
+        check(!isSourceSeparationProcess()) {
+            "The source-separation process must not initialize the application image loader."
+        }
         return ImageLoader.Builder(context)
             .crossfade(true)
             .allowHardware(false)
@@ -157,6 +169,7 @@ class App : Application(), SingletonImageLoader.Factory {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
+        if (isSourceSeparationProcess()) return
         ReplayGainTagExtractor.clearCache()
 
         val imageLoader = SingletonImageLoader.get(this)
@@ -176,8 +189,16 @@ class App : Application(), SingletonImageLoader.Factory {
                 .detectAll()
                 .penaltyLog()
                 .penaltyFlashScreen()
-                .build()
+            .build()
         )
+    }
+
+    private fun isSourceSeparationProcess(): Boolean {
+        return if (::processIdentity.isInitialized) {
+            processIdentity.isSourceSeparationProcess
+        } else {
+            AppProcessResolver.resolve(this).isSourceSeparationProcess
+        }
     }
 
     companion object {
