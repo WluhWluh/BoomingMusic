@@ -566,6 +566,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             var runtimeEvidenceManifest: SourceSeparationCacheManifest? = null
             var seekPositionMs: Long? = null
             var seekStartedPending = false
+            var cancellationLatencyMs = 0L
 
             if (lifecycleScenario.includesPauseResume) {
                 val pauseWorker = SourceSeparationForegroundWorkerCoordinator(
@@ -686,8 +687,20 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 )
                 assertTrue(cancelWorker.startCurrentSong())
                 waitForReady(cancelWorker, minimumReadyWindows = 1)
+                val cancellationStartedAt = SystemClock.elapsedRealtime()
                 cancelWorker.cancel()
                 waitForInactive(cancelWorker)
+                cancellationLatencyMs =
+                    SystemClock.elapsedRealtime() - cancellationStartedAt
+                val maximumCancellationLatencyMs = arguments.optionalLong(
+                    ARG_MAXIMUM_CANCELLATION_LATENCY_MS,
+                    DEFAULT_MAXIMUM_CANCELLATION_LATENCY_MS,
+                )
+                assertTrue(
+                    "Cancellation took " + cancellationLatencyMs +
+                        "ms; maximum is " + maximumCancellationLatencyMs + "ms.",
+                    cancellationLatencyMs <= maximumCancellationLatencyMs,
+                )
                 canceledStatus = runtimeFacade.cacheStatus(runtimeSong)
                 assertTrue(
                     "Cancellation must not publish a completed entry: $canceledStatus",
@@ -696,6 +709,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
 
             report.put("status", "passed")
+            report.put("timing", report.getJSONObject("timing")
+                .put("cancellationLatencyMs", cancellationLatencyMs)
+            )
             report.put("lifecycle", report.getJSONObject("lifecycle")
                 .put("sessionCreateCount", sessionCreateCount.get())
                 .put("pauseResumePassed", lifecycleScenario.includesPauseResume)
@@ -2517,6 +2533,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_LITERT_VERSION = "litertVersion"
         const val ARG_RUNNER_REVISION = "runnerRevision"
         const val ARG_THRESHOLDS_VERSION = "thresholdsVersion"
+        const val ARG_MAXIMUM_CANCELLATION_LATENCY_MS = "maximumCancellationLatencyMs"
         const val ARG_FIXTURES_VERSION = "fixturesVersion"
         const val ARG_SOURCE_PATH = "sourcePath"
         const val ARG_CURRENT_SOURCE_PATH = "currentSourcePath"
@@ -2561,6 +2578,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val REPORT_DIRECTORY = "phase7-validation-reports"
         const val ARTIFACT_EXPORT_DIRECTORY = "phase7-validation-artifacts"
         const val EXPECTED_NULL_VALUE = "__none__"
+        const val DEFAULT_MAXIMUM_CANCELLATION_LATENCY_MS = 30_000L
         const val THERMAL_SAMPLE_INTERVAL_MS = 2_000L
         const val REQUIRED_READY_WINDOWS = 2
         const val TEST_BLEND = 0.23f

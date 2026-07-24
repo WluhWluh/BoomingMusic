@@ -443,6 +443,8 @@ try {
         "-e", "litertVersion", "2.1.5",
         "-e", "runnerRevision", $RunnerRevision,
         "-e", "thresholdsVersion", $thresholds.schemaVersion,
+        "-e", "maximumCancellationLatencyMs",
+        [string]$thresholds.lifecycle.maximumCancellationLatencyMs,
         "-e", "fixturesVersion", $fixtures.schemaVersion,
         "-e", "cleanInstallScenario", $((-not $KeepAppData).ToString().ToLowerInvariant())
     )
