@@ -65,6 +65,7 @@ import com.mardous.booming.separation.process.SourceSeparationProcessSessionStat
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcRecycleReason
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteConnectionState
+import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteRecycleTimeoutException
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCallbacks
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
@@ -92,6 +93,7 @@ import java.security.MessageDigest
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -1298,6 +1300,266 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
             writeReport(context, runId, "process-switch-matrix", report)
+        }
+    }
+
+    @Test
+    fun validateProcessFaultMatrix() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        require(MdxX86ProcessValidationOverride.buildEnabled) {
+            "The process fault matrix requires the x86 validation build."
+        }
+        val report = baseReport(context, runId, arguments)
+        val coordinators = mutableListOf<SourceSeparationForegroundWorkerCoordinator>()
+        val hostEvents = Collections.synchronizedList(
+            mutableListOf<SourceSeparationExecutionHostEvent>(),
+        )
+        val callbackFaultArmed = AtomicBoolean(true)
+        val callbackFaultObserved = AtomicBoolean(false)
+        var host: BoundRemoteSourceSeparationExecutionHost? = null
+        var mediaUri: Uri? = null
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            mediaUri = registerSourceInMediaStore(context, sourcePath, runId)
+            val source = resolveMediaStoreSong(context, mediaUri, sourcePath)
+            val durationMs = maxOf(
+                source.duration,
+                arguments.optionalLong(ARG_FIXTURE_DURATION_US) / 1_000L,
+            )
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            check(preferences.edit()
+                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
+                .commit()
+            ) { "Could not persist process fault-matrix preferences." }
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            assertExpectedActivePreset(arguments)
+            val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
+                SourceSeparationModelAwareCacheRepository::class.java,
+            )
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val eventSink: (SourceSeparationExecutionHostEvent) -> Unit = { event ->
+                    hostEvents += event
+                    val payload = event.payload
+                    if (callbackFaultArmed.get() &&
+                        payload is SourceSeparationExecutionHostEventPayload
+                            .SegmentStateChanged &&
+                        payload.state == SourceSeparationSegmentState.Ready
+                    ) {
+                        callbackFaultArmed.set(false)
+                        callbackFaultObserved.set(true)
+                        throw IllegalStateException("phase3-injected-callback-failure")
+                    }
+                }
+            fun createRuntime() = createCpuRuntimeFacade(
+                context = context,
+                preferences = preferences,
+                presetRepository = presetRepository,
+                backendMode = BackendMode.Auto,
+                processorCount = null,
+                executionHostMode = Phase7ExecutionHostMode.BoundRemote,
+                executionHostEventSink = eventSink,
+                boundRemoteHostSink = { host = it },
+            )
+            var runtimeFacade = createRuntime()
+            var runtimeSong = (runtimeFacade.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The process fault-matrix source could not be admitted.")
+
+            fun newWorker() = SourceSeparationForegroundWorkerCoordinator(
+                context = context,
+                preferences = preferences,
+                sourceSeparationRuntime = runtimeFacade,
+            ).also { worker ->
+                coordinators += worker
+                worker.attachCallbacks(RecordingCallbacks())
+                worker.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = durationMs,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+            }
+
+            clearExactCacheEntry(runtimeFacade, runtimeSong.cacheKey)
+            val failingWorker = newWorker()
+            assertTrue(failingWorker.startCurrentSong())
+            val callbackFailure = waitForFailed(failingWorker)
+            failingWorker.cancel()
+            waitForInactive(failingWorker)
+            val callbackLeaseReleaseMs = waitForCacheLeaseRelease(
+                cacheRepository,
+                runtimeSong.cacheKey,
+            )
+            assertTrue(callbackFaultObserved.get())
+            val failedManifest = requireNotNull(store.readManifest(runtimeSong.cacheKey))
+            assertEquals(SourceSeparationCacheManifestState.Failed, failedManifest.state)
+            val callbackFailureDiagnostics = requireNotNull(host).processDiagnostics()
+            assertEquals(
+                SourceSeparationProcessSessionState.Resident,
+                callbackFailureDiagnostics.session.state,
+            )
+            assertFalse(callbackFailureDiagnostics.session.poisoned)
+            assertEquals(1,
+                callbackFailureDiagnostics.session.nativeSessionCreationCount)
+            assertTrue(callbackFailureDiagnostics.session.invocationCount > 0L)
+            val retainedSessionId = requireNotNull(
+                callbackFailureDiagnostics.session.sessionId,
+            )
+
+            val callbackFailedHost = requireNotNull(host)
+            callbackFailedHost.close()
+            SystemClock.sleep(PROCESS_REBIND_SETTLE_MS)
+            runtimeFacade = createRuntime()
+            runtimeSong = (runtimeFacade.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The callback-failure retry could not rebind.")
+            val callbackRebindDiagnostics = requireNotNull(host).processDiagnostics()
+            assertEquals(
+                callbackFailureDiagnostics.processGeneration,
+                callbackRebindDiagnostics.processGeneration,
+            )
+            assertEquals(retainedSessionId,
+                callbackRebindDiagnostics.session.sessionId)
+
+            clearExactCacheEntry(runtimeFacade, runtimeSong.cacheKey)
+            val retryWorker = newWorker()
+            assertTrue(retryWorker.startCurrentSong())
+            waitForCompleted(retryWorker)
+            retryWorker.cancel()
+            waitForInactive(retryWorker)
+            val retryLeaseReleaseMs = waitForCacheLeaseRelease(
+                cacheRepository,
+                runtimeSong.cacheKey,
+            )
+            val retryDiagnostics = requireNotNull(host).processDiagnostics()
+            assertEquals(callbackFailureDiagnostics.processGeneration,
+                retryDiagnostics.processGeneration)
+            assertEquals(retainedSessionId, retryDiagnostics.session.sessionId)
+            assertEquals(1, retryDiagnostics.session.nativeSessionCreationCount)
+            assertTrue(
+                retryDiagnostics.session.invocationCount >
+                    callbackFailureDiagnostics.session.invocationCount,
+            )
+            assertTrue(
+                runtimeFacade.cacheStatus(runtimeSong) is
+                    SourceSeparationModelAwareCacheStatus.Completed,
+            )
+
+            val originalHost = requireNotNull(host)
+            originalHost.close()
+            SystemClock.sleep(PROCESS_REBIND_SETTLE_MS)
+            val timeoutHost = BoundRemoteSourceSeparationExecutionHost(
+                context.applicationContext,
+                recycleTimeoutMs = PROCESS_FAULT_RECYCLE_TIMEOUT_MS,
+            )
+            host = timeoutHost
+            val retainedBeforeTimeout = timeoutHost.processDiagnostics()
+            assertEquals(retryDiagnostics.processGeneration,
+                retainedBeforeTimeout.processGeneration)
+            assertEquals(retainedSessionId, retainedBeforeTimeout.session.sessionId)
+
+            val recycleTimedOut = try {
+                timeoutHost.recycle(
+                    SourceSeparationIpcRecycleReason.ValidationRequested,
+                    recycleToken = "phase3-timeout-recycle-0001",
+                )
+                false
+            } catch (_: SourceSeparationRemoteRecycleTimeoutException) {
+                true
+            }
+            assertTrue("The 1 ms recycle fault did not time out.", recycleTimedOut)
+            waitForRemoteConnectionState(
+                timeoutHost,
+                SourceSeparationRemoteConnectionState.Dead,
+            )
+            val timeoutDeath = requireNotNull(
+                timeoutHost.connectionDiagnostics.lastBinderDeath,
+            )
+            assertFalse(timeoutDeath.expected)
+            assertEquals(1,
+                timeoutHost.connectionDiagnostics.unexpectedBinderDeathCount)
+            val generationAfterTimeout = timeoutHost.processGeneration
+            val recoveredAfterTimeout = timeoutHost.processDiagnostics()
+            assertNotEquals(retainedBeforeTimeout.processGeneration,
+                generationAfterTimeout)
+            assertNotEquals(retainedBeforeTimeout.processStartTicks,
+                recoveredAfterTimeout.processStartTicks)
+
+            val idleGeneration = recoveredAfterTimeout.processGeneration
+            val idleStartTicks = recoveredAfterTimeout.processStartTicks
+            android.os.Process.killProcess(recoveredAfterTimeout.pid)
+            waitForRemoteConnectionState(
+                timeoutHost,
+                SourceSeparationRemoteConnectionState.Dead,
+            )
+            assertEquals(2,
+                timeoutHost.connectionDiagnostics.unexpectedBinderDeathCount)
+            assertFalse(requireNotNull(
+                timeoutHost.connectionDiagnostics.lastBinderDeath,
+            ).expected)
+            val generationAfterUnexpectedDeath = timeoutHost.processGeneration
+            val recoveredAfterUnexpectedDeath = timeoutHost.processDiagnostics()
+            assertNotEquals(idleGeneration, generationAfterUnexpectedDeath)
+            assertNotEquals(idleStartTicks,
+                recoveredAfterUnexpectedDeath.processStartTicks)
+
+            report.put("status", "passed")
+            report.put("processFaultMatrix", JSONObject()
+                .put("callbackDelivery", JSONObject()
+                    .put("failureMessage", callbackFailure.message ?: JSONObject.NULL)
+                    .put("cacheState", failedManifest.state.name)
+                    .put("leaseReleaseMs", callbackLeaseReleaseMs)
+                    .put("processGeneration",
+                        callbackFailureDiagnostics.processGeneration)
+                    .put("sessionId", retainedSessionId)
+                    .put("nativeSessionCreationCount",
+                        callbackFailureDiagnostics.session.nativeSessionCreationCount)
+                    .put("failureInvocationCount",
+                        callbackFailureDiagnostics.session.invocationCount)
+                    .put("retryInvocationCount", retryDiagnostics.session.invocationCount)
+                    .put("retryLeaseReleaseMs", retryLeaseReleaseMs)
+                    .put("clientRebound", true)
+                    .put("retryUsedSameSession",
+                        retryDiagnostics.session.sessionId == retainedSessionId)
+                )
+                .put("recycleTimeout", JSONObject()
+                    .put("timeoutMs", PROCESS_FAULT_RECYCLE_TIMEOUT_MS)
+                    .put("oldGeneration", retainedBeforeTimeout.processGeneration)
+                    .put("binderDeathExpected", timeoutDeath.expected)
+                    .put("recoveredGeneration", recoveredAfterTimeout.processGeneration)
+                    .put("recoveredProcessStartTicks",
+                        recoveredAfterTimeout.processStartTicks)
+                )
+                .put("unexpectedIdleDeath", JSONObject()
+                    .put("oldGeneration", idleGeneration)
+                    .put("oldProcessStartTicks", idleStartTicks)
+                    .put("unexpectedBinderDeathCount",
+                        timeoutHost.connectionDiagnostics.unexpectedBinderDeathCount)
+                    .put("recoveredGeneration",
+                        recoveredAfterUnexpectedDeath.processGeneration)
+                    .put("recoveredProcessStartTicks",
+                        recoveredAfterUnexpectedDeath.processStartTicks)
+                )
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            coordinators.forEach { coordinator -> coordinator.cancel() }
+            host?.close()
+            mediaUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            writeReport(context, runId, "process-fault-matrix", report)
         }
     }
 
@@ -2682,6 +2944,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
         return SystemClock.elapsedRealtime() - startedAt
     }
 
+    private fun waitForRemoteConnectionState(
+        host: BoundRemoteSourceSeparationExecutionHost,
+        expected: SourceSeparationRemoteConnectionState,
+    ) {
+        val deadline = SystemClock.elapsedRealtime() + PROCESS_DEATH_TIMEOUT_MS
+        while (host.connectionDiagnostics.state != expected &&
+            SystemClock.elapsedRealtime() < deadline
+        ) {
+            SystemClock.sleep(POLL_INTERVAL_MS)
+        }
+        assertEquals(expected, host.connectionDiagnostics.state)
+    }
+
     private fun waitForWorkerToLeaveSong(
         worker: SourceSeparationForegroundWorkerCoordinator,
         songId: Long,
@@ -3783,6 +4058,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val PROCESS_MATRIX_MAXIMUM_PSS_GROWTH_BYTES = 64L * 1_024L * 1_024L
         const val PROCESS_MATRIX_MAXIMUM_MAP_GROWTH = 256
         const val PROCESS_MATRIX_LEASE_RELEASE_TIMEOUT_MS = 30_000L
+        const val PROCESS_FAULT_RECYCLE_TIMEOUT_MS = 1L
+        const val PROCESS_DEATH_TIMEOUT_MS = 10_000L
         val PROCESS_MATRIX_SNAPSHOT_CYCLES = setOf(2, 10, 20)
         const val ARG_FIXTURE_ID = "fixtureId"
         const val ARG_FIXTURE_FILE_NAME = "fixtureFileName"

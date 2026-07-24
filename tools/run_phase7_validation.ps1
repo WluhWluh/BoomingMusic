@@ -15,6 +15,7 @@ param(
         "worker",
         "process-matrix",
         "process-switch-matrix",
+        "process-fault-matrix",
         "lifecycle",
         "recreation",
         "playback",
@@ -67,6 +68,7 @@ $sourceStages = @(
     "worker",
     "process-matrix",
     "process-switch-matrix",
+    "process-fault-matrix",
     "lifecycle",
     "recreation",
     "playback",
@@ -84,6 +86,7 @@ $testMethod = switch ($Stage) {
     "worker" { "validateProductionWorker"; break }
     "process-matrix" { "validateProcessSessionMatrix"; break }
     "process-switch-matrix" { "validateProcessModelSwitchMatrix"; break }
+    "process-fault-matrix" { "validateProcessFaultMatrix"; break }
     "lifecycle" { "validateWorkerLifecycle"; break }
     "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
     "playback" { "validateMediaSessionPlayback"; break }
@@ -145,11 +148,11 @@ if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "work
     throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
 }
 if ($ExecutionHostMode -eq "bound-remote" -and
-        ($Stage -notin @("worker", "background", "process-matrix", "process-switch-matrix") -or
+        ($Stage -notin @("worker", "background", "process-matrix", "process-switch-matrix", "process-fault-matrix") -or
         $BackendMode -ne "auto" -or $AutoFailpoint -ne "none")) {
     throw "BoundRemote requires a supported process stage, BackendMode=auto, and AutoFailpoint=none."
 }
-if ($Stage -in @("process-matrix", "process-switch-matrix") -and
+if ($Stage -in @("process-matrix", "process-switch-matrix", "process-fault-matrix") -and
         (-not $X86ProcessValidation -or $ProcessAbi -ne "x86" -or
         $ExecutionHostMode -ne "bound-remote" -or $BackendMode -ne "auto")) {
     throw "$Stage requires pure x86, X86ProcessValidation, and BoundRemote Auto."
