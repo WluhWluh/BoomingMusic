@@ -2444,6 +2444,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val artifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
         val contractId = arguments.requiredString(ARG_CONTRACT_ID)
         val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
+        val x86ProcessValidation = arguments.optionalBoolean(
+            ARG_X86_PROCESS_VALIDATION,
+            false,
+        )
+        assertEquals(x86ProcessValidation, MdxX86ProcessValidationOverride.buildEnabled)
         return JSONObject()
             .put("schemaVersion", "phase7-report-v1")
             .put("status", "not-tested")
@@ -2538,6 +2543,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("cpuThreads", resolveCpuThreads(arguments.getString(ARG_PROCESSOR_COUNT)?.toIntOrNull()))
                 .put("windowDecodeEnabled", arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true))
                 .put("cleanInstallScenario", arguments.optionalBoolean(ARG_CLEAN_INSTALL, false))
+                .put("x86ProcessValidation", x86ProcessValidation)
                 .put(
                     "xnnPackFlags",
                     arguments.getString(ARG_XNNPACK_FLAGS)?.toIntOrNull() ?: JSONObject.NULL,
@@ -2872,6 +2878,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_EXPORT_CACHE_AUDIO = "exportCacheAudio"
         const val ARG_RUN_CLASS = "runClass"
         const val ARG_CLEAN_INSTALL = "cleanInstallScenario"
+        const val ARG_X86_PROCESS_VALIDATION = "x86ProcessValidation"
         const val ARG_FIXTURE_ID = "fixtureId"
         const val ARG_FIXTURE_FILE_NAME = "fixtureFileName"
         const val ARG_FIXTURE_BYTES = "fixtureBytes"

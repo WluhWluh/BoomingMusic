@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.MdxInferenceSessionProvider
+import com.mardous.booming.separation.model.MdxInferenceSessionFactory
 import com.mardous.booming.separation.model.MdxRangeSeparator
 import com.mardous.booming.separation.model.MdxSeparationExecution
 import com.mardous.booming.separation.model.SingleUseMdxInferenceSessionProvider
@@ -52,9 +53,15 @@ internal class MdxSourceSeparationModelAwareRangeExecutor(
     )
 }
 
-private fun createAutoLiteRtSessionProvider(
+internal fun createAutoLiteRtSessionProvider(
     context: Context,
 ): MdxInferenceSessionProvider {
+    return SingleUseMdxInferenceSessionProvider(createAutoLiteRtSessionFactory(context))
+}
+
+internal fun createAutoLiteRtSessionFactory(
+    context: Context,
+): MdxInferenceSessionFactory {
     val gpuProfile = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1
     val factory = MdxLiteRtAutoInferenceSessionFactory(
         gpuRuntimeProfile = gpuProfile,
@@ -78,5 +85,5 @@ private fun createAutoLiteRtSessionProvider(
             compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
         ),
     )
-    return SingleUseMdxInferenceSessionProvider(factory)
+    return factory
 }

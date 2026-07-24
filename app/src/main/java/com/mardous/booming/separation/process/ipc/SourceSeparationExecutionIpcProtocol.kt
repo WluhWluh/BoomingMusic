@@ -202,6 +202,7 @@ internal enum class SourceSeparationIpcStatus {
     StaleControl,
     RunActive,
     Terminal,
+    RecycleRequired,
     Rejected,
     Failed,
 }
@@ -227,6 +228,7 @@ internal enum class SourceSeparationIpcErrorCategory {
     RuntimeFailure,
     HostDied,
     Timeout,
+    RecycleRequired,
     Internal,
 }
 

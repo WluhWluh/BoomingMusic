@@ -3,6 +3,7 @@ package com.mardous.booming.separation.process
 import android.content.Context
 import android.net.Uri
 import com.mardous.booming.separation.MdxSourceSeparationModelAwareRangeExecutor
+import com.mardous.booming.separation.createAutoLiteRtSessionFactory
 import com.mardous.booming.separation.SourceSeparationModelAwareExecutionRequest
 import com.mardous.booming.separation.SourceSeparationModelAwareExecutionWorkspace
 import com.mardous.booming.separation.SourceSeparationModelAwareRangeExecutor
@@ -22,9 +23,13 @@ import java.util.concurrent.atomic.AtomicLong
 internal class SourceSeparationRemoteExecutionEnvironment(
     context: Context,
     private val presetRepository: SourceSeparationPresetRepository,
+    private val sessionController: SourceSeparationProcessSessionController =
+        createRemoteSessionController(context.applicationContext),
     val rangeExecutor: SourceSeparationModelAwareRangeExecutor =
-        MdxSourceSeparationModelAwareRangeExecutor(context.applicationContext),
-) {
+        MdxSourceSeparationModelAwareRangeExecutor(context.applicationContext) {
+            sessionController
+        },
+) : AutoCloseable {
     private val applicationContext = context.applicationContext
     private val cacheStore = SourceSeparationCacheStore(
         AndroidSourceSeparationCacheRootProvider(applicationContext).resolveRoot(),
@@ -39,10 +44,17 @@ internal class SourceSeparationRemoteExecutionEnvironment(
         SourceSeparationProcessValidationOverrideDiagnostics? = null
 
     fun sessionDiagnostics(): SourceSeparationProcessSessionDiagnostics =
-        SourceSeparationProcessSessionDiagnostics.empty()
+        sessionController.diagnostics()
 
     fun validationOverrideDiagnostics():
         SourceSeparationProcessValidationOverrideDiagnostics? = validationOverrideDiagnostics
+
+    fun beginExecution(runId: String) = sessionController.beginExecution(runId)
+
+    fun finishExecution(runId: String, failure: Throwable?) =
+        sessionController.finishExecution(runId, failure)
+
+    override fun close() = sessionController.close()
 
     fun prepare(
         descriptor: SourceSeparationExecutionDescriptor,
@@ -201,6 +213,22 @@ internal class SourceSeparationRemoteExecutionEnvironment(
         const val WORK_DIRECTORY = "work"
         const val SEGMENTS_DIRECTORY = "segments"
     }
+}
+
+private fun createRemoteSessionController(
+    context: Context,
+): SourceSeparationProcessSessionController {
+    val persistentX86Validation = MdxX86ProcessValidationOverride.buildEnabled &&
+        runCatching { AndroidMdxRuntimePlatformProvider.current().runtimeAbi }
+            .getOrNull() == com.mardous.booming.separation.model.MdxRuntimeAbi.X86
+    return SourceSeparationProcessSessionController(
+        factory = createAutoLiteRtSessionFactory(context),
+        ownership = if (persistentX86Validation) {
+            SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit
+        } else {
+            SourceSeparationProcessSessionOwnership.SingleUse
+        },
+    )
 }
 
 internal class SourceSeparationRemoteSourceUnavailableException(

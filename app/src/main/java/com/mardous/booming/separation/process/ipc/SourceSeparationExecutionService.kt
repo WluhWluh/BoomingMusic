@@ -17,6 +17,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostReque
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnosticsCollector
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionDiagnostics
+import com.mardous.booming.separation.process.SourceSeparationProcessSessionRecycleRequiredException
 import com.mardous.booming.separation.process.SourceSeparationRemoteCacheUnavailableException
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionControl
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionEnvironment
@@ -70,6 +71,10 @@ internal class SourceSeparationExecutionService : Service() {
             activeRun = null
             unlinkClientDeathLocked()
             clientCallback = null
+        }
+        synchronized(environmentLock) {
+            executionEnvironment?.close()
+            executionEnvironment = null
         }
         super.onDestroy()
     }
@@ -339,6 +344,7 @@ internal class SourceSeparationExecutionService : Service() {
             control = control,
             sender = sender,
             host = host,
+            environment = environment,
             executionRequest = executionRequest,
         ).also { activeRun = it }
     }
@@ -347,7 +353,11 @@ internal class SourceSeparationExecutionService : Service() {
         command: SourceSeparationIpcStartCommand,
         active: ActiveRemoteRun,
     ): String {
+        var executionBegan = false
+        var executionFailure: Throwable? = null
         return try {
+            active.environment.beginExecution(command.descriptor.runId)
+            executionBegan = true
             val hosted = active.host.start(
                 SourceSeparationExecutionHostRequest(
                     descriptor = command.descriptor,
@@ -368,9 +378,23 @@ internal class SourceSeparationExecutionService : Service() {
             terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Paused, error)
         } catch (error: CancellationException) {
             terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Canceled, error)
+        } catch (error: SourceSeparationProcessSessionRecycleRequiredException) {
+            executionFailure = error
+            terminalStartResponse(
+                command.commandId,
+                SourceSeparationIpcStatus.RecycleRequired,
+                error,
+            )
         } catch (error: Throwable) {
+            executionFailure = error
             terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Failed, error)
         } finally {
+            if (executionBegan) {
+                active.environment.finishExecution(
+                    command.descriptor.runId,
+                    executionFailure,
+                )
+            }
             closeAbandonedRun(active)
         }
     }
@@ -525,6 +549,7 @@ internal class SourceSeparationExecutionService : Service() {
         val control: SourceSeparationRemoteExecutionControl,
         val sender: SourceSeparationRemoteEventSender,
         val host: InProcessSourceSeparationExecutionHost,
+        val environment: SourceSeparationRemoteExecutionEnvironment,
         val executionRequest: com.mardous.booming.separation
             .SourceSeparationModelAwareExecutionRequest,
     ) : AutoCloseable {
@@ -606,6 +631,8 @@ private fun Throwable.toIpcError(): SourceSeparationIpcError {
             SourceSeparationIpcErrorCategory.CacheUnavailable
         is SourceSeparationRemoteEventDeliveryException ->
             SourceSeparationIpcErrorCategory.HostDied
+        is SourceSeparationProcessSessionRecycleRequiredException ->
+            SourceSeparationIpcErrorCategory.RecycleRequired
         is IllegalArgumentException -> SourceSeparationIpcErrorCategory.IdentityMismatch
         else -> SourceSeparationIpcErrorCategory.RuntimeFailure
     }

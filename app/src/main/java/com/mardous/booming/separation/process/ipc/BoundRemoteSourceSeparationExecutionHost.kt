@@ -855,6 +855,7 @@ private fun SourceSeparationIpcStatus.toHostControlResult():
     SourceSeparationIpcStatus.Paused,
     SourceSeparationIpcStatus.Canceled,
     SourceSeparationIpcStatus.Failed,
+    SourceSeparationIpcStatus.RecycleRequired,
     SourceSeparationIpcStatus.StaleControl,
     SourceSeparationIpcStatus.Rejected,
     -> SourceSeparationExecutionHostControlResult.Terminal

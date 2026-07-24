@@ -52,7 +52,8 @@ param(
     [switch]$CleanInstallScenario,
     [switch]$PreserveMediaStoreSource,
     [switch]$ExportCacheAudio,
-    [switch]$ScreenOffAfterReady
+    [switch]$ScreenOffAfterReady,
+    [switch]$X86ProcessValidation
 )
 
 $ErrorActionPreference = "Stop"
@@ -140,6 +141,13 @@ if ($ExecutionHostMode -eq "bound-remote" -and
         ($Stage -notin @("worker", "background") -or
         $BackendMode -ne "auto" -or $AutoFailpoint -ne "none")) {
     throw "BoundRemote requires Stage=worker/background, BackendMode=auto, and AutoFailpoint=none."
+}
+if ($X86ProcessValidation -and $ProcessAbi -ne "x86") {
+    throw "X86ProcessValidation can only build and run the pure-x86 target."
+}
+if ($X86ProcessValidation -and $Stage -in $sourceStages -and
+        $ExecutionHostMode -ne "bound-remote") {
+    throw "X86ProcessValidation execution stages require BoundRemote."
 }
 if ($PreserveMediaStoreSource -and $Stage -notin @("worker", "switching")) {
     throw "PreserveMediaStoreSource applies only to worker and switching stages."
@@ -392,11 +400,24 @@ New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 Push-Location $repoRoot
 try {
     if (-not $SkipBuild) {
-        & .\gradlew.bat :app:assembleGithubDebugAndroidTest --console=plain
+        $validationGradleArgument = if ($X86ProcessValidation) {
+            @("-PboomingSs.x86ProcessValidation=true")
+        } else {
+            @()
+        }
+        $androidTestBuildArguments = @(
+            ":app:assembleGithubDebugAndroidTest",
+            "--console=plain"
+        ) + $validationGradleArgument
+        & .\gradlew.bat @androidTestBuildArguments
         if ($LASTEXITCODE -ne 0) { throw "Phase 7 AndroidTest assembly failed." }
         # AndroidTest configuration emits a universal app APK. Rebuild the app
         # last so output metadata and files describe the requested ABI splits.
-        & .\gradlew.bat :app:assembleGithubDebug --console=plain
+        $appBuildArguments = @(
+            ":app:assembleGithubDebug",
+            "--console=plain"
+        ) + $validationGradleArgument
+        & .\gradlew.bat @appBuildArguments
         if ($LASTEXITCODE -ne 0) { throw "Phase 7 app assembly failed." }
     }
 
@@ -421,6 +442,9 @@ try {
         if ($buildIdentity.schemaVersion -ne "phase7-build-identity-v1" -or
                 [string]$buildIdentity.appCommit -notmatch '^[0-9a-f]{40}$') {
             throw "Phase 7 build identity is invalid: $buildIdentityPath"
+        }
+        if ([bool]$buildIdentity.x86ProcessValidation -ne [bool]$X86ProcessValidation) {
+            throw "The selected APK used a different x86 process-validation gate."
         }
         $recordedAppApk = @($buildIdentity.appApks) | Where-Object {
             $_.fileName -eq $appApk.Name
@@ -449,6 +473,7 @@ try {
         $buildIdentity = [ordered]@{
             schemaVersion = "phase7-build-identity-v1"
             appCommit = $sourceCommitAtInvocation
+            x86ProcessValidation = [bool]$X86ProcessValidation
             appApks = $appApkRecords
             testApk = [ordered]@{
                 fileName = $testApk.Name
@@ -512,7 +537,8 @@ try {
         "-e", "maximumCancellationLatencyMs",
         [string]$thresholds.lifecycle.maximumCancellationLatencyMs,
         "-e", "fixturesVersion", $fixtures.schemaVersion,
-        "-e", "cleanInstallScenario", $((-not $KeepAppData).ToString().ToLowerInvariant())
+        "-e", "cleanInstallScenario", $((-not $KeepAppData).ToString().ToLowerInvariant()),
+        "-e", "x86ProcessValidation", $X86ProcessValidation.ToString().ToLowerInvariant()
     )
     if ($null -ne $secondaryModel) {
         $instrumentArguments += @(
