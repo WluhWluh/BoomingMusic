@@ -40,12 +40,17 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private var connectionState = SourceSeparationRemoteConnectionState.Unbound
     private var remoteService: ISourceSeparationExecutionService? = null
     private var remoteBinder: IBinder? = null
+    private var remoteDeathRecipient: IBinder.DeathRecipient? = null
     private var connectResponse: SourceSeparationIpcConnectResponse? = null
     private var bound = false
+    private var bindingSequence = 0L
+    private var activeBindingGeneration = 0L
+    private var activeServiceConnection: ServiceConnection? = null
     private var activeRequest: SourceSeparationExecutionHostRequest? = null
     private var activePump: RemoteControlPump? = null
     private val controlSequence = AtomicLong(0L)
     private val terminalConnectionFailure = AtomicReference<Throwable?>(null)
+    private val callbackFailure = AtomicReference<Throwable?>(null)
 
     override val processGeneration: Long
         get() = ensureConnected().processGeneration
@@ -71,6 +76,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         }
         val service = connectionLock.withLock {
             check(activeRequest == null) { "Bound-remote execution host is busy." }
+            callbackFailure.set(null)
             activeRequest = request
             requireNotNull(remoteService)
         }
@@ -103,6 +109,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 ),
             )
         }
+        callbackFailure.get()?.let { throw SourceSeparationRemoteCallbackException(it) }
         return when (response.status) {
             SourceSeparationIpcStatus.Completed -> {
                 val completion = requireNotNull(response.completion)
@@ -199,14 +206,20 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 pump = activePump,
                 service = remoteService,
                 binder = remoteBinder,
+                deathRecipient = remoteDeathRecipient,
+                serviceConnection = activeServiceConnection,
                 wasBound = bound,
             )
             activePump = null
             bound = false
+            activeBindingGeneration = 0L
+            activeServiceConnection = null
             remoteBinder = null
+            remoteDeathRecipient = null
             remoteService = null
             connectResponse = null
             activeRequest = null
+            callbackFailure.set(null)
             connectionChanged.signalAll()
             state
         }
@@ -214,11 +227,11 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         if (shutdown.request != null && shutdown.service != null) {
             runCatching { sendShutdownCancel(shutdown.service, shutdown.request) }
         }
-        shutdown.binder?.let { binder ->
-            runCatching { binder.unlinkToDeath(serviceDeathRecipient, 0) }
+        if (shutdown.binder != null && shutdown.deathRecipient != null) {
+            runCatching { shutdown.binder.unlinkToDeath(shutdown.deathRecipient, 0) }
         }
-        if (shutdown.wasBound) {
-            runCatching { applicationContext.unbindService(serviceConnection) }
+        if (shutdown.wasBound && shutdown.serviceConnection != null) {
+            runCatching { applicationContext.unbindService(shutdown.serviceConnection) }
         }
     }
 
@@ -243,13 +256,13 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     }
 
     private fun ensureConnected(): SourceSeparationIpcConnectResponse {
-        val shouldBind = connectionLock.withLock {
+        val bindingAttempt = connectionLock.withLock {
             when (connectionState) {
                 SourceSeparationRemoteConnectionState.Connected ->
                     return requireNotNull(connectResponse)
                 SourceSeparationRemoteConnectionState.Closed ->
                     throw IllegalStateException("Bound-remote execution host is closed.")
-                SourceSeparationRemoteConnectionState.Binding -> false
+                SourceSeparationRemoteConnectionState.Binding -> null
                 SourceSeparationRemoteConnectionState.Unbound,
                 SourceSeparationRemoteConnectionState.Dead,
                 -> {
@@ -258,61 +271,109 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                     }
                     connectionState = SourceSeparationRemoteConnectionState.Binding
                     terminalConnectionFailure.set(null)
-                    true
+                    bindingSequence += 1L
+                    val generation = bindingSequence.coerceAtLeast(1L)
+                    val serviceConnection = createServiceConnection(generation)
+                    activeBindingGeneration = generation
+                    activeServiceConnection = serviceConnection
+                    BindingAttempt(generation, serviceConnection)
                 }
             }
         }
-        if (shouldBind) {
+        if (bindingAttempt != null) {
             val intent = Intent(
                 applicationContext,
                 SourceSeparationExecutionService::class.java,
             ).setAction(SourceSeparationExecutionService.ACTION_BIND)
-            val didBind = applicationContext.bindService(
-                intent,
-                serviceConnection,
-                Context.BIND_AUTO_CREATE,
-            )
-            connectionLock.withLock {
-                bound = didBind
-                if (!didBind) {
+            val didBind = try {
+                applicationContext.bindService(
+                    intent,
+                    bindingAttempt.serviceConnection,
+                    Context.BIND_AUTO_CREATE,
+                )
+            } catch (error: Throwable) {
+                markConnectionDead(error, bindingAttempt.generation)
+                throw SourceSeparationRemoteHostDiedException(error)
+            }
+            val shouldUnbindRejectedBinding = connectionLock.withLock {
+                if (bindingAttempt.generation == activeBindingGeneration &&
+                    didBind &&
+                    (connectionState == SourceSeparationRemoteConnectionState.Binding ||
+                        connectionState == SourceSeparationRemoteConnectionState.Connected)
+                ) {
+                    bound = true
+                    false
+                } else if (bindingAttempt.generation == activeBindingGeneration &&
+                    !didBind &&
+                    connectionState == SourceSeparationRemoteConnectionState.Binding
+                ) {
+                    activeBindingGeneration = 0L
+                    activeServiceConnection = null
                     connectionState = SourceSeparationRemoteConnectionState.Dead
                     terminalConnectionFailure.set(
                         IllegalStateException("Unable to bind the source-separation service."),
                     )
                     connectionChanged.signalAll()
+                    false
+                } else {
+                    didBind
+                }
+            }
+            if (shouldUnbindRejectedBinding) {
+                runCatching {
+                    applicationContext.unbindService(bindingAttempt.serviceConnection)
                 }
             }
         }
+        val observedBindingGeneration = connectionLock.withLock {
+            activeBindingGeneration
+        }
         val deadlineNanos = System.nanoTime() + connectionTimeoutMs * 1_000_000L
-        return connectionLock.withLock {
-            while (connectionState == SourceSeparationRemoteConnectionState.Binding) {
-                val remaining = deadlineNanos - System.nanoTime()
-                if (remaining <= 0L) {
-                    connectionState = SourceSeparationRemoteConnectionState.Dead
-                    val timeout = SourceSeparationRemoteConnectionTimeoutException(
-                        connectionTimeoutMs,
-                    )
-                    terminalConnectionFailure.set(timeout)
-                    throw timeout
+        return try {
+            connectionLock.withLock {
+                while (connectionState == SourceSeparationRemoteConnectionState.Binding) {
+                    val remaining = deadlineNanos - System.nanoTime()
+                    if (remaining <= 0L) {
+                        throw SourceSeparationRemoteConnectionTimeoutException(
+                            connectionTimeoutMs,
+                        )
+                    }
+                    connectionChanged.awaitNanos(remaining)
                 }
-                connectionChanged.awaitNanos(remaining)
+                if (connectionState != SourceSeparationRemoteConnectionState.Connected) {
+                    throw SourceSeparationRemoteHostDiedException(
+                        terminalConnectionFailure.get(),
+                    )
+                }
+                requireNotNull(connectResponse)
             }
-            if (connectionState != SourceSeparationRemoteConnectionState.Connected) {
-                throw SourceSeparationRemoteHostDiedException(
-                    terminalConnectionFailure.get(),
-                )
-            }
-            requireNotNull(connectResponse)
+        } catch (timeout: SourceSeparationRemoteConnectionTimeoutException) {
+            markConnectionDead(timeout, observedBindingGeneration)
+            throw timeout
         }
     }
 
     private fun connect(
-        component: ComponentName,
+        bindingGeneration: Long,
         binder: IBinder,
     ) {
+        var deathRecipient: IBinder.DeathRecipient? = null
         try {
+            val isCurrentBinding = connectionLock.withLock {
+                bindingGeneration == activeBindingGeneration &&
+                    connectionState == SourceSeparationRemoteConnectionState.Binding
+            }
+            if (!isCurrentBinding) return
             val service = ISourceSeparationExecutionService.Stub.asInterface(binder)
-            binder.linkToDeath(serviceDeathRecipient, 0)
+            val recipient = IBinder.DeathRecipient {
+                markConnectionDead(
+                    DeadObjectException("Source-separation service binder died."),
+                    bindingGeneration,
+                    binder,
+                )
+            }
+            deathRecipient = recipient
+            binder.linkToDeath(recipient, 0)
             val processName = AppProcessResolver.resolve(applicationContext).processName
             val request = SourceSeparationIpcConnectRequest(
                 commandId = nextCommandId("connect"),
@@ -330,19 +391,29 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             ) {
                 "Bound service returned an invalid process identity."
             }
-            connectionLock.withLock {
-                if (connectionState == SourceSeparationRemoteConnectionState.Closed) {
-                    binder.unlinkToDeath(serviceDeathRecipient, 0)
-                    return
+            val accepted = connectionLock.withLock {
+                if (bindingGeneration != activeBindingGeneration ||
+                    connectionState != SourceSeparationRemoteConnectionState.Binding
+                ) {
+                    false
+                } else {
+                    remoteService = service
+                    remoteBinder = binder
+                    remoteDeathRecipient = recipient
+                    connectResponse = response
+                    connectionState = SourceSeparationRemoteConnectionState.Connected
+                    connectionChanged.signalAll()
+                    true
                 }
-                remoteService = service
-                remoteBinder = binder
-                connectResponse = response
-                connectionState = SourceSeparationRemoteConnectionState.Connected
-                connectionChanged.signalAll()
+            }
+            if (!accepted) {
+                runCatching { binder.unlinkToDeath(recipient, 0) }
             }
         } catch (error: Throwable) {
-            markConnectionDead(error)
+            deathRecipient?.let { recipient ->
+                runCatching { binder.unlinkToDeath(recipient, 0) }
+            }
+            markConnectionDead(error, bindingGeneration, binder)
         }
     }
 
@@ -359,53 +430,81 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             ) {
                 "Bound-remote event targets a stale run or process generation."
             }
-            request.onEvent(event)
+            try {
+                request.onEvent(event)
+            } catch (error: Throwable) {
+                callbackFailure.compareAndSet(null, error)
+                throw error
+            }
         }
     }
 
-    private val serviceDeathRecipient = IBinder.DeathRecipient {
-        markConnectionDead(DeadObjectException("Source-separation service binder died."))
-    }
+    private fun createServiceConnection(bindingGeneration: Long) =
+        object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName, service: IBinder) {
+                connect(bindingGeneration, service)
+            }
 
-    private val serviceConnection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, service: IBinder) {
-            connect(name, service)
+            override fun onServiceDisconnected(name: ComponentName) {
+                markConnectionDead(
+                    RemoteException("Source-separation service disconnected."),
+                    bindingGeneration,
+                )
+            }
+
+            override fun onBindingDied(name: ComponentName) {
+                markConnectionDead(
+                    DeadObjectException("Source-separation service binding died."),
+                    bindingGeneration,
+                )
+            }
+
+            override fun onNullBinding(name: ComponentName) {
+                markConnectionDead(
+                    RemoteException("Source-separation service returned null binding."),
+                    bindingGeneration,
+                )
+            }
         }
 
-        override fun onServiceDisconnected(name: ComponentName) {
-            markConnectionDead(RemoteException("Source-separation service disconnected."))
-        }
-
-        override fun onBindingDied(name: ComponentName) {
-            markConnectionDead(DeadObjectException("Source-separation service binding died."))
-        }
-
-        override fun onNullBinding(name: ComponentName) {
-            markConnectionDead(RemoteException("Source-separation service returned null binding."))
-        }
-    }
-
-    private fun markConnectionDead(error: Throwable) {
+    private fun markConnectionDead(
+        error: Throwable,
+        bindingGeneration: Long? = null,
+        binder: IBinder? = null,
+    ) {
         val disconnected = connectionLock.withLock {
             if (connectionState == SourceSeparationRemoteConnectionState.Closed) return
+            if (bindingGeneration != null &&
+                bindingGeneration != activeBindingGeneration
+            ) return
+            if (binder != null && remoteBinder != null && binder !== remoteBinder) return
             terminalConnectionFailure.compareAndSet(null, error)
             val state = DisconnectedBinding(
                 binder = remoteBinder,
+                deathRecipient = remoteDeathRecipient,
+                serviceConnection = activeServiceConnection,
                 wasBound = bound,
             )
             connectionState = SourceSeparationRemoteConnectionState.Dead
             bound = false
+            activeBindingGeneration = 0L
+            activeServiceConnection = null
             remoteService = null
             remoteBinder = null
+            remoteDeathRecipient = null
             connectResponse = null
             connectionChanged.signalAll()
             state
         }
-        disconnected.binder?.let { binder ->
-            runCatching { binder.unlinkToDeath(serviceDeathRecipient, 0) }
+        if (disconnected.binder != null && disconnected.deathRecipient != null) {
+            runCatching {
+                disconnected.binder.unlinkToDeath(disconnected.deathRecipient, 0)
+            }
         }
-        if (disconnected.wasBound) {
-            runCatching { applicationContext.unbindService(serviceConnection) }
+        if (disconnected.wasBound && disconnected.serviceConnection != null) {
+            runCatching {
+                applicationContext.unbindService(disconnected.serviceConnection)
+            }
         }
     }
 
@@ -493,6 +592,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             activePump = null
             activeRequest = null
             controlSequence.set(0L)
+            callbackFailure.set(null)
             value
         }
         pump?.close()
@@ -606,12 +706,21 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         val pump: RemoteControlPump?,
         val service: ISourceSeparationExecutionService?,
         val binder: IBinder?,
+        val deathRecipient: IBinder.DeathRecipient?,
+        val serviceConnection: ServiceConnection?,
         val wasBound: Boolean,
     )
 
     private data class DisconnectedBinding(
         val binder: IBinder?,
+        val deathRecipient: IBinder.DeathRecipient?,
+        val serviceConnection: ServiceConnection?,
         val wasBound: Boolean,
+    )
+
+    private data class BindingAttempt(
+        val generation: Long,
+        val serviceConnection: ServiceConnection,
     )
 }
 
@@ -645,6 +754,10 @@ internal class SourceSeparationRemoteExecutionException(
 ) : IllegalStateException(
     "${remoteError.category}: ${remoteError.message ?: remoteError.type}",
 )
+
+internal class SourceSeparationRemoteCallbackException(
+    cause: Throwable,
+) : IllegalStateException("Unable to apply a source-separation remote event.", cause)
 
 private fun SourceSeparationIpcStatus.toHostControlResult():
         SourceSeparationExecutionHostControlResult = when (this) {
