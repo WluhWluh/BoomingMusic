@@ -15,6 +15,7 @@ param(
     [string[]]$FixtureId = @(),
     [string]$OutputRoot = "",
     [string]$RunPrefix = "phase7-formats-v1",
+    [switch]$ExportCacheAudio,
     [switch]$SkipBuild
 )
 
@@ -71,6 +72,9 @@ foreach ($fixture in $formatFixtures) {
     }
     if (-not [string]::IsNullOrWhiteSpace($OutputRoot)) {
         $arguments.OutputRoot = $OutputRoot
+    }
+    if ($ExportCacheAudio) {
+        $arguments.ExportCacheAudio = $true
     }
     if (-not $buildNeeded) {
         $arguments.SkipBuild = $true

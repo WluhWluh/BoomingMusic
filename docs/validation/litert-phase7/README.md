@@ -185,8 +185,10 @@ The wrapper verifies the companion repository revision, runs all nine v2
 format fixtures through the production worker, and continues after an
 individual failure so one invocation captures the full decoder matrix. Use
 `-BackendMode cpu` for claimed CPU ABIs and `-FixtureId <id>` to repeat a
-single route. Pure x86 is intentionally excluded because source separation is
-unsupported there.
+single route. Add `-ExportCacheAudio` when generating local digital-comparison
+evidence; the host then verifies and retains the WAV/FLAC stems and cache
+manifest under the ignored output root. Pure x86 is intentionally excluded
+because source separation is unsupported there.
 
 CPU is the default validation backend. Pass `-BackendMode auto` on S10 or S25
 to exercise the production `gpu-auto-fp32-v1` provider, including its real GPU
