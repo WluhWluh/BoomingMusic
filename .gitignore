@@ -17,6 +17,7 @@ out/
 # Gradle files
 .gradle/
 build/
+__pycache__/
 
 # Private keystore properties
 keystore.properties

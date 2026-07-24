@@ -124,6 +124,12 @@ class Elf32:
 def verify(path: Path) -> None:
     if not path.is_file():
         raise RuntimeError(f"LiteRT x86 library is missing: {path}")
+
+    elf = Elf32(path.read_bytes())
+    if elf.elf_type != 3:
+        raise RuntimeError(f"ELF type is {elf.elf_type}, expected ET_DYN (3)")
+    if elf.machine != 3:
+        raise RuntimeError(f"ELF machine is {elf.machine}, expected Intel 80386 (3)")
     if path.stat().st_size != EXPECTED_BYTES:
         raise RuntimeError(
             f"Unexpected LiteRT x86 size: {path.stat().st_size}, expected {EXPECTED_BYTES}"
@@ -131,12 +137,6 @@ def verify(path: Path) -> None:
     actual_hash = sha256(path)
     if actual_hash != EXPECTED_SHA256:
         raise RuntimeError(f"Unexpected LiteRT x86 SHA-256: {actual_hash}")
-
-    elf = Elf32(path.read_bytes())
-    if elf.elf_type != 3:
-        raise RuntimeError(f"ELF type is {elf.elf_type}, expected ET_DYN (3)")
-    if elf.machine != 3:
-        raise RuntimeError(f"ELF machine is {elf.machine}, expected Intel 80386 (3)")
 
     dependencies = elf.dependencies()
     if dependencies != EXPECTED_DEPENDENCIES:
