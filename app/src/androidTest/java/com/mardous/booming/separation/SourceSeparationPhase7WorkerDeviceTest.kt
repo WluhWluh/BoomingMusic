@@ -58,6 +58,7 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetReposit
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
+import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteConnectionState
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCallbacks
@@ -124,6 +125,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
             false,
         )
         val exportCacheAudio = arguments.optionalBoolean(ARG_EXPORT_CACHE_AUDIO, false)
+        val rebindAfterCompletion = arguments.optionalBoolean(
+            ARG_REBIND_AFTER_COMPLETION,
+            false,
+        )
+        require(!rebindAfterCompletion ||
+            executionHostMode == Phase7ExecutionHostMode.BoundRemote
+        ) {
+            "Process-retention validation requires the bound-remote host."
+        }
         var coordinator: SourceSeparationForegroundWorkerCoordinator? = null
         var boundRemoteHost: BoundRemoteSourceSeparationExecutionHost? = null
         var mediaUri: Uri? = null
@@ -328,6 +338,53 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
             assertExpectedSourceDecode(arguments, runtimeRecord)
             playback.close()
+
+            if (rebindAfterCompletion) {
+                val originalHost = requireNotNull(boundRemoteHost)
+                val beforeRebind = originalHost.processDiagnostics()
+                assertEquals(
+                    SourceSeparationProcessSessionState.Resident,
+                    beforeRebind.session.state,
+                )
+                assertEquals(1, beforeRebind.session.nativeSessionCreationCount)
+                assertEquals(0, beforeRebind.session.activeLeaseCount)
+                assertTrue(beforeRebind.session.invocationCount > 0L)
+                val expectedSessionId = requireNotNull(beforeRebind.session.sessionId)
+
+                originalHost.close()
+                SystemClock.sleep(PROCESS_REBIND_SETTLE_MS)
+                val reboundHost = BoundRemoteSourceSeparationExecutionHost(
+                    context.applicationContext,
+                )
+                boundRemoteHost = reboundHost
+                val afterRebind = reboundHost.processDiagnostics()
+                assertEquals(beforeRebind.processGeneration, afterRebind.processGeneration)
+                assertEquals(beforeRebind.pid, afterRebind.pid)
+                assertEquals(beforeRebind.processStartTicks, afterRebind.processStartTicks)
+                assertEquals(expectedSessionId, afterRebind.session.sessionId)
+                assertEquals(1, afterRebind.session.nativeSessionCreationCount)
+                assertEquals(0, afterRebind.session.activeLeaseCount)
+                assertEquals(
+                    beforeRebind.session.invocationCount,
+                    afterRebind.session.invocationCount,
+                )
+                assertEquals(
+                    SourceSeparationProcessSessionState.Resident,
+                    afterRebind.session.state,
+                )
+                report.put("processRetention", JSONObject()
+                    .put("rebound", true)
+                    .put("processGeneration", afterRebind.processGeneration)
+                    .put("pid", afterRebind.pid)
+                    .put("processStartTicks", afterRebind.processStartTicks)
+                    .put("sessionId", afterRebind.session.sessionId)
+                    .put(
+                        "nativeSessionCreationCount",
+                        afterRebind.session.nativeSessionCreationCount,
+                    )
+                    .put("invocationCount", afterRebind.session.invocationCount)
+                )
+            }
 
             val playable = runtimeFacade.playableStatus(
                 song = runtimeSong,
@@ -2898,6 +2955,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_RUN_CLASS = "runClass"
         const val ARG_CLEAN_INSTALL = "cleanInstallScenario"
         const val ARG_X86_PROCESS_VALIDATION = "x86ProcessValidation"
+        const val ARG_REBIND_AFTER_COMPLETION = "rebindAfterCompletion"
+        const val PROCESS_REBIND_SETTLE_MS = 250L
         const val ARG_FIXTURE_ID = "fixtureId"
         const val ARG_FIXTURE_FILE_NAME = "fixtureFileName"
         const val ARG_FIXTURE_BYTES = "fixtureBytes"

@@ -10,6 +10,7 @@ import com.mardous.booming.AppProcessResolver
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.v2.SourceSeparationExactCacheModelException
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.process.InProcessSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
@@ -40,6 +41,7 @@ internal class SourceSeparationExecutionService : Service() {
     private var clientDeathRecipient: IBinder.DeathRecipient? = null
     private var activeRun: ActiveRemoteRun? = null
     private var recycleAcknowledgement: SourceSeparationIpcRecycleAcknowledgement? = null
+    private val retentionBinder = Binder()
 
     override fun onCreate() {
         super.onCreate()
@@ -50,13 +52,24 @@ internal class SourceSeparationExecutionService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder {
-        require(intent?.action == ACTION_BIND) {
-            "Source-separation execution service requires its explicit bind action."
+        return when (intent?.action) {
+            ACTION_BIND -> {
+                binder
+            }
+            ACTION_RETAIN_WITHOUT_CLIENT -> {
+                check(MdxX86ProcessValidationOverride.buildEnabled) {
+                    "Remote warm retention is unavailable outside x86 validation builds."
+                }
+                retentionBinder
+            }
+            else -> error(
+                "Source-separation execution service requires an explicit bind action.",
+            )
         }
-        return binder
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
+        if (intent?.action != ACTION_BIND) return false
         synchronized(stateLock) {
             abandonClientLocked()
         }
@@ -657,6 +670,8 @@ internal class SourceSeparationExecutionService : Service() {
     companion object {
         const val ACTION_BIND =
             "com.wluhwluh.booming.sourcesep.action.BIND_SOURCE_SEPARATION_EXECUTION"
+        const val ACTION_RETAIN_WITHOUT_CLIENT =
+            "com.wluhwluh.booming.sourcesep.action.RETAIN_SOURCE_SEPARATION_EXECUTION"
         private const val SELF_TERMINATION_DELAY_MS =
             SourceSeparationProcessLifecyclePolicy.RECYCLE_ACKNOWLEDGEMENT_GRACE_MS
         private const val SELF_TERMINATION_THREAD_NAME = "SourceSeparationProcessRecycle"

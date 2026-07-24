@@ -338,6 +338,18 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     }
 
     override fun close() {
+        val canCaptureRetention = connectionLock.withLock {
+            connectionState == SourceSeparationRemoteConnectionState.Connected &&
+                activeRequest == null
+        }
+        val retentionDiagnostics = if (canCaptureRetention) {
+            runCatching { processDiagnostics() }.getOrNull()
+        } else {
+            null
+        }
+        retentionDiagnostics?.let { diagnostics ->
+            SourceSeparationRemoteWarmRetention.retain(applicationContext, diagnostics)
+        }
         val shutdown = connectionLock.withLock {
             if (connectionState == SourceSeparationRemoteConnectionState.Closed) return
             connectionState = SourceSeparationRemoteConnectionState.Closed
@@ -552,6 +564,11 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             }
             if (!accepted) {
                 runCatching { binder.unlinkToDeath(recipient, 0) }
+            } else {
+                SourceSeparationRemoteWarmRetention.release(
+                    response.processGeneration,
+                    response.diagnostics.processStartTicks,
+                )
             }
         } catch (error: Throwable) {
             deathRecipient?.let { recipient ->

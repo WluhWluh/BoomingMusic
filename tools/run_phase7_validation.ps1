@@ -52,6 +52,7 @@ param(
     [switch]$CleanInstallScenario,
     [switch]$PreserveMediaStoreSource,
     [switch]$ExportCacheAudio,
+    [switch]$RebindAfterCompletion,
     [switch]$ScreenOffAfterReady,
     [switch]$X86ProcessValidation
 )
@@ -154,6 +155,10 @@ if ($PreserveMediaStoreSource -and $Stage -notin @("worker", "switching")) {
 }
 if ($ScreenOffAfterReady -and $Stage -ne "background") {
     throw "ScreenOffAfterReady applies only to the background stage."
+}
+if ($RebindAfterCompletion -and
+        ($Stage -ne "worker" -or $ExecutionHostMode -ne "bound-remote")) {
+    throw "RebindAfterCompletion requires Stage=worker and ExecutionHostMode=bound-remote."
 }
 if ($Stage -ne "lifecycle" -and
         ($LifecycleScenario -ne "sequential" -or $LifecycleSessionMode -ne "single-use")) {
@@ -677,6 +682,9 @@ try {
         }
         if ($Stage -eq "worker" -and $ExportCacheAudio) {
             $instrumentArguments += @("-e", "exportCacheAudio", "true")
+        }
+        if ($Stage -eq "worker" -and $RebindAfterCompletion) {
+            $instrumentArguments += @("-e", "rebindAfterCompletion", "true")
         }
         if ($ProcessorCount -gt 0) {
             $instrumentArguments += @("-e", "processorCount", [string]$ProcessorCount)
