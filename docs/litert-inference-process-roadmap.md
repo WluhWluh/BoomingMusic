@@ -4,8 +4,8 @@ Status: staged research and implementation plan
 
 Updated: 2026-07-24
 
-Current milestone: Phase 0, freeze the in-process baseline and acceptance
-contract before introducing a process boundary.
+Current milestone: Phase 3, qualify one resident pure-x86 session per remote
+process generation and a deterministic whole-process recycle boundary.
 
 This roadmap governs two related but separate experiments:
 
@@ -27,8 +27,8 @@ document is authoritative only for process placement and background execution.
 
 ## Goals
 
-- Determine whether a dedicated same-UID process makes LiteRT session
-  recreation safe on pure `x86`.
+- Determine whether one resident LiteRT session plus whole-process recycle
+  avoids unsafe in-process session recreation on pure `x86`.
 - Keep native allocation, XNNPACK state, GPU resources, and runtime failures
   out of the playback process.
 - Make process exit a reliable last-resort reclamation boundary.
@@ -92,6 +92,12 @@ be folded into any phase in this document.
   before native allocation.
 - HQ4 retains its current compatibility and resource gates.
 
+Phase 3 may use one compile-time and AndroidTest-only exception for the exact
+pinned x86 9662 and KARA artifacts. Every such report must retain the original
+`Unsupported` decision and identify the effective validation-only override.
+Normal debug, CI, and release graphs must continue to reject those records
+before native allocation until a later explicit compatibility decision.
+
 ### Cache and storage policy
 
 - Model weights remain application data.
@@ -113,11 +119,24 @@ be folded into any phase in this document.
 
 ## Known Baseline
 
-The production coordinator currently owns an in-memory coroutine worker in the
-same application process as `PlaybackService`. It creates a
-`SingleUseMdxInferenceSessionProvider` for each separation execution.
-The manifest declares `PlaybackService` for
-`mediaPlayback|mediaProcessing`.
+Production still owns an in-memory coroutine worker in the same application
+process as `PlaybackService` and creates a
+`SingleUseMdxInferenceSessionProvider` for each separation execution. The
+manifest declares `PlaybackService` for `mediaPlayback|mediaProcessing`.
+
+Phase 2 added an internal-only `BoundRemote` host in
+`:source_separation`, process-specific startup, bounded IPC, exact remote
+admission, and complete remote range execution. The main process still owns
+the cache run-writer lease, manifest transitions, FLAC promotion, hydration,
+and playback. Bound execution matches in-process output on the supported
+worker ABIs, and pure x86 passes service startup, close, rebind, and
+remote-death handling.
+
+The remote range executor still creates a new single-use provider for every
+execution. It therefore does not yet address pure x86's unsafe close/create
+lifecycle, and normal pure-x86 admission remains fail-closed before native
+allocation. The accepted Phase 2 evidence is in
+`validation/litert-inference-process/phase2/validation-2026-07-24.md`.
 
 The processing wake lock and dynamic `mediaProcessing` foreground
 type currently protect the case where playback is waiting for separation
@@ -125,10 +144,10 @@ cache. They are not a separate durable owner for every full-song background
 run. Current background behavior therefore depends substantially on the
 playback service and process remaining alive.
 
-The application `App.onCreate()` currently starts the complete Koin
-module graph in every app process. A remote process would therefore initialize
-far more UI, network, image, and repository state than it needs unless process
-specific startup is added.
+The inference process now starts only its small Koin graph and returns before
+main-process preference population, crash UI, StrictMode, image loading, and
+other unrelated startup. Its settled pre-LiteRT PSS passes the frozen 96 MiB
+gate on S10, S25, x86_64, and pure x86.
 
 The [LiteRT CPU results](litert-cpu-validation-results.md) establish:
 
@@ -233,7 +252,8 @@ No phase passes unless:
 - no run can have two live cache writers;
 - cancellation and pause remain distinguishable;
 - process death cannot promote a partial cache to completed;
-- unsupported models and ABIs fail before native allocation;
+- unsupported models and ABIs fail before native allocation outside an
+  explicitly identified AndroidTest-only compatibility override;
 - original playback survives a remote runtime failure; and
 - reports identify app commit, model hash, contract, ABI, Android API, process
   mode, process generation, backend, and source fixture.
@@ -386,48 +406,182 @@ background semantics. It is still internal-only on every ABI. The accepted
 evidence and the explicit recents-removal limitation are recorded in
 `docs/validation/litert-inference-process/phase2/validation-2026-07-24.md`.
 
-## Phase 3: Qualify the Pure-x86 Session Strategy
+## Phase 3: Qualify a Single-Session Pure-x86 Process
 
-### Phase 3A: One resident session
+Existing CPU evidence establishes that 9662 and KARA can run correctly on the
+packaged x86 LiteRT runtime and can reuse one native session; Phase 0 freezes
+the 9662 result as the diagnostic baseline. The failure mode is
+production-shaped close/create/invoke in one 32-bit process. Phase 2 now gives
+that experiment a replaceable process boundary, but its range executor still
+uses a new `SingleUseMdxInferenceSessionProvider` for each run.
 
-- [ ] Give the dedicated process a serialized reusable-session owner keyed by
-  factory, artifact SHA-256, contract/profile identity, backend profile, and
-  runtime settings.
-- [ ] Keep the session alive across pause/resume and successive work for the
-  same exact model.
-- [ ] Never hold two large x86 sessions concurrently.
-- [ ] Distinguish lease release from session destruction.
-- [ ] Record process address-space and allocator evidence before setup, after
-  inference, after pause, after reuse, and before recycle.
+| Current evidence | Result | Phase 3 consequence |
+| --- | --- | --- |
+| Pure-x86 bound service startup, close, death, and rebind | passed | the process boundary is ready for inference experiments |
+| 9662/KARA x86 numerical run and same-session reuse | passed at about 532 MiB session PSS delta | test one resident session instead of repeated allocation |
+| Production-shaped single-use close/create/invoke | repeated LiteRT invocation failure | forbid a second native session in one process generation |
+| HQ4 x86 first allocation | failed despite the enlarged AVD | retain zero-allocation rejection; it is not a Phase 3 candidate |
 
-### Phase 3B: Deterministic process recycle
+Phase 3 is a falsifiable, internal-only x86 experiment. It must not alter
+source decode, cache identity, release compatibility, other ABI host policy,
+or background ownership. Cache-race recovery and arbitrary process death
+remain Phase 4 work.
 
-- [ ] Treat model switch, incompatible runtime settings, fatal native state,
-  and failed session validation as process-recycle boundaries on x86.
-- [ ] Compare graceful service stop, unbind/stop, and explicit dedicated
-  process termination. Do not assume `stopSelf()` creates a fresh
-  process.
-- [ ] Require a recycle acknowledgement and a new generation before the next
-  model can acquire its cache lease.
-- [ ] Prevent sticky restart from reviving the old generation.
-- [ ] Verify that the main process and original playback survive every recycle.
+### Phase 3A: Freeze the failure model and harness
 
-### Phase 3C: x86 lifecycle matrix
+- [ ] Add a Phase 3 report extension that records process PID/generation,
+  process-start identity from `/proc/<pid>/stat`, session ID and key,
+  native-session creation count, lease count, invocation count, poisoned
+  state, recycle reason/token, and expected versus unexpected Binder death.
+- [ ] Capture remote `VmSize`, `VmPeak`, `VmRSS`, PSS, native PSS, thread and
+  mapped-region counts, `smaps_rollup` or a `smaps` fallback,
+  `AnonHugePages`, and the largest free virtual-address gap before setup, after
+  first invocation, after pause, after reuse, and immediately before recycle.
+- [ ] Add an opt-in validation build gate that admits only the exact pinned
+  x86 9662 and KARA artifacts through `BoundRemote`. It must be unavailable to
+  normal debug/CI/release builds, have no preference or backup key, and record
+  both the original `Unsupported` decision and the effective test override.
+  The remote service must derive and verify the override itself; a client IPC
+  field cannot grant compatibility.
+- [ ] In sacrificial fresh generations, compare at least five
+  create/invoke/close/create attempts with a separate same-session-reuse
+  control. Preserve failures and address-space evidence instead of treating a
+  successful retry as proof that recreation is generally safe.
+- [ ] Freeze the session state machine as
+  `Empty -> Creating -> Resident -> Poisoned -> Recycling`. A pure-x86
+  generation may never transition directly from one resident session key to
+  another.
+- [ ] Freeze the no-client/paused warm-retention deadline and recycle timeout
+  and the minimum acceptable largest-free-address gap before the lifecycle
+  matrix. Use the Phase 0 20-cycle, 64 MiB PSS-growth, and
+  256-mapping-growth gates without retrospective adjustment. This deadline is
+  an experimental reclamation bound, not the final user-facing pause policy;
+  Phase 7C retains that production decision.
 
-- [ ] Run 9662 through at least 20 pause/resume/seek/cancel cycles in one
-  process generation.
-- [ ] Run repeated full-song and bounded-prefetch jobs for the same model.
-- [ ] Alternate 9662 and KARA through process recycle for at least 20 switches.
-- [ ] Inject failure during setup, invocation, output read, segment commit, and
-  recycle.
-- [ ] Compare output against the existing x86 numerical oracle.
-- [ ] Confirm the second, tenth, and twentieth successful run do not show
-  growing mapped-region, PSS, or restart trends.
-- [ ] Keep HQ4 unsupported; run only an explicit allocation probe if useful.
+### Phase 3B: Add one process-owned session authority
 
-**Phase 3 exit:** pure x86 remains unsupported unless repeated production-shaped
-jobs and model switches pass through a fresh process boundary. A failure ends
-this route without changing other ABI policy.
+- [ ] Add a serialized process-owned session controller to the remote
+  execution environment. Implement it generically, but enable persistent
+  native-session ownership only for the internal pure-x86 experiment in this
+  phase; other ABIs retain the Phase 2 single-use behavior.
+- [ ] Refactor the remote range executor to acquire from that environment-owned
+  controller instead of calling a provider factory for every `separate()`.
+  Closing an `ActiveRemoteRun` releases its lease and callbacks; it must not
+  destroy the resident provider.
+- [ ] Key the resident session by factory, artifact SHA-256, contract and
+  execution-profile identity, backend profile, precision, and runtime
+  settings. Auto on pure x86 must resolve to the CPU backend before the key is
+  accepted.
+- [ ] Permit exactly one native session creation and one active lease at a time
+  in each x86 process generation. A same-key request reuses the exact session;
+  a different key returns `RecycleRequired` without closing or creating a
+  second session.
+- [ ] Make pause, cancel, bounded-prefetch completion, ordinary completion,
+  and lease release leave a healthy same-key session resident. Session close
+  is process teardown, not an in-process replacement mechanism.
+- [ ] Mark the controller poisoned after any native create, invoke, tensor
+  read, non-finite output, or cleanup failure that may leave LiteRT state
+  uncertain. A poisoned generation rejects all later starts.
+- [ ] Keep protocol/admission failures before session acquisition non-poisoning.
+  Conservatively recycle after an unexpected execution failure once a native
+  session has been acquired; do not guess that the session survived.
+- [ ] Preserve the Phase 2 rule that the main process owns the one cache
+  run-writer lease. Session residency must not retain, duplicate, or bypass
+  that lease.
+- [ ] Add fake-session tests for every state transition, same-key reuse,
+  key mismatch, lease release, client disconnect/rebind, delayed recycle,
+  poisoning, and the invariant that creation count cannot exceed one.
+
+### Phase 3C: Add acknowledged whole-process recycle
+
+- [ ] Extend the private protocol with a recycle request containing the exact
+  expected process generation, reason, and a unique recycle token. Accept it
+  only when no remote run is active and the main process has observed the run's
+  terminal/paused result and released its run-writer lease.
+- [ ] Have the inference process acknowledge the token and then terminate its
+  own PID after the synchronous Binder response returns. The main process must
+  not kill a remembered remote PID.
+- [ ] Treat the resulting Binder death as expected only for the acknowledged
+  token. Block new admission until the old binder is dead and a new binding
+  reports a new process generation and process-start identity. Record PID
+  changes, but do not assume Android cannot reuse a numeric PID.
+- [ ] Use self-termination as the reclamation boundary. Measure
+  `stopSelf()`, unbind, and service stop for diagnostics, but do not use them as
+  proof that Android discarded native address-space state.
+- [ ] Recycle at a run boundary for model/profile/runtime-key changes, a
+  poisoned session, expiration of the frozen idle deadline, or an idle memory
+  pressure request. Never recycle merely because the active model changes
+  while an already admitted run is still executing.
+- [ ] A native failure ends the current Phase 3 run. Recycle before the next
+  attempt, but do not automatically resume or recover the failed cache until
+  the Phase 4 journal and cross-process lease rules exist.
+- [ ] Prevent sticky restart and stale callbacks from reviving or completing
+  the old generation. Verify that original-audio playback and the main process
+  survive every expected recycle and injected remote death.
+- [ ] Hold no foreground-service state or wake lock merely to retain an idle or
+  manually paused session. If Android kills it, classify that separately from
+  the acknowledged recycle path.
+
+### Phase 3D: Run the staged x86 qualification matrix
+
+- [ ] Start with one bounded `content://` 9662 worker and one complete song in
+  `BoundRemote`. Require the existing decode route, exact frame count, cache
+  identity, terminal state, and x86 numerical/output oracle before running the
+  repetition matrix.
+- [ ] In one generation with one 9662 session, run at least 20 bounded
+  production-worker jobs: five ordinary completions, five pause/resume cases,
+  five pending-tail seek/resume cases, and five cancellations. Include client
+  disconnect/rebind while paused and require one session ID and creation count
+  throughout.
+- [ ] Ensure every repetition actually invokes LiteRT. Use a distinct exact
+  cache identity or remove the prior exact entry only after terminal state and
+  run-writer lease release; a completed-cache hit does not count as a cycle.
+- [ ] Run one full-song 9662 job before and after the 20-cycle series, plus
+  repeated bounded-prefetch/resume work, without replacing the resident
+  session. No canceled or failed window may become `Ready`.
+- [ ] Alternate exact 9662 and KARA keys through at least 20 acknowledged
+  recycle boundaries. Each switch must use a fresh process incarnation and
+  generation, create one session only, run a bounded worker through valid
+  output without a completed-cache shortcut, and reject every stale callback
+  or old-generation command.
+- [ ] Inject validation failure before native setup, native setup failure,
+  invocation failure, output-read/non-finite failure, callback death, recycle
+  timeout, and unexpected idle remote death. Verify the defined
+  healthy/poisoned classification and require a fresh generation after every
+  native-fatal case. Arbitrary death during an active cache-file transition
+  remains Phase 4.
+- [ ] At cycles 2, 10, and 20, compare address-space and allocator evidence.
+  Require zero unexplained failures, at most 64 MiB PSS growth from cycle 2 to
+  cycle 20, at most 256 additional mapped regions, no shrinking trend that
+  crosses the frozen largest-free-gap floor, and no unexpected process restart.
+- [ ] Run original-audio playback during at least one long resident-session
+  case and one 20-switch recycle case. Remote failure or recycle must not stop,
+  seek, or replace original playback.
+- [ ] Keep HQ4 fail-closed and verify its existing zero-allocation preflight.
+  Do not repeat the known-disqualified x86 HQ4 allocation probe in Phase 3.
+
+### Phase 3E: Record a bounded decision
+
+- [ ] Commit compact Phase 3 reports and a summary that distinguishes
+  same-session reliability, expected recycle, unexpected death, memory trend,
+  output parity, and the remaining Phase 4 cache-safety dependency.
+- [ ] If the matrix passes, retain x86 as `Unsupported` in normal builds and
+  carry the result forward only as candidate evidence for Phase 4 and final
+  device qualification. Do not enable a user-visible model or process mode in
+  this phase.
+- [ ] If any unexplained allocation, stale-generation, cache, playback, or
+  trend gate fails, end the pure-x86 route, remove the validation override, and
+  leave other ABI policy unchanged.
+- [ ] Evaluate persistent sessions on arm32, arm64, x86_64, and GPU only as a
+  later independent optimization. Phase 3 must not silently change their
+  already-qualified single-use behavior.
+
+**Phase 3 exit:** passing means one exact x86 session can survive the frozen
+same-model matrix and exact model changes can cross an acknowledged fresh
+process boundary without harming playback. Production remains `InProcess`,
+`BoundRemote` remains internal-only, and pure x86 remains fail-closed until
+Phase 4 process-safe cache ownership and later release qualification pass. A
+failure ends the pure-x86 route without changing other ABI policy.
 
 ## Phase 4: Make Cache Ownership Process-Safe
 
