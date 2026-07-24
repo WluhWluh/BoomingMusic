@@ -586,6 +586,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val coordinators = mutableListOf<SourceSeparationForegroundWorkerCoordinator>()
         val snapshots = JSONArray()
         val cases = JSONArray()
+        val fullSongBookends = JSONArray()
         val snapshotsByCycle = mutableMapOf<Int, SourceSeparationProcessDiagnostics>()
         var host: BoundRemoteSourceSeparationExecutionHost? = null
         var mediaUri: Uri? = null
@@ -690,7 +691,46 @@ class SourceSeparationPhase7WorkerDeviceTest {
                         isPlaying = false,
                         sourceSeparationBlend = TEST_BLEND,
                     )
+                }
+
+            fun completeFullSongBookend(label: String): SourceSeparationCacheManifest {
+                clearExactCacheEntry(runtimeFacade, tailRuntimeSong.cacheKey)
+                val worker = newWorker(
+                    runtime = runtimeFacade,
+                    workerSource = tailSource,
+                    workerDurationMs = tailDurationMs,
+                )
+                assertTrue(worker.startCurrentSong())
+                waitForCompleted(worker)
+                worker.cancel()
+                waitForInactive(worker)
+                val leaseReleaseMs = waitForCacheLeaseRelease(
+                    cacheRepository,
+                    tailRuntimeSong.cacheKey,
+                )
+                val completed = runtimeFacade.cacheStatus(tailRuntimeSong) as?
+                    SourceSeparationModelAwareCacheStatus.Completed
+                    ?: error("The $label full-song bookend did not complete.")
+                val diagnostics = requireNotNull(host).processDiagnostics()
+                assertProcessIdentity(diagnostics)
+                val output = requireNotNull(completed.manifest.output)
+                fullSongBookends.put(JSONObject()
+                    .put("label", label)
+                    .put("outputFrameCount", output.outputFrameCount)
+                    .put("windowCount", output.windowCount)
+                    .put("leaseReleaseMs", leaseReleaseMs)
+                    .put("invocationCount", diagnostics.session.invocationCount)
+                    .put("sessionId", diagnostics.session.sessionId)
+                    .put("stems", JSONArray(output.stems.map { stem ->
+                        JSONObject()
+                            .put("semantic", stem.semantic.name)
+                            .put("sha256", requireNotNull(stem.wavIntegrity).sha256)
+                    }))
+                )
+                return completed.manifest
             }
+
+            val beforeMatrixFullSong = completeFullSongBookend("before-matrix")
 
             for (cycle in 1..PROCESS_MATRIX_CYCLE_COUNT) {
                 val scenario = ProcessMatrixScenario.forCycle(cycle)
@@ -881,6 +921,20 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 }
             }
 
+            val afterMatrixFullSong = completeFullSongBookend("after-matrix")
+            assertEquals(
+                beforeMatrixFullSong.output?.outputFrameCount,
+                afterMatrixFullSong.output?.outputFrameCount,
+            )
+            assertEquals(
+                beforeMatrixFullSong.output?.stems.orEmpty().associate { stem ->
+                    stem.semantic to requireNotNull(stem.wavIntegrity).sha256
+                },
+                afterMatrixFullSong.output?.stems.orEmpty().associate { stem ->
+                    stem.semantic to requireNotNull(stem.wavIntegrity).sha256
+                },
+            )
+
             val cycle2 = requireNotNull(snapshotsByCycle[2])
             val cycle20 = requireNotNull(snapshotsByCycle[20])
             val pssGrowthBytes = cycle20.memory.pssBytes - cycle2.memory.pssBytes
@@ -935,6 +989,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("mappedRegionGrowthCycle2To20", mappedRegionGrowth)
                 .put("unexpectedBinderDeathCount", unexpectedDeaths)
                 .put("cases", cases)
+                .put("fullSongBookends", fullSongBookends)
                 .put("snapshots", snapshots)
                 .put("recycle", JSONObject()
                     .put("token", recycle.recycleToken)
@@ -948,6 +1003,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("error", "${error::class.java.name}: ${error.message}")
             report.put("processMatrix", JSONObject()
                 .put("cases", cases)
+                .put("fullSongBookends", fullSongBookends)
                 .put("snapshots", snapshots)
             )
             throw error
