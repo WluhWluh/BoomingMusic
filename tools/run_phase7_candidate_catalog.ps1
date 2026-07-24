@@ -69,6 +69,25 @@ function Invoke-Adb {
     return $output
 }
 
+function Invoke-DownloadWithRetry([string]$Uri, [string]$Destination) {
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+        try {
+            Invoke-WebRequest -Uri $Uri -UseBasicParsing -OutFile $Destination
+            if (-not (Test-Path -LiteralPath $Destination -PathType Leaf) -or
+                    (Get-Item -LiteralPath $Destination).Length -le 0) {
+                throw "Download created an empty file."
+            }
+            return
+        } catch {
+            $lastError = $_.Exception
+            if ($attempt -lt 3) { Start-Sleep -Seconds ([math]::Pow(2, $attempt - 1)) }
+        }
+    }
+    throw "Could not download $Uri after three attempts: $($lastError.Message)"
+}
+
 function Get-ReleaseArtifact($ReleaseManifest, [string]$RequestedModelId) {
     $row = @($ReleaseManifest.artifacts) | Where-Object {
         $_.modelId -eq $RequestedModelId
@@ -149,7 +168,7 @@ $releaseTag = [string]($releaseTags | Select-Object -First 1)
 $releaseBaseUrl = "https://github.com/WluhWluh/bss-tflite/releases/download/$releaseTag"
 $releaseManifestUrl = "$releaseBaseUrl/release-manifest-v1.json"
 $remoteManifestPath = Join-Path $deviceDirectory "release-manifest-v1.json"
-Invoke-WebRequest -Uri $releaseManifestUrl -UseBasicParsing -OutFile $remoteManifestPath
+Invoke-DownloadWithRetry $releaseManifestUrl $remoteManifestPath
 $remoteManifestSha256 = Get-Sha256 $remoteManifestPath
 $releaseManifest = Get-Content -LiteralPath $remoteManifestPath -Raw | ConvertFrom-Json
 Require-Equal $releaseManifest.releaseTag $releaseTag "Release manifest tag"
