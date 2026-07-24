@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/WluhWluh/BoomingSS/tree/feature/litert-multi-model-presets/docs/validation/litert-inference-process/phase0/report-schema-v1.json",
+  "title": "Booming SS LiteRT inference process report",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "identity",
+    "device",
+    "run",
+    "processes",
+    "timing",
+    "memory",
+    "lifecycle",
+    "terminal"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "litert-inference-process-report-v1"
+    },
+    "identity": {
+      "type": "object",
+      "required": [
+        "appCommit",
+        "dirty",
+        "packageName",
+        "modelId",
+        "artifactSha256",
+        "contractId",
+        "contractSchemaVersion"
+      ],
+      "properties": {
+        "appCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "dirty": { "type": "boolean" },
+        "packageName": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string", "minLength": 1 },
+        "artifactSha256": { "$ref": "#/$defs/sha256" },
+        "contractId": { "type": "string", "minLength": 1 },
+        "contractSchemaVersion": { "type": "integer", "minimum": 1 },
+        "protocolVersion": { "type": ["integer", "null"], "minimum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "device": {
+      "type": "object",
+      "required": ["serial", "model", "androidApi", "abi", "fingerprint"],
+      "properties": {
+        "serial": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "androidApi": { "type": "integer", "minimum": 26 },
+        "abi": {
+          "enum": ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
+        },
+        "fingerprint": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "runId",
+        "hostMode",
+        "processGeneration",
+        "cacheKey",
+        "backend",
+        "sourceFixture",
+        "decodeRoute"
+      ],
+      "properties": {
+        "runId": { "$ref": "#/$defs/token" },
+        "hostMode": {
+          "enum": ["InProcess", "BoundRemote", "IndependentForeground"]
+        },
+        "processGeneration": { "$ref": "#/$defs/token" },
+        "cacheKey": { "$ref": "#/$defs/sha256" },
+        "backend": { "type": "string", "minLength": 1 },
+        "sourceFixture": { "type": "string", "minLength": 1 },
+        "decodeRoute": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "processes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "role",
+          "processName",
+          "pid",
+          "oomScoreAdj",
+          "vmSizeBytes",
+          "vmPeakBytes",
+          "mappedRegionCount"
+        ],
+        "properties": {
+          "role": { "enum": ["main", "inference", "instrumentation"] },
+          "processName": { "type": "string", "minLength": 1 },
+          "pid": { "type": "integer", "minimum": 1 },
+          "oomScoreAdj": { "type": "integer", "minimum": -1000, "maximum": 1000 },
+          "vmSizeBytes": { "type": "integer", "minimum": 0 },
+          "vmPeakBytes": { "type": "integer", "minimum": 0 },
+          "vmRssBytes": { "type": "integer", "minimum": 0 },
+          "threadCount": { "type": "integer", "minimum": 1 },
+          "mappedRegionCount": { "type": "integer", "minimum": 0 },
+          "pssBytes": { "type": ["integer", "null"], "minimum": 0 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "timing": {
+      "type": "object",
+      "required": ["firstReadyMs", "fullSongMs", "processCpuMs"],
+      "properties": {
+        "firstReadyMs": { "type": "integer", "minimum": 0 },
+        "fullSongMs": { "type": "integer", "minimum": 0 },
+        "processCpuMs": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "memory": {
+      "type": "object",
+      "required": ["summedPeakPssBytes"],
+      "properties": {
+        "summedIdlePssBytes": { "type": "integer", "minimum": 0 },
+        "summedPeakPssBytes": { "type": "integer", "minimum": 0 },
+        "mainPeakPssBytes": { "type": "integer", "minimum": 0 },
+        "inferencePeakPssBytes": { "type": ["integer", "null"], "minimum": 0 },
+        "peakNativeBytes": { "type": "integer", "minimum": 0 },
+        "peakGraphicsBytes": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "lifecycle": {
+      "type": "object",
+      "required": [
+        "pauseResumePassed",
+        "cancelPassed",
+        "mainProcessSurvived",
+        "unexpectedProcessDeaths",
+        "restartCount"
+      ],
+      "properties": {
+        "pauseResumePassed": { "type": "boolean" },
+        "cancelPassed": { "type": "boolean" },
+        "mainProcessSurvived": { "type": "boolean" },
+        "unexpectedProcessDeaths": { "type": "integer", "minimum": 0 },
+        "restartCount": { "type": "integer", "minimum": 0 },
+        "foregroundServiceType": { "type": ["string", "null"] },
+        "wakeLockHeld": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "terminal": {
+      "type": "object",
+      "required": ["state", "cacheValid", "outputFrames", "outputSha256"],
+      "properties": {
+        "state": {
+          "enum": ["Completed", "Paused", "Canceled", "Failed", "Unsupported"]
+        },
+        "cacheValid": { "type": "boolean" },
+        "outputFrames": { "type": "integer", "minimum": 0 },
+        "outputSha256": {
+          "oneOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,160}$"
+    }
+  },
+  "additionalProperties": true
+}
+

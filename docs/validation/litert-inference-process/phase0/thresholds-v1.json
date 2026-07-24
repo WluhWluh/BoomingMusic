@@ -1,0 +1,114 @@
+{
+  "schemaVersion": "litert-inference-process-thresholds-v1",
+  "frozenAtAppCommit": "c948e9d89ec12318a6a177de1548750fc70fc5dc",
+  "model": {
+    "modelId": "uvr_mdxnet_3_9662",
+    "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "contractSchemaVersion": 2
+  },
+  "comparison": {
+    "maximumFirstReadyRatio": 1.2,
+    "maximumFullSongRatio": 1.15,
+    "maximumSummedPeakPssIncreaseBytes": 134217728,
+    "maximumIdleRemotePssBytes": 100663296,
+    "maximumPlaybackTimestampDriftMs": 100,
+    "maximumUnexpectedProcessDeaths": 0,
+    "maximumAudioUnderruns": 0,
+    "requireExactOutputFrames": true,
+    "requireExactDecodeRoute": true,
+    "requireQuantizedEquivalentOutput": true,
+    "maximumPcm16Delta": 1,
+    "minimumSnrDb": 70.0,
+    "maximumJoinDiscontinuity": 0.00006103515625,
+    "maximumReconstructionErrorDelta": 0.00006103515625
+  },
+  "x86Lifecycle": {
+    "minimumSameModelCycles": 20,
+    "minimumModelSwitchCycles": 20,
+    "maximumFailures": 0,
+    "maximumPssGrowthSecondToFinalBytes": 67108864,
+    "maximumMappedRegionGrowthSecondToFinal": 256,
+    "requireFreshGenerationForModelSwitch": true,
+    "requireMainProcessSurvival": true,
+    "hq4RemainsUnsupported": true
+  },
+  "baselines": [
+    {
+      "target": "s10-arm32",
+      "device": "SM-G9730",
+      "androidApi": 31,
+      "abi": "armeabi-v7a",
+      "backend": "LiteRtCpu",
+      "firstReadyMs": 11379,
+      "fullSongMs": 252809,
+      "processCpuMs": 783593,
+      "idlePssBytes": 242265088,
+      "peakPssBytes": 859328512,
+      "peakPssDeltaBytes": 617063424,
+      "peakNativeBytes": 514498560,
+      "peakThermalStatus": 0
+    },
+    {
+      "target": "s10-arm64",
+      "device": "SM-G9730",
+      "androidApi": 31,
+      "abi": "arm64-v8a",
+      "backend": "LiteRtCpu",
+      "firstReadyMs": 9487,
+      "fullSongMs": 194694,
+      "processCpuMs": 642150,
+      "idlePssBytes": 204396544,
+      "peakPssBytes": 984918016,
+      "peakPssDeltaBytes": 780521472,
+      "peakNativeBytes": 672923648,
+      "peakThermalStatus": 0
+    },
+    {
+      "target": "s25-arm64",
+      "device": "SM-S9310",
+      "androidApi": 35,
+      "abi": "arm64-v8a",
+      "backend": "LiteRtCpu",
+      "firstReadyMs": 4509,
+      "fullSongMs": 108096,
+      "processCpuMs": 353138,
+      "idlePssBytes": 208876544,
+      "peakPssBytes": 992248832,
+      "peakPssDeltaBytes": 783372288,
+      "peakNativeBytes": 672501760,
+      "peakThermalStatus": 1
+    },
+    {
+      "target": "api37-x86_64",
+      "device": "sdk_gphone16k_x86_64",
+      "androidApi": 37,
+      "abi": "x86_64",
+      "backend": "LiteRtCpu",
+      "firstReadyMs": 22693,
+      "fullSongMs": 202540,
+      "processCpuMs": 448856,
+      "idlePssBytes": 204324864,
+      "peakPssBytes": 1119097856,
+      "peakPssDeltaBytes": 914772992,
+      "peakNativeBytes": 835784704,
+      "peakThermalStatus": 0
+    }
+  ],
+  "diagnosticX86Baseline": {
+    "device": "Android SDK built for x86",
+    "androidApi": 26,
+    "abi": "x86",
+    "backend": "LiteRtCpu",
+    "firstInferenceMs": 1830,
+    "sameSessionReuseMs": 1459,
+    "sessionPssDeltaMiB": 531.7,
+    "snrDb": 97.59860504552219,
+    "maximumAbsoluteError": 0.00005953,
+    "productionStatus": "unsupported"
+  },
+  "sourceReports": [
+    "../../litert-phase7/9662-objective-2026-07-24/phase7-9662-objective-summary.json",
+    "../../litert-cpu-phase2/phase2-final-x86-9662-lifecycle.json"
+  ]
+}

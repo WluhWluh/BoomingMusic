@@ -246,42 +246,42 @@ never retrospectively to make a failing result pass.
 
 ### Phase 0A: Current lifecycle inventory
 
-- [ ] Diagram current ownership of coordinator scope, PlaybackService scope,
+- [x] Diagram current ownership of coordinator scope, PlaybackService scope,
   foreground state, wake lock, model session, cache lease, FLAC promotion, and
   playback readiness.
-- [ ] Record which behavior survives Activity destruction, PlaybackService
+- [x] Record which behavior survives Activity destruction, PlaybackService
   destruction, recents removal, main-process death, and inference exceptions.
-- [ ] Record the current `oom_score_adj`, process state, wake-lock
+- [x] Record the current `oom_score_adj`, process state, wake-lock
   state, and foreground-service type during full-song, prefetch, and
   playback-waiting runs.
-- [ ] Confirm how current process death is recovered from v2 cache manifests.
-- [ ] Inventory every in-memory lock or singleton that assumes one process.
+- [x] Confirm how current process death is recovered from v2 cache manifests.
+- [x] Inventory every in-memory lock or singleton that assumes one process.
 
 ### Phase 0B: Baseline device reports
 
-- [ ] Capture in-process 9662 full-song and bounded-prefetch baselines on S10
+- [x] Capture in-process 9662 full-song and bounded-prefetch baselines on S10
   arm64, S10 arm32, S25 arm64, pure x86, and x86_64 where current compatibility
   permits.
-- [ ] Keep pure-x86 baseline execution behind an instrumentation-only
+- [x] Keep pure-x86 baseline execution behind an instrumentation-only
   compatibility override; its production preflight remains fail-closed.
-- [ ] Record main-process PSS/USS/RSS, native and graphics memory,
+- [x] Record main-process PSS/USS/RSS, native and graphics memory,
   `VmSize`/`VmPeak`, mapped-region count, CPU time, first
   ready-window time, windows per minute, total run time, and thermal state.
-- [ ] Record playback underruns, MediaSession interruptions, and progress gaps
+- [x] Record playback underruns, MediaSession interruptions, and progress gaps
   while music is playing.
-- [ ] Capture screen-on and screen-off baselines without changing source
+- [x] Capture screen-on and screen-off baselines without changing source
   fixtures or decode policy.
-- [ ] Freeze explicit per-device comparison thresholds for later phases.
+- [x] Freeze explicit per-device comparison thresholds for later phases.
 
 ### Phase 0C: Protocol and rollback contract
 
-- [ ] Define protocol v1 and its compatibility policy.
-- [ ] Define the exact durable run journal fields and location under the
+- [x] Define protocol v1 and its compatibility policy.
+- [x] Define the exact durable run journal fields and location under the
   model-aware cache entry.
-- [ ] Define which terminal reasons permit bounded automatic recovery.
-- [ ] Define compile-time and internal runtime gates that can return every
+- [x] Define which terminal reasons permit bounded automatic recovery.
+- [x] Define compile-time and internal runtime gates that can return every
   supported ABI to `InProcess` while leaving x86 fail-closed.
-- [ ] Add this roadmap's report schemas and directory naming convention under
+- [x] Add this roadmap's report schemas and directory naming convention under
   `docs/validation/litert-inference-process/`.
 
 **Phase 0 exit:** baseline reports and thresholds are committed; no process
