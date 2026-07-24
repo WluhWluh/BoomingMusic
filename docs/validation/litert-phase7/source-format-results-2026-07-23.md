@@ -77,7 +77,11 @@ handling or host-side expectation selection and do not execute in those rows.
 ## Remaining scope
 
 This completes the format-route worker gate, not all Phase 7 audio evidence.
-Per-format desktop ORT stem references and full digital stem comparisons have
-not been generated, so the broader fixture-freeze item remains open. The
-representative full-track reference, listening/UI pass, repeated resource and
-thermal matrix, and final catalog decision also remain separate gates.
+At the time of this matrix, per-format desktop references had not yet been
+generated. The follow-up `reference-inputs-v1.json` now freezes canonical PCM
+and ORT stem hashes for all nine rows without changing their production routes.
+
+Compressed-format FFmpeg references remain diagnostic rather than Android
+MediaCodec byte-equivalence oracles. Any later window-policy change requires a
+separate same-device window/full-song comparison and representative listening.
+The listening/UI pass and final catalog decision remain separate gates.

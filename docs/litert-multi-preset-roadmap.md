@@ -2284,7 +2284,7 @@ exists.
   LiteRT runtime revision in every report. The current acquisition baseline is
   the published prerelease `v0.1.0-candidates.1`; it is not a stable model
   release and must not be silently replaced by a mutable branch asset.
-- [ ] Freeze the digital fixtures and their hashes. Keep the existing 12-second
+- [x] Freeze the digital fixtures and their hashes. Keep the existing 12-second
   Coast Town source and a synthetic mixture as parity/control fixtures, but add
   at least one representative full-length track for worker, playback, resource,
   and thermal evidence. Add a source-format corpus covering every production
@@ -2294,7 +2294,13 @@ exists.
   codec/container, redistribution status, and expected output stem semantics.
   A short fixture cannot satisfy a full-song gate; non-redistributable media
   and full reference outputs stay out of the app repository, with hashes and
-  acquisition/reproduction instructions retained instead.
+  acquisition/reproduction instructions retained instead. The hash-only
+  `reference-inputs-v1.json` now binds three direct PCM references and nine
+  canonical format references to the exact fixture contract, companion
+  revision, FFmpeg build, ONNX artifact, DSP parameters, and script hashes.
+  Compressed-format references are diagnostic, not MediaCodec byte-equivalence
+  oracles. Any window-policy adjustment remains a separate same-device
+  full-song comparison and representative-listening decision.
 - [x] Freeze numerical and behavioral pass thresholds before running the
   promotion matrix: finite output, sample count and timeline drift, full-track
   SNR/error against desktop references, join discontinuity, ready-window and

@@ -41,9 +41,13 @@ precision. A successful short-window probe is not a Phase 7 promotion result.
 - `fixtures-v2.json` identifies the local research fixtures and the generated
   source-format corpus by hash without copying model weights, full audio, or
   reference stems into Booming SS.
-- `phase7-inputs-v1.json` will pin the exact app commit, catalog, model Release,
-  runtime, APK hashes, and fixture references once the Phase 7 runner build is
-  frozen.
+- `reference-inputs-v1.json` and its companion summary freeze the three PCM
+  desktop references and all nine canonical source-format references by hash.
+  Compressed-format references are diagnostic and do not replace same-device
+  listening decisions.
+- A final aggregate `phase7-inputs-v1.json` is intentionally deferred until the
+  exact decision build is frozen. Until then, each raw report's embedded
+  identity is authoritative.
 - `s10-arm64-9662-window-cold-v2.json` records the first full-song S10 evidence
   summary under the historical v1 threshold. It remains historical evidence:
   worker/cache correctness and one-LSB reference equivalence passed, while the

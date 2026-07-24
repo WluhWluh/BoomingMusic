@@ -1,0 +1,505 @@
+{
+  "schemaVersion": "phase7-reference-inputs-v1",
+  "generatedOn": "2026-07-24",
+  "status": "frozen-hash-only",
+  "fixtureContract": {
+    "fileName": "fixtures-v2.json",
+    "schemaVersion": "phase7-fixtures-v2",
+    "sha256": "2be55c8b0c7340ef5160a02271fbc919a98309f41660de34293e5eecdf274f3c",
+    "sourceRepository": "https://github.com/WluhWluh/MusicSourceSeparation",
+    "sourceRevision": "58fcedc9005a9dbfb2de728b66a21de8a0a5d7b5"
+  },
+  "tools": {
+    "ffmpeg": "8.1.1-full_build-www.gyan.dev",
+    "corpusGenerator": {
+      "path": "tools/generate_phase7_format_corpus.py",
+      "sha256": "eb6e02ae7e8f55807f6a5ab141156b421fc0a2e4d979b1491903ab363e1534c1"
+    },
+    "referencePipeline": {
+      "path": "tools/mdx_reference.py",
+      "sha256": "6edb7e9224de37f6e0fefc864433267093c5b5b5e2577ce6450bc3cf3f36382e"
+    },
+    "comparisonPipeline": {
+      "path": "tools/compare_phase7_audio.py",
+      "sha256": "d185aadd98e106ed78b9092104579018eafb332253fb4849334f4fcdf3269e01"
+    }
+  },
+  "model": {
+    "modelId": "uvr_mdxnet_3_9662",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "canonicalOnnxSha256": "e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc",
+    "tfliteArtifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "sampleRate": 44100,
+    "dimF": 2048,
+    "nFft": 6144,
+    "hopLength": 1024,
+    "dimTPower": 8,
+    "denoise": false,
+    "modelOutputScale": 1.035,
+    "modelOutputStem": "Vocals",
+    "outputStemSemantics": [
+      "Vocals",
+      "Instrumental"
+    ]
+  },
+  "reproduction": {
+    "canonicalDecode": "ffmpeg -hide_banner -loglevel error -nostdin -y -i <source> -map_metadata -1 -vn -af aresample=44100,apad,atrim=end_sample=<expectedOutputFrameCount> -ar 44100 -ac 2 -c:a pcm_s16le <canonical-input.wav>",
+    "reference": "python tools/mdx_reference.py separate --model <canonical-9662.onnx> --input <canonical-input.wav> --output-dir <output> --limit-seconds 360 --no-denoise --model-output-scale 1.035 --model-output-stem vocals"
+  },
+  "comparisonPolicy": {
+    "representativePcm": "Apply phase7-thresholds-v2 to matching Android exports.",
+    "compressedFormats": "Hash-frozen desktop codec/ORT references are diagnostic. They must not change the production window-decode policy without same-device window/full-song controls and representative listening.",
+    "repositoryPayload": "Reference audio and model weights are omitted; only hashes and reproduction inputs are committed."
+  },
+  "directPcmReferences": [
+    {
+      "fixtureId": "coast_town_full_wav",
+      "source": {
+        "relativePath": "data/samples/_-_Coast_Town__decoded.wav",
+        "byteSize": 48280564,
+        "sha256": "e845e52aeeeb69be702d3a28d756eaf7a3137dbe5338ea50fb0ac3d8c4f9bd89",
+        "durationUs": 273699093,
+        "sampleRate": 44100,
+        "channels": 2,
+        "codec": "pcm_s16le",
+        "redistribution": "local-research-only"
+      },
+      "canonicalInput": {
+        "kind": "direct-pcm-fixture",
+        "frameCount": 12070130,
+        "sha256": "e845e52aeeeb69be702d3a28d756eaf7a3137dbe5338ea50fb0ac3d8c4f9bd89"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "_-_Coast_Town__decoded_vocals.wav",
+          "byteSize": 48280564,
+          "sha256": "6d1fbc52b977bed2d8f21bee930d2231e8de3ad5e36fdecee10a30dd81ac34b2"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "_-_Coast_Town__decoded_instrumental.wav",
+          "byteSize": 48280564,
+          "sha256": "0203b18a0b78c39bad7705732620aaf3bc37b87cc0c420b5f8566e2969f96e3b"
+        }
+      ]
+    },
+    {
+      "fixtureId": "coast_town_short_wav",
+      "source": {
+        "relativePath": "data/samples/coast_town_vocal_entry_37s_12s.wav",
+        "byteSize": 2116844,
+        "sha256": "0fa980cace732c47647043d1a5fce3589e54771ca3574b003f152acfa6ceec96",
+        "durationUs": 12000000,
+        "sampleRate": 44100,
+        "channels": 2,
+        "codec": "pcm_s16le",
+        "redistribution": "local-research-only"
+      },
+      "canonicalInput": {
+        "kind": "direct-pcm-fixture",
+        "frameCount": 529200,
+        "sha256": "0fa980cace732c47647043d1a5fce3589e54771ca3574b003f152acfa6ceec96"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "coast_town_vocal_entry_37s_12s_vocals.wav",
+          "byteSize": 2116844,
+          "sha256": "03bbdbc94807c3cd64830a1d01ce9fa0d7e0b854963ee0188179caee65971486"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "coast_town_vocal_entry_37s_12s_instrumental.wav",
+          "byteSize": 2116844,
+          "sha256": "39b2b63fad0c8351f49680f054bb2e2bcb4637e7caa2206b587103e90e279b7b"
+        }
+      ]
+    },
+    {
+      "fixtureId": "synthetic_mix",
+      "source": {
+        "relativePath": "data/smoke/synthetic_mix.wav",
+        "byteSize": 529244,
+        "sha256": "c7d097e1b0d8b7cd372d43b6b93866d297d1a1af3204f355fd1b013b72e6457a",
+        "durationUs": 3000000,
+        "sampleRate": 44100,
+        "channels": 2,
+        "codec": "pcm_s16le",
+        "redistribution": "local-research-only"
+      },
+      "canonicalInput": {
+        "kind": "direct-pcm-fixture",
+        "frameCount": 132300,
+        "sha256": "c7d097e1b0d8b7cd372d43b6b93866d297d1a1af3204f355fd1b013b72e6457a"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "synthetic_mix_vocals.wav",
+          "byteSize": 529244,
+          "sha256": "528929a9363b868694559244b5eca15d15596877a462138884fa912c392260ea"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "synthetic_mix_instrumental.wav",
+          "byteSize": 529244,
+          "sha256": "9c485bff9029c4316ec4b8ff15820fbb42402013b588817264a1e849442153e6"
+        }
+      ]
+    }
+  ],
+  "sourceFormatReferences": [
+    {
+      "fixtureId": "format_wav_44100",
+      "source": {
+        "relativePath": "data/phase7/source-formats-v1/phase7_format_source.wav",
+        "byteSize": 2646044,
+        "sha256": "0fc47a42541e5e3860d256d5b01aaff104012438f26da80f1b9ba054c052f6b9",
+        "durationUs": 15000000,
+        "sampleRate": 44100,
+        "channels": 2,
+        "codec": "pcm_s16le",
+        "container": "wav",
+        "decodeClass": "wav-window",
+        "redistribution": "generated-apache-2.0",
+        "expectedOutputFrameCount": 661500
+      },
+      "canonicalInput": {
+        "kind": "pinned-ffmpeg-canonical-decode",
+        "sampleRate": 44100,
+        "channels": 2,
+        "sampleFormat": "s16",
+        "frameCount": 661500,
+        "byteSize": 2646078,
+        "sha256": "e81a5ed11435a32c466a19981689efa293d8fc517f90eb8469a92ba92cc4efc5"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "canonical-input_vocals.wav",
+          "byteSize": 2646044,
+          "sha256": "6bf56edb86fb5a87e669601e3eabd82fcb8f0182bb7cd6e7039a86ab282f449a"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "canonical-input_instrumental.wav",
+          "byteSize": 2646044,
+          "sha256": "8577b30461489498951d08dd7bf4292feacf43039211f1b20b5383fa686dc777"
+        }
+      ]
+    },
+    {
+      "fixtureId": "format_flac_44100",
+      "source": {
+        "relativePath": "data/phase7/source-formats-v1/phase7_format_flac_44100.flac",
+        "byteSize": 1591558,
+        "sha256": "f45e7df2fa9fa47e183d8f4dbce56e7ba965ac086fa696979596d9288beef40b",
+        "durationUs": 15000000,
+        "sampleRate": 44100,
+        "channels": 2,
+        "codec": "flac",
+        "container": "flac",
+        "decodeClass": "flac-44100-window",
+        "redistribution": "generated-apache-2.0",
+        "expectedOutputFrameCount": 661500
+      },
+      "canonicalInput": {
+        "kind": "pinned-ffmpeg-canonical-decode",
+        "sampleRate": 44100,
+        "channels": 2,
+        "sampleFormat": "s16",
+        "frameCount": 661500,
+        "byteSize": 2646078,
+        "sha256": "e81a5ed11435a32c466a19981689efa293d8fc517f90eb8469a92ba92cc4efc5"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "canonical-input_vocals.wav",
+          "byteSize": 2646044,
+          "sha256": "6bf56edb86fb5a87e669601e3eabd82fcb8f0182bb7cd6e7039a86ab282f449a"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "canonical-input_instrumental.wav",
+          "byteSize": 2646044,
+          "sha256": "8577b30461489498951d08dd7bf4292feacf43039211f1b20b5383fa686dc777"
+        }
+      ]
+    },
+    {
+      "fixtureId": "format_vorbis_44100",
+      "source": {
+        "relativePath": "data/phase7/source-formats-v1/phase7_format_vorbis_44100.ogg",
+        "byteSize": 320573,
+        "sha256": "46a50085ce295c6efd15101aef4df6de3c0b31b94544873566fe2a7058a4648e",
+        "durationUs": 15000000,
+        "sampleRate": 44100,
+        "channels": 2,
+        "codec": "vorbis",
+        "container": "ogg",
+        "decodeClass": "ogg-vorbis-window",
+        "redistribution": "generated-apache-2.0",
+        "expectedOutputFrameCount": 661500
+      },
+      "canonicalInput": {
+        "kind": "pinned-ffmpeg-canonical-decode",
+        "sampleRate": 44100,
+        "channels": 2,
+        "sampleFormat": "s16",
+        "frameCount": 661500,
+        "byteSize": 2646078,
+        "sha256": "d45dc615e44741584492e842170d79c91a545f4bbeb4e566c8f53650a736be89"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "canonical-input_vocals.wav",
+          "byteSize": 2646044,
+          "sha256": "b7d41135752269f0ca97657f8728b9c9c907c3e24ac91f2257bc9eba60c593a1"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "canonical-input_instrumental.wav",
+          "byteSize": 2646044,
+          "sha256": "55e96aeab136a3eb61a825b6936626223b163d2957d4511585eaf166a3665bb9"
+        }
+      ]
+    },
+    {
+      "fixtureId": "format_mp3_gapless_44100",
+      "source": {
+        "relativePath": "data/phase7/source-formats-v1/phase7_format_mp3_gapless_44100.mp3",
+        "byteSize": 361787,
+        "sha256": "e6e8a0dac41829e76ffa5dbac121fb4c1f9dc7fea6f91d5a0d4ea3e512bfaa73",
+        "durationUs": 15000000,
+        "sampleRate": 44100,
+        "channels": 2,
+        "codec": "mp3",
+        "container": "mp3",
+        "decodeClass": "mp3-44100-gapless-window",
+        "redistribution": "generated-apache-2.0",
+        "expectedOutputFrameCount": 661500
+      },
+      "canonicalInput": {
+        "kind": "pinned-ffmpeg-canonical-decode",
+        "sampleRate": 44100,
+        "channels": 2,
+        "sampleFormat": "s16",
+        "frameCount": 661500,
+        "byteSize": 2646078,
+        "sha256": "9fd6645cf71c54741eafd3c3f5579b1acf34d3a9ed029c4aa7ad9c2b6382100d"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "canonical-input_vocals.wav",
+          "byteSize": 2646044,
+          "sha256": "7eba0124a5849a7569f83155188d71f9c3d265242ee6e46fd5f8031e946f1040"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "canonical-input_instrumental.wav",
+          "byteSize": 2646044,
+          "sha256": "1cedd8384955c1b35b80f74683474c795fb44766e8b7658ba0b9e7c9b9f732f5"
+        }
+      ]
+    },
+    {
+      "fixtureId": "format_mp3_no_xing_44100",
+      "source": {
+        "relativePath": "data/phase7/source-formats-v1/phase7_format_mp3_no_xing_44100.mp3",
+        "byteSize": 361116,
+        "sha256": "ccd970f52817a2e27ac16411ca19500ef69d42d4a6f7f6063ca11f3ebf7302e5",
+        "durationUs": 15046500,
+        "sampleRate": 44100,
+        "channels": 2,
+        "codec": "mp3",
+        "container": "mp3",
+        "decodeClass": "mp3-44100-no-gapless-window",
+        "redistribution": "generated-apache-2.0",
+        "expectedOutputFrameCount": 663551
+      },
+      "canonicalInput": {
+        "kind": "pinned-ffmpeg-canonical-decode",
+        "sampleRate": 44100,
+        "channels": 2,
+        "sampleFormat": "s16",
+        "frameCount": 663551,
+        "byteSize": 2654282,
+        "sha256": "8973958b237af60e2ba8486d6c13d63f8569873fd3062f5a0cb71a3600922f27"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "canonical-input_vocals.wav",
+          "byteSize": 2654248,
+          "sha256": "441154efdc16de2b112fcf176aaff6758ceeb459d1c06691b2feba977c4466b2"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "canonical-input_instrumental.wav",
+          "byteSize": 2654248,
+          "sha256": "893100d48a55d1194de07fd604500cda3d49b58d1e210b685033944533d67961"
+        }
+      ]
+    },
+    {
+      "fixtureId": "format_aac_44100",
+      "source": {
+        "relativePath": "data/phase7/source-formats-v1/phase7_format_aac_44100.m4a",
+        "byteSize": 363889,
+        "sha256": "ba19f132eddbc43a614a6b6e17d17b19a2f2c145f81a597241c177acbb91fc61",
+        "durationUs": 15000000,
+        "sampleRate": 44100,
+        "channels": 2,
+        "codec": "aac",
+        "container": "mov,mp4,m4a,3gp,3g2,mj2",
+        "decodeClass": "unsupported-mime-full-song",
+        "redistribution": "generated-apache-2.0",
+        "expectedOutputFrameCount": 661500
+      },
+      "canonicalInput": {
+        "kind": "pinned-ffmpeg-canonical-decode",
+        "sampleRate": 44100,
+        "channels": 2,
+        "sampleFormat": "s16",
+        "frameCount": 661500,
+        "byteSize": 2646078,
+        "sha256": "d4dc1861a9600a4a95029e67ed62a94053e642fa5d0ee58e46ba541f66f010fb"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "canonical-input_vocals.wav",
+          "byteSize": 2646044,
+          "sha256": "b2c8e70133532498f1908f9fa6bf5801a553c111b21d7637bd4ffdb495b50285"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "canonical-input_instrumental.wav",
+          "byteSize": 2646044,
+          "sha256": "14e1d451e87e5abe7b8bc7e63779a5dd52374907cc4dad5796afea28b7dca16b"
+        }
+      ]
+    },
+    {
+      "fixtureId": "format_flac_48000",
+      "source": {
+        "relativePath": "data/phase7/source-formats-v1/phase7_format_flac_48000.flac",
+        "byteSize": 1727805,
+        "sha256": "4cb390abce0ff980a890860cac438eadc75c0ab93a4f5735ffb9ed064b494728",
+        "durationUs": 15000000,
+        "sampleRate": 48000,
+        "channels": 2,
+        "codec": "flac",
+        "container": "flac",
+        "decodeClass": "flac-non-44100-full-song",
+        "redistribution": "generated-apache-2.0",
+        "expectedOutputFrameCount": 661500
+      },
+      "canonicalInput": {
+        "kind": "pinned-ffmpeg-canonical-decode",
+        "sampleRate": 44100,
+        "channels": 2,
+        "sampleFormat": "s16",
+        "frameCount": 661500,
+        "byteSize": 2646078,
+        "sha256": "ac935efb1ae14fe9590ff90ebafa28603243ce8fcee7eca21c681ba632f6fd1b"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "canonical-input_vocals.wav",
+          "byteSize": 2646044,
+          "sha256": "122b6163fa3da6868f88feb5741e39918ab6ef1fe1a7158dfba96324a6b68776"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "canonical-input_instrumental.wav",
+          "byteSize": 2646044,
+          "sha256": "807ce64c40d6db6ef384e4e86a54062a89734cd35f3266a890485c22a5349a40"
+        }
+      ]
+    },
+    {
+      "fixtureId": "format_mp3_48000",
+      "source": {
+        "relativePath": "data/phase7/source-formats-v1/phase7_format_mp3_48000.mp3",
+        "byteSize": 361197,
+        "sha256": "0185d1a9ea6e4fccb67b0090c6f1093cafa9cc7340d6f21225beee70bb314561",
+        "durationUs": 15000000,
+        "sampleRate": 48000,
+        "channels": 2,
+        "codec": "mp3",
+        "container": "mp3",
+        "decodeClass": "mp3-non-44100-full-song",
+        "redistribution": "generated-apache-2.0",
+        "expectedOutputFrameCount": 661500
+      },
+      "canonicalInput": {
+        "kind": "pinned-ffmpeg-canonical-decode",
+        "sampleRate": 44100,
+        "channels": 2,
+        "sampleFormat": "s16",
+        "frameCount": 661500,
+        "byteSize": 2646078,
+        "sha256": "74df45f03e5d33e67fe4fa1a18c7c07d679a6cbccb61efd9843e1c3dc724f67f"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "canonical-input_vocals.wav",
+          "byteSize": 2646044,
+          "sha256": "828b2a712b0e5ddc2098b62a5f2291668c3849e7b41b62a007a2750dc54e29bd"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "canonical-input_instrumental.wav",
+          "byteSize": 2646044,
+          "sha256": "71b1f9e7c31b90e99285365d8defb8d7ba08539c430b8e2c1477beaebf271b87"
+        }
+      ]
+    },
+    {
+      "fixtureId": "format_wav_wrong_extension",
+      "source": {
+        "relativePath": "data/phase7/source-formats-v1/phase7_format_wav_wrong_extension.wave",
+        "byteSize": 2646044,
+        "sha256": "0fc47a42541e5e3860d256d5b01aaff104012438f26da80f1b9ba054c052f6b9",
+        "durationUs": 15000000,
+        "sampleRate": 44100,
+        "channels": 2,
+        "codec": "pcm_s16le",
+        "container": "wav",
+        "decodeClass": "wav-name-full-song",
+        "redistribution": "generated-apache-2.0",
+        "expectedOutputFrameCount": 661500
+      },
+      "canonicalInput": {
+        "kind": "pinned-ffmpeg-canonical-decode",
+        "sampleRate": 44100,
+        "channels": 2,
+        "sampleFormat": "s16",
+        "frameCount": 661500,
+        "byteSize": 2646078,
+        "sha256": "e81a5ed11435a32c466a19981689efa293d8fc517f90eb8469a92ba92cc4efc5"
+      },
+      "outputs": [
+        {
+          "semantic": "Vocals",
+          "fileName": "canonical-input_vocals.wav",
+          "byteSize": 2646044,
+          "sha256": "6bf56edb86fb5a87e669601e3eabd82fcb8f0182bb7cd6e7039a86ab282f449a"
+        },
+        {
+          "semantic": "Instrumental",
+          "fileName": "canonical-input_instrumental.wav",
+          "byteSize": 2646044,
+          "sha256": "8577b30461489498951d08dd7bf4292feacf43039211f1b20b5383fa686dc777"
+        }
+      ]
+    }
+  ]
+}
