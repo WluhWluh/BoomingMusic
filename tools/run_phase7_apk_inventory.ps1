@@ -196,6 +196,7 @@ try {
         schemaVersion = "phase7-dual-runtime-inventory-v1"
         generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
         appCommit = [string]$buildIdentity.appCommit
+        testApk = $buildIdentity.testApk
         packageName = $PackageName
         apkDirectory = $relativeApkRoot
         runtimeState = "dual-runtime-ort-oracle-and-litert-production"
