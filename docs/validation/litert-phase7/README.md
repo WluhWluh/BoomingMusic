@@ -190,6 +190,11 @@ evidence; the host then verifies and retains the WAV/FLAC stems and cache
 manifest under the ignored output root. Pure x86 is intentionally excluded
 because source separation is unsupported there.
 
+Runner v12 also accepts `-WindowDecode:$false` as a diagnostic full-song
+control for a format fixture. The host replaces that fixture's normal route
+expectation with `FullSong` and the explicit disabled-window fallback reason;
+it does not weaken the production route assertion used by the ordinary corpus.
+
 CPU is the default validation backend. Pass `-BackendMode auto` on S10 or S25
 to exercise the production `gpu-auto-fp32-v1` provider, including its real GPU
 eligibility, finite-output probe, and one-way CPU fallback. Auto cannot be

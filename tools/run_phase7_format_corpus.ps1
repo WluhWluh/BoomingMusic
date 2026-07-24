@@ -15,6 +15,7 @@ param(
     [string[]]$FixtureId = @(),
     [string]$OutputRoot = "",
     [string]$RunPrefix = "phase7-formats-v1",
+    [bool]$WindowDecode = $true,
     [switch]$ExportCacheAudio,
     [switch]$SkipBuild
 )
@@ -69,6 +70,7 @@ foreach ($fixture in $formatFixtures) {
         SourcePath = $sourcePath
         FixtureId = $fixture.fixtureId
         RunId = $runId
+        WindowDecode = $WindowDecode
     }
     if (-not [string]::IsNullOrWhiteSpace($OutputRoot)) {
         $arguments.OutputRoot = $OutputRoot

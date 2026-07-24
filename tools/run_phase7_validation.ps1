@@ -30,7 +30,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v11",
+    [string]$RunnerRevision = "phase7-runner-v12",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet("none", "setup", "probe", "invocation-after-ready")]
@@ -544,6 +544,14 @@ try {
             Select-Object -First 1
         if ($null -ne $expectedDecodeOverride) {
             $expectedDecode = $expectedDecodeOverride.expectedDecode
+        }
+        if (-not $WindowDecode -and $null -ne $expectedDecode) {
+            $expectedDecode = [pscustomobject]@{
+                mode = "FullSong"
+                profile = $null
+                mimeType = [string]$expectedDecode.mimeType
+                fallbackReason = "Window decoding is disabled in source separation settings."
+            }
         }
         if ($null -ne $expectedDecode) {
             $expectedProfile = if ($null -eq $expectedDecode.profile) {
