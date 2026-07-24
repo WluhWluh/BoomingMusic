@@ -17,7 +17,9 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostSnaps
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostStartResult
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
+import com.mardous.booming.separation.process.SourceSeparationProcParser
 import com.mardous.booming.separation.process.toMdxRangeSeparationResult
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -157,7 +159,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         ) {
             "Bound service returned a recycle acknowledgement for another process incarnation."
         }
-        connectionLock.withLock {
+        val acknowledgedBinding = connectionLock.withLock {
             check(connectionState == SourceSeparationRemoteConnectionState.Connected &&
                 connectResponse?.processGeneration == oldConnection.processGeneration
             ) {
@@ -166,6 +168,23 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             expectedRecycle = acknowledgement
             connectionState = SourceSeparationRemoteConnectionState.Recycling
             connectionChanged.signalAll()
+            activeServiceConnection.takeIf { bound }.also { connection ->
+                if (connection != null) bound = false
+            }
+        }
+        if (acknowledgedBinding != null) {
+            try {
+                applicationContext.unbindService(acknowledgedBinding)
+            } catch (error: Throwable) {
+                connectionLock.withLock {
+                    if (connectionState == SourceSeparationRemoteConnectionState.Recycling &&
+                        activeServiceConnection === acknowledgedBinding
+                    ) {
+                        bound = true
+                    }
+                }
+                throw error
+            }
         }
 
         val deadlineNanos = System.nanoTime() + recycleTimeoutMs * 1_000_000L
@@ -188,6 +207,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 "The acknowledged recycle did not end in its expected Binder death."
             }
         }
+        waitForProcessIncarnationExit(oldConnection.diagnostics, deadlineNanos)
 
         val newConnection = ensureConnected()
         require(newConnection.processGeneration != oldConnection.processGeneration) {
@@ -693,6 +713,33 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         }
     }
 
+    private fun waitForProcessIncarnationExit(
+        process: SourceSeparationProcessDiagnostics,
+        deadlineNanos: Long,
+    ) {
+        val firstObservedTicks = readProcessStartTicks(process.pid)
+        if (firstObservedTicks == null) {
+            Thread.sleep(
+                SourceSeparationProcessLifecyclePolicy.RECYCLE_ACKNOWLEDGEMENT_GRACE_MS +
+                    PROCESS_EXIT_FALLBACK_GRACE_MS,
+            )
+            return
+        }
+        if (firstObservedTicks != process.processStartTicks) return
+        while (System.nanoTime() < deadlineNanos) {
+            val currentTicks = readProcessStartTicks(process.pid)
+            if (currentTicks == null || currentTicks != process.processStartTicks) return
+            Thread.sleep(PROCESS_EXIT_POLL_INTERVAL_MS)
+        }
+        throw SourceSeparationRemoteRecycleTimeoutException(recycleTimeoutMs)
+    }
+
+    private fun readProcessStartTicks(pid: Int): Long? = runCatching {
+        SourceSeparationProcParser.parseProcessStartTicks(
+            File("/proc/$pid/stat").readText(),
+        )
+    }.getOrNull()
+
     private fun sendControl(
         runId: String,
         processGeneration: Long,
@@ -886,6 +933,8 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         const val DEFAULT_CONTROL_POLL_INTERVAL_MS = 100L
         const val CONTROL_THREAD_NAME = "SourceSeparationIpcControl"
         const val CONTROL_CLOSE_TIMEOUT_MS = 2_000L
+        const val PROCESS_EXIT_POLL_INTERVAL_MS = 20L
+        const val PROCESS_EXIT_FALLBACK_GRACE_MS = 50L
     }
 
     private data class ShutdownState(

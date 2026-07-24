@@ -82,15 +82,18 @@ internal class SourceSeparationExecutionService : Service() {
     }
 
     override fun onDestroy() {
-        synchronized(stateLock) {
+        val acknowledgedRecycle = synchronized(stateLock) {
             activeRun?.close()
             activeRun = null
             unlinkClientDeathLocked()
             clientCallback = null
+            recycleAcknowledgement != null
         }
-        synchronized(environmentLock) {
-            executionEnvironment?.close()
-            executionEnvironment = null
+        if (!acknowledgedRecycle) {
+            synchronized(environmentLock) {
+                executionEnvironment?.close()
+                executionEnvironment = null
+            }
         }
         super.onDestroy()
     }
