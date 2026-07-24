@@ -2238,10 +2238,19 @@ native payload and 3.34-10.18 MiB of LiteRT payload per ABI, plus exact
 installed code-path sizes. This closes Phase 7C without changing HQ4's
 download-only policy.
 
+KARA FP32 has now passed one-cold/three-warm CPU resource runs, isolated
+cancellation, full worker export, real MediaSession playback, and desktop ORT
+full-track equivalence on S25 arm64, S10 arm64, S10 arm32, and diagnostic
+x86_64. Every digital output has exact frames, at most one-LSB sample error,
+and at most two-LSB join and reconstruction deltas. Physical-device peak PSS
+is about 0.8-0.95 GiB, which supports only a clearly warned experimental tier.
+See
+[`validation/litert-phase7/kara-results-2026-07-24.md`](validation/litert-phase7/kara-results-2026-07-24.md).
+
 These are not promotion results yet. The v2 threshold revision must be used to
 rerun the affected rows after the final decision commit. S10 GPU audio export,
-representative listening and UI coverage, KARA full-song qualification, and
-the final catalog promotion matrix remain open. Pure x86 retains ordinary
+representative listening and UI coverage, KARA's human review, and the final
+catalog promotion matrix remain open. Pure x86 retains ordinary
 playback but source separation now fails closed before native allocation;
 x86_64 remains CPU evidence only until a separate GPU qualification exists.
 
@@ -2371,9 +2380,12 @@ x86_64 remains CPU evidence only until a separate GPU qualification exists.
 
 - [ ] Run KARA FP32 CPU full-song, playback, resource, cancellation, and
   representative listening checks on the ABIs for which it may be selectable.
-  Its rejected GPU profiles remain rejected. It can become a warned CPU-only
-  experimental model only with complete per-ABI evidence; otherwise keep it
-  download-only or restrict activation to the qualified ABI set.
+  Objective arm64, arm32, and diagnostic x86_64 rows now pass and are recorded
+  in `kara-results-2026-07-24.md`; representative listening and gesture-level
+  UI review remain open. Its rejected GPU profiles remain rejected. It can
+  become a warned CPU-only experimental model only after that human review and
+  the exact decision-build rerun; otherwise keep it download-only or restrict
+  activation to the qualified ABI set.
 - [x] Keep HQ4 download-only for the current artifact. Use compatibility and
   preflight tests to confirm rejection without model allocation, including the
   expanded x86 AVD; do not repeat the known-disqualified full-song allocation

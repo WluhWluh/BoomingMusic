@@ -20,6 +20,10 @@ precision. A successful short-window probe is not a Phase 7 promotion result.
 - `resource-results-2026-07-24.md` records the repeated CPU/GPU resource,
   thread-count, thermal, cancellation, HQ4 preflight, supplemental-runtime,
   and dual-runtime size matrices and their policy decisions.
+- `kara-results-2026-07-24.md` and its machine-readable objective summary
+  record KARA CPU resources, cancellation, full worker/MediaSession playback,
+  and full-track desktop-reference equivalence. Listening and gesture-level UI
+  review remain open.
 - `dual-runtime-inventory-2026-07-24.json` retains exact split, native runtime,
   and installed code-path sizes for the temporary ORT plus LiteRT build.
 - `hq4-preflight/` contains five checked no-allocation device reports and their

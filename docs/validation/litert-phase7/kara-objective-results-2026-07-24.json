@@ -1,0 +1,139 @@
+{
+  "schemaVersion": "phase7-kara-objective-summary-v1",
+  "status": "objective-gates-passed-human-review-pending",
+  "identity": {
+    "appCommit": "4c680f238968a38dda26d83435b90e5e55137c7e",
+    "catalogSha256": "a553f227588313578321c07c73ff99654eff7795727d825d16b191aa0f879e1f",
+    "catalogSourceRevision": "28d9a076c8a44980085a059e6224768ae77f9c8a",
+    "modelId": "uvr_mdxnet_kara",
+    "artifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
+    "artifactBytes": 29700460,
+    "contractId": "uvr_mdxnet_kara@2",
+    "contractSchemaVersion": 2,
+    "modelReleaseTag": "v0.1.0-candidates.1",
+    "litertVersion": "2.1.5",
+    "runnerRevision": "phase7-runner-v11",
+    "thresholdsVersion": "phase7-thresholds-v2",
+    "fixturesVersion": "phase7-fixtures-v2",
+    "appApkSha256": {
+      "arm64-v8a": "499b3c1f193a9a6988254185245d99fb1cf9db13e3f374335740758ce69eeaa1",
+      "armeabi-v7a": "5ffae498b66fc8a424e3fbd39c04a35ef1727587717aa2a9fe1944d74ec96489",
+      "x86_64": "fc9ad0450753ec5e1e1c54c4377e881d7f0eddad03a4f856cbe066f1bedd7ff0"
+    },
+    "androidTestApkSha256": "aa725b78ce9b4452fdbaa0216b57b7bcb431173b2fb714bde10816b8efa97966"
+  },
+  "fixture": {
+    "fixtureId": "coast_town_full_wav",
+    "sha256": "e845e52aeeeb69be702d3a28d756eaf7a3137dbe5338ea50fb0ac3d8c4f9bd89",
+    "durationUs": 273699093,
+    "outputFrames": 12070130
+  },
+  "desktopReference": {
+    "repository": "https://github.com/WluhWluh/MusicSourceSeparation",
+    "revision": "58fcedc9005a9dbfb2de728b66a21de8a0a5d7b5",
+    "canonicalOnnxSha256": "e3167c87333a48548413e972a286bf40bf5694001d2853861eb1435953f02d63",
+    "referenceScriptSha256": "6edb7e9224de37f6e0fefc864433267093c5b5b5e2577ce6450bc3cf3f36382e",
+    "comparisonScriptSha256": "d185aadd98e106ed78b9092104579018eafb332253fb4849334f4fcdf3269e01",
+    "vocalsWavSha256": "c700cae15bf26dd913088e37c0ac60a34e95871f2a24f0a48ffac35d3b8ea2f3",
+    "instrumentalWavSha256": "7b6bdd181d9b520f6fc1535c2be234ce324ac25ea708df049027e421f06f0fed"
+  },
+  "resourceRuns": [
+    {
+      "target": "Galaxy S25",
+      "androidApi": 35,
+      "abi": "arm64-v8a",
+      "runCount": 4,
+      "fullSongMsRange": [84130, 99928],
+      "firstReadyMsRange": [4534, 4565],
+      "peakPssBytesRange": [988716032, 999613440],
+      "peakPssDeltaBytesRange": [775875584, 790727680],
+      "peakThermalStatus": 1
+    },
+    {
+      "target": "Galaxy S10",
+      "androidApi": 31,
+      "abi": "arm64-v8a",
+      "runCount": 4,
+      "fullSongMsRange": [174920, 189840],
+      "firstReadyMsRange": [8362, 11640],
+      "peakPssBytesRange": [974413824, 976328704],
+      "peakPssDeltaBytesRange": [758191104, 771236864],
+      "peakThermalStatus": 0
+    },
+    {
+      "target": "Galaxy S10",
+      "androidApi": 31,
+      "abi": "armeabi-v7a",
+      "runCount": 4,
+      "fullSongMsRange": [222487, 230287],
+      "firstReadyMsRange": [10365, 11106],
+      "peakPssBytesRange": [836675584, 839157760],
+      "peakPssDeltaBytesRange": [601084928, 605789184],
+      "peakThermalStatus": 0
+    },
+    {
+      "target": "API 37 emulator",
+      "androidApi": 37,
+      "abi": "x86_64",
+      "runCount": 4,
+      "fullSongMsRange": [159714, 165733],
+      "firstReadyMsRange": [11601, 17229],
+      "peakPssBytesRange": [1122291712, 1128479744],
+      "peakPssDeltaBytesRange": [912855040, 921458688],
+      "peakThermalStatus": 0
+    }
+  ],
+  "productionFlow": [
+    {
+      "target": "Galaxy S25 arm64",
+      "firstReadyMs": 4425,
+      "fullSongMs": 84623,
+      "mediaSessionPassed": true,
+      "playerTimestampDriftMs": 0,
+      "cancellationLatencyMs": 0
+    },
+    {
+      "target": "Galaxy S10 arm64",
+      "firstReadyMs": 8274,
+      "fullSongMs": 187814,
+      "mediaSessionPassed": true,
+      "playerTimestampDriftMs": 0,
+      "cancellationLatencyMs": 4
+    },
+    {
+      "target": "Galaxy S10 arm32",
+      "firstReadyMs": 11366,
+      "fullSongMs": 237138,
+      "mediaSessionPassed": true,
+      "playerTimestampDriftMs": 0,
+      "cancellationLatencyMs": 4
+    },
+    {
+      "target": "API 37 x86_64 emulator",
+      "firstReadyMs": 12840,
+      "fullSongMs": 139195,
+      "mediaSessionPassed": true,
+      "playerTimestampDriftMs": 0,
+      "cancellationLatencyMs": 11
+    }
+  ],
+  "audioComparison": {
+    "targets": ["Galaxy S25 arm64", "Galaxy S10 arm64", "Galaxy S10 arm32", "API 37 x86_64 emulator"],
+    "allFrameCountsExact": true,
+    "maximumPcm16Delta": 1,
+    "maximumAbsError": 0.000030517578125,
+    "minimumSnrDbRange": [66.98535344671448, 66.98565312579011],
+    "maximumJoinDiscontinuity": 0.00006103515625,
+    "maximumReconstructionErrorDelta": 0.00006103515625,
+    "segmentCount": 48
+  },
+  "decision": {
+    "cpuArm64": "objective-gates-passed",
+    "cpuArm32": "objective-gates-passed",
+    "cpuX86_64": "objective-gates-passed-emulator-diagnostic",
+    "cpuX86": "unsupported",
+    "gpu": "rejected",
+    "catalogTierChange": "blocked-on-representative-listening-ui-and-final-decision-build",
+    "intendedTier": "warned-cpu-only-experimental"
+  }
+}
