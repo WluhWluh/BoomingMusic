@@ -149,6 +149,7 @@ internal class SourceSeparationModelAwareEngine(
             require(it.isNotBlank()) { "Execution run ID factory returned an empty ID." }
         }
         val processGeneration = executionHost.processGeneration
+        var hostStartAttempted = false
         var hostRunAccepted = false
         return try {
             if (shouldCancel()) throw CancellationException("Source separation canceled.")
@@ -179,6 +180,7 @@ internal class SourceSeparationModelAwareEngine(
                 initialPlaybackReadyWindowCount = initialPlaybackReadyWindowCount,
             )
             var latestEventSequence = 0L
+            hostStartAttempted = true
             val hosted = executionHost.start(
                 SourceSeparationExecutionHostRequest(
                     descriptor = descriptor,
@@ -236,6 +238,7 @@ internal class SourceSeparationModelAwareEngine(
                     },
                 )
             )
+            check(hostRunAccepted) { "Execution host completed without accepting the run." }
             if (shouldCancel()) throw CancellationException("Source separation canceled.")
             SourceSeparationModelAwareEngineResult.Completed(
                 manifest = coordinator.complete(run, hosted.result),
@@ -253,12 +256,13 @@ internal class SourceSeparationModelAwareEngine(
             coordinator.fail(run, error)
             throw error
         } finally {
-            if (hostRunAccepted) {
+            if (hostStartAttempted) {
+                val closeResult = executionHost.closeRun(runId, processGeneration)
                 check(
-                    executionHost.closeRun(runId, processGeneration) ==
-                        SourceSeparationExecutionHostControlResult.Applied
+                    closeResult == SourceSeparationExecutionHostControlResult.Applied ||
+                        closeResult == SourceSeparationExecutionHostControlResult.NoActiveRun
                 ) {
-                    "Execution host did not close the terminal run."
+                    "Execution host did not close the terminal run: $closeResult"
                 }
             }
         }

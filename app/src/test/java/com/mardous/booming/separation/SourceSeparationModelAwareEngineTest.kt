@@ -19,6 +19,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationResolvedCacheMode
 import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.MdxRangePreparation
+import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import com.mardous.booming.separation.model.MdxRangeTimingReport
 import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
@@ -32,11 +33,25 @@ import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPresetOrigin
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
+import com.mardous.booming.separation.process.InProcessSourceSeparationExecutionHost
+import com.mardous.booming.separation.process.SourceSeparationExecutionHost
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostLifecycle
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
 import java.io.File
 import java.util.concurrent.CancellationException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
@@ -206,6 +221,251 @@ class SourceSeparationModelAwareEngineTest {
         assertEquals(2, fixture.preflightCount)
     }
 
+    @Test
+    fun `in process host preserves result and emits serializable monotonic events`() {
+        val fixture = fixture()
+        val events = mutableListOf<SourceSeparationExecutionHostEvent>()
+        lateinit var executorResult: MdxRangeSeparationResult
+        val engine = fixture.engine(
+            runIdFactory = { "run-parity" },
+            eventSink = { event ->
+                Json.encodeToString(SourceSeparationExecutionHostEvent.serializer(), event)
+                events += event
+            },
+        ) { request ->
+            request.onProgress(
+                MdxRangeProgress(
+                    completedWindows = 1,
+                    totalWindows = 2,
+                    stage = "test-progress",
+                )
+            )
+            fixture.complete(request, fixture.prepare(request)).also {
+                executorResult = it
+            }
+        }
+
+        val completed = engine.separate(fixture.input)
+            as SourceSeparationModelAwareEngineResult.Completed
+
+        assertSame(executorResult, completed.result)
+        assertEquals(SourceSeparationExecutionHostMode.InProcess, completed.hostDiagnostics.mode)
+        assertEquals(SourceSeparationExecutionHostLifecycle.Completed,
+            completed.hostDiagnostics.lifecycle)
+        assertEquals("run-parity", completed.hostDiagnostics.runId)
+        assertEquals(1L, completed.hostDiagnostics.processGeneration)
+        assertEquals("LiteRtCpu", completed.hostDiagnostics.backend)
+        assertEquals(events.size.toLong(), completed.hostDiagnostics.latestEventSequence)
+        assertEquals((1L..events.size.toLong()).toList(), events.map { it.sequence })
+        assertTrue(events.all { it.runId == "run-parity" && it.processGeneration == 1L })
+        assertEquals(
+            listOf(
+                SourceSeparationExecutionHostEventPayload.Accepted::class,
+                SourceSeparationExecutionHostEventPayload.Progress::class,
+                SourceSeparationExecutionHostEventPayload.Prepared::class,
+                SourceSeparationExecutionHostEventPayload.SegmentStateChanged::class,
+                SourceSeparationExecutionHostEventPayload.SegmentStateChanged::class,
+                SourceSeparationExecutionHostEventPayload.Completed::class,
+            ),
+            events.map { it.payload::class },
+        )
+        assertEquals("vocals", completed.result.vocalsFile.readText())
+        assertEquals("instrumental", completed.result.instrumentalFile.readText())
+        assertEquals(SourceSeparationCacheManifestState.Completed, completed.manifest.state)
+        assertFalse(fixture.repository.isLeased(completed.manifest.cacheKey))
+    }
+
+    @Test
+    fun `in process host rejects a descriptor that differs from the admitted source`() {
+        val fixture = fixture()
+        val executor = SourceSeparationModelAwareRangeExecutor { request ->
+            fixture.complete(request, fixture.prepare(request))
+        }
+        val delegate = InProcessSourceSeparationExecutionHost(executor)
+        val mutatingHost = object : SourceSeparationExecutionHost by delegate {
+            override fun start(
+                request: SourceSeparationExecutionHostRequest,
+            ) = delegate.start(
+                request.copy(
+                    descriptor = request.descriptor.copy(
+                        source = request.descriptor.source.copy(
+                            sourceUri = "content://media/wrong",
+                        ),
+                    ),
+                )
+            )
+        }
+        val engine = fixture.engine(
+            executionHost = mutatingHost,
+            runIdFactory = { "run-descriptor" },
+            executor = executor,
+        )
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            engine.separate(fixture.input)
+        }
+
+        assertTrue(error.message.orEmpty().contains("admitted source"))
+        val manifest = fixture.store.listManifests().single()
+        assertEquals(SourceSeparationCacheManifestState.Failed, manifest.state)
+        assertFalse(fixture.repository.isLeased(manifest.cacheKey))
+    }
+
+    @Test
+    fun `engine rejects stale generation events and closes the host run`() {
+        val fixture = fixture()
+        val executor = SourceSeparationModelAwareRangeExecutor { request ->
+            fixture.complete(request, fixture.prepare(request))
+        }
+        val delegate = InProcessSourceSeparationExecutionHost(
+            rangeExecutor = executor,
+            processGeneration = 7L,
+        )
+        val staleEventHost = object : SourceSeparationExecutionHost by delegate {
+            override fun start(
+                request: SourceSeparationExecutionHostRequest,
+            ) = delegate.start(
+                request.copy(
+                    onEvent = { event ->
+                        request.onEvent(event.copy(processGeneration = 6L))
+                    },
+                )
+            )
+        }
+        val engine = fixture.engine(
+            executionHost = staleEventHost,
+            runIdFactory = { "run-stale-generation" },
+            executor = executor,
+        )
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            engine.separate(fixture.input)
+        }
+
+        assertTrue(error.message.orEmpty().contains("stale run or generation"))
+        assertEquals(null, delegate.snapshot("run-stale-generation", 7L))
+        val manifest = fixture.store.listManifests().single()
+        assertEquals(SourceSeparationCacheManifestState.Failed, manifest.state)
+        assertFalse(fixture.repository.isLeased(manifest.cacheKey))
+    }
+
+    @Test
+    fun `host pause command reaches the admitted run and preserves resumable state`() {
+        val fixture = fixture()
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val executor = SourceSeparationModelAwareRangeExecutor { request ->
+            request.onPrepared(fixture.prepare(request))
+            request.onSegmentStateChanged(0, SourceSeparationSegmentState.Ready)
+            request.onSegmentStateChanged(1, SourceSeparationSegmentState.Running)
+            started.countDown()
+            check(release.await(5, TimeUnit.SECONDS)) { "Pause test timed out." }
+            if (request.shouldPause()) throw SourceSeparationPausedException()
+            fixture.complete(request, fixture.prepare(request, preserveFiles = true))
+        }
+        val host = InProcessSourceSeparationExecutionHost(executor, processGeneration = 9L)
+        val engine = fixture.engine(
+            executionHost = host,
+            runIdFactory = { "run-pause" },
+            executor = executor,
+        )
+        val thread = Executors.newSingleThreadExecutor()
+
+        try {
+            val future = thread.submit<SourceSeparationModelAwareEngineResult> {
+                engine.separate(fixture.input)
+            }
+            assertTrue(started.await(5, TimeUnit.SECONDS))
+            assertEquals(
+                SourceSeparationExecutionHostControlResult.StaleGeneration,
+                host.pause("run-pause", 8L),
+            )
+            assertEquals(
+                SourceSeparationExecutionHostControlResult.StaleRun,
+                host.pause("another-run", 9L),
+            )
+            assertEquals(
+                SourceSeparationExecutionHostControlResult.Applied,
+                host.pause("run-pause", 9L),
+            )
+            assertEquals(
+                SourceSeparationExecutionHostControlResult.AlreadyApplied,
+                host.pause("run-pause", 9L),
+            )
+            release.countDown()
+            val error = assertThrows(ExecutionException::class.java) {
+                future.get(5, TimeUnit.SECONDS)
+            }
+            assertTrue(error.cause is SourceSeparationPausedException)
+        } finally {
+            release.countDown()
+            thread.shutdownNow()
+        }
+
+        val manifest = fixture.store.listManifests().single()
+        assertEquals(SourceSeparationCacheManifestState.Running, manifest.state)
+        assertEquals(SourceSeparationSegmentState.Ready,
+            manifest.segmentPlan?.segments?.get(0)?.state)
+        assertEquals(SourceSeparationSegmentState.Queued,
+            manifest.segmentPlan?.segments?.get(1)?.state)
+        assertFalse(fixture.repository.isLeased(manifest.cacheKey))
+        assertEquals(null, host.snapshot("run-pause", 9L))
+    }
+
+    @Test
+    fun `host cancel command reaches the admitted run and releases its only lease`() {
+        val fixture = fixture()
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val executor = SourceSeparationModelAwareRangeExecutor { request ->
+            request.onPrepared(fixture.prepare(request))
+            request.onSegmentStateChanged(0, SourceSeparationSegmentState.Running)
+            assertTrue(fixture.repository.isLeased(request.run.identity.cacheKey))
+            assertEquals(null, fixture.repository.tryAcquireRunWrite(request.run.identity))
+            started.countDown()
+            check(release.await(5, TimeUnit.SECONDS)) { "Cancel test timed out." }
+            if (request.shouldCancel()) throw CancellationException("host cancel")
+            fixture.complete(request, fixture.prepare(request, preserveFiles = true))
+        }
+        val host = InProcessSourceSeparationExecutionHost(executor, processGeneration = 11L)
+        val engine = fixture.engine(
+            executionHost = host,
+            runIdFactory = { "run-cancel" },
+            executor = executor,
+        )
+        val thread = Executors.newSingleThreadExecutor()
+
+        try {
+            val future = thread.submit<SourceSeparationModelAwareEngineResult> {
+                engine.separate(fixture.input)
+            }
+            assertTrue(started.await(5, TimeUnit.SECONDS))
+            assertEquals(
+                SourceSeparationExecutionHostControlResult.Applied,
+                host.cancel("run-cancel", 11L),
+            )
+            assertEquals(
+                SourceSeparationExecutionHostControlResult.AlreadyApplied,
+                host.cancel("run-cancel", 11L),
+            )
+            release.countDown()
+            val error = assertThrows(ExecutionException::class.java) {
+                future.get(5, TimeUnit.SECONDS)
+            }
+            assertTrue(error.cause is CancellationException)
+        } finally {
+            release.countDown()
+            thread.shutdownNow()
+        }
+
+        val manifest = fixture.store.listManifests().single()
+        assertEquals(SourceSeparationCacheManifestState.Canceled, manifest.state)
+        assertEquals(SourceSeparationSegmentState.Queued,
+            manifest.segmentPlan?.segments?.first()?.state)
+        assertFalse(fixture.repository.isLeased(manifest.cacheKey))
+        assertEquals(null, host.snapshot("run-cancel", 11L))
+    }
+
     private fun fixture(): EngineFixture {
         val root = temporary.newFolder().absoluteFile
         val store = SourceSeparationCacheStore(
@@ -237,6 +497,7 @@ class SourceSeparationModelAwareEngineTest {
     ) {
         var activeModel: SourceSeparationResolvedCacheModel? = null
         var preflightCount: Int = 0
+        private var runIdSequence: Int = 0
 
         val input = SourceSeparationModelAwareSongInput(
             sourceUri = "content://media/42",
@@ -258,6 +519,9 @@ class SourceSeparationModelAwareEngineTest {
 
         fun engine(
             constructionGate: Boolean = true,
+            executionHost: SourceSeparationExecutionHost? = null,
+            runIdFactory: () -> String = { "test-run-${++runIdSequence}" },
+            eventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
             executor: SourceSeparationModelAwareRangeExecutor = SourceSeparationModelAwareRangeExecutor {
                 request -> complete(request, prepare(request))
             },
@@ -270,7 +534,10 @@ class SourceSeparationModelAwareEngineTest {
             },
             coordinator = coordinator,
             rangeExecutor = executor,
+            executionHost = executionHost ?: InProcessSourceSeparationExecutionHost(executor),
             constructionGate = { constructionGate },
+            runIdFactory = runIdFactory,
+            executionHostEventSink = eventSink,
         )
 
         fun resolvedModel(modelId: String): SourceSeparationResolvedCacheModel {
