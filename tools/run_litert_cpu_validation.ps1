@@ -221,9 +221,11 @@ try {
         Invoke-Adb install -r -t $testApk.FullName
     }
     Invoke-Adb shell am force-stop $package
-    & $adb -s $Serial shell monkey -p $package 1 2>$null | Out-Null
-    Start-Sleep -Milliseconds 750
-    & $adb -s $Serial shell input keyevent KEYCODE_HOME 2>$null | Out-Null
+    if (-not $PreflightOnly) {
+        & $adb -s $Serial shell monkey -p $package 1 2>$null | Out-Null
+        Start-Sleep -Milliseconds 750
+        & $adb -s $Serial shell input keyevent KEYCODE_HOME 2>$null | Out-Null
+    }
 
     $appDataRoot = (& $adb -s $Serial shell run-as $package pwd) -join "`n"
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($appDataRoot)) {
