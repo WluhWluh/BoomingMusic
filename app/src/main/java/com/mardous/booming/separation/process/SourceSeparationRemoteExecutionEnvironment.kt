@@ -48,13 +48,22 @@ internal class SourceSeparationRemoteExecutionEnvironment(
         ) {
             "The exact execution model is outside the canonical model root."
         }
-        val entryDirectory = cacheStore.entryDirectory(descriptor.cacheKey).canonicalFile
-        val canonicalEntriesRoot = requireNotNull(entryDirectory.parentFile).canonicalFile
-        require(canonicalEntriesRoot == cacheStore.entriesDirectory().canonicalFile &&
-            entryDirectory.name == descriptor.cacheKey &&
-            entryDirectory.isDirectory
+        val entryDirectory = try {
+            cacheStore.entryDirectory(descriptor.cacheKey).canonicalFile
+        } catch (error: Throwable) {
+            throw SourceSeparationRemoteCacheUnavailableException(
+                "The exact execution cache entry cannot be resolved.",
+                error,
+            )
+        }
+        val canonicalEntriesRoot = entryDirectory.parentFile?.canonicalFile
+        if (canonicalEntriesRoot != cacheStore.entriesDirectory().canonicalFile ||
+            entryDirectory.name != descriptor.cacheKey ||
+            !entryDirectory.isDirectory
         ) {
-            "The exact execution cache entry is unavailable or noncanonical."
+            throw SourceSeparationRemoteCacheUnavailableException(
+                "The exact execution cache entry is unavailable or noncanonical.",
+            )
         }
         val workDirectory = resolveExecutionDirectory(entryDirectory, WORK_DIRECTORY)
         val segmentsDirectory = resolveExecutionDirectory(entryDirectory, SEGMENTS_DIRECTORY)
@@ -105,37 +114,54 @@ internal class SourceSeparationRemoteExecutionEnvironment(
         entryDirectory: File,
         relativePath: String,
     ): File {
-        val directory = cacheStore.resolveRelativePath(entryDirectory, relativePath)
-            .canonicalFile
-        require(directory.parentFile == entryDirectory && directory.isDirectory) {
-            "The execution cache workspace is unavailable or noncanonical."
+        val directory = try {
+            cacheStore.resolveRelativePath(entryDirectory, relativePath).canonicalFile
+        } catch (error: Throwable) {
+            throw SourceSeparationRemoteCacheUnavailableException(
+                "The execution cache workspace cannot be resolved.",
+                error,
+            )
+        }
+        if (directory.parentFile != entryDirectory || !directory.isDirectory) {
+            throw SourceSeparationRemoteCacheUnavailableException(
+                "The execution cache workspace is unavailable or noncanonical.",
+            )
         }
         return directory
     }
 
     private fun validateSourceAccess(sourceUri: String) {
-        val uri = Uri.parse(sourceUri)
-        when (uri.scheme?.lowercase()) {
-            "content" -> {
-                val descriptor = applicationContext.contentResolver
-                    .openAssetFileDescriptor(uri, "r")
-                requireNotNull(descriptor) { "The execution source URI cannot be opened." }
-                    .use { value ->
-                        require(value.fileDescriptor.valid()) {
-                            "The execution source URI returned an invalid file descriptor."
+        try {
+            val uri = Uri.parse(sourceUri)
+            when (uri.scheme?.lowercase()) {
+                "content" -> {
+                    val descriptor = applicationContext.contentResolver
+                        .openAssetFileDescriptor(uri, "r")
+                    requireNotNull(descriptor) { "The execution source URI cannot be opened." }
+                        .use { value ->
+                            require(value.fileDescriptor.valid()) {
+                                "The execution source URI returned an invalid file descriptor."
+                            }
                         }
-                    }
-            }
-
-            "file" -> {
-                val path = requireNotNull(uri.path) { "The execution file URI has no path." }
-                require(File(path).canonicalFile.isFile) {
-                    "The execution file URI is unavailable."
                 }
-            }
 
-            else -> throw IllegalArgumentException(
-                "The execution source URI scheme is unsupported.",
+                "file" -> {
+                    val path = requireNotNull(uri.path) {
+                        "The execution file URI has no path."
+                    }
+                    require(File(path).canonicalFile.isFile) {
+                        "The execution file URI is unavailable."
+                    }
+                }
+
+                else -> throw IllegalArgumentException(
+                    "The execution source URI scheme is unsupported.",
+                )
+            }
+        } catch (error: Throwable) {
+            throw SourceSeparationRemoteSourceUnavailableException(
+                "The exact execution source is unavailable.",
+                error,
             )
         }
     }
@@ -145,6 +171,16 @@ internal class SourceSeparationRemoteExecutionEnvironment(
         const val SEGMENTS_DIRECTORY = "segments"
     }
 }
+
+internal class SourceSeparationRemoteSourceUnavailableException(
+    message: String,
+    cause: Throwable? = null,
+) : IllegalStateException(message, cause)
+
+internal class SourceSeparationRemoteCacheUnavailableException(
+    message: String,
+    cause: Throwable? = null,
+) : IllegalStateException(message, cause)
 
 internal class SourceSeparationRemoteExecutionControl(
     initialPlaybackPositionMs: Long?,

@@ -15,8 +15,10 @@ import com.mardous.booming.separation.process.InProcessSourceSeparationExecution
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
+import com.mardous.booming.separation.process.SourceSeparationRemoteCacheUnavailableException
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionControl
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionEnvironment
+import com.mardous.booming.separation.process.SourceSeparationRemoteSourceUnavailableException
 import com.mardous.booming.separation.process.toExecutionCompletion
 import java.util.LinkedHashSet
 import java.util.concurrent.CancellationException
@@ -265,7 +267,7 @@ internal class SourceSeparationExecutionService : Service() {
         if (!commandLedger.record(command.commandId)) {
             throw SourceSeparationIpcDuplicateCommandException(command.commandId)
         }
-        check(activeRun == null) { "The remote execution host is busy." }
+        if (activeRun != null) throw SourceSeparationIpcBusyException()
         val callback = requireNotNull(clientCallback) {
             "The remote execution client is not connected."
         }
@@ -361,7 +363,7 @@ internal class SourceSeparationExecutionService : Service() {
             status = when (error) {
                 is SourceSeparationIpcDuplicateCommandException ->
                     SourceSeparationIpcStatus.Duplicate
-                is IllegalStateException -> SourceSeparationIpcStatus.Busy
+                is SourceSeparationIpcBusyException -> SourceSeparationIpcStatus.Busy
                 else -> SourceSeparationIpcStatus.Rejected
             },
             error = error.toIpcError(),
@@ -507,6 +509,9 @@ private class SourceSeparationIpcDuplicateCommandException(
     commandId: String,
 ) : IllegalArgumentException("Duplicate IPC command: $commandId")
 
+private class SourceSeparationIpcBusyException :
+    IllegalStateException("The remote execution host is busy.")
+
 private fun SourceSeparationExecutionHostControlResult.toIpcStatus():
         SourceSeparationIpcStatus = when (this) {
     SourceSeparationExecutionHostControlResult.Applied -> SourceSeparationIpcStatus.Applied
@@ -528,8 +533,14 @@ private fun SourceSeparationExecutionHostControlResult.toIpcStatus():
 
 private fun Throwable.toIpcError(): SourceSeparationIpcError {
     val category = when (this) {
+        is SourceSeparationIpcProtocolException ->
+            SourceSeparationIpcErrorCategory.MalformedRequest
         is SourceSeparationExactCacheModelException ->
             SourceSeparationIpcErrorCategory.ModelUnavailable
+        is SourceSeparationRemoteSourceUnavailableException ->
+            SourceSeparationIpcErrorCategory.SourceUnavailable
+        is SourceSeparationRemoteCacheUnavailableException ->
+            SourceSeparationIpcErrorCategory.CacheUnavailable
         is SourceSeparationRemoteEventDeliveryException ->
             SourceSeparationIpcErrorCategory.HostDied
         is IllegalArgumentException -> SourceSeparationIpcErrorCategory.IdentityMismatch
