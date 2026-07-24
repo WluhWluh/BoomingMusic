@@ -332,53 +332,59 @@ independent foreground lifetime.
 
 ### Phase 2A: Lightweight process startup
 
-- [ ] Detect the current process before initializing application-wide modules.
-- [ ] Split the Koin graph into main-process and inference-process modules.
-- [ ] Keep UI, image loading, network clients, update checks, widgets, and
+- [x] Detect the current process before initializing application-wide modules.
+- [x] Split the Koin graph into main-process and inference-process modules.
+- [x] Keep UI, image loading, network clients, update checks, widgets, and
   unrelated repositories out of the inference process.
-- [ ] Initialize only contract parsing, model validation, cache execution,
+- [x] Initialize only contract parsing, model validation, cache execution,
   source decode, DSP, LiteRT, diagnostics, and IPC dependencies.
-- [ ] Verify that default-preference initialization and crash UI setup do not
+- [x] Verify that default-preference initialization and crash UI setup do not
   race or repeat in the inference process.
-- [ ] Measure the idle remote-process baseline before loading LiteRT.
+- [x] Measure the idle remote-process baseline before loading LiteRT.
 
 ### Phase 2B: Private service and IPC
 
-- [ ] Add a non-exported same-UID service in
+- [x] Add a non-exported same-UID service in
   `:source_separation`.
-- [ ] Implement protocol v1 with request-size and event-rate assertions.
-- [ ] Bind from the current controller with explicit connection, binder-death,
+- [x] Implement protocol v1 with request-size and event-rate assertions.
+- [x] Bind from the current controller with explicit connection, binder-death,
   timeout, and rebind states.
-- [ ] Coalesce progress callbacks so one processed window cannot create an
+- [x] Coalesce progress callbacks so one processed window cannot create an
   unbounded Binder queue.
-- [ ] Reject malformed, stale-generation, duplicate, or identity-mismatched
+- [x] Reject malformed, stale-generation, duplicate, or identity-mismatched
   commands before touching cache or LiteRT.
-- [ ] Validate canonical model/cache roots and hashes in the remote process.
+- [x] Validate canonical model/cache roots and hashes in the remote process.
 
 ### Phase 2C: Move the complete range execution
 
-- [ ] Execute source decode, DSP, LiteRT, segment commit, and run completion in
+- [x] Execute source decode, DSP, LiteRT, segment commit, and run completion in
   the remote process.
-- [ ] Keep the exact existing decoder and route selector unchanged.
-- [ ] Keep playback mixing and hydration in the playback process.
-- [ ] Initially keep post-completion FLAC promotion under its current owner,
+- [x] Keep the exact existing decoder and route selector unchanged.
+- [x] Keep playback mixing and hydration in the playback process.
+- [x] Initially keep post-completion FLAC promotion under its current owner,
   while recording whether independent execution will later require moving it.
-- [ ] Do not transmit PCM or tensors through Binder.
-- [ ] Ensure source URIs and persisted grants work from the same-UID process on
-  every supported API.
+- [x] Do not transmit PCM or tensors through Binder.
+- [x] Ensure production MediaStore source URIs work from the same-UID process
+  on every supported API. Imported model documents are copied into app-private
+  storage before execution, so no live SAF grant crosses Binder.
 
 ### Phase 2D: Bound-mode parity
 
-- [ ] Run the same fixture once in `InProcess` and once in
+- [x] Run the same fixture once in `InProcess` and once in
   `BoundRemote` within a fresh app-data state.
-- [ ] Compare decode route, progress order, ready horizon, frame counts,
+- [x] Compare decode route, progress order, ready horizon, frame counts,
   output hashes, cache manifest, and terminal state.
-- [ ] Background the UI and turn off the screen while PlaybackService remains
+- [x] Background the UI and turn off the screen while PlaybackService remains
   active.
-- [ ] Confirm current recents-removal behavior has not changed.
+- [x] Confirm current production recents-removal behavior has not changed.
+  `PlaybackService.onTaskRemoved()` and production `InProcess` selection are
+  unchanged; a dynamic `BoundRemote` recents-removal matrix remains Phase 7/8
+  work.
 
 **Phase 2 exit:** the bound remote process matches in-process output and current
-background semantics. It is still internal-only on every ABI.
+background semantics. It is still internal-only on every ABI. The accepted
+evidence and the explicit recents-removal limitation are recorded in
+`docs/validation/litert-inference-process/phase2/validation-2026-07-24.md`.
 
 ## Phase 3: Qualify the Pure-x86 Session Strategy
 

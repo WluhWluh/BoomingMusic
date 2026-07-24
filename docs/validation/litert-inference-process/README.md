@@ -19,6 +19,8 @@ selection, MP3 handling, output frames, and join placement.
 - `phase0/`: frozen in-process baseline, protocol, report schema, and
   comparison thresholds.
 - `phase1/`: in-process host-boundary parity and device-validation summary.
+- `phase2/`: bound remote-process startup, IPC, output-parity, device, and
+  background-semantics summary.
 - Later phase directories use
   `<phase>/<yyyy-mm-dd>/<target>/<run-id>.json`.
 
