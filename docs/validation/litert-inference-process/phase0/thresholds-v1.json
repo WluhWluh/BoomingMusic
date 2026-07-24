@@ -29,6 +29,10 @@
     "maximumFailures": 0,
     "maximumPssGrowthSecondToFinalBytes": 67108864,
     "maximumMappedRegionGrowthSecondToFinal": 256,
+    "noClientWarmRetentionMs": 300000,
+    "pausedWarmRetentionMs": 300000,
+    "recycleTimeoutMs": 10000,
+    "minimumLargestFreeAddressGapBytes": 134217728,
     "requireFreshGenerationForModelSwitch": true,
     "requireMainProcessSurvival": true,
     "hq4RemainsUnsupported": true

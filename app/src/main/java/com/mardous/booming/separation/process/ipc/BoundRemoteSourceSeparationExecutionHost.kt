@@ -16,6 +16,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostReque
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostSnapshot
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostStartResult
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
+import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
 import com.mardous.booming.separation.process.toMdxRangeSeparationResult
 import java.util.UUID
 import java.util.concurrent.CancellationException
@@ -28,6 +29,7 @@ import kotlin.concurrent.withLock
 internal class BoundRemoteSourceSeparationExecutionHost(
     context: Context,
     private val connectionTimeoutMs: Long = DEFAULT_CONNECTION_TIMEOUT_MS,
+    private val recycleTimeoutMs: Long = DEFAULT_RECYCLE_TIMEOUT_MS,
     private val controlPollIntervalMs: Long = DEFAULT_CONTROL_POLL_INTERVAL_MS,
     private val commandIdFactory: (String) -> String = { prefix ->
         "$prefix-${UUID.randomUUID()}"
@@ -47,6 +49,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private var lastBinderDeath: SourceSeparationRemoteBinderDeathDiagnostics? = null
     private var expectedBinderDeathCount = 0
     private var unexpectedBinderDeathCount = 0
+    private var expectedRecycle: SourceSeparationIpcRecycleAcknowledgement? = null
     private var bound = false
     private var bindingSequence = 0L
     private var activeBindingGeneration = 0L
@@ -113,6 +116,95 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         }
         connectionLock.withLock { lastProcessDiagnostics = diagnostics }
         return diagnostics
+    }
+
+    fun recycle(
+        reason: SourceSeparationIpcRecycleReason,
+        recycleToken: String = "recycle-${UUID.randomUUID()}",
+    ): SourceSeparationRemoteRecycleResult {
+        val oldConnection = ensureConnected()
+        val service = connectionLock.withLock {
+            check(activeRequest == null) { "Cannot recycle during an active remote run." }
+            requireNotNull(remoteService)
+        }
+        val command = SourceSeparationIpcRecycleCommand(
+            commandId = nextCommandId("recycle"),
+            processGeneration = oldConnection.processGeneration,
+            reason = reason,
+            recycleToken = recycleToken,
+        )
+        val response = try {
+            SourceSeparationExecutionIpcCodec.decodeRecycleResponse(
+                service.recycle(SourceSeparationExecutionIpcCodec.encodeRecycleCommand(command)),
+            )
+        } catch (error: Throwable) {
+            throw handleRemoteFailure(error)
+        }
+        if (response.status != SourceSeparationIpcStatus.RecycleAccepted) {
+            throw SourceSeparationRemoteExecutionException(
+                response.error ?: SourceSeparationIpcError(
+                    category = SourceSeparationIpcErrorCategory.Internal,
+                    type = "RemoteRecycle${response.status}",
+                    message = "Remote recycle ended with status ${response.status}.",
+                ),
+            )
+        }
+        val acknowledgement = requireNotNull(response.acknowledgement)
+        require(acknowledgement.recycleToken == recycleToken &&
+            acknowledgement.processGeneration == oldConnection.processGeneration &&
+            acknowledgement.pid == oldConnection.pid &&
+            acknowledgement.processStartTicks == oldConnection.diagnostics.processStartTicks
+        ) {
+            "Bound service returned a recycle acknowledgement for another process incarnation."
+        }
+        connectionLock.withLock {
+            check(connectionState == SourceSeparationRemoteConnectionState.Connected &&
+                connectResponse?.processGeneration == oldConnection.processGeneration
+            ) {
+                "Bound service died before its recycle acknowledgement was accepted."
+            }
+            expectedRecycle = acknowledgement
+            connectionState = SourceSeparationRemoteConnectionState.Recycling
+            connectionChanged.signalAll()
+        }
+
+        val deadlineNanos = System.nanoTime() + recycleTimeoutMs * 1_000_000L
+        connectionLock.withLock {
+            while (connectionState == SourceSeparationRemoteConnectionState.Recycling) {
+                val remaining = deadlineNanos - System.nanoTime()
+                if (remaining <= 0L) {
+                    expectedRecycle = null
+                    if (remoteBinder?.isBinderAlive == true) {
+                        connectionState = SourceSeparationRemoteConnectionState.Connected
+                    }
+                    throw SourceSeparationRemoteRecycleTimeoutException(recycleTimeoutMs)
+                }
+                connectionChanged.awaitNanos(remaining)
+            }
+            check(connectionState == SourceSeparationRemoteConnectionState.Dead &&
+                lastBinderDeath?.expected == true &&
+                lastBinderDeath?.recycleToken == recycleToken
+            ) {
+                "The acknowledged recycle did not end in its expected Binder death."
+            }
+        }
+
+        val newConnection = ensureConnected()
+        require(newConnection.processGeneration != oldConnection.processGeneration) {
+            "The recycled service reused its old process generation."
+        }
+        require(newConnection.diagnostics.processStartTicks !=
+            oldConnection.diagnostics.processStartTicks
+        ) {
+            "The recycled service did not report a fresh process-start identity."
+        }
+        return SourceSeparationRemoteRecycleResult(
+            reason = reason,
+            recycleToken = recycleToken,
+            oldProcess = oldConnection.diagnostics,
+            newProcess = newConnection.diagnostics,
+            binderDeath = requireNotNull(connectionDiagnostics.lastBinderDeath),
+        )
     }
 
     override fun start(
@@ -266,6 +358,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             remoteDeathRecipient = null
             remoteService = null
             connectResponse = null
+            expectedRecycle = null
             activeRequest = null
             callbackFailure.set(null)
             connectionChanged.signalAll()
@@ -310,6 +403,8 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                     return requireNotNull(connectResponse)
                 SourceSeparationRemoteConnectionState.Closed ->
                     throw IllegalStateException("Bound-remote execution host is closed.")
+                SourceSeparationRemoteConnectionState.Recycling ->
+                    throw SourceSeparationRemoteRecycleInProgressException()
                 SourceSeparationRemoteConnectionState.Binding -> null
                 SourceSeparationRemoteConnectionState.Unbound,
                 SourceSeparationRemoteConnectionState.Dead,
@@ -530,17 +625,28 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             terminalConnectionFailure.compareAndSet(null, error)
             val deadProcess = connectResponse?.diagnostics
             if (deadProcess != null) {
+                val expected = expectedRecycle?.let { acknowledgement ->
+                    connectionState == SourceSeparationRemoteConnectionState.Recycling &&
+                        acknowledgement.processGeneration == deadProcess.processGeneration &&
+                        acknowledgement.pid == deadProcess.pid &&
+                        acknowledgement.processStartTicks == deadProcess.processStartTicks
+                } == true
                 lastProcessDiagnostics = deadProcess
                 lastBinderDeath = SourceSeparationRemoteBinderDeathDiagnostics(
                     processGeneration = deadProcess.processGeneration,
                     pid = deadProcess.pid,
                     processStartTicks = deadProcess.processStartTicks,
-                    expected = false,
-                    recycleToken = null,
+                    expected = expected,
+                    recycleToken = expectedRecycle?.recycleToken.takeIf { expected },
                     error = error.message ?: error::class.java.name,
                 )
-                unexpectedBinderDeathCount += 1
+                if (expected) {
+                    expectedBinderDeathCount += 1
+                } else {
+                    unexpectedBinderDeathCount += 1
+                }
             }
+            expectedRecycle = null
             val state = DisconnectedBinding(
                 binder = remoteBinder,
                 deathRecipient = remoteDeathRecipient,
@@ -758,6 +864,8 @@ internal class BoundRemoteSourceSeparationExecutionHost(
 
     private companion object {
         const val DEFAULT_CONNECTION_TIMEOUT_MS = 10_000L
+        const val DEFAULT_RECYCLE_TIMEOUT_MS =
+            SourceSeparationProcessLifecyclePolicy.RECYCLE_TIMEOUT_MS
         const val DEFAULT_CONTROL_POLL_INTERVAL_MS = 100L
         const val CONTROL_THREAD_NAME = "SourceSeparationIpcControl"
         const val CONTROL_CLOSE_TIMEOUT_MS = 2_000L
@@ -790,6 +898,7 @@ internal enum class SourceSeparationRemoteConnectionState {
     Unbound,
     Binding,
     Connected,
+    Recycling,
     Dead,
     Closed,
 }
@@ -817,9 +926,24 @@ internal data class SourceSeparationRemoteBinderDeathDiagnostics(
     val error: String,
 )
 
+internal data class SourceSeparationRemoteRecycleResult(
+    val reason: SourceSeparationIpcRecycleReason,
+    val recycleToken: String,
+    val oldProcess: SourceSeparationProcessDiagnostics,
+    val newProcess: SourceSeparationProcessDiagnostics,
+    val binderDeath: SourceSeparationRemoteBinderDeathDiagnostics,
+)
+
 internal class SourceSeparationRemoteConnectionTimeoutException(
     timeoutMs: Long,
 ) : IllegalStateException("Source-separation service bind timed out after $timeoutMs ms.")
+
+internal class SourceSeparationRemoteRecycleTimeoutException(
+    timeoutMs: Long,
+) : IllegalStateException("Source-separation process recycle timed out after $timeoutMs ms.")
+
+internal class SourceSeparationRemoteRecycleInProgressException :
+    IllegalStateException("Source-separation process recycle is still in progress.")
 
 internal class SourceSeparationRemoteHostDiedException(
     cause: Throwable?,
@@ -856,6 +980,7 @@ private fun SourceSeparationIpcStatus.toHostControlResult():
     SourceSeparationIpcStatus.Canceled,
     SourceSeparationIpcStatus.Failed,
     SourceSeparationIpcStatus.RecycleRequired,
+    SourceSeparationIpcStatus.RecycleAccepted,
     SourceSeparationIpcStatus.StaleControl,
     SourceSeparationIpcStatus.Rejected,
     -> SourceSeparationExecutionHostControlResult.Terminal

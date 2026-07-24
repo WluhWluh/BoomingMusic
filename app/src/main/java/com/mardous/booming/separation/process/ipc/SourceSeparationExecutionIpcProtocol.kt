@@ -86,6 +86,69 @@ internal data class SourceSeparationIpcDiagnosticsResponse(
 }
 
 @Serializable
+internal data class SourceSeparationIpcRecycleCommand(
+    val protocolVersion: Int = SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION,
+    val commandId: String,
+    val processGeneration: Long,
+    val reason: SourceSeparationIpcRecycleReason,
+    val recycleToken: String,
+) {
+    init {
+        requireProtocolVersion(protocolVersion)
+        requireCommandId(commandId)
+        require(processGeneration > 0L) { "IPC recycle generation is invalid." }
+        require(RECYCLE_TOKEN_PATTERN.matches(recycleToken)) {
+            "IPC recycle token is invalid."
+        }
+    }
+}
+
+@Serializable
+internal enum class SourceSeparationIpcRecycleReason {
+    ModelOrRuntimeKeyChanged,
+    PoisonedSession,
+    IdleDeadlineExpired,
+    MemoryPressure,
+    ValidationRequested,
+}
+
+@Serializable
+internal data class SourceSeparationIpcRecycleAcknowledgement(
+    val recycleToken: String,
+    val processGeneration: Long,
+    val pid: Int,
+    val processStartTicks: Long,
+) {
+    init {
+        require(RECYCLE_TOKEN_PATTERN.matches(recycleToken)) {
+            "IPC recycle acknowledgement token is invalid."
+        }
+        require(processGeneration > 0L && pid > 0 && processStartTicks > 0L) {
+            "IPC recycle acknowledgement identity is invalid."
+        }
+    }
+}
+
+@Serializable
+internal data class SourceSeparationIpcRecycleResponse(
+    val protocolVersion: Int = SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION,
+    val commandId: String,
+    val status: SourceSeparationIpcStatus,
+    val acknowledgement: SourceSeparationIpcRecycleAcknowledgement? = null,
+    val error: SourceSeparationIpcError? = null,
+) {
+    init {
+        requireProtocolVersion(protocolVersion)
+        requireCommandId(commandId)
+        if (status == SourceSeparationIpcStatus.RecycleAccepted) {
+            require(acknowledgement != null && error == null) {
+                "Accepted IPC recycle response is incomplete."
+            }
+        }
+    }
+}
+
+@Serializable
 internal data class SourceSeparationIpcStartCommand(
     val protocolVersion: Int = SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION,
     val commandId: String,
@@ -203,6 +266,7 @@ internal enum class SourceSeparationIpcStatus {
     RunActive,
     Terminal,
     RecycleRequired,
+    RecycleAccepted,
     Rejected,
     Failed,
 }
@@ -263,6 +327,18 @@ internal object SourceSeparationExecutionIpcCodec {
 
     fun decodeDiagnosticsResponse(payload: String): SourceSeparationIpcDiagnosticsResponse =
         decode(SourceSeparationIpcDiagnosticsResponse.serializer(), payload)
+
+    fun encodeRecycleCommand(value: SourceSeparationIpcRecycleCommand): String =
+        encode(SourceSeparationIpcRecycleCommand.serializer(), value)
+
+    fun decodeRecycleCommand(payload: String): SourceSeparationIpcRecycleCommand =
+        decode(SourceSeparationIpcRecycleCommand.serializer(), payload)
+
+    fun encodeRecycleResponse(value: SourceSeparationIpcRecycleResponse): String =
+        encode(SourceSeparationIpcRecycleResponse.serializer(), value)
+
+    fun decodeRecycleResponse(payload: String): SourceSeparationIpcRecycleResponse =
+        decode(SourceSeparationIpcRecycleResponse.serializer(), payload)
 
     fun encodeStartCommand(value: SourceSeparationIpcStartCommand): String =
         encode(SourceSeparationIpcStartCommand.serializer(), value)
@@ -351,3 +427,4 @@ private fun requireCommandId(commandId: String) {
 }
 
 private val COMMAND_ID_PATTERN = Regex("^[A-Za-z0-9._-]{1,128}$")
+private val RECYCLE_TOKEN_PATTERN = Regex("^[A-Za-z0-9._-]{16,128}$")

@@ -16,8 +16,10 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnosticsCollector
+import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionRecycleRequiredException
+import com.mardous.booming.separation.process.SourceSeparationProcessSessionPoisonedException
 import com.mardous.booming.separation.process.SourceSeparationRemoteCacheUnavailableException
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionControl
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionEnvironment
@@ -37,6 +39,7 @@ internal class SourceSeparationExecutionService : Service() {
     private var clientCallback: ISourceSeparationExecutionCallback? = null
     private var clientDeathRecipient: IBinder.DeathRecipient? = null
     private var activeRun: ActiveRemoteRun? = null
+    private var recycleAcknowledgement: SourceSeparationIpcRecycleAcknowledgement? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -259,6 +262,62 @@ internal class SourceSeparationExecutionService : Service() {
             )
         }
 
+        override fun recycle(requestJson: String): String {
+            requireSameUidCaller()
+            val command = try {
+                SourceSeparationExecutionIpcCodec.decodeRecycleCommand(requestJson)
+            } catch (error: Throwable) {
+                return rejectedRecycleResponse("malformed", error)
+            }
+            val process = AppProcessResolver.resolve(this@SourceSeparationExecutionService)
+            val processDiagnostics = captureProcessDiagnostics(process.processName)
+            val response = synchronized(stateLock) {
+                when {
+                    !commandLedger.record(command.commandId) ->
+                        SourceSeparationIpcRecycleResponse(
+                            commandId = command.commandId,
+                            status = SourceSeparationIpcStatus.Duplicate,
+                        )
+                    command.processGeneration != processGeneration ->
+                        SourceSeparationIpcRecycleResponse(
+                            commandId = command.commandId,
+                            status = SourceSeparationIpcStatus.StaleGeneration,
+                        )
+                    activeRun != null -> SourceSeparationIpcRecycleResponse(
+                        commandId = command.commandId,
+                        status = SourceSeparationIpcStatus.RunActive,
+                    )
+                    recycleAcknowledgement != null -> SourceSeparationIpcRecycleResponse(
+                        commandId = command.commandId,
+                        status = SourceSeparationIpcStatus.AlreadyApplied,
+                    )
+                    else -> {
+                        executionEnvironment().markRecycling(
+                            reason = command.reason.name,
+                            token = command.recycleToken,
+                        )
+                        val acknowledgement = SourceSeparationIpcRecycleAcknowledgement(
+                            recycleToken = command.recycleToken,
+                            processGeneration = processGeneration,
+                            pid = Process.myPid(),
+                            processStartTicks = processDiagnostics.processStartTicks,
+                        )
+                        recycleAcknowledgement = acknowledgement
+                        SourceSeparationIpcRecycleResponse(
+                            commandId = command.commandId,
+                            status = SourceSeparationIpcStatus.RecycleAccepted,
+                            acknowledgement = acknowledgement,
+                        )
+                    }
+                }
+            }
+            val encoded = SourceSeparationExecutionIpcCodec.encodeRecycleResponse(response)
+            if (response.status == SourceSeparationIpcStatus.RecycleAccepted) {
+                scheduleSelfTermination()
+            }
+            return encoded
+        }
+
         override fun closeRun(requestJson: String): String {
             requireSameUidCaller()
             val command = try {
@@ -310,6 +369,7 @@ internal class SourceSeparationExecutionService : Service() {
             throw SourceSeparationIpcDuplicateCommandException(command.commandId)
         }
         if (activeRun != null) throw SourceSeparationIpcBusyException()
+        if (recycleAcknowledgement != null) throw SourceSeparationIpcRecyclingException()
         val callback = requireNotNull(clientCallback) {
             "The remote execution client is not connected."
         }
@@ -385,6 +445,13 @@ internal class SourceSeparationExecutionService : Service() {
                 SourceSeparationIpcStatus.RecycleRequired,
                 error,
             )
+        } catch (error: SourceSeparationProcessSessionPoisonedException) {
+            executionFailure = error
+            terminalStartResponse(
+                command.commandId,
+                SourceSeparationIpcStatus.RecycleRequired,
+                error,
+            )
         } catch (error: Throwable) {
             executionFailure = error
             terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Failed, error)
@@ -445,6 +512,17 @@ internal class SourceSeparationExecutionService : Service() {
         error: Throwable,
     ): String = SourceSeparationExecutionIpcCodec.encodeDiagnosticsResponse(
         SourceSeparationIpcDiagnosticsResponse(
+            commandId = commandId,
+            status = SourceSeparationIpcStatus.Rejected,
+            error = error.toIpcError(),
+        )
+    )
+
+    private fun rejectedRecycleResponse(
+        commandId: String,
+        error: Throwable,
+    ): String = SourceSeparationExecutionIpcCodec.encodeRecycleResponse(
+        SourceSeparationIpcRecycleResponse(
             commandId = commandId,
             status = SourceSeparationIpcStatus.Rejected,
             error = error.toIpcError(),
@@ -537,6 +615,16 @@ internal class SourceSeparationExecutionService : Service() {
         )
     }
 
+    private fun scheduleSelfTermination() {
+        Thread({
+            SystemClock.sleep(SELF_TERMINATION_DELAY_MS)
+            Process.killProcess(Process.myPid())
+        }, SELF_TERMINATION_THREAD_NAME).apply {
+            isDaemon = true
+            start()
+        }
+    }
+
     private fun createProcessGeneration(): Long {
         val value = SystemClock.elapsedRealtimeNanos() xor
             (Process.myPid().toLong() shl 32)
@@ -569,6 +657,9 @@ internal class SourceSeparationExecutionService : Service() {
     companion object {
         const val ACTION_BIND =
             "com.wluhwluh.booming.sourcesep.action.BIND_SOURCE_SEPARATION_EXECUTION"
+        private const val SELF_TERMINATION_DELAY_MS =
+            SourceSeparationProcessLifecyclePolicy.RECYCLE_ACKNOWLEDGEMENT_GRACE_MS
+        private const val SELF_TERMINATION_THREAD_NAME = "SourceSeparationProcessRecycle"
     }
 }
 
@@ -599,6 +690,9 @@ private class SourceSeparationIpcDuplicateCommandException(
 
 private class SourceSeparationIpcBusyException :
     IllegalStateException("The remote execution host is busy.")
+
+private class SourceSeparationIpcRecyclingException :
+    IllegalStateException("The remote execution process is recycling.")
 
 private fun SourceSeparationExecutionHostControlResult.toIpcStatus():
         SourceSeparationIpcStatus = when (this) {
@@ -632,6 +726,8 @@ private fun Throwable.toIpcError(): SourceSeparationIpcError {
         is SourceSeparationRemoteEventDeliveryException ->
             SourceSeparationIpcErrorCategory.HostDied
         is SourceSeparationProcessSessionRecycleRequiredException ->
+            SourceSeparationIpcErrorCategory.RecycleRequired
+        is SourceSeparationProcessSessionPoisonedException ->
             SourceSeparationIpcErrorCategory.RecycleRequired
         is IllegalArgumentException -> SourceSeparationIpcErrorCategory.IdentityMismatch
         else -> SourceSeparationIpcErrorCategory.RuntimeFailure

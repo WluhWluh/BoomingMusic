@@ -8,6 +8,7 @@ import com.mardous.booming.AppProcessResolver
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteConnectionState
+import com.mardous.booming.separation.process.ipc.SourceSeparationIpcRecycleReason
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -129,6 +130,39 @@ class SourceSeparationInferenceProcessDeviceTest {
                 SourceSeparationRemoteConnectionState.Connected,
                 secondDiagnostics.state,
             )
+        } finally {
+            host.close()
+        }
+    }
+
+    @Test
+    fun acknowledgedRecycleRequiresAFreshProcessIncarnation() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val host = BoundRemoteSourceSeparationExecutionHost(context)
+        val mainPid = android.os.Process.myPid()
+
+        try {
+            val oldGeneration = host.processGeneration
+            val oldDiagnostics = host.processDiagnostics()
+            val result = host.recycle(
+                SourceSeparationIpcRecycleReason.ValidationRequested,
+                recycleToken = "device-recycle-token-0001",
+            )
+
+            assertEquals(oldGeneration, result.oldProcess.processGeneration)
+            assertEquals(oldDiagnostics.processStartTicks, result.oldProcess.processStartTicks)
+            assertNotEquals(oldGeneration, result.newProcess.processGeneration)
+            assertNotEquals(
+                oldDiagnostics.processStartTicks,
+                result.newProcess.processStartTicks,
+            )
+            assertTrue(result.binderDeath.expected)
+            assertEquals("device-recycle-token-0001", result.binderDeath.recycleToken)
+            assertEquals(mainPid, android.os.Process.myPid())
+            assertEquals(SourceSeparationRemoteConnectionState.Connected,
+                host.connectionDiagnostics.state)
+            assertEquals(1, host.connectionDiagnostics.expectedBinderDeathCount)
+            assertEquals(0, host.connectionDiagnostics.unexpectedBinderDeathCount)
         } finally {
             host.close()
         }

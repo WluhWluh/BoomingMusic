@@ -30,6 +30,12 @@ class SourceSeparationExecutionIpcProtocolTest {
             commandId = "diagnostics-1",
             processGeneration = 7L,
         )
+        val recycle = SourceSeparationIpcRecycleCommand(
+            commandId = "recycle-1",
+            processGeneration = 7L,
+            reason = SourceSeparationIpcRecycleReason.ModelOrRuntimeKeyChanged,
+            recycleToken = "recycle-token-0001",
+        )
 
         assertEquals(
             connect,
@@ -47,6 +53,12 @@ class SourceSeparationExecutionIpcProtocolTest {
             diagnostics,
             SourceSeparationExecutionIpcCodec.decodeDiagnosticsCommand(
                 SourceSeparationExecutionIpcCodec.encodeDiagnosticsCommand(diagnostics),
+            ),
+        )
+        assertEquals(
+            recycle,
+            SourceSeparationExecutionIpcCodec.decodeRecycleCommand(
+                SourceSeparationExecutionIpcCodec.encodeRecycleCommand(recycle),
             ),
         )
         assertThrows(SourceSeparationIpcProtocolException::class.java) {

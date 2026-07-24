@@ -54,6 +54,9 @@ internal class SourceSeparationRemoteExecutionEnvironment(
     fun finishExecution(runId: String, failure: Throwable?) =
         sessionController.finishExecution(runId, failure)
 
+    fun markRecycling(reason: String, token: String) =
+        sessionController.markRecycling(reason, token)
+
     override fun close() = sessionController.close()
 
     fun prepare(
