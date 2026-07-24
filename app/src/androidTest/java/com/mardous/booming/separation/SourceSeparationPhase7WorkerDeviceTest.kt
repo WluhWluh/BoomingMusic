@@ -47,6 +47,7 @@ import com.mardous.booming.separation.model.MdxInferenceSessionFactory
 import com.mardous.booming.separation.model.MdxInferenceSessionProvider
 import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.model.ReusableMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.SingleUseMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
@@ -1958,6 +1959,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 } == 1,
         )
         val diagnostics = remoteHost?.connectionDiagnostics
+        val processDiagnostics = remoteHost?.let { host ->
+            runCatching { host.processDiagnostics() }.getOrNull()
+                ?: host.connectionDiagnostics.latestProcessDiagnostics
+        }
         if (mode == Phase7ExecutionHostMode.BoundRemote) {
             assertEquals(
                 SourceSeparationRemoteConnectionState.Connected,
@@ -1971,7 +1976,64 @@ class SourceSeparationPhase7WorkerDeviceTest {
             .put("mode", mode.argumentValue)
             .put("processGeneration", diagnostics?.processGeneration ?: JSONObject.NULL)
             .put("remotePid", diagnostics?.pid ?: JSONObject.NULL)
+            .put("processStartTicks", diagnostics?.processStartTicks ?: JSONObject.NULL)
             .put("idleRemotePssBytes", diagnostics?.idlePssBytes ?: JSONObject.NULL)
+            .put("process", processDiagnostics?.let { process ->
+                JSONObject()
+                    .put("capturedAtElapsedRealtimeNanos",
+                        process.capturedAtElapsedRealtimeNanos)
+                    .put("activeRunId", process.activeRunId ?: JSONObject.NULL)
+                    .put("vmSizeBytes", process.memory.vmSizeBytes ?: JSONObject.NULL)
+                    .put("vmPeakBytes", process.memory.vmPeakBytes ?: JSONObject.NULL)
+                    .put("vmRssBytes", process.memory.vmRssBytes ?: JSONObject.NULL)
+                    .put("pssBytes", process.memory.pssBytes)
+                    .put("nativePssBytes", process.memory.nativePssBytes)
+                    .put("threadCount", process.memory.threadCount)
+                    .put("mappedRegionCount", process.memory.mappedRegionCount)
+                    .put("smapsSource", process.memory.smapsSource.name)
+                    .put("anonHugePagesBytes",
+                        process.memory.anonHugePagesBytes ?: JSONObject.NULL)
+                    .put("largestFreeAddressGapBytes",
+                        process.memory.largestFreeAddressGapBytes ?: JSONObject.NULL)
+            } ?: JSONObject.NULL)
+            .put("session", processDiagnostics?.session?.let { session ->
+                JSONObject()
+                    .put("state", session.state.name)
+                    .put("sessionId", session.sessionId ?: JSONObject.NULL)
+                    .put("sessionKey", session.sessionKey ?: JSONObject.NULL)
+                    .put("nativeSessionCreationCount", session.nativeSessionCreationCount)
+                    .put("activeLeaseCount", session.activeLeaseCount)
+                    .put("invocationCount", session.invocationCount)
+                    .put("poisoned", session.poisoned)
+                    .put("poisonReason", session.poisonReason ?: JSONObject.NULL)
+                    .put("recycleReason", session.recycleReason ?: JSONObject.NULL)
+                    .put("recycleToken", session.recycleToken ?: JSONObject.NULL)
+            } ?: JSONObject.NULL)
+            .put("validationOverride",
+                processDiagnostics?.validationOverride?.let { validation ->
+                    JSONObject()
+                        .put("modelId", validation.modelId)
+                        .put("artifactSha256", validation.artifactSha256)
+                        .put("contractId", validation.contractId)
+                        .put("originalStatus", validation.originalStatus)
+                        .put("originalReason", validation.originalReason)
+                        .put("originalEvidence", validation.originalEvidence)
+                        .put("effectiveStatus", validation.effectiveStatus)
+                        .put("effectiveReason", validation.effectiveReason)
+                } ?: JSONObject.NULL)
+            .put("binderDeath", diagnostics?.lastBinderDeath?.let { death ->
+                JSONObject()
+                    .put("processGeneration", death.processGeneration)
+                    .put("pid", death.pid)
+                    .put("processStartTicks", death.processStartTicks)
+                    .put("expected", death.expected)
+                    .put("recycleToken", death.recycleToken ?: JSONObject.NULL)
+                    .put("error", death.error)
+            } ?: JSONObject.NULL)
+            .put("expectedBinderDeathCount",
+                diagnostics?.expectedBinderDeathCount ?: JSONObject.NULL)
+            .put("unexpectedBinderDeathCount",
+                diagnostics?.unexpectedBinderDeathCount ?: JSONObject.NULL)
             .put("eventCount", events.size)
             .put("firstSequence", events.first().sequence)
             .put("lastSequence", events.last().sequence)
@@ -2062,7 +2124,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
         return DefaultSourceSeparationRuntimeFacade(
             activeModelResolver = presetRepository::resolveActiveCacheModelResolution,
-            compatibilityResolver = AndroidSourceSeparationRuntimeCompatibilityResolver,
+            compatibilityResolver = if (
+                executionHostMode == Phase7ExecutionHostMode.BoundRemote &&
+                MdxX86ProcessValidationOverride.buildEnabled
+            ) {
+                X86ProcessValidationRuntimeCompatibilityResolver
+            } else {
+                AndroidSourceSeparationRuntimeCompatibilityResolver
+            },
             preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(context),
             engine = engine,
             cacheRepository = cacheRepository,

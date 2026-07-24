@@ -3,6 +3,8 @@ package com.mardous.booming.separation.model.preset
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxRuntimeProfiles
+import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
+import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.model.contract.CatalogActivationPolicy
 import com.mardous.booming.separation.model.contract.CatalogReleaseMaturity
 import com.mardous.booming.separation.model.contract.CatalogRuntimeQualification
@@ -94,7 +96,16 @@ object SourceSeparationPresetActivationResolver {
                 qualification,
             )
         }
-        if (qualification.status != ContractRuntimeQualificationStatus.KnownGood) {
+        if (qualification.status != ContractRuntimeQualificationStatus.KnownGood &&
+            !(scope == SourceSeparationPresetSelectionScope.InternalValidation &&
+                MdxX86ProcessValidationOverride.permitsCatalogQualification(
+                    modelId = modelId,
+                    artifactSha256 = artifactSha256,
+                    contractId = contract.contractId,
+                    platform = platform,
+                    originalStatus = qualification.status.toMdxRuntimeSupportStatus(),
+                ))
+        ) {
             return blocked(
                 SourceSeparationPresetSelectionBlockReason.MissingKnownGoodCpuProfile,
                 qualification,
@@ -159,4 +170,12 @@ private fun ContractAbi.matches(runtimeAbi: MdxRuntimeAbi): Boolean = when (this
     ContractAbi.ArmeabiV7a -> runtimeAbi == MdxRuntimeAbi.ArmeabiV7a
     ContractAbi.X86_64 -> runtimeAbi == MdxRuntimeAbi.X86_64
     ContractAbi.X86 -> runtimeAbi == MdxRuntimeAbi.X86
+}
+
+private fun ContractRuntimeQualificationStatus.toMdxRuntimeSupportStatus() = when (this) {
+    ContractRuntimeQualificationStatus.KnownGood -> MdxRuntimeSupportStatus.KnownGood
+    ContractRuntimeQualificationStatus.Candidate -> MdxRuntimeSupportStatus.Candidate
+    ContractRuntimeQualificationStatus.Rejected -> MdxRuntimeSupportStatus.Rejected
+    ContractRuntimeQualificationStatus.Untested -> MdxRuntimeSupportStatus.Untested
+    ContractRuntimeQualificationStatus.Unsupported -> MdxRuntimeSupportStatus.Unsupported
 }

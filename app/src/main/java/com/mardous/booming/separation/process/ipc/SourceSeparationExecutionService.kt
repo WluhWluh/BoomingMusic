@@ -3,7 +3,6 @@ package com.mardous.booming.separation.process.ipc
 import android.app.Service
 import android.content.Intent
 import android.os.Binder
-import android.os.Debug
 import android.os.IBinder
 import android.os.Process
 import android.os.SystemClock
@@ -15,6 +14,9 @@ import com.mardous.booming.separation.process.InProcessSourceSeparationExecution
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
+import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
+import com.mardous.booming.separation.process.SourceSeparationProcessDiagnosticsCollector
+import com.mardous.booming.separation.process.SourceSeparationProcessSessionDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationRemoteCacheUnavailableException
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionControl
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionEnvironment
@@ -93,13 +95,15 @@ internal class SourceSeparationExecutionService : Service() {
                 clientDeathRecipient = deathRecipient
             }
             val process = AppProcessResolver.resolve(this@SourceSeparationExecutionService)
+            val diagnostics = captureProcessDiagnostics(process.processName)
             return SourceSeparationExecutionIpcCodec.encodeConnectResponse(
                 SourceSeparationIpcConnectResponse(
                     commandId = request.commandId,
                     processGeneration = processGeneration,
                     processName = process.processName,
                     pid = Process.myPid(),
-                    idlePssBytes = Debug.getPss() * 1_024L,
+                    idlePssBytes = diagnostics.memory.pssBytes,
+                    diagnostics = diagnostics,
                 )
             )
         }
@@ -215,6 +219,39 @@ internal class SourceSeparationExecutionService : Service() {
                     snapshot = active.host.snapshot(command.runId, command.processGeneration),
                 )
             }
+        }
+
+        override fun diagnostics(requestJson: String): String {
+            requireSameUidCaller()
+            val command = try {
+                SourceSeparationExecutionIpcCodec.decodeDiagnosticsCommand(requestJson)
+            } catch (error: Throwable) {
+                return rejectedDiagnosticsResponse("malformed", error)
+            }
+            val status = synchronized(stateLock) {
+                when {
+                    !commandLedger.record(command.commandId) ->
+                        SourceSeparationIpcStatus.Duplicate
+                    command.processGeneration != processGeneration ->
+                        SourceSeparationIpcStatus.StaleGeneration
+                    else -> SourceSeparationIpcStatus.Applied
+                }
+            }
+            val processDiagnostics = if (status == SourceSeparationIpcStatus.Applied) {
+                val processName = AppProcessResolver.resolve(
+                    this@SourceSeparationExecutionService,
+                ).processName
+                captureProcessDiagnostics(processName)
+            } else {
+                null
+            }
+            return SourceSeparationExecutionIpcCodec.encodeDiagnosticsResponse(
+                SourceSeparationIpcDiagnosticsResponse(
+                    commandId = command.commandId,
+                    status = status,
+                    diagnostics = processDiagnostics,
+                )
+            )
         }
 
         override fun closeRun(requestJson: String): String {
@@ -379,6 +416,17 @@ internal class SourceSeparationExecutionService : Service() {
         error = error.toIpcError(),
     )
 
+    private fun rejectedDiagnosticsResponse(
+        commandId: String,
+        error: Throwable,
+    ): String = SourceSeparationExecutionIpcCodec.encodeDiagnosticsResponse(
+        SourceSeparationIpcDiagnosticsResponse(
+            commandId = commandId,
+            status = SourceSeparationIpcStatus.Rejected,
+            error = error.toIpcError(),
+        )
+    )
+
     private fun operationResponse(
         commandId: String,
         status: SourceSeparationIpcStatus,
@@ -448,6 +496,21 @@ internal class SourceSeparationExecutionService : Service() {
             return SourceSeparationRemoteExecutionEnvironment(this, presetRepository)
                 .also { executionEnvironment = it }
         }
+    }
+
+    private fun captureProcessDiagnostics(
+        processName: String,
+    ): SourceSeparationProcessDiagnostics {
+        val activeRunId = synchronized(stateLock) { activeRun?.descriptor?.runId }
+        val environment = synchronized(environmentLock) { executionEnvironment }
+        return SourceSeparationProcessDiagnosticsCollector.capture(
+            processGeneration = processGeneration,
+            processName = processName,
+            activeRunId = activeRunId,
+            session = environment?.sessionDiagnostics()
+                ?: SourceSeparationProcessSessionDiagnostics.empty(),
+            validationOverride = environment?.validationOverrideDiagnostics(),
+        )
     }
 
     private fun createProcessGeneration(): Long {

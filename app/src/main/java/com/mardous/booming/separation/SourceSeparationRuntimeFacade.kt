@@ -27,6 +27,7 @@ import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxLiteRtCompatibilityResolver
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
 import java.util.concurrent.CancellationException
@@ -328,6 +329,23 @@ internal object AndroidSourceSeparationRuntimeCompatibilityResolver :
             policy = MdxCompatibilityPolicy.KnownGoodOnly,
         )
         return decision.reason.takeUnless { decision.isAllowed }
+    }
+}
+
+/** Used only by the compile-time-gated AndroidTest bound-process harness. */
+internal object X86ProcessValidationRuntimeCompatibilityResolver :
+    SourceSeparationRuntimeCompatibilityResolver {
+    override fun unsupportedReason(model: SourceSeparationResolvedCacheModel): String? {
+        val normalReason = AndroidSourceSeparationRuntimeCompatibilityResolver
+            .unsupportedReason(model)
+            ?: return null
+        val platform = runCatching { AndroidMdxRuntimePlatformProvider.current() }
+            .getOrElse { return normalReason }
+        return if (MdxX86ProcessValidationOverride.applyTo(model, platform) != null) {
+            null
+        } else {
+            normalReason
+        }
     }
 }
 

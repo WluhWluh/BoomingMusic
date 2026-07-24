@@ -6,6 +6,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionDescripto
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostSnapshot
+import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.Serializable
@@ -34,6 +35,7 @@ internal data class SourceSeparationIpcConnectResponse(
     val processName: String,
     val pid: Int,
     val idlePssBytes: Long,
+    val diagnostics: SourceSeparationProcessDiagnostics,
 ) {
     init {
         requireProtocolVersion(protocolVersion)
@@ -42,6 +44,44 @@ internal data class SourceSeparationIpcConnectResponse(
         require(processName.isNotBlank()) { "IPC process name is empty." }
         require(pid > 0) { "IPC process ID is invalid." }
         require(idlePssBytes >= 0L) { "IPC idle PSS is invalid." }
+        require(diagnostics.processGeneration == processGeneration &&
+            diagnostics.processName == processName &&
+            diagnostics.pid == pid
+        ) {
+            "IPC connect process diagnostics are inconsistent."
+        }
+    }
+}
+
+@Serializable
+internal data class SourceSeparationIpcDiagnosticsCommand(
+    val protocolVersion: Int = SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION,
+    val commandId: String,
+    val processGeneration: Long,
+) {
+    init {
+        requireProtocolVersion(protocolVersion)
+        requireCommandId(commandId)
+        require(processGeneration > 0L) { "IPC diagnostic generation is invalid." }
+    }
+}
+
+@Serializable
+internal data class SourceSeparationIpcDiagnosticsResponse(
+    val protocolVersion: Int = SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION,
+    val commandId: String,
+    val status: SourceSeparationIpcStatus,
+    val diagnostics: SourceSeparationProcessDiagnostics? = null,
+    val error: SourceSeparationIpcError? = null,
+) {
+    init {
+        requireProtocolVersion(protocolVersion)
+        requireCommandId(commandId)
+        if (status == SourceSeparationIpcStatus.Applied) {
+            require(diagnostics != null && error == null) {
+                "Applied IPC diagnostic response is incomplete."
+            }
+        }
     }
 }
 
@@ -209,6 +249,18 @@ internal object SourceSeparationExecutionIpcCodec {
 
     fun decodeConnectResponse(payload: String): SourceSeparationIpcConnectResponse =
         decode(SourceSeparationIpcConnectResponse.serializer(), payload)
+
+    fun encodeDiagnosticsCommand(value: SourceSeparationIpcDiagnosticsCommand): String =
+        encode(SourceSeparationIpcDiagnosticsCommand.serializer(), value)
+
+    fun decodeDiagnosticsCommand(payload: String): SourceSeparationIpcDiagnosticsCommand =
+        decode(SourceSeparationIpcDiagnosticsCommand.serializer(), payload)
+
+    fun encodeDiagnosticsResponse(value: SourceSeparationIpcDiagnosticsResponse): String =
+        encode(SourceSeparationIpcDiagnosticsResponse.serializer(), value)
+
+    fun decodeDiagnosticsResponse(payload: String): SourceSeparationIpcDiagnosticsResponse =
+        decode(SourceSeparationIpcDiagnosticsResponse.serializer(), payload)
 
     fun encodeStartCommand(value: SourceSeparationIpcStartCommand): String =
         encode(SourceSeparationIpcStartCommand.serializer(), value)

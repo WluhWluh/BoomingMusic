@@ -15,6 +15,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostSnapshot
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostStartResult
+import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.toMdxRangeSeparationResult
 import java.util.UUID
 import java.util.concurrent.CancellationException
@@ -42,6 +43,10 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private var remoteBinder: IBinder? = null
     private var remoteDeathRecipient: IBinder.DeathRecipient? = null
     private var connectResponse: SourceSeparationIpcConnectResponse? = null
+    private var lastProcessDiagnostics: SourceSeparationProcessDiagnostics? = null
+    private var lastBinderDeath: SourceSeparationRemoteBinderDeathDiagnostics? = null
+    private var expectedBinderDeathCount = 0
+    private var unexpectedBinderDeathCount = 0
     private var bound = false
     private var bindingSequence = 0L
     private var activeBindingGeneration = 0L
@@ -57,15 +62,58 @@ internal class BoundRemoteSourceSeparationExecutionHost(
 
     val connectionDiagnostics: SourceSeparationRemoteConnectionDiagnostics
         get() = connectionLock.withLock {
+            val process = connectResponse?.diagnostics ?: lastProcessDiagnostics
             SourceSeparationRemoteConnectionDiagnostics(
                 state = connectionState,
-                processGeneration = connectResponse?.processGeneration,
-                processName = connectResponse?.processName,
-                pid = connectResponse?.pid,
-                idlePssBytes = connectResponse?.idlePssBytes,
+                processGeneration = process?.processGeneration,
+                processName = process?.processName,
+                pid = process?.pid,
+                processStartTicks = process?.processStartTicks,
+                idlePssBytes = connectResponse?.idlePssBytes
+                    ?: process?.memory?.pssBytes,
+                latestProcessDiagnostics = process,
+                lastBinderDeath = lastBinderDeath,
+                expectedBinderDeathCount = expectedBinderDeathCount,
+                unexpectedBinderDeathCount = unexpectedBinderDeathCount,
                 failure = terminalConnectionFailure.get()?.message,
             )
         }
+
+    fun processDiagnostics(): SourceSeparationProcessDiagnostics {
+        val connection = ensureConnected()
+        val service = connectionLock.withLock { requireNotNull(remoteService) }
+        val command = SourceSeparationIpcDiagnosticsCommand(
+            commandId = nextCommandId("diagnostics"),
+            processGeneration = connection.processGeneration,
+        )
+        val response = try {
+            SourceSeparationExecutionIpcCodec.decodeDiagnosticsResponse(
+                service.diagnostics(
+                    SourceSeparationExecutionIpcCodec.encodeDiagnosticsCommand(command),
+                )
+            )
+        } catch (error: Throwable) {
+            throw handleRemoteFailure(error)
+        }
+        if (response.status != SourceSeparationIpcStatus.Applied) {
+            throw SourceSeparationRemoteExecutionException(
+                response.error ?: SourceSeparationIpcError(
+                    category = SourceSeparationIpcErrorCategory.Internal,
+                    type = "RemoteDiagnostics${response.status}",
+                    message = "Remote diagnostics ended with status ${response.status}.",
+                ),
+            )
+        }
+        val diagnostics = requireNotNull(response.diagnostics)
+        require(diagnostics.processGeneration == connection.processGeneration &&
+            diagnostics.pid == connection.pid &&
+            diagnostics.processStartTicks == connection.diagnostics.processStartTicks
+        ) {
+            "Bound service returned diagnostics for a different process incarnation."
+        }
+        connectionLock.withLock { lastProcessDiagnostics = diagnostics }
+        return diagnostics
+    }
 
     override fun start(
         request: SourceSeparationExecutionHostRequest,
@@ -401,6 +449,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                     remoteBinder = binder
                     remoteDeathRecipient = recipient
                     connectResponse = response
+                    lastProcessDiagnostics = response.diagnostics
                     connectionState = SourceSeparationRemoteConnectionState.Connected
                     connectionChanged.signalAll()
                     true
@@ -479,6 +528,19 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             ) return
             if (binder != null && remoteBinder != null && binder !== remoteBinder) return
             terminalConnectionFailure.compareAndSet(null, error)
+            val deadProcess = connectResponse?.diagnostics
+            if (deadProcess != null) {
+                lastProcessDiagnostics = deadProcess
+                lastBinderDeath = SourceSeparationRemoteBinderDeathDiagnostics(
+                    processGeneration = deadProcess.processGeneration,
+                    pid = deadProcess.pid,
+                    processStartTicks = deadProcess.processStartTicks,
+                    expected = false,
+                    recycleToken = null,
+                    error = error.message ?: error::class.java.name,
+                )
+                unexpectedBinderDeathCount += 1
+            }
             val state = DisconnectedBinding(
                 binder = remoteBinder,
                 deathRecipient = remoteDeathRecipient,
@@ -737,8 +799,22 @@ internal data class SourceSeparationRemoteConnectionDiagnostics(
     val processGeneration: Long?,
     val processName: String?,
     val pid: Int?,
+    val processStartTicks: Long?,
     val idlePssBytes: Long?,
+    val latestProcessDiagnostics: SourceSeparationProcessDiagnostics?,
+    val lastBinderDeath: SourceSeparationRemoteBinderDeathDiagnostics?,
+    val expectedBinderDeathCount: Int,
+    val unexpectedBinderDeathCount: Int,
     val failure: String?,
+)
+
+internal data class SourceSeparationRemoteBinderDeathDiagnostics(
+    val processGeneration: Long,
+    val pid: Int,
+    val processStartTicks: Long,
+    val expected: Boolean,
+    val recycleToken: String?,
+    val error: String,
 )
 
 internal class SourceSeparationRemoteConnectionTimeoutException(

@@ -9,8 +9,10 @@ import com.mardous.booming.separation.SourceSeparationModelAwareRangeExecutor
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.resolveExactCacheModel
+import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxRangeResumeState
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -32,13 +34,42 @@ internal class SourceSeparationRemoteExecutionEnvironment(
         SourceSeparationPresetRepository.MODEL_ROOT_DIRECTORY,
     ).canonicalFile
 
+    @Volatile
+    private var validationOverrideDiagnostics:
+        SourceSeparationProcessValidationOverrideDiagnostics? = null
+
+    fun sessionDiagnostics(): SourceSeparationProcessSessionDiagnostics =
+        SourceSeparationProcessSessionDiagnostics.empty()
+
+    fun validationOverrideDiagnostics():
+        SourceSeparationProcessValidationOverrideDiagnostics? = validationOverrideDiagnostics
+
     fun prepare(
         descriptor: SourceSeparationExecutionDescriptor,
         control: SourceSeparationRemoteExecutionControl,
     ): SourceSeparationModelAwareExecutionRequest {
         descriptor.requireConsistentIdentity()
         validateSourceAccess(descriptor.source.sourceUri)
-        val model = presetRepository.resolveExactCacheModel(descriptor.contract)
+        val resolvedModel = presetRepository.resolveExactCacheModel(descriptor.contract)
+        val validationOverride = runCatching {
+            MdxX86ProcessValidationOverride.applyTo(
+                model = resolvedModel,
+                platform = AndroidMdxRuntimePlatformProvider.current(),
+            )
+        }.getOrNull()
+        validationOverrideDiagnostics = validationOverride?.let { override ->
+            SourceSeparationProcessValidationOverrideDiagnostics(
+                modelId = resolvedModel.contract.modelId,
+                artifactSha256 = resolvedModel.artifact.sha256.lowercase(java.util.Locale.US),
+                contractId = resolvedModel.contract.contractId,
+                originalStatus = override.originalRecord.status.name,
+                originalReason = override.originalDecision.reason,
+                originalEvidence = override.originalRecord.evidence,
+                effectiveStatus = override.effectiveRecord.status.name,
+                effectiveReason = override.effectiveDecision.reason,
+            )
+        }
+        val model = validationOverride?.model ?: resolvedModel
         val canonicalModel = model.artifact.file.canonicalFile
         require(canonicalModel.toPath().startsWith(modelRoot.toPath()) &&
             canonicalModel.parentFile?.name.equals(

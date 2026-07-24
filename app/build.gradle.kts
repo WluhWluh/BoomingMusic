@@ -78,6 +78,14 @@ val currentVersion: Version = Version.Beta(
 )
 val sourceSeparationVersionSuffix = "-ss.1"
 val currentVersionCode = currentVersion.code
+val x86ProcessValidationProperty = providers.gradleProperty(
+    "boomingSs.x86ProcessValidation",
+).orNull
+val x86ProcessValidationRequested = x86ProcessValidationProperty?.let { value ->
+    requireNotNull(value.toBooleanStrictOrNull()) {
+        "boomingSs.x86ProcessValidation must be true or false"
+    }
+} ?: false
 
 android {
     compileSdk = 37
@@ -223,7 +231,14 @@ androidComponents {
         }
 
         variant.buildConfigFields?.putAll(
-            mapOf("IS_CI_BUILD" to BuildConfigField("boolean", isCI, null))
+            mapOf(
+                "IS_CI_BUILD" to BuildConfigField("boolean", isCI, null),
+                "X86_PROCESS_VALIDATION" to BuildConfigField(
+                    "boolean",
+                    x86ProcessValidationRequested && variant.buildType == "debug" && !isCI,
+                    "Opt-in pure-x86 inference-process validation; never enabled in release or CI.",
+                ),
+            )
         )
 
         val flavorProps = loadFlavorProperties(variant.flavorName)

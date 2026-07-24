@@ -10,5 +10,6 @@ interface ISourceSeparationExecutionService {
     String start(String requestJson);
     String updateControl(String requestJson);
     String snapshot(String requestJson);
+    String diagnostics(String requestJson);
     String closeRun(String requestJson);
 }

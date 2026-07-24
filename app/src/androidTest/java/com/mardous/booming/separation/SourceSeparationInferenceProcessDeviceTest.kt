@@ -33,6 +33,21 @@ class SourceSeparationInferenceProcessDeviceTest {
             assertEquals(expectedProcessName, diagnostics.processName)
             assertNotEquals(android.os.Process.myPid(), diagnostics.pid)
             assertTrue(requireNotNull(diagnostics.idlePssBytes) > 0L)
+            assertTrue(requireNotNull(diagnostics.processStartTicks) > 0L)
+            val processDiagnostics = host.processDiagnostics()
+            assertEquals(generation, processDiagnostics.processGeneration)
+            assertEquals(diagnostics.pid, processDiagnostics.pid)
+            assertEquals(diagnostics.processStartTicks, processDiagnostics.processStartTicks)
+            assertTrue(processDiagnostics.memory.vmSizeBytes != null)
+            assertTrue(processDiagnostics.memory.vmPeakBytes != null)
+            assertTrue(processDiagnostics.memory.vmRssBytes != null)
+            assertTrue(processDiagnostics.memory.pssBytes > 0L)
+            assertTrue(processDiagnostics.memory.nativePssBytes >= 0L)
+            assertTrue(processDiagnostics.memory.threadCount > 0)
+            assertTrue(processDiagnostics.memory.mappedRegionCount > 0)
+            assertTrue(processDiagnostics.memory.largestFreeAddressGapBytes != null)
+            assertEquals(0, diagnostics.expectedBinderDeathCount)
+            assertEquals(0, diagnostics.unexpectedBinderDeathCount)
             Thread.sleep(IDLE_SETTLE_MS)
             val manager = context.getSystemService(ActivityManager::class.java)
             val settledPssBytes = manager.getProcessMemoryInfo(
@@ -98,6 +113,12 @@ class SourceSeparationInferenceProcessDeviceTest {
             assertEquals(
                 SourceSeparationRemoteConnectionState.Dead,
                 host.connectionDiagnostics.state,
+            )
+            assertEquals(1, host.connectionDiagnostics.unexpectedBinderDeathCount)
+            assertEquals(false, host.connectionDiagnostics.lastBinderDeath?.expected)
+            assertEquals(
+                firstGeneration,
+                host.connectionDiagnostics.lastBinderDeath?.processGeneration,
             )
 
             val secondGeneration = host.processGeneration

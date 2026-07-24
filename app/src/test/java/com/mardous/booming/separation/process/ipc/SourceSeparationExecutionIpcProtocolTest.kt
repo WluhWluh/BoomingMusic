@@ -26,6 +26,10 @@ class SourceSeparationExecutionIpcProtocolTest {
             playbackPositionMs = 1_500L,
             playbackReadyWindowCount = 3,
         )
+        val diagnostics = SourceSeparationIpcDiagnosticsCommand(
+            commandId = "diagnostics-1",
+            processGeneration = 7L,
+        )
 
         assertEquals(
             connect,
@@ -37,6 +41,12 @@ class SourceSeparationExecutionIpcProtocolTest {
             control,
             SourceSeparationExecutionIpcCodec.decodeControlCommand(
                 SourceSeparationExecutionIpcCodec.encodeControlCommand(control),
+            ),
+        )
+        assertEquals(
+            diagnostics,
+            SourceSeparationExecutionIpcCodec.decodeDiagnosticsCommand(
+                SourceSeparationExecutionIpcCodec.encodeDiagnosticsCommand(diagnostics),
             ),
         )
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
