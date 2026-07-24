@@ -809,7 +809,9 @@ class MdxLiteRtCpuValidationTest {
         .put("schemaVersion", 1)
         .put("runId", runId)
         .put("status", "running")
-        .put("appCommit", arguments.getString(ARG_APP_COMMIT).orEmpty())
+        .put("appCommit", arguments.requiredString(ARG_APP_COMMIT))
+        .put("appApkSha256", arguments.requiredString(ARG_APP_APK_SHA256))
+        .put("testApkSha256", arguments.requiredString(ARG_TEST_APK_SHA256))
         .put("catalogSha256", SourceSeparationModelMetadata.CATALOG_SHA256)
         .put("contractSchemaVersion", SourceSeparationModelContractValidator.CONTRACT_SCHEMA_VERSION)
         .put("pipelineVersion", SourceSeparationModelContractValidator.PIPELINE_VERSION)
@@ -1473,6 +1475,8 @@ class MdxLiteRtCpuValidationTest {
         private const val ARG_FIXTURE_NAME = "fixtureName"
         private const val ARG_PROCESS_ABI = "processAbi"
         private const val ARG_APP_COMMIT = "appCommit"
+        private const val ARG_APP_APK_SHA256 = "appApkSha256"
+        private const val ARG_TEST_APK_SHA256 = "testApkSha256"
         private const val ARG_TEST_IN_FLIGHT_CANCELLATION = "testInFlightCancellation"
         private const val ARG_SECONDARY_MODEL_ID = "secondaryModelId"
         private const val ARG_SECONDARY_MODEL_PATH = "secondaryModelPath"

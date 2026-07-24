@@ -63,6 +63,39 @@ function Invoke-Adb {
     }
 }
 
+function Get-Sha256([string]$Path) {
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Get-InstalledApkSha256([string]$PackageName) {
+    $packagePaths = @(
+        & $adb -s $Serial shell pm path $PackageName |
+            ForEach-Object {
+                $line = ([string]$_).Trim()
+                if ($line.StartsWith("package:", [System.StringComparison]::Ordinal)) {
+                    $line.Substring("package:".Length)
+                }
+            } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if ($LASTEXITCODE -ne 0 -or $packagePaths.Count -ne 1) {
+        throw "Expected one installed base APK for $PackageName; found $($packagePaths.Count)."
+    }
+    $hashLine = (& $adb -s $Serial shell sha256sum $packagePaths[0]).Trim()
+    if ($LASTEXITCODE -ne 0 -or $hashLine -notmatch '^([0-9a-fA-F]{64})\s+') {
+        throw "Could not hash the installed base APK for $PackageName."
+    }
+    return $Matches[1].ToLowerInvariant()
+}
+
+function Assert-InstalledApk([string]$PackageName, [string]$ExpectedSha256) {
+    $actualSha256 = Get-InstalledApkSha256 $PackageName
+    if ($actualSha256 -ne $ExpectedSha256) {
+        throw ("Installed APK hash mismatch for {0}: expected {1}, actual {2}." -f
+            $PackageName, $ExpectedSha256, $actualSha256)
+    }
+}
+
 function Require-File([string]$Path, [string]$Role) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "$Role file not found: $Path"
@@ -107,6 +140,10 @@ if ($Backend -eq "auto-fallback" -and -not [string]::IsNullOrWhiteSpace($Seconda
 
 $remoteRelativeRoot = ""
 $remoteTempRoot = ""
+$sourceCommitAtInvocation = (& git -C $repoRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommitAtInvocation -notmatch '^[0-9a-f]{40}$') {
+    throw "Could not resolve the source commit for the LiteRT validation build."
+}
 Push-Location $repoRoot
 try {
     if (-not $SkipBuild) {
@@ -123,7 +160,63 @@ try {
         Select-Object -First 1
     if ($null -eq $testApk) { throw "No AndroidTest APK was found." }
 
-    if (-not $SkipInstall) {
+    $appApkSha256 = Get-Sha256 $appApk.FullName
+    $testApkSha256 = Get-Sha256 $testApk.FullName
+    $buildIdentityPath = Join-Path `
+        "app\build\outputs\apk\github\debug" `
+        "phase7-build-identity-v1.json"
+    if ($SkipBuild) {
+        if (-not (Test-Path -LiteralPath $buildIdentityPath -PathType Leaf)) {
+            throw "Phase 7 build identity is missing. Re-run without SkipBuild."
+        }
+        $buildIdentity = Get-Content -LiteralPath $buildIdentityPath -Raw | ConvertFrom-Json
+        if ($buildIdentity.schemaVersion -ne "phase7-build-identity-v1" -or
+                [string]$buildIdentity.appCommit -notmatch '^[0-9a-f]{40}$') {
+            throw "Phase 7 build identity is invalid: $buildIdentityPath"
+        }
+        $recordedAppApk = @($buildIdentity.appApks) | Where-Object {
+            $_.fileName -eq $appApk.Name
+        } | Select-Object -First 1
+        if ($null -eq $recordedAppApk -or
+                $recordedAppApk.sha256 -ne $appApkSha256) {
+            throw "The selected app APK does not match the Phase 7 build identity."
+        }
+        if ($buildIdentity.testApk.fileName -ne $testApk.Name -or
+                $buildIdentity.testApk.sha256 -ne $testApkSha256) {
+            throw "The AndroidTest APK does not match the Phase 7 build identity."
+        }
+        $appCommit = [string]$buildIdentity.appCommit
+    } else {
+        $appApkRecords = @(
+            Get-ChildItem "app\build\outputs\apk\github\debug" -Filter "*.apk" |
+                Sort-Object Name |
+                ForEach-Object {
+                    [ordered]@{
+                        fileName = $_.Name
+                        bytes = [int64]$_.Length
+                        sha256 = Get-Sha256 $_.FullName
+                    }
+                }
+        )
+        $buildIdentity = [ordered]@{
+            schemaVersion = "phase7-build-identity-v1"
+            appCommit = $sourceCommitAtInvocation
+            appApks = $appApkRecords
+            testApk = [ordered]@{
+                fileName = $testApk.Name
+                bytes = [int64]$testApk.Length
+                sha256 = $testApkSha256
+            }
+        }
+        $buildIdentity | ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath $buildIdentityPath -Encoding utf8
+        $appCommit = $sourceCommitAtInvocation
+    }
+
+    if ($SkipInstall) {
+        Assert-InstalledApk $package $appApkSha256
+        Assert-InstalledApk ($package + ".test") $testApkSha256
+    } else {
         Invoke-Adb install -r -t $appApk.FullName
         Invoke-Adb install -r -t $testApk.FullName
     }
@@ -153,7 +246,9 @@ try {
         "-e", "modelId", $ModelId,
         "-e", "fixtureName", $FixtureName,
         "-e", "processAbi", $ProcessAbi,
-        "-e", "appCommit", (git rev-parse HEAD),
+        "-e", "appCommit", $appCommit,
+        "-e", "appApkSha256", $appApkSha256,
+        "-e", "testApkSha256", $testApkSha256,
         "-e", "testInFlightCancellation", $TestInFlightCancellation.IsPresent.ToString().ToLowerInvariant(),
         "-e", "allowUnsupportedResourceProbe", $AllowUnsupportedResourceProbe.IsPresent.ToString().ToLowerInvariant(),
         "-e", "preflightOnly", $PreflightOnly.IsPresent.ToString().ToLowerInvariant()
