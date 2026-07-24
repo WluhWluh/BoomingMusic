@@ -23,10 +23,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class InProcessSourceSeparationExecutionHost(
     private val rangeExecutor: SourceSeparationModelAwareRangeExecutor,
     override val processGeneration: Long = DEFAULT_PROCESS_GENERATION,
-) : SourceSeparationExecutionHost {
     override val mode: SourceSeparationExecutionHostMode =
-        SourceSeparationExecutionHostMode.InProcess
-
+        SourceSeparationExecutionHostMode.InProcess,
+) : SourceSeparationExecutionHost {
     private val lock = Any()
     private var closed = false
     private var activeRun: ActiveRun? = null

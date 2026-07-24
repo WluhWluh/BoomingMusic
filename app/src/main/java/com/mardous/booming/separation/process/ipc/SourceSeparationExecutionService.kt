@@ -1,0 +1,500 @@
+package com.mardous.booming.separation.process.ipc
+
+import android.app.Service
+import android.content.Intent
+import android.os.Binder
+import android.os.Debug
+import android.os.IBinder
+import android.os.Process
+import android.os.SystemClock
+import com.mardous.booming.AppProcessResolver
+import com.mardous.booming.separation.SourceSeparationPausedException
+import com.mardous.booming.separation.cache.v2.SourceSeparationExactCacheModelException
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.process.InProcessSourceSeparationExecutionHost
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
+import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionControl
+import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionEnvironment
+import com.mardous.booming.separation.process.toExecutionCompletion
+import java.util.LinkedHashSet
+import java.util.concurrent.CancellationException
+import org.koin.android.ext.android.inject
+
+internal class SourceSeparationExecutionService : Service() {
+    private val presetRepository: SourceSeparationPresetRepository by inject()
+    private val stateLock = Any()
+    private val processGeneration by lazy(::createProcessGeneration)
+    private val commandLedger = SourceSeparationIpcCommandLedger()
+    private lateinit var environment: SourceSeparationRemoteExecutionEnvironment
+    private var clientCallback: ISourceSeparationExecutionCallback? = null
+    private var clientDeathRecipient: IBinder.DeathRecipient? = null
+    private var activeRun: ActiveRemoteRun? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        val process = AppProcessResolver.resolve(this)
+        check(process.isSourceSeparationProcess) {
+            "Source-separation execution service started in the wrong process."
+        }
+        environment = SourceSeparationRemoteExecutionEnvironment(this, presetRepository)
+    }
+
+    override fun onBind(intent: Intent?): IBinder {
+        require(intent?.action == ACTION_BIND) {
+            "Source-separation execution service requires its explicit bind action."
+        }
+        return binder
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        synchronized(stateLock) {
+            activeRun?.requestPause()
+        }
+        return false
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        stopSelf(startId)
+        return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        synchronized(stateLock) {
+            activeRun?.close()
+            activeRun = null
+            unlinkClientDeathLocked()
+            clientCallback = null
+        }
+        super.onDestroy()
+    }
+
+    private val binder = object : ISourceSeparationExecutionService.Stub() {
+        override fun connect(
+            requestJson: String,
+            callback: ISourceSeparationExecutionCallback,
+        ): String {
+            requireSameUidCaller()
+            val request = SourceSeparationExecutionIpcCodec.decodeConnectRequest(requestJson)
+            synchronized(stateLock) {
+                if (!commandLedger.record(request.commandId) && clientCallback == null) {
+                    throw IllegalArgumentException("Duplicate IPC connect command.")
+                }
+                check(activeRun == null) {
+                    "The IPC callback cannot be replaced during an active run."
+                }
+                unlinkClientDeathLocked()
+                clientCallback = callback
+                val deathRecipient = IBinder.DeathRecipient(::handleClientDeath)
+                callback.asBinder().linkToDeath(deathRecipient, 0)
+                clientDeathRecipient = deathRecipient
+            }
+            val process = AppProcessResolver.resolve(this@SourceSeparationExecutionService)
+            return SourceSeparationExecutionIpcCodec.encodeConnectResponse(
+                SourceSeparationIpcConnectResponse(
+                    commandId = request.commandId,
+                    processGeneration = processGeneration,
+                    processName = process.processName,
+                    pid = Process.myPid(),
+                    idlePssBytes = Debug.getPss() * 1_024L,
+                )
+            )
+        }
+
+        override fun start(requestJson: String): String {
+            requireSameUidCaller()
+            val command = try {
+                SourceSeparationExecutionIpcCodec.decodeStartCommand(requestJson)
+            } catch (error: Throwable) {
+                return rejectedStartResponse("malformed", error)
+            }
+            val active = try {
+                reserveRun(command)
+            } catch (error: Throwable) {
+                return rejectedStartResponse(command.commandId, error)
+            }
+            return executeRun(command, active)
+        }
+
+        override fun updateControl(requestJson: String): String {
+            requireSameUidCaller()
+            val command = try {
+                SourceSeparationExecutionIpcCodec.decodeControlCommand(requestJson)
+            } catch (error: Throwable) {
+                return rejectedOperationResponse("malformed", error)
+            }
+            return synchronized(stateLock) {
+                if (!commandLedger.record(command.commandId)) {
+                    return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.Duplicate,
+                    )
+                }
+                val active = activeRun
+                    ?: return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.NoActiveRun,
+                    )
+                if (command.processGeneration != processGeneration) {
+                    return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.StaleGeneration,
+                    )
+                }
+                if (command.runId != active.descriptor.runId) {
+                    return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.StaleRun,
+                    )
+                }
+                if (command.controlSequence <= active.highestControlSequence) {
+                    return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.StaleControl,
+                    )
+                }
+                active.highestControlSequence = command.controlSequence
+                active.control.update(
+                    hasPlaybackPositionUpdate = command.hasPlaybackPositionUpdate,
+                    playbackPositionMs = command.playbackPositionMs,
+                    playbackReadyWindowCount = command.playbackReadyWindowCount,
+                )
+                val result = when (command.action) {
+                    SourceSeparationIpcControlAction.Update ->
+                        SourceSeparationExecutionHostControlResult.Applied
+                    SourceSeparationIpcControlAction.Pause -> {
+                        active.control.requestPause()
+                        active.host.pause(command.runId, command.processGeneration)
+                    }
+                    SourceSeparationIpcControlAction.Cancel -> {
+                        active.control.requestCancel()
+                        active.host.cancel(command.runId, command.processGeneration)
+                    }
+                }
+                operationResponse(command.commandId, result.toIpcStatus())
+            }
+        }
+
+        override fun snapshot(requestJson: String): String {
+            requireSameUidCaller()
+            val command = try {
+                SourceSeparationExecutionIpcCodec.decodeRunCommand(requestJson)
+            } catch (error: Throwable) {
+                return rejectedOperationResponse("malformed", error)
+            }
+            return synchronized(stateLock) {
+                if (!commandLedger.record(command.commandId)) {
+                    return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.Duplicate,
+                    )
+                }
+                if (command.processGeneration != processGeneration) {
+                    return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.StaleGeneration,
+                    )
+                }
+                val active = activeRun
+                    ?: return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.NoActiveRun,
+                    )
+                if (command.runId != active.descriptor.runId) {
+                    return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.StaleRun,
+                    )
+                }
+                operationResponse(
+                    commandId = command.commandId,
+                    status = SourceSeparationIpcStatus.Applied,
+                    snapshot = active.host.snapshot(command.runId, command.processGeneration),
+                )
+            }
+        }
+
+        override fun closeRun(requestJson: String): String {
+            requireSameUidCaller()
+            val command = try {
+                SourceSeparationExecutionIpcCodec.decodeRunCommand(requestJson)
+            } catch (error: Throwable) {
+                return rejectedOperationResponse("malformed", error)
+            }
+            return synchronized(stateLock) {
+                if (!commandLedger.record(command.commandId)) {
+                    return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.Duplicate,
+                    )
+                }
+                if (command.processGeneration != processGeneration) {
+                    return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.StaleGeneration,
+                    )
+                }
+                val active = activeRun
+                    ?: return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.NoActiveRun,
+                    )
+                if (command.runId != active.descriptor.runId) {
+                    return@synchronized operationResponse(
+                        command.commandId,
+                        SourceSeparationIpcStatus.StaleRun,
+                    )
+                }
+                val result = active.host.closeRun(command.runId, command.processGeneration)
+                if (result == SourceSeparationExecutionHostControlResult.Applied) {
+                    active.close()
+                    activeRun = null
+                }
+                operationResponse(command.commandId, result.toIpcStatus())
+            }
+        }
+    }
+
+    private fun reserveRun(
+        command: SourceSeparationIpcStartCommand,
+    ): ActiveRemoteRun = synchronized(stateLock) {
+        require(command.descriptor.processGeneration == processGeneration) {
+            "IPC start command targets a stale process generation."
+        }
+        if (!commandLedger.record(command.commandId)) {
+            throw SourceSeparationIpcDuplicateCommandException(command.commandId)
+        }
+        check(activeRun == null) { "The remote execution host is busy." }
+        val callback = requireNotNull(clientCallback) {
+            "The remote execution client is not connected."
+        }
+        val control = SourceSeparationRemoteExecutionControl(
+            initialPlaybackPositionMs = command.descriptor.runtime.initialPlaybackPositionMs,
+            initialPlaybackReadyWindowCount =
+                command.descriptor.runtime.initialPlaybackReadyWindowCount,
+        )
+        val sender = SourceSeparationRemoteEventSender(callback) {
+            control.requestPause()
+        }
+        val executionRequest = try {
+            environment.prepare(command.descriptor, control)
+        } catch (error: Throwable) {
+            sender.close()
+            throw error
+        }
+        val host = InProcessSourceSeparationExecutionHost(
+            rangeExecutor = environment.rangeExecutor,
+            processGeneration = processGeneration,
+            mode = SourceSeparationExecutionHostMode.BoundRemote,
+        )
+        ActiveRemoteRun(
+            descriptor = command.descriptor,
+            control = control,
+            sender = sender,
+            host = host,
+            executionRequest = executionRequest,
+        ).also { activeRun = it }
+    }
+
+    private fun executeRun(
+        command: SourceSeparationIpcStartCommand,
+        active: ActiveRemoteRun,
+    ): String {
+        return try {
+            val hosted = active.host.start(
+                SourceSeparationExecutionHostRequest(
+                    descriptor = command.descriptor,
+                    executionRequest = active.executionRequest,
+                    onEvent = active.sender::offer,
+                )
+            )
+            active.sender.closeAndAwait()
+            SourceSeparationExecutionIpcCodec.encodeStartResponse(
+                SourceSeparationIpcStartResponse(
+                    commandId = command.commandId,
+                    status = SourceSeparationIpcStatus.Completed,
+                    completion = hosted.result.toExecutionCompletion(active.executionRequest),
+                    diagnostics = hosted.diagnostics,
+                )
+            )
+        } catch (error: SourceSeparationPausedException) {
+            terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Paused, error)
+        } catch (error: CancellationException) {
+            terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Canceled, error)
+        } catch (error: Throwable) {
+            terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Failed, error)
+        }
+    }
+
+    private fun terminalStartResponse(
+        commandId: String,
+        status: SourceSeparationIpcStatus,
+        error: Throwable,
+    ): String {
+        runCatching { synchronized(stateLock) { activeRun?.sender?.closeAndAwait() } }
+        return SourceSeparationExecutionIpcCodec.encodeStartResponse(
+            SourceSeparationIpcStartResponse(
+                commandId = commandId,
+                status = status,
+                error = error.toIpcError(),
+            )
+        )
+    }
+
+    private fun rejectedStartResponse(
+        commandId: String,
+        error: Throwable,
+    ): String = SourceSeparationExecutionIpcCodec.encodeStartResponse(
+        SourceSeparationIpcStartResponse(
+            commandId = commandId,
+            status = when (error) {
+                is SourceSeparationIpcDuplicateCommandException ->
+                    SourceSeparationIpcStatus.Duplicate
+                is IllegalStateException -> SourceSeparationIpcStatus.Busy
+                else -> SourceSeparationIpcStatus.Rejected
+            },
+            error = error.toIpcError(),
+        )
+    )
+
+    private fun rejectedOperationResponse(
+        commandId: String,
+        error: Throwable,
+    ): String = operationResponse(
+        commandId = commandId,
+        status = SourceSeparationIpcStatus.Rejected,
+        error = error.toIpcError(),
+    )
+
+    private fun operationResponse(
+        commandId: String,
+        status: SourceSeparationIpcStatus,
+        snapshot: com.mardous.booming.separation.process
+            .SourceSeparationExecutionHostSnapshot? = null,
+        error: SourceSeparationIpcError? = null,
+    ): String = SourceSeparationExecutionIpcCodec.encodeOperationResponse(
+        SourceSeparationIpcOperationResponse(
+            commandId = commandId,
+            status = status,
+            snapshot = snapshot,
+            error = error,
+        )
+    )
+
+    private fun handleClientDeath() {
+        synchronized(stateLock) {
+            activeRun?.requestPause()
+            clientCallback = null
+            clientDeathRecipient = null
+        }
+    }
+
+    private fun unlinkClientDeathLocked() {
+        val callback = clientCallback
+        val recipient = clientDeathRecipient
+        if (callback != null && recipient != null) {
+            callback.asBinder().unlinkToDeath(recipient, 0)
+        }
+        clientDeathRecipient = null
+    }
+
+    private fun requireSameUidCaller() {
+        require(Binder.getCallingUid() == applicationInfo.uid) {
+            "Source-separation IPC caller UID is not allowed."
+        }
+    }
+
+    private fun createProcessGeneration(): Long {
+        val value = SystemClock.elapsedRealtimeNanos() xor
+            (Process.myPid().toLong() shl 32)
+        return (value and Long.MAX_VALUE).coerceAtLeast(1L)
+    }
+
+    private class ActiveRemoteRun(
+        val descriptor: com.mardous.booming.separation.process
+            .SourceSeparationExecutionDescriptor,
+        val control: SourceSeparationRemoteExecutionControl,
+        val sender: SourceSeparationRemoteEventSender,
+        val host: InProcessSourceSeparationExecutionHost,
+        val executionRequest: com.mardous.booming.separation
+            .SourceSeparationModelAwareExecutionRequest,
+    ) : AutoCloseable {
+        var highestControlSequence: Long = 0L
+
+        fun requestPause() {
+            control.requestPause()
+            host.pause(descriptor.runId, descriptor.processGeneration)
+        }
+
+        override fun close() {
+            sender.close()
+            host.close()
+        }
+    }
+
+    companion object {
+        const val ACTION_BIND =
+            "com.wluhwluh.booming.sourcesep.action.BIND_SOURCE_SEPARATION_EXECUTION"
+    }
+}
+
+private class SourceSeparationIpcCommandLedger(
+    private val maximumEntries: Int = 512,
+) {
+    private val commandIds = LinkedHashSet<String>()
+
+    init {
+        require(maximumEntries > 0) { "IPC command-ledger limit is invalid." }
+    }
+
+    @Synchronized
+    fun record(commandId: String): Boolean {
+        if (!commandIds.add(commandId)) return false
+        if (commandIds.size > maximumEntries) {
+            val oldest = commandIds.iterator()
+            oldest.next()
+            oldest.remove()
+        }
+        return true
+    }
+}
+
+private class SourceSeparationIpcDuplicateCommandException(
+    commandId: String,
+) : IllegalArgumentException("Duplicate IPC command: $commandId")
+
+private fun SourceSeparationExecutionHostControlResult.toIpcStatus():
+        SourceSeparationIpcStatus = when (this) {
+    SourceSeparationExecutionHostControlResult.Applied -> SourceSeparationIpcStatus.Applied
+    SourceSeparationExecutionHostControlResult.AlreadyApplied ->
+        SourceSeparationIpcStatus.AlreadyApplied
+    SourceSeparationExecutionHostControlResult.NoActiveRun ->
+        SourceSeparationIpcStatus.NoActiveRun
+    SourceSeparationExecutionHostControlResult.StaleRun ->
+        SourceSeparationIpcStatus.StaleRun
+    SourceSeparationExecutionHostControlResult.StaleGeneration ->
+        SourceSeparationIpcStatus.StaleGeneration
+    SourceSeparationExecutionHostControlResult.RunActive ->
+        SourceSeparationIpcStatus.RunActive
+    SourceSeparationExecutionHostControlResult.Terminal ->
+        SourceSeparationIpcStatus.Terminal
+    SourceSeparationExecutionHostControlResult.HostClosed ->
+        SourceSeparationIpcStatus.Terminal
+}
+
+private fun Throwable.toIpcError(): SourceSeparationIpcError {
+    val category = when (this) {
+        is SourceSeparationExactCacheModelException ->
+            SourceSeparationIpcErrorCategory.ModelUnavailable
+        is SourceSeparationRemoteEventDeliveryException ->
+            SourceSeparationIpcErrorCategory.HostDied
+        is IllegalArgumentException -> SourceSeparationIpcErrorCategory.IdentityMismatch
+        else -> SourceSeparationIpcErrorCategory.RuntimeFailure
+    }
+    return SourceSeparationIpcError(
+        category = category,
+        type = this::class.java.name,
+        message = message,
+    )
+}

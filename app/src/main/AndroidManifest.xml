@@ -195,6 +195,12 @@
             </intent-filter>
         </service>
 
+        <service
+            android:name=".separation.process.ipc.SourceSeparationExecutionService"
+            android:exported="false"
+            android:process=":source_separation"
+            android:stopWithTask="false"/>
+
         <receiver
             android:name="androidx.media3.session.MediaButtonReceiver"
             android:exported="true">

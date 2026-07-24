@@ -22,6 +22,9 @@ class SourceSeparationExecutionIpcProtocolTest {
             processGeneration = 7L,
             controlSequence = 3L,
             action = SourceSeparationIpcControlAction.Cancel,
+            hasPlaybackPositionUpdate = true,
+            playbackPositionMs = 1_500L,
+            playbackReadyWindowCount = 3,
         )
 
         assertEquals(

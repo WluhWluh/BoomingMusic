@@ -41,6 +41,8 @@ class SourceSeparationCacheStore(
         return File(File(root.directory, ENTRIES_DIR_NAME), cacheKey)
     }
 
+    fun entriesDirectory(): File = File(root.directory, ENTRIES_DIR_NAME)
+
     fun beginStaging(runId: String = UUID.randomUUID().toString()): SourceSeparationCacheStaging {
         require(RUN_ID_PATTERN.matches(runId)) { "Cache staging run ID is invalid." }
         ensureLayout()

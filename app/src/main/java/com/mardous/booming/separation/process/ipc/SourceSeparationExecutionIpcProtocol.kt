@@ -89,6 +89,9 @@ internal data class SourceSeparationIpcControlCommand(
     val processGeneration: Long,
     val controlSequence: Long,
     val action: SourceSeparationIpcControlAction,
+    val hasPlaybackPositionUpdate: Boolean = false,
+    val playbackPositionMs: Long? = null,
+    val playbackReadyWindowCount: Int? = null,
 ) {
     init {
         requireProtocolVersion(protocolVersion)
@@ -96,11 +99,21 @@ internal data class SourceSeparationIpcControlCommand(
         require(runId.isNotBlank()) { "IPC control run ID is empty." }
         require(processGeneration > 0L) { "IPC control generation is invalid." }
         require(controlSequence > 0L) { "IPC control sequence is invalid." }
+        require(playbackPositionMs == null || playbackPositionMs >= 0L) {
+            "IPC playback position is invalid."
+        }
+        require(hasPlaybackPositionUpdate || playbackPositionMs == null) {
+            "IPC playback position was supplied without an update marker."
+        }
+        require(playbackReadyWindowCount == null || playbackReadyWindowCount > 0) {
+            "IPC playback ready-window count is invalid."
+        }
     }
 }
 
 @Serializable
 internal enum class SourceSeparationIpcControlAction {
+    Update,
     Pause,
     Cancel,
 }
@@ -137,6 +150,8 @@ internal data class SourceSeparationIpcOperationResponse(
 @Serializable
 internal enum class SourceSeparationIpcStatus {
     Completed,
+    Paused,
+    Canceled,
     Applied,
     AlreadyApplied,
     Duplicate,
