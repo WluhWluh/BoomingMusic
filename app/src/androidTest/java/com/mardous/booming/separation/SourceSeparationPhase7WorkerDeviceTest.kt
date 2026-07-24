@@ -965,6 +965,287 @@ class SourceSeparationPhase7WorkerDeviceTest {
     }
 
     @Test
+    fun validateProcessModelSwitchMatrix() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        require(MdxX86ProcessValidationOverride.buildEnabled) {
+            "The process model-switch matrix requires the x86 validation build."
+        }
+        val report = baseReport(context, runId, arguments)
+        val events = Collections.synchronizedList(
+            mutableListOf<SourceSeparationExecutionHostEvent>(),
+        )
+        val coordinators = mutableListOf<SourceSeparationForegroundWorkerCoordinator>()
+        val switchCases = JSONArray()
+        var host: BoundRemoteSourceSeparationExecutionHost? = null
+        var mediaUri: Uri? = null
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            mediaUri = registerSourceInMediaStore(context, sourcePath, runId)
+            val source = resolveMediaStoreSong(context, mediaUri, sourcePath)
+            val durationMs = maxOf(
+                source.duration,
+                arguments.optionalLong(ARG_FIXTURE_DURATION_US) / 1_000L,
+            )
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            check(preferences.edit()
+                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
+                .commit()
+            ) { "Could not persist model-switch matrix preferences." }
+
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            val primaryModelId = arguments.requiredString(ARG_MODEL_ID)
+            val primaryArtifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
+            val secondaryModelId = arguments.requiredString(ARG_SECONDARY_MODEL_ID)
+            val secondaryArtifactSha256 = arguments.requiredString(
+                ARG_SECONDARY_ARTIFACT_SHA256,
+            )
+            assertExpectedActivePreset(arguments)
+            val installedSecondary = get<SourceSeparationPresetDownloader>(
+                SourceSeparationPresetDownloader::class.java,
+            ).download(secondaryModelId)
+            assertEquals(secondaryArtifactSha256, installedSecondary.sha256)
+            val activeAfterDownload = presetRepository.activeModel() as?
+                SourceSeparationActivePresetState.Reference
+                ?: error("Downloading KARA replaced the active 9662 reference.")
+            assertEquals(primaryModelId, activeAfterDownload.reference.modelId)
+            assertEquals(
+                primaryArtifactSha256,
+                activeAfterDownload.reference.artifactSha256,
+            )
+
+            val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
+                SourceSeparationModelAwareCacheRepository::class.java,
+            )
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val runtimeFacade = createCpuRuntimeFacade(
+                context = context,
+                preferences = preferences,
+                presetRepository = presetRepository,
+                backendMode = BackendMode.Auto,
+                processorCount = null,
+                executionHostMode = Phase7ExecutionHostMode.BoundRemote,
+                executionHostEventSink = events::add,
+                boundRemoteHostSink = { host = it },
+            )
+
+            fun newWorker() = SourceSeparationForegroundWorkerCoordinator(
+                context = context,
+                preferences = preferences,
+                sourceSeparationRuntime = runtimeFacade,
+            ).also { worker ->
+                coordinators += worker
+                worker.attachCallbacks(RecordingCallbacks())
+                worker.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = durationMs,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+            }
+
+            fun resolveActiveSong(
+                expectedModelId: String,
+                expectedSha256: String,
+            ): SourceSeparationRuntimeSong {
+                val resolved = (runtimeFacade.resolve(source) as?
+                    SourceSeparationRuntimeSongResolution.Ready)?.song
+                    ?: error("The active switch target could not resolve.")
+                assertEquals(expectedModelId, resolved.modelId)
+                assertEquals(expectedSha256, resolved.artifactSha256)
+                return resolved
+            }
+
+            fun completeExactRun(
+                runtimeSong: SourceSeparationRuntimeSong,
+            ): SourceSeparationCacheManifest {
+                clearExactCacheEntry(runtimeFacade, runtimeSong.cacheKey)
+                val worker = newWorker()
+                assertTrue(worker.startCurrentSong())
+                waitForCompleted(worker)
+                worker.cancel()
+                waitForInactive(worker)
+                waitForCacheLeaseRelease(cacheRepository, runtimeSong.cacheKey)
+                val completed = runtimeFacade.cacheStatus(runtimeSong) as?
+                    SourceSeparationModelAwareCacheStatus.Completed
+                    ?: error("The switched model did not produce a completed exact cache.")
+                assertEquals(runtimeSong.modelId, completed.manifest.identity.modelId)
+                assertEquals(
+                    runtimeSong.artifactSha256,
+                    completed.manifest.identity.artifactSha256,
+                )
+                return completed.manifest
+            }
+
+            val seedSong = resolveActiveSong(primaryModelId, primaryArtifactSha256)
+            val seedManifest = completeExactRun(seedSong)
+            val initialDiagnostics = requireNotNull(host).processDiagnostics()
+            assertEquals(1, initialDiagnostics.session.nativeSessionCreationCount)
+            assertTrue(initialDiagnostics.session.invocationCount > 0L)
+            assertEquals(
+                SourceSeparationProcessSessionState.Resident,
+                initialDiagnostics.session.state,
+            )
+            var currentSessionId = requireNotNull(initialDiagnostics.session.sessionId)
+
+            repeat(PROCESS_MODEL_SWITCH_COUNT) { zeroBasedIndex ->
+                val switchIndex = zeroBasedIndex + 1
+                val selectSecondary = switchIndex % 2 == 1
+                val targetModelId = if (selectSecondary) secondaryModelId else primaryModelId
+                val targetArtifactSha256 = if (selectSecondary) {
+                    secondaryArtifactSha256
+                } else {
+                    primaryArtifactSha256
+                }
+                val selected = presetRepository.activate(
+                    sha256 = targetArtifactSha256,
+                    platform = AndroidMdxRuntimePlatformProvider.current(),
+                    scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                    experimentalConfirmed = true,
+                )
+                assertEquals(targetModelId, selected.modelId)
+                assertEquals(targetArtifactSha256, selected.artifactSha256)
+                val targetSong = resolveActiveSong(targetModelId, targetArtifactSha256)
+                clearExactCacheEntry(runtimeFacade, targetSong.cacheKey)
+
+                val oldProcess = requireNotNull(host).processDiagnostics()
+                val oldInvocationCount = oldProcess.session.invocationCount
+                val mismatchWorker = newWorker()
+                assertTrue(mismatchWorker.startCurrentSong())
+                val mismatchState = waitForFailed(mismatchWorker)
+                mismatchWorker.cancel()
+                waitForInactive(mismatchWorker)
+                val mismatchLeaseReleaseMs = waitForCacheLeaseRelease(
+                    cacheRepository,
+                    targetSong.cacheKey,
+                )
+                val failedManifest = requireNotNull(store.readManifest(targetSong.cacheKey))
+                assertEquals(SourceSeparationCacheManifestState.Failed, failedManifest.state)
+                val mismatchMessage = listOfNotNull(
+                    mismatchState.message,
+                    failedManifest.error?.message,
+                ).joinToString(" | ")
+                assertTrue(
+                    "The old generation did not report its model-key boundary: $mismatchMessage",
+                    "session-key-change" in mismatchMessage,
+                )
+                val mismatchDiagnostics = requireNotNull(host).processDiagnostics()
+                assertEquals(oldProcess.processGeneration,
+                    mismatchDiagnostics.processGeneration)
+                assertEquals(oldProcess.processStartTicks,
+                    mismatchDiagnostics.processStartTicks)
+                assertEquals(oldInvocationCount,
+                    mismatchDiagnostics.session.invocationCount)
+                assertEquals(1,
+                    mismatchDiagnostics.session.nativeSessionCreationCount)
+                assertEquals("session-key-change",
+                    mismatchDiagnostics.session.recycleReason)
+                assertEquals(SourceSeparationProcessSessionState.Resident,
+                    mismatchDiagnostics.session.state)
+
+                val recycle = requireNotNull(host).recycle(
+                    SourceSeparationIpcRecycleReason.ModelOrRuntimeKeyChanged,
+                    recycleToken = "phase3-switch-" + switchIndex.toString().padStart(2, '0'),
+                )
+                assertEquals(oldProcess.processGeneration,
+                    recycle.oldProcess.processGeneration)
+                assertNotEquals(recycle.oldProcess.processGeneration,
+                    recycle.newProcess.processGeneration)
+                assertNotEquals(recycle.oldProcess.processStartTicks,
+                    recycle.newProcess.processStartTicks)
+                assertTrue(recycle.binderDeath.expected)
+                val emptyGeneration = requireNotNull(host).processDiagnostics()
+                assertEquals(SourceSeparationProcessSessionState.Empty,
+                    emptyGeneration.session.state)
+                assertEquals(0, emptyGeneration.session.nativeSessionCreationCount)
+
+                clearExactCacheEntry(runtimeFacade, targetSong.cacheKey)
+                val completedManifest = completeExactRun(targetSong)
+                val completedDiagnostics = requireNotNull(host).processDiagnostics()
+                assertEquals(recycle.newProcess.processGeneration,
+                    completedDiagnostics.processGeneration)
+                assertEquals(recycle.newProcess.processStartTicks,
+                    completedDiagnostics.processStartTicks)
+                assertEquals(1,
+                    completedDiagnostics.session.nativeSessionCreationCount)
+                assertTrue(completedDiagnostics.session.invocationCount > 0L)
+                assertEquals(SourceSeparationProcessSessionState.Resident,
+                    completedDiagnostics.session.state)
+                val nextSessionId = requireNotNull(completedDiagnostics.session.sessionId)
+                assertNotEquals(currentSessionId, nextSessionId)
+                currentSessionId = nextSessionId
+                assertEquals(targetModelId, completedManifest.identity.modelId)
+                assertEquals(targetArtifactSha256,
+                    completedManifest.identity.artifactSha256)
+
+                switchCases.put(JSONObject()
+                    .put("switch", switchIndex)
+                    .put("targetModelId", targetModelId)
+                    .put("targetArtifactSha256", targetArtifactSha256)
+                    .put("mismatchGeneration", oldProcess.processGeneration)
+                    .put("mismatchInvocationCount", oldInvocationCount)
+                    .put("mismatchLeaseReleaseMs", mismatchLeaseReleaseMs)
+                    .put("recycleToken", recycle.recycleToken)
+                    .put("newGeneration", completedDiagnostics.processGeneration)
+                    .put("newProcessStartTicks", completedDiagnostics.processStartTicks)
+                    .put("sessionId", nextSessionId)
+                    .put("nativeSessionCreationCount",
+                        completedDiagnostics.session.nativeSessionCreationCount)
+                    .put("invocationCount", completedDiagnostics.session.invocationCount)
+                    .put("pssBytes", completedDiagnostics.memory.pssBytes)
+                    .put("mappedRegionCount",
+                        completedDiagnostics.memory.mappedRegionCount)
+                    .put("largestFreeAddressGapBytes",
+                        completedDiagnostics.memory.largestFreeAddressGapBytes ?: JSONObject.NULL)
+                )
+            }
+
+            val finalHost = requireNotNull(host)
+            assertEquals(
+                PROCESS_MODEL_SWITCH_COUNT,
+                finalHost.connectionDiagnostics.expectedBinderDeathCount,
+            )
+            assertEquals(0, finalHost.connectionDiagnostics.unexpectedBinderDeathCount)
+            report.put("status", "passed")
+            applyRuntimeEvidence(report, seedManifest)
+            report.put("processModelSwitchMatrix", JSONObject()
+                .put("switchCount", PROCESS_MODEL_SWITCH_COUNT)
+                .put("primaryModelId", primaryModelId)
+                .put("primaryArtifactSha256", primaryArtifactSha256)
+                .put("secondaryModelId", secondaryModelId)
+                .put("secondaryArtifactSha256", secondaryArtifactSha256)
+                .put("downloadPreservedActiveSelection", true)
+                .put("expectedBinderDeathCount",
+                    finalHost.connectionDiagnostics.expectedBinderDeathCount)
+                .put("unexpectedBinderDeathCount",
+                    finalHost.connectionDiagnostics.unexpectedBinderDeathCount)
+                .put("switches", switchCases)
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            report.put("processModelSwitchMatrix", JSONObject()
+                .put("switches", switchCases)
+            )
+            throw error
+        } finally {
+            coordinators.forEach { coordinator -> coordinator.cancel() }
+            host?.close()
+            mediaUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            writeReport(context, runId, "process-switch-matrix", report)
+        }
+    }
+
+    @Test
     fun validateWorkerLifecycle() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -2281,6 +2562,22 @@ class SourceSeparationPhase7WorkerDeviceTest {
         error("Worker did not complete in time.")
     }
 
+    private fun waitForFailed(
+        worker: SourceSeparationForegroundWorkerCoordinator,
+    ): SourceSeparationUiState.Failed {
+        val deadline = SystemClock.elapsedRealtime() + LIFECYCLE_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            when (val state = worker.workerStateFlow.value) {
+                is SourceSeparationUiState.Failed -> return state
+                is SourceSeparationUiState.Completed,
+                is SourceSeparationUiState.Canceled,
+                -> error("Worker did not fail at the expected process boundary: $state")
+                else -> SystemClock.sleep(POLL_INTERVAL_MS)
+            }
+        }
+        error("Worker did not publish the expected process-boundary failure in time.")
+    }
+
     private fun waitForPlayable(
         runtimeFacade: SourceSeparationRuntimeFacade,
         song: SourceSeparationRuntimeSong,
@@ -3425,6 +3722,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_REBIND_AFTER_COMPLETION = "rebindAfterCompletion"
         const val PROCESS_REBIND_SETTLE_MS = 250L
         const val PROCESS_MATRIX_CYCLE_COUNT = 20
+        const val PROCESS_MODEL_SWITCH_COUNT = 20
         const val PROCESS_MATRIX_FIRST_PAUSE_CYCLE = 6
         const val PROCESS_MATRIX_MAXIMUM_PSS_GROWTH_BYTES = 64L * 1_024L * 1_024L
         const val PROCESS_MATRIX_MAXIMUM_MAP_GROWTH = 256

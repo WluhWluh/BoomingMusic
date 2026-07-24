@@ -14,6 +14,7 @@ param(
         "acquisition",
         "worker",
         "process-matrix",
+        "process-switch-matrix",
         "lifecycle",
         "recreation",
         "playback",
@@ -65,6 +66,7 @@ $runner = "$package.test/androidx.test.runner.AndroidJUnitRunner"
 $sourceStages = @(
     "worker",
     "process-matrix",
+    "process-switch-matrix",
     "lifecycle",
     "recreation",
     "playback",
@@ -81,6 +83,7 @@ $testMethod = switch ($Stage) {
     "acquisition" { "validatePinnedAcquisition"; break }
     "worker" { "validateProductionWorker"; break }
     "process-matrix" { "validateProcessSessionMatrix"; break }
+    "process-switch-matrix" { "validateProcessModelSwitchMatrix"; break }
     "lifecycle" { "validateWorkerLifecycle"; break }
     "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
     "playback" { "validateMediaSessionPlayback"; break }
@@ -142,14 +145,14 @@ if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "work
     throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
 }
 if ($ExecutionHostMode -eq "bound-remote" -and
-        ($Stage -notin @("worker", "background", "process-matrix") -or
+        ($Stage -notin @("worker", "background", "process-matrix", "process-switch-matrix") -or
         $BackendMode -ne "auto" -or $AutoFailpoint -ne "none")) {
-    throw "BoundRemote requires Stage=worker/background/process-matrix, BackendMode=auto, and AutoFailpoint=none."
+    throw "BoundRemote requires a supported process stage, BackendMode=auto, and AutoFailpoint=none."
 }
-if ($Stage -eq "process-matrix" -and
+if ($Stage -in @("process-matrix", "process-switch-matrix") -and
         (-not $X86ProcessValidation -or $ProcessAbi -ne "x86" -or
         $ExecutionHostMode -ne "bound-remote" -or $BackendMode -ne "auto")) {
-    throw "ProcessMatrix requires pure x86, X86ProcessValidation, and BoundRemote Auto."
+    throw "$Stage requires pure x86, X86ProcessValidation, and BoundRemote Auto."
 }
 if ($X86ProcessValidation -and $ProcessAbi -ne "x86") {
     throw "X86ProcessValidation can only build and run the pure-x86 target."
@@ -179,8 +182,9 @@ if ($BackendMode -eq "auto" -and $Stage -eq "lifecycle" -and
 if ($Stage -eq "playback" -and $CacheKey -notmatch '^[0-9a-f]{64}$') {
     throw "Playback stage requires a 64-character lowercase cache key."
 }
-if ($Stage -eq "switching" -and [string]::IsNullOrWhiteSpace($SecondaryModelId)) {
-    throw "Switching stage requires SecondaryModelId."
+if ($Stage -in @("switching", "process-switch-matrix") -and
+        [string]::IsNullOrWhiteSpace($SecondaryModelId)) {
+    throw "$Stage requires SecondaryModelId."
 }
 if (-not [string]::IsNullOrWhiteSpace($SecondaryModelId) -and
         $SecondaryModelId -eq $ModelId) {
