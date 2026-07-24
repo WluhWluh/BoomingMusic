@@ -24,6 +24,9 @@ precision. A successful short-window probe is not a Phase 7 promotion result.
   record KARA CPU resources, cancellation, full worker/MediaSession playback,
   and full-track desktop-reference equivalence. Listening and gesture-level UI
   review remain open.
+- `candidate-catalog-2026-07-24/` contains the 27-row immutable download-only
+  candidate audit: online Release acquisition, catalog/sidecar reconciliation,
+  Android LiteRT structural compile, activation rejection, and cleanup.
 - `dual-runtime-inventory-2026-07-24.json` retains exact split, native runtime,
   and installed code-path sizes for the temporary ORT plus LiteRT build.
 - `hq4-preflight/` contains five checked no-allocation device reports and their

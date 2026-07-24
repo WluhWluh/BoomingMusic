@@ -1,0 +1,1733 @@
+{
+  "artifactCount": 30,
+  "artifactSet": "all-candidates-fp32",
+  "artifacts": [
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 66742116,
+        "fileName": "Kim_Inst_static_float32.tflite",
+        "sha256": "fd3ca5bcb6568d893be5f049de8804278ee669303749d6fb3010bbeaeae4d288"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999803736,
+          "maxAbsError": 0.0001430511474609375,
+          "meanAbsError": 5.628773263784599e-06,
+          "rmse": 7.1930224544580025e-06,
+          "snrDbMin": 104.05598979880764
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999803736,
+            "maxAbsError": 0.0001430511474609375,
+            "meanAbsError": 5.628773263784599e-06,
+            "rmse": 7.1930224544580025e-06,
+            "sample": "synthetic_00",
+            "signalRms": 1.147389591768283,
+            "snrDb": 104.05598979880764
+          }
+        ]
+      },
+      "displayName": "Kim Inst",
+      "modelId": "kim_inst",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66759214,
+        "fileName": "Kim_Inst.onnx",
+        "sha256": "86b1940e7122fbdd2beadc65507cbff6c352d79012a8a7e60d56db98532af5f7",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Inst.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 66742120,
+        "fileName": "Kim_Vocal_1_static_float32.tflite",
+        "sha256": "1eae9fd7667a517fec7b2cc586fca35345e8484a4f9e9fdab57a762cc1cba244"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999847816,
+          "maxAbsError": 6.29425048828125e-05,
+          "meanAbsError": 7.3095655987269e-07,
+          "rmse": 1.4553365577768556e-06,
+          "snrDbMin": 105.1628985780559
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999847816,
+            "maxAbsError": 6.29425048828125e-05,
+            "meanAbsError": 7.3095655987269e-07,
+            "rmse": 1.4553365577768556e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.2636989301223343,
+            "snrDb": 105.1628985780559
+          }
+        ]
+      },
+      "displayName": "Kim Vocal 1",
+      "modelId": "kim_vocal_1",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66759214,
+        "fileName": "Kim_Vocal_1.onnx",
+        "sha256": "f313140ef8fecc3041881b60ecb993d985a0281a138b2fb634aa8901aebc38cb",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_1.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 66742120,
+        "fileName": "Kim_Vocal_2_static_float32.tflite",
+        "sha256": "b0fd60074dc9480747155db2fe02731f569d6a4d94ceb66dfffe47c1539691f5"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999724665,
+          "maxAbsError": 6.461143493652344e-05,
+          "meanAbsError": 1.4855183677979038e-06,
+          "rmse": 2.3486722640915654e-06,
+          "snrDbMin": 102.59084314424757
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999724665,
+            "maxAbsError": 6.461143493652344e-05,
+            "meanAbsError": 1.4855183677979038e-06,
+            "rmse": 2.3486722640915654e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.31649334059311657,
+            "snrDb": 102.59084314424757
+          }
+        ]
+      },
+      "displayName": "Kim Vocal 2",
+      "modelId": "kim_vocal_2",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66759214,
+        "fileName": "Kim_Vocal_2.onnx",
+        "sha256": "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_2.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifact": {
+        "byteSize": 29700460,
+        "fileName": "kuielab_a_bass_static_float32.tflite",
+        "sha256": "17bb6777ecb7478677b247eaea49d7e8ce6538d951d04f3c01b6e6b750b1134a"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999990763,
+          "maxAbsError": 0.00016021728515625,
+          "meanAbsError": 1.0892484891833476e-06,
+          "rmse": 2.5339984183602543e-06,
+          "snrDbMin": 117.33006797488422
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999990763,
+            "maxAbsError": 0.00016021728515625,
+            "meanAbsError": 1.0892484891833476e-06,
+            "rmse": 2.5339984183602543e-06,
+            "sample": "synthetic_00",
+            "signalRms": 1.8634156483033428,
+            "snrDb": 117.33006797488422
+          }
+        ]
+      },
+      "displayName": "Kuielab A Bass",
+      "modelId": "kuielab_a_bass",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29703204,
+        "fileName": "kuielab_a_bass.onnx",
+        "sha256": "0c3e77b9963185b1ea6bb46a4b8924137d9370fc1ccdefec7b1b416ef550dcaa",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/kuielab_a_bass.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifact": {
+        "byteSize": 29700460,
+        "fileName": "kuielab_a_drums_static_float32.tflite",
+        "sha256": "28fb8bafb783ccc9659fae4d4a8924941d1eab8e141ef2000cf4da237241bb1f"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999870864,
+          "maxAbsError": 3.6716461181640625e-05,
+          "meanAbsError": 2.3553019734556813e-07,
+          "rmse": 5.275709228817751e-07,
+          "snrDbMin": 105.87911070115341
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999870864,
+            "maxAbsError": 3.6716461181640625e-05,
+            "meanAbsError": 2.3553019734556813e-07,
+            "rmse": 5.275709228817751e-07,
+            "sample": "synthetic_00",
+            "signalRms": 0.10380932960765844,
+            "snrDb": 105.87911070115341
+          }
+        ]
+      },
+      "displayName": "Kuielab A Drums",
+      "modelId": "kuielab_a_drums",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29703204,
+        "fileName": "kuielab_a_drums.onnx",
+        "sha256": "40f586b7091934dd6f5563f0cba8f14bad57ce88440da1098bf388ea716c2901",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/kuielab_a_drums.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifact": {
+        "byteSize": 29700460,
+        "fileName": "kuielab_a_other_static_float32.tflite",
+        "sha256": "c23a824468749a154aff73897bcb8ef37d98a99535543884ed39f18b8d49cbc8"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999965575,
+          "maxAbsError": 4.9114227294921875e-05,
+          "meanAbsError": 6.379240400367081e-07,
+          "rmse": 1.058846652510379e-06,
+          "snrDbMin": 111.60910665895139
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999965575,
+            "maxAbsError": 4.9114227294921875e-05,
+            "meanAbsError": 6.379240400367081e-07,
+            "rmse": 1.058846652510379e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.4029845544823076,
+            "snrDb": 111.60910665895139
+          }
+        ]
+      },
+      "displayName": "Kuielab A Other",
+      "modelId": "kuielab_a_other",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29703204,
+        "fileName": "kuielab_a_other.onnx",
+        "sha256": "7b67a1dcb5f232153528c59960b4c7bf8dc736b8114de360af0e719633f53358",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/kuielab_a_other.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 29700460,
+        "fileName": "kuielab_a_vocals_static_float32.tflite",
+        "sha256": "066517da5cfdc67a348c08249753d4c4e16923800790dca1edcb5fd370681750"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999408861,
+          "maxAbsError": 0.00013637542724609375,
+          "meanAbsError": 4.742520971490194e-07,
+          "rmse": 2.660121671984909e-06,
+          "snrDbMin": 99.27197971326757
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999408861,
+            "maxAbsError": 0.00013637542724609375,
+            "meanAbsError": 4.742520971490194e-07,
+            "rmse": 2.660121671984909e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.24462480194818154,
+            "snrDb": 99.27197971326757
+          }
+        ]
+      },
+      "displayName": "Kuielab A Vocals",
+      "modelId": "kuielab_a_vocals",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29703204,
+        "fileName": "kuielab_a_vocals.onnx",
+        "sha256": "daba83c2ee1afee9139766ad64c9b6808d6b6f092fff04bed3338be50baac721",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/kuielab_a_vocals.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifact": {
+        "byteSize": 29700460,
+        "fileName": "kuielab_b_bass_static_float32.tflite",
+        "sha256": "9654f3f5cad4727e3b70a9d26dc74742b2bafd5cd75fc538c6ceb1673961bc79"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999970006,
+          "maxAbsError": 0.00011920928955078125,
+          "meanAbsError": 9.82799022497538e-07,
+          "rmse": 1.8940935544840123e-06,
+          "snrDbMin": 112.21854322088555
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999970006,
+            "maxAbsError": 0.00011920928955078125,
+            "meanAbsError": 9.82799022497538e-07,
+            "rmse": 1.8940935544840123e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.7732654165004303,
+            "snrDb": 112.21854322088555
+          }
+        ]
+      },
+      "displayName": "Kuielab B Bass",
+      "modelId": "kuielab_b_bass",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29703204,
+        "fileName": "kuielab_b_bass.onnx",
+        "sha256": "b4b7080fe501d0bece62076c5d4eda4d6590c5207ed78ec84a57bac0740a061d",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/kuielab_b_bass.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifact": {
+        "byteSize": 21931680,
+        "fileName": "kuielab_b_drums_static_float32.tflite",
+        "sha256": "cbe947a5242c680a5e484aa0d3b857e6087cce5a32b7b1b61e823d47240638eb"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999877517,
+          "maxAbsError": 7.414817810058594e-05,
+          "meanAbsError": 3.802683019582531e-07,
+          "rmse": 1.1884018708655357e-06,
+          "snrDbMin": 106.09387699422251
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          128,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          128,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999877517,
+            "maxAbsError": 7.414817810058594e-05,
+            "meanAbsError": 3.802683019582531e-07,
+            "rmse": 1.1884018708655357e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.23969400750233041,
+            "snrDb": 106.09387699422251
+          }
+        ]
+      },
+      "displayName": "Kuielab B Drums",
+      "modelId": "kuielab_b_drums",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 21930313,
+        "fileName": "kuielab_b_drums.onnx",
+        "sha256": "a6fecee758059b33ed99f6dabba297439b3e7cacfac4b1097bd324aff8052208",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/kuielab_b_drums.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifact": {
+        "byteSize": 29700460,
+        "fileName": "kuielab_b_other_static_float32.tflite",
+        "sha256": "c11e06e6858956a7e27a413d37d3e933e2d62fd0ee8f66df3276a61169109044"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.999999999951219,
+          "maxAbsError": 0.00011682510375976562,
+          "meanAbsError": 9.616056639849546e-07,
+          "rmse": 1.981180320838472e-06,
+          "snrDbMin": 100.10697309938516
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.999999999951219,
+            "maxAbsError": 0.00011682510375976562,
+            "meanAbsError": 9.616056639849546e-07,
+            "rmse": 1.981180320838472e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.2005730877832801,
+            "snrDb": 100.10697309938516
+          }
+        ]
+      },
+      "displayName": "Kuielab B Other",
+      "modelId": "kuielab_b_other",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29703204,
+        "fileName": "kuielab_b_other.onnx",
+        "sha256": "b0d0b63950ac332333fea2d58f68c92fd3ab0aae071398c2a8beeae1ad15b655",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/kuielab_b_other.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 29700460,
+        "fileName": "kuielab_b_vocals_static_float32.tflite",
+        "sha256": "8257c4b85822086350a2ad59757ef030af7eca3441ad7a23704834c3bb198587"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999464774,
+          "maxAbsError": 9.262561798095703e-05,
+          "meanAbsError": 6.397567851035291e-07,
+          "rmse": 1.4373994758963242e-06,
+          "snrDbMin": 99.70419557474176
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999464774,
+            "maxAbsError": 9.262561798095703e-05,
+            "meanAbsError": 6.397567851035291e-07,
+            "rmse": 1.4373994758963242e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.13892719298357503,
+            "snrDb": 99.70419557474176
+          }
+        ]
+      },
+      "displayName": "Kuielab B Vocals",
+      "modelId": "kuielab_b_vocals",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29703204,
+        "fileName": "kuielab_b_vocals.onnx",
+        "sha256": "9b7dcb9d878acb0f3e64ff3fd27750faae96577013f6d50f5996875bf4250713",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/kuielab_b_vocals.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifact": {
+        "byteSize": 66753272,
+        "fileName": "Reverb_HQ_By_FoxJoy_static_float32.tflite",
+        "sha256": "94ada8c869418f67fa916d5eea1944b9153040731be7e5ce635b190a1c6b3e34"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999875352,
+          "maxAbsError": 3.123283386230469e-05,
+          "meanAbsError": 3.475556435983407e-07,
+          "rmse": 1.1090531938255423e-06,
+          "snrDbMin": 106.03269487240496
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          512,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          512,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999875352,
+            "maxAbsError": 3.123283386230469e-05,
+            "meanAbsError": 3.475556435983407e-07,
+            "rmse": 1.1090531938255423e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.22211972159480062,
+            "snrDb": 106.03269487240496
+          }
+        ]
+      },
+      "displayName": "Reverb HQ by FoxJoy",
+      "modelId": "reverb_hq_by_foxjoy",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66780123,
+        "fileName": "Reverb_HQ_By_FoxJoy.onnx",
+        "sha256": "233bb5c6aaa365e568659a0a81211746fa881f8f47f82d9e864fce1f7692db80",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Reverb_HQ_By_FoxJoy.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 66742128,
+        "fileName": "UVR-MDX-NET-Inst_1_static_float32.tflite",
+        "sha256": "ffa7a3481f08d864812ae026b5254f30b85cbf3c31cc27bd6654a25166ca3328"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999905578,
+          "maxAbsError": 0.00011932849884033203,
+          "meanAbsError": 4.412319718483104e-06,
+          "rmse": 5.67824451165387e-06,
+          "snrDbMin": 107.19021712282174
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999905578,
+            "maxAbsError": 0.00011932849884033203,
+            "meanAbsError": 4.412319718483104e-06,
+            "rmse": 5.67824451165387e-06,
+            "sample": "synthetic_00",
+            "signalRms": 1.299346395365309,
+            "snrDb": 107.19021712282174
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Inst 1",
+      "modelId": "uvr_mdxnet_inst_1",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66759214,
+        "fileName": "UVR-MDX-NET-Inst_1.onnx",
+        "sha256": "6ca53f94b7a0cbb04fcfcc8f3ea5ec1ae22cd8ad044f5e673588859f83976f5e",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_1.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 66742128,
+        "fileName": "UVR-MDX-NET-Inst_2_static_float32.tflite",
+        "sha256": "7bd2f73f520f31d034467cebfc565affdf8e0be9aa836cc153731e689713d883"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.99999999998916,
+          "maxAbsError": 0.00012874603271484375,
+          "meanAbsError": 4.648809086423474e-06,
+          "rmse": 5.976695512061376e-06,
+          "snrDbMin": 106.62707911375941
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.99999999998916,
+            "maxAbsError": 0.00012874603271484375,
+            "meanAbsError": 4.648809086423474e-06,
+            "rmse": 5.976695512061376e-06,
+            "sample": "synthetic_00",
+            "signalRms": 1.2817847095782726,
+            "snrDb": 106.62707911375941
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Inst 2",
+      "modelId": "uvr_mdxnet_inst_2",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66759214,
+        "fileName": "UVR-MDX-NET-Inst_2.onnx",
+        "sha256": "e3a96a664d28b52db9def0a9cae9a16dbb524d8325bfe8f0ac64ac5d231456bc",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_2.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 66742128,
+        "fileName": "UVR-MDX-NET-Inst_3_static_float32.tflite",
+        "sha256": "5ac1ec6e48c9fb9db02106e221d8e22d3b6a9095029e4f27dac8728f4e071090"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999899253,
+          "maxAbsError": 0.00013065338134765625,
+          "meanAbsError": 4.492607104111812e-06,
+          "rmse": 5.797933785105166e-06,
+          "snrDbMin": 106.95741837188419
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999899253,
+            "maxAbsError": 0.00013065338134765625,
+            "meanAbsError": 4.492607104111812e-06,
+            "rmse": 5.797933785105166e-06,
+            "sample": "synthetic_00",
+            "signalRms": 1.2916479821265543,
+            "snrDb": 106.95741837188419
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Inst 3",
+      "modelId": "uvr_mdxnet_inst_3",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66759214,
+        "fileName": "UVR-MDX-NET-Inst_3.onnx",
+        "sha256": "2b7834e2972158d8c9864e7376e3a7d084079c80a23f38dc31c4b0a4e901a1cb",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_3.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 66742132,
+        "fileName": "UVR-MDX-NET-Inst_HQ_1_static_float32.tflite",
+        "sha256": "eca068aa4ee9f00c37ae2838dd4eaef51981e93a9352cf7609b7a6f8e596a8e3"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999333383,
+          "maxAbsError": 0.000125885009765625,
+          "meanAbsError": 3.276394507700786e-06,
+          "rmse": 4.468136821818527e-06,
+          "snrDbMin": 98.7509517246857
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999333383,
+            "maxAbsError": 0.000125885009765625,
+            "meanAbsError": 3.276394507700786e-06,
+            "rmse": 4.468136821818527e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.3869671061454287,
+            "snrDb": 98.7509517246857
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Inst HQ 1",
+      "modelId": "uvr_mdxnet_inst_hq_1",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66759214,
+        "fileName": "UVR-MDX-NET-Inst_HQ_1.onnx",
+        "sha256": "38a045c4ded87e3bf97b609ec5be7910e8a7cecec455f507227ab12b5e29f7f9",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_1.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 66742132,
+        "fileName": "UVR-MDX-NET-Inst_HQ_2_static_float32.tflite",
+        "sha256": "c9da23102862d0c3d38c10c53476a9330ae0d2c899ce5f429ed19c6face235e0"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999125085,
+          "maxAbsError": 0.00012183189392089844,
+          "meanAbsError": 4.229592293884347e-06,
+          "rmse": 5.542158351461413e-06,
+          "snrDbMin": 97.57002245500117
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999125085,
+            "maxAbsError": 0.00012183189392089844,
+            "meanAbsError": 4.229592293884347e-06,
+            "rmse": 5.542158351461413e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.418967227733751,
+            "snrDb": 97.57002245500117
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Inst HQ 2",
+      "modelId": "uvr_mdxnet_inst_hq_2",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66759214,
+        "fileName": "UVR-MDX-NET-Inst_HQ_2.onnx",
+        "sha256": "197f8ab296df850f961e68c595f6649acb7d9e621b5600b460f3458967299112",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_2.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 66742132,
+        "fileName": "UVR-MDX-NET-Inst_HQ_3_static_float32.tflite",
+        "sha256": "47443ff5604cadb3c55802ed9dff87152c1342fd5c34c41f1cca6321d5971e53"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999998842396,
+          "maxAbsError": 0.0001285076141357422,
+          "meanAbsError": 4.552091912598162e-06,
+          "rmse": 5.971742466013945e-06,
+          "snrDbMin": 96.35388775217993
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999998842396,
+            "maxAbsError": 0.0001285076141357422,
+            "meanAbsError": 4.552091912598162e-06,
+            "rmse": 5.971742466013945e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.392460052785473,
+            "snrDb": 96.35388775217993
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Inst HQ 3",
+      "modelId": "uvr_mdxnet_inst_hq_3",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66759214,
+        "fileName": "UVR-MDX-NET-Inst_HQ_3.onnx",
+        "sha256": "317554b07fe1ea5279a77f2b1520a41ea4b93432560c4ffd08792c30fddf9adc",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_3.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "download-only-resource-gated",
+      "artifact": {
+        "byteSize": 59057268,
+        "fileName": "UVR-MDX-NET-Inst_HQ_4_static_float32.tflite",
+        "sha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.999999999867069,
+          "maxAbsError": 0.000278472900390625,
+          "meanAbsError": 3.226660433094016e-06,
+          "rmse": 5.1021193087451925e-06,
+          "snrDbMin": 95.75308991312113
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2560,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2560,
+          256,
+          4
+        ],
+        "randomSampleCount": 2,
+        "realInput": "uvr_mdxnet_inst_hq_4_coast_town_window0_nchw_f32.bin",
+        "sampleCount": 3,
+        "samples": [
+          {
+            "cosineSimilarity": 0.999999999867069,
+            "maxAbsError": 6.945431232452393e-05,
+            "meanAbsError": 3.1923184501181367e-06,
+            "rmse": 4.627790669226234e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.28381033202224654,
+            "snrDb": 95.75308991312113
+          },
+          {
+            "cosineSimilarity": 0.9999999998671055,
+            "maxAbsError": 6.979703903198242e-05,
+            "meanAbsError": 3.1953546609564397e-06,
+            "rmse": 4.630483824868957e-06,
+            "sample": "synthetic_01",
+            "signalRms": 0.28402034370238216,
+            "snrDb": 95.75446154346069
+          },
+          {
+            "cosineSimilarity": 0.999999999991496,
+            "maxAbsError": 0.000278472900390625,
+            "meanAbsError": 3.2923081882074713e-06,
+            "rmse": 6.048083432140387e-06,
+            "sample": "coast_town_window0",
+            "signalRms": 1.4664093819580792,
+            "snrDb": 107.69274913996199
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Inst HQ 4",
+      "modelId": "uvr_mdxnet_inst_hq_4",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 59074342,
+        "fileName": "UVR-MDX-NET-Inst_HQ_4.onnx",
+        "sha256": "3c4b5b9b05090fdf238f38ba5046813982d50e2a652e9cb3324ea79720c3c9c8",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_4.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 59057268,
+        "fileName": "UVR-MDX-NET-Inst_HQ_5_static_float32.tflite",
+        "sha256": "e981c7728784c97707ef42a92139bc12802df9aadca9da5ec0ea1020123c558f"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999998887489,
+          "maxAbsError": 5.868077278137207e-05,
+          "meanAbsError": 2.1768715003922523e-06,
+          "rmse": 3.035392193928156e-06,
+          "snrDbMin": 96.526673183823
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2560,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2560,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999998887489,
+            "maxAbsError": 5.868077278137207e-05,
+            "meanAbsError": 2.1768715003922523e-06,
+            "rmse": 3.035392193928156e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.20349253035752904,
+            "snrDb": 96.526673183823
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Inst HQ 5",
+      "modelId": "uvr_mdxnet_inst_hq_5",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 59074342,
+        "fileName": "UVR-MDX-NET-Inst_HQ_5.onnx",
+        "sha256": "811cb24095d865763752310848b7ec86aeede0626cb05749ab35350e46897000",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_5.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 52769652,
+        "fileName": "UVR-MDX-NET-Inst_Main_static_float32.tflite",
+        "sha256": "8901458e2874aee6defbb922b8e34dec6109665c54707116bc0e4d21dd2983bc"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999968651,
+          "maxAbsError": 4.1961669921875e-05,
+          "meanAbsError": 3.867910464805391e-06,
+          "rmse": 4.931656846720003e-06,
+          "snrDbMin": 112.01236101104811
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999968651,
+            "maxAbsError": 4.1961669921875e-05,
+            "meanAbsError": 3.867910464805391e-06,
+            "rmse": 4.931656846720003e-06,
+            "sample": "synthetic_00",
+            "signalRms": 1.9661239819251006,
+            "snrDb": 112.01236101104811
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Inst Main",
+      "modelId": "uvr_mdxnet_inst_main",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 52786726,
+        "fileName": "UVR-MDX-NET-Inst_Main.onnx",
+        "sha256": "8ab401dfe4a548b87deb64f975294bd56ff946aa32903f53b4b24bb13b2cce1e",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_Main.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 66742128,
+        "fileName": "UVR-MDX-NET-Voc_FT_static_float32.tflite",
+        "sha256": "8341c58754415a34e692f786a3719b63f7e0677b8d6884df2ef82c4cf61ac0d0"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999789712,
+          "maxAbsError": 6.461143493652344e-05,
+          "meanAbsError": 1.1976468264525881e-06,
+          "rmse": 2.0016697104816486e-06,
+          "snrDbMin": 103.76166394314254
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999789712,
+            "maxAbsError": 6.461143493652344e-05,
+            "meanAbsError": 1.1976468264525881e-06,
+            "rmse": 2.0016697104816486e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.3086566331658977,
+            "snrDb": 103.76166394314254
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Voc FT",
+      "modelId": "uvr_mdxnet_voc_ft",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66762490,
+        "fileName": "UVR-MDX-NET-Voc_FT.onnx",
+        "sha256": "534b2070fcc7df514b13ef660dc8cbb328679c2374d04354a5c42bb14ecce111",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Voc_FT.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "download-only-generic-stem",
+      "artifact": {
+        "byteSize": 59057268,
+        "fileName": "UVR-MDX-NET_Crowd_HQ_1_static_float32.tflite",
+        "sha256": "11712744f0b88aadc36f30522ece08752985b381badb0468fe48ad6155ba5768"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999357045,
+          "maxAbsError": 4.9173831939697266e-05,
+          "meanAbsError": 2.20760508415907e-06,
+          "rmse": 2.814055743089103e-06,
+          "snrDbMin": 98.90008265999236
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2560,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2560,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999357045,
+            "maxAbsError": 4.9173831939697266e-05,
+            "meanAbsError": 2.20760508415907e-06,
+            "rmse": 2.814055743089103e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.2479344235804088,
+            "snrDb": 98.90008265999236
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Crowd HQ 1",
+      "modelId": "uvr_mdxnet_crowd_hq_1",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 59074342,
+        "fileName": "UVR-MDX-NET_Crowd_HQ_1.onnx",
+        "sha256": "313b7bf869c411fdafe005cf0d5a635c405cb3d0df137178a64091952d75225c",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET_Crowd_HQ_1.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 29700464,
+        "fileName": "UVR_MDXNET_1_9703_static_float32.tflite",
+        "sha256": "2607c88c1d4ba9c39ad27d577f21ce2860361d9e9c1a09b75ebb3b10b9700555"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999089009,
+          "maxAbsError": 5.882978439331055e-05,
+          "meanAbsError": 2.8311217414866974e-06,
+          "rmse": 4.573702113872184e-06,
+          "snrDbMin": 97.39259037288292
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999089009,
+            "maxAbsError": 5.882978439331055e-05,
+            "meanAbsError": 2.8311217414866974e-06,
+            "rmse": 4.573702113872184e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.33876411071525414,
+            "snrDb": 97.39259037288292
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET 1",
+      "modelId": "uvr_mdxnet_1_9703",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29704436,
+        "fileName": "UVR_MDXNET_1_9703.onnx",
+        "sha256": "229ad3bb96a037e89d8ed86732d6d3675856e6a07c3e3f02896eac01ec7ee4be",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_1_9703.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 29700464,
+        "fileName": "UVR_MDXNET_2_9682_static_float32.tflite",
+        "sha256": "73be30195e35dbc15324fbf3f3ddfc84edddc5c24bb08e53ca6eae37406a83e1"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999998898601,
+          "maxAbsError": 4.780292510986328e-05,
+          "meanAbsError": 2.7177157234659077e-06,
+          "rmse": 4.13778349092711e-06,
+          "snrDbMin": 96.57018971761671
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999998898601,
+            "maxAbsError": 4.780292510986328e-05,
+            "meanAbsError": 2.7177157234659077e-06,
+            "rmse": 4.13778349092711e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.2787900362847016,
+            "snrDb": 96.57018971761671
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET 2",
+      "modelId": "uvr_mdxnet_2_9682",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29704436,
+        "fileName": "UVR_MDXNET_2_9682.onnx",
+        "sha256": "1deb7295acd3206bc9582a5d92f1b0a74bf3f41c7c1fb78a0ac0123cde4372db",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_2_9682.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "selectable-when-qualified",
+      "artifact": {
+        "byteSize": 29700464,
+        "fileName": "UVR_MDXNET_3_9662_static_float32.tflite",
+        "sha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999998225894,
+          "maxAbsError": 7.063150405883789e-05,
+          "meanAbsError": 3.054939318255142e-06,
+          "rmse": 4.522307660901774e-06,
+          "snrDbMin": 94.49927443665162
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "randomSampleCount": 2,
+        "realInput": "uvr_mdxnet_3_9662_coast_town_window0_nchw_f32.bin",
+        "sampleCount": 3,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999998225894,
+            "maxAbsError": 5.957484245300293e-05,
+            "meanAbsError": 3.3597565383125527e-06,
+            "rmse": 4.8298572789305686e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.25638819180913325,
+            "snrDb": 94.49927443665162
+          },
+          {
+            "cosineSimilarity": 0.9999999998270448,
+            "maxAbsError": 5.918741226196289e-05,
+            "meanAbsError": 3.3216383994449927e-06,
+            "rmse": 4.761893493384647e-06,
+            "sample": "synthetic_01",
+            "signalRms": 0.25598087374350176,
+            "snrDb": 94.60855679123169
+          },
+          {
+            "cosineSimilarity": 0.9999999999167237,
+            "maxAbsError": 7.063150405883789e-05,
+            "meanAbsError": 2.4834230170078797e-06,
+            "rmse": 3.975172210390106e-06,
+            "sample": "coast_town_window0",
+            "signalRms": 0.3079635261120652,
+            "snrDb": 97.78286671746379
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET 3",
+      "modelId": "uvr_mdxnet_3_9662",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29704436,
+        "fileName": "UVR_MDXNET_3_9662.onnx",
+        "sha256": "e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_3_9662.onnx"
+      },
+      "supportLevel": "recommended"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 29700460,
+        "fileName": "UVR_MDXNET_9482_static_float32.tflite",
+        "sha256": "efda13dd1a157a8137594f83c0377aef6fb06df860d624cdd4b63bcfdba6ac28"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999615071,
+          "maxAbsError": 3.6329030990600586e-05,
+          "meanAbsError": 1.4763988869237465e-06,
+          "rmse": 2.5375506886001113e-06,
+          "snrDbMin": 101.13344242059202
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999615071,
+            "maxAbsError": 3.6329030990600586e-05,
+            "meanAbsError": 1.4763988869237465e-06,
+            "rmse": 2.5375506886001113e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.28912579985934583,
+            "snrDb": 101.13344242059202
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET 9482",
+      "modelId": "uvr_mdxnet_9482",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29704436,
+        "fileName": "UVR_MDXNET_9482.onnx",
+        "sha256": "f4f365207c56deb115bceedff3ad8fe98a751c745f9e370cecec6226b8b47184",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_9482.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "selectable-experimental-cpu-only",
+      "artifact": {
+        "byteSize": 29700460,
+        "fileName": "UVR_MDXNET_KARA_static_float32.tflite",
+        "sha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999942982,
+          "maxAbsError": 1.4171004295349121e-05,
+          "meanAbsError": 5.608171870600623e-07,
+          "rmse": 8.609848075224644e-07,
+          "snrDbMin": 109.42606963843433
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "randomSampleCount": 2,
+        "realInput": "uvr_mdxnet_kara_coast_town_window0_nchw_f32.bin",
+        "sampleCount": 3,
+        "samples": [
+          {
+            "cosineSimilarity": 0.999999999994568,
+            "maxAbsError": 9.626150131225586e-06,
+            "meanAbsError": 5.538305742902594e-07,
+            "rmse": 8.23384948654426e-07,
+            "sample": "synthetic_00",
+            "signalRms": 0.2497566128743572,
+            "snrDb": 109.638281441685
+          },
+          {
+            "cosineSimilarity": 0.9999999999942982,
+            "maxAbsError": 1.049041748046875e-05,
+            "meanAbsError": 5.589161968799772e-07,
+            "rmse": 8.445360051751581e-07,
+            "sample": "synthetic_01",
+            "signalRms": 0.24998943300691642,
+            "snrDb": 109.42606963843433
+          },
+          {
+            "cosineSimilarity": 0.9999999999962988,
+            "maxAbsError": 1.4171004295349121e-05,
+            "meanAbsError": 5.697047900099506e-07,
+            "rmse": 9.150334687378092e-07,
+            "sample": "coast_town_window0",
+            "signalRms": 0.3303213053919002,
+            "snrDb": 111.1499921363052
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Karaoke",
+      "modelId": "uvr_mdxnet_kara",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 29704436,
+        "fileName": "UVR_MDXNET_KARA.onnx",
+        "sha256": "e3167c87333a48548413e972a286bf40bf5694001d2853861eb1435953f02d63",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_KARA.onnx"
+      },
+      "supportLevel": "experimental"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 52769648,
+        "fileName": "UVR_MDXNET_KARA_2_static_float32.tflite",
+        "sha256": "b8f5b5866963a1dafce5019d43cd89951ed4d7f34745ca0cf65a61e8016ec768"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999967953,
+          "maxAbsError": 1.7940998077392578e-05,
+          "meanAbsError": 1.2528284187851568e-06,
+          "rmse": 1.637193006453243e-06,
+          "snrDbMin": 111.92962461354702
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999967953,
+            "maxAbsError": 1.7940998077392578e-05,
+            "meanAbsError": 1.2528284187851568e-06,
+            "rmse": 1.637193006453243e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.646518730514642,
+            "snrDb": 111.92962461354702
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Karaoke 2",
+      "modelId": "uvr_mdxnet_kara_2",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 52786726,
+        "fileName": "UVR_MDXNET_KARA_2.onnx",
+        "sha256": "bf32e15105a09c0f7dddd2b67346146334d6f3ecb399ed7638eba2ab07cbf5f4",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_KARA_2.onnx"
+      },
+      "supportLevel": "download-only"
+    },
+    {
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifact": {
+        "byteSize": 66742124,
+        "fileName": "UVR_MDXNET_Main_static_float32.tflite",
+        "sha256": "4546cdad2dc7c36104692cc45d9617938c49b4ac0057f16794ffb205bff6c070"
+      },
+      "desktopValidation": {
+        "aggregate": {
+          "cosineSimilarityMin": 0.9999999999595757,
+          "maxAbsError": 8.106231689453125e-05,
+          "meanAbsError": 1.6123916202204214e-06,
+          "rmse": 2.450536466950757e-06,
+          "snrDbMin": 100.92334905099545
+        },
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "randomSampleCount": 1,
+        "realInput": null,
+        "sampleCount": 1,
+        "samples": [
+          {
+            "cosineSimilarity": 0.9999999999595757,
+            "maxAbsError": 8.106231689453125e-05,
+            "meanAbsError": 1.6123916202204214e-06,
+            "rmse": 2.450536466950757e-06,
+            "sample": "synthetic_00",
+            "signalRms": 0.27253897753497774,
+            "snrDb": 100.92334905099545
+          }
+        ]
+      },
+      "displayName": "UVR-MDX-NET Main",
+      "modelId": "uvr_mdxnet_main",
+      "releaseMaturity": "candidate",
+      "source": {
+        "byteSize": 66759214,
+        "fileName": "UVR_MDXNET_Main.onnx",
+        "sha256": "8289784cda38543ff431add4070662813311a8cccfc0112ca82f76d9dba2b4ca",
+        "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR_MDXNET_Main.onnx"
+      },
+      "supportLevel": "download-only"
+    }
+  ],
+  "catalog": {
+    "fileName": "model-catalog-v2.json",
+    "sha256": "f1fed9d5a15e8a66d84c87623fbaf380c0183d6c76bde13b6c9aeb80192651cd"
+  },
+  "releaseManifestSchemaVersion": 1,
+  "releaseTag": "v0.1.0-candidates.1",
+  "repository": "https://github.com/WluhWluh/bss-tflite",
+  "reviewedSidecars": [
+    {
+      "fileName": "UVR_MDXNET_3_9662_static_float32.tflite.json",
+      "sha256": "edf02de52bb45c842ad65a4be8f2118ed6d212ec4590a81ae0401e760bfb4fe9"
+    },
+    {
+      "fileName": "UVR_MDXNET_KARA_static_float32.tflite.json",
+      "sha256": "c3f3bbd0b434fc424da4672e89428b8e7bc26572c347991c16e88d2beb0d6dcd"
+    },
+    {
+      "fileName": "UVR-MDX-NET-Inst_HQ_4_static_float32.tflite.json",
+      "sha256": "aa441f7f801849929a1d02cd3adcc5bf121df0c978974d074dee50e3fca03ef6"
+    }
+  ],
+  "sourceRevision": "746bee43db9ece9ec8214c1c74269e21547aed58",
+  "totalArtifactBytes": 1461964976
+}

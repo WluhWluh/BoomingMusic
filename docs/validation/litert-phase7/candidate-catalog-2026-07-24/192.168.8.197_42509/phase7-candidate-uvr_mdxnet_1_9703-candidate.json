@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "phase7-candidate-audit-v1",
+  "status": "passed",
+  "runId": "phase7-candidate-uvr_mdxnet_1_9703",
+  "identity": {
+    "appCommit": "b01b7c0e577b5d04c61ea370fc51b674aee19131",
+    "appApkSha256": "499b3c1f193a9a6988254185245d99fb1cf9db13e3f374335740758ce69eeaa1",
+    "testApkSha256": "89ff3ed8712ac4508870b562704b3b81d7b8bca23cd97f88fa1ce90121dab7d3",
+    "catalogSha256": "a553f227588313578321c07c73ff99654eff7795727d825d16b191aa0f879e1f",
+    "catalogSourceRevision": "28d9a076c8a44980085a059e6224768ae77f9c8a",
+    "modelReleaseTag": "v0.1.0-candidates.1",
+    "litertVersion": "2.1.5"
+  },
+  "device": {
+    "serial": "192.168.8.197:42509",
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "androidApi": 35,
+    "buildFingerprint": "samsung\/pa1qzcx\/pa1q:15\/AP3A.240905.015.A2\/S9310ZCU5AYHA_CHC5AYHA:user\/release-keys",
+    "processAbi": "arm64-v8a",
+    "bitness": 64
+  },
+  "candidate": {
+    "modelId": "uvr_mdxnet_1_9703",
+    "artifactFileName": "UVR_MDXNET_1_9703_static_float32.tflite",
+    "artifactSha256": "2607c88c1d4ba9c39ad27d577f21ce2860361d9e9c1a09b75ebb3b10b9700555",
+    "artifactBytes": 29700464,
+    "releaseUrl": "https:\/\/github.com\/WluhWluh\/bss-tflite\/releases\/download\/v0.1.0-candidates.1\/UVR_MDXNET_1_9703_static_float32.tflite",
+    "activationPolicy": "blocked-until-reviewed-contract",
+    "reviewedContract": false,
+    "reviewedSidecar": false
+  },
+  "download": {
+    "elapsedMs": 7327,
+    "sourceUrl": "https:\/\/github.com\/WluhWluh\/bss-tflite\/releases\/download\/v0.1.0-candidates.1\/UVR_MDXNET_1_9703_static_float32.tflite",
+    "usingMirror": false,
+    "bytes": 29700464,
+    "sha256": "2607c88c1d4ba9c39ad27d577f21ce2860361d9e9c1a09b75ebb3b10b9700555"
+  },
+  "structure": {
+    "compiled": true,
+    "compileAndInspectMs": 55,
+    "inputName": "input",
+    "inputShapeNhwc": [
+      1,
+      2048,
+      256,
+      4
+    ],
+    "inputBufferBytes": 8388608,
+    "outputName": "output",
+    "outputShapeNhwc": [
+      1,
+      2048,
+      256,
+      4
+    ],
+    "outputBufferBytes": 8388608,
+    "dtype": "float32",
+    "buffersAllocated": false
+  },
+  "activation": {
+    "allowed": false,
+    "blockReason": "DownloadOnly"
+  },
+  "cleanup": {
+    "deleted": true,
+    "installedCountAfter": 0
+  }
+}

@@ -2247,6 +2247,13 @@ is about 0.8-0.95 GiB, which supports only a clearly warned experimental tier.
 See
 [`validation/litert-phase7/kara-results-2026-07-24.md`](validation/litert-phase7/kara-results-2026-07-24.md).
 
+The other 27 published candidates now pass immutable Release download, exact
+catalog/conversion/sidecar reconciliation, Android arm64 LiteRT structural
+compile, enforced `DownloadOnly` activation rejection, and post-test deletion.
+No tensor buffers or inference sessions were run, so all 27 retain their
+existing download-only policies and pending runtime/full-song statuses. See
+[`validation/litert-phase7/candidate-catalog-2026-07-24/README.md`](validation/litert-phase7/candidate-catalog-2026-07-24/README.md).
+
 These are not promotion results yet. The v2 threshold revision must be used to
 rerun the affected rows after the final decision commit. S10 GPU audio export,
 representative listening and UI coverage, KARA's human review, and the final
@@ -2390,11 +2397,14 @@ x86_64 remains CPU evidence only until a separate GPU qualification exists.
   preflight tests to confirm rejection without model allocation, including the
   expanded x86 AVD; do not repeat the known-disqualified full-song allocation
   merely to fill a matrix.
-- [ ] For every other published candidate, verify pinned download, contract and
+- [x] For every other published candidate, verify pinned download, contract and
   sidecar inspection, structural/TFLite smoke on a compatible target, and an
   explicit download-only, rejected, or unsupported state. Do not reconvert the
   model in this repository or grant activation from conversion success alone;
-  conversion reproducibility belongs to `bss-tflite`.
+  conversion reproducibility belongs to `bss-tflite`. All 27 contract-free
+  artifacts passed on S25 arm64 without tensor-buffer allocation or inference;
+  each remained `DownloadOnly` and was deleted after inspection. The immutable
+  evidence is in `candidate-catalog-2026-07-24/`.
 - [ ] Keep target-stem-plus-residual candidates download-only until neutral
   stem labels and the generic playback/cache UI have passed their own full-song
   gate. Never expose them as vocals/instrumental based on filename inference.

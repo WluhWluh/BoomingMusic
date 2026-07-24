@@ -1,0 +1,1579 @@
+{
+  "schemaVersion": "phase7-candidate-catalog-summary-v1",
+  "generatedAtUtc": "2026-07-24T10:03:21.3351134Z",
+  "status": "passed",
+  "identity": {
+    "appCommit": "b01b7c0e577b5d04c61ea370fc51b674aee19131",
+    "appApkSha256": "499b3c1f193a9a6988254185245d99fb1cf9db13e3f374335740758ce69eeaa1",
+    "testApkSha256": "89ff3ed8712ac4508870b562704b3b81d7b8bca23cd97f88fa1ce90121dab7d3",
+    "processAbi": "arm64-v8a",
+    "catalogSha256": "a553f227588313578321c07c73ff99654eff7795727d825d16b191aa0f879e1f",
+    "catalogSourceRevision": "28d9a076c8a44980085a059e6224768ae77f9c8a",
+    "bssTfliteRevision": "28d9a076c8a44980085a059e6224768ae77f9c8a",
+    "conversionManifestSha256": "31b4817cd9c66ec928031d089fa3e2d8a94b47d83fec6e679fd027768f01a9bc",
+    "litertVersion": "2.1.5"
+  },
+  "release": {
+    "tag": "v0.1.0-candidates.1",
+    "manifestUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/release-manifest-v1.json",
+    "manifestSha256": "d749a07b9c2755bdd6b29f268bfcbc109a7acf6d554b8f838053ff4d1a248cbc",
+    "sourceRevision": "746bee43db9ece9ec8214c1c74269e21547aed58",
+    "artifactCount": 30,
+    "totalArtifactBytes": 1461964976,
+    "reviewedSidecars": [
+      "UVR_MDXNET_3_9662_static_float32.tflite.json",
+      "UVR_MDXNET_KARA_static_float32.tflite.json",
+      "UVR-MDX-NET-Inst_HQ_4_static_float32.tflite.json"
+    ]
+  },
+  "device": {
+    "serial": "192.168.8.197:42509",
+    "model": "SM-S9310",
+    "androidApi": 35,
+    "processAbi": "arm64-v8a"
+  },
+  "expectedCandidateCount": 27,
+  "reportCount": 27,
+  "failures": [],
+  "candidates": [
+    {
+      "modelId": "kim_inst",
+      "displayName": "Kim Inst",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "Kim_Inst_static_float32.tflite",
+      "artifactSha256": "fd3ca5bcb6568d893be5f049de8804278ee669303749d6fb3010bbeaeae4d288",
+      "artifactBytes": 66742116,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-kim_inst-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 13830,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/Kim_Inst_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66742116,
+        "sha256": "fd3ca5bcb6568d893be5f049de8804278ee669303749d6fb3010bbeaeae4d288"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 102,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "inputBufferBytes": 12582912,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputBufferBytes": 12582912,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "kim_vocal_1",
+      "displayName": "Kim Vocal 1",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "Kim_Vocal_1_static_float32.tflite",
+      "artifactSha256": "1eae9fd7667a517fec7b2cc586fca35345e8484a4f9e9fdab57a762cc1cba244",
+      "artifactBytes": 66742120,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-kim_vocal_1-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 12275,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/Kim_Vocal_1_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66742120,
+        "sha256": "1eae9fd7667a517fec7b2cc586fca35345e8484a4f9e9fdab57a762cc1cba244"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 104,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "inputBufferBytes": 12582912,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputBufferBytes": 12582912,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "kim_vocal_2",
+      "displayName": "Kim Vocal 2",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "Kim_Vocal_2_static_float32.tflite",
+      "artifactSha256": "b0fd60074dc9480747155db2fe02731f569d6a4d94ceb66dfffe47c1539691f5",
+      "artifactBytes": 66742120,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-kim_vocal_2-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 14587,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/Kim_Vocal_2_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66742120,
+        "sha256": "b0fd60074dc9480747155db2fe02731f569d6a4d94ceb66dfffe47c1539691f5"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 102,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "inputBufferBytes": 12582912,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputBufferBytes": 12582912,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "kuielab_a_bass",
+      "displayName": "Kuielab A Bass",
+      "activationPolicy": "download-only-generic-stem",
+      "artifactFileName": "kuielab_a_bass_static_float32.tflite",
+      "artifactSha256": "17bb6777ecb7478677b247eaea49d7e8ce6538d951d04f3c01b6e6b750b1134a",
+      "artifactBytes": 29700460,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-kuielab_a_bass-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 7015,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/kuielab_a_bass_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 29700460,
+        "sha256": "17bb6777ecb7478677b247eaea49d7e8ce6538d951d04f3c01b6e6b750b1134a"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 55,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "inputBufferBytes": 16777216,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "outputBufferBytes": 16777216,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "kuielab_a_drums",
+      "displayName": "Kuielab A Drums",
+      "activationPolicy": "download-only-generic-stem",
+      "artifactFileName": "kuielab_a_drums_static_float32.tflite",
+      "artifactSha256": "28fb8bafb783ccc9659fae4d4a8924941d1eab8e141ef2000cf4da237241bb1f",
+      "artifactBytes": 29700460,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-kuielab_a_drums-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 7684,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/kuielab_a_drums_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 29700460,
+        "sha256": "28fb8bafb783ccc9659fae4d4a8924941d1eab8e141ef2000cf4da237241bb1f"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 53,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "inputBufferBytes": 16777216,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "outputBufferBytes": 16777216,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "kuielab_a_other",
+      "displayName": "Kuielab A Other",
+      "activationPolicy": "download-only-generic-stem",
+      "artifactFileName": "kuielab_a_other_static_float32.tflite",
+      "artifactSha256": "c23a824468749a154aff73897bcb8ef37d98a99535543884ed39f18b8d49cbc8",
+      "artifactBytes": 29700460,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-kuielab_a_other-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 6785,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/kuielab_a_other_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 29700460,
+        "sha256": "c23a824468749a154aff73897bcb8ef37d98a99535543884ed39f18b8d49cbc8"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 55,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "inputBufferBytes": 16777216,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "outputBufferBytes": 16777216,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "kuielab_a_vocals",
+      "displayName": "Kuielab A Vocals",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "kuielab_a_vocals_static_float32.tflite",
+      "artifactSha256": "066517da5cfdc67a348c08249753d4c4e16923800790dca1edcb5fd370681750",
+      "artifactBytes": 29700460,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-kuielab_a_vocals-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 7653,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/kuielab_a_vocals_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 29700460,
+        "sha256": "066517da5cfdc67a348c08249753d4c4e16923800790dca1edcb5fd370681750"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 53,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "inputBufferBytes": 16777216,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          512,
+          4
+        ],
+        "outputBufferBytes": 16777216,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "kuielab_b_bass",
+      "displayName": "Kuielab B Bass",
+      "activationPolicy": "download-only-generic-stem",
+      "artifactFileName": "kuielab_b_bass_static_float32.tflite",
+      "artifactSha256": "9654f3f5cad4727e3b70a9d26dc74742b2bafd5cd75fc538c6ceb1673961bc79",
+      "artifactBytes": 29700460,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-kuielab_b_bass-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 7585,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/kuielab_b_bass_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 29700460,
+        "sha256": "9654f3f5cad4727e3b70a9d26dc74742b2bafd5cd75fc538c6ceb1673961bc79"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 54,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "inputBufferBytes": 8388608,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputBufferBytes": 8388608,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "kuielab_b_drums",
+      "displayName": "Kuielab B Drums",
+      "activationPolicy": "download-only-generic-stem",
+      "artifactFileName": "kuielab_b_drums_static_float32.tflite",
+      "artifactSha256": "cbe947a5242c680a5e484aa0d3b857e6087cce5a32b7b1b61e823d47240638eb",
+      "artifactBytes": 21931680,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-kuielab_b_drums-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 4829,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/kuielab_b_drums_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 21931680,
+        "sha256": "cbe947a5242c680a5e484aa0d3b857e6087cce5a32b7b1b61e823d47240638eb"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 37,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          128,
+          4
+        ],
+        "inputBufferBytes": 4194304,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          128,
+          4
+        ],
+        "outputBufferBytes": 4194304,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "kuielab_b_other",
+      "displayName": "Kuielab B Other",
+      "activationPolicy": "download-only-generic-stem",
+      "artifactFileName": "kuielab_b_other_static_float32.tflite",
+      "artifactSha256": "c11e06e6858956a7e27a413d37d3e933e2d62fd0ee8f66df3276a61169109044",
+      "artifactBytes": 29700460,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-kuielab_b_other-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 7119,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/kuielab_b_other_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 29700460,
+        "sha256": "c11e06e6858956a7e27a413d37d3e933e2d62fd0ee8f66df3276a61169109044"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 54,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "inputBufferBytes": 8388608,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputBufferBytes": 8388608,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "kuielab_b_vocals",
+      "displayName": "Kuielab B Vocals",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "kuielab_b_vocals_static_float32.tflite",
+      "artifactSha256": "8257c4b85822086350a2ad59757ef030af7eca3441ad7a23704834c3bb198587",
+      "artifactBytes": 29700460,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-kuielab_b_vocals-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 7426,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/kuielab_b_vocals_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 29700460,
+        "sha256": "8257c4b85822086350a2ad59757ef030af7eca3441ad7a23704834c3bb198587"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 52,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "inputBufferBytes": 8388608,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputBufferBytes": 8388608,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "reverb_hq_by_foxjoy",
+      "displayName": "Reverb HQ by FoxJoy",
+      "activationPolicy": "download-only-generic-stem",
+      "artifactFileName": "Reverb_HQ_By_FoxJoy_static_float32.tflite",
+      "artifactSha256": "94ada8c869418f67fa916d5eea1944b9153040731be7e5ce635b190a1c6b3e34",
+      "artifactBytes": 66753272,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-reverb_hq_by_foxjoy-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 12648,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/Reverb_HQ_By_FoxJoy_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66753272,
+        "sha256": "94ada8c869418f67fa916d5eea1944b9153040731be7e5ce635b190a1c6b3e34"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 102,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          512,
+          4
+        ],
+        "inputBufferBytes": 25165824,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          512,
+          4
+        ],
+        "outputBufferBytes": 25165824,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_1_9703",
+      "displayName": "UVR-MDX-NET 1",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR_MDXNET_1_9703_static_float32.tflite",
+      "artifactSha256": "2607c88c1d4ba9c39ad27d577f21ce2860361d9e9c1a09b75ebb3b10b9700555",
+      "artifactBytes": 29700464,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_1_9703-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 7327,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR_MDXNET_1_9703_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 29700464,
+        "sha256": "2607c88c1d4ba9c39ad27d577f21ce2860361d9e9c1a09b75ebb3b10b9700555"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 55,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "inputBufferBytes": 8388608,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputBufferBytes": 8388608,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_2_9682",
+      "displayName": "UVR-MDX-NET 2",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR_MDXNET_2_9682_static_float32.tflite",
+      "artifactSha256": "73be30195e35dbc15324fbf3f3ddfc84edddc5c24bb08e53ca6eae37406a83e1",
+      "artifactBytes": 29700464,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_2_9682-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 6339,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR_MDXNET_2_9682_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 29700464,
+        "sha256": "73be30195e35dbc15324fbf3f3ddfc84edddc5c24bb08e53ca6eae37406a83e1"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 53,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "inputBufferBytes": 8388608,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputBufferBytes": 8388608,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_9482",
+      "displayName": "UVR-MDX-NET 9482",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR_MDXNET_9482_static_float32.tflite",
+      "artifactSha256": "efda13dd1a157a8137594f83c0377aef6fb06df860d624cdd4b63bcfdba6ac28",
+      "artifactBytes": 29700460,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_9482-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 7997,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR_MDXNET_9482_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 29700460,
+        "sha256": "efda13dd1a157a8137594f83c0377aef6fb06df860d624cdd4b63bcfdba6ac28"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 52,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "inputBufferBytes": 8388608,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputBufferBytes": 8388608,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_crowd_hq_1",
+      "displayName": "UVR-MDX-NET Crowd HQ 1",
+      "activationPolicy": "download-only-generic-stem",
+      "artifactFileName": "UVR-MDX-NET_Crowd_HQ_1_static_float32.tflite",
+      "artifactSha256": "11712744f0b88aadc36f30522ece08752985b381badb0468fe48ad6155ba5768",
+      "artifactBytes": 59057268,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_crowd_hq_1-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 11343,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR-MDX-NET_Crowd_HQ_1_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 59057268,
+        "sha256": "11712744f0b88aadc36f30522ece08752985b381badb0468fe48ad6155ba5768"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 95,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2560,
+          256,
+          4
+        ],
+        "inputBufferBytes": 10485760,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2560,
+          256,
+          4
+        ],
+        "outputBufferBytes": 10485760,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_inst_1",
+      "displayName": "UVR-MDX-NET Inst 1",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR-MDX-NET-Inst_1_static_float32.tflite",
+      "artifactSha256": "ffa7a3481f08d864812ae026b5254f30b85cbf3c31cc27bd6654a25166ca3328",
+      "artifactBytes": 66742128,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_inst_1-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 15160,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR-MDX-NET-Inst_1_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66742128,
+        "sha256": "ffa7a3481f08d864812ae026b5254f30b85cbf3c31cc27bd6654a25166ca3328"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 101,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "inputBufferBytes": 12582912,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputBufferBytes": 12582912,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_inst_2",
+      "displayName": "UVR-MDX-NET Inst 2",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR-MDX-NET-Inst_2_static_float32.tflite",
+      "artifactSha256": "7bd2f73f520f31d034467cebfc565affdf8e0be9aa836cc153731e689713d883",
+      "artifactBytes": 66742128,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_inst_2-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 13154,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR-MDX-NET-Inst_2_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66742128,
+        "sha256": "7bd2f73f520f31d034467cebfc565affdf8e0be9aa836cc153731e689713d883"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 105,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "inputBufferBytes": 12582912,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputBufferBytes": 12582912,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_inst_3",
+      "displayName": "UVR-MDX-NET Inst 3",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR-MDX-NET-Inst_3_static_float32.tflite",
+      "artifactSha256": "5ac1ec6e48c9fb9db02106e221d8e22d3b6a9095029e4f27dac8728f4e071090",
+      "artifactBytes": 66742128,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_inst_3-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 12645,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR-MDX-NET-Inst_3_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66742128,
+        "sha256": "5ac1ec6e48c9fb9db02106e221d8e22d3b6a9095029e4f27dac8728f4e071090"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 102,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "inputBufferBytes": 12582912,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputBufferBytes": 12582912,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_inst_hq_1",
+      "displayName": "UVR-MDX-NET Inst HQ 1",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR-MDX-NET-Inst_HQ_1_static_float32.tflite",
+      "artifactSha256": "eca068aa4ee9f00c37ae2838dd4eaef51981e93a9352cf7609b7a6f8e596a8e3",
+      "artifactBytes": 66742132,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_inst_hq_1-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 12357,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR-MDX-NET-Inst_HQ_1_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66742132,
+        "sha256": "eca068aa4ee9f00c37ae2838dd4eaef51981e93a9352cf7609b7a6f8e596a8e3"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 102,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "inputBufferBytes": 12582912,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputBufferBytes": 12582912,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_inst_hq_2",
+      "displayName": "UVR-MDX-NET Inst HQ 2",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR-MDX-NET-Inst_HQ_2_static_float32.tflite",
+      "artifactSha256": "c9da23102862d0c3d38c10c53476a9330ae0d2c899ce5f429ed19c6face235e0",
+      "artifactBytes": 66742132,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_inst_hq_2-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 14662,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR-MDX-NET-Inst_HQ_2_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66742132,
+        "sha256": "c9da23102862d0c3d38c10c53476a9330ae0d2c899ce5f429ed19c6face235e0"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 100,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "inputBufferBytes": 12582912,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputBufferBytes": 12582912,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_inst_hq_3",
+      "displayName": "UVR-MDX-NET Inst HQ 3",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR-MDX-NET-Inst_HQ_3_static_float32.tflite",
+      "artifactSha256": "47443ff5604cadb3c55802ed9dff87152c1342fd5c34c41f1cca6321d5971e53",
+      "artifactBytes": 66742132,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_inst_hq_3-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 12870,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR-MDX-NET-Inst_HQ_3_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66742132,
+        "sha256": "47443ff5604cadb3c55802ed9dff87152c1342fd5c34c41f1cca6321d5971e53"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 99,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "inputBufferBytes": 12582912,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputBufferBytes": 12582912,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_inst_hq_5",
+      "displayName": "UVR-MDX-NET Inst HQ 5",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR-MDX-NET-Inst_HQ_5_static_float32.tflite",
+      "artifactSha256": "e981c7728784c97707ef42a92139bc12802df9aadca9da5ec0ea1020123c558f",
+      "artifactBytes": 59057268,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_inst_hq_5-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 11161,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR-MDX-NET-Inst_HQ_5_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 59057268,
+        "sha256": "e981c7728784c97707ef42a92139bc12802df9aadca9da5ec0ea1020123c558f"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 98,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2560,
+          256,
+          4
+        ],
+        "inputBufferBytes": 10485760,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2560,
+          256,
+          4
+        ],
+        "outputBufferBytes": 10485760,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_inst_main",
+      "displayName": "UVR-MDX-NET Inst Main",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR-MDX-NET-Inst_Main_static_float32.tflite",
+      "artifactSha256": "8901458e2874aee6defbb922b8e34dec6109665c54707116bc0e4d21dd2983bc",
+      "artifactBytes": 52769652,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_inst_main-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 10047,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR-MDX-NET-Inst_Main_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 52769652,
+        "sha256": "8901458e2874aee6defbb922b8e34dec6109665c54707116bc0e4d21dd2983bc"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 95,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "inputBufferBytes": 8388608,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputBufferBytes": 8388608,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_kara_2",
+      "displayName": "UVR-MDX-NET Karaoke 2",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR_MDXNET_KARA_2_static_float32.tflite",
+      "artifactSha256": "b8f5b5866963a1dafce5019d43cd89951ed4d7f34745ca0cf65a61e8016ec768",
+      "artifactBytes": 52769648,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_kara_2-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 9977,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR_MDXNET_KARA_2_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 52769648,
+        "sha256": "b8f5b5866963a1dafce5019d43cd89951ed4d7f34745ca0cf65a61e8016ec768"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 93,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "inputBufferBytes": 8388608,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          2048,
+          256,
+          4
+        ],
+        "outputBufferBytes": 8388608,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_main",
+      "displayName": "UVR-MDX-NET Main",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR_MDXNET_Main_static_float32.tflite",
+      "artifactSha256": "4546cdad2dc7c36104692cc45d9617938c49b4ac0057f16794ffb205bff6c070",
+      "artifactBytes": 66742124,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_main-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 12388,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR_MDXNET_Main_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66742124,
+        "sha256": "4546cdad2dc7c36104692cc45d9617938c49b4ac0057f16794ffb205bff6c070"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 97,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "inputBufferBytes": 12582912,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputBufferBytes": 12582912,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    },
+    {
+      "modelId": "uvr_mdxnet_voc_ft",
+      "displayName": "UVR-MDX-NET Voc FT",
+      "activationPolicy": "blocked-until-reviewed-contract",
+      "artifactFileName": "UVR-MDX-NET-Voc_FT_static_float32.tflite",
+      "artifactSha256": "8341c58754415a34e692f786a3719b63f7e0677b8d6884df2ef82c4cf61ac0d0",
+      "artifactBytes": 66742128,
+      "reportFile": "192.168.8.197_42509/phase7-candidate-uvr_mdxnet_voc_ft-candidate.json",
+      "status": "passed",
+      "device": {
+        "serial": "192.168.8.197:42509",
+        "manufacturer": "samsung",
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+        "processAbi": "arm64-v8a",
+        "bitness": 64
+      },
+      "download": {
+        "elapsedMs": 13324,
+        "sourceUrl": "https://github.com/WluhWluh/bss-tflite/releases/download/v0.1.0-candidates.1/UVR-MDX-NET-Voc_FT_static_float32.tflite",
+        "usingMirror": false,
+        "bytes": 66742128,
+        "sha256": "8341c58754415a34e692f786a3719b63f7e0677b8d6884df2ef82c4cf61ac0d0"
+      },
+      "structure": {
+        "compiled": true,
+        "compileAndInspectMs": 101,
+        "inputName": "input",
+        "inputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "inputBufferBytes": 12582912,
+        "outputName": "output",
+        "outputShapeNhwc": [
+          1,
+          3072,
+          256,
+          4
+        ],
+        "outputBufferBytes": 12582912,
+        "dtype": "float32",
+        "buffersAllocated": false
+      },
+      "activation": {
+        "allowed": false,
+        "blockReason": "DownloadOnly"
+      },
+      "cleanup": {
+        "deleted": true,
+        "installedCountAfter": 0
+      },
+      "error": null
+    }
+  ]
+}

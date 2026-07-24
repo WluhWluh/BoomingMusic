@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "phase7-inputs-v1",
+  "runId": "phase7-candidate-catalog-setup",
+  "appCommit": "b01b7c0e577b5d04c61ea370fc51b674aee19131",
+  "appApk": {
+    "path": "BoomingSS-1.3.1-beta.2-ss.1.debug-github-arm64-v8a.apk",
+    "sha256": "499b3c1f193a9a6988254185245d99fb1cf9db13e3f374335740758ce69eeaa1",
+    "bytes": 80740384
+  },
+  "testApk": {
+    "path": "app-github-debug-androidTest.apk",
+    "sha256": "89ff3ed8712ac4508870b562704b3b81d7b8bca23cd97f88fa1ce90121dab7d3",
+    "bytes": 657665
+  },
+  "catalog": {
+    "path": "app/src/main/assets/source-separation/model-catalog-v2.json",
+    "sha256": "a553f227588313578321c07c73ff99654eff7795727d825d16b191aa0f879e1f",
+    "sourceRevision": "28d9a076c8a44980085a059e6224768ae77f9c8a"
+  },
+  "model": {
+    "modelId": "uvr_mdxnet_3_9662",
+    "releaseTag": "v0.1.0-candidates.1",
+    "fileName": "UVR_MDXNET_3_9662_static_float32.tflite",
+    "sha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "contractSchemaVersion": 2,
+    "pipelineCompatibilityVersion": "booming-ss-mdx-stft-v1"
+  },
+  "secondaryModel": null,
+  "runtime": {
+    "id": "litert",
+    "version": "2.1.5",
+    "abi": "arm64-v8a",
+    "nativeLibrarySha256": ""
+  },
+  "thresholdsVersion": "phase7-thresholds-v2",
+  "fixturesVersion": "phase7-fixtures-v2",
+  "runnerRevision": "phase7-runner-v11",
+  "run": null
+}
