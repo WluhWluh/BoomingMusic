@@ -2152,6 +2152,24 @@ class SourceSeparationPhase7WorkerDeviceTest {
             .getMimeTypeFromExtension(extension)
             ?: "audio/x-wav".takeIf { extension == "wave" }
             ?: "audio/*"
+        @Suppress("DEPRECATION")
+        val legacySource = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            File(
+                File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+                    "BoomingSS",
+                ).also { directory ->
+                    check(directory.exists() || directory.mkdirs()) {
+                        "Unable to create the legacy MediaStore fixture directory."
+                    }
+                },
+                displayName,
+            ).also { destination ->
+                File(path).copyTo(destination, overwrite = true)
+            }
+        } else {
+            null
+        }
         val values = ContentValues().apply {
             put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
             put(MediaStore.Audio.Media.TITLE, "Phase 7 $runId")
@@ -2164,7 +2182,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/BoomingSS")
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
             } else {
-                put(MediaStore.Audio.Media.DATA, path)
+                put(MediaStore.Audio.Media.DATA, requireNotNull(legacySource).absolutePath)
             }
         }
         val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -2195,6 +2213,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             return uri
         } catch (error: Throwable) {
             resolver.delete(uri, null, null)
+            legacySource?.delete()
             throw error
         }
     }
