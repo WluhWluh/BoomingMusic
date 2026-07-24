@@ -358,7 +358,11 @@ if ($Stage -eq "prefetch") {
         throw "Current source fixture identity does not match $CurrentFixtureId."
     }
 }
-$appCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
+$sourceCommitAtInvocation = (& git -C $repoRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommitAtInvocation -notmatch '^[0-9a-f]{40}$') {
+    throw "Could not resolve the source commit for the Phase 7 build."
+}
+$appCommit = ""
 $appApk = $null
 $testApk = $null
 $remoteSourcePath = ""
@@ -395,6 +399,56 @@ try {
 
     $appApkSha256 = Get-Sha256 $appApk.FullName
     $testApkSha256 = Get-Sha256 $testApk.FullName
+    $buildIdentityPath = Join-Path `
+        "app\build\outputs\apk\github\debug" `
+        "phase7-build-identity-v1.json"
+    if ($SkipBuild) {
+        if (-not (Test-Path -LiteralPath $buildIdentityPath -PathType Leaf)) {
+            throw "Phase 7 build identity is missing. Re-run without SkipBuild."
+        }
+        $buildIdentity = Get-Content -LiteralPath $buildIdentityPath -Raw | ConvertFrom-Json
+        if ($buildIdentity.schemaVersion -ne "phase7-build-identity-v1" -or
+                [string]$buildIdentity.appCommit -notmatch '^[0-9a-f]{40}$') {
+            throw "Phase 7 build identity is invalid: $buildIdentityPath"
+        }
+        $recordedAppApk = @($buildIdentity.appApks) | Where-Object {
+            $_.fileName -eq $appApk.Name
+        } | Select-Object -First 1
+        if ($null -eq $recordedAppApk -or
+                $recordedAppApk.sha256 -ne $appApkSha256) {
+            throw "The selected app APK does not match the Phase 7 build identity."
+        }
+        if ($buildIdentity.testApk.fileName -ne $testApk.Name -or
+                $buildIdentity.testApk.sha256 -ne $testApkSha256) {
+            throw "The AndroidTest APK does not match the Phase 7 build identity."
+        }
+        $appCommit = [string]$buildIdentity.appCommit
+    } else {
+        $appApkRecords = @(
+            Get-ChildItem "app\build\outputs\apk\github\debug" -Filter "*.apk" |
+                Sort-Object Name |
+                ForEach-Object {
+                    [ordered]@{
+                        fileName = $_.Name
+                        bytes = [int64]$_.Length
+                        sha256 = Get-Sha256 $_.FullName
+                    }
+                }
+        )
+        $buildIdentity = [ordered]@{
+            schemaVersion = "phase7-build-identity-v1"
+            appCommit = $sourceCommitAtInvocation
+            appApks = $appApkRecords
+            testApk = [ordered]@{
+                fileName = $testApk.Name
+                bytes = [int64]$testApk.Length
+                sha256 = $testApkSha256
+            }
+        }
+        $buildIdentity | ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath $buildIdentityPath -Encoding utf8
+        $appCommit = $sourceCommitAtInvocation
+    }
     $litertSha256 = ""
     $runtimeAsset = Get-ChildItem "app\build\intermediates\merged_native_libs\githubDebug\out\lib\$ProcessAbi\libLiteRt.so" -ErrorAction SilentlyContinue
     if ($null -ne $runtimeAsset) { $litertSha256 = Get-Sha256 $runtimeAsset.FullName }
