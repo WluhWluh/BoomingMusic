@@ -24,6 +24,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.PlaybackService
+import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
@@ -58,8 +59,11 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetReposit
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
+import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
+import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
+import com.mardous.booming.separation.process.ipc.SourceSeparationIpcRecycleReason
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteConnectionState
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCallbacks
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
@@ -564,6 +568,399 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 }
             }
             writeReport(context, runId, report)
+        }
+    }
+
+    @Test
+    fun validateProcessSessionMatrix() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        require(MdxX86ProcessValidationOverride.buildEnabled) {
+            "The process-session matrix requires the explicit x86 validation build."
+        }
+        val report = baseReport(context, runId, arguments)
+        val events = Collections.synchronizedList(
+            mutableListOf<SourceSeparationExecutionHostEvent>(),
+        )
+        val coordinators = mutableListOf<SourceSeparationForegroundWorkerCoordinator>()
+        val snapshots = JSONArray()
+        val cases = JSONArray()
+        val snapshotsByCycle = mutableMapOf<Int, SourceSeparationProcessDiagnostics>()
+        var host: BoundRemoteSourceSeparationExecutionHost? = null
+        var mediaUri: Uri? = null
+        var tailMediaUri: Uri? = null
+        var retiredUnexpectedDeaths = 0
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            mediaUri = registerSourceInMediaStore(context, sourcePath, runId)
+            val source = resolveMediaStoreSong(context, mediaUri, sourcePath)
+            val durationMs = maxOf(
+                source.duration,
+                arguments.optionalLong(ARG_FIXTURE_DURATION_US) / 1_000L,
+            )
+            val tailSourcePath = arguments.requiredString(ARG_CURRENT_SOURCE_PATH)
+            tailMediaUri = registerSourceInMediaStore(
+                context,
+                tailSourcePath,
+                "$runId-tail",
+            )
+            val tailSource = resolveMediaStoreSong(context, tailMediaUri, tailSourcePath)
+            val tailDurationMs = maxOf(
+                tailSource.duration,
+                arguments.optionalLong(ARG_CURRENT_FIXTURE_DURATION_US) / 1_000L,
+            )
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            check(preferences.edit()
+                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
+                .commit()
+            ) { "Could not persist the process-session matrix preferences." }
+
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            assertExpectedActivePreset(arguments)
+            val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
+                SourceSeparationModelAwareCacheRepository::class.java,
+            )
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+
+            fun createRuntime(): SourceSeparationRuntimeFacade = createCpuRuntimeFacade(
+                context = context,
+                preferences = preferences,
+                presetRepository = presetRepository,
+                backendMode = BackendMode.Auto,
+                processorCount = null,
+                executionHostMode = Phase7ExecutionHostMode.BoundRemote,
+                executionHostEventSink = events::add,
+                boundRemoteHostSink = { host = it },
+            )
+
+            var runtimeFacade = createRuntime()
+            var runtimeSong = (runtimeFacade.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The process-session matrix source could not be admitted.")
+            var tailRuntimeSong = (runtimeFacade.resolve(tailSource) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The pending-tail matrix source could not be admitted.")
+            clearExactCacheEntry(runtimeFacade, runtimeSong.cacheKey)
+            clearExactCacheEntry(runtimeFacade, tailRuntimeSong.cacheKey)
+            val initialHost = requireNotNull(host)
+            val initialDiagnostics = initialHost.processDiagnostics()
+            val expectedGeneration = initialDiagnostics.processGeneration
+            val expectedStartTicks = initialDiagnostics.processStartTicks
+            var expectedSessionId: String? = null
+            snapshots.put(processMatrixSnapshot("before-setup", 0, initialDiagnostics))
+
+            fun assertProcessIdentity(diagnostics: SourceSeparationProcessDiagnostics) {
+                assertEquals(expectedGeneration, diagnostics.processGeneration)
+                assertEquals(expectedStartTicks, diagnostics.processStartTicks)
+                assertEquals(0, diagnostics.session.activeLeaseCount)
+                assertEquals(1, diagnostics.session.nativeSessionCreationCount)
+                assertEquals(
+                    SourceSeparationProcessSessionState.Resident,
+                    diagnostics.session.state,
+                )
+                assertFalse(diagnostics.session.poisoned)
+                val sessionId = requireNotNull(diagnostics.session.sessionId)
+                expectedSessionId?.let { assertEquals(it, sessionId) }
+                    ?: run { expectedSessionId = sessionId }
+            }
+
+            fun newWorker(
+                runtime: SourceSeparationRuntimeFacade,
+                workerSource: Song = source,
+                workerDurationMs: Long = durationMs,
+                positionMs: Long = 0L,
+            ) =
+                SourceSeparationForegroundWorkerCoordinator(
+                    context = context,
+                    preferences = preferences,
+                    sourceSeparationRuntime = runtime,
+                ).also { worker ->
+                    coordinators += worker
+                    worker.attachCallbacks(RecordingCallbacks())
+                    worker.updateSong(
+                        song = workerSource,
+                        positionMs = positionMs,
+                        durationMs = workerDurationMs,
+                        isPlaying = false,
+                        sourceSeparationBlend = TEST_BLEND,
+                    )
+            }
+
+            for (cycle in 1..PROCESS_MATRIX_CYCLE_COUNT) {
+                val scenario = ProcessMatrixScenario.forCycle(cycle)
+                val cycleRuntimeSong = if (
+                    scenario == ProcessMatrixScenario.PendingTailResume
+                ) {
+                    tailRuntimeSong
+                } else {
+                    runtimeSong
+                }
+                clearExactCacheEntry(runtimeFacade, cycleRuntimeSong.cacheKey)
+                assertFalse(cacheRepository.isLeased(cycleRuntimeSong.cacheKey))
+                val activeHost = requireNotNull(host)
+                val before = activeHost.processDiagnostics()
+                val invocationsBefore = before.session.invocationCount
+                var pausedDiagnostics: SourceSeparationProcessDiagnostics? = null
+                var pendingTailConfirmed = false
+                var rebound = false
+
+                when (scenario) {
+                    ProcessMatrixScenario.Completion -> {
+                        val worker = newWorker(runtimeFacade)
+                        assertTrue(worker.startCurrentSong())
+                        if (cycle == 1) {
+                            waitForReady(worker, minimumReadyWindows = 1)
+                            snapshots.put(processMatrixSnapshot(
+                                "after-first-invocation",
+                                cycle,
+                                activeHost.processDiagnostics(),
+                            ))
+                        }
+                        waitForCompleted(worker)
+                        worker.cancel()
+                        waitForInactive(worker)
+                    }
+                    ProcessMatrixScenario.PauseResume -> {
+                        val pauseWorker = newWorker(runtimeFacade)
+                        assertTrue(pauseWorker.startCurrentSong())
+                        waitForReady(pauseWorker, minimumReadyWindows = 1)
+                        pauseWorker.pauseCurrentSong(source)
+                        waitForPaused(pauseWorker)
+                        pauseWorker.cancel()
+                        waitForInactive(pauseWorker)
+                        pausedDiagnostics = requireNotNull(host).processDiagnostics()
+                        assertProcessIdentity(pausedDiagnostics)
+                        if (cycle == PROCESS_MATRIX_FIRST_PAUSE_CYCLE) {
+                            snapshots.put(processMatrixSnapshot(
+                                "after-pause",
+                                cycle,
+                                pausedDiagnostics,
+                            ))
+                            val oldHost = requireNotNull(host)
+                            retiredUnexpectedDeaths +=
+                                oldHost.connectionDiagnostics.unexpectedBinderDeathCount
+                            oldHost.close()
+                            SystemClock.sleep(PROCESS_REBIND_SETTLE_MS)
+                            runtimeFacade = createRuntime()
+                            runtimeSong = (runtimeFacade.resolve(source) as?
+                                SourceSeparationRuntimeSongResolution.Ready)?.song
+                                ?: error("The paused process-session run could not rebind.")
+                            tailRuntimeSong = (runtimeFacade.resolve(tailSource) as?
+                                SourceSeparationRuntimeSongResolution.Ready)?.song
+                                ?: error("The pending-tail source could not rebind.")
+                            val reboundDiagnostics = requireNotNull(host).processDiagnostics()
+                            assertProcessIdentity(reboundDiagnostics)
+                            assertEquals(
+                                pausedDiagnostics.session.invocationCount,
+                                reboundDiagnostics.session.invocationCount,
+                            )
+                            rebound = true
+                        }
+                        val resumeWorker = newWorker(runtimeFacade)
+                        assertTrue(resumeWorker.startCurrentSong())
+                        waitForCompleted(resumeWorker)
+                        resumeWorker.cancel()
+                        waitForInactive(resumeWorker)
+                    }
+                    ProcessMatrixScenario.PendingTailResume -> {
+                        val pauseWorker = newWorker(
+                            runtime = runtimeFacade,
+                            workerSource = tailSource,
+                            workerDurationMs = tailDurationMs,
+                        )
+                        assertTrue(pauseWorker.startCurrentSong())
+                        waitForReady(pauseWorker, minimumReadyWindows = 1)
+                        pauseWorker.pauseCurrentSong(tailSource)
+                        waitForPaused(pauseWorker)
+                        pauseWorker.cancel()
+                        waitForInactive(pauseWorker)
+                        val targetPositionMs =
+                            (tailDurationMs - SEEK_FROM_END_MS).coerceAtLeast(0L)
+                        when (val status = runtimeFacade.playableStatus(
+                            song = tailRuntimeSong,
+                            playbackPositionMs = targetPositionMs,
+                            readyWindowCount = 1,
+                        )) {
+                            SourceSeparationModelAwarePlayableStatus.Processing -> {
+                                pendingTailConfirmed = true
+                            }
+                            is SourceSeparationModelAwarePlayableStatus.Ready -> {
+                                status.playback.close()
+                                error("The tail window was already ready before seek/resume.")
+                            }
+                            SourceSeparationModelAwarePlayableStatus.Unavailable ->
+                                error("The pending tail became unavailable.")
+                        }
+                        val resumeWorker = newWorker(
+                            runtime = runtimeFacade,
+                            workerSource = tailSource,
+                            workerDurationMs = tailDurationMs,
+                            positionMs = targetPositionMs,
+                        )
+                        assertTrue(resumeWorker.startCurrentSong())
+                        waitForPlayable(
+                            runtimeFacade = runtimeFacade,
+                            song = tailRuntimeSong,
+                            playbackPositionMs = targetPositionMs,
+                            readyWindowCount = 1,
+                        ).playback.close()
+                        resumeWorker.cancel()
+                        waitForInactive(resumeWorker)
+                    }
+                    ProcessMatrixScenario.Cancellation -> {
+                        val worker = newWorker(runtimeFacade)
+                        assertTrue(worker.startCurrentSong())
+                        waitForReady(worker, minimumReadyWindows = 1)
+                        worker.cancel()
+                        waitForInactive(worker)
+                        assertTrue(
+                            runtimeFacade.cacheStatus(runtimeSong) !is
+                                SourceSeparationModelAwareCacheStatus.Completed,
+                        )
+                    }
+                }
+
+                val leaseReleaseMs = waitForCacheLeaseRelease(
+                    cacheRepository,
+                    cycleRuntimeSong.cacheKey,
+                )
+                val after = requireNotNull(host).processDiagnostics()
+                assertProcessIdentity(after)
+                assertTrue(
+                    "Cycle $cycle did not invoke LiteRT.",
+                    after.session.invocationCount > invocationsBefore,
+                )
+                val manifest = store.readManifest(cycleRuntimeSong.cacheKey)
+                if (scenario == ProcessMatrixScenario.PendingTailResume ||
+                    scenario == ProcessMatrixScenario.Cancellation
+                ) {
+                    assertEquals(
+                        SourceSeparationCacheManifestState.Canceled,
+                        manifest?.state,
+                    )
+                }
+                assertTrue(
+                    "Cycle $cycle left a failed cache window.",
+                    manifest?.segmentPlan?.segments.orEmpty().none { segment ->
+                        segment.state == SourceSeparationSegmentState.Failed
+                    },
+                )
+                if (scenario == ProcessMatrixScenario.Completion ||
+                    scenario == ProcessMatrixScenario.PauseResume
+                ) {
+                    assertTrue(
+                        runtimeFacade.cacheStatus(cycleRuntimeSong) is
+                            SourceSeparationModelAwareCacheStatus.Completed,
+                    )
+                } else {
+                    assertTrue(
+                        runtimeFacade.cacheStatus(cycleRuntimeSong) !is
+                            SourceSeparationModelAwareCacheStatus.Completed,
+                    )
+                }
+                cases.put(JSONObject()
+                    .put("cycle", cycle)
+                    .put("scenario", scenario.argumentValue)
+                    .put("invocationsBefore", invocationsBefore)
+                    .put("invocationsAfter", after.session.invocationCount)
+                    .put("pausedInvocationCount",
+                        pausedDiagnostics?.session?.invocationCount ?: JSONObject.NULL)
+                    .put("pendingTailConfirmed", pendingTailConfirmed)
+                    .put("rebound", rebound)
+                    .put("leaseReleaseMs", leaseReleaseMs)
+                )
+                if (cycle in PROCESS_MATRIX_SNAPSHOT_CYCLES) {
+                    snapshotsByCycle[cycle] = after
+                    snapshots.put(processMatrixSnapshot("cycle-$cycle", cycle, after))
+                }
+            }
+
+            val cycle2 = requireNotNull(snapshotsByCycle[2])
+            val cycle20 = requireNotNull(snapshotsByCycle[20])
+            val pssGrowthBytes = cycle20.memory.pssBytes - cycle2.memory.pssBytes
+            val mappedRegionGrowth = cycle20.memory.mappedRegionCount -
+                cycle2.memory.mappedRegionCount
+            assertTrue(
+                "Resident process PSS grew by $pssGrowthBytes bytes.",
+                pssGrowthBytes <= PROCESS_MATRIX_MAXIMUM_PSS_GROWTH_BYTES,
+            )
+            assertTrue(
+                "Resident process map count grew by $mappedRegionGrowth.",
+                mappedRegionGrowth <= PROCESS_MATRIX_MAXIMUM_MAP_GROWTH,
+            )
+            snapshotsByCycle.values.forEach { diagnostics ->
+                assertTrue(
+                    "The largest x86 virtual-address gap crossed the frozen floor.",
+                    requireNotNull(diagnostics.memory.largestFreeAddressGapBytes) >=
+                        SourceSeparationProcessLifecyclePolicy
+                            .MINIMUM_LARGEST_FREE_ADDRESS_GAP_BYTES,
+                )
+            }
+            val finalHost = requireNotNull(host)
+            val beforeRecycle = finalHost.processDiagnostics()
+            snapshots.put(processMatrixSnapshot(
+                "before-recycle",
+                PROCESS_MATRIX_CYCLE_COUNT,
+                beforeRecycle,
+            ))
+            val unexpectedDeaths = retiredUnexpectedDeaths +
+                finalHost.connectionDiagnostics.unexpectedBinderDeathCount
+            assertEquals(0, unexpectedDeaths)
+            val recycle = finalHost.recycle(
+                SourceSeparationIpcRecycleReason.ValidationRequested,
+                recycleToken = "phase3-matrix-recycle-0001",
+            )
+            assertEquals(beforeRecycle.processGeneration, recycle.oldProcess.processGeneration)
+            assertNotEquals(
+                recycle.oldProcess.processGeneration,
+                recycle.newProcess.processGeneration,
+            )
+
+            report.put("status", "passed")
+            report.put("processMatrix", JSONObject()
+                .put("cycleCount", PROCESS_MATRIX_CYCLE_COUNT)
+                .put("sessionId", expectedSessionId)
+                .put("processGeneration", expectedGeneration)
+                .put("processStartTicks", expectedStartTicks)
+                .put("nativeSessionCreationCount",
+                    beforeRecycle.session.nativeSessionCreationCount)
+                .put("finalInvocationCount", beforeRecycle.session.invocationCount)
+                .put("pssGrowthCycle2To20Bytes", pssGrowthBytes)
+                .put("mappedRegionGrowthCycle2To20", mappedRegionGrowth)
+                .put("unexpectedBinderDeathCount", unexpectedDeaths)
+                .put("cases", cases)
+                .put("snapshots", snapshots)
+                .put("recycle", JSONObject()
+                    .put("token", recycle.recycleToken)
+                    .put("oldGeneration", recycle.oldProcess.processGeneration)
+                    .put("newGeneration", recycle.newProcess.processGeneration)
+                    .put("expectedBinderDeath", recycle.binderDeath.expected)
+                )
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            report.put("processMatrix", JSONObject()
+                .put("cases", cases)
+                .put("snapshots", snapshots)
+            )
+            throw error
+        } finally {
+            coordinators.forEach { coordinator -> coordinator.cancel() }
+            host?.close()
+            mediaUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            tailMediaUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            writeReport(context, runId, "process-matrix", report)
         }
     }
 
@@ -1915,6 +2312,23 @@ class SourceSeparationPhase7WorkerDeviceTest {
         error("Worker did not leave its active job in time.")
     }
 
+    private fun waitForCacheLeaseRelease(
+        repository: SourceSeparationModelAwareCacheRepository,
+        cacheKey: String,
+    ): Long {
+        val startedAt = SystemClock.elapsedRealtime()
+        val deadline = startedAt + PROCESS_MATRIX_LEASE_RELEASE_TIMEOUT_MS
+        while (repository.isLeased(cacheKey) && SystemClock.elapsedRealtime() < deadline) {
+            SystemClock.sleep(POLL_INTERVAL_MS)
+        }
+        assertFalse(
+            "Cache lease did not release within " +
+                "$PROCESS_MATRIX_LEASE_RELEASE_TIMEOUT_MS ms: $cacheKey",
+            repository.isLeased(cacheKey),
+        )
+        return SystemClock.elapsedRealtime() - startedAt
+    }
+
     private fun waitForWorkerToLeaveSong(
         worker: SourceSeparationForegroundWorkerCoordinator,
         songId: Long,
@@ -1962,6 +2376,41 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 )
             }
     }
+
+    private fun processMatrixSnapshot(
+        label: String,
+        cycle: Int,
+        diagnostics: SourceSeparationProcessDiagnostics,
+    ) = JSONObject()
+        .put("label", label)
+        .put("cycle", cycle)
+        .put("processGeneration", diagnostics.processGeneration)
+        .put("pid", diagnostics.pid)
+        .put("processStartTicks", diagnostics.processStartTicks)
+        .put("vmSizeBytes", diagnostics.memory.vmSizeBytes ?: JSONObject.NULL)
+        .put("vmPeakBytes", diagnostics.memory.vmPeakBytes ?: JSONObject.NULL)
+        .put("vmRssBytes", diagnostics.memory.vmRssBytes ?: JSONObject.NULL)
+        .put("pssBytes", diagnostics.memory.pssBytes)
+        .put("nativePssBytes", diagnostics.memory.nativePssBytes)
+        .put("threadCount", diagnostics.memory.threadCount)
+        .put("mappedRegionCount", diagnostics.memory.mappedRegionCount)
+        .put(
+            "anonHugePagesBytes",
+            diagnostics.memory.anonHugePagesBytes ?: JSONObject.NULL,
+        )
+        .put(
+            "largestFreeAddressGapBytes",
+            diagnostics.memory.largestFreeAddressGapBytes ?: JSONObject.NULL,
+        )
+        .put("sessionState", diagnostics.session.state.name)
+        .put("sessionId", diagnostics.session.sessionId ?: JSONObject.NULL)
+        .put(
+            "nativeSessionCreationCount",
+            diagnostics.session.nativeSessionCreationCount,
+        )
+        .put("activeLeaseCount", diagnostics.session.activeLeaseCount)
+        .put("invocationCount", diagnostics.session.invocationCount)
+        .put("poisoned", diagnostics.session.poisoned)
 
     private fun assertExpectedActivePreset(arguments: Bundle) {
         val active = get<SourceSeparationPresetRepository>(
@@ -2916,6 +3365,24 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
     }
 
+    private enum class ProcessMatrixScenario(val argumentValue: String) {
+        Completion("completion"),
+        PauseResume("pause-resume"),
+        PendingTailResume("pending-tail-resume"),
+        Cancellation("cancellation"),
+        ;
+
+        companion object {
+            fun forCycle(cycle: Int): ProcessMatrixScenario = when (cycle) {
+                in 1..5 -> Completion
+                in 6..10 -> PauseResume
+                in 11..15 -> PendingTailResume
+                in 16..20 -> Cancellation
+                else -> error("Process matrix cycle is out of range: $cycle")
+            }
+        }
+    }
+
     private companion object {
         const val ARG_RUN_ID = "runId"
         const val ARG_SERIAL = "serial"
@@ -2957,6 +3424,12 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_X86_PROCESS_VALIDATION = "x86ProcessValidation"
         const val ARG_REBIND_AFTER_COMPLETION = "rebindAfterCompletion"
         const val PROCESS_REBIND_SETTLE_MS = 250L
+        const val PROCESS_MATRIX_CYCLE_COUNT = 20
+        const val PROCESS_MATRIX_FIRST_PAUSE_CYCLE = 6
+        const val PROCESS_MATRIX_MAXIMUM_PSS_GROWTH_BYTES = 64L * 1_024L * 1_024L
+        const val PROCESS_MATRIX_MAXIMUM_MAP_GROWTH = 256
+        const val PROCESS_MATRIX_LEASE_RELEASE_TIMEOUT_MS = 30_000L
+        val PROCESS_MATRIX_SNAPSHOT_CYCLES = setOf(2, 10, 20)
         const val ARG_FIXTURE_ID = "fixtureId"
         const val ARG_FIXTURE_FILE_NAME = "fixtureFileName"
         const val ARG_FIXTURE_BYTES = "fixtureBytes"

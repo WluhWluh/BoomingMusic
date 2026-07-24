@@ -13,6 +13,7 @@ param(
         "identity",
         "acquisition",
         "worker",
+        "process-matrix",
         "lifecycle",
         "recreation",
         "playback",
@@ -30,7 +31,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v13",
+    [string]$RunnerRevision = "phase7-runner-v14",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet("in-process", "bound-remote")]
@@ -63,6 +64,7 @@ $package = "com.wluhwluh.booming.sourcesep.debug"
 $runner = "$package.test/androidx.test.runner.AndroidJUnitRunner"
 $sourceStages = @(
     "worker",
+    "process-matrix",
     "lifecycle",
     "recreation",
     "playback",
@@ -78,6 +80,7 @@ $testClass = if ($Stage -in $sourceStages) {
 $testMethod = switch ($Stage) {
     "acquisition" { "validatePinnedAcquisition"; break }
     "worker" { "validateProductionWorker"; break }
+    "process-matrix" { "validateProcessSessionMatrix"; break }
     "lifecycle" { "validateWorkerLifecycle"; break }
     "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
     "playback" { "validateMediaSessionPlayback"; break }
@@ -139,9 +142,14 @@ if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "work
     throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
 }
 if ($ExecutionHostMode -eq "bound-remote" -and
-        ($Stage -notin @("worker", "background") -or
+        ($Stage -notin @("worker", "background", "process-matrix") -or
         $BackendMode -ne "auto" -or $AutoFailpoint -ne "none")) {
-    throw "BoundRemote requires Stage=worker/background, BackendMode=auto, and AutoFailpoint=none."
+    throw "BoundRemote requires Stage=worker/background/process-matrix, BackendMode=auto, and AutoFailpoint=none."
+}
+if ($Stage -eq "process-matrix" -and
+        (-not $X86ProcessValidation -or $ProcessAbi -ne "x86" -or
+        $ExecutionHostMode -ne "bound-remote" -or $BackendMode -ne "auto")) {
+    throw "ProcessMatrix requires pure x86, X86ProcessValidation, and BoundRemote Auto."
 }
 if ($X86ProcessValidation -and $ProcessAbi -ne "x86") {
     throw "X86ProcessValidation can only build and run the pure-x86 target."
@@ -181,10 +189,10 @@ if (-not [string]::IsNullOrWhiteSpace($SecondaryModelId) -and
 if ($Stage -in @("background", "prefetch") -and $BackendMode -ne "auto") {
     throw "$Stage uses the production service graph and requires BackendMode=auto."
 }
-if ($Stage -eq "prefetch" -and
+if ($Stage -in @("prefetch", "process-matrix") -and
         ([string]::IsNullOrWhiteSpace($CurrentSourcePath) -or
         [string]::IsNullOrWhiteSpace($CurrentFixtureId))) {
-    throw "Prefetch requires CurrentSourcePath and CurrentFixtureId."
+    throw "$Stage requires CurrentSourcePath and CurrentFixtureId."
 }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "build\phase7-validation"
@@ -348,7 +356,7 @@ $profileId = if ($BackendMode -eq "auto") {
 }
 $backendName = if ($BackendMode -eq "auto") { "LiteRtAuto" } else { "LiteRtCpu" }
 $fixture = @($fixtures.fixtures) | Where-Object { $_.fixtureId -eq $FixtureId } | Select-Object -First 1
-$currentFixture = if ($Stage -eq "prefetch") {
+$currentFixture = if ($Stage -in @("prefetch", "process-matrix")) {
     @($fixtures.fixtures) |
         Where-Object { $_.fixtureId -eq $CurrentFixtureId } |
         Select-Object -First 1
@@ -367,7 +375,7 @@ if ($Stage -in $sourceStages) {
         throw "Source fixture identity does not match $FixtureId."
     }
 }
-if ($Stage -eq "prefetch") {
+if ($Stage -in @("prefetch", "process-matrix")) {
     if ($null -eq $currentFixture) {
         throw "Fixture is absent from fixtures-v2.json: $CurrentFixtureId"
     }
@@ -630,7 +638,7 @@ try {
                 [string]$fixture.expectedOutputFrameCount
             )
         }
-        if ($Stage -eq "prefetch") {
+        if ($Stage -in @("prefetch", "process-matrix")) {
             $currentSourceLeaf = Split-Path -Leaf $currentSourcePath
             if ($currentSourceLeaf -notmatch '^[A-Za-z0-9._-]+$') {
                 throw "Current source fixture filename contains unsupported characters: $currentSourceLeaf"
