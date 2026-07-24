@@ -2254,6 +2254,15 @@ No tensor buffers or inference sessions were run, so all 27 retain their
 existing download-only policies and pending runtime/full-song statuses. See
 [`validation/litert-phase7/candidate-catalog-2026-07-24/README.md`](validation/litert-phase7/candidate-catalog-2026-07-24/README.md).
 
+The current 9662 CPU build now has clean acquisition, full WAV-to-FLAC worker,
+process recreation and hydration, real MediaSession playback, and full-track
+desktop ORT equivalence on S25/S10 arm64, S10 arm32, and diagnostic x86_64.
+All four targets also passed full-fixture pause/resume, a ready-to-pending tail
+seek, and cancellation. S10 and S25 passed production Auto Home/background
+completion and two-window next-song prefetch under retained cache identities.
+See
+[`validation/litert-phase7/9662-objective-2026-07-24/README.md`](validation/litert-phase7/9662-objective-2026-07-24/README.md).
+
 These are not promotion results yet. The v2 threshold revision must be used to
 rerun the affected rows after the final decision commit. S10 GPU audio export,
 representative listening and UI coverage, KARA's human review, and the final
@@ -2330,7 +2339,9 @@ x86_64 remains CPU evidence only until a separate GPU qualification exists.
   cancellation, process recreation, FLAC promotion/hydration, blend changes,
   and exact completed-cache playback. Capture digital output joins and
   timestamps on every target; perform representative listening and the full
-  gesture-level UI pass on S10 and S25.
+  gesture-level UI pass on S10 and S25. All listed automated CPU/ABI and arm64
+  service scenarios now pass in `9662-objective-2026-07-24/`; only the explicit
+  human listening and gesture-level UI portion keeps this item open.
 - [x] Run the frozen source-format corpus through the production worker and
   verify the expected local-window or full-song decode route, output duration,
   source fingerprint, join placement, and fallback reason. A format-specific
@@ -2346,10 +2357,13 @@ x86_64 remains CPU evidence only until a separate GPU qualification exists.
   validation harness, then verify one-way recreation of the same run on LiteRT
   CPU without changing its render/cache identity. Do not add a force-GPU or
   force-CPU user preference to make this test possible.
-- [ ] Treat a successful window comparison as necessary but insufficient:
+- [x] Treat a successful window comparison as necessary but insufficient:
   full-song stem joins, output scale/residual compensation, duration, cache
   append, and player timestamps must all pass before 9662 receives stable
-  release maturity for that ABI/profile.
+  release maturity for that ABI/profile. The four CPU rows have exact frames,
+  one-LSB stem equivalence, two-LSB join/reconstruction deltas, exact cache
+  identity, and zero MediaSession timestamp drift. Stable maturity remains
+  separately blocked by human review and the final decision-build rerun.
 
 #### Phase 7C: Resource, thread, and thermal gates
 

@@ -27,6 +27,10 @@ precision. A successful short-window probe is not a Phase 7 promotion result.
 - `candidate-catalog-2026-07-24/` contains the 27-row immutable download-only
   candidate audit: online Release acquisition, catalog/sidecar reconciliation,
   Android LiteRT structural compile, activation rejection, and cleanup.
+- `9662-objective-2026-07-24/` contains the current 9662 CPU full-song,
+  desktop-reference, process-recreation, MediaSession, sequential lifecycle,
+  background, and next-song prefetch evidence. Human listening/UI review is
+  still excluded.
 - `dual-runtime-inventory-2026-07-24.json` retains exact split, native runtime,
   and installed code-path sizes for the temporary ORT plus LiteRT build.
 - `hq4-preflight/` contains five checked no-allocation device reports and their

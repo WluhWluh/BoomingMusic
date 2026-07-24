@@ -1,0 +1,344 @@
+{
+  "schemaVersion": "phase7-9662-objective-summary-v1",
+  "status": "objective-gates-passed-human-review-pending",
+  "identity": {
+    "appCommit": "b01b7c0e577b5d04c61ea370fc51b674aee19131",
+    "testApkSha256": "89ff3ed8712ac4508870b562704b3b81d7b8bca23cd97f88fa1ce90121dab7d3",
+    "catalogSha256": "a553f227588313578321c07c73ff99654eff7795727d825d16b191aa0f879e1f",
+    "catalogSourceRevision": "28d9a076c8a44980085a059e6224768ae77f9c8a",
+    "modelId": "uvr_mdxnet_3_9662",
+    "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "contractSchemaVersion": 2,
+    "modelReleaseTag": "v0.1.0-candidates.1",
+    "litertVersion": "2.1.5",
+    "runnerRevision": "phase7-runner-v11",
+    "thresholdsVersion": "phase7-thresholds-v2",
+    "fixturesVersion": "phase7-fixtures-v2",
+    "appApkSha256": {
+      "arm64-v8a": "499b3c1f193a9a6988254185245d99fb1cf9db13e3f374335740758ce69eeaa1",
+      "armeabi-v7a": "5ffae498b66fc8a424e3fbd39c04a35ef1727587717aa2a9fe1944d74ec96489",
+      "x86_64": "fc9ad0450753ec5e1e1c54c4377e881d7f0eddad03a4f856cbe066f1bedd7ff0"
+    }
+  },
+  "fixture": {
+    "fixtureId": "coast_town_full_wav",
+    "sha256": "e845e52aeeeb69be702d3a28d756eaf7a3137dbe5338ea50fb0ac3d8c4f9bd89",
+    "durationUs": 273699093,
+    "outputFrames": 12070130
+  },
+  "desktopReference": {
+    "repository": "https://github.com/WluhWluh/MusicSourceSeparation",
+    "revision": "58fcedc9005a9dbfb2de728b66a21de8a0a5d7b5",
+    "canonicalOnnxSha256": "e02220e80d8253f4c2209f8924298b2b686bbdf2868b788ff5500fb9bd94aadc",
+    "referenceScriptSha256": "6edb7e9224de37f6e0fefc864433267093c5b5b5e2577ce6450bc3cf3f36382e",
+    "comparisonScriptSha256": "d185aadd98e106ed78b9092104579018eafb332253fb4849334f4fcdf3269e01",
+    "vocalsWavSha256": "6d1fbc52b977bed2d8f21bee930d2231e8de3ad5e36fdecee10a30dd81ac34b2",
+    "instrumentalWavSha256": "0203b18a0b78c39bad7705732620aaf3bc37b87cc0c420b5f8566e2969f96e3b"
+  },
+  "fullSong": [
+    {
+      "target": "s10-arm32",
+      "device": "SM-G9730",
+      "androidApi": 31,
+      "abi": "armeabi-v7a",
+      "reports": {
+        "acquisition": "full-song/192.168.8.181_35975/phase7-9662-s10-arm32-acquisition-v1-acquisition.json",
+        "worker": "full-song/192.168.8.181_35975/phase7-9662-s10-arm32-full-worker-v1-worker.json",
+        "recreation": "full-song/192.168.8.181_35975/phase7-9662-s10-arm32-recreation-v1-recreation.json",
+        "playback": "full-song/192.168.8.181_35975/phase7-9662-s10-arm32-mediasession-v1-playback.json"
+      },
+      "acquisition": {
+        "passed": true,
+        "explicitUse": true,
+        "downloadMs": 9145
+      },
+      "worker": {
+        "firstReadyMs": 11379,
+        "fullSongMs": 252809,
+        "outputFrames": 12070130,
+        "cacheKey": "469fd161f404025c8ee1abf9fc6c26c753894ba18347a1dfedd3b0c88c19dd34",
+        "backend": "LiteRtCpu",
+        "completedPlayable": true
+      },
+      "recreation": {
+        "passed": true,
+        "hydratedPlayable": true,
+        "exactIdentity": true
+      },
+      "playback": {
+        "mediaSessionConnected": true,
+        "playerTimestampDriftMs": 0,
+        "exactIdentity": true
+      },
+      "audioComparison": {
+        "exactFrames": true,
+        "quantizedEquivalent": true,
+        "maximumPcm16Delta": 1,
+        "minimumSnrDb": 71.4443164511287,
+        "maximumJoinDiscontinuity": 6.103515625E-05,
+        "maximumReconstructionErrorDelta": 6.103515625E-05
+      }
+    },
+    {
+      "target": "s10-arm64",
+      "device": "SM-G9730",
+      "androidApi": 31,
+      "abi": "arm64-v8a",
+      "reports": {
+        "acquisition": "full-song/192.168.8.181_35975/phase7-9662-s10-arm64-acquisition-v1-acquisition.json",
+        "worker": "full-song/192.168.8.181_35975/phase7-9662-s10-arm64-full-worker-v1-worker.json",
+        "recreation": "full-song/192.168.8.181_35975/phase7-9662-s10-arm64-recreation-v1-recreation.json",
+        "playback": "full-song/192.168.8.181_35975/phase7-9662-s10-arm64-mediasession-v1-playback.json"
+      },
+      "acquisition": {
+        "passed": true,
+        "explicitUse": true,
+        "downloadMs": 10138
+      },
+      "worker": {
+        "firstReadyMs": 9487,
+        "fullSongMs": 194694,
+        "outputFrames": 12070130,
+        "cacheKey": "469fd161f404025c8ee1abf9fc6c26c753894ba18347a1dfedd3b0c88c19dd34",
+        "backend": "LiteRtCpu",
+        "completedPlayable": true
+      },
+      "recreation": {
+        "passed": true,
+        "hydratedPlayable": true,
+        "exactIdentity": true
+      },
+      "playback": {
+        "mediaSessionConnected": true,
+        "playerTimestampDriftMs": 0,
+        "exactIdentity": true
+      },
+      "audioComparison": {
+        "exactFrames": true,
+        "quantizedEquivalent": true,
+        "maximumPcm16Delta": 1,
+        "minimumSnrDb": 71.44512791100539,
+        "maximumJoinDiscontinuity": 6.103515625E-05,
+        "maximumReconstructionErrorDelta": 6.103515625E-05
+      }
+    },
+    {
+      "target": "s25-arm64",
+      "device": "SM-S9310",
+      "androidApi": 35,
+      "abi": "arm64-v8a",
+      "reports": {
+        "acquisition": "full-song/192.168.8.197_42509/phase7-9662-s25-arm64-acquisition-v1-acquisition.json",
+        "worker": "full-song/192.168.8.197_42509/phase7-9662-s25-arm64-full-worker-v1-worker.json",
+        "recreation": "full-song/192.168.8.197_42509/phase7-9662-s25-arm64-recreation-v1-recreation.json",
+        "playback": "full-song/192.168.8.197_42509/phase7-9662-s25-arm64-mediasession-v1-playback.json"
+      },
+      "acquisition": {
+        "passed": true,
+        "explicitUse": true,
+        "downloadMs": 8003
+      },
+      "worker": {
+        "firstReadyMs": 4509,
+        "fullSongMs": 108096,
+        "outputFrames": 12070130,
+        "cacheKey": "469fd161f404025c8ee1abf9fc6c26c753894ba18347a1dfedd3b0c88c19dd34",
+        "backend": "LiteRtCpu",
+        "completedPlayable": true
+      },
+      "recreation": {
+        "passed": true,
+        "hydratedPlayable": true,
+        "exactIdentity": true
+      },
+      "playback": {
+        "mediaSessionConnected": true,
+        "playerTimestampDriftMs": 0,
+        "exactIdentity": true
+      },
+      "audioComparison": {
+        "exactFrames": true,
+        "quantizedEquivalent": true,
+        "maximumPcm16Delta": 1,
+        "minimumSnrDb": 71.44511344515264,
+        "maximumJoinDiscontinuity": 6.103515625E-05,
+        "maximumReconstructionErrorDelta": 6.103515625E-05
+      }
+    },
+    {
+      "target": "x86_64",
+      "device": "sdk_gphone16k_x86_64",
+      "androidApi": 37,
+      "abi": "x86_64",
+      "reports": {
+        "acquisition": "full-song/emulator-5554/phase7-9662-x86_64-acquisition-v1-acquisition.json",
+        "worker": "full-song/emulator-5554/phase7-9662-x86_64-full-worker-v1-worker.json",
+        "recreation": "full-song/emulator-5554/phase7-9662-x86_64-recreation-v1-recreation.json",
+        "playback": "full-song/emulator-5554/phase7-9662-x86_64-mediasession-v1-playback.json"
+      },
+      "acquisition": {
+        "passed": true,
+        "explicitUse": true,
+        "downloadMs": 35914
+      },
+      "worker": {
+        "firstReadyMs": 22693,
+        "fullSongMs": 202540,
+        "outputFrames": 12070130,
+        "cacheKey": "a59663a098c7604a86d5e89a9e89761505e9222e24230fd441da47dca913221e",
+        "backend": "LiteRtCpu",
+        "completedPlayable": true
+      },
+      "recreation": {
+        "passed": true,
+        "hydratedPlayable": true,
+        "exactIdentity": true
+      },
+      "playback": {
+        "mediaSessionConnected": true,
+        "playerTimestampDriftMs": 0,
+        "exactIdentity": true
+      },
+      "audioComparison": {
+        "exactFrames": true,
+        "quantizedEquivalent": true,
+        "maximumPcm16Delta": 1,
+        "minimumSnrDb": 71.44511706161131,
+        "maximumJoinDiscontinuity": 6.103515625E-05,
+        "maximumReconstructionErrorDelta": 6.103515625E-05
+      }
+    }
+  ],
+  "sequentialLifecycle": [
+    {
+      "target": "s10-arm32",
+      "device": "SM-G9730",
+      "abi": "armeabi-v7a",
+      "report": "lifecycle/192.168.8.181_35975/phase7-9662-s10-arm32-lifecycle-sequential-v1-lifecycle.json",
+      "sessionCreateCount": 4,
+      "pauseResumePassed": true,
+      "pauseStatus": "Incomplete",
+      "resumedStatus": "Completed",
+      "seekPassed": true,
+      "seekStartedPending": true,
+      "seekStatus": "Completed",
+      "cancellationPassed": true,
+      "cancellationLatencyMs": 1,
+      "canceledStatus": "Incomplete"
+    },
+    {
+      "target": "s10-arm64",
+      "device": "SM-G9730",
+      "abi": "arm64-v8a",
+      "report": "lifecycle/192.168.8.181_35975/phase7-9662-s10-arm64-lifecycle-sequential-v1-lifecycle.json",
+      "sessionCreateCount": 4,
+      "pauseResumePassed": true,
+      "pauseStatus": "Incomplete",
+      "resumedStatus": "Completed",
+      "seekPassed": true,
+      "seekStartedPending": true,
+      "seekStatus": "Completed",
+      "cancellationPassed": true,
+      "cancellationLatencyMs": 1,
+      "canceledStatus": "Incomplete"
+    },
+    {
+      "target": "s25-arm64",
+      "device": "SM-S9310",
+      "abi": "arm64-v8a",
+      "report": "lifecycle/192.168.8.197_42509/phase7-9662-s25-arm64-lifecycle-sequential-v1-lifecycle.json",
+      "sessionCreateCount": 4,
+      "pauseResumePassed": true,
+      "pauseStatus": "Incomplete",
+      "resumedStatus": "Completed",
+      "seekPassed": true,
+      "seekStartedPending": true,
+      "seekStatus": "Completed",
+      "cancellationPassed": true,
+      "cancellationLatencyMs": 1,
+      "canceledStatus": "Incomplete"
+    },
+    {
+      "target": "x86_64",
+      "device": "sdk_gphone16k_x86_64",
+      "abi": "x86_64",
+      "report": "lifecycle/emulator-5554/phase7-9662-x86_64-lifecycle-sequential-v1-lifecycle.json",
+      "sessionCreateCount": 4,
+      "pauseResumePassed": true,
+      "pauseStatus": "Incomplete",
+      "resumedStatus": "Completed",
+      "seekPassed": true,
+      "seekStartedPending": true,
+      "seekStatus": "Completed",
+      "cancellationPassed": true,
+      "cancellationLatencyMs": 0,
+      "canceledStatus": "Incomplete"
+    }
+  ],
+  "backgroundContinuation": [
+    {
+      "target": "s10-arm64",
+      "device": "SM-G9730",
+      "report": "service/192.168.8.181_35975/phase7-9662-s10-arm64-background-v1-background.json",
+      "backend": "LiteRtGpu",
+      "firstReadyMs": 8037,
+      "fullSongMs": 162018,
+      "backgroundContinuationPassed": true,
+      "homeAfterReady": true,
+      "sourcePreparationAttempts": 2,
+      "exactIdentity": true,
+      "completedPlayable": true
+    },
+    {
+      "target": "s25-arm64",
+      "device": "SM-S9310",
+      "report": "service/192.168.8.197_42509/phase7-9662-s25-arm64-background-v1-background.json",
+      "backend": "LiteRtGpu",
+      "firstReadyMs": 2845,
+      "fullSongMs": 51369,
+      "backgroundContinuationPassed": true,
+      "homeAfterReady": true,
+      "sourcePreparationAttempts": 1,
+      "exactIdentity": true,
+      "completedPlayable": true
+    }
+  ],
+  "nextSongPrefetch": [
+    {
+      "target": "s10-arm64",
+      "device": "SM-G9730",
+      "report": "service/192.168.8.181_35975/phase7-9662-s10-arm64-prefetch-v1-prefetch.json",
+      "backend": "LiteRtGpu",
+      "currentCacheKey": "7613c487df350d8c5ea2ec62bdd6f57349884bd83b311a7106b481041f09866b",
+      "nextCacheKey": "dc1d709c6620b41263f3ae7cffec778bcf26c3936e790a368f18597afe5638c8",
+      "requiredReadyWindows": 2,
+      "prefetchedReadyWindows": 2,
+      "stoppedBeforeCompletion": true,
+      "transitionRetainedCacheIdentity": true,
+      "completedPlayable": true
+    },
+    {
+      "target": "s25-arm64",
+      "device": "SM-S9310",
+      "report": "service/192.168.8.197_42509/phase7-9662-s25-arm64-prefetch-v1-prefetch.json",
+      "backend": "LiteRtGpu",
+      "currentCacheKey": "7613c487df350d8c5ea2ec62bdd6f57349884bd83b311a7106b481041f09866b",
+      "nextCacheKey": "dc1d709c6620b41263f3ae7cffec778bcf26c3936e790a368f18597afe5638c8",
+      "requiredReadyWindows": 2,
+      "prefetchedReadyWindows": 2,
+      "stoppedBeforeCompletion": true,
+      "transitionRetainedCacheIdentity": true,
+      "completedPlayable": true
+    }
+  ],
+  "decision": {
+    "cpuArm64": "objective-gates-passed",
+    "cpuArm32": "objective-gates-passed",
+    "cpuX86_64": "objective-gates-passed-emulator-diagnostic",
+    "cpuX86": "unsupported",
+    "autoArm64": "objective-service-lifecycle-passed",
+    "catalogTierChange": "blocked-on-representative-listening-ui-and-final-decision-build",
+    "intendedTier": "sole-stable-recommended-default"
+  }
+}
