@@ -1,6 +1,7 @@
 package com.mardous.booming.separation
 
 import android.app.ActivityManager
+import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.AppProcessResolver
@@ -77,8 +78,45 @@ class SourceSeparationInferenceProcessDeviceTest {
         )
     }
 
+    @Test
+    fun reconnectsAfterIdleRemoteProcessDeath() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val host = BoundRemoteSourceSeparationExecutionHost(context)
+
+        try {
+            val firstGeneration = host.processGeneration
+            val firstPid = requireNotNull(host.connectionDiagnostics.pid)
+            android.os.Process.killProcess(firstPid)
+
+            val deathDeadline = SystemClock.elapsedRealtime() + PROCESS_DEATH_TIMEOUT_MS
+            while (host.connectionDiagnostics.state !=
+                SourceSeparationRemoteConnectionState.Dead &&
+                SystemClock.elapsedRealtime() < deathDeadline
+            ) {
+                SystemClock.sleep(PROCESS_STATE_POLL_MS)
+            }
+            assertEquals(
+                SourceSeparationRemoteConnectionState.Dead,
+                host.connectionDiagnostics.state,
+            )
+
+            val secondGeneration = host.processGeneration
+            val secondDiagnostics = host.connectionDiagnostics
+            assertNotEquals(firstGeneration, secondGeneration)
+            assertNotEquals(firstPid, secondDiagnostics.pid)
+            assertEquals(
+                SourceSeparationRemoteConnectionState.Connected,
+                secondDiagnostics.state,
+            )
+        } finally {
+            host.close()
+        }
+    }
+
     private companion object {
         const val MAXIMUM_IDLE_REMOTE_PSS_BYTES = 96L * 1024L * 1024L
         const val IDLE_SETTLE_MS = 2_000L
+        const val PROCESS_DEATH_TIMEOUT_MS = 10_000L
+        const val PROCESS_STATE_POLL_MS = 50L
     }
 }

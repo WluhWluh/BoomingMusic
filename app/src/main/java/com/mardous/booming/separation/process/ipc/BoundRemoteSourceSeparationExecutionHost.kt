@@ -386,14 +386,26 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     }
 
     private fun markConnectionDead(error: Throwable) {
-        connectionLock.withLock {
+        val disconnected = connectionLock.withLock {
             if (connectionState == SourceSeparationRemoteConnectionState.Closed) return
             terminalConnectionFailure.compareAndSet(null, error)
+            val state = DisconnectedBinding(
+                binder = remoteBinder,
+                wasBound = bound,
+            )
             connectionState = SourceSeparationRemoteConnectionState.Dead
+            bound = false
             remoteService = null
             remoteBinder = null
             connectResponse = null
             connectionChanged.signalAll()
+            state
+        }
+        disconnected.binder?.let { binder ->
+            runCatching { binder.unlinkToDeath(serviceDeathRecipient, 0) }
+        }
+        if (disconnected.wasBound) {
+            runCatching { applicationContext.unbindService(serviceConnection) }
         }
     }
 
@@ -593,6 +605,11 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         val request: SourceSeparationExecutionHostRequest?,
         val pump: RemoteControlPump?,
         val service: ISourceSeparationExecutionService?,
+        val binder: IBinder?,
+        val wasBound: Boolean,
+    )
+
+    private data class DisconnectedBinding(
         val binder: IBinder?,
         val wasBound: Boolean,
     )
