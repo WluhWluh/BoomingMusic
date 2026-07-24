@@ -2405,9 +2405,13 @@ x86_64 remains CPU evidence only until a separate GPU qualification exists.
   artifacts passed on S25 arm64 without tensor-buffer allocation or inference;
   each remained `DownloadOnly` and was deleted after inspection. The immutable
   evidence is in `candidate-catalog-2026-07-24/`.
-- [ ] Keep target-stem-plus-residual candidates download-only until neutral
+- [x] Keep target-stem-plus-residual candidates download-only until neutral
   stem labels and the generic playback/cache UI have passed their own full-song
   gate. Never expose them as vocals/instrumental based on filename inference.
+  The eight published rows are contract-free
+  `download-only-generic-stem` entries; the S25 catalog audit proved that each
+  remains non-activatable. Generic UI and full-song qualification are future
+  prerequisites, not implied by this guardrail result.
 
 #### Phase 7E: Promotion decision and catalog revision
 
