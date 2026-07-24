@@ -295,33 +295,35 @@ engine.
 
 ### Phase 1A: Host interfaces
 
-- [ ] Define a runtime-neutral execution-host interface for start, state
+- [x] Define a runtime-neutral execution-host interface for start, state
   snapshot, pause, cancel, and close.
-- [ ] Keep model resolution and admission outside the host.
-- [ ] Make requests carry exact immutable model, source, cache, and runtime
+- [x] Keep model resolution and admission outside the host.
+- [x] Make requests carry exact immutable model, source, cache, and runtime
   identities.
-- [ ] Keep progress and terminal events typed and serializable without making
+- [x] Keep progress and terminal events typed and serializable without making
   them Android Parcelables inside core separation code.
-- [ ] Implement `InProcess` using the current production executor.
+- [x] Implement `InProcess` using the current production executor.
 
 ### Phase 1B: State and diagnostics
 
-- [ ] Add host mode, run ID, process generation, backend, and host lifecycle to
+- [x] Add host mode, run ID, process generation, backend, and host lifecycle to
   runtime diagnostics.
-- [ ] Make stale-generation events impossible to apply to current playback.
-- [ ] Ensure one admitted run owns one cache lease and one host generation.
-- [ ] Exclude internal host selection and diagnostics from backup.
+- [x] Make stale-generation events impossible to apply to current playback.
+- [x] Ensure one admitted run owns one cache lease and one host generation.
+- [x] Exclude internal host selection and diagnostics from backup.
 
 ### Phase 1C: Parity
 
-- [ ] Run existing scheduler, cache, full-song, playback, and format suites
+- [x] Run existing scheduler, cache, full-song, playback, and format suites
   through the host interface.
-- [ ] Confirm no source-decode fixture or output hash changes.
-- [ ] Confirm foreground and wake-lock traces are byte-for-byte or
+- [x] Confirm no source-decode fixture or output hash changes.
+- [x] Confirm foreground and wake-lock traces are byte-for-byte or
   semantically equivalent to the pre-refactor baseline.
 
 **Phase 1 exit:** production still runs in process, and the new host boundary
 has no observable behavior, output, memory-policy, or background-policy change.
+The accepted evidence is recorded in
+`docs/validation/litert-inference-process/phase1/validation-2026-07-24.md`.
 
 ## Phase 2: Build a Bound Remote-Process Prototype
 

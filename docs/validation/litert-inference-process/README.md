@@ -18,6 +18,7 @@ selection, MP3 handling, output frames, and join placement.
 
 - `phase0/`: frozen in-process baseline, protocol, report schema, and
   comparison thresholds.
+- `phase1/`: in-process host-boundary parity and device-validation summary.
 - Later phase directories use
   `<phase>/<yyyy-mm-dd>/<target>/<run-id>.json`.
 
@@ -33,4 +34,3 @@ flavor, ABI, API, device fingerprint, model and contract identity, process
 mode and generation, concrete backend, source fixture and decode route, cache
 key, foreground/wake-lock state, per-process and summed memory, timings,
 process deaths, restart count, and terminal result.
-
