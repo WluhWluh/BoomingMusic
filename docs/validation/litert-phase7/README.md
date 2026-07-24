@@ -112,6 +112,39 @@ Run a rejected/download-only model preflight without staging its weight file:
 APK hashes. `PreflightOnly` avoids the unrelated app warmup and requires zero
 model staging and zero native allocator calls.
 
+Audit the published contract-free candidate catalog on a compatible CPU
+target with:
+
+```powershell
+.\tools\run_phase7_candidate_catalog.ps1 `
+  -Serial <serial> `
+  -ProcessAbi arm64-v8a `
+  -BssTfliteRepository <bss-tflite-checkout>
+```
+
+The host first verifies the bundled catalog against the `bss-tflite` catalog,
+complete conversion manifest, and immutable online Release manifest. For each
+of the 27 contract-free candidates, a fresh app-data scenario uses the
+production downloader, checks bytes and SHA-256, compiles the TFLite model on
+CPU, reads its static tensor metadata and buffer requirements without creating
+buffers, verifies `DownloadOnly` activation rejection, and deletes the
+inactive weight. One instrumentation process is used per model so a failed
+compile cannot contaminate a later row. This is structural evidence only; it
+does not create a contract or qualify inference, DSP, stem semantics, resource
+use, or playback.
+
+Run only the catalog/Release/sidecar reconciliation without ADB with:
+
+```powershell
+.\tools\run_phase7_candidate_catalog.ps1 `
+  -Serial metadata-host `
+  -BssTfliteRepository <bss-tflite-checkout> `
+  -MetadataOnly
+```
+
+Pass one or more `-ModelId` values to reproduce a subset. The full promotion
+evidence must still cover all 27 rows from one exact app/test APK identity.
+
 Record static and installed dual-runtime sizes with:
 
 ```powershell
