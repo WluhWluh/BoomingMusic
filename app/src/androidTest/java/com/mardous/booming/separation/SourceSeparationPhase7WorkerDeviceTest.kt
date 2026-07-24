@@ -55,6 +55,10 @@ import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetS
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
+import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
+import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteConnectionState
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCallbacks
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
@@ -78,6 +82,7 @@ import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import java.io.File
 import java.security.MessageDigest
+import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -96,6 +101,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
         val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
+        val executionHostMode = Phase7ExecutionHostMode.parse(
+            arguments.getString(ARG_EXECUTION_HOST_MODE),
+        )
+        require(executionHostMode == Phase7ExecutionHostMode.InProcess ||
+            backendMode == BackendMode.Auto
+        ) {
+            "Bound-remote validation requires the production Auto backend."
+        }
         val autoFailpoint = Phase7AutoFailpoint.parse(arguments.getString(ARG_AUTO_FAILPOINT))
         require(autoFailpoint == Phase7AutoFailpoint.None || backendMode == BackendMode.Auto) {
             "Phase 7 Auto fault injection requires BackendMode=auto."
@@ -110,7 +123,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
         )
         val exportCacheAudio = arguments.optionalBoolean(ARG_EXPORT_CACHE_AUDIO, false)
         var coordinator: SourceSeparationForegroundWorkerCoordinator? = null
+        var boundRemoteHost: BoundRemoteSourceSeparationExecutionHost? = null
         var mediaUri: Uri? = null
+        val hostEvents = Collections.synchronizedList(
+            mutableListOf<SourceSeparationExecutionHostEvent>(),
+        )
 
         try {
             val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
@@ -158,7 +175,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     ?.takeIf { it >= 0 },
                 sessionProviderFactoryOverride = autoFaultController
                     ?.createSessionProviderFactory(context),
+                executionHostMode = executionHostMode,
+                executionHostEventSink = hostEvents::add,
+                boundRemoteHostSink = { boundRemoteHost = it },
             )
+            val remoteStartup = boundRemoteHost?.let { host ->
+                host.processGeneration
+                host.connectionDiagnostics
+            }
             val resolved = runtimeFacade.resolve(source)
             val runtimeSong = (resolved as? SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The scanned song could not be admitted: $resolved")
@@ -202,6 +226,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
             var peakJavaBytes = idleMemory.getLong("javaPssBytes")
             var peakNativeBytes = idleMemory.getLong("nativePssBytes")
             var peakGraphicsBytes = idleMemory.getLong("graphicsPssBytes")
+            var peakRemotePssBytes = remoteStartup?.idlePssBytes ?: 0L
+            var peakSummedPssBytes = idleMemory.getLong("totalPssBytes") +
+                peakRemotePssBytes
             var decodeMode: String? = null
             var decodeDiagnostics: String? = null
             var finalState: SourceSeparationUiState = SourceSeparationUiState.Idle
@@ -222,6 +249,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 peakJavaBytes = maxOf(peakJavaBytes, memory.getLong("javaPssBytes"))
                 peakNativeBytes = maxOf(peakNativeBytes, memory.getLong("nativePssBytes"))
                 peakGraphicsBytes = maxOf(peakGraphicsBytes, memory.getLong("graphicsPssBytes"))
+                val remotePssBytes = boundRemoteHost?.connectionDiagnostics?.pid
+                    ?.let { processPssBytes(context, it) }
+                    ?: 0L
+                peakRemotePssBytes = maxOf(peakRemotePssBytes, remotePssBytes)
+                peakSummedPssBytes = maxOf(
+                    peakSummedPssBytes,
+                    memory.getLong("totalPssBytes") + remotePssBytes,
+                )
                 when (finalState) {
                     is SourceSeparationUiState.Completed,
                     is SourceSeparationUiState.Failed,
@@ -355,6 +390,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("peakJavaBytes", peakJavaBytes)
                 .put("peakNativeBytes", peakNativeBytes)
                 .put("peakGraphicsBytes", peakGraphicsBytes)
+                .put("idleRemotePssBytes", remoteStartup?.idlePssBytes ?: JSONObject.NULL)
+                .put("peakRemotePssBytes", peakRemotePssBytes)
+                .put("peakSummedPssBytes", peakSummedPssBytes)
             )
             report.put("thermal", thermalSampler.toJson())
             report.put("lifecycle", report.getJSONObject("lifecycle")
@@ -432,6 +470,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 )
             }
             report.put("cache", cacheReport)
+            report.put(
+                "executionHost",
+                executionHostReport(
+                    mode = executionHostMode,
+                    events = synchronized(hostEvents) { hostEvents.toList() },
+                    remoteHost = boundRemoteHost,
+                ),
+            )
             report.put("worker", JSONObject()
                 .put("sourcePath", sourcePath)
                 .put("mediaUri", mediaUri.toString())
@@ -441,6 +487,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("preservedMediaStoreSource", preserveMediaStoreSource)
                 .put("cpuThreads", runCallbacks.cpuThreads)
                 .put("backendMode", backendMode.argumentValue)
+                .put("executionHostMode", executionHostMode.argumentValue)
                 .put("autoFailpoint", autoFailpoint.argumentValue)
                 .put("runtimeDiagnostics", manifest.runtimeRecords.map { it.backend + "/" + it.runtimeProfileId }
                     .joinToString(","))
@@ -451,6 +498,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             throw error
         } finally {
             coordinator?.cancel()
+            boundRemoteHost?.close()
             if (!preserveMediaStoreSource) {
                 mediaUri?.let { uri ->
                     runCatching { context.contentResolver.delete(uri, null, null) }
@@ -1764,6 +1812,76 @@ class SourceSeparationPhase7WorkerDeviceTest {
         )
     }
 
+    private fun processPssBytes(context: Context, pid: Int): Long {
+        if (pid <= 0) return 0L
+        val manager = context.getSystemService(ActivityManager::class.java)
+        return manager.getProcessMemoryInfo(intArrayOf(pid))
+            .singleOrNull()
+            ?.totalPss
+            ?.toLong()
+            ?.times(1_024L)
+            ?: 0L
+    }
+
+    private fun executionHostReport(
+        mode: Phase7ExecutionHostMode,
+        events: List<SourceSeparationExecutionHostEvent>,
+        remoteHost: BoundRemoteSourceSeparationExecutionHost?,
+    ): JSONObject {
+        assertTrue("The execution host emitted no events.", events.isNotEmpty())
+        assertTrue(
+            "The execution host did not accept the run first.",
+            events.first().payload is SourceSeparationExecutionHostEventPayload.Accepted,
+        )
+        assertTrue(
+            "Execution host event sequences are not strictly monotonic.",
+            events.zipWithNext().all { (current, next) -> next.sequence > current.sequence },
+        )
+        assertTrue(
+            "The execution host emitted no preparation event.",
+            events.any { it.payload is SourceSeparationExecutionHostEventPayload.Prepared },
+        )
+        assertTrue(
+            "The execution host did not complete with one terminal event.",
+            events.last().payload is SourceSeparationExecutionHostEventPayload.Completed &&
+                events.count { event ->
+                    event.payload is SourceSeparationExecutionHostEventPayload.Completed ||
+                        event.payload is SourceSeparationExecutionHostEventPayload.Paused ||
+                        event.payload is SourceSeparationExecutionHostEventPayload.Canceled ||
+                        event.payload is SourceSeparationExecutionHostEventPayload.Failed
+                } == 1,
+        )
+        val diagnostics = remoteHost?.connectionDiagnostics
+        if (mode == Phase7ExecutionHostMode.BoundRemote) {
+            assertEquals(
+                SourceSeparationRemoteConnectionState.Connected,
+                requireNotNull(diagnostics).state,
+            )
+            assertNotEquals(Process.myPid(), diagnostics.pid)
+        } else {
+            assertTrue(remoteHost == null)
+        }
+        return JSONObject()
+            .put("mode", mode.argumentValue)
+            .put("processGeneration", diagnostics?.processGeneration ?: JSONObject.NULL)
+            .put("remotePid", diagnostics?.pid ?: JSONObject.NULL)
+            .put("idleRemotePssBytes", diagnostics?.idlePssBytes ?: JSONObject.NULL)
+            .put("eventCount", events.size)
+            .put("firstSequence", events.first().sequence)
+            .put("lastSequence", events.last().sequence)
+            .put(
+                "sequenceGapCount",
+                events.zipWithNext().count { (current, next) ->
+                    next.sequence != current.sequence + 1L
+                },
+            )
+            .put("events", JSONArray(events.map { event ->
+                JSONObject()
+                    .put("sequence", event.sequence)
+                    .put("type", event.payload::class.java.simpleName)
+            }))
+    }
+
     private fun createCpuRuntimeFacade(
         context: Context,
         preferences: SharedPreferences,
@@ -1772,6 +1890,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
         processorCount: Int?,
         xnnPackFlags: Int? = null,
         sessionProviderFactoryOverride: (() -> MdxInferenceSessionProvider)? = null,
+        executionHostMode: Phase7ExecutionHostMode = Phase7ExecutionHostMode.InProcess,
+        executionHostEventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
+        boundRemoteHostSink: (BoundRemoteSourceSeparationExecutionHost) -> Unit = {},
     ): SourceSeparationRuntimeFacade {
         val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
         val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
@@ -1784,39 +1905,55 @@ class SourceSeparationPhase7WorkerDeviceTest {
             SourceSeparationCacheFlacPromoter::class.java,
         )
         val hydrator = get<SourceSeparationCacheHydrator>(SourceSeparationCacheHydrator::class.java)
-        val sessionProviderFactory: (() -> MdxInferenceSessionProvider)? =
-            sessionProviderFactoryOverride ?: if (backendMode == BackendMode.Cpu) {
-                val cpuFactory = MdxLiteRtCpuInferenceSessionFactory(
-                    compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
-                    availableProcessors = {
-                        processorCount ?: Runtime.getRuntime().availableProcessors()
-                    },
-                    xnnPackFlags = xnnPackFlags,
-                )
-                val singleUseFactory: () -> MdxInferenceSessionProvider = {
-                    SingleUseMdxInferenceSessionProvider(cpuFactory)
-                }
-                singleUseFactory
-            } else {
-                null
+        val engine = if (executionHostMode == Phase7ExecutionHostMode.BoundRemote) {
+            require(backendMode == BackendMode.Auto && sessionProviderFactoryOverride == null) {
+                "Bound-remote validation uses the production Auto runtime."
             }
-        val rangeExecutor = if (
-            backendMode == BackendMode.Auto && sessionProviderFactory == null
-        ) {
-            MdxSourceSeparationModelAwareRangeExecutor(context)
+            val host = BoundRemoteSourceSeparationExecutionHost(context.applicationContext)
+                .also(boundRemoteHostSink)
+            SourceSeparationModelAwareEngine.createBoundRemotePrototype(
+                context = context,
+                presetRepository = presetRepository,
+                coordinator = runCoordinator,
+                executionHost = host,
+                executionHostEventSink = executionHostEventSink,
+            )
         } else {
-            MdxSourceSeparationModelAwareRangeExecutor(
-                context,
-                requireNotNull(sessionProviderFactory),
+            val sessionProviderFactory: (() -> MdxInferenceSessionProvider)? =
+                sessionProviderFactoryOverride ?: if (backendMode == BackendMode.Cpu) {
+                    val cpuFactory = MdxLiteRtCpuInferenceSessionFactory(
+                        compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
+                        availableProcessors = {
+                            processorCount ?: Runtime.getRuntime().availableProcessors()
+                        },
+                        xnnPackFlags = xnnPackFlags,
+                    )
+                    val singleUseFactory: () -> MdxInferenceSessionProvider = {
+                        SingleUseMdxInferenceSessionProvider(cpuFactory)
+                    }
+                    singleUseFactory
+                } else {
+                    null
+                }
+            val rangeExecutor = if (
+                backendMode == BackendMode.Auto && sessionProviderFactory == null
+            ) {
+                MdxSourceSeparationModelAwareRangeExecutor(context)
+            } else {
+                MdxSourceSeparationModelAwareRangeExecutor(
+                    context,
+                    requireNotNull(sessionProviderFactory),
+                )
+            }
+            SourceSeparationModelAwareEngine(
+                activeModelResolver = presetRepository::resolveActiveCacheModel,
+                preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(context),
+                coordinator = runCoordinator,
+                rangeExecutor = rangeExecutor,
+                constructionGate = { true },
+                executionHostEventSink = executionHostEventSink,
             )
         }
-        val engine = SourceSeparationModelAwareEngine(
-            activeModelResolver = presetRepository::resolveActiveCacheModel,
-            preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(context),
-            coordinator = runCoordinator,
-            rangeExecutor = rangeExecutor,
-            constructionGate = { true },
-        )
         return DefaultSourceSeparationRuntimeFacade(
             activeModelResolver = presetRepository::resolveActiveCacheModelResolution,
             compatibilityResolver = AndroidSourceSeparationRuntimeCompatibilityResolver,
@@ -2479,6 +2616,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
     }
 
+    private enum class Phase7ExecutionHostMode(val argumentValue: String) {
+        InProcess("in-process"),
+        BoundRemote("bound-remote"),
+        ;
+
+        companion object {
+            fun parse(value: String?): Phase7ExecutionHostMode = values().singleOrNull {
+                it.argumentValue == (value ?: InProcess.argumentValue)
+            } ?: error("Unsupported Phase 7 execution host mode: $value")
+        }
+    }
+
     private enum class LifecycleScenario(
         val argumentValue: String,
         val includesPauseResume: Boolean,
@@ -2538,6 +2687,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_SOURCE_PATH = "sourcePath"
         const val ARG_CURRENT_SOURCE_PATH = "currentSourcePath"
         const val ARG_BACKEND_MODE = "backendMode"
+        const val ARG_EXECUTION_HOST_MODE = "executionHostMode"
         const val ARG_AUTO_FAILPOINT = "autoFailpoint"
         const val ARG_PROCESSOR_COUNT = "processorCount"
         const val ARG_XNNPACK_FLAGS = "xnnPackFlags"

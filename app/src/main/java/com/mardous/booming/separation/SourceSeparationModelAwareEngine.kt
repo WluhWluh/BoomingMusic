@@ -314,6 +314,7 @@ internal class SourceSeparationModelAwareEngine(
             coordinator: SourceSeparationCacheRunCoordinator,
             executionHost: SourceSeparationExecutionHost =
                 BoundRemoteSourceSeparationExecutionHost(context.applicationContext),
+            executionHostEventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
         ): SourceSeparationModelAwareEngine {
             val appContext = context.applicationContext
             return SourceSeparationModelAwareEngine(
@@ -323,6 +324,7 @@ internal class SourceSeparationModelAwareEngine(
                 rangeExecutor = MdxSourceSeparationModelAwareRangeExecutor(appContext),
                 executionHost = executionHost,
                 constructionGate = { true },
+                executionHostEventSink = executionHostEventSink,
             )
         }
 

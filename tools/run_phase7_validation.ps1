@@ -30,9 +30,11 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v12",
+    [string]$RunnerRevision = "phase7-runner-v13",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
+    [ValidateSet("in-process", "bound-remote")]
+    [string]$ExecutionHostMode = "in-process",
     [ValidateSet("none", "setup", "probe", "invocation-after-ready")]
     [string]$AutoFailpoint = "none",
     [int]$ProcessorCount = 0,
@@ -132,6 +134,10 @@ if ($BackendMode -eq "auto" -and ($ProcessorCount -gt 0 -or $XnnPackFlags -ge 0)
 }
 if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "worker")) {
     throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
+}
+if ($ExecutionHostMode -eq "bound-remote" -and
+        ($Stage -ne "worker" -or $BackendMode -ne "auto" -or $AutoFailpoint -ne "none")) {
+    throw "BoundRemote requires Stage=worker, BackendMode=auto, and AutoFailpoint=none."
 }
 if ($PreserveMediaStoreSource -and $Stage -notin @("worker", "switching")) {
     throw "PreserveMediaStoreSource applies only to worker and switching stages."
@@ -486,6 +492,7 @@ try {
         "-e", "contractSchemaVersion", [string]$model.Contract.contractSchemaVersion,
         "-e", "profileId", $profileId,
         "-e", "backendMode", $BackendMode,
+        "-e", "executionHostMode", $ExecutionHostMode,
         "-e", "autoFailpoint", $AutoFailpoint,
         "-e", "appCommit", $appCommit,
         "-e", "appApkSha256", $appApkSha256,
@@ -805,6 +812,7 @@ try {
                 xnnPackFlags = if ($XnnPackFlags -ge 0) { $XnnPackFlags } else { $null }
                 installSkipped = $SkipInstall
                 backendMode = $BackendMode
+                executionHostMode = $ExecutionHostMode
                 backend = $backendName
                 autoFailpoint = $AutoFailpoint
                 screenTimeoutOverrideMs = if ($Stage -eq "background") {
