@@ -153,10 +153,13 @@ try {
     $firstRun = $true
     foreach ($processorCount in $ProcessorCounts) {
         $threadLabel = if ($processorCount -eq 0) { "default" } else { "t$processorCount" }
-        $runCount = 1 + $WarmRepetitions
+        $isFirstConfiguration = $firstRun
+        $runCount = $WarmRepetitions + $(if ($isFirstConfiguration) { 1 } else { 0 })
         for ($index = 0; $index -lt $runCount; $index++) {
-            $runClass = if ($index -eq 0) { "cold-session" } else { "warm-session" }
-            $ordinal = if ($index -eq 0) { "cold" } else { "warm$index" }
+            $isColdRun = $isFirstConfiguration -and $index -eq 0
+            $runClass = if ($isColdRun) { "cold-session" } else { "warm-session" }
+            $warmOrdinal = if ($isFirstConfiguration) { $index } else { $index + 1 }
+            $ordinal = if ($isColdRun) { "cold" } else { "warm$warmOrdinal" }
             $runId = "$RunPrefix-$safeSerial-$ProcessAbi-$threadLabel-$ordinal"
             Write-Host "Running $runId ($BackendMode)..."
             $arguments = @{
@@ -174,7 +177,7 @@ try {
                 SkipInstall = $true
             }
             if (-not $buildNeeded) { $arguments.SkipBuild = $true }
-            if ($index -eq 0 -and $firstRun) {
+            if ($isColdRun) {
                 $arguments.CleanInstallScenario = $true
             }
             if ($processorCount -gt 0) {
