@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase7-hq4-x86_64-preflight-v2-r3",
+  "status": "complete",
+  "appCommit": "4c680f238968a38dda26d83435b90e5e55137c7e",
+  "appApkSha256": "fc9ad0450753ec5e1e1c54c4377e881d7f0eddad03a4f856cbe066f1bedd7ff0",
+  "testApkSha256": "aa725b78ce9b4452fdbaa0216b57b7bcb431173b2fb714bde10816b8efa97966",
+  "catalogSha256": "a553f227588313578321c07c73ff99654eff7795727d825d16b191aa0f879e1f",
+  "contractSchemaVersion": 2,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784879626946,
+  "contractId": "uvr_mdxnet_inst_hq_4@2",
+  "contractConversionRevision": "695cf49db9bbe0d43ef0c8b52ae145a16c10cf28",
+  "modelId": "uvr_mdxnet_inst_hq_4",
+  "requestedBackend": "LiteRtCpu",
+  "process": {
+    "supportedAbis": [
+      "x86_64",
+      "arm64-v8a"
+    ],
+    "osArch": "x86_64",
+    "is64Bit": true,
+    "resolvedProcessAbi": "x86_64",
+    "selectedLiteRtRuntimeAbi": "x86_64",
+    "nativeLibraryDir": "\/data\/app\/~~xnMZAlbUEB3C7eds36miTg==\/com.wluhwluh.booming.sourcesep.debug-MlDO29275PLEWrGjc6DPJQ==\/lib\/x86_64",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~xnMZAlbUEB3C7eds36miTg==\/com.wluhwluh.booming.sourcesep.debug-MlDO29275PLEWrGjc6DPJQ==\/base.apk!\/lib\/x86_64\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": "\/data\/app\/~~xnMZAlbUEB3C7eds36miTg==\/com.wluhwluh.booming.sourcesep.debug-MlDO29275PLEWrGjc6DPJQ==\/base.apk!\/lib\/x86_64\/libLiteRtClGlAccelerator.so",
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~xnMZAlbUEB3C7eds36miTg==\/com.wluhwluh.booming.sourcesep.debug-MlDO29275PLEWrGjc6DPJQ==\/base.apk",
+        "liteRtEntries": [
+          "lib\/x86_64\/libLiteRt.so",
+          "lib\/x86_64\/libLiteRtClGlAccelerator.so"
+        ]
+      }
+    ],
+    "mappedLiteRtEntries": [
+      {
+        "apkPath": "\/data\/app\/~~xnMZAlbUEB3C7eds36miTg==\/com.wluhwluh.booming.sourcesep.debug-MlDO29275PLEWrGjc6DPJQ==\/base.apk",
+        "entryName": "lib\/x86_64\/libLiteRt.so",
+        "dataOffset": 32849920,
+        "byteSize": 7272904,
+        "mapLines": []
+      },
+      {
+        "apkPath": "\/data\/app\/~~xnMZAlbUEB3C7eds36miTg==\/com.wluhwluh.booming.sourcesep.debug-MlDO29275PLEWrGjc6DPJQ==\/base.apk",
+        "entryName": "lib\/x86_64\/libLiteRtClGlAccelerator.so",
+        "dataOffset": 40124416,
+        "byteSize": 3400840,
+        "mapLines": []
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 8325386240,
+    "availableDeviceMemoryBytes": 6492303360,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 226492416,
+    "pid": 4089,
+    "manufacturer": "Google",
+    "model": "sdk_gphone16k_x86_64",
+    "device": "emu64xa16k",
+    "androidApi": 37,
+    "fingerprint": "google\/sdk_gphone16k_x86_64\/emu64xa16k:17\/CP21.260330.012\/15545953:userdebug\/dev-keys"
+  },
+  "compatibilityOverride": null,
+  "preflightOnly": true,
+  "preflightErrorType": "com.mardous.booming.separation.model.MdxInferenceCompatibilityException",
+  "preflightErrorMessage": "The runtime profile was rejected by validation.",
+  "nativeAllocatorCalls": 0,
+  "modelFileExists": false,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 385350,
+    "processCpuMs": 6946,
+    "totalPssKb": 66733,
+    "nativePssKb": 29758,
+    "dalvikPssKb": 14505,
+    "otherPssKb": 22470,
+    "nativeHeapAllocatedBytes": 34097184,
+    "summaryKb": {
+      "summary.java-heap": 21240,
+      "summary.native-heap": 29684,
+      "summary.code": 2532,
+      "summary.stack": 704,
+      "summary.graphics": 0,
+      "summary.private-other": 3076,
+      "summary.system": 9497,
+      "summary.total-pss": 66733,
+      "summary.total-swap": 0
+    }
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 385376,
+    "processCpuMs": 6982,
+    "totalPssKb": 66683,
+    "nativePssKb": 29758,
+    "dalvikPssKb": 14517,
+    "otherPssKb": 22408,
+    "nativeHeapAllocatedBytes": 34097152,
+    "summaryKb": {
+      "summary.java-heap": 21252,
+      "summary.native-heap": 29684,
+      "summary.code": 2396,
+      "summary.stack": 704,
+      "summary.graphics": 0,
+      "summary.private-other": 2996,
+      "summary.system": 9651,
+      "summary.total-pss": 66683,
+      "summary.total-swap": 0
+    }
+  }
+}

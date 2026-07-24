@@ -18,7 +18,12 @@ precision. A successful short-window probe is not a Phase 7 promotion result.
 - `source-format-results-2026-07-23.md` records the completed v2 decoder
   corpus matrix and the timeline fixes found by it.
 - `resource-results-2026-07-24.md` records the repeated CPU/GPU resource,
-  thread-count, thermal, and cancellation matrices and their policy decisions.
+  thread-count, thermal, cancellation, HQ4 preflight, supplemental-runtime,
+  and dual-runtime size matrices and their policy decisions.
+- `dual-runtime-inventory-2026-07-24.json` retains exact split, native runtime,
+  and installed code-path sizes for the temporary ORT plus LiteRT build.
+- `hq4-preflight/` contains five checked no-allocation device reports and their
+  SHA-256 manifest.
 - `fixtures-v2.json` identifies the local research fixtures and the generated
   source-format corpus by hash without copying model weights, full audio, or
   reference stems into Booming SS.
@@ -85,6 +90,39 @@ Use `-BackendMode auto` only on eligible arm64 physical devices. Pass
 `-ProcessorCounts 0,3,4` to record the default four-thread configuration and
 expose actual two- and three-thread neighbors through the production thread
 formula. Raw reports and summaries stay under the ignored `build` directory.
+
+Run a rejected/download-only model preflight without staging its weight file:
+
+```powershell
+.\tools\run_litert_cpu_validation.ps1 `
+  -Serial <serial> `
+  -ProcessAbi <abi> `
+  -Backend cpu `
+  -ModelId uvr_mdxnet_inst_hq_4 `
+  -PreflightOnly `
+  -SkipBuild `
+  -SkipInstall
+```
+
+`-SkipBuild` and `-SkipInstall` verify the build marker and installed app/test
+APK hashes. `PreflightOnly` avoids the unrelated app warmup and requires zero
+model staging and zero native allocator calls.
+
+Record static and installed dual-runtime sizes with:
+
+```powershell
+.\tools\run_phase7_apk_inventory.ps1 `
+  -OutputPath <report.json> `
+  -InstalledTarget @(
+    'arm64-v8a=<serial>',
+    'armeabi-v7a=<serial>',
+    'x86_64=<serial>',
+    'x86=<serial>'
+  )
+```
+
+The inventory first runs `verify_litert_apks.py`, binds every split to the
+build marker, and rejects an installed hash or ABI mismatch.
 
 Run the complete generated source-format matrix after the pinned model has
 been acquired and selected on a device:

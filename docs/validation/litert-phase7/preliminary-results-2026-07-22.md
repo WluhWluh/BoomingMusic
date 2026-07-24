@@ -106,6 +106,14 @@ on S25. See
 [`resource-results-2026-07-24.md`](resource-results-2026-07-24.md) for the
 complete ranges and decisions.
 
+HQ4 no-allocation preflight passed on S10 arm64/arm32, S25 arm64, API 37
+x86_64, and API 26 x86 with zero allocator calls, zero model files, and zero
+mapped LiteRT libraries. The supplemental x86 verifier now covers valid,
+missing, same-size tampered, and wrong-machine inputs in CI. A checked
+dual-runtime inventory records APK, native, ORT, LiteRT, and installed code
+sizes for all four split ABIs. These results close the exploratory Phase 7C
+gate while keeping HQ4 download-only.
+
 ## Open Evidence
 
 - Rerun the final promotion rows from the frozen decision commit; current local
@@ -115,7 +123,5 @@ complete ranges and decisions.
   staging sufficient local storage.
 - Complete KARA CPU full-song, cancellation, playback, resource, and listening
   rows on every ABI for which it may become selectable.
-- Complete HQ4 no-allocation preflight, supplemental x86 runtime failure, and
-  dual-runtime size-inventory rows.
 - Keep pure x86 ordinary-playback support, but mark source separation
   `unsupported` until a lifecycle-safe runtime strategy exists.

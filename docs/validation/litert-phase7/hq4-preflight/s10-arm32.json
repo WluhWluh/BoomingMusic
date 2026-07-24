@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "runId": "phase7-hq4-s10-arm32-preflight-v2",
+  "status": "complete",
+  "appCommit": "4c680f238968a38dda26d83435b90e5e55137c7e",
+  "appApkSha256": "5ffae498b66fc8a424e3fbd39c04a35ef1727587717aa2a9fe1944d74ec96489",
+  "testApkSha256": "aa725b78ce9b4452fdbaa0216b57b7bcb431173b2fb714bde10816b8efa97966",
+  "catalogSha256": "a553f227588313578321c07c73ff99654eff7795727d825d16b191aa0f879e1f",
+  "contractSchemaVersion": 2,
+  "pipelineVersion": 1,
+  "runtime": "LiteRT 2.1.5",
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "startedAtEpochMs": 1784878201010,
+  "contractId": "uvr_mdxnet_inst_hq_4@2",
+  "contractConversionRevision": "695cf49db9bbe0d43ef0c8b52ae145a16c10cf28",
+  "modelId": "uvr_mdxnet_inst_hq_4",
+  "requestedBackend": "LiteRtCpu",
+  "process": {
+    "supportedAbis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ],
+    "osArch": "armv8l",
+    "is64Bit": false,
+    "resolvedProcessAbi": "armeabi-v7a",
+    "selectedLiteRtRuntimeAbi": "armeabi-v7a",
+    "nativeLibraryDir": "\/data\/app\/~~4S5Yjs-QaiBMT8xEirtxlg==\/com.wluhwluh.booming.sourcesep.debug--QGoSUHuvYyZ8NaZrdClfw==\/lib\/arm",
+    "extractedRuntime": null,
+    "classLoaderResolvedRuntime": "\/data\/app\/~~4S5Yjs-QaiBMT8xEirtxlg==\/com.wluhwluh.booming.sourcesep.debug--QGoSUHuvYyZ8NaZrdClfw==\/base.apk!\/lib\/armeabi-v7a\/libLiteRt.so",
+    "classLoaderResolvedGpuAccelerator": null,
+    "apkInventories": [
+      {
+        "path": "\/data\/app\/~~4S5Yjs-QaiBMT8xEirtxlg==\/com.wluhwluh.booming.sourcesep.debug--QGoSUHuvYyZ8NaZrdClfw==\/base.apk",
+        "liteRtEntries": [
+          "lib\/armeabi-v7a\/libLiteRt.so"
+        ]
+      }
+    ],
+    "mappedLiteRtEntries": [
+      {
+        "apkPath": "\/data\/app\/~~4S5Yjs-QaiBMT8xEirtxlg==\/com.wluhwluh.booming.sourcesep.debug--QGoSUHuvYyZ8NaZrdClfw==\/base.apk",
+        "entryName": "lib\/armeabi-v7a\/libLiteRt.so",
+        "dataOffset": 32849920,
+        "byteSize": 3504124,
+        "mapLines": []
+      }
+    ],
+    "loadedRuntimeMaps": [],
+    "loadedGpuAcceleratorMaps": [],
+    "totalDeviceMemoryBytes": 7823921152,
+    "availableDeviceMemoryBytes": 3191988224,
+    "lowMemory": false,
+    "lowMemoryThresholdBytes": 408944640,
+    "pid": 12315,
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "device": "beyond1q",
+    "androidApi": 31,
+    "fingerprint": "samsung\/beyond1qltezc\/beyond1q:12\/SP1A.210812.016\/G9730ZCU8HWE2:user\/release-keys"
+  },
+  "compatibilityOverride": null,
+  "preflightOnly": true,
+  "preflightErrorType": "com.mardous.booming.separation.model.MdxInferenceCompatibilityException",
+  "preflightErrorMessage": "The runtime target is explicitly unsupported.",
+  "nativeAllocatorCalls": 0,
+  "modelFileExists": false,
+  "memoryBefore": {
+    "elapsedRealtimeMs": 427357858,
+    "processCpuMs": 3378,
+    "totalPssKb": 261622,
+    "nativePssKb": 25772,
+    "dalvikPssKb": 12964,
+    "otherPssKb": 213714,
+    "nativeHeapAllocatedBytes": 24224704,
+    "summaryKb": {
+      "summary.java-heap": 25212,
+      "summary.native-heap": 25104,
+      "summary.code": 190776,
+      "summary.stack": 484,
+      "summary.graphics": 0,
+      "summary.private-other": 6332,
+      "summary.system": 13714,
+      "summary.total-pss": 261622,
+      "summary.total-swap": 18356
+    }
+  },
+  "memoryAfter": {
+    "elapsedRealtimeMs": 427357904,
+    "processCpuMs": 3423,
+    "totalPssKb": 261676,
+    "nativePssKb": 25780,
+    "dalvikPssKb": 12972,
+    "otherPssKb": 213770,
+    "nativeHeapAllocatedBytes": 24225952,
+    "summaryKb": {
+      "summary.java-heap": 25220,
+      "summary.native-heap": 25108,
+      "summary.code": 190812,
+      "summary.stack": 484,
+      "summary.graphics": 0,
+      "summary.private-other": 6336,
+      "summary.system": 13716,
+      "summary.total-pss": 261676,
+      "summary.total-swap": 18320
+    }
+  }
+}

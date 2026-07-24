@@ -1,0 +1,327 @@
+{
+  "schemaVersion": "phase7-dual-runtime-inventory-v1",
+  "generatedAtUtc": "2026-07-24T07:58:18.1942251Z",
+  "appCommit": "4c680f238968a38dda26d83435b90e5e55137c7e",
+  "testApk": {
+    "fileName": "app-github-debug-androidTest.apk",
+    "bytes": 544557,
+    "sha256": "aa725b78ce9b4452fdbaa0216b57b7bcb431173b2fb714bde10816b8efa97966"
+  },
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "apkDirectory": "app/build/outputs/apk/github/debug",
+  "runtimeState": "dual-runtime-ort-oracle-and-litert-production",
+  "apks": [
+    {
+      "variant": "arm64-v8a",
+      "fileName": "BoomingSS-1.3.1-beta.2-ss.1.debug-github-arm64-v8a.apk",
+      "bytes": 80740384,
+      "sha256": "499b3c1f193a9a6988254185245d99fb1cf9db13e3f374335740758ce69eeaa1",
+      "zipPayloadBytes": 134039648,
+      "nativeBytes": 38304136,
+      "liteRtBytes": 8057216,
+      "ortBytes": 27520248,
+      "otherNativeBytes": 2726672,
+      "nativeEntryCount": 7,
+      "runtimeEntries": [
+        {
+          "entryName": "lib/arm64-v8a/libLiteRt.so",
+          "runtime": "LiteRT",
+          "bytes": 5328296,
+          "compressedBytes": 5328296,
+          "sha256": "366e3e040b00692158f9f8f9105870672c93348a3d8e9024120b40045a074b0b"
+        },
+        {
+          "entryName": "lib/arm64-v8a/libLiteRtClGlAccelerator.so",
+          "runtime": "LiteRT",
+          "bytes": 2728920,
+          "compressedBytes": 2728920,
+          "sha256": "d22d9490c43a9428a6047564560dae83ce32a616658baa324b43843bfb066e89"
+        },
+        {
+          "entryName": "lib/arm64-v8a/libonnxruntime.so",
+          "runtime": "ORT",
+          "bytes": 27408600,
+          "compressedBytes": 27408600,
+          "sha256": "9f8e49b209cbac4483c96e5fc82f0405747f39c0708fb673561cbb019db0c0bc"
+        },
+        {
+          "entryName": "lib/arm64-v8a/libonnxruntime4j_jni.so",
+          "runtime": "ORT",
+          "bytes": 111648,
+          "compressedBytes": 111648,
+          "sha256": "0984ef3397a10837286e344256fd4982eefb71f7d36ebdd92d85395e83ac0355"
+        }
+      ]
+    },
+    {
+      "variant": "armeabi-v7a",
+      "fileName": "BoomingSS-1.3.1-beta.2-ss.1.debug-github-armeabi-v7a.apk",
+      "bytes": 67693805,
+      "sha256": "5ffae498b66fc8a424e3fbd39c04a35ef1727587717aa2a9fe1944d74ec96489",
+      "zipPayloadBytes": 120998940,
+      "nativeBytes": 25263428,
+      "liteRtBytes": 3504124,
+      "ortBytes": 19584296,
+      "otherNativeBytes": 2175008,
+      "nativeEntryCount": 6,
+      "runtimeEntries": [
+        {
+          "entryName": "lib/armeabi-v7a/libLiteRt.so",
+          "runtime": "LiteRT",
+          "bytes": 3504124,
+          "compressedBytes": 3504124,
+          "sha256": "836ee7a2321c9453f02658b6774fc4c5951716432b450ba6bc4e9a94fe524e6c"
+        },
+        {
+          "entryName": "lib/armeabi-v7a/libonnxruntime.so",
+          "runtime": "ORT",
+          "bytes": 19502760,
+          "compressedBytes": 19502760,
+          "sha256": "43e71a854973e1427d87eea80c8c4ed59d63930001783f5b0f9fe7de119e4211"
+        },
+        {
+          "entryName": "lib/armeabi-v7a/libonnxruntime4j_jni.so",
+          "runtime": "ORT",
+          "bytes": 81536,
+          "compressedBytes": 81536,
+          "sha256": "2f4b0af2a4cc3e582ae258ed29d027c0ef751a44f97833677306b003e711d98e"
+        }
+      ]
+    },
+    {
+      "variant": "x86_64",
+      "fileName": "BoomingSS-1.3.1-beta.2-ss.1.debug-github-x86_64.apk",
+      "bytes": 89239811,
+      "sha256": "fc9ad0450753ec5e1e1c54c4377e881d7f0eddad03a4f856cbe066f1bedd7ff0",
+      "zipPayloadBytes": 142546792,
+      "nativeBytes": 46811280,
+      "liteRtBytes": 10673744,
+      "ortBytes": 33304936,
+      "otherNativeBytes": 2832600,
+      "nativeEntryCount": 7,
+      "runtimeEntries": [
+        {
+          "entryName": "lib/x86_64/libLiteRt.so",
+          "runtime": "LiteRT",
+          "bytes": 7272904,
+          "compressedBytes": 7272904,
+          "sha256": "6d5b2f35d536a3b2d38b26d26328cc9c259133ef2aa0413ec554cd7ef84f6604"
+        },
+        {
+          "entryName": "lib/x86_64/libLiteRtClGlAccelerator.so",
+          "runtime": "LiteRT",
+          "bytes": 3400840,
+          "compressedBytes": 3400840,
+          "sha256": "9a8407cfb22b4b1d395288e52dc945ec0b47ae525795a54e9242648dfd34d0e3"
+        },
+        {
+          "entryName": "lib/x86_64/libonnxruntime.so",
+          "runtime": "ORT",
+          "bytes": 33204920,
+          "compressedBytes": 33204920,
+          "sha256": "7950f0bb0ba765a0e3b11c11d6449c1b993e0301156e6c8fd1b2a10c45e7baa9"
+        },
+        {
+          "entryName": "lib/x86_64/libonnxruntime4j_jni.so",
+          "runtime": "ORT",
+          "bytes": 100016,
+          "compressedBytes": 100016,
+          "sha256": "272250caada01c1ec2ff5b0a5f082f84acb1c2dabfe22a757e0a685bb47c7569"
+        }
+      ]
+    },
+    {
+      "variant": "x86",
+      "fileName": "BoomingSS-1.3.1-beta.2-ss.1.debug-github-x86.apk",
+      "bytes": 85759453,
+      "sha256": "c8334b19f824aeb687d4a12b3a219583d4f1310695800939bf56980ce4960473",
+      "zipPayloadBytes": 139074952,
+      "nativeBytes": 43339440,
+      "liteRtBytes": 7482132,
+      "ortBytes": 33168884,
+      "otherNativeBytes": 2688424,
+      "nativeEntryCount": 6,
+      "runtimeEntries": [
+        {
+          "entryName": "lib/x86/libLiteRt.so",
+          "runtime": "LiteRT",
+          "bytes": 7482132,
+          "compressedBytes": 7482132,
+          "sha256": "02b6556ec235926c11eb0c067eb16e459adcddb1568a42eefe0c40f4cc4b59af"
+        },
+        {
+          "entryName": "lib/x86/libonnxruntime.so",
+          "runtime": "ORT",
+          "bytes": 33075264,
+          "compressedBytes": 33075264,
+          "sha256": "f534e650334342c3834f7cc525c341637cefbf9d7812eadd9c80959de64e2d34"
+        },
+        {
+          "entryName": "lib/x86/libonnxruntime4j_jni.so",
+          "runtime": "ORT",
+          "bytes": 93620,
+          "compressedBytes": 93620,
+          "sha256": "346111c6d88ef0b2178096cb8db054bfa17506f4be1f1b8219af6251f716403e"
+        }
+      ]
+    },
+    {
+      "variant": "universal",
+      "fileName": "BoomingSS-1.3.1-beta.2-ss.1.debug-github-universal.apk",
+      "bytes": 196277947,
+      "sha256": "56d5c214c8d4b83a7e01912f1048422652356823ba917753766c08046b5ee9dc",
+      "zipPayloadBytes": 249453796,
+      "nativeBytes": 153718284,
+      "liteRtBytes": 29717216,
+      "ortBytes": 113578364,
+      "otherNativeBytes": 10422704,
+      "nativeEntryCount": 26,
+      "runtimeEntries": [
+        {
+          "entryName": "lib/arm64-v8a/libLiteRt.so",
+          "runtime": "LiteRT",
+          "bytes": 5328296,
+          "compressedBytes": 5328296,
+          "sha256": "366e3e040b00692158f9f8f9105870672c93348a3d8e9024120b40045a074b0b"
+        },
+        {
+          "entryName": "lib/arm64-v8a/libLiteRtClGlAccelerator.so",
+          "runtime": "LiteRT",
+          "bytes": 2728920,
+          "compressedBytes": 2728920,
+          "sha256": "d22d9490c43a9428a6047564560dae83ce32a616658baa324b43843bfb066e89"
+        },
+        {
+          "entryName": "lib/arm64-v8a/libonnxruntime.so",
+          "runtime": "ORT",
+          "bytes": 27408600,
+          "compressedBytes": 27408600,
+          "sha256": "9f8e49b209cbac4483c96e5fc82f0405747f39c0708fb673561cbb019db0c0bc"
+        },
+        {
+          "entryName": "lib/arm64-v8a/libonnxruntime4j_jni.so",
+          "runtime": "ORT",
+          "bytes": 111648,
+          "compressedBytes": 111648,
+          "sha256": "0984ef3397a10837286e344256fd4982eefb71f7d36ebdd92d85395e83ac0355"
+        },
+        {
+          "entryName": "lib/armeabi-v7a/libLiteRt.so",
+          "runtime": "LiteRT",
+          "bytes": 3504124,
+          "compressedBytes": 3504124,
+          "sha256": "836ee7a2321c9453f02658b6774fc4c5951716432b450ba6bc4e9a94fe524e6c"
+        },
+        {
+          "entryName": "lib/armeabi-v7a/libonnxruntime.so",
+          "runtime": "ORT",
+          "bytes": 19502760,
+          "compressedBytes": 19502760,
+          "sha256": "43e71a854973e1427d87eea80c8c4ed59d63930001783f5b0f9fe7de119e4211"
+        },
+        {
+          "entryName": "lib/armeabi-v7a/libonnxruntime4j_jni.so",
+          "runtime": "ORT",
+          "bytes": 81536,
+          "compressedBytes": 81536,
+          "sha256": "2f4b0af2a4cc3e582ae258ed29d027c0ef751a44f97833677306b003e711d98e"
+        },
+        {
+          "entryName": "lib/x86_64/libLiteRt.so",
+          "runtime": "LiteRT",
+          "bytes": 7272904,
+          "compressedBytes": 7272904,
+          "sha256": "6d5b2f35d536a3b2d38b26d26328cc9c259133ef2aa0413ec554cd7ef84f6604"
+        },
+        {
+          "entryName": "lib/x86_64/libLiteRtClGlAccelerator.so",
+          "runtime": "LiteRT",
+          "bytes": 3400840,
+          "compressedBytes": 3400840,
+          "sha256": "9a8407cfb22b4b1d395288e52dc945ec0b47ae525795a54e9242648dfd34d0e3"
+        },
+        {
+          "entryName": "lib/x86_64/libonnxruntime.so",
+          "runtime": "ORT",
+          "bytes": 33204920,
+          "compressedBytes": 33204920,
+          "sha256": "7950f0bb0ba765a0e3b11c11d6449c1b993e0301156e6c8fd1b2a10c45e7baa9"
+        },
+        {
+          "entryName": "lib/x86_64/libonnxruntime4j_jni.so",
+          "runtime": "ORT",
+          "bytes": 100016,
+          "compressedBytes": 100016,
+          "sha256": "272250caada01c1ec2ff5b0a5f082f84acb1c2dabfe22a757e0a685bb47c7569"
+        },
+        {
+          "entryName": "lib/x86/libLiteRt.so",
+          "runtime": "LiteRT",
+          "bytes": 7482132,
+          "compressedBytes": 7482132,
+          "sha256": "02b6556ec235926c11eb0c067eb16e459adcddb1568a42eefe0c40f4cc4b59af"
+        },
+        {
+          "entryName": "lib/x86/libonnxruntime.so",
+          "runtime": "ORT",
+          "bytes": 33075264,
+          "compressedBytes": 33075264,
+          "sha256": "f534e650334342c3834f7cc525c341637cefbf9d7812eadd9c80959de64e2d34"
+        },
+        {
+          "entryName": "lib/x86/libonnxruntime4j_jni.so",
+          "runtime": "ORT",
+          "bytes": 93620,
+          "compressedBytes": 93620,
+          "sha256": "346111c6d88ef0b2178096cb8db054bfa17506f4be1f1b8219af6251f716403e"
+        }
+      ]
+    }
+  ],
+  "installed": [
+    {
+      "variant": "arm64-v8a",
+      "serial": "192.168.8.197:42509",
+      "manufacturer": "samsung",
+      "model": "SM-S9310",
+      "androidApi": 35,
+      "installedApkBytes": 80740384,
+      "installedApkSha256": "499b3c1f193a9a6988254185245d99fb1cf9db13e3f374335740758ce69eeaa1",
+      "baseApkAllocatedKiB": 78936,
+      "codePathAllocatedKiB": 78947
+    },
+    {
+      "variant": "armeabi-v7a",
+      "serial": "192.168.8.181:35975",
+      "manufacturer": "samsung",
+      "model": "SM-G9730",
+      "androidApi": 31,
+      "installedApkBytes": 67693805,
+      "installedApkSha256": "5ffae498b66fc8a424e3fbd39c04a35ef1727587717aa2a9fe1944d74ec96489",
+      "baseApkAllocatedKiB": 66124,
+      "codePathAllocatedKiB": 66148
+    },
+    {
+      "variant": "x86_64",
+      "serial": "emulator-5554",
+      "manufacturer": "Google",
+      "model": "sdk_gphone16k_x86_64",
+      "androidApi": 37,
+      "installedApkBytes": 89239811,
+      "installedApkSha256": "fc9ad0450753ec5e1e1c54c4377e881d7f0eddad03a4f856cbe066f1bedd7ff0",
+      "baseApkAllocatedKiB": 87128,
+      "codePathAllocatedKiB": 87152
+    },
+    {
+      "variant": "x86",
+      "serial": "emulator-5556",
+      "manufacturer": "unknown",
+      "model": "Android SDK built for x86",
+      "androidApi": 26,
+      "installedApkBytes": 85759453,
+      "installedApkSha256": "c8334b19f824aeb687d4a12b3a219583d4f1310695800939bf56980ce4960473",
+      "baseApkAllocatedKiB": 83752,
+      "codePathAllocatedKiB": 83764
+    }
+  ]
+}

@@ -110,13 +110,75 @@ the coordinator's prompt cancellation path. Existing direct-engine tests still
 cover cancellation requested during an invocation, where LiteRT must return
 before the output can be discarded.
 
-## Decisions and Remaining Gates
+## HQ4 No-Allocation Gate
+
+The current HQ4 artifact is 59,057,268 bytes with SHA-256
+`5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742`.
+Earlier window probes measured about 0.76-1.3 GiB of PSS, above the 256 MiB
+target and 384 MiB hard limit. Phase 7 therefore verifies rejection before
+model or native allocation instead of repeating a known-disqualified run.
+
+| Target | Catalog result | Allocator calls | LiteRT maps | Model exists | PSS change (KiB) |
+| --- | --- | ---: | ---: | --- | ---: |
+| Galaxy S25 arm64 | rejected | 0 | 0 | no | +84 |
+| Galaxy S10 arm64 | rejected | 0 | 0 | no | +26 |
+| Galaxy S10 arm32 | unsupported | 0 | 0 | no | +54 |
+| API 37 x86_64 AVD | rejected | 0 | 0 | no | -50 |
+| API 26 x86 AVD | unsupported | 0 | 0 | no | +80 |
+
+All five reports use app commit `4c680f23`, exact per-ABI app APK hashes, and
+AndroidTest APK SHA-256
+`aa725b78ce9b4452fdbaa0216b57b7bcb431173b2fb714bde10816b8efa97966`.
+The reports and checksums are in [`hq4-preflight`](hq4-preflight/). HQ4 remains
+download-only. Any artifact, contract, runtime, or resource-policy change
+reopens the S10 hard gate before activation can be reconsidered.
+
+## Supplemental x86 Runtime Faults
+
+`test_verify_litert_native.py` now runs in Android CI, the API 26 x86 smoke
+job, and release builds. Its four cases are:
+
+| Input | Expected terminal result | Result |
+| --- | --- | --- |
+| pinned x86 ELF | exact size, SHA-256, exports, and dependencies accepted | passed |
+| missing file | local `library is missing` build failure | passed |
+| same-size tampered ELF | local SHA-256 build failure | passed |
+| ELF32 with ARM machine ID | local `expected Intel 80386` build failure | passed |
+
+The verifier checks ELF class and machine before the pinned hash, so a wrong
+architecture is reported distinctly from tampering. These are pre-package
+terminal failures: they cannot start ORT, select another model, or allocate a
+second inference session. Existing production-graph tests separately prevent
+normal runtime routes from constructing the ORT oracle.
+
+## Dual-Runtime Size Baseline
+
+The full machine-readable inventory is
+[`dual-runtime-inventory-2026-07-24.json`](dual-runtime-inventory-2026-07-24.json).
+Every installed row matched the local split by SHA-256 and `primaryCpuAbi`.
+Models, app data, and separation caches are excluded.
+
+| ABI | APK (MiB) | ZIP payload (MiB) | Native (MiB) | LiteRT (MiB) | ORT (MiB) | Installed code path (MiB) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| arm64-v8a | 77.00 | 127.83 | 36.53 | 7.68 | 26.25 | 77.10 |
+| armeabi-v7a | 64.56 | 115.39 | 24.09 | 3.34 | 18.68 | 64.60 |
+| x86_64 | 85.11 | 135.94 | 44.64 | 10.18 | 31.76 | 85.11 |
+| x86 | 81.79 | 132.63 | 41.33 | 7.14 | 31.63 | 81.80 |
+| universal | 187.19 | 237.90 | 146.60 | 28.34 | 108.32 | not installed |
+
+This is intentionally the Phase 7 dual-runtime baseline. ORT remains packaged
+only as the unreachable regression oracle. Phase 8 must remove it, rebuild the
+same inventory, and apply the separate 10 MiB target / 16 MiB hard LiteRT
+runtime-increment gate; this table is not post-removal size acceptance.
+
+## Phase 7C Decisions
 
 - Retain the four-thread CPU formula and GPU-first Auto policy.
 - Treat x86_64 resource numbers as diagnostics, not device qualification.
-- Keep HQ4 download-only. Its no-allocation preflight and the existing 256 MiB
-  target / 384 MiB hard PSS gate remain open Phase 7C work.
-- Still record missing, altered, and wrong-architecture supplemental x86
-  runtime behavior and the dual-runtime APK/installed-size inventory.
+- Keep HQ4 download-only under the existing 256 MiB target and 384 MiB hard
+  PSS gate; the current artifact is rejected without allocation on every ABI.
+- Reject missing, altered, or wrong-architecture supplemental x86 runtimes in
+  the build supply chain before an APK or inference session can be produced.
+- Use the checked dual-runtime inventory as the Phase 8 pre-removal baseline.
 - Rerun the final promotion rows from one frozen commit after listening, UI,
   KARA, catalog, and remaining lifecycle decisions are complete.

@@ -2230,13 +2230,20 @@ default-thread cancellation matrix passes at 1-9 ms on all four CPU targets.
 See
 [`validation/litert-phase7/resource-results-2026-07-24.md`](validation/litert-phase7/resource-results-2026-07-24.md).
 
+The current HQ4 artifact now fails closed before model/native allocation on
+S10 arm64/arm32, S25 arm64, x86_64, and pure x86. Missing, same-size tampered,
+and wrong-machine supplemental x86 libraries fail in the CI/release verifier.
+The checked dual-runtime inventory records 18.68-31.76 MiB of temporary ORT
+native payload and 3.34-10.18 MiB of LiteRT payload per ABI, plus exact
+installed code-path sizes. This closes Phase 7C without changing HQ4's
+download-only policy.
+
 These are not promotion results yet. The v2 threshold revision must be used to
 rerun the affected rows after the final decision commit. S10 GPU audio export,
-representative listening and UI coverage, HQ4 and supplemental-runtime gates,
-KARA full-song qualification, and the final catalog promotion matrix remain
-open. Pure x86 retains ordinary playback but source separation now fails closed
-before native allocation; x86_64 remains CPU evidence only until a separate
-GPU qualification exists.
+representative listening and UI coverage, KARA full-song qualification, and
+the final catalog promotion matrix remain open. Pure x86 retains ordinary
+playback but source separation now fails closed before native allocation;
+x86_64 remains CPU evidence only until a separate GPU qualification exists.
 
 #### Phase 7A: Freeze the validation inputs and evidence format
 
@@ -2349,14 +2356,14 @@ GPU qualification exists.
   bind the release graph directly to the LiteRT CPU provider and keep `Auto`
   internal; do not describe the current GPU-first `Auto` controller as
   CPU-first.
-- [ ] Keep the existing resource gates: HQ4 remains a 64 MiB model with a
+- [x] Keep the existing resource gates: HQ4 remains a 64 MiB model with a
   256 MiB target and 384 MiB hard PSS-increase limit. A changed HQ4 artifact or
   runtime must pass the hard gate on S10 before any allocation beyond preflight
   is allowed; S25 success cannot waive an S10 failure.
-- [ ] Record missing, altered, and wrong-architecture supplemental-runtime
+- [x] Record missing, altered, and wrong-architecture supplemental-runtime
   results as build or localized terminal failures. They must never trigger ORT,
   another model, or a second large allocation.
-- [ ] Record the dual-runtime Phase 7 APK and installed-size inventory per ABI
+- [x] Record the dual-runtime Phase 7 APK and installed-size inventory per ABI
   as the comparison baseline. It is not final size acceptance while ORT remains;
   Phase 8 owns the post-removal 10/16 MiB runtime gate.
 
@@ -2367,7 +2374,7 @@ GPU qualification exists.
   Its rejected GPU profiles remain rejected. It can become a warned CPU-only
   experimental model only with complete per-ABI evidence; otherwise keep it
   download-only or restrict activation to the qualified ABI set.
-- [ ] Keep HQ4 download-only for the current artifact. Use compatibility and
+- [x] Keep HQ4 download-only for the current artifact. Use compatibility and
   preflight tests to confirm rejection without model allocation, including the
   expanded x86 AVD; do not repeat the known-disqualified full-song allocation
   merely to fill a matrix.
