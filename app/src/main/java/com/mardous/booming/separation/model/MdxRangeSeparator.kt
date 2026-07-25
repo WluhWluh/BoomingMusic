@@ -295,6 +295,8 @@ class MdxRangeSeparator(
                         SourceSeparationCacheFaultInjection.reach(
                             SourceSeparationCacheFaultStage.Decode,
                         )
+                        throwIfPaused(shouldPause)
+                        throwIfCanceled(shouldCancel)
                         requireWorkspaceAvailable()
                         val mixWindow = sourceInput.toStereoFloatContextWindow(
                             windowStartFrame = generationStartFrame - config.trim,
@@ -353,6 +355,8 @@ class MdxRangeSeparator(
                         SourceSeparationCacheFaultInjection.reach(
                             SourceSeparationCacheFaultStage.Dsp,
                         )
+                        throwIfPaused(shouldPause)
+                        throwIfCanceled(shouldCancel)
                         requireWorkspaceAvailable()
                         val modelOutputWindow = runWindow(
                             session = session,
