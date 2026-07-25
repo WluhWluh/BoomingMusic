@@ -3015,8 +3015,27 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     .put("playbackState", controller.playbackState)
                     .put("repeatMode", controller.repeatMode)
             }
+            val baseline = synchronized(snapshots) { snapshots.firstOrNull() }
+            val expectedPositionMs = baseline?.let {
+                val durationMs = snapshot.getLong("durationMs")
+                (it.getLong("positionMs") +
+                    snapshot.getLong("sampledAtElapsedRealtimeMs") -
+                    it.getLong("sampledAtElapsedRealtimeMs")) % durationMs
+            } ?: snapshot.getLong("positionMs")
+            val directDriftMs = abs(snapshot.getLong("positionMs") - expectedPositionMs)
+            val positionDriftMs = minOf(
+                directDriftMs,
+                snapshot.getLong("durationMs") - directDriftMs,
+            )
+            snapshot
+                .put("expectedPositionMs", expectedPositionMs)
+                .put("positionDriftMs", positionDriftMs)
             snapshots += snapshot
             val violations = synchronized(unexpectedEvents) { unexpectedEvents.toList() }
+            assertTrue(
+                "Original playback position drifted by $positionDriftMs ms at $label.",
+                positionDriftMs <= PLAYBACK_CONTINUITY_POSITION_TOLERANCE_MS,
+            )
             assertTrue(
                 "Original playback continuity failed at $label: ${violations.joinToString()}",
                 violations.isEmpty(),
@@ -3035,6 +3054,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("snapshotCount", snapshotCopy.size)
                 .put("automaticDiscontinuityCount", automaticDiscontinuityCount.get())
                 .put("sameItemTransitionCount", sameItemTransitionCount.get())
+                .put(
+                    "maximumPositionDriftMs",
+                    snapshotCopy.maxOfOrNull { it.getLong("positionDriftMs") } ?: 0L,
+                )
                 .put("unexpectedEventCount", eventCopy.size)
                 .put("unexpectedEvents", JSONArray(eventCopy))
                 .put("snapshots", JSONArray(snapshotCopy))
@@ -4369,6 +4392,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val MEDIA_SESSION_TIMEOUT_SECONDS = 30L
         const val MEDIA_SESSION_TIMEOUT_MS = 30_000L
         const val MEDIA_SESSION_SEEK_TOLERANCE_MS = 250L
+        const val PLAYBACK_CONTINUITY_POSITION_TOLERANCE_MS = 1_000L
         const val REPEAT_MODE_CYCLE_LIMIT = 3
         const val MEDIA_SCAN_TIMEOUT_MS = 30_000L
         const val MEDIA_SCAN_RETRIES = 60
