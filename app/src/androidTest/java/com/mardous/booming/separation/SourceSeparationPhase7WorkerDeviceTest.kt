@@ -282,9 +282,13 @@ class SourceSeparationPhase7WorkerDeviceTest {
             var peakJavaBytes = idleMemory.getLong("javaPssBytes")
             var peakNativeBytes = idleMemory.getLong("nativePssBytes")
             var peakGraphicsBytes = idleMemory.getLong("graphicsPssBytes")
-            var peakRemotePssBytes = remoteStartup?.idlePssBytes ?: 0L
+            var currentRemotePssBytes = maxOf(
+                remoteStartup?.idlePssBytes ?: 0L,
+                remoteProcessBefore?.memory?.pssBytes ?: 0L,
+            )
+            var peakRemotePssBytes = currentRemotePssBytes
             var peakSummedPssBytes = idleMemory.getLong("totalPssBytes") +
-                peakRemotePssBytes
+                currentRemotePssBytes
             var peakUssBytes = idleMemory.getLong("totalUssBytes")
             var peakRssBytes = idleMemory.getLong("vmRssBytes")
             var peakRemoteUssBytes = remoteProcessBefore?.memory?.ussBytes ?: 0L
@@ -327,11 +331,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 val remotePssBytes = boundRemoteHost?.connectionDiagnostics?.pid
                     ?.let { processPssBytes(context, it) }
                     ?: 0L
+                currentRemotePssBytes = remotePssBytes
                 peakRemotePssBytes = maxOf(peakRemotePssBytes, remotePssBytes)
-                peakSummedPssBytes = maxOf(
-                    peakSummedPssBytes,
-                    memory.getLong("totalPssBytes") + remotePssBytes,
-                )
                 val activeRemoteHost = boundRemoteHost
                 if (activeRemoteHost != null &&
                     (lastRemoteResourceSampleAt == Long.MIN_VALUE ||
@@ -339,6 +340,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 ) {
                     runCatching { activeRemoteHost.processDiagnostics() }.getOrNull()?.let {
                         remote ->
+                        currentRemotePssBytes = remote.memory.pssBytes
+                        peakRemotePssBytes = maxOf(
+                            peakRemotePssBytes,
+                            remote.memory.pssBytes,
+                        )
                         peakRemoteUssBytes = maxOf(peakRemoteUssBytes, remote.memory.ussBytes)
                         currentRemoteUssBytes = remote.memory.ussBytes
                         peakRemoteRssBytes = maxOf(
@@ -365,6 +371,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     }
                     lastRemoteResourceSampleAt = now
                 }
+                peakSummedPssBytes = maxOf(
+                    peakSummedPssBytes,
+                    memory.getLong("totalPssBytes") + currentRemotePssBytes,
+                )
                 peakSummedUssBytes = maxOf(
                     peakSummedUssBytes,
                     memory.getLong("totalUssBytes") + currentRemoteUssBytes,
@@ -430,6 +440,56 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val fullSongMs = completedAt - workerStartedAt
             val mainProcessAfter = currentProcessDiagnostics()
             val remoteProcessAfter = boundRemoteHost?.processDiagnostics()
+            peakPssBytes = maxOf(peakPssBytes, mainProcessAfter.memory.pssBytes)
+            peakJavaBytes = maxOf(peakJavaBytes, mainProcessAfter.memory.javaPssBytes)
+            peakNativeBytes = maxOf(peakNativeBytes, mainProcessAfter.memory.nativePssBytes)
+            peakGraphicsBytes = maxOf(
+                peakGraphicsBytes,
+                mainProcessAfter.memory.graphicsPssBytes,
+            )
+            peakUssBytes = maxOf(peakUssBytes, mainProcessAfter.memory.ussBytes)
+            peakRssBytes = maxOf(
+                peakRssBytes,
+                mainProcessAfter.memory.vmRssBytes ?: 0L,
+            )
+            remoteProcessAfter?.memory?.let { remoteMemory ->
+                peakRemotePssBytes = maxOf(peakRemotePssBytes, remoteMemory.pssBytes)
+                peakRemoteUssBytes = maxOf(peakRemoteUssBytes, remoteMemory.ussBytes)
+                peakRemoteRssBytes = maxOf(
+                    peakRemoteRssBytes,
+                    remoteMemory.vmRssBytes ?: 0L,
+                )
+                peakRemoteJavaBytes = maxOf(
+                    peakRemoteJavaBytes,
+                    remoteMemory.javaPssBytes,
+                )
+                peakRemoteNativeBytes = maxOf(
+                    peakRemoteNativeBytes,
+                    remoteMemory.nativePssBytes,
+                )
+                peakRemoteGraphicsBytes = maxOf(
+                    peakRemoteGraphicsBytes,
+                    remoteMemory.graphicsPssBytes,
+                )
+                minimumLargestFreeAddressGapBytes = remoteMemory
+                    .largestFreeAddressGapBytes
+                    ?.let { gap ->
+                        minimumLargestFreeAddressGapBytes?.let { minOf(it, gap) } ?: gap
+                    }
+                peakSummedPssBytes = maxOf(
+                    peakSummedPssBytes,
+                    mainProcessAfter.memory.pssBytes + remoteMemory.pssBytes,
+                )
+                peakSummedUssBytes = maxOf(
+                    peakSummedUssBytes,
+                    mainProcessAfter.memory.ussBytes + remoteMemory.ussBytes,
+                )
+                peakSummedRssBytes = maxOf(
+                    peakSummedRssBytes,
+                    (mainProcessAfter.memory.vmRssBytes ?: 0L) +
+                        (remoteMemory.vmRssBytes ?: 0L),
+                )
+            }
             val remoteProcessCpuMs = if (remoteProcessBefore != null && remoteProcessAfter != null &&
                 remoteProcessBefore.pid == remoteProcessAfter.pid
             ) {
