@@ -18,6 +18,7 @@ param(
         "process-fault-matrix",
         "process-cache-matrix",
         "process-cache-race-matrix",
+        "process-main-death",
         "lifecycle",
         "recreation",
         "playback",
@@ -75,6 +76,7 @@ $sourceStages = @(
     "process-fault-matrix",
     "process-cache-matrix",
     "process-cache-race-matrix",
+    "process-main-death",
     "lifecycle",
     "recreation",
     "playback",
@@ -95,6 +97,7 @@ $testMethod = switch ($Stage) {
     "process-fault-matrix" { "validateProcessFaultMatrix"; break }
     "process-cache-matrix" { "validateProcessCacheSafetyMatrix"; break }
     "process-cache-race-matrix" { "validateProcessCacheManagementRaces"; break }
+    "process-main-death" { "validateProcessMainDeathRecovery"; break }
     "lifecycle" { "validateWorkerLifecycle"; break }
     "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
     "playback" { "validateMediaSessionPlayback"; break }
@@ -156,11 +159,11 @@ if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "work
     throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
 }
 if ($ExecutionHostMode -eq "bound-remote" -and
-        ($Stage -notin @("worker", "background", "process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-matrix", "process-cache-race-matrix") -or
+        ($Stage -notin @("worker", "background", "process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-matrix", "process-cache-race-matrix", "process-main-death") -or
         $BackendMode -ne "auto" -or $AutoFailpoint -ne "none")) {
     throw "BoundRemote requires a supported process stage, BackendMode=auto, and AutoFailpoint=none."
 }
-if ($Stage -in @("process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-matrix", "process-cache-race-matrix") -and
+if ($Stage -in @("process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-matrix", "process-cache-race-matrix", "process-main-death") -and
         (-not $X86ProcessValidation -or $ProcessAbi -ne "x86" -or
         $ExecutionHostMode -ne "bound-remote" -or $BackendMode -ne "auto")) {
     throw "$Stage requires pure x86, X86ProcessValidation, and BoundRemote Auto."
@@ -744,19 +747,47 @@ try {
         Invoke-Adb shell wm dismiss-keyguard
     }
 
-    $instrumentAttempt = 0
-    do {
-        $instrumentAttempt += 1
+    if ($Stage -eq "process-main-death") {
         Invoke-Adb shell am force-stop --user $deviceUserId $package
+        $prepareArguments = @($instrumentArguments)
+        $classArgumentIndex = [Array]::IndexOf($prepareArguments, "class")
+        if ($classArgumentIndex -lt 0 -or $classArgumentIndex + 1 -ge $prepareArguments.Count) {
+            throw "Could not locate the instrumentation class argument."
+        }
+        $prepareArguments[$classArgumentIndex + 1] =
+            "$testClass#beginProcessMainDeathScenario"
+        $prepareOutput = & $adb -s $Serial shell am instrument --user $deviceUserId `
+            -w -r @prepareArguments $runner
+        $prepareText = $prepareOutput -join "`n"
+        Write-Host $prepareText
+        if ($prepareText -match 'OK \(1 test\)') {
+            throw "The process main-death setup returned without killing its main process."
+        }
+        $scenarioRelativePath = "files/phase4-main-death/$RunId.json"
+        $scenarioText = Read-RemoteFile $scenarioRelativePath
+        if ($scenarioText.TrimStart() -notmatch '^\{') {
+            throw "The process main-death setup did not persist its scenario envelope."
+        }
+        Start-Sleep -Milliseconds 250
         $instrumentOutput = & $adb -s $Serial shell am instrument --user $deviceUserId `
             -w -r @instrumentArguments $runner
         $instrumentExit = $LASTEXITCODE
         $instrumentText = $instrumentOutput -join "`n"
-        if ($instrumentText -notmatch 'Invalid userId' -or $instrumentAttempt -ge 2) {
-            break
-        }
-        Start-Sleep -Milliseconds 750
-    } while ($true)
+    } else {
+        $instrumentAttempt = 0
+        do {
+            $instrumentAttempt += 1
+            Invoke-Adb shell am force-stop --user $deviceUserId $package
+            $instrumentOutput = & $adb -s $Serial shell am instrument --user $deviceUserId `
+                -w -r @instrumentArguments $runner
+            $instrumentExit = $LASTEXITCODE
+            $instrumentText = $instrumentOutput -join "`n"
+            if ($instrumentText -notmatch 'Invalid userId' -or $instrumentAttempt -ge 2) {
+                break
+            }
+            Start-Sleep -Milliseconds 750
+        } while ($true)
+    }
     Write-Host $instrumentText
     $remoteReport = "files/phase7-validation-reports/$RunId-$reportStage.json"
     $reportText = Read-RemoteFile $remoteReport

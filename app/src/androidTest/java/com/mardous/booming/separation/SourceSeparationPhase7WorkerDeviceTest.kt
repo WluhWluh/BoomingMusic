@@ -2271,6 +2271,250 @@ class SourceSeparationPhase7WorkerDeviceTest {
     }
 
     @Test
+    fun beginProcessMainDeathScenario() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        require(MdxX86ProcessValidationOverride.buildEnabled) {
+            "The process main-death scenario requires the explicit x86 validation build."
+        }
+        val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+        val scenarioFile = processMainDeathScenarioFile(context, runId)
+        var mediaUri: Uri? = null
+        var host: BoundRemoteSourceSeparationExecutionHost? = null
+        var cacheRoot: File? = null
+
+        try {
+            scenarioFile.delete()
+            mediaUri = registerSourceInMediaStore(context, sourcePath, runId)
+            val source = resolveMediaStoreSong(context, mediaUri, sourcePath)
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            check(preferences.edit()
+                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
+                .commit()
+            ) { "Could not persist process main-death preferences." }
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            assertExpectedActivePreset(arguments)
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val root = store.root().directory.also { cacheRoot = it }
+            val runtime = createCpuRuntimeFacade(
+                context = context,
+                preferences = preferences,
+                presetRepository = presetRepository,
+                backendMode = BackendMode.Auto,
+                processorCount = null,
+                executionHostMode = Phase7ExecutionHostMode.BoundRemote,
+                boundRemoteHostSink = { host = it },
+            )
+            val runtimeSong = (runtime.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The process main-death source could not be admitted.")
+            clearExactCacheEntry(runtime, runtimeSong.cacheKey)
+            val token = "main-process-death"
+            SourceSeparationCacheFaultInjection.arm(
+                root,
+                SourceSeparationCacheFaultControl(
+                    token = token,
+                    stage = SourceSeparationCacheFaultStage.Dsp,
+                    action = SourceSeparationCacheFaultAction.Barrier,
+                ),
+            )
+            Thread({
+                runtime.separate(
+                    song = runtimeSong,
+                    playbackReadyWindowCountProvider = { 1 },
+                )
+            }, "Phase4MainDeathWriter").start()
+
+            val hit = waitForCacheFaultHit(root, token)
+            val remote = requireNotNull(host).processDiagnostics()
+            assertEquals(remote.pid, hit.pid)
+            assertNotEquals(Process.myPid(), hit.pid)
+            val journal = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+            assertEquals(remote.pid, journal.request.ownerPid)
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Running, journal.lifecycle)
+            writeDurableJson(
+                scenarioFile,
+                JSONObject()
+                    .put("schemaVersion", 1)
+                    .put("runId", runId)
+                    .put("token", token)
+                    .put("cacheKey", runtimeSong.cacheKey)
+                    .put("sourceMediaUri", mediaUri.toString())
+                    .put("mainPid", Process.myPid())
+                    .put("remotePid", remote.pid)
+                    .put("remoteProcessGeneration", remote.processGeneration)
+                    .put("remoteProcessStartTicks", remote.processStartTicks)
+                    .put("journalSequence", journal.latestSequence)
+                    .put("committedSegments", journal.committedSegments.size),
+            )
+
+            Process.killProcess(Process.myPid())
+            SystemClock.sleep(PROCESS_DEATH_TIMEOUT_MS)
+            error("The validation main process survived its requested death.")
+        } catch (error: Throwable) {
+            cacheRoot?.let(SourceSeparationCacheFaultInjection::clear)
+            host?.close()
+            mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+            scenarioFile.delete()
+            throw error
+        }
+    }
+
+    @Test
+    fun validateProcessMainDeathRecovery() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        require(MdxX86ProcessValidationOverride.buildEnabled) {
+            "The process main-death recovery requires the explicit x86 validation build."
+        }
+        val report = baseReport(context, runId, arguments)
+        val scenarioFile = processMainDeathScenarioFile(context, runId)
+        var mediaUri: Uri? = null
+        var host: BoundRemoteSourceSeparationExecutionHost? = null
+
+        try {
+            val scenario = JSONObject(scenarioFile.readText(Charsets.UTF_8))
+            assertEquals(1, scenario.getInt("schemaVersion"))
+            assertEquals(runId, scenario.getString("runId"))
+            val token = scenario.getString("token")
+            val cacheKey = scenario.getString("cacheKey")
+            val oldMainPid = scenario.getInt("mainPid")
+            val oldRemotePid = scenario.getInt("remotePid")
+            val oldRemoteGeneration = scenario.getLong("remoteProcessGeneration")
+            mediaUri = Uri.parse(scenario.getString("sourceMediaUri"))
+            assertNotEquals(oldMainPid, Process.myPid())
+            assertFalse(File("/proc/$oldMainPid").exists())
+
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val root = store.root().directory
+            val journalBeforeRecovery = requireNotNull(store.readRunJournal(cacheKey))
+            assertEquals(oldRemotePid, journalBeforeRecovery.request.ownerPid)
+            val lockWasStillHeld = store.entryLocks().tryAcquire(
+                cacheKey,
+                SourceSeparationCacheLockOwner(
+                    purpose = SourceSeparationCacheLockPurpose.Other,
+                    pid = Process.myPid(),
+                ),
+            )?.let { lease ->
+                lease.close()
+                false
+            } ?: true
+            val remoteAliveBeforeRelease = File("/proc/$oldRemotePid").isDirectory
+            SourceSeparationCacheFaultInjection.release(root, token)
+            val lockReleaseMs = waitForKernelCacheLockRelease(store, cacheKey)
+            SourceSeparationCacheFaultInjection.clear(root)
+            val remoteExitDeadline = SystemClock.elapsedRealtime() + PROCESS_DEATH_TIMEOUT_MS
+            while (File("/proc/$oldRemotePid").isDirectory &&
+                SystemClock.elapsedRealtime() < remoteExitDeadline
+            ) {
+                SystemClock.sleep(PHASE4_FAULT_POLL_INTERVAL_MS)
+            }
+            val remoteAliveAfterRelease = File("/proc/$oldRemotePid").isDirectory
+
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            val source = resolveMediaStoreSong(context, requireNotNull(mediaUri), sourcePath)
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            assertExpectedActivePreset(arguments)
+            val runtime = createCpuRuntimeFacade(
+                context = context,
+                preferences = preferences,
+                presetRepository = presetRepository,
+                backendMode = BackendMode.Auto,
+                processorCount = null,
+                executionHostMode = Phase7ExecutionHostMode.BoundRemote,
+                boundRemoteHostSink = { host = it },
+            )
+            val runtimeSong = (runtime.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The new main process could not resolve the interrupted source.")
+            assertEquals(cacheKey, runtimeSong.cacheKey)
+            val recovered = runtime.separate(
+                song = runtimeSong,
+                playbackReadyWindowCountProvider = { 1 },
+            )
+            assertTrue(
+                recovered is SourceSeparationModelAwareEngineResult.Completed ||
+                    recovered is SourceSeparationModelAwareEngineResult.AlreadyCompleted,
+            )
+            val completed = requireNotNull(store.readManifest(cacheKey))
+            assertEquals(SourceSeparationCacheManifestState.Completed, completed.state)
+            assertEquals(
+                SourceSeparationCacheValidationResult.Valid,
+                store.validateCompletedEntry(completed),
+            )
+            val journal = requireNotNull(store.readRunJournal(cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Completed, journal.lifecycle)
+            assertEquals(journal.committedSegments.size,
+                journal.committedSegments.map { it.segmentIndex }.distinct().size)
+            val previousOwnerDeathRecorded = journal.transitions.any {
+                it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied &&
+                    it.ownerPid == oldRemotePid
+            }
+            assertTrue(previousOwnerDeathRecorded ||
+                journalBeforeRecovery.lifecycle != SourceSeparationCacheRunJournalLifecycle.Running)
+            val newRemote = requireNotNull(host).processDiagnostics()
+            runtime.openCompletedCache(cacheKey).use { playbackCache ->
+                requireNotNull(playbackCache)
+                assertTrue(playbackCache.vocalsFile.isFile)
+                assertTrue(playbackCache.instrumentalFile.isFile)
+            }
+
+            applyRuntimeEvidence(report, completed)
+            report.put("status", "passed")
+            report.put("processMainDeath", JSONObject()
+                .put("oldMainPid", oldMainPid)
+                .put("newMainPid", Process.myPid())
+                .put("oldRemotePid", oldRemotePid)
+                .put("oldRemoteGeneration", oldRemoteGeneration)
+                .put("newRemotePid", newRemote.pid)
+                .put("newRemoteGeneration", newRemote.processGeneration)
+                .put("remoteProcessReused",
+                    oldRemoteGeneration == newRemote.processGeneration)
+                .put("lockWasStillHeld", lockWasStillHeld)
+                .put("lockReleaseMs", lockReleaseMs)
+                .put("remoteAliveBeforeRelease", remoteAliveBeforeRelease)
+                .put("remoteAliveAfterRelease", remoteAliveAfterRelease)
+                .put("journalSequenceBeforeDeath",
+                    scenario.getLong("journalSequence"))
+                .put("journalSequenceBeforeRecovery",
+                    journalBeforeRecovery.latestSequence)
+                .put("finalJournalSequence", journal.latestSequence)
+                .put("previousOwnerDeathRecorded", previousOwnerDeathRecorded)
+                .put("completedSegments", journal.committedSegments.size)
+            )
+            report.put("cache", report.getJSONObject("cache")
+                .put("cacheKey", cacheKey)
+                .put("exactIdentity", true)
+                .put("completedPlayable", true)
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            runCatching {
+                get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+                    .root().directory
+                    .let(SourceSeparationCacheFaultInjection::clear)
+            }
+            host?.close()
+            mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+            scenarioFile.delete()
+            scenarioFile.parentFile?.delete()
+            writeReport(context, runId, "process-main-death", report)
+        }
+    }
+
+    @Test
     fun validateWorkerLifecycle() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -3817,6 +4061,21 @@ class SourceSeparationPhase7WorkerDeviceTest {
         error("Cache fault injection did not reach token $token.")
     }
 
+    private fun processMainDeathScenarioFile(context: Context, runId: String): File =
+        File(context.filesDir, "$PHASE4_MAIN_DEATH_DIRECTORY/$runId.json")
+
+    private fun writeDurableJson(file: File, value: JSONObject) {
+        val directory = requireNotNull(file.parentFile)
+        require(directory.isDirectory || directory.mkdirs()) {
+            "Could not create the process main-death scenario directory."
+        }
+        java.io.RandomAccessFile(file, "rw").use { output ->
+            output.setLength(0L)
+            output.write(value.toString(2).toByteArray(Charsets.UTF_8))
+            output.fd.sync()
+        }
+    }
+
     private fun waitForKernelCacheLockRelease(
         store: SourceSeparationCacheStore,
         cacheKey: String,
@@ -5064,6 +5323,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val PHASE4_EXECUTION_TIMEOUT_MS = 60_000L
         const val PHASE4_LOCK_RELEASE_TIMEOUT_MS = 30_000L
         const val PHASE4_FAULT_POLL_INTERVAL_MS = 20L
+        const val PHASE4_MAIN_DEATH_DIRECTORY = "phase4-main-death"
         val PROCESS_MATRIX_SNAPSHOT_CYCLES = setOf(2, 10, 20)
         const val ARG_FIXTURE_ID = "fixtureId"
         const val ARG_FIXTURE_FILE_NAME = "fixtureFileName"
