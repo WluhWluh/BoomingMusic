@@ -18,6 +18,8 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Base64
 import android.webkit.MimeTypeMap
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -593,6 +595,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         var host: BoundRemoteSourceSeparationExecutionHost? = null
         var mediaUri: Uri? = null
         var tailMediaUri: Uri? = null
+        var originalPlayback: OriginalAudioPlaybackProbe? = null
         var retiredUnexpectedDeaths = 0
 
         try {
@@ -621,6 +624,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
                 .commit()
             ) { "Could not persist the process-session matrix preferences." }
+            val playback = startOriginalAudioPlayback(
+                context = context,
+                source = source,
+                operation = "process-session matrix playback",
+            ).also { originalPlayback = it }
 
             val presetRepository = get<SourceSeparationPresetRepository>(
                 SourceSeparationPresetRepository::class.java,
@@ -733,6 +741,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
 
             val beforeMatrixFullSong = completeFullSongBookend("before-matrix")
+            playback.assertContinuous("after-before-matrix-bookend")
 
             for (cycle in 1..PROCESS_MATRIX_CYCLE_COUNT) {
                 val scenario = ProcessMatrixScenario.forCycle(cycle)
@@ -920,6 +929,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 if (cycle in PROCESS_MATRIX_SNAPSHOT_CYCLES) {
                     snapshotsByCycle[cycle] = after
                     snapshots.put(processMatrixSnapshot("cycle-$cycle", cycle, after))
+                    playback.assertContinuous("resident-cycle-$cycle")
                 }
             }
 
@@ -960,6 +970,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
             val finalHost = requireNotNull(host)
             val beforeRecycle = finalHost.processDiagnostics()
+            playback.assertContinuous("before-final-recycle")
             snapshots.put(processMatrixSnapshot(
                 "before-recycle",
                 PROCESS_MATRIX_CYCLE_COUNT,
@@ -977,8 +988,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 recycle.oldProcess.processGeneration,
                 recycle.newProcess.processGeneration,
             )
+            playback.assertContinuous("after-final-recycle")
 
             report.put("status", "passed")
+            report.put("originalPlayback", playback.report())
             report.put("processMatrix", JSONObject()
                 .put("cycleCount", PROCESS_MATRIX_CYCLE_COUNT)
                 .put("sessionId", expectedSessionId)
@@ -1011,6 +1024,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             throw error
         } finally {
             coordinators.forEach { coordinator -> coordinator.cancel() }
+            originalPlayback?.let { playback ->
+                report.put("originalPlayback", playback.report())
+                playback.close()
+            }
             host?.close()
             mediaUri?.let { uri ->
                 runCatching { context.contentResolver.delete(uri, null, null) }
@@ -1038,6 +1055,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val switchCases = JSONArray()
         var host: BoundRemoteSourceSeparationExecutionHost? = null
         var mediaUri: Uri? = null
+        var originalPlayback: OriginalAudioPlaybackProbe? = null
 
         try {
             val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
@@ -1054,6 +1072,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
                 .commit()
             ) { "Could not persist model-switch matrix preferences." }
+            val playback = startOriginalAudioPlayback(
+                context = context,
+                source = source,
+                operation = "process model-switch matrix playback",
+            ).also { originalPlayback = it }
 
             val presetRepository = get<SourceSeparationPresetRepository>(
                 SourceSeparationPresetRepository::class.java,
@@ -1152,6 +1175,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 initialDiagnostics.session.state,
             )
             var currentSessionId = requireNotNull(initialDiagnostics.session.sessionId)
+            playback.assertContinuous("after-primary-seed")
 
             repeat(PROCESS_MODEL_SWITCH_COUNT) { zeroBasedIndex ->
                 val switchIndex = zeroBasedIndex + 1
@@ -1208,6 +1232,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 assertEquals(SourceSeparationProcessSessionState.Resident,
                     mismatchDiagnostics.session.state)
 
+                playback.assertContinuous("switch-$switchIndex-before-recycle")
                 val recycle = requireNotNull(host).recycle(
                     SourceSeparationIpcRecycleReason.ModelOrRuntimeKeyChanged,
                     recycleToken = "phase3-switch-" + switchIndex.toString().padStart(2, '0'),
@@ -1223,6 +1248,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 assertEquals(SourceSeparationProcessSessionState.Empty,
                     emptyGeneration.session.state)
                 assertEquals(0, emptyGeneration.session.nativeSessionCreationCount)
+                playback.assertContinuous("switch-$switchIndex-after-recycle")
 
                 clearExactCacheEntry(runtimeFacade, targetSong.cacheKey)
                 val completedManifest = completeExactRun(targetSong)
@@ -1242,6 +1268,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 assertEquals(targetModelId, completedManifest.identity.modelId)
                 assertEquals(targetArtifactSha256,
                     completedManifest.identity.artifactSha256)
+                playback.assertContinuous("switch-$switchIndex-after-run")
 
                 switchCases.put(JSONObject()
                     .put("switch", switchIndex)
@@ -1273,6 +1300,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertEquals(0, finalHost.connectionDiagnostics.unexpectedBinderDeathCount)
             report.put("status", "passed")
             applyRuntimeEvidence(report, seedManifest)
+            report.put("originalPlayback", playback.report())
             report.put("processModelSwitchMatrix", JSONObject()
                 .put("switchCount", PROCESS_MODEL_SWITCH_COUNT)
                 .put("primaryModelId", primaryModelId)
@@ -1295,6 +1323,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             throw error
         } finally {
             coordinators.forEach { coordinator -> coordinator.cancel() }
+            originalPlayback?.let { playback ->
+                report.put("originalPlayback", playback.report())
+                playback.close()
+            }
             host?.close()
             mediaUri?.let { uri ->
                 runCatching { context.contentResolver.delete(uri, null, null) }
@@ -2787,6 +2819,81 @@ class SourceSeparationPhase7WorkerDeviceTest {
         error("MediaController did not complete $operation in time.")
     }
 
+    private fun startOriginalAudioPlayback(
+        context: Context,
+        source: Song,
+        operation: String,
+    ): OriginalAudioPlaybackProbe {
+        val sessionToken = SessionToken(
+            context,
+            ComponentName(context, PlaybackService::class.java),
+        )
+        val controller = MediaController.Builder(context, sessionToken)
+            .buildAsync()
+            .get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        try {
+            val disableSeparationCommand = SessionCommand(
+                Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+                Bundle.EMPTY,
+            )
+            assertTrue(
+                "PlaybackService did not expose the source-separation playback command.",
+                onMediaControllerThread(controller) {
+                    controller.availableSessionCommands.contains(disableSeparationCommand)
+                },
+            )
+            val disableResult = onMediaControllerThread(controller) {
+                controller.sendCustomCommand(
+                    disableSeparationCommand,
+                    Bundle().apply {
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, false)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                    },
+                )
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            assertEquals(SessionResult.RESULT_SUCCESS, disableResult.resultCode)
+
+            onMediaControllerThread(controller) {
+                controller.pause()
+                controller.clearMediaItems()
+                controller.repeatMode = Player.REPEAT_MODE_ONE
+                controller.volume = 0f
+            }
+            val sourcePreparationAttempts = prepareMediaControllerSource(
+                controller = controller,
+                source = source,
+                operation = operation,
+            )
+            val probe = OriginalAudioPlaybackProbe(
+                controller = controller,
+                expectedMediaId = source.id.toString(),
+                sourcePreparationAttempts = sourcePreparationAttempts,
+            )
+            onMediaControllerThread(controller) {
+                controller.addListener(probe)
+                controller.play()
+            }
+            waitForMediaController(controller, "$operation start") {
+                controller.currentMediaItem?.mediaId == source.id.toString() &&
+                    controller.repeatMode == Player.REPEAT_MODE_ONE &&
+                    controller.playWhenReady &&
+                    controller.isPlaying
+            }
+            probe.arm()
+            probe.assertContinuous("started")
+            return probe
+        } catch (error: Throwable) {
+            runCatching {
+                onMediaControllerThread(controller) {
+                    controller.pause()
+                    controller.clearMediaItems()
+                    controller.release()
+                }
+            }
+            throw error
+        }
+    }
+
     private fun prepareMediaControllerSource(
         controller: MediaController,
         source: Song,
@@ -2841,6 +2948,132 @@ class SourceSeparationPhase7WorkerDeviceTest {
         error.get()?.let { throw it }
         @Suppress("UNCHECKED_CAST")
         return result.get() as T
+    }
+
+    private inner class OriginalAudioPlaybackProbe(
+        private val controller: MediaController,
+        private val expectedMediaId: String,
+        private val sourcePreparationAttempts: Int,
+    ) : Player.Listener {
+        private val armed = AtomicBoolean(false)
+        private val closed = AtomicBoolean(false)
+        private val automaticDiscontinuityCount = AtomicInteger(0)
+        private val sameItemTransitionCount = AtomicInteger(0)
+        private val unexpectedEvents = Collections.synchronizedList(mutableListOf<String>())
+        private val snapshots = Collections.synchronizedList(mutableListOf<JSONObject>())
+
+        fun arm() {
+            armed.set(true)
+        }
+
+        fun assertContinuous(label: String): JSONObject {
+            waitForMediaController(controller, "original playback at $label") {
+                controller.currentMediaItem?.mediaId == expectedMediaId &&
+                    controller.repeatMode == Player.REPEAT_MODE_ONE &&
+                    controller.playWhenReady &&
+                    controller.isPlaying
+            }
+            val snapshot = onMediaControllerThread(controller) {
+                JSONObject()
+                    .put("label", label)
+                    .put("sampledAtElapsedRealtimeMs", SystemClock.elapsedRealtime())
+                    .put("mediaId", controller.currentMediaItem?.mediaId)
+                    .put("mediaItemIndex", controller.currentMediaItemIndex)
+                    .put("positionMs", controller.currentPosition)
+                    .put("durationMs", controller.duration)
+                    .put("playWhenReady", controller.playWhenReady)
+                    .put("isPlaying", controller.isPlaying)
+                    .put("playbackState", controller.playbackState)
+                    .put("repeatMode", controller.repeatMode)
+            }
+            snapshots += snapshot
+            val violations = synchronized(unexpectedEvents) { unexpectedEvents.toList() }
+            assertTrue(
+                "Original playback continuity failed at $label: ${violations.joinToString()}",
+                violations.isEmpty(),
+            )
+            return snapshot
+        }
+
+        fun report(): JSONObject {
+            val snapshotCopy = synchronized(snapshots) { snapshots.toList() }
+            val eventCopy = synchronized(unexpectedEvents) { unexpectedEvents.toList() }
+            return JSONObject()
+                .put("expectedMediaId", expectedMediaId)
+                .put("sourcePreparationAttempts", sourcePreparationAttempts)
+                .put("repeatMode", "one")
+                .put("muted", true)
+                .put("snapshotCount", snapshotCopy.size)
+                .put("automaticDiscontinuityCount", automaticDiscontinuityCount.get())
+                .put("sameItemTransitionCount", sameItemTransitionCount.get())
+                .put("unexpectedEventCount", eventCopy.size)
+                .put("unexpectedEvents", JSONArray(eventCopy))
+                .put("snapshots", JSONArray(snapshotCopy))
+        }
+
+        fun close() {
+            if (!closed.compareAndSet(false, true)) return
+            armed.set(false)
+            runCatching {
+                onMediaControllerThread(controller) {
+                    controller.removeListener(this@OriginalAudioPlaybackProbe)
+                    controller.pause()
+                    controller.clearMediaItems()
+                    controller.release()
+                }
+            }
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            if (!armed.get()) return
+            if (mediaItem?.mediaId == expectedMediaId) {
+                sameItemTransitionCount.incrementAndGet()
+            } else {
+                recordUnexpected("media-item-transition reason=$reason mediaId=${mediaItem?.mediaId}")
+            }
+        }
+
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int,
+        ) {
+            if (!armed.get()) return
+            if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION &&
+                newPosition.mediaItem?.mediaId == expectedMediaId
+            ) {
+                automaticDiscontinuityCount.incrementAndGet()
+            } else {
+                recordUnexpected(
+                    "position-discontinuity reason=$reason " +
+                        "old=${oldPosition.positionMs} new=${newPosition.positionMs}",
+                )
+            }
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (armed.get() && !playWhenReady) {
+                recordUnexpected("play-when-ready-disabled reason=$reason")
+            }
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (armed.get() &&
+                (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED)
+            ) {
+                recordUnexpected("terminal-playback-state state=$playbackState")
+            }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            if (armed.get()) {
+                recordUnexpected("player-error code=${error.errorCode} message=${error.message}")
+            }
+        }
+
+        private fun recordUnexpected(message: String) {
+            unexpectedEvents += "${SystemClock.elapsedRealtime()}:$message"
+        }
     }
 
     private fun waitForReady(
