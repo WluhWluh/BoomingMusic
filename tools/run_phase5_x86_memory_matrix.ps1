@@ -7,6 +7,7 @@ param(
     [int[]]$MemoryMiB = @(2048, 3072, 4096),
     [int]$RunsPerBoot = 3,
     [string]$HeapGrowthLimit = "228m",
+    [string]$HeapSize = "",
     [string]$ModelId = "uvr_mdxnet_3_9662",
     [string]$FixtureId = "coast_town_short_wav",
     [string]$SourceRepository = "",
@@ -45,6 +46,10 @@ if ($RunsPerBoot -lt 3) {
 }
 if ($HeapGrowthLimit -notmatch '^\d+[kKmMgG]$') {
     throw "HeapGrowthLimit must be an Android size such as 228m."
+}
+if (-not [string]::IsNullOrWhiteSpace($HeapSize) -and
+        $HeapSize -notmatch '^\d+[kKmMgG]$') {
+    throw "HeapSize must be empty or an Android size such as 128m."
 }
 if ($BootTimeoutSeconds -lt 60) {
     throw "BootTimeoutSeconds must be at least 60."
@@ -189,23 +194,36 @@ function Start-ColdAvd([int]$RequestedMemoryMiB) {
 }
 
 function Restart-FrameworkWithHeapLimit {
-    $before = Get-DeviceProperty "dalvik.vm.heapgrowthlimit"
+    $growthBefore = Get-DeviceProperty "dalvik.vm.heapgrowthlimit"
+    $sizeBefore = Get-DeviceProperty "dalvik.vm.heapsize"
     [void](Get-DeviceText -Arguments @("root"))
     Wait-DeviceOnline 60
     [void](Get-DeviceText -Arguments @("shell", "stop"))
     [void](Get-DeviceText -Arguments @(
         "shell", "setprop", "dalvik.vm.heapgrowthlimit", $HeapGrowthLimit
     ))
+    if (-not [string]::IsNullOrWhiteSpace($HeapSize)) {
+        [void](Get-DeviceText -Arguments @(
+            "shell", "setprop", "dalvik.vm.heapsize", $HeapSize
+        ))
+    }
     [void](Get-DeviceText -Arguments @("shell", "start"))
     Wait-FrameworkReady $BootTimeoutSeconds
-    $after = Get-DeviceProperty "dalvik.vm.heapgrowthlimit"
-    if ($after -ne $HeapGrowthLimit) {
-        throw "Framework heap growth limit is '$after', expected '$HeapGrowthLimit'."
+    $growthAfter = Get-DeviceProperty "dalvik.vm.heapgrowthlimit"
+    $sizeAfter = Get-DeviceProperty "dalvik.vm.heapsize"
+    if ($growthAfter -ne $HeapGrowthLimit) {
+        throw "Framework heap growth limit is '$growthAfter', expected '$HeapGrowthLimit'."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($HeapSize) -and $sizeAfter -ne $HeapSize) {
+        throw "Framework heap size is '$sizeAfter', expected '$HeapSize'."
     }
     return [ordered]@{
-        before = $before
-        requested = $HeapGrowthLimit
-        after = $after
+        growthLimitBefore = $growthBefore
+        growthLimitRequested = $HeapGrowthLimit
+        growthLimitAfter = $growthAfter
+        heapSizeBefore = $sizeBefore
+        heapSizeRequested = $HeapSize
+        heapSizeAfter = $sizeAfter
         method = "adb-root-stop-setprop-start"
     }
 }
@@ -299,6 +317,7 @@ function Save-Summary {
         requestedMemoryMiB = @($MemoryMiB)
         runsPerBoot = $RunsPerBoot
         heapGrowthLimit = $HeapGrowthLimit
+        heapSize = $HeapSize
         modelId = $ModelId
         fixtureId = $FixtureId
         minimumRuntimeHeapBytes = $minimumRuntimeHeapBytes
@@ -338,7 +357,8 @@ try {
             actualMemoryBytes = $environment.guest.totalMemoryBytes
             swapTotalBytes = $environment.guest.swapTotalBytes
             bootId = $environment.guest.bootId
-            heapGrowthLimit = $environment.framework.heapGrowthLimitOverride.after
+            heapGrowthLimit = $environment.framework.heapGrowthLimitOverride.growthLimitAfter
+            heapSize = $environment.framework.heapGrowthLimitOverride.heapSizeAfter
             environmentFile = $relativeEnvironmentPath
             environmentSha256 = (Get-FileHash -LiteralPath $environmentPath `
                 -Algorithm SHA256).Hash.ToLowerInvariant()
