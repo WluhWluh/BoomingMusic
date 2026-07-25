@@ -12,7 +12,7 @@ import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 3
+internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 4
 
 internal interface SourceSeparationExecutionHost : AutoCloseable {
     val mode: SourceSeparationExecutionHostMode
@@ -214,6 +214,7 @@ internal data class SourceSeparationExecutionSourceIdentity(
 internal data class SourceSeparationExecutionRuntimeIdentity(
     val executionProfileId: String,
     val executionSessionIdentity: String,
+    val backendPolicy: SourceSeparationExecutionBackendPolicy,
     val cpuThreads: Int,
     val useXnnpack: Boolean,
     val windowDecodeEnabled: Boolean,
@@ -235,6 +236,15 @@ internal data class SourceSeparationExecutionRuntimeIdentity(
             "Initial playback ready-window count is invalid."
         }
     }
+}
+
+@Serializable
+internal enum class SourceSeparationExecutionBackendPolicy {
+    @SerialName("auto")
+    Auto,
+
+    @SerialName("cpu")
+    Cpu,
 }
 
 @Serializable

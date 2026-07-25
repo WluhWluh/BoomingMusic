@@ -336,6 +336,7 @@ private fun SourceSeparationExecutionHostRequest.requireExactDescriptor(
 internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
     runId: String,
     processGeneration: Long,
+    backendPolicy: SourceSeparationExecutionBackendPolicy,
     sourceDiagnostics: SourceSeparationCacheSourceDiagnostics,
     song: SourceSeparationCacheSongLocator,
     initialPlaybackPositionMs: Long?,
@@ -373,6 +374,7 @@ internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
         runtime = SourceSeparationExecutionRuntimeIdentity(
             executionProfileId = profile.profileId,
             executionSessionIdentity = profile.sessionIdentity,
+            backendPolicy = backendPolicy,
             cpuThreads = runtimeSettings.cpuThreads,
             useXnnpack = runtimeSettings.useXnnpack,
             windowDecodeEnabled = windowDecodeEnabled,

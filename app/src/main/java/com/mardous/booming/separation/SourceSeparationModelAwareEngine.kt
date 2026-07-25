@@ -28,6 +28,7 @@ import com.mardous.booming.separation.process.SOURCE_SEPARATION_EXECUTION_PROTOC
 import com.mardous.booming.separation.process.SourceSeparationExecutionHost
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostDiagnostics
+import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
@@ -49,6 +50,8 @@ internal class SourceSeparationModelAwareEngine(
     rangeExecutor: SourceSeparationModelAwareRangeExecutor,
     private val executionHost: SourceSeparationExecutionHost =
         InProcessSourceSeparationExecutionHost(rangeExecutor),
+    private val executionBackendPolicy: SourceSeparationExecutionBackendPolicy =
+        SourceSeparationExecutionBackendPolicy.Auto,
     private val constructionGate: () -> Boolean,
     private val runIdFactory: () -> String = { UUID.randomUUID().toString() },
     private val executionHostEventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
@@ -216,6 +219,7 @@ internal class SourceSeparationModelAwareEngine(
         val descriptor = executionRequest.toExecutionDescriptor(
             runId = runId,
             processGeneration = processGeneration,
+            backendPolicy = executionBackendPolicy,
             sourceDiagnostics = input.sourceDiagnostics,
             song = input.song,
             initialPlaybackPositionMs = playbackPositionMsProvider()?.takeIf { it >= 0L },
@@ -353,6 +357,7 @@ internal class SourceSeparationModelAwareEngine(
             val descriptor = executionRequest.toExecutionDescriptor(
                 runId = currentRunId,
                 processGeneration = currentProcessGeneration,
+                backendPolicy = executionBackendPolicy,
                 sourceDiagnostics = input.sourceDiagnostics,
                 song = input.song,
                 initialPlaybackPositionMs = initialPlaybackPositionMs,
@@ -486,6 +491,8 @@ internal class SourceSeparationModelAwareEngine(
             coordinator: SourceSeparationCacheRunCoordinator,
             executionHost: SourceSeparationExecutionHost =
                 BoundRemoteSourceSeparationExecutionHost(context.applicationContext),
+            executionBackendPolicy: SourceSeparationExecutionBackendPolicy =
+                SourceSeparationExecutionBackendPolicy.Auto,
             executionHostEventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
         ): SourceSeparationModelAwareEngine {
             val appContext = context.applicationContext
@@ -495,6 +502,7 @@ internal class SourceSeparationModelAwareEngine(
                 coordinator = coordinator,
                 rangeExecutor = MdxSourceSeparationModelAwareRangeExecutor(appContext),
                 executionHost = executionHost,
+                executionBackendPolicy = executionBackendPolicy,
                 constructionGate = { true },
                 executionHostEventSink = executionHostEventSink,
             )

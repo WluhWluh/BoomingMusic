@@ -34,6 +34,7 @@ import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPres
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPresetOrigin
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
 import com.mardous.booming.separation.process.InProcessSourceSeparationExecutionHost
+import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
 import com.mardous.booming.separation.process.SourceSeparationExecutionHost
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
@@ -312,6 +313,31 @@ class SourceSeparationModelAwareEngineTest {
     }
 
     @Test
+    fun `execution backend policy is frozen into the host descriptor`() {
+        val fixture = fixture()
+        val executor = SourceSeparationModelAwareRangeExecutor { request ->
+            fixture.complete(request, fixture.prepare(request))
+        }
+        val delegate = InProcessSourceSeparationExecutionHost(executor)
+        var observedPolicy: SourceSeparationExecutionBackendPolicy? = null
+        val observingHost = object : SourceSeparationExecutionHost by delegate {
+            override fun start(
+                request: SourceSeparationExecutionHostRequest,
+            ) = delegate.start(request.also {
+                observedPolicy = it.descriptor.runtime.backendPolicy
+            })
+        }
+
+        fixture.engine(
+            executionHost = observingHost,
+            executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Cpu,
+            executor = executor,
+        ).separate(fixture.input)
+
+        assertEquals(SourceSeparationExecutionBackendPolicy.Cpu, observedPolicy)
+    }
+
+    @Test
     fun `engine rejects stale generation events and closes the host run`() {
         val fixture = fixture()
         val executor = SourceSeparationModelAwareRangeExecutor { request ->
@@ -556,6 +582,8 @@ class SourceSeparationModelAwareEngineTest {
         fun engine(
             constructionGate: Boolean = true,
             executionHost: SourceSeparationExecutionHost? = null,
+            executionBackendPolicy: SourceSeparationExecutionBackendPolicy =
+                SourceSeparationExecutionBackendPolicy.Auto,
             runIdFactory: () -> String = { "test-run-${++runIdSequence}" },
             eventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
             executor: SourceSeparationModelAwareRangeExecutor = SourceSeparationModelAwareRangeExecutor {
@@ -571,6 +599,7 @@ class SourceSeparationModelAwareEngineTest {
             coordinator = coordinator,
             rangeExecutor = executor,
             executionHost = executionHost ?: InProcessSourceSeparationExecutionHost(executor),
+            executionBackendPolicy = executionBackendPolicy,
             constructionGate = { constructionGate },
             runIdFactory = runIdFactory,
             executionHostEventSink = eventSink,
