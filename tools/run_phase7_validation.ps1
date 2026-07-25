@@ -36,7 +36,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v14",
+    [string]$RunnerRevision = "phase7-runner-v15",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet("in-process", "bound-remote")]
@@ -61,6 +61,8 @@ param(
     [switch]$PreserveMediaStoreSource,
     [switch]$ExportCacheAudio,
     [switch]$RebindAfterCompletion,
+    [switch]$ProbeOriginalPlayback,
+    [switch]$ForceStopBeforeRun,
     [switch]$ScreenOffAfterReady,
     [switch]$X86ProcessValidation
 )
@@ -193,6 +195,12 @@ if ($RebindAfterCompletion -and
         ($Stage -ne "worker" -or $ExecutionHostMode -ne "bound-remote")) {
     throw "RebindAfterCompletion requires Stage=worker and ExecutionHostMode=bound-remote."
 }
+if ($ProbeOriginalPlayback -and $Stage -ne "worker") {
+    throw "ProbeOriginalPlayback applies only to the worker stage."
+}
+if ($ForceStopBeforeRun -and ($Stage -notin $sourceStages -or -not $KeepAppData)) {
+    throw "ForceStopBeforeRun requires an execution stage with KeepAppData."
+}
 if ($Stage -ne "lifecycle" -and
         ($LifecycleScenario -ne "sequential" -or $LifecycleSessionMode -ne "single-use")) {
     throw "LifecycleScenario and LifecycleSessionMode apply only to the lifecycle stage."
@@ -228,6 +236,43 @@ function Invoke-Adb {
     & $adb -s $Serial @args
     if ($LASTEXITCODE -ne 0) {
         throw "adb failed with exit code ${LASTEXITCODE}: $args"
+    }
+}
+
+function Get-AppProcessIds {
+    $ids = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($processName in @($package, "${package}:source_separation", "$package.test")) {
+        $output = & $adb -s $Serial shell pidof $processName 2>$null
+        if ($LASTEXITCODE -ne 0) { continue }
+        foreach ($token in (($output -join " ") -split '\s+')) {
+            $value = 0
+            if ([int]::TryParse($token, [ref]$value) -and $value -gt 0) {
+                [void]$ids.Add($value)
+            }
+        }
+    }
+    return @($ids | Sort-Object)
+}
+
+function Stop-AppProcesses {
+    $before = @(Get-AppProcessIds)
+    $started = [Diagnostics.Stopwatch]::StartNew()
+    Invoke-Adb shell am force-stop --user $deviceUserId $package
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        $remaining = @(Get-AppProcessIds)
+        if ($remaining.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $started.Stop()
+    if ($remaining.Count -ne 0) {
+        throw "App processes did not exit after force-stop: $($remaining -join ',')."
+    }
+    return [ordered]@{
+        requested = $true
+        priorPids = $before
+        exitElapsedMs = [int64]$started.ElapsedMilliseconds
+        allExited = $true
     }
 }
 
@@ -432,6 +477,12 @@ $expectedRemoteArtifactDirectory = "files/phase7-validation-artifacts/$RunId"
 $backgroundScreenTimeoutMs = 30 * 60 * 1000
 $originalScreenOffTimeout = ""
 $screenTimeoutChanged = $false
+$preRunProcessBoundary = [ordered]@{
+    requested = $false
+    priorPids = @()
+    exitElapsedMs = 0L
+    allExited = $true
+}
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) { throw "OutputRoot must not be empty." }
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
@@ -539,6 +590,9 @@ try {
     & $adb -s $Serial shell pm grant $package android.permission.READ_EXTERNAL_STORAGE 2>$null | Out-Null
     & $adb -s $Serial shell pm grant $package android.permission.WRITE_EXTERNAL_STORAGE 2>$null | Out-Null
     & $adb -s $Serial shell pm grant $package android.permission.READ_MEDIA_AUDIO 2>$null | Out-Null
+    if ($ForceStopBeforeRun) {
+        $preRunProcessBoundary = Stop-AppProcesses
+    }
     $appDataRoot = if ($Stage -in $sourceStages) {
         (& $adb -s $Serial shell run-as $package pwd).Trim()
     } else {
@@ -577,7 +631,10 @@ try {
         [string]$thresholds.lifecycle.maximumCancellationLatencyMs,
         "-e", "fixturesVersion", $fixtures.schemaVersion,
         "-e", "cleanInstallScenario", $((-not $KeepAppData).ToString().ToLowerInvariant()),
-        "-e", "x86ProcessValidation", $X86ProcessValidation.ToString().ToLowerInvariant()
+        "-e", "x86ProcessValidation", $X86ProcessValidation.ToString().ToLowerInvariant(),
+        "-e", "probeOriginalPlayback", $ProbeOriginalPlayback.ToString().ToLowerInvariant(),
+        "-e", "coldProcessBoundary", $ForceStopBeforeRun.ToString().ToLowerInvariant(),
+        "-e", "preRunProcessExitMs", [string]$preRunProcessBoundary.exitElapsedMs
     )
     if ($null -ne $secondaryModel) {
         $instrumentArguments += @(
@@ -935,6 +992,9 @@ try {
                 installSkipped = $SkipInstall
                 backendMode = $BackendMode
                 executionHostMode = $ExecutionHostMode
+                probeOriginalPlayback = [bool]$ProbeOriginalPlayback
+                coldProcessBoundary = [bool]$ForceStopBeforeRun
+                preRunProcessBoundary = $preRunProcessBoundary
                 screenOffAfterReady = [bool]$ScreenOffAfterReady
                 backend = $backendName
                 autoFailpoint = $AutoFailpoint

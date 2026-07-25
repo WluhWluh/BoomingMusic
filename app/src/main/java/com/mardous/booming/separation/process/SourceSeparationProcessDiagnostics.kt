@@ -35,6 +35,7 @@ internal data class SourceSeparationProcessMemoryDiagnostics(
     val vmSizeBytes: Long? = null,
     val vmPeakBytes: Long? = null,
     val vmRssBytes: Long? = null,
+    val vmDataBytes: Long? = null,
     val pssBytes: Long,
     val nativePssBytes: Long,
     val threadCount: Int,
@@ -42,9 +43,22 @@ internal data class SourceSeparationProcessMemoryDiagnostics(
     val smapsSource: SourceSeparationSmapsSource,
     val anonHugePagesBytes: Long? = null,
     val largestFreeAddressGapBytes: Long? = null,
+    val ussBytes: Long = 0L,
+    val javaPssBytes: Long = 0L,
+    val graphicsPssBytes: Long = 0L,
+    val javaHeapAllocatedBytes: Long = 0L,
+    val nativeHeapAllocatedBytes: Long = 0L,
+    val runtimeMaxMemoryBytes: Long = 0L,
+    val processCpuTimeMs: Long = 0L,
+    val oomScoreAdj: Int? = null,
 ) {
     init {
-        require(pssBytes >= 0L && nativePssBytes >= 0L) {
+        require(
+            pssBytes >= 0L && nativePssBytes >= 0L && ussBytes >= 0L &&
+                javaPssBytes >= 0L && graphicsPssBytes >= 0L &&
+                javaHeapAllocatedBytes >= 0L && nativeHeapAllocatedBytes >= 0L &&
+                runtimeMaxMemoryBytes >= 0L && processCpuTimeMs >= 0L,
+        ) {
             "Process diagnostic PSS is invalid."
         }
         require(threadCount >= 0 && mappedRegionCount >= 0) {
@@ -145,6 +159,7 @@ internal object SourceSeparationProcessDiagnosticsCollector {
         val maps = readLines(File(procRoot, "maps"))
         val memoryInfo = Debug.MemoryInfo().also(Debug::getMemoryInfo)
         val smaps = readSmaps(procRoot)
+        val runtime = Runtime.getRuntime()
         val processStartTicks = SourceSeparationProcParser.parseProcessStartTicks(
             requireNotNull(readText(File(procRoot, "stat"))) {
                 "Unable to read the inference process start identity."
@@ -161,6 +176,7 @@ internal object SourceSeparationProcessDiagnosticsCollector {
                 vmSizeBytes = SourceSeparationProcParser.parseStatusKilobytes(status, "VmSize"),
                 vmPeakBytes = SourceSeparationProcParser.parseStatusKilobytes(status, "VmPeak"),
                 vmRssBytes = SourceSeparationProcParser.parseStatusKilobytes(status, "VmRSS"),
+                vmDataBytes = SourceSeparationProcParser.parseStatusKilobytes(status, "VmData"),
                 pssBytes = memoryInfo.totalPss.toLong() * KIBIBYTE,
                 nativePssBytes = memoryInfo.nativePss.toLong() * KIBIBYTE,
                 threadCount = SourceSeparationProcParser.parseStatusCount(status, "Threads")
@@ -171,6 +187,16 @@ internal object SourceSeparationProcessDiagnosticsCollector {
                 anonHugePagesBytes = smaps.anonHugePagesBytes,
                 largestFreeAddressGapBytes =
                     SourceSeparationProcParser.largestMappedAddressGapBytes(maps),
+                ussBytes = (memoryInfo.totalPrivateDirty.toLong() +
+                    memoryInfo.totalPrivateClean.toLong()) * KIBIBYTE,
+                javaPssBytes = memoryInfo.summaryBytes("summary.java-heap", memoryInfo.dalvikPss),
+                graphicsPssBytes = memoryInfo.summaryBytes("summary.graphics", 0),
+                javaHeapAllocatedBytes = (runtime.totalMemory() - runtime.freeMemory())
+                    .coerceAtLeast(0L),
+                nativeHeapAllocatedBytes = Debug.getNativeHeapAllocatedSize().coerceAtLeast(0L),
+                runtimeMaxMemoryBytes = runtime.maxMemory().coerceAtLeast(0L),
+                processCpuTimeMs = Process.getElapsedCpuTime().coerceAtLeast(0L),
+                oomScoreAdj = readText(File(procRoot, "oom_score_adj"))?.trim()?.toIntOrNull(),
             ),
             session = session,
             validationOverride = validationOverride,
@@ -203,6 +229,9 @@ internal object SourceSeparationProcessDiagnosticsCollector {
 
     private fun readLines(file: File): List<String> =
         runCatching { file.readLines() }.getOrDefault(emptyList())
+
+    private fun Debug.MemoryInfo.summaryBytes(key: String, fallbackKiB: Int): Long =
+        (memoryStats[key]?.toLongOrNull() ?: fallbackKiB.toLong()) * KIBIBYTE
 
     private data class SmapsDiagnostics(
         val source: SourceSeparationSmapsSource,

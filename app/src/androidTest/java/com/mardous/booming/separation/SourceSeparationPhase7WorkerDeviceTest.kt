@@ -1,6 +1,7 @@
 package com.mardous.booming.separation
 
 import android.app.ActivityManager
+import android.app.Application
 import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
@@ -72,7 +73,9 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelecti
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
+import com.mardous.booming.separation.process.SourceSeparationProcessDiagnosticsCollector
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
+import com.mardous.booming.separation.process.SourceSeparationProcParser
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcRecycleReason
@@ -150,6 +153,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             ARG_REBIND_AFTER_COMPLETION,
             false,
         )
+        val probeOriginalPlayback = arguments.optionalBoolean(
+            ARG_PROBE_ORIGINAL_PLAYBACK,
+            false,
+        )
         require(!rebindAfterCompletion ||
             executionHostMode == Phase7ExecutionHostMode.BoundRemote
         ) {
@@ -157,6 +164,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
         var coordinator: SourceSeparationForegroundWorkerCoordinator? = null
         var boundRemoteHost: BoundRemoteSourceSeparationExecutionHost? = null
+        var originalPlayback: OriginalAudioPlaybackProbe? = null
         var mediaUri: Uri? = null
         val hostEvents = Collections.synchronizedList(
             mutableListOf<SourceSeparationExecutionHostEvent>(),
@@ -180,6 +188,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 preferencesEditor.putInt(MINIMUM_SONG_DURATION, 0)
             }
             preferencesEditor.apply()
+            val playbackProbe = if (probeOriginalPlayback) {
+                startOriginalAudioPlayback(
+                    context = context,
+                    source = source,
+                    operation = "paired host worker playback",
+                ).also { originalPlayback = it }
+            } else {
+                null
+            }
 
             val presetRepository = get<SourceSeparationPresetRepository>(
                 SourceSeparationPresetRepository::class.java,
@@ -217,6 +234,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 host.processGeneration
                 host.connectionDiagnostics
             }
+            val remoteProcessBefore = boundRemoteHost?.processDiagnostics()
             val resolved = runtimeFacade.resolve(source)
             val runtimeSong = (resolved as? SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The scanned song could not be admitted: $resolved")
@@ -230,6 +248,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 }
             assertTrue(runtimeFacade.cacheStatus(runtimeSong) is SourceSeparationModelAwareCacheStatus.Missing)
             val idleMemory = memorySnapshot(context)
+            val mainProcessBefore = currentProcessDiagnostics()
 
             val worker = SourceSeparationForegroundWorkerCoordinator(
                 context = context,
@@ -253,6 +272,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val workerStartedCpuMs = Process.getElapsedCpuTime()
             val thermalSampler = Phase7ThermalSampler(context, workerStartedAt)
             thermalSampler.sample(workerStartedAt, force = true)
+            playbackProbe?.assertContinuous("before-worker")
             assertTrue(worker.startCurrentSong())
 
             val firstReadyAt = AtomicLong(0L)
@@ -263,6 +283,22 @@ class SourceSeparationPhase7WorkerDeviceTest {
             var peakRemotePssBytes = remoteStartup?.idlePssBytes ?: 0L
             var peakSummedPssBytes = idleMemory.getLong("totalPssBytes") +
                 peakRemotePssBytes
+            var peakUssBytes = idleMemory.getLong("totalUssBytes")
+            var peakRssBytes = idleMemory.getLong("vmRssBytes")
+            var peakRemoteUssBytes = remoteProcessBefore?.memory?.ussBytes ?: 0L
+            var peakRemoteRssBytes = remoteProcessBefore?.memory?.vmRssBytes ?: 0L
+            var peakRemoteJavaBytes = remoteProcessBefore?.memory?.javaPssBytes ?: 0L
+            var peakRemoteNativeBytes = remoteProcessBefore?.memory?.nativePssBytes ?: 0L
+            var peakRemoteGraphicsBytes = remoteProcessBefore?.memory?.graphicsPssBytes ?: 0L
+            var currentRemoteUssBytes = peakRemoteUssBytes
+            var currentRemoteRssBytes = peakRemoteRssBytes
+            var peakSummedUssBytes = peakUssBytes + peakRemoteUssBytes
+            var peakSummedRssBytes = peakRssBytes + peakRemoteRssBytes
+            var minimumLargestFreeAddressGapBytes = remoteProcessBefore?.memory
+                ?.largestFreeAddressGapBytes
+            var lastRemoteResourceSampleAt = Long.MIN_VALUE
+            var lastPlaybackSampleAt = workerStartedAt
+            var firstReadyPlaybackChecked = false
             var decodeMode: String? = null
             var decodeDiagnostics: String? = null
             var finalState: SourceSeparationUiState = SourceSeparationUiState.Idle
@@ -284,6 +320,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 peakJavaBytes = maxOf(peakJavaBytes, memory.getLong("javaPssBytes"))
                 peakNativeBytes = maxOf(peakNativeBytes, memory.getLong("nativePssBytes"))
                 peakGraphicsBytes = maxOf(peakGraphicsBytes, memory.getLong("graphicsPssBytes"))
+                peakUssBytes = maxOf(peakUssBytes, memory.getLong("totalUssBytes"))
+                peakRssBytes = maxOf(peakRssBytes, memory.getLong("vmRssBytes"))
                 val remotePssBytes = boundRemoteHost?.connectionDiagnostics?.pid
                     ?.let { processPssBytes(context, it) }
                     ?: 0L
@@ -292,6 +330,57 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     peakSummedPssBytes,
                     memory.getLong("totalPssBytes") + remotePssBytes,
                 )
+                val activeRemoteHost = boundRemoteHost
+                if (activeRemoteHost != null &&
+                    (lastRemoteResourceSampleAt == Long.MIN_VALUE ||
+                        now - lastRemoteResourceSampleAt >= PROCESS_RESOURCE_SAMPLE_INTERVAL_MS)
+                ) {
+                    runCatching { activeRemoteHost.processDiagnostics() }.getOrNull()?.let {
+                        remote ->
+                        peakRemoteUssBytes = maxOf(peakRemoteUssBytes, remote.memory.ussBytes)
+                        currentRemoteUssBytes = remote.memory.ussBytes
+                        peakRemoteRssBytes = maxOf(
+                            peakRemoteRssBytes,
+                            remote.memory.vmRssBytes ?: 0L,
+                        )
+                        currentRemoteRssBytes = remote.memory.vmRssBytes ?: 0L
+                        peakRemoteJavaBytes = maxOf(
+                            peakRemoteJavaBytes,
+                            remote.memory.javaPssBytes,
+                        )
+                        peakRemoteNativeBytes = maxOf(
+                            peakRemoteNativeBytes,
+                            remote.memory.nativePssBytes,
+                        )
+                        peakRemoteGraphicsBytes = maxOf(
+                            peakRemoteGraphicsBytes,
+                            remote.memory.graphicsPssBytes,
+                        )
+                        remote.memory.largestFreeAddressGapBytes?.let { gap ->
+                            minimumLargestFreeAddressGapBytes =
+                                minimumLargestFreeAddressGapBytes?.let { minOf(it, gap) } ?: gap
+                        }
+                    }
+                    lastRemoteResourceSampleAt = now
+                }
+                peakSummedUssBytes = maxOf(
+                    peakSummedUssBytes,
+                    memory.getLong("totalUssBytes") + currentRemoteUssBytes,
+                )
+                peakSummedRssBytes = maxOf(
+                    peakSummedRssBytes,
+                    memory.getLong("vmRssBytes") + currentRemoteRssBytes,
+                )
+                playbackProbe?.let { playback ->
+                    if (firstReadyAt.get() > 0L && !firstReadyPlaybackChecked) {
+                        playback.assertContinuous("first-ready")
+                        firstReadyPlaybackChecked = true
+                        lastPlaybackSampleAt = now
+                    } else if (now - lastPlaybackSampleAt >= PLAYBACK_RESOURCE_SAMPLE_INTERVAL_MS) {
+                        playback.assertContinuous("worker-${now - workerStartedAt}ms")
+                        lastPlaybackSampleAt = now
+                    }
+                }
                 if (!remoteCacheOwnershipChecked && remoteStartup != null) {
                     store.readRunJournal(cacheKey)
                         ?.takeIf { it.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running }
@@ -330,12 +419,23 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             val completedAt = SystemClock.elapsedRealtime()
             thermalSampler.sample(completedAt, force = true)
+            playbackProbe?.assertContinuous("completed")
             val processCpuMs = (Process.getElapsedCpuTime() - workerStartedCpuMs)
                 .coerceAtLeast(0L)
             val firstReadyMs = firstReadyAt.get().takeIf { it > 0L }
                 ?.minus(workerStartedAt)
                 ?: 0L
             val fullSongMs = completedAt - workerStartedAt
+            val mainProcessAfter = currentProcessDiagnostics()
+            val remoteProcessAfter = boundRemoteHost?.processDiagnostics()
+            val remoteProcessCpuMs = if (remoteProcessBefore != null && remoteProcessAfter != null &&
+                remoteProcessBefore.pid == remoteProcessAfter.pid
+            ) {
+                (remoteProcessAfter.memory.processCpuTimeMs -
+                    remoteProcessBefore.memory.processCpuTimeMs).coerceAtLeast(0L)
+            } else {
+                0L
+            }
 
             val entries = runtimeFacade.entries()
             val completedEntry = entries.singleOrNull { it.cacheKey == cacheKey }
@@ -503,6 +603,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("idleRemotePssBytes", remoteStartup?.idlePssBytes ?: JSONObject.NULL)
                 .put("peakRemotePssBytes", peakRemotePssBytes)
                 .put("peakSummedPssBytes", peakSummedPssBytes)
+                .put("peakUssBytes", peakUssBytes)
+                .put("peakRssBytes", peakRssBytes)
+                .put("peakRemoteUssBytes", peakRemoteUssBytes)
+                .put("peakRemoteRssBytes", peakRemoteRssBytes)
+                .put("peakRemoteJavaBytes", peakRemoteJavaBytes)
+                .put("peakRemoteNativeBytes", peakRemoteNativeBytes)
+                .put("peakRemoteGraphicsBytes", peakRemoteGraphicsBytes)
+                .put("peakSummedUssBytes", peakSummedUssBytes)
+                .put("peakSummedRssBytes", peakSummedRssBytes)
+                .put(
+                    "minimumLargestFreeAddressGapBytes",
+                    minimumLargestFreeAddressGapBytes ?: JSONObject.NULL,
+                )
             )
             report.put("thermal", thermalSampler.toJson())
             report.put("lifecycle", report.getJSONObject("lifecycle")
@@ -590,8 +703,25 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     mode = executionHostMode,
                     events = synchronized(hostEvents) { hostEvents.toList() },
                     remoteHost = boundRemoteHost,
+                    processDiagnosticsOverride = remoteProcessAfter,
                 ),
             )
+            report.put("processResources", JSONObject()
+                .put("mainBefore", processResourceJson(mainProcessBefore))
+                .put("mainAfter", processResourceJson(mainProcessAfter))
+                .put(
+                    "remoteBefore",
+                    remoteProcessBefore?.let(::processResourceJson) ?: JSONObject.NULL,
+                )
+                .put(
+                    "remoteAfter",
+                    remoteProcessAfter?.let(::processResourceJson) ?: JSONObject.NULL,
+                )
+                .put("mainProcessCpuMs", processCpuMs)
+                .put("remoteProcessCpuMs", remoteProcessCpuMs)
+                .put("instrumentationSharesMainProcess", true)
+            )
+            playbackProbe?.let { report.put("originalPlayback", it.report()) }
             report.put("worker", JSONObject()
                 .put("sourcePath", sourcePath)
                 .put("mediaUri", mediaUri.toString())
@@ -613,6 +743,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         } finally {
             coordinator?.cancel()
             boundRemoteHost?.close()
+            originalPlayback?.close()
             if (!preserveMediaStoreSource) {
                 mediaUri?.let { uri ->
                     runCatching { context.contentResolver.delete(uri, null, null) }
@@ -4385,8 +4516,17 @@ class SourceSeparationPhase7WorkerDeviceTest {
         .put("vmSizeBytes", diagnostics.memory.vmSizeBytes ?: JSONObject.NULL)
         .put("vmPeakBytes", diagnostics.memory.vmPeakBytes ?: JSONObject.NULL)
         .put("vmRssBytes", diagnostics.memory.vmRssBytes ?: JSONObject.NULL)
+        .put("vmDataBytes", diagnostics.memory.vmDataBytes ?: JSONObject.NULL)
         .put("pssBytes", diagnostics.memory.pssBytes)
+        .put("ussBytes", diagnostics.memory.ussBytes)
+        .put("javaPssBytes", diagnostics.memory.javaPssBytes)
         .put("nativePssBytes", diagnostics.memory.nativePssBytes)
+        .put("graphicsPssBytes", diagnostics.memory.graphicsPssBytes)
+        .put("javaHeapAllocatedBytes", diagnostics.memory.javaHeapAllocatedBytes)
+        .put("nativeHeapAllocatedBytes", diagnostics.memory.nativeHeapAllocatedBytes)
+        .put("runtimeMaxMemoryBytes", diagnostics.memory.runtimeMaxMemoryBytes)
+        .put("processCpuTimeMs", diagnostics.memory.processCpuTimeMs)
+        .put("oomScoreAdj", diagnostics.memory.oomScoreAdj ?: JSONObject.NULL)
         .put("threadCount", diagnostics.memory.threadCount)
         .put("mappedRegionCount", diagnostics.memory.mappedRegionCount)
         .put(
@@ -4435,6 +4575,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         mode: Phase7ExecutionHostMode,
         events: List<SourceSeparationExecutionHostEvent>,
         remoteHost: BoundRemoteSourceSeparationExecutionHost?,
+        processDiagnosticsOverride: SourceSeparationProcessDiagnostics? = null,
     ): JSONObject {
         assertTrue("The execution host emitted no events.", events.isNotEmpty())
         assertTrue(
@@ -4460,7 +4601,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 } == 1,
         )
         val diagnostics = remoteHost?.connectionDiagnostics
-        val processDiagnostics = remoteHost?.let { host ->
+        val processDiagnostics = processDiagnosticsOverride ?: remoteHost?.let { host ->
             runCatching { host.processDiagnostics() }.getOrNull()
                 ?: host.connectionDiagnostics.latestProcessDiagnostics
         }
@@ -4479,24 +4620,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             .put("remotePid", diagnostics?.pid ?: JSONObject.NULL)
             .put("processStartTicks", diagnostics?.processStartTicks ?: JSONObject.NULL)
             .put("idleRemotePssBytes", diagnostics?.idlePssBytes ?: JSONObject.NULL)
-            .put("process", processDiagnostics?.let { process ->
-                JSONObject()
-                    .put("capturedAtElapsedRealtimeNanos",
-                        process.capturedAtElapsedRealtimeNanos)
-                    .put("activeRunId", process.activeRunId ?: JSONObject.NULL)
-                    .put("vmSizeBytes", process.memory.vmSizeBytes ?: JSONObject.NULL)
-                    .put("vmPeakBytes", process.memory.vmPeakBytes ?: JSONObject.NULL)
-                    .put("vmRssBytes", process.memory.vmRssBytes ?: JSONObject.NULL)
-                    .put("pssBytes", process.memory.pssBytes)
-                    .put("nativePssBytes", process.memory.nativePssBytes)
-                    .put("threadCount", process.memory.threadCount)
-                    .put("mappedRegionCount", process.memory.mappedRegionCount)
-                    .put("smapsSource", process.memory.smapsSource.name)
-                    .put("anonHugePagesBytes",
-                        process.memory.anonHugePagesBytes ?: JSONObject.NULL)
-                    .put("largestFreeAddressGapBytes",
-                        process.memory.largestFreeAddressGapBytes ?: JSONObject.NULL)
-            } ?: JSONObject.NULL)
+            .put(
+                "process",
+                processDiagnostics?.let(::processResourceJson) ?: JSONObject.NULL,
+            )
             .put("session", processDiagnostics?.session?.let { session ->
                 JSONObject()
                     .put("state", session.state.name)
@@ -4847,12 +4974,61 @@ class SourceSeparationPhase7WorkerDeviceTest {
         Debug.getMemoryInfo(info)
         val manager = context.getSystemService(ActivityManager::class.java)
         val processInfo = manager?.getProcessMemoryInfo(intArrayOf(Process.myPid()))?.firstOrNull()
+        val status = runCatching { File("/proc/self/status").readText() }.getOrNull()
         return JSONObject()
             .put("totalPssBytes", (processInfo?.totalPss ?: info.totalPss).toLong() * 1024L)
+            .put(
+                "totalUssBytes",
+                (info.totalPrivateDirty.toLong() + info.totalPrivateClean.toLong()) * 1_024L,
+            )
+            .put(
+                "vmRssBytes",
+                SourceSeparationProcParser.parseStatusKilobytes(status, "VmRSS") ?: 0L,
+            )
             .put("javaPssBytes", info.summaryBytes("summary.java-heap", info.dalvikPss))
             .put("nativePssBytes", info.summaryBytes("summary.native-heap", info.nativePss))
             .put("graphicsPssBytes", info.summaryBytes("summary.graphics", 0))
     }
+
+    private fun currentProcessDiagnostics(): SourceSeparationProcessDiagnostics =
+        SourceSeparationProcessDiagnosticsCollector.capture(
+            processGeneration = 1L,
+            processName = Application.getProcessName(),
+        )
+
+    private fun processResourceJson(process: SourceSeparationProcessDiagnostics): JSONObject =
+        JSONObject()
+            .put("processGeneration", process.processGeneration)
+            .put("processName", process.processName)
+            .put("pid", process.pid)
+            .put("processStartTicks", process.processStartTicks)
+            .put("capturedAtElapsedRealtimeNanos", process.capturedAtElapsedRealtimeNanos)
+            .put("activeRunId", process.activeRunId ?: JSONObject.NULL)
+            .put("vmSizeBytes", process.memory.vmSizeBytes ?: JSONObject.NULL)
+            .put("vmPeakBytes", process.memory.vmPeakBytes ?: JSONObject.NULL)
+            .put("vmRssBytes", process.memory.vmRssBytes ?: JSONObject.NULL)
+            .put("vmDataBytes", process.memory.vmDataBytes ?: JSONObject.NULL)
+            .put("pssBytes", process.memory.pssBytes)
+            .put("ussBytes", process.memory.ussBytes)
+            .put("javaPssBytes", process.memory.javaPssBytes)
+            .put("nativePssBytes", process.memory.nativePssBytes)
+            .put("graphicsPssBytes", process.memory.graphicsPssBytes)
+            .put("javaHeapAllocatedBytes", process.memory.javaHeapAllocatedBytes)
+            .put("nativeHeapAllocatedBytes", process.memory.nativeHeapAllocatedBytes)
+            .put("runtimeMaxMemoryBytes", process.memory.runtimeMaxMemoryBytes)
+            .put("processCpuTimeMs", process.memory.processCpuTimeMs)
+            .put("oomScoreAdj", process.memory.oomScoreAdj ?: JSONObject.NULL)
+            .put("threadCount", process.memory.threadCount)
+            .put("mappedRegionCount", process.memory.mappedRegionCount)
+            .put("smapsSource", process.memory.smapsSource.name)
+            .put(
+                "anonHugePagesBytes",
+                process.memory.anonHugePagesBytes ?: JSONObject.NULL,
+            )
+            .put(
+                "largestFreeAddressGapBytes",
+                process.memory.largestFreeAddressGapBytes ?: JSONObject.NULL,
+            )
 
     private fun Debug.MemoryInfo.summaryBytes(key: String, fallbackKb: Int): Long =
         (memoryStats[key]?.toLongOrNull() ?: fallbackKb.toLong()) * 1024L
@@ -4969,6 +5145,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             false,
         )
         assertEquals(x86ProcessValidation, MdxX86ProcessValidationOverride.buildEnabled)
+        val activityManager = requireNotNull(context.getSystemService(ActivityManager::class.java))
+        val deviceMemory = ActivityManager.MemoryInfo().also(activityManager::getMemoryInfo)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val runtime = Runtime.getRuntime()
         return JSONObject()
             .put("schemaVersion", "phase7-report-v1")
             .put("status", "not-tested")
@@ -5013,6 +5193,21 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("runtimeAbi", abi)
                 .put("bitness", if (Process.is64Bit()) 64 else 32)
                 .put("availableProcessors", Runtime.getRuntime().availableProcessors())
+                .put("totalMemoryBytes", deviceMemory.totalMem)
+                .put("availableMemoryBytes", deviceMemory.availMem)
+                .put("lowMemoryThresholdBytes", deviceMemory.threshold)
+                .put("lowMemory", deviceMemory.lowMemory)
+                .put("isLowRamDevice", activityManager.isLowRamDevice)
+                .put("memoryClassMiB", activityManager.memoryClass)
+                .put("largeMemoryClassMiB", activityManager.largeMemoryClass)
+                .put("runtimeMaxMemoryBytes", runtime.maxMemory())
+            )
+            .put("processRoles", JSONObject()
+                .put("mainPid", Process.myPid())
+                .put("mainProcessName", Application.getProcessName())
+                .put("targetPackage", instrumentation.targetContext.packageName)
+                .put("instrumentationPackage", instrumentation.context.packageName)
+                .put("instrumentationSharesMainProcess", true)
             )
             .put("fixture", JSONObject()
                 .put("fixtureId", arguments.getString(ARG_FIXTURE_ID) ?: "unknown")
@@ -5063,6 +5258,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("cpuThreads", resolveCpuThreads(arguments.getString(ARG_PROCESSOR_COUNT)?.toIntOrNull()))
                 .put("windowDecodeEnabled", arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true))
                 .put("cleanInstallScenario", arguments.optionalBoolean(ARG_CLEAN_INSTALL, false))
+                .put(
+                    "coldProcessBoundary",
+                    arguments.optionalBoolean(ARG_COLD_PROCESS_BOUNDARY, false),
+                )
+                .put("preRunProcessExitMs", arguments.optionalLong(ARG_PRE_RUN_PROCESS_EXIT_MS))
+                .put(
+                    "probeOriginalPlayback",
+                    arguments.optionalBoolean(ARG_PROBE_ORIGINAL_PLAYBACK, false),
+                )
                 .put("x86ProcessValidation", x86ProcessValidation)
                 .put(
                     "xnnPackFlags",
@@ -5424,6 +5628,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_CLEAN_INSTALL = "cleanInstallScenario"
         const val ARG_X86_PROCESS_VALIDATION = "x86ProcessValidation"
         const val ARG_REBIND_AFTER_COMPLETION = "rebindAfterCompletion"
+        const val ARG_PROBE_ORIGINAL_PLAYBACK = "probeOriginalPlayback"
+        const val ARG_COLD_PROCESS_BOUNDARY = "coldProcessBoundary"
+        const val ARG_PRE_RUN_PROCESS_EXIT_MS = "preRunProcessExitMs"
+        const val PROCESS_RESOURCE_SAMPLE_INTERVAL_MS = 1_000L
+        const val PLAYBACK_RESOURCE_SAMPLE_INTERVAL_MS = 15_000L
         const val PROCESS_REBIND_SETTLE_MS = 250L
         const val PROCESS_MATRIX_CYCLE_COUNT = 20
         const val PROCESS_MODEL_SWITCH_COUNT = 20
