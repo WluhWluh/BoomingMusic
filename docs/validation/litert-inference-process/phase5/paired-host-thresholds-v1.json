@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "phase5-paired-host-thresholds-v1",
+  "frozenBeforeResults": true,
+  "measurement": {
+    "minimumPairCount": 3,
+    "pairOrder": [
+      ["in-process", "bound-remote"],
+      ["bound-remote", "in-process"],
+      ["in-process", "bound-remote"]
+    ],
+    "coldProcessDefinition": "All target, inference, and instrumentation PIDs are absent before instrumentation; installed model data is retained; the exact cache entry is deleted by the worker before admission.",
+    "sessionPolicy": "single-use",
+    "originalPlaybackRequired": true,
+    "reportAllSamplesAndMedians": true
+  },
+  "identity": {
+    "requireExactAppCommit": true,
+    "requireExactAppApkSha256": true,
+    "requireExactTestApkSha256": true,
+    "requireExactCatalogSha256": true,
+    "requireExactArtifactSha256": true,
+    "requireExactContractId": true,
+    "requireExactFixtureSha256": true,
+    "requireExactCacheKey": true,
+    "requireExactDecodeRoute": true,
+    "requireExactConcreteBackendWithinPair": true
+  },
+  "output": {
+    "requireExactOutputFrameCount": true,
+    "requireExactStemWavSha256": true,
+    "requireExactStemFlacSha256": true,
+    "requireCompletedPlayableCache": true
+  },
+  "resource": {
+    "minimumRuntimeMaxMemoryBytes": 134217728,
+    "minimumLargestFreeAddressGapBytes": 134217728,
+    "maximumIdleRemotePssBytes": 100663296,
+    "maximumMedianSummedPssRegressionBytes": 134217728,
+    "maximumProcessExitMs": 30000
+  },
+  "performance": {
+    "maximumMedianFirstReadyRatio": 1.5,
+    "maximumMedianFirstReadyRegressionMs": 5000,
+    "maximumMedianFullSongRatio": 1.5,
+    "maximumMedianFullSongRegressionMs": 30000
+  },
+  "playback": {
+    "maximumPositionDriftMs": 1000,
+    "maximumUnexpectedEventCount": 0
+  },
+  "environment": {
+    "maximumStartingThermalStatus": 1,
+    "maximumPairStartingThermalStatusDelta": 1,
+    "requireMatchingPowerSourceWithinPair": true,
+    "emulatorThermalIsDiagnosticOnly": true
+  }
+}
