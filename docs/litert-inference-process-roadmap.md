@@ -132,11 +132,13 @@ and playback. Bound execution matches in-process output on the supported
 worker ABIs, and pure x86 passes service startup, close, rebind, and
 remote-death handling.
 
-The remote range executor still creates a new single-use provider for every
-execution. It therefore does not yet address pure x86's unsafe close/create
-lifecycle, and normal pure-x86 admission remains fail-closed before native
-allocation. The accepted Phase 2 evidence is in
-`validation/litert-inference-process/phase2/validation-2026-07-24.md`.
+Phase 3 added one process-owned resident session only behind the exact pinned
+pure-x86 validation gate. The session survived the 20-cycle 9662 matrix, and
+20 alternating 9662/KARA key changes crossed acknowledged fresh-process
+boundaries without interrupting original playback. Other ABIs retain the
+Phase 2 single-use policy. Normal pure-x86 admission remains fail-closed before
+native allocation. Accepted evidence is in
+`validation/litert-inference-process/phase3/validation-2026-07-24.md`.
 
 The processing wake lock and dynamic `mediaProcessing` foreground
 type currently protect the case where playback is waiting for separation
@@ -233,6 +235,44 @@ The implementation may expose these modes to debug and instrumentation code:
 | `InProcess` | none | current PlaybackService behavior | parity oracle and rollback |
 | `BoundRemote` | dedicated inference process | PlaybackService/client binding | memory and x86 lifecycle experiment |
 | `IndependentForeground` | dedicated inference process | inference media-processing FGS | separate background experiment |
+
+### Orthogonal policy axes
+
+Later phases must vary and decide these axes independently:
+
+| Axis | Values | Question |
+| --- | --- | --- |
+| Host execution | `InProcess`, `BoundRemote` | where decode, DSP, and LiteRT execute in one build/run |
+| Release host policy | `InProcess`, `RemotePreferred`, `RemoteRequired` | which qualified host a release selects for one scope |
+| Session lifetime | `SingleUse`, `ResidentUntilProcessExit` | whether one process may retain native state across runs |
+| Background owner | client-bound, independent processing FGS | whether work may outlive the playback/main process |
+
+A successful remote host does not authorize a resident session. A successful
+resident session does not authorize independent background execution. A
+background experiment must use the already-qualified host/session combination
+rather than changing multiple axes at once.
+
+`RemotePreferred` means a release selects `BoundRemote` by default but a later
+build-level policy change may roll that scope back to its separately qualified
+`InProcess` path. `RemoteRequired` means no in-process path is supported for
+that scope. Neither permits a failed remote run to fall back to in-process
+execution at runtime.
+
+### Support tiers
+
+Process placement is also separate from the user-facing support commitment:
+
+| Tier | Meaning |
+| --- | --- |
+| `Unsupported` | fail before native allocation |
+| `Experimental` | gated, narrowly scoped, and not a general compatibility promise |
+| `Supported` | release-qualified for the recorded ABI/backend/model resource scope |
+
+Every Phase 5 and Phase 9 policy row must record support tier, release host
+policy, concrete host execution, session lifetime, and background owner. For
+example,
+`Experimental + RemoteRequired + ResidentUntilProcessExit + client-bound` is
+a valid x86 outcome; `RemoteRequired` alone is not a support declaration.
 
 No normal release should silently fall back from a failed remote production
 host to in-process inference. That could create a second large session or a
@@ -600,28 +640,50 @@ against main-process cleanup or deletion.
 ### Phase 4A: Cross-process exact-entry lease
 
 - [ ] Add an OS-backed file lock for each exact cache entry.
+- [ ] Acquire the kernel lock before admitting a writer and retain its open
+  file descriptor through the last durable terminal transition. Do not treat a
+  successful metadata write as ownership.
 - [ ] Keep run ID, owner process generation, PID, and timestamps as diagnostic
   metadata; the kernel lock, not metadata age, is authoritative.
 - [ ] Make main-process delete, prune, promotion, and inspection respect the
   same lock.
 - [ ] Route operations through one owner where a file lock alone cannot make a
   multi-file transition atomic.
+- [ ] Define one exact-entry mutation authority at every instant. A main and
+  remote process may both read, but may not independently update the same
+  journal or manifest under separate in-memory locks.
+- [ ] Treat disappearance of the cache directory or lock file during a run as
+  a typed cache-loss outcome. Never recreate system-cleared cache from model
+  or application data while the old run is still active.
 - [ ] Confirm process death releases the kernel lock.
 
 ### Phase 4B: Durable run journal
 
 - [ ] Write the admitted immutable request and lifecycle state under the cache
   entry before native setup.
-- [ ] Atomically record each committed window and terminal transition.
+- [ ] Give journal records a schema version, monotonic transition sequence,
+  run ID, process generation, exact cache/model/contract identity, and last
+  committed window.
+- [ ] Freeze the window commit order: write a run-scoped temporary output,
+  flush and close it, verify expected size/integrity, atomically publish the
+  segment, and only then journal that window as `Ready`.
+- [ ] Atomically record terminal transitions only after every required segment
+  and output integrity record is durable. A completed journal must never point
+  at a temporary or missing file.
 - [ ] Never persist raw model paths as portable identity.
 - [ ] Mark pause, user cancel, incompatibility, FGS timeout, cache clearing,
   and unexpected process death distinctly.
-- [ ] Ensure a journal cannot make an incomplete entry playable.
+- [ ] Make journal replay idempotent. Ignore or clean orphan temporary files,
+  reject `Ready` records whose published file fails integrity, and ensure an
+  incomplete entry cannot become playable.
 
 ### Phase 4C: Death and race injection
 
 - [ ] Kill the inference process during decode, DSP, native invocation, output
   write, manifest update, FLAC handoff, and terminal commit.
+- [ ] Include a real active native-invocation process kill rather than only a
+  Kotlin failpoint. Original audio and the main process must survive, and the
+  old exact-entry lock must become acquirable only after kernel cleanup.
 - [ ] Kill the main process while the inference process owns the entry.
 - [ ] Race cache inspection, deletion, pruning, model deletion, and active-model
   switching against the remote writer.
@@ -629,125 +691,252 @@ against main-process cleanup or deletion.
   outcome without recreation from model/application data.
 - [ ] Recover only from the next uncommitted window and never duplicate a
   completed segment.
+- [ ] Repeat every kill point at least three times and distinguish recovery
+  correctness from automatic continuation. Phase 4 may require a new explicit
+  command to resume; it does not yet authorize background restart.
+
+### Phase 4D: Cross-process cache qualification
+
+- [ ] Run the complete death/race matrix first with exact 9662 on pure x86,
+  then repeat representative lock, journal, and cache-clear cases on arm64 so
+  the contract is not accidentally x86-specific.
+- [ ] Record lock acquisition/release, journal sequence, published segment
+  integrity, old/new process generations, cache terminal state, and playback
+  continuity in compact reports.
+- [ ] Keep FLAC promotion and hydration outside the active writer lease unless
+  the test proves a single explicit handoff. No phase may leave two owners
+  capable of mutating completed output.
 
 **Phase 4 exit:** process death and management races cannot corrupt, splice,
-misidentify, or prematurely promote a cache.
+misidentify, or prematurely promote a cache. Active native-process death is
+recoverable from a durable boundary without harming original playback, but no
+independent background restart is implied.
 
-## Phase 5: Compare Bound Remote Execution on Every ABI
+## Phase 5: Compare Host and Session Policies on Every ABI
 
-This phase asks whether process isolation is useful beyond x86. It does not
-enable independent background execution.
+This phase asks whether process isolation is useful beyond x86 and whether any
+non-x86 ABI benefits from retaining a session. It does not enable independent
+background execution. Host placement and session lifetime are changed in
+separate subphases so their effects remain attributable.
 
-### Phase 5A: CPU matrix
+### Phase 5A: Freeze paired-comparison method
 
-- [ ] Compare `InProcess` and `BoundRemote` on S10 arm32,
-  S10 arm64, S25 arm64, API 26 x86, and x86_64.
-- [ ] Test 9662 everywhere it is currently eligible and KARA where its CPU
-  contract permits.
-- [ ] Record main, remote, and summed PSS/USS/RSS rather than reporting only
-  the inference process.
-- [ ] Record idle-process overhead, model setup, first/reused inference,
-  first-ready-window, full-song throughput, process restart, and memory return
-  after process exit.
-- [ ] Measure playback underruns and scheduling contention.
+- [ ] Pair `InProcess` and `BoundRemote` runs by app revision, exact model and
+  contract, source fixture, cache identity, backend request, thread settings,
+  battery/charger state, and starting thermal status.
+- [ ] Run at least three cold A/B pairs per policy candidate, alternating which
+  host runs first. Report all samples and medians; do not select one favorable
+  run.
+- [ ] Keep non-x86 comparison runs `SingleUse` initially. Pure x86 uses its
+  already-qualified resident policy because production-shaped recreation is
+  not a valid oracle there.
+- [ ] Separate instrumentation/test-runner PSS and CPU time from the main and
+  inference processes. Record device total/available memory and
+  `ActivityManager.isLowRamDevice` at admission.
+- [ ] Freeze performance, summed-memory, playback, process-exit, and output
+  gates before reviewing the paired results.
 
-### Phase 5B: GPU and fallback matrix
+### Phase 5B: CPU host-placement matrix
+
+- [ ] Compare `InProcess + SingleUse` with `BoundRemote + SingleUse` on S10
+  arm32, S10 arm64, S25 arm64, and x86_64. Compare pure x86's unsupported
+  baseline only with `BoundRemote + ResidentUntilProcessExit`.
+- [ ] Test 9662 everywhere it is currently eligible and KARA only where its
+  exact CPU contract and support tier permit it.
+- [ ] Record main, remote, instrumentation, and summed PSS/USS/RSS; native,
+  graphics, and Java memory; `VmSize`/`VmPeak`; largest free VA gap;
+  `oom_score_adj`; and mapped-region count.
+- [ ] Record idle-process overhead, bind/start latency, model setup,
+  first/reused inference, first-ready-window, full-song throughput, process CPU
+  time, memory return after process exit, and time until the old PID and its
+  mappings disappear.
+- [ ] Measure original-playback position drift, audio underruns, MediaSession
+  continuity, and scheduler contention while separation uses its production
+  thread policy.
+- [ ] Run pure-x86 9662 on 2, 3, and 4 GiB AVD memory configurations, with at
+  least three cold process generations per configuration. Treat allocation
+  failure, LMKD pressure, or crossing the VA-gap floor as a resource rejection,
+  not a reason to lower the gate.
+- [ ] Repeat x86 smoke on a second pure-x86 API image if a compatible image is
+  available. Otherwise record the single API 26 emulator as a support-scope
+  limitation rather than implying real-device coverage.
+- [ ] Verify the x86 APK's LiteRT ELF identity and SHA-256 against the pinned
+  `bss-litert-android` release and run its CI smoke before any support-tier
+  promotion.
+
+### Phase 5C: Session-lifetime matrix
+
+- [ ] Test `BoundRemote + ResidentUntilProcessExit` on a non-x86 ABI only after
+  that ABI's `BoundRemote + SingleUse` host result passes.
+- [ ] Start with armeabi-v7a CPU because it has the strongest non-x86
+  address-space rationale; then test arm64 CPU and x86_64 CPU only if measured
+  setup/reclamation costs justify the experiment.
+- [ ] For every resident candidate, repeat the Phase 3 20-cycle lifecycle,
+  same-key full-song bookend, key-change recycle, memory-trend, and original
+  playback gates. Do not infer residency safety from a short worker.
+- [ ] Keep GPU sessions single-use in this subphase. GPU residency requires its
+  own graphics-memory and driver-lifetime decision.
+- [ ] Select `SingleUse` unless residency demonstrates a concrete latency or
+  reliability gain without unacceptable retained memory or recycle cost.
+
+### Phase 5D: GPU host and fallback matrix
 
 - [ ] Verify accelerator library discovery from the remote arm64 process.
-- [ ] Re-run 9662 GPU eligibility, finite-output probe, full-song Auto, and
-  injected setup/invocation/output failures on S10 and S25.
-- [ ] Confirm GPU closes before CPU fallback is created in the same remote
-  process.
-- [ ] Confirm fatal GPU cleanup can request a process recycle instead of
-  risking a second allocator when cleanup is unconfirmed.
-- [ ] Record graphics/native memory and driver diagnostics separately from PSS.
+- [ ] Re-run 9662 GPU eligibility, finite-output probe, and at least three
+  alternating full-song `InProcess`/`BoundRemote` Auto pairs on S10 and S25.
+- [ ] Inject setup, invocation, output-read/non-finite, and cleanup failures.
+  Confirm GPU closes before CPU fallback is created when cleanup is known-good.
+- [ ] If GPU cleanup is uncertain or fatal, require whole-process recycle
+  before CPU creation rather than risking a second allocator in one process.
+- [ ] Record graphics/native memory, delegate/library identity, driver
+  diagnostics, CPU fallback cost, thermal state, and playback continuity
+  separately from aggregate PSS.
 
-### Phase 5C: ABI policy checkpoint
+### Phase 5E: Process and support policy checkpoint
 
-- [ ] Decide whether x86 is `RemoteRequired` or remains unsupported.
-- [ ] Decide whether armeabi-v7a is `RemotePreferred` based on
-  32-bit address-space and recovery evidence.
+- [ ] Publish one row per ABI/backend with support tier, release host policy,
+  concrete host execution, session lifetime, model/resource scope, and current
+  background owner.
+- [ ] Decide whether pure x86 becomes `Experimental + RemoteRequired` for exact
+  9662, remains `Unsupported`, or has enough repeated evidence for a narrower
+  `Supported` scope. KARA and every additional model require separate tier
+  evidence; HQ4 remains rejected.
+- [ ] Keep unknown imported x86 models outside the stable support promise.
+  Decide whether they are blocked from activation or allowed only through an
+  explicit unverified-model flow that always uses a fresh process.
+- [ ] Decide whether armeabi-v7a is `RemotePreferred` or `RemoteRequired` based
+  on 32-bit address-space, total-memory, and recovery evidence.
 - [ ] Keep arm64 and x86_64 in process unless remote execution demonstrates a
   concrete reliability benefit without unacceptable total-memory,
   performance, GPU, or playback regressions.
-- [ ] Document why a common all-ABI path is or is not worth its active-memory
-  overhead.
+- [ ] Document why a common all-ABI path is or is not worth its idle and active
+  memory overhead. Never add automatic runtime fallback from a failed remote
+  host to in-process inference.
+- [ ] Make an explicit branch decision: a qualified `BoundRemote` policy may
+  proceed toward release with current client-bound background semantics even
+  if Phases 6-8 later reject independent background execution.
 
-**Phase 5 exit:** each ABI has an evidence-backed process-placement candidate.
-No independent foreground service exists yet.
+**Phase 5 exit:** each ABI/backend has an evidence-backed support tier, release
+host policy, concrete host execution, and session-lifetime candidate. Process
+isolation can be accepted or rejected independently of the still-unimplemented
+processing foreground service.
 
 ## Phase 6: Prototype an Independent Media-Processing Service
 
 This phase changes background ownership. It must remain behind a separate
-internal gate from `BoundRemote`.
+internal gate from `BoundRemote`. It uses the Phase 5-selected host and session
+policy and must not silently change either while background behavior is under
+test.
 
-### Phase 6A: Foreground-service ownership
+### Phase 6A: Freeze run-class eligibility
+
+- [ ] Classify admitted work as manual full-song, playback-demand window, or
+  bounded next-song prefetch in the protocol and journal.
+- [ ] Make only an explicitly user-started manual full-song run eligible for
+  independent foreground execution in the first prototype.
+- [ ] Keep playback-demand work under `PlaybackService` ownership so it cannot
+  outlive the playback intent it serves.
+- [ ] Keep next-song prefetch client-bound initially. Queue replacement,
+  playback stop, or loss of a live main-process decision must prevent it from
+  becoming an independently continuing job.
+- [ ] Keep model download, activation/deletion, and cache management outside
+  the inference foreground service. Decide FLAC handoff separately rather than
+  broadening the run implicitly.
+- [ ] Record the selected run-class/background policy in diagnostics and
+  exclude the internal gate from backup.
+
+### Phase 6B: Foreground-service ownership
 
 - [ ] Let the inference service declare only
-  `foregroundServiceType="mediaProcessing"`.
-- [ ] Keep PlaybackService responsible for `mediaPlayback`.
+  `foregroundServiceType="mediaProcessing"` where the platform supports that
+  type, with explicit legacy behavior for API 26-34.
+- [ ] Keep `PlaybackService` responsible for `mediaPlayback`.
 - [ ] Define a handoff that never leaves active inference unprotected and never
-  has two components claiming ownership indefinitely.
-- [ ] Call `startForeground()` within the platform deadline with a
-  dedicated processing notification.
+  has two components claiming the processing lifetime indefinitely.
+- [ ] Call `startForeground()` within the platform deadline with a dedicated,
+  user-comprehensible processing notification.
 - [ ] Provide Pause and Cancel notification actions with idempotent command
-  IDs.
-- [ ] Do not keep an idle process in foreground solely to retain a model
-  session.
+  IDs and exact run identity.
+- [ ] Do not keep an idle or manually paused process in foreground solely to
+  retain a model session.
+- [ ] Record both foreground services, types, notification IDs, start/stop
+  timestamps, and ownership handoffs when playback and separation overlap.
 
-### Phase 6B: Wake-lock ownership
+### Phase 6C: Wake-lock ownership
 
-- [ ] Move the active-computation `PARTIAL_WAKE_LOCK` to the process
-  actually executing inference.
-- [ ] Acquire it only after an exact run is admitted and before heavy setup.
+- [ ] Move the active-computation `PARTIAL_WAKE_LOCK` to the process actually
+  executing inference.
+- [ ] Acquire it only after exact admission, durable journal creation, and FGS
+  protection, immediately before heavy setup.
 - [ ] Use bounded acquisition/renewal and release it on pause, cancel,
-  completion, failure, timeout, cache loss, and process teardown.
+  completion, failure, timeout, cache loss, process teardown, and failed FGS
+  promotion.
 - [ ] Record every acquire, renewal, and release in validation diagnostics.
-- [ ] Ensure the playback process does not retain a duplicate processing lock.
+- [ ] Ensure the playback process does not retain a duplicate processing lock
+  after a successful ownership handoff.
 
-### Phase 6C: Modern Android constraints
+### Phase 6D: Primary platform prototype
 
-- [ ] Test foreground-service start from a visible UI command.
-- [ ] Test automatic prefetch while the app UI is backgrounded and playback is
-  already foreground.
-- [ ] Handle `ForegroundServiceStartNotAllowedException` as a typed
-  paused/deferred outcome, not a retry loop.
+- [ ] Implement and validate the first manual full-song prototype on S25
+  arm64 CPU. Keep GPU, x86, and session-residency changes out of this first
+  lifecycle proof.
+- [ ] Start from a visible user command, background the UI, stop playback, and
+  turn the screen off while requiring journal progress and one bounded wake
+  lock.
+- [ ] Handle `ForegroundServiceStartNotAllowedException` and every denied
+  promotion as a typed paused/deferred outcome, never a retry loop.
 - [ ] Implement and test `Service.onTimeout()` for the Android 15+
   media-processing time budget, including its approximately six-hour
   per-24-hour background allowance.
-- [ ] Stop promptly after timeout while preserving the last committed window.
-- [ ] Test API 31, 35, 36, and the current highest emulator API because the app
-  targets API 36.
-- [ ] Measure the cumulative media-processing FGS budget for long or repeated
-  runs.
-- [ ] During this prototype, treat main-process Binder death as a controlled
+- [ ] Stop promptly after timeout while preserving the last committed window
+  and releasing notification, foreground state, lock, and native session.
+- [ ] Test API 35, API 36, and the current highest emulator API before
+  expanding to older devices. Record cumulative media-processing FGS budget
+  for long and repeated runs.
+- [ ] After CPU lifecycle semantics pass, repeat the prototype with the
+  Phase 5-qualified S25 GPU policy and verify graphics memory and fallback.
+- [ ] During this phase, treat main-process Binder death as a controlled durable
   pause. Continuing without the main process is enabled only after Phase 7
   transfers active-run authority and passes its recovery gates.
 
-**Phase 6 exit:** one exact run can remain protected with the screen off and
-without relying on PlaybackService's processing lease. Main-process death
-continuation is not yet enabled.
+**Phase 6 exit:** one exact, user-started manual full-song run can remain
+protected on the primary arm64 target with playback stopped and the screen off,
+without relying on `PlaybackService`'s processing lease. Playback-demand and
+prefetch work remain client-bound, and main-process death continuation is not
+yet enabled.
 
 ## Phase 7: Support Independent Process Lifetime and Recovery
 
 ### Phase 7A: Transfer active-run authority
 
-- [ ] Once a run is acknowledged, make the inference service authoritative for
-  that exact admitted run until a durable terminal transition.
+- [ ] Once an eligible manual full-song run has a durable journal, exact-entry
+  kernel lock, and acknowledged processing FGS, make the inference service
+  authoritative for that exact admitted run until a durable terminal
+  transition.
 - [ ] Keep the main coordinator as a proxy and observer rather than a second
   in-memory worker.
 - [ ] Let a reconnecting main process query and adopt the current snapshot.
-- [ ] Do not let callback loss cancel an otherwise valid foreground run.
+- [ ] Do not let callback loss cancel an otherwise valid foreground run, but
+  persist that the observer disconnected and bound how long unobserved work may
+  continue.
 - [ ] Do not let the inference process admit a new song after completing the
   frozen request without a live main-process decision.
+- [ ] Keep playback-demand and prefetch authority in the main/playback process;
+  they must not inherit manual full-song survival semantics accidentally.
 
 ### Phase 7B: Bounded restart policy
 
-- [ ] Define whether system-killed active work uses sticky restart, redelivered
-  intent, or an explicit durable-journal restart.
+- [ ] Compare sticky restart, redelivered intent, and explicit
+  durable-journal restart, then select at most one mechanism. Do not combine
+  Android restart modes with a second application retry loop.
 - [ ] Gate restart on a matching nonterminal journal, intact model/cache,
-  available FGS permission, and retry budget.
-- [ ] Apply bounded backoff and stop after repeated death or allocation failure.
+  released old kernel lock, available FGS permission/quota, and retry budget.
+- [ ] Distinguish system/LMKD death, native fatal state, FGS timeout, and
+  protocol incompatibility. Each class needs an explicit retry or terminal
+  policy rather than a generic service restart.
+- [ ] Apply bounded backoff and stop after repeated death or allocation
+  failure. Record every attempt and never create two process generations for
+  one retry slot.
 - [ ] Never restart work canceled or paused by the user, stopped by FGS
   timeout, invalidated by cache clearing, or made incompatible by model loss.
 - [ ] Surface a stable terminal/deferred state after the retry budget ends.
@@ -755,7 +944,9 @@ continuation is not yet enabled.
 ### Phase 7C: User and task lifecycle
 
 - [ ] Preserve the existing "stop when closed from recents" setting.
-- [ ] Define and test behavior when playback stops while separation continues.
+- [ ] Define and test behavior when playback stops while an eligible manual
+  full-song run continues. Playback-demand and prefetch work must stop or pause
+  with their owning playback intent.
 - [ ] Define whether a manually paused session retains the remote process and
   for how long; do not hold foreground state or wake lock while paused.
 - [ ] Decide whether an expired idle-retention deadline or idle memory pressure
@@ -769,11 +960,36 @@ continuation is not yet enabled.
 - [ ] Confirm Android force-stop always terminates work without automatic
   resurrection.
 
+### Phase 7D: Recovery and reattachment matrix
+
+- [ ] Kill and restart the main process before FGS handoff, after first durable
+  window, during native invocation, after final segment publication, and during
+  terminal journal commit.
+- [ ] Require a reconnecting client to reject stale Binder generations and
+  reconstruct UI state from the durable snapshot without seeking or replacing
+  original playback.
+- [ ] Kill the inference process at the same boundaries and verify the selected
+  bounded-restart policy never duplicates a writer, segment, notification,
+  wake lock, or native session.
+- [ ] Run user Pause, Cancel, recents removal with both setting values, force
+  stop, model deletion, and cache clearing against pending restart state.
+- [ ] Commit compact reports that separate continuation, explicit resume,
+  bounded restart, and terminal defer; a single generic "recovered" result is
+  insufficient.
+
 **Phase 7 exit:** an admitted run may survive main-process death, or the feature
-is rejected with a documented reason. Recovery is bounded, cache-safe, and
-visible.
+is rejected with a documented reason. Only the explicitly selected run classes
+may continue. Recovery is bounded, cache-safe, visible, and incapable of
+creating duplicate ownership.
 
 ## Phase 8: Background and OEM Qualification
+
+Qualification uses a layered matrix, not every scenario on every ABI. Android
+API/FGS behavior is primarily covered by modern emulators and arm64 devices;
+Samsung task and battery behavior is covered by both physical generations;
+32-bit ABI runs focus on address space, resource pressure, and recovery. Any
+ABI promoted to production still receives a release smoke for every enabled
+run class.
 
 ### Phase 8A: Scenario matrix
 
@@ -794,14 +1010,23 @@ independent host:
 - model switch and x86 process recycle; and
 - media-processing foreground-service timeout.
 
+Manual full-song continuation, playback-demand work, and next-song prefetch
+must be reported separately. A passing manual run cannot be used to claim that
+prefetch may outlive playback.
+
 ### Phase 8B: Devices
 
-- [ ] Galaxy S10 arm64.
-- [ ] Galaxy S10 armeabi-v7a.
-- [ ] Galaxy S25 arm64.
-- [ ] API 26 pure-x86 emulator.
-- [ ] x86_64 emulator for the current highest supported Android API.
-- [ ] API 35 and API 36 emulator coverage for foreground-service policy.
+- [ ] Run the complete scenario, notification, recents, screen-off, and Samsung
+  battery-policy matrix on Galaxy S10 arm64 and Galaxy S25 arm64.
+- [ ] Run the complete modern foreground-service policy matrix on API 35, API
+  36, and the current highest supported emulator API.
+- [ ] Run targeted long-job, low-memory, process-death, and recovery smokes on
+  Galaxy S10 armeabi-v7a, API 26 pure x86, and the current x86_64 emulator.
+- [ ] Re-run the selected x86 support scope at its passing and first failing AVD
+  memory configurations. Do not publish an untested minimum-RAM claim.
+- [ ] Record explicitly that emulator-only x86 evidence does not constitute
+  real x86 device/OEM coverage. Narrow the support tier if no representative
+  hardware can be tested.
 - [ ] Samsung battery modes: Unrestricted, Optimized, and Restricted where the
   OS permits the comparison.
 
@@ -809,7 +1034,9 @@ independent host:
 
 - [ ] Compare windows per minute, first-ready time, full-song duration, CPU
   time, thermal status, and battery discharge.
-- [ ] Compare main, remote, and summed memory plus graphics/native allocation.
+- [ ] Compare main, remote, instrumentation, and summed memory plus
+  graphics/native allocation, total available system memory, LMKD events,
+  `oom_score_adj`, and memory returned after process exit.
 - [ ] Record wake-lock duration and require no lock after every terminal state.
 - [ ] Record foreground-service type, notification lifetime, start failures,
   timeouts, process deaths, restart count, and progress gaps.
@@ -817,24 +1044,50 @@ independent host:
 - [ ] Verify output, frame, decode-route, join, cache, and FLAC gates.
 - [ ] Perform representative listening only as a regression check; do not use
   this phase to retune window decoding.
+- [ ] Run at least three cold repetitions for every performance or memory
+  comparison used to promote policy, alternate baseline/candidate order, and
+  publish all samples plus medians.
+
+### Phase 8D: Run-class and support-tier gate
+
+- [ ] Decide independently whether manual full-song, playback-demand, and
+  bounded prefetch use client-bound or independent background ownership.
+- [ ] Publish support tier, release host policy, concrete host execution,
+  session lifetime, background owner, model/resource scope, minimum tested
+  memory, Android API range, and device-evidence scope for every production
+  candidate.
+- [ ] Reject independent background without rejecting an otherwise qualified
+  `BoundRemote` process-isolation policy.
+- [ ] Reject one ABI/backend/model scope without weakening another row's
+  frozen gates.
 
 **Phase 8 exit:** background execution is promoted only if it preserves
 correctness and playback, has bounded recovery, meets the Phase 0 memory and
 performance thresholds, and behaves acceptably on both Samsung generations
-and modern Android FGS policy.
+and modern Android FGS policy. Promotion is per run class and support tier, not
+an all-or-nothing app-wide switch.
 
 ## Phase 9: Select Production Policy and Remove Transitional Ownership
 
 ### Phase 9A: Policy decision
 
-- [ ] Publish an evidence table selecting `InProcess`,
-  `BoundRemote`, `IndependentForeground`, or Unsupported
-  for each ABI/backend combination.
+- [ ] Publish an evidence table for each ABI/backend/model-resource scope that
+  selects support tier, release host policy, concrete host execution, session
+  lifetime, and background owner for manual full-song, playback-demand, and
+  prefetch work.
 - [ ] Prefer one common production architecture only when the all-ABI evidence
   justifies its memory and lifecycle cost.
-- [ ] Keep pure x86 fail-closed if process recycling is not repeatably safe.
+- [ ] Keep pure x86 fail-closed if cache safety, process recycling, memory-tier
+  repeatability, binary provenance, or release smoke is incomplete. If enabled,
+  require `BoundRemote`, exact known-good model scope, and the recorded support
+  tier; do not imply HQ4 or unknown-model support.
 - [ ] Keep HQ4's separate model-resource restrictions regardless of process
   mode.
+- [ ] Decide the unknown imported-model policy per ABI. An unverified custom
+  profile must not inherit the stable tier of a same-shaped known artifact.
+- [ ] Record process isolation and independent background as separate release
+  decisions. Failure of the latter must not force a qualified host policy back
+  in process.
 
 ### Phase 9B: Production cleanup
 
@@ -842,23 +1095,32 @@ and modern Android FGS policy.
   ownership from the nonselected path.
 - [ ] Keep a test oracle for in-process correctness if production becomes
   remote, but do not expose automatic runtime fallback between hosts.
-- [ ] Remove internal process-mode controls from release UI.
+- [ ] Remove internal process-mode controls from release UI. User-visible
+  labels may describe experimental support or resource rejection, but users do
+  not select an unsafe host/session combination manually.
 - [ ] Update compatibility catalog evidence only after device reports are
   committed.
 - [ ] Update the main LiteRT roadmap, runtime documentation, release notes, and
   user-visible unsupported-device messages.
 - [ ] Verify ABI split APK and universal APK service/native-library inventory.
+- [ ] Pin the x86 LiteRT release URL/version, ELF identity, SHA-256, build
+  provenance, and CI smoke in the application release record whenever x86 is
+  not `Unsupported`.
 
 ### Phase 9C: Release gate
 
 - [ ] Repeat clean-install model acquisition, selection, separation, playback,
   cache management, backup/restore, and clear-cache recovery.
-- [ ] Repeat full-song and background smoke tests on every production-enabled
-  ABI.
+- [ ] Repeat full-song and every enabled run-class/background smoke on each
+  production-enabled ABI/backend/model scope, including the minimum tested
+  memory configuration for a resource-limited tier.
 - [ ] Verify no service, binder callback, session, file lock, notification, or
   wake lock remains after completion or cancellation.
 - [ ] Record the final app commit, protocol version, process policy, model
-  hashes, and device evidence.
+  hashes, x86 runtime artifact where applicable, support tier, and device/API
+  evidence scope.
+- [ ] Verify unsupported and out-of-scope combinations still fail before native
+  allocation with a stable user-facing reason.
 
 **Phase 9 exit:** process placement and background ownership are explicit
 production contracts, not incidental consequences of where a coroutine runs.
@@ -879,14 +1141,21 @@ Every report should identify:
 - app commit and dirty-tree state;
 - protocol and journal schema versions;
 - package, flavor, ABI, Android API, and device fingerprint;
+- support tier, release host policy, concrete host execution, session lifetime,
+  and background owner by run class;
 - process mode and process generations;
 - main and inference PIDs;
 - model artifact SHA-256 and contract/profile identity;
+- LiteRT binary/ELF identity and SHA-256 when a custom packaged runtime is
+  under qualification;
 - concrete CPU/GPU backend and fallback;
 - source fixture and decode route;
 - cache key and run ID;
 - foreground-service and wake-lock timeline;
-- per-process and summed memory;
+- per-process, instrumentation, and summed memory; device total/available
+  memory; configured AVD memory; low-RAM classification; and LMKD evidence;
+- repetition number, cold/warm classification, A/B order, and the complete
+  sample set used for each median;
 - timings, thermal state, process deaths, and restart count; and
 - terminal state and output/cache validation.
 
@@ -901,6 +1170,8 @@ Every report should identify:
 | Main process dies | remote durable snapshot and reconnect protocol |
 | Remote process dies | atomic window commits and bounded recovery |
 | x86 model switch recreates in fragmented process | deterministic dedicated-process recycle |
+| x86 passes only on an oversized emulator | fixed 2/3/4 GiB AVD matrix, minimum passing scope, and emulator-only disclosure |
+| Custom x86 runtime drifts from its build source | pinned release, ELF/hash verification, provenance, and CI smoke |
 | Two foreground owners drift | explicit ownership handoff and one active processing lease |
 | Screen-off stalls | inference-owned bounded partial wake lock |
 | FGS start is denied | typed deferred state, no retry loop |
@@ -922,9 +1193,18 @@ These decisions guide implementation but remain subject to the phase gates:
 - Keep one serialized session per inference process generation.
 - Recycle pure-x86 inference process on model identity change or fatal native
   state.
+- Keep non-x86 sessions single-use during the first host-placement comparison;
+  test residency only as a separate optimization after the host passes.
+- Treat pure x86 as an `Experimental + RemoteRequired` candidate for exact
+  9662, not as supported, until Phase 4/5/8/9 gates pass. KARA and every other
+  model retain independent evidence tiers.
 - Test bound isolation before adding a second foreground service.
 - Make the inference process own foreground and wake-lock state only in the
   independent-background experiment.
+- Make only explicit manual full-song work eligible for the first independent
+  foreground prototype; keep playback-demand and prefetch client-bound.
+- Allow Phase 5 to accept process isolation independently of whether later
+  independent background execution is accepted.
 - Treat all ABI process placement as evidence-driven.
 - Never modify current window-decoding policy as part of process migration.
 
@@ -932,6 +1212,11 @@ These decisions guide implementation but remain subject to the phase gates:
 
 - Whether armeabi-v7a should use remote execution by default.
 - Whether arm64/x86_64 reliability gains justify active total-memory overhead.
+- Whether non-x86 CPU or GPU sessions should ever remain resident after a run.
+- Whether pure x86 can pass a useful minimum-memory scope repeatedly enough for
+  `Experimental` or `Supported`, given emulator-only device evidence.
+- Whether unknown imported models may be activated on x86 and, if so, what
+  explicit unverified-resource flow contains their failure.
 - Whether GPU Auto remains stable in a service process on both Samsung devices.
 - Whether the service should retain an idle same-model session after pause.
 - Which bounded restart mechanism is reliable across API 26 through target 36.
@@ -940,6 +1225,8 @@ These decisions guide implementation but remain subject to the phase gates:
   playback controls.
 - Whether background auto-prefetch can start or promote the service reliably
   under modern FGS restrictions.
+- Whether playback-demand windows or prefetch should ever become independently
+  owned after the manual full-song path is qualified.
 - Whether independent background completion is worth its wake-lock, quota,
   battery, and OEM-policy cost.
 
@@ -947,14 +1234,17 @@ These decisions guide implementation but remain subject to the phase gates:
 
 This roadmap is complete only when:
 
-1. pure x86 is either repeatably supported through a documented remote-process
-   policy or explicitly retained as unsupported;
-2. every other ABI has an evidence-backed process-placement decision;
+1. pure x86 has an explicit support tier, model/resource scope, minimum tested
+   memory, binary provenance, and remote-process policy, or remains
+   unsupported;
+2. every other ABI/backend has an evidence-backed release host policy,
+   concrete host execution, and session-lifetime decision;
 3. independent background execution is either qualified or explicitly
-   rejected separately from process isolation;
+   rejected per run class, separately from process isolation;
 4. source decode and output behavior remain unchanged;
 5. playback survives remote failures;
 6. cache ownership and recovery are process-safe;
 7. foreground-service and wake-lock ownership are singular and bounded; and
-8. the final policy is reflected in catalog evidence and release
-   documentation.
+8. the final support tier, release host policy, concrete host execution,
+   session/background policy, model/resource scope, and evidence limitations
+   are reflected in catalog and release documentation.

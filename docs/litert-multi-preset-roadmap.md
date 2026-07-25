@@ -128,8 +128,10 @@ profiles are rejected for numerical parity and are not official presets.
 
 - LiteRT 2.1.5 inference for MDX two-stem models.
 - CPU execution on supported Android devices.
-- CPU execution on pure x86 through the separately built and audited
-  supplemental LiteRT runtime.
+- Packaging and validation of pure-x86 CPU execution through the separately
+  built and audited supplemental LiteRT runtime. User-visible x86 support,
+  model/resource scope, and minimum tested memory remain gated by the
+  inference-process roadmap.
 - GPU execution when the LiteRT GPU backend initializes and runs successfully.
 - Automatic GPU-to-CPU fallback for a single separation session.
 - Multiple official TFLite presets installed side by side.
@@ -550,8 +552,12 @@ the current x86 contract and must not become x86-selectable without a new
 artifact/runtime review and explicit memory validation.
 
 Arm64 devices equivalent to the tested S10 and S25 remain the primary
-performance and GPU targets, but pure x86 CPU support for compatible presets
-is now an acceptance requirement rather than an unsupported-ABI fallback.
+performance and GPU targets. Pure x86 now has a validated runtime and exact
+9662/KARA numerical evidence, but that is not yet a product support promise.
+The companion inference-process roadmap must decide whether x86 remains
+`Unsupported` or becomes a narrowly scoped `Experimental`/`Supported`
+`RemoteRequired` tier after cache-safety, memory-configuration, process-recycle,
+binary-provenance, and release qualification.
 
 ### Provisional resource budgets
 
@@ -2610,9 +2616,9 @@ Every runtime or model change should run the narrowest applicable checks:
 | Audio | Full-length source, digital output joins/timestamps, and representative listening for every model requesting selection; short-fixture or window parity alone is insufficient |
 | Cache | Canonical identity/key determinism, manifest v2 and relative-path validation, multiple models per song, profile revisions, deleted custom profile, partial stale/resume, read-only completed playback, FLAC promotion, entry leases, crash consistency, delete/cleanup, and system clear-cache recovery |
 | Persistence/Backup | Format/schema v1, key allowlists, pending active model, unknown fork payload, canonical/legacy priority, both package directions, and excluded model/cache/per-song data |
-| Lifecycle | Activity recreation, process restart, background worker continuation |
-| Device | Galaxy S10/S25 arm64 9662 CPU and eligible GPU evidence, CPU-only KARA promotion evidence, S10 armeabi-v7a CPU, official x86_64 CPU/runtime evidence without GPU promotion, API 26 pure x86 CPU for 9662/KARA, actual process-ABI evidence, and explicit HQ4 resource rejection |
-| Resource budgets | Model/runtime install size, peak PSS, graphics/native memory, thermal behavior, and target/hard-limit decisions |
+| Lifecycle | Activity recreation, process restart, background worker continuation, and the companion roadmap's independently qualified host/session/background policy |
+| Device | Galaxy S10/S25 arm64 9662 CPU and eligible GPU evidence, CPU-only KARA promotion evidence, S10 armeabi-v7a CPU, official x86_64 CPU/runtime evidence without GPU promotion, API 26 pure-x86 9662/KARA validation plus an explicit process support tier and emulator-only limitation, actual process-ABI evidence, and explicit HQ4 resource rejection |
+| Resource budgets | Model/runtime install size, peak and summed PSS, graphics/native memory, 32-bit VA gap, tested device/AVD memory scope, thermal behavior, and target/hard-limit decisions |
 | Native supply chain | Pinned source/toolchain, Release hash, ELF/JNI audit, checksums, notices, and GitHub provenance |
 | Packaging | Four ABI splits plus universal APK built separately from AndroidTest, one runtime per ABI, native inventory, and APK/install size |
 | Localization | Fork string completeness and terminology review |

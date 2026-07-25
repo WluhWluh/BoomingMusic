@@ -155,7 +155,8 @@ isolation, parity, and deterministic x86 process recycling first.
   backup.
 - Supported production ABIs can return to InProcess without changing model,
   contract, or cache formats.
-- Pure x86 remains unsupported unless Phase 3 passes.
+- Pure x86 remains unsupported. Passing Phase 3 is necessary but not
+  sufficient; cache safety, memory scope, all-ABI policy, and release
+  qualification remain later gates.
 - A failed remote execution terminates visibly; it never retries through
   InProcess against the same cache entry.
-
