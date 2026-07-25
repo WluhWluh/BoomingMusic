@@ -103,6 +103,16 @@ VA gap was about 372.8 GiB. Instrumentation/main co-location and remote
 No decoder, MP3 fallback threshold, overlap calibration, join placement, or
 listening-derived window policy changed in Phase 5A.
 
+## Full CPU checkpoint
+
+The complete non-x86 CPU matrix subsequently passed on S10 arm32, S10 arm64,
+S25 arm64, and API 37 x86_64. During arm32 validation, paired report schema v1
+was found to compare immediate bind-time PSS with the two-second settled PSS
+gate. Schema v2 now records both values and preserves the original 96 MiB
+limit. The rejected v1 arm32 result and the successful corrected repeat remain
+distinct evidence. See
+[`cpu-host-matrix-2026-07-25.md`](cpu-host-matrix-2026-07-25.md).
+
 ## Raw ignored evidence
 
 | Report | Bytes | SHA-256 |

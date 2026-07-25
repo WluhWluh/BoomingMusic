@@ -757,21 +757,23 @@ host policy or full-song performance result. See
 
 ### Phase 5B: CPU host-placement matrix
 
-- [ ] Compare `InProcess + SingleUse` with `BoundRemote + SingleUse` on S10
-  arm32, S10 arm64, S25 arm64, and x86_64. Compare pure x86's unsupported
-  baseline only with `BoundRemote + ResidentUntilProcessExit`.
-- [ ] Test 9662 everywhere it is currently eligible and KARA only where its
-  exact CPU contract and support tier permit it.
-- [ ] Record main, remote, instrumentation, and summed PSS/USS/RSS; native,
+- [x] Compare `InProcess + SingleUse` with `BoundRemote + SingleUse` on S10
+  arm32, S10 arm64, S25 arm64, and x86_64.
+- [ ] Compare pure x86's unsupported baseline only with
+  `BoundRemote + ResidentUntilProcessExit`.
+- [x] Test 9662 on every eligible non-x86 CPU target. Test KARA and pure x86
+  only where their exact CPU contract and support tier permit it.
+- [x] Record main, remote, instrumentation, and summed PSS/USS/RSS; native,
   graphics, and Java memory; `VmSize`/`VmPeak`; largest free VA gap;
   `oom_score_adj`; and mapped-region count.
-- [ ] Record idle-process overhead, bind/start latency, model setup,
-  first/reused inference, first-ready-window, full-song throughput, process CPU
-  time, memory return after process exit, and time until the old PID and its
-  mappings disappear.
-- [ ] Measure original-playback position drift, audio underruns, MediaSession
-  continuity, and scheduler contention while separation uses its production
-  thread policy.
+- [ ] Add dedicated bind/start, model-setup, and first/reused-inference timing.
+  The completed non-x86 matrix already records idle-process overhead,
+  first-ready-window, full-song throughput, process CPU time, and time until
+  the old PID and its mappings disappear.
+- [ ] Add explicit audio-underrun and scheduler-contention counters. The
+  completed non-x86 matrix already records original-playback position drift,
+  MediaSession continuity, and unexpected player events while separation uses
+  its production thread policy.
 - [ ] Run pure-x86 9662 on 2, 3, and 4 GiB AVD memory configurations, with at
   least three cold process generations per configuration. Treat allocation
   failure, LMKD pressure, or crossing the VA-gap floor as a resource rejection,
@@ -827,6 +829,21 @@ passing limit was transient, the full 2/3/4 GiB matrix and paired host study
 remain incomplete, and normal builds still fail closed. Pure x86 therefore
 remains `Unsupported`; no catalog or production host policy changes in this
 checkpoint.
+
+Non-x86 CPU checkpoint (2026-07-25): complete three-pair full-WAV matrices
+passed on S10 arm32, S10 arm64, S25 arm64, and API 37 x86_64. Bound remote
+added 17.7-25.4 MiB median summed peak PSS and stayed within every performance,
+output, process-exit, and playback gate. Arm32 reduced median peak main-process
+PSS from 755.5 MiB to 150.1 MiB while retaining a 464.2 MiB minimum remote VA
+gap, so it advances to the Phase 5C resident-session experiment. Arm64 and
+x86_64 remain in process pending a concrete reliability benefit.
+
+Paired report schema v2 corrected a measurement mismatch without changing the
+frozen 96 MiB limit: it gates PSS sampled after the established two-second
+idle settle, while retaining immediate bind-time PSS separately. The first
+arm32 full run remains recorded as rejected under the incorrect v1 field; the
+corrected short and full repeats passed. See
+`docs/validation/litert-inference-process/phase5/cpu-host-matrix-2026-07-25.md`.
 
 ### Phase 5C: Session-lifetime matrix
 
