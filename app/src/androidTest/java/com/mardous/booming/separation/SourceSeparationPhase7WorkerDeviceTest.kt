@@ -28,6 +28,11 @@ import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.PlaybackService
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultAction
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultControl
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultHit
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultInjection
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultStage
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
@@ -38,6 +43,9 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheValidationResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLockOwner
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLockPurpose
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
@@ -68,6 +76,8 @@ import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePo
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcRecycleReason
+import com.mardous.booming.separation.process.ipc.SourceSeparationIpcErrorCategory
+import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteExecutionException
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteConnectionState
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteRecycleTimeoutException
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCallbacks
@@ -1632,6 +1642,302 @@ class SourceSeparationPhase7WorkerDeviceTest {
     }
 
     @Test
+    fun validateProcessCacheSafetyMatrix() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val processCacheScope = arguments.getString(ARG_PROCESS_CACHE_SCOPE) ?: "all"
+        require(processCacheScope in setOf("all", "death", "cache-clear")) {
+            "Unsupported process-cache matrix scope: $processCacheScope"
+        }
+        require(MdxX86ProcessValidationOverride.buildEnabled) {
+            "The process-cache matrix requires the explicit x86 validation build."
+        }
+        val report = baseReport(context, runId, arguments)
+        val cases = JSONArray()
+        var mediaUri: Uri? = null
+        var playbackMediaUri: Uri? = null
+        var playback: OriginalAudioPlaybackProbe? = null
+        var host: BoundRemoteSourceSeparationExecutionHost? = null
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            mediaUri = registerSourceInMediaStore(context, sourcePath, runId)
+            val source = resolveMediaStoreSong(context, mediaUri, sourcePath)
+            val playbackSourcePath = arguments.requiredString(ARG_CURRENT_SOURCE_PATH)
+            playbackMediaUri = registerSourceInMediaStore(
+                context,
+                playbackSourcePath,
+                "$runId-playback",
+            )
+            val playbackSource = resolveMediaStoreSong(
+                context,
+                playbackMediaUri,
+                playbackSourcePath,
+            )
+            val playbackProbe = startOriginalAudioPlayback(
+                context,
+                playbackSource,
+                "process-cache matrix playback",
+            ).also { playback = it }
+
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            check(preferences.edit()
+                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
+                .commit()
+            ) { "Could not persist process-cache matrix preferences." }
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            assertExpectedActivePreset(arguments)
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val cacheRoot = store.root().directory
+
+            fun createRuntime(): SourceSeparationRuntimeFacade = createCpuRuntimeFacade(
+                context = context,
+                preferences = preferences,
+                presetRepository = presetRepository,
+                backendMode = BackendMode.Auto,
+                processorCount = null,
+                executionHostMode = Phase7ExecutionHostMode.BoundRemote,
+                boundRemoteHostSink = { host = it },
+            )
+
+            var runtime = createRuntime()
+            var runtimeSong = (runtime.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The process-cache matrix source could not be admitted.")
+            val cacheKey = runtimeSong.cacheKey
+            val deathCases = listOf(
+                Triple(SourceSeparationCacheFaultStage.Decode,
+                    SourceSeparationCacheFaultAction.Barrier, 2),
+                Triple(SourceSeparationCacheFaultStage.Dsp,
+                    SourceSeparationCacheFaultAction.Barrier, 2),
+                Triple(SourceSeparationCacheFaultStage.NativeInvocation,
+                    SourceSeparationCacheFaultAction.Notify, 2),
+                Triple(SourceSeparationCacheFaultStage.OutputPublish,
+                    SourceSeparationCacheFaultAction.Barrier, 3),
+                Triple(SourceSeparationCacheFaultStage.JournalCommit,
+                    SourceSeparationCacheFaultAction.Barrier, 5),
+                Triple(SourceSeparationCacheFaultStage.TerminalCommit,
+                    SourceSeparationCacheFaultAction.Barrier, 1),
+            )
+
+            deathCases.takeIf { processCacheScope != "cache-clear" }
+                .orEmpty()
+                .forEach { (stage, action, occurrence) ->
+                repeat(PHASE4_DEATH_REPETITIONS) { repetition ->
+                    clearExactCacheEntry(runtime, cacheKey)
+                    val token = "${stage.name.lowercase()}-${repetition + 1}"
+                    SourceSeparationCacheFaultInjection.arm(
+                        cacheRoot,
+                        SourceSeparationCacheFaultControl(
+                            token = token,
+                            stage = stage,
+                            action = action,
+                            occurrence = occurrence,
+                        ),
+                    )
+                    val executionError = AtomicReference<Throwable?>()
+                    val executionResult = AtomicReference<SourceSeparationModelAwareEngineResult?>()
+                    val finished = CountDownLatch(1)
+                    val executionThread = Thread({
+                        try {
+                            executionResult.set(runtime.separate(
+                                song = runtimeSong,
+                                playbackReadyWindowCountProvider = { 1 },
+                                windowDecodeEnabled = true,
+                            ))
+                        } catch (error: Throwable) {
+                            executionError.set(error)
+                        } finally {
+                            finished.countDown()
+                        }
+                    }, "Phase4CacheDeath-$token").apply { start() }
+
+                    val hit = waitForCacheFaultHit(cacheRoot, token)
+                    val activeHost = requireNotNull(host)
+                    assertEquals(activeHost.connectionDiagnostics.pid, hit.pid)
+                    assertNotEquals(Process.myPid(), hit.pid)
+                    runtime.entries()
+                    runtime.cacheStatus(runtimeSong)
+                    assertEquals(
+                        SourceSeparationCacheMutationResult.Busy,
+                        runtime.delete(cacheKey),
+                    )
+                    val protectedOtherEntries = runtime.entries()
+                        .map { it.cacheKey }
+                        .filterNot { it == cacheKey }
+                        .toSet()
+                    assertEquals(
+                        0,
+                        runtime.prune(
+                            partialLimit = 0,
+                            completedLimit = Int.MAX_VALUE,
+                            protectedCacheKeys = protectedOtherEntries,
+                        ).deletedEntries,
+                    )
+                    assertFalse(runtime.writeBlend(runtimeSong, 0.25f))
+                    assertTrue(runtime.promote(cacheKey) is
+                        SourceSeparationCacheFlacPromotionResult.Busy)
+                    assertTrue(runtime.hydrate(cacheKey) is
+                        SourceSeparationCacheHydrationResult.Busy)
+                    val journalBeforeDeath = store.readRunJournal(cacheKey)
+                    Process.killProcess(hit.pid)
+
+                    assertTrue(
+                        "Remote execution did not terminate after $stage kill.",
+                        finished.await(PHASE4_EXECUTION_TIMEOUT_MS, TimeUnit.MILLISECONDS),
+                    )
+                    assertTrue(
+                        "Remote execution unexpectedly completed at $stage: " +
+                            executionResult.get(),
+                        executionError.get() != null,
+                    )
+                    SourceSeparationCacheFaultInjection.clear(cacheRoot)
+                    val lockReleaseMs = waitForKernelCacheLockRelease(store, cacheKey)
+                    playbackProbe.assertContinuous("$stage-${repetition + 1}-death")
+
+                    activeHost.close()
+                    runtime = createRuntime()
+                    runtimeSong = (runtime.resolve(source) as?
+                        SourceSeparationRuntimeSongResolution.Ready)?.song
+                        ?: error("The process-cache resume source became unavailable.")
+                    val recovered = runtime.separate(
+                        song = runtimeSong,
+                        playbackReadyWindowCountProvider = { 1 },
+                        windowDecodeEnabled = true,
+                    )
+                    assertTrue(
+                        recovered is SourceSeparationModelAwareEngineResult.Completed ||
+                            recovered is SourceSeparationModelAwareEngineResult.AlreadyCompleted,
+                    )
+                    val journal = requireNotNull(store.readRunJournal(cacheKey))
+                    assertEquals(SourceSeparationCacheRunJournalLifecycle.Completed,
+                        journal.lifecycle)
+                    assertEquals(journal.committedSegments.size,
+                        journal.committedSegments.map { it.segmentIndex }.distinct().size)
+                    if (journalBeforeDeath != null) {
+                        assertTrue(journal.transitions.any {
+                            it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+                        })
+                    }
+                    val completion = requireNotNull(store.readManifest(cacheKey))
+                    assertEquals(
+                        SourceSeparationCacheValidationResult.Valid,
+                        store.validateCompletedEntry(completion),
+                    )
+                    playbackProbe.assertContinuous("$stage-${repetition + 1}-recovered")
+                    cases.put(JSONObject()
+                        .put("stage", stage.name)
+                        .put("repetition", repetition + 1)
+                        .put("action", action.name)
+                        .put("occurrence", occurrence)
+                        .put("killedPid", hit.pid)
+                        .put("lockReleaseMs", lockReleaseMs)
+                        .put("journalBeforeDeath", journalBeforeDeath != null)
+                        .put("finalSequence", journal.latestSequence)
+                        .put("committedSegments", journal.committedSegments.size)
+                    )
+                }
+            }
+
+            repeat(
+                if (processCacheScope != "death") PHASE4_CACHE_CLEAR_REPETITIONS else 0,
+            ) { repetition ->
+                clearExactCacheEntry(runtime, cacheKey)
+                val token = "cache-clear-${repetition + 1}"
+                SourceSeparationCacheFaultInjection.arm(
+                    cacheRoot,
+                    SourceSeparationCacheFaultControl(
+                        token = token,
+                        stage = SourceSeparationCacheFaultStage.Dsp,
+                        action = SourceSeparationCacheFaultAction.Barrier,
+                    ),
+                )
+                val executionError = AtomicReference<Throwable?>()
+                val finished = CountDownLatch(1)
+                Thread({
+                    try {
+                        runtime.separate(
+                            song = runtimeSong,
+                            playbackReadyWindowCountProvider = { 1 },
+                        )
+                    } catch (error: Throwable) {
+                        executionError.set(error)
+                    } finally {
+                        finished.countDown()
+                    }
+                }, "Phase4CacheClear-$token").start()
+                waitForCacheFaultHit(cacheRoot, token)
+                assertTrue(cacheRoot.deleteRecursively())
+                assertTrue(
+                    "Cache-clear run did not terminate.",
+                    finished.await(PHASE4_EXECUTION_TIMEOUT_MS, TimeUnit.MILLISECONDS),
+                )
+                val error = executionError.get()
+                assertTrue(error is SourceSeparationRemoteExecutionException)
+                val remoteError = error as SourceSeparationRemoteExecutionException
+                assertEquals(
+                    SourceSeparationIpcErrorCategory.CacheUnavailable,
+                    remoteError.remoteError.category,
+                )
+                assertFalse(store.entryDirectory(cacheKey).exists())
+                playbackProbe.assertContinuous("cache-clear-${repetition + 1}")
+                store.ensureLayout()
+                SourceSeparationCacheFaultInjection.clear(cacheRoot)
+                val recovered = runtime.separate(
+                    song = runtimeSong,
+                    playbackReadyWindowCountProvider = { 1 },
+                )
+                assertTrue(recovered is SourceSeparationModelAwareEngineResult.Completed)
+                cases.put(JSONObject()
+                    .put("stage", "CacheClear")
+                    .put("repetition", repetition + 1)
+                    .put("typedOutcome", remoteError.remoteError.category.name)
+                )
+            }
+
+            report.put("status", "passed")
+            report.put("processCacheScope", processCacheScope)
+            report.put("processCacheCases", cases)
+            report.put("playbackContinuity", playbackProbe.report())
+            report.put("cache", report.getJSONObject("cache")
+                .put("cacheKey", cacheKey)
+                .put("deathCaseCount", if (processCacheScope != "cache-clear") {
+                    deathCases.size * PHASE4_DEATH_REPETITIONS
+                } else {
+                    0
+                })
+                .put("cacheClearCaseCount", if (processCacheScope != "death") {
+                    PHASE4_CACHE_CLEAR_REPETITIONS
+                } else {
+                    0
+                })
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            val cacheRoot = runCatching {
+                get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+                    .root().directory
+            }.getOrNull()
+            cacheRoot?.let(SourceSeparationCacheFaultInjection::clear)
+            host?.close()
+            playback?.close()
+            mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+            playbackMediaUri?.let {
+                runCatching { context.contentResolver.delete(it, null, null) }
+            }
+            writeReport(context, runId, "process-cache-matrix", report)
+        }
+    }
+
+    @Test
     fun validateWorkerLifecycle() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -3164,6 +3470,43 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
     }
 
+    private fun waitForCacheFaultHit(
+        root: File,
+        token: String,
+    ): SourceSeparationCacheFaultHit {
+        val deadline = SystemClock.elapsedRealtime() + PHASE4_FAULT_HIT_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            SourceSeparationCacheFaultInjection.readHit(root)
+                ?.takeIf { it.token == token }
+                ?.let { return it }
+            SystemClock.sleep(PHASE4_FAULT_POLL_INTERVAL_MS)
+        }
+        error("Cache fault injection did not reach token $token.")
+    }
+
+    private fun waitForKernelCacheLockRelease(
+        store: SourceSeparationCacheStore,
+        cacheKey: String,
+    ): Long {
+        val startedAt = SystemClock.elapsedRealtime()
+        val deadline = startedAt + PHASE4_LOCK_RELEASE_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val lease = store.entryLocks().tryAcquire(
+                cacheKey,
+                SourceSeparationCacheLockOwner(
+                    purpose = SourceSeparationCacheLockPurpose.Other,
+                    pid = Process.myPid(),
+                ),
+            )
+            if (lease != null) {
+                lease.close()
+                return SystemClock.elapsedRealtime() - startedAt
+            }
+            SystemClock.sleep(PHASE4_FAULT_POLL_INTERVAL_MS)
+        }
+        error("Kernel cache lock was not released for $cacheKey.")
+    }
+
     private fun waitForReady(
         worker: SourceSeparationForegroundWorkerCoordinator,
         minimumReadyWindows: Int,
@@ -4364,6 +4707,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_SCREEN_OFF_AFTER_READY = "screenOffAfterReady"
         const val ARG_AUTO_FAILPOINT = "autoFailpoint"
         const val ARG_PROCESSOR_COUNT = "processorCount"
+        const val ARG_PROCESS_CACHE_SCOPE = "processCacheScope"
         const val ARG_XNNPACK_FLAGS = "xnnPackFlags"
         const val ARG_WINDOW_DECODE_ENABLED = "windowDecodeEnabled"
         const val ARG_PRESERVE_MEDIA_STORE_SOURCE = "preserveMediaStoreSource"
@@ -4381,6 +4725,12 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val PROCESS_MATRIX_LEASE_RELEASE_TIMEOUT_MS = 30_000L
         const val PROCESS_FAULT_RECYCLE_TIMEOUT_MS = 1L
         const val PROCESS_DEATH_TIMEOUT_MS = 10_000L
+        const val PHASE4_DEATH_REPETITIONS = 3
+        const val PHASE4_CACHE_CLEAR_REPETITIONS = 3
+        const val PHASE4_FAULT_HIT_TIMEOUT_MS = 120_000L
+        const val PHASE4_EXECUTION_TIMEOUT_MS = 60_000L
+        const val PHASE4_LOCK_RELEASE_TIMEOUT_MS = 30_000L
+        const val PHASE4_FAULT_POLL_INTERVAL_MS = 20L
         val PROCESS_MATRIX_SNAPSHOT_CYCLES = setOf(2, 10, 20)
         const val ARG_FIXTURE_ID = "fixtureId"
         const val ARG_FIXTURE_FILE_NAME = "fixtureFileName"
