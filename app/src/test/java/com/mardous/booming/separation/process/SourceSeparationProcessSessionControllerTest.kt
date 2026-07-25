@@ -76,6 +76,36 @@ class SourceSeparationProcessSessionControllerTest {
     }
 
     @Test
+    fun `resident arm32 accepts only its known good CPU record`() {
+        val arm32Profile = profile.copy(
+            runtimeCompatibility = profile.runtimeCompatibility.map { record ->
+                record.copy(abi = MdxRuntimeAbi.ArmeabiV7a)
+            },
+        )
+        val arm32Artifact = artifact(arm32Profile)
+        val factory = FakeFactory()
+        val controller = residentController(factory, MdxRuntimeAbi.ArmeabiV7a)
+
+        controller.beginExecution("run-arm32")
+        controller.acquire(arm32Artifact, arm32Profile, settings).close()
+        controller.finishExecution("run-arm32", null)
+
+        assertEquals(SourceSeparationProcessSessionState.Resident,
+            controller.diagnostics().state)
+        assertEquals(1, factory.createCount)
+    }
+
+    @Test
+    fun `resident authority rejects another ABI compatibility record`() {
+        val controller = residentController(FakeFactory(), MdxRuntimeAbi.ArmeabiV7a)
+        controller.beginExecution("run-wrong-abi")
+
+        assertThrows(IllegalStateException::class.java) {
+            controller.acquire(artifact, profile, settings)
+        }
+    }
+
+    @Test
     fun `resident key mismatch requires recycle without replacing native state`() {
         val factory = FakeFactory()
         val controller = residentController(factory)
@@ -307,10 +337,14 @@ class SourceSeparationProcessSessionControllerTest {
         assertEquals("token", diagnostics.recycleToken)
     }
 
-    private fun residentController(factory: FakeFactory) =
+    private fun residentController(
+        factory: FakeFactory,
+        runtimeAbi: MdxRuntimeAbi = MdxRuntimeAbi.X86,
+    ) =
         SourceSeparationProcessSessionController(
             factory,
             SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit,
+            runtimeAbi = runtimeAbi,
             sessionIdFactory = { "session-1" },
         )
 

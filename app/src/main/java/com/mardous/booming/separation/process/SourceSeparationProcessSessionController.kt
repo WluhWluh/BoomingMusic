@@ -29,6 +29,7 @@ internal enum class SourceSeparationProcessSessionOwnership {
 internal class SourceSeparationProcessSessionController(
     private val factory: MdxInferenceSessionFactory,
     private val ownership: SourceSeparationProcessSessionOwnership,
+    private val runtimeAbi: MdxRuntimeAbi? = null,
     private val sessionIdFactory: () -> String = { UUID.randomUUID().toString() },
 ) : MdxInferenceSessionProvider, AutoCloseable {
     private var state = SourceSeparationProcessSessionState.Empty
@@ -87,7 +88,7 @@ internal class SourceSeparationProcessSessionController(
         }
         profile.validateArtifact(artifact)
         if (ownership == SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit) {
-            requirePureX86CpuProfile(profile)
+            requireResidentCpuProfile(profile)
         }
         val requestedKey = SessionKey.create(factory, artifact, profile, runtimeSettings)
         when (state) {
@@ -236,28 +237,31 @@ internal class SourceSeparationProcessSessionController(
         state = SourceSeparationProcessSessionState.Poisoned
     }
 
-    private fun requirePureX86CpuProfile(profile: MdxExecutionProfile) {
+    private fun requireResidentCpuProfile(profile: MdxExecutionProfile) {
         check(factory.backend == MdxInferenceBackend.LiteRtAuto ||
             factory.backend == MdxInferenceBackend.LiteRtCpu
         ) {
-            "Resident pure-x86 validation requires Auto or CPU inference."
+            "Resident process validation requires Auto or CPU inference."
+        }
+        val requiredAbi = checkNotNull(runtimeAbi) {
+            "Resident process validation requires its exact runtime ABI."
         }
         val cpuRecord = profile.runtimeCompatibility.singleOrNull { record ->
-            record.abi == MdxRuntimeAbi.X86 &&
+            record.abi == requiredAbi &&
                 record.backend == MdxInferenceBackend.LiteRtCpu &&
                 record.profileId == MdxRuntimeProfiles.CPU_DEFAULT_FP32 &&
                 record.precision == MdxRuntimePrecision.Fp32
         }
         check(cpuRecord?.status == MdxRuntimeSupportStatus.KnownGood) {
-            "Resident pure-x86 validation requires its effective CPU-only record."
+            "Resident process validation requires its exact KnownGood CPU record."
         }
         check(profile.runtimeCompatibility.none { record ->
-            record.abi == MdxRuntimeAbi.X86 &&
+            record.abi == requiredAbi &&
                 record.backend == MdxInferenceBackend.LiteRtGpu &&
                 record.status != MdxRuntimeSupportStatus.Unsupported &&
                 record.status != MdxRuntimeSupportStatus.Rejected
         }) {
-            "Resident pure-x86 validation cannot accept a GPU-capable profile."
+            "Resident process validation cannot accept a GPU-capable profile."
         }
     }
 

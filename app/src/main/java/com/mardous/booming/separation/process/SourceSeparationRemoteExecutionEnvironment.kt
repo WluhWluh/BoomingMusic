@@ -294,6 +294,7 @@ private fun createRemoteSessionControllerProvider(
             SourceSeparationProcessSessionController(
                 factory = createAutoLiteRtSessionFactory(context),
                 ownership = ownership,
+                runtimeAbi = runtimeAbi,
             )
         },
         cpuControllerFactory = {
@@ -302,6 +303,7 @@ private fun createRemoteSessionControllerProvider(
                     compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
                 ),
                 ownership = ownership,
+                runtimeAbi = runtimeAbi,
             )
         },
     )
