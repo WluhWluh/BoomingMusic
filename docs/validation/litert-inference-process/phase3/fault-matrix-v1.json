@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "litert-inference-process-phase3-fault-v1",
+  "status": "passed",
+  "testedAppCommit": "ef61357b9fd2626d7121405826d542bae5e841c2",
+  "target": {
+    "id": "api26-x86",
+    "androidApi": 26,
+    "processAbi": "x86",
+    "bitness": 32
+  },
+  "controllerUnitCoverage": {
+    "preAcquisitionValidationFailure": "healthy",
+    "nativeCreationFailure": "poisoned",
+    "nativeInvocationFailure": "poisoned",
+    "nonFiniteOutput": "poisoned",
+    "postAcquisitionFailure": "poisoned",
+    "cancellation": "healthy",
+    "callbackDeliveryFailure": "healthy"
+  },
+  "deviceMatrix": {
+    "callbackDelivery": {
+      "cacheState": "Failed",
+      "nativeSessionCreationCount": 1,
+      "failureInvocationCount": 2,
+      "retryInvocationCount": 5,
+      "clientRebound": true,
+      "retryUsedSameSession": true
+    },
+    "forcedRecycleTimeout": {
+      "timeoutMs": 1,
+      "binderDeathExpected": false,
+      "freshGenerationRecovered": true
+    },
+    "unexpectedIdleDeath": {
+      "classifiedUnexpected": true,
+      "freshGenerationRecovered": true
+    }
+  },
+  "deferred": {
+    "activeRunNativeCrashInjection": "phase4",
+    "reason": "A true process death during a cache-file transition requires the Phase 4 journal and cross-process lease before recovery can be asserted safely."
+  },
+  "rawEvidence": {
+    "fileName": "phase3e-x86-process-fault-matrix-v3-clean-head-process-fault-matrix.json",
+    "byteSize": 4627,
+    "sha256": "e161586a6207500923c35bcbd593192fe572a5add9d0caaab51b5428074eb63b"
+  }
+}

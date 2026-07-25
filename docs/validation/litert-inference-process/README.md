@@ -21,6 +21,8 @@ selection, MP3 handling, output frames, and join placement.
 - `phase1/`: in-process host-boundary parity and device-validation summary.
 - `phase2/`: bound remote-process startup, IPC, output-parity, device, and
   background-semantics summary.
+- `phase3/`: pure-x86 resident-session, whole-process recycle, playback, and
+  fault-classification evidence.
 - Later phase directories use
   `<phase>/<yyyy-mm-dd>/<target>/<run-id>.json`.
 

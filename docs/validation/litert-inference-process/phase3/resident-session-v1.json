@@ -1,0 +1,121 @@
+{
+  "schemaVersion": "litert-inference-process-phase3-resident-v1",
+  "status": "passed",
+  "testedAppCommit": "ef61357b9fd2626d7121405826d542bae5e841c2",
+  "build": {
+    "flavor": "githubDebug",
+    "x86ProcessValidation": true,
+    "appApkSha256": "9cfb0239bba99af58efb4734caf5a9ae7bc871a9e0641b1cd63441613831c761",
+    "testApkSha256": "8ac87a0afbe4419d46766e99569d61871b94467c6eebc9e79c66da528fe4a28d"
+  },
+  "target": {
+    "id": "api26-x86",
+    "model": "Android SDK built for x86",
+    "androidApi": 26,
+    "processAbi": "x86",
+    "bitness": 32,
+    "availableProcessors": 6
+  },
+  "compatibility": {
+    "normalBuildDecision": "Unsupported",
+    "effectiveDecision": "KnownGood",
+    "overrideScope": "exact-pinned-androidtest-only",
+    "productionEnabled": false
+  },
+  "runtime": {
+    "executionHost": "BoundRemote",
+    "backend": "LiteRtCpu",
+    "litertVersion": "2.1.5",
+    "cpuThreads": 4
+  },
+  "model": {
+    "modelId": "uvr_mdxnet_3_9662",
+    "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "contractSchemaVersion": 2
+  },
+  "fixtures": {
+    "bounded": {
+      "fixtureId": "coast_town_short_wav",
+      "sha256": "0fa980cace732c47647043d1a5fce3589e54771ca3574b003f152acfa6ceec96",
+      "durationUs": 12000000
+    },
+    "fullSongBookend": {
+      "fixtureId": "coast_town_full_wav",
+      "sha256": "e845e52aeeeb69be702d3a28d756eaf7a3137dbe5338ea50fb0ac3d8c4f9bd89",
+      "durationUs": 273699093
+    }
+  },
+  "matrix": {
+    "cycleCount": 20,
+    "scenarioCounts": {
+      "completion": 5,
+      "pauseResume": 5,
+      "pendingTailResume": 5,
+      "cancellation": 5
+    },
+    "processGeneration": 64243740419172,
+    "processStartTicks": 2265975,
+    "sessionId": "53ad05cc-a309-4398-bc63-beab70f8a61d",
+    "nativeSessionCreationCount": 1,
+    "invocationCount": 146,
+    "unexpectedBinderDeathCount": 0,
+    "memory": {
+      "maximumPssGrowthBytesCycle2To20": 67108864,
+      "actualPssGrowthBytesCycle2To20": -4497408,
+      "maximumMappedRegionGrowthCycle2To20": 256,
+      "actualMappedRegionGrowthCycle2To20": 10,
+      "minimumLargestFreeAddressGapBytes": 134217728,
+      "minimumObservedLargestFreeAddressGapBytes": 144646144,
+      "snapshots": [
+        {
+          "cycle": 2,
+          "pssBytes": 606635008,
+          "nativePssBytes": 508585984,
+          "mappedRegionCount": 1556,
+          "largestFreeAddressGapBytes": 158040064
+        },
+        {
+          "cycle": 10,
+          "pssBytes": 607277056,
+          "nativePssBytes": 508876800,
+          "mappedRegionCount": 1575,
+          "largestFreeAddressGapBytes": 148598784
+        },
+        {
+          "cycle": 20,
+          "pssBytes": 602137600,
+          "nativePssBytes": 509081600,
+          "mappedRegionCount": 1566,
+          "largestFreeAddressGapBytes": 144646144
+        }
+      ]
+    },
+    "fullSongBookends": {
+      "count": 2,
+      "sameSession": true,
+      "outputFrameCount": 12070130,
+      "windowCount": 48,
+      "vocalsWavSha256": "b35cfa1519cfc51305d86599619743ae6df58e4131d0270bd027fa530e9a1aef",
+      "instrumentalWavSha256": "cba869cdb1cc1f1be69c4f31f232026fdab9eaaae129f71574cb4e01d22fb95c"
+    },
+    "originalPlayback": {
+      "mediaIdentityPreserved": true,
+      "snapshotCount": 7,
+      "maximumAllowedPositionDriftMs": 1000,
+      "maximumObservedPositionDriftMs": 60,
+      "unexpectedEventCount": 0
+    },
+    "finalRecycle": {
+      "token": "phase3-matrix-recycle-0001",
+      "oldGeneration": 64243740419172,
+      "newGeneration": 40424503172732,
+      "expectedBinderDeath": true
+    }
+  },
+  "rawEvidence": {
+    "fileName": "phase3e-x86-9662-session-matrix-v7-playback-drift-process-matrix.json",
+    "byteSize": 18934,
+    "sha256": "ea1fe89792d6cb724f00c3fee1399bad6bc641851423ab4e1a49825d39df4dc5"
+  }
+}
