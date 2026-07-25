@@ -86,6 +86,7 @@ internal enum class SourceSeparationProcessSessionState {
 @Serializable
 internal data class SourceSeparationProcessSessionDiagnostics(
     val state: SourceSeparationProcessSessionState,
+    val backendPolicy: SourceSeparationExecutionBackendPolicy? = null,
     val sessionId: String? = null,
     val sessionKey: String? = null,
     val nativeSessionCreationCount: Int = 0,
