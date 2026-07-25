@@ -70,6 +70,7 @@ import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetS
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
+import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
@@ -131,11 +132,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val executionHostMode = Phase7ExecutionHostMode.parse(
             arguments.getString(ARG_EXECUTION_HOST_MODE),
         )
-        require(executionHostMode == Phase7ExecutionHostMode.InProcess ||
-            backendMode == BackendMode.Auto
-        ) {
-            "Bound-remote validation requires the production Auto backend."
-        }
         val autoFailpoint = Phase7AutoFailpoint.parse(arguments.getString(ARG_AUTO_FAILPOINT))
         require(autoFailpoint == Phase7AutoFailpoint.None || backendMode == BackendMode.Auto) {
             "Phase 7 Auto fault injection requires BackendMode=auto."
@@ -4627,6 +4623,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
             .put("session", processDiagnostics?.session?.let { session ->
                 JSONObject()
                     .put("state", session.state.name)
+                    .put(
+                        "backendPolicy",
+                        session.backendPolicy?.let { policy ->
+                            when (policy) {
+                                SourceSeparationExecutionBackendPolicy.Auto -> "auto"
+                                SourceSeparationExecutionBackendPolicy.Cpu -> "cpu"
+                            }
+                        } ?: JSONObject.NULL,
+                    )
                     .put("sessionId", session.sessionId ?: JSONObject.NULL)
                     .put("sessionKey", session.sessionKey ?: JSONObject.NULL)
                     .put("nativeSessionCreationCount", session.nativeSessionCreationCount)
@@ -4702,8 +4707,13 @@ class SourceSeparationPhase7WorkerDeviceTest {
         )
         val hydrator = get<SourceSeparationCacheHydrator>(SourceSeparationCacheHydrator::class.java)
         val engine = if (executionHostMode == Phase7ExecutionHostMode.BoundRemote) {
-            require(backendMode == BackendMode.Auto && sessionProviderFactoryOverride == null) {
-                "Bound-remote validation uses the production Auto runtime."
+            require(sessionProviderFactoryOverride == null) {
+                "Bound-remote validation does not support an injected session provider."
+            }
+            require(backendMode == BackendMode.Auto ||
+                (processorCount == null && xnnPackFlags == null)
+            ) {
+                "Bound-remote CPU validation uses the default production thread policy."
             }
             val host = BoundRemoteSourceSeparationExecutionHost(context.applicationContext)
                 .also(boundRemoteHostSink)
@@ -4712,6 +4722,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 presetRepository = presetRepository,
                 coordinator = runCoordinator,
                 executionHost = host,
+                executionBackendPolicy = backendMode.executionPolicy,
                 executionHostEventSink = executionHostEventSink,
             )
         } else {
@@ -4746,6 +4757,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(context),
                 coordinator = runCoordinator,
                 rangeExecutor = rangeExecutor,
+                executionBackendPolicy = backendMode.executionPolicy,
                 constructionGate = { true },
                 executionHostEventSink = executionHostEventSink,
             )
@@ -5509,9 +5521,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
     private enum class BackendMode(
         val argumentValue: String,
         val reportBackend: String,
+        val executionPolicy: SourceSeparationExecutionBackendPolicy,
     ) {
-        Cpu("cpu", "LiteRtCpu"),
-        Auto("auto", "LiteRtAuto"),
+        Cpu(
+            "cpu",
+            "LiteRtCpu",
+            SourceSeparationExecutionBackendPolicy.Cpu,
+        ),
+        Auto(
+            "auto",
+            "LiteRtAuto",
+            SourceSeparationExecutionBackendPolicy.Auto,
+        ),
         ;
 
         companion object {

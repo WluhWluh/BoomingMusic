@@ -11,6 +11,8 @@ param(
     [string]$SourceRepository = "",
     [string]$OutputRoot = "",
     [string]$RunPrefix = "phase5-host-pairs-v1",
+    [ValidateSet("cpu", "auto")]
+    [string]$BackendMode = "auto",
     [int]$PairCount = 3,
     [int]$CooldownSeconds = 15,
     [int]$ThermalWaitTimeoutSeconds = 600,
@@ -246,6 +248,9 @@ function Add-WorkerReport(
             sessionStateAfter = if ($null -ne $report.executionHost.session) {
                 [string]$report.executionHost.session.state
             } else { $null }
+            sessionBackendPolicy = if ($null -ne $report.executionHost.session) {
+                [string]$report.executionHost.session.backendPolicy
+            } else { $null }
             nativeSessionCreationCount = if ($null -ne $report.executionHost.session) {
                 [int]$report.executionHost.session.nativeSessionCreationCount
             } else { 0 }
@@ -312,6 +317,17 @@ function Test-Gates {
     }
     $reference = $runRecords[0]
     foreach ($record in $runRecords) {
+        $expectedBackendRequest = if ($BackendMode -eq "cpu") {
+            "LiteRtCpu"
+        } else {
+            "LiteRtAuto"
+        }
+        Require-Equal $expectedBackendRequest $record.execution.backendRequested `
+            "$($record.runId) backend request"
+        if ($BackendMode -eq "cpu") {
+            Require-Equal "LiteRtCpu" $record.execution.backendUsed `
+                "$($record.runId) concrete CPU backend"
+        }
         foreach ($field in @(
             "appCommit", "appApkSha256", "testApkSha256", "catalogSha256",
             "artifactSha256", "contractId", "fixtureSha256", "cacheKey"
@@ -343,6 +359,8 @@ function Test-Gates {
             throw "$($record.runId) failed the main Java heap admission gate."
         }
         if ($record.hostMode -eq "bound-remote") {
+            Require-Equal $BackendMode $record.execution.sessionBackendPolicy `
+                "$($record.runId) remote descriptor backend policy"
             if ($record.execution.sessionStateAfter -ne "Empty" -or
                     $record.execution.nativeSessionCreationCount -ne 1) {
                 throw "$($record.runId) did not use the frozen non-x86 SingleUse policy."
@@ -435,13 +453,13 @@ function Test-Gates {
 $comparison = $null
 try {
     if (-not $SkipAcquisition) {
-        $acquisitionId = "$RunPrefix-$safeSerial-$ProcessAbi-acquisition"
+        $acquisitionId = "$RunPrefix-$safeSerial-$ProcessAbi-$BackendMode-acquisition"
         $arguments = @{
             Serial = $Serial
             ProcessAbi = $ProcessAbi
             ModelId = $ModelId
             Stage = "acquisition"
-            BackendMode = "auto"
+            BackendMode = $BackendMode
             RunId = $acquisitionId
             OutputRoot = $OutputRoot
         }
@@ -468,14 +486,14 @@ try {
             $batteryStart = Get-BatteryState
             $hostMode = $order[$ordinal - 1]
             $hostLabel = $hostMode -replace '-', ''
-            $runId = "$RunPrefix-$safeSerial-$ProcessAbi-pair$pair-$ordinal-$hostLabel"
+            $runId = "$RunPrefix-$safeSerial-$ProcessAbi-$BackendMode-pair$pair-$ordinal-$hostLabel"
             Write-Host "Running $runId with $hostMode..."
             $arguments = @{
                 Serial = $Serial
                 ProcessAbi = $ProcessAbi
                 ModelId = $ModelId
                 Stage = "worker"
-                BackendMode = "auto"
+                BackendMode = $BackendMode
                 ExecutionHostMode = $hostMode
                 KeepAppData = $true
                 SourcePath = $sourcePath
@@ -511,6 +529,7 @@ try {
         thresholdsVersion = [string]$thresholds.schemaVersion
         modelId = $ModelId
         fixtureId = $FixtureId
+        backendMode = $BackendMode
         pairCount = $PairCount
         device = [ordered]@{
             serial = $Serial
@@ -532,7 +551,7 @@ try {
         runs = @($runRecords)
     }
     $summaryPath = Join-Path $deviceDirectory `
-        "$RunPrefix-$safeSerial-$ProcessAbi-summary.json"
+        "$RunPrefix-$safeSerial-$ProcessAbi-$BackendMode-summary.json"
     $summary | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $summaryPath -Encoding utf8
     Write-Host "Saved paired-host summary to $summaryPath"
 }

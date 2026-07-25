@@ -36,7 +36,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v15",
+    [string]$RunnerRevision = "phase7-runner-v16",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet("in-process", "bound-remote")]
@@ -160,10 +160,12 @@ if ($BackendMode -eq "auto" -and ($ProcessorCount -gt 0 -or $XnnPackFlags -ge 0)
 if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "worker")) {
     throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
 }
+$boundRemoteBackendSupported = $BackendMode -eq "auto" -or
+    ($Stage -eq "worker" -and $BackendMode -eq "cpu" -and -not $X86ProcessValidation)
 if ($ExecutionHostMode -eq "bound-remote" -and
         ($Stage -notin @("worker", "background", "process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-matrix", "process-cache-race-matrix", "process-main-death") -or
-        $BackendMode -ne "auto" -or $AutoFailpoint -ne "none")) {
-    throw "BoundRemote requires a supported process stage, BackendMode=auto, and AutoFailpoint=none."
+        -not $boundRemoteBackendSupported -or $AutoFailpoint -ne "none")) {
+    throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
 }
 if ($Stage -in @("process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-race-matrix", "process-main-death") -and
         (-not $X86ProcessValidation -or $ProcessAbi -ne "x86" -or
