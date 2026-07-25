@@ -2,6 +2,13 @@ package com.mardous.booming.separation.process
 
 import com.mardous.booming.BuildConfig
 import com.mardous.booming.separation.model.MdxRuntimeAbi
+import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
+
+internal object SourceSeparationResidentProcessValidation {
+    val buildEnabled: Boolean
+        get() = MdxX86ProcessValidationOverride.buildEnabled ||
+            SourceSeparationArm32ResidentValidation.buildEnabled
+}
 
 /** Compile-time-only session policy for the Phase 5 arm32 resident experiment. */
 internal object SourceSeparationArm32ResidentValidation {

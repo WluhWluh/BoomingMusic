@@ -10,7 +10,6 @@ import com.mardous.booming.AppProcessResolver
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.v2.SourceSeparationExactCacheModelException
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
-import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.process.InProcessSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
@@ -26,6 +25,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLostExceptio
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionControl
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionEnvironment
 import com.mardous.booming.separation.process.SourceSeparationRemoteSourceUnavailableException
+import com.mardous.booming.separation.process.SourceSeparationResidentProcessValidation
 import com.mardous.booming.separation.process.toExecutionCompletion
 import java.util.LinkedHashSet
 import java.util.concurrent.CancellationException
@@ -58,8 +58,8 @@ internal class SourceSeparationExecutionService : Service() {
                 binder
             }
             ACTION_RETAIN_WITHOUT_CLIENT -> {
-                check(MdxX86ProcessValidationOverride.buildEnabled) {
-                    "Remote warm retention is unavailable outside x86 validation builds."
+                check(SourceSeparationResidentProcessValidation.buildEnabled) {
+                    "Remote warm retention requires a resident validation build."
                 }
                 retentionBinder
             }

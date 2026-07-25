@@ -10,7 +10,7 @@ import android.os.Looper
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
-import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
+import com.mardous.booming.separation.process.SourceSeparationResidentProcessValidation
 
 /** Keeps only an idle validation process bound while execution hosts are replaced. */
 internal object SourceSeparationRemoteWarmRetention {
@@ -30,7 +30,7 @@ internal object SourceSeparationRemoteWarmRetention {
     }
 
     fun retain(context: Context, diagnostics: SourceSeparationProcessDiagnostics): Boolean {
-        if (!MdxX86ProcessValidationOverride.buildEnabled) return false
+        if (!SourceSeparationResidentProcessValidation.buildEnabled) return false
         if (!diagnostics.isWarmRetentionCandidate()) return false
         val applicationContext = context.applicationContext
         synchronized(lock) {
