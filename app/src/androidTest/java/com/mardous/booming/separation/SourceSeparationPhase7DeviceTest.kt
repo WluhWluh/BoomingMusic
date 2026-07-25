@@ -362,7 +362,18 @@ class SourceSeparationPhase7DeviceTest {
     private fun String.is64BitAbi(): Boolean = this == MdxRuntimeAbi.Arm64V8a.androidName ||
         this == MdxRuntimeAbi.X86_64.androidName
 
-    private fun File.sha256(): String = inputStream().use { it.readBytes().sha256() }
+    private fun File.sha256(): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        inputStream().buffered().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read > 0) digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().toHexString()
+    }
 
     private fun ByteArray.sha256(): String = MessageDigest.getInstance("SHA-256")
         .digest(this)
