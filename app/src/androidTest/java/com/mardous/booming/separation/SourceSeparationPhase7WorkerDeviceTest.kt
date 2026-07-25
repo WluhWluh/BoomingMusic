@@ -1938,6 +1938,339 @@ class SourceSeparationPhase7WorkerDeviceTest {
     }
 
     @Test
+    fun validateProcessCacheManagementRaces() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        require(MdxX86ProcessValidationOverride.buildEnabled) {
+            "The process-cache race matrix requires the explicit x86 validation build."
+        }
+        val report = baseReport(context, runId, arguments)
+        val backgroundThreads = mutableListOf<Thread>()
+        var mediaUri: Uri? = null
+        var playbackMediaUri: Uri? = null
+        var playback: OriginalAudioPlaybackProbe? = null
+        var host: BoundRemoteSourceSeparationExecutionHost? = null
+        var cacheRoot: File? = null
+        var presetRepository: SourceSeparationPresetRepository? = null
+        var primaryModelId: String? = null
+        var primaryArtifactSha256: String? = null
+        var primaryBackup: File? = null
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            mediaUri = registerSourceInMediaStore(context, sourcePath, runId)
+            val source = resolveMediaStoreSong(context, mediaUri, sourcePath)
+            val playbackSourcePath = arguments.requiredString(ARG_CURRENT_SOURCE_PATH)
+            playbackMediaUri = registerSourceInMediaStore(
+                context,
+                playbackSourcePath,
+                "$runId-playback",
+            )
+            val playbackSource = resolveMediaStoreSong(
+                context,
+                playbackMediaUri,
+                playbackSourcePath,
+            )
+            val playbackProbe = startOriginalAudioPlayback(
+                context,
+                playbackSource,
+                "process-cache race playback",
+            ).also { playback = it }
+
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            check(preferences.edit()
+                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
+                .commit()
+            ) { "Could not persist process-cache race preferences." }
+            val repository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            ).also { presetRepository = it }
+            val primaryId = arguments.requiredString(ARG_MODEL_ID)
+                .also { primaryModelId = it }
+            val primarySha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
+                .also { primaryArtifactSha256 = it }
+            val secondaryModelId = arguments.requiredString(ARG_SECONDARY_MODEL_ID)
+            val secondaryArtifactSha256 = arguments.requiredString(
+                ARG_SECONDARY_ARTIFACT_SHA256,
+            )
+            assertExpectedActivePreset(arguments)
+            val secondaryInstalled = get<SourceSeparationPresetDownloader>(
+                SourceSeparationPresetDownloader::class.java,
+            ).download(secondaryModelId)
+            assertEquals(secondaryArtifactSha256, secondaryInstalled.sha256)
+            val primaryInstalled = repository.requireInstalledPreset(primarySha256)
+            val backup = File(
+                context.filesDir,
+                "phase4-model-backups/$runId-${primaryInstalled.file.name}",
+            ).also { file ->
+                require(file.parentFile?.mkdirs() == true || file.parentFile?.isDirectory == true)
+                primaryInstalled.file.copyTo(file, overwrite = true)
+                primaryBackup = file
+            }
+
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val root = store.root().directory.also { cacheRoot = it }
+            fun createRuntime(): SourceSeparationRuntimeFacade = createCpuRuntimeFacade(
+                context = context,
+                preferences = preferences,
+                presetRepository = repository,
+                backendMode = BackendMode.Auto,
+                processorCount = null,
+                executionHostMode = Phase7ExecutionHostMode.BoundRemote,
+                boundRemoteHostSink = { host = it },
+            )
+
+            var runtime = createRuntime()
+            val primarySong = (runtime.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The primary process-cache race source could not be admitted.")
+            assertEquals(primaryId, primarySong.modelId)
+            clearExactCacheEntry(runtime, primarySong.cacheKey)
+            val seed = runtime.separate(
+                song = primarySong,
+                playbackReadyWindowCountProvider = { 1 },
+            )
+            assertTrue(seed is SourceSeparationModelAwareEngineResult.Completed)
+            val seedManifest = (seed as SourceSeparationModelAwareEngineResult.Completed).manifest
+            val idleHost = requireNotNull(host)
+            val idleRemote = idleHost.processDiagnostics()
+            assertEquals(SourceSeparationProcessSessionState.Resident, idleRemote.session.state)
+
+            val flacToken = "flac-handoff"
+            SourceSeparationCacheFaultInjection.arm(
+                root,
+                SourceSeparationCacheFaultControl(
+                    token = flacToken,
+                    stage = SourceSeparationCacheFaultStage.FlacHandoff,
+                    action = SourceSeparationCacheFaultAction.Barrier,
+                ),
+            )
+            val promotionResult = AtomicReference<SourceSeparationCacheFlacPromotionResult?>()
+            val promotionError = AtomicReference<Throwable?>()
+            val promotionFinished = CountDownLatch(1)
+            backgroundThreads += Thread({
+                try {
+                    promotionResult.set(runtime.promote(primarySong.cacheKey))
+                } catch (error: Throwable) {
+                    promotionError.set(error)
+                } finally {
+                    promotionFinished.countDown()
+                }
+            }, "Phase4FlacHandoff").apply { start() }
+
+            val flacHit = waitForCacheFaultHit(root, flacToken)
+            assertEquals(Process.myPid(), flacHit.pid)
+            assertNotEquals(idleRemote.pid, flacHit.pid)
+            runtime.entries()
+            assertEquals(
+                SourceSeparationCacheMutationResult.Busy,
+                runtime.delete(primarySong.cacheKey),
+            )
+            assertEquals(
+                0,
+                runtime.prune(
+                    partialLimit = 0,
+                    completedLimit = 0,
+                    protectedCacheKeys = runtime.entries()
+                        .map { it.cacheKey }
+                        .filterNot { it == primarySong.cacheKey }
+                        .toSet(),
+                ).deletedEntries,
+            )
+            assertFalse(runtime.writeBlend(primarySong, 0.2f))
+            assertTrue(runtime.hydrate(primarySong.cacheKey) is
+                SourceSeparationCacheHydrationResult.Busy)
+            Process.killProcess(idleRemote.pid)
+            waitForRemoteConnectionState(
+                idleHost,
+                SourceSeparationRemoteConnectionState.Dead,
+            )
+            assertEquals(1, idleHost.connectionDiagnostics.unexpectedBinderDeathCount)
+            SourceSeparationCacheFaultInjection.release(root, flacToken)
+            assertTrue(
+                "FLAC handoff did not finish after idle remote death.",
+                promotionFinished.await(PHASE4_EXECUTION_TIMEOUT_MS, TimeUnit.MILLISECONDS),
+            )
+            promotionError.get()?.let { throw it }
+            val promoted = promotionResult.get() as?
+                SourceSeparationCacheFlacPromotionResult.Completed
+                ?: error("FLAC handoff did not complete: ${promotionResult.get()}")
+            assertTrue(requireNotNull(promoted.manifest.output).stems.all {
+                it.promotionValidated
+            })
+            assertEquals(
+                SourceSeparationCacheValidationResult.Valid,
+                store.validateCompletedEntry(promoted.manifest),
+            )
+            playbackProbe.assertContinuous("flac-handoff-idle-remote-death")
+
+            idleHost.close()
+            host = null
+            runtime = createRuntime()
+            clearExactCacheEntry(runtime, primarySong.cacheKey)
+            val modelRaceToken = "model-delete-race"
+            SourceSeparationCacheFaultInjection.arm(
+                root,
+                SourceSeparationCacheFaultControl(
+                    token = modelRaceToken,
+                    stage = SourceSeparationCacheFaultStage.Dsp,
+                    action = SourceSeparationCacheFaultAction.Barrier,
+                ),
+            )
+            val separationResult = AtomicReference<SourceSeparationModelAwareEngineResult?>()
+            val separationError = AtomicReference<Throwable?>()
+            val separationFinished = CountDownLatch(1)
+            backgroundThreads += Thread({
+                try {
+                    separationResult.set(runtime.separate(
+                        song = primarySong,
+                        playbackReadyWindowCountProvider = { 1 },
+                    ))
+                } catch (error: Throwable) {
+                    separationError.set(error)
+                } finally {
+                    separationFinished.countDown()
+                }
+            }, "Phase4ModelDeleteRace").apply { start() }
+
+            val modelRaceHit = waitForCacheFaultHit(root, modelRaceToken)
+            val modelRaceHost = requireNotNull(host)
+            val admittedRemote = modelRaceHost.processDiagnostics()
+            assertEquals(admittedRemote.pid, modelRaceHit.pid)
+            assertNotEquals(Process.myPid(), modelRaceHit.pid)
+            val selectedSecondary = repository.activate(
+                sha256 = secondaryArtifactSha256,
+                platform = AndroidMdxRuntimePlatformProvider.current(),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                experimentalConfirmed = true,
+            )
+            assertEquals(secondaryModelId, selectedSecondary.modelId)
+            assertTrue(repository.delete(primarySha256))
+            assertEquals(null, repository.installedModel(primarySha256))
+            assertEquals(
+                SourceSeparationCacheMutationResult.Busy,
+                runtime.delete(primarySong.cacheKey),
+            )
+            SourceSeparationCacheFaultInjection.release(root, modelRaceToken)
+            assertTrue(
+                "The admitted run did not finish after its model was deleted.",
+                separationFinished.await(PHASE4_EXECUTION_TIMEOUT_MS, TimeUnit.MILLISECONDS),
+            )
+            separationError.get()?.let { throw it }
+            val completed = separationResult.get() as?
+                SourceSeparationModelAwareEngineResult.Completed
+                ?: error("The admitted model-delete run did not complete: ${separationResult.get()}")
+            assertEquals(primaryId, completed.manifest.identity.modelId)
+            assertEquals(primarySha256, completed.manifest.identity.artifactSha256)
+            assertEquals(
+                SourceSeparationCacheValidationResult.Valid,
+                store.validateCompletedEntry(completed.manifest),
+            )
+            runtime.openCompletedCache(primarySong.cacheKey).use { playbackCache ->
+                requireNotNull(playbackCache)
+                assertTrue(playbackCache.vocalsFile.isFile)
+                assertTrue(playbackCache.instrumentalFile.isFile)
+            }
+            val secondarySong = (runtime.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The switched secondary model could not resolve.")
+            assertEquals(secondaryModelId, secondarySong.modelId)
+            assertNotEquals(primarySong.cacheKey, secondarySong.cacheKey)
+            val modelRaceDiagnostics = modelRaceHost.processDiagnostics()
+            assertEquals(admittedRemote.processGeneration, modelRaceDiagnostics.processGeneration)
+            assertEquals(SourceSeparationProcessSessionState.Resident,
+                modelRaceDiagnostics.session.state)
+            assertTrue(modelRaceDiagnostics.session.invocationCount > 0L)
+            playbackProbe.assertContinuous("active-switch-model-delete")
+
+            backup.inputStream().use { input ->
+                repository.installOfficial(primaryId, input)
+            }
+            val restoredPrimary = repository.activate(
+                sha256 = primarySha256,
+                platform = AndroidMdxRuntimePlatformProvider.current(),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                experimentalConfirmed = true,
+            )
+            assertEquals(primaryId, restoredPrimary.modelId)
+            assertEquals(primarySha256, restoredPrimary.artifactSha256)
+
+            applyRuntimeEvidence(report, completed.manifest)
+            report.put("status", "passed")
+            report.put("playbackContinuity", playbackProbe.report())
+            report.put("processCacheRaces", JSONObject()
+                .put("flacHandoff", JSONObject()
+                    .put("ownerPid", flacHit.pid)
+                    .put("idleRemotePid", idleRemote.pid)
+                    .put("idleRemoteGeneration", idleRemote.processGeneration)
+                    .put("unexpectedBinderDeathCount",
+                        idleHost.connectionDiagnostics.unexpectedBinderDeathCount)
+                    .put("promotionCompleted", true)
+                    .put("completedCacheValid", true)
+                )
+                .put("modelManagement", JSONObject()
+                    .put("admittedRemotePid", admittedRemote.pid)
+                    .put("admittedRemoteGeneration", admittedRemote.processGeneration)
+                    .put("primaryModelId", primaryId)
+                    .put("primaryArtifactSha256", primarySha256)
+                    .put("secondaryModelId", secondaryModelId)
+                    .put("secondaryArtifactSha256", secondaryArtifactSha256)
+                    .put("activeSwitchPreservedRunIdentity", true)
+                    .put("deletedWeightsPreservedCompletedPlayback", true)
+                    .put("primaryModelRestored", true)
+                )
+            )
+            report.put("cache", report.getJSONObject("cache")
+                .put("cacheKey", primarySong.cacheKey)
+                .put("exactIdentity", true)
+                .put("completedPlayable", true)
+                .put("flacPromotionValid", true)
+            )
+            assertEquals(seedManifest.identity, completed.manifest.identity)
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            cacheRoot?.let(SourceSeparationCacheFaultInjection::clear)
+            backgroundThreads.forEach { thread ->
+                runCatching { thread.join(PHASE4_EXECUTION_TIMEOUT_MS) }
+            }
+            val repository = presetRepository
+            val primaryId = primaryModelId
+            val primarySha256 = primaryArtifactSha256
+            val backup = primaryBackup
+            if (repository != null && primaryId != null && primarySha256 != null) {
+                runCatching {
+                    if (repository.installedModel(primarySha256) == null && backup?.isFile == true) {
+                        backup.inputStream().use { input ->
+                            repository.installOfficial(primaryId, input)
+                        }
+                    }
+                    repository.activate(
+                        sha256 = primarySha256,
+                        platform = AndroidMdxRuntimePlatformProvider.current(),
+                        scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                        experimentalConfirmed = true,
+                    )
+                }
+            }
+            primaryBackup?.delete()
+            primaryBackup?.parentFile?.delete()
+            host?.close()
+            playback?.close()
+            mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+            playbackMediaUri?.let {
+                runCatching { context.contentResolver.delete(it, null, null) }
+            }
+            writeReport(context, runId, "process-cache-race-matrix", report)
+        }
+    }
+
+    @Test
     fun validateWorkerLifecycle() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext

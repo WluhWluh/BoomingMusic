@@ -17,6 +17,7 @@ param(
         "process-switch-matrix",
         "process-fault-matrix",
         "process-cache-matrix",
+        "process-cache-race-matrix",
         "lifecycle",
         "recreation",
         "playback",
@@ -73,6 +74,7 @@ $sourceStages = @(
     "process-switch-matrix",
     "process-fault-matrix",
     "process-cache-matrix",
+    "process-cache-race-matrix",
     "lifecycle",
     "recreation",
     "playback",
@@ -92,6 +94,7 @@ $testMethod = switch ($Stage) {
     "process-switch-matrix" { "validateProcessModelSwitchMatrix"; break }
     "process-fault-matrix" { "validateProcessFaultMatrix"; break }
     "process-cache-matrix" { "validateProcessCacheSafetyMatrix"; break }
+    "process-cache-race-matrix" { "validateProcessCacheManagementRaces"; break }
     "lifecycle" { "validateWorkerLifecycle"; break }
     "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
     "playback" { "validateMediaSessionPlayback"; break }
@@ -153,11 +156,11 @@ if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "work
     throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
 }
 if ($ExecutionHostMode -eq "bound-remote" -and
-        ($Stage -notin @("worker", "background", "process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-matrix") -or
+        ($Stage -notin @("worker", "background", "process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-matrix", "process-cache-race-matrix") -or
         $BackendMode -ne "auto" -or $AutoFailpoint -ne "none")) {
     throw "BoundRemote requires a supported process stage, BackendMode=auto, and AutoFailpoint=none."
 }
-if ($Stage -in @("process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-matrix") -and
+if ($Stage -in @("process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-matrix", "process-cache-race-matrix") -and
         (-not $X86ProcessValidation -or $ProcessAbi -ne "x86" -or
         $ExecutionHostMode -ne "bound-remote" -or $BackendMode -ne "auto")) {
     throw "$Stage requires pure x86, X86ProcessValidation, and BoundRemote Auto."
@@ -190,7 +193,7 @@ if ($BackendMode -eq "auto" -and $Stage -eq "lifecycle" -and
 if ($Stage -eq "playback" -and $CacheKey -notmatch '^[0-9a-f]{64}$') {
     throw "Playback stage requires a 64-character lowercase cache key."
 }
-if ($Stage -in @("switching", "process-switch-matrix") -and
+if ($Stage -in @("switching", "process-switch-matrix", "process-cache-race-matrix") -and
         [string]::IsNullOrWhiteSpace($SecondaryModelId)) {
     throw "$Stage requires SecondaryModelId."
 }
@@ -201,7 +204,7 @@ if (-not [string]::IsNullOrWhiteSpace($SecondaryModelId) -and
 if ($Stage -in @("background", "prefetch") -and $BackendMode -ne "auto") {
     throw "$Stage uses the production service graph and requires BackendMode=auto."
 }
-if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix") -and
+if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix", "process-cache-race-matrix") -and
         ([string]::IsNullOrWhiteSpace($CurrentSourcePath) -or
         [string]::IsNullOrWhiteSpace($CurrentFixtureId))) {
     throw "$Stage requires CurrentSourcePath and CurrentFixtureId."
@@ -368,7 +371,7 @@ $profileId = if ($BackendMode -eq "auto") {
 }
 $backendName = if ($BackendMode -eq "auto") { "LiteRtAuto" } else { "LiteRtCpu" }
 $fixture = @($fixtures.fixtures) | Where-Object { $_.fixtureId -eq $FixtureId } | Select-Object -First 1
-$currentFixture = if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix")) {
+$currentFixture = if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix", "process-cache-race-matrix")) {
     @($fixtures.fixtures) |
         Where-Object { $_.fixtureId -eq $CurrentFixtureId } |
         Select-Object -First 1
@@ -387,7 +390,7 @@ if ($Stage -in $sourceStages) {
         throw "Source fixture identity does not match $FixtureId."
     }
 }
-if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix")) {
+if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix", "process-cache-race-matrix")) {
     if ($null -eq $currentFixture) {
         throw "Fixture is absent from fixtures-v2.json: $CurrentFixtureId"
     }
@@ -650,7 +653,7 @@ try {
                 [string]$fixture.expectedOutputFrameCount
             )
         }
-        if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix")) {
+        if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix", "process-cache-race-matrix")) {
             $currentSourceLeaf = Split-Path -Leaf $currentSourcePath
             if ($currentSourceLeaf -notmatch '^[A-Za-z0-9._-]+$') {
                 throw "Current source fixture filename contains unsupported characters: $currentSourceLeaf"
