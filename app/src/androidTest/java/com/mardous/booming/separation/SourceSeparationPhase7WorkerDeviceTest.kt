@@ -2856,7 +2856,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
             onMediaControllerThread(controller) {
                 controller.pause()
                 controller.clearMediaItems()
-                controller.repeatMode = Player.REPEAT_MODE_ONE
                 controller.volume = 0f
             }
             val sourcePreparationAttempts = prepareMediaControllerSource(
@@ -2864,6 +2863,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 source = source,
                 operation = operation,
             )
+            setMediaControllerRepeatOne(controller, operation)
             val probe = OriginalAudioPlaybackProbe(
                 controller = controller,
                 expectedMediaId = source.id.toString(),
@@ -2892,6 +2892,35 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
             throw error
         }
+    }
+
+    private fun setMediaControllerRepeatOne(
+        controller: MediaController,
+        operation: String,
+    ) {
+        val cycleRepeatCommand = SessionCommand(Playback.CYCLE_REPEAT, Bundle.EMPTY)
+        assertTrue(
+            "PlaybackService did not expose the repeat-mode command.",
+            onMediaControllerThread(controller) {
+                controller.availableSessionCommands.contains(cycleRepeatCommand)
+            },
+        )
+        repeat(REPEAT_MODE_CYCLE_LIMIT) {
+            val previousMode = onMediaControllerThread(controller) { controller.repeatMode }
+            if (previousMode == Player.REPEAT_MODE_ONE) return
+            val result = onMediaControllerThread(controller) {
+                controller.sendCustomCommand(cycleRepeatCommand, Bundle.EMPTY)
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            assertEquals(SessionResult.RESULT_SUCCESS, result.resultCode)
+            waitForMediaController(controller, "$operation repeat-mode transition") {
+                controller.repeatMode != previousMode
+            }
+        }
+        assertEquals(
+            "Could not select repeat-one for $operation.",
+            Player.REPEAT_MODE_ONE,
+            onMediaControllerThread(controller) { controller.repeatMode },
+        )
     }
 
     private fun prepareMediaControllerSource(
@@ -4340,6 +4369,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val MEDIA_SESSION_TIMEOUT_SECONDS = 30L
         const val MEDIA_SESSION_TIMEOUT_MS = 30_000L
         const val MEDIA_SESSION_SEEK_TOLERANCE_MS = 250L
+        const val REPEAT_MODE_CYCLE_LIMIT = 3
         const val MEDIA_SCAN_TIMEOUT_MS = 30_000L
         const val MEDIA_SCAN_RETRIES = 60
         const val MEDIA_SCAN_POLL_MS = 500L
