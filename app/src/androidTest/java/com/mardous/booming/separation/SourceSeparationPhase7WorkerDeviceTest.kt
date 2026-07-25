@@ -765,10 +765,13 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     cacheRepository,
                     tailRuntimeSong.cacheKey,
                 )
+                val sessionLeaseRelease = waitForProcessSessionLeaseRelease(
+                    requireNotNull(host),
+                )
                 val completed = runtimeFacade.cacheStatus(tailRuntimeSong) as?
                     SourceSeparationModelAwareCacheStatus.Completed
                     ?: error("The $label full-song bookend did not complete.")
-                val diagnostics = requireNotNull(host).processDiagnostics()
+                val diagnostics = sessionLeaseRelease.diagnostics
                 assertProcessIdentity(diagnostics)
                 val output = requireNotNull(completed.manifest.output)
                 fullSongBookends.put(JSONObject()
@@ -776,6 +779,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     .put("outputFrameCount", output.outputFrameCount)
                     .put("windowCount", output.windowCount)
                     .put("leaseReleaseMs", leaseReleaseMs)
+                    .put("sessionLeaseReleaseMs", sessionLeaseRelease.elapsedMs)
                     .put("invocationCount", diagnostics.session.invocationCount)
                     .put("sessionId", diagnostics.session.sessionId)
                     .put("stems", JSONArray(output.stems.map { stem ->
@@ -928,7 +932,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     cacheRepository,
                     cycleRuntimeSong.cacheKey,
                 )
-                val after = requireNotNull(host).processDiagnostics()
+                val sessionLeaseRelease = waitForProcessSessionLeaseRelease(
+                    requireNotNull(host),
+                )
+                val after = sessionLeaseRelease.diagnostics
                 assertProcessIdentity(after)
                 assertTrue(
                     "Cycle $cycle did not invoke LiteRT.",
@@ -972,6 +979,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     .put("pendingTailConfirmed", pendingTailConfirmed)
                     .put("rebound", rebound)
                     .put("leaseReleaseMs", leaseReleaseMs)
+                    .put("sessionLeaseReleaseMs", sessionLeaseRelease.elapsedMs)
                 )
                 if (cycle in PROCESS_MATRIX_SNAPSHOT_CYCLES) {
                     snapshotsByCycle[cycle] = after
@@ -4279,6 +4287,30 @@ class SourceSeparationPhase7WorkerDeviceTest {
         return SystemClock.elapsedRealtime() - startedAt
     }
 
+    private fun waitForProcessSessionLeaseRelease(
+        host: BoundRemoteSourceSeparationExecutionHost,
+    ): ProcessSessionLeaseRelease {
+        val startedAt = SystemClock.elapsedRealtime()
+        val deadline = startedAt + PROCESS_MATRIX_LEASE_RELEASE_TIMEOUT_MS
+        var diagnostics = host.processDiagnostics()
+        while (diagnostics.session.activeLeaseCount != 0 &&
+            SystemClock.elapsedRealtime() < deadline
+        ) {
+            SystemClock.sleep(POLL_INTERVAL_MS)
+            diagnostics = host.processDiagnostics()
+        }
+        assertEquals(
+            "Native session lease did not release within " +
+                "$PROCESS_MATRIX_LEASE_RELEASE_TIMEOUT_MS ms.",
+            0,
+            diagnostics.session.activeLeaseCount,
+        )
+        return ProcessSessionLeaseRelease(
+            diagnostics = diagnostics,
+            elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+        )
+    }
+
     private fun waitForRemoteConnectionState(
         host: BoundRemoteSourceSeparationExecutionHost,
         expected: SourceSeparationRemoteConnectionState,
@@ -5345,6 +5377,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
         }
     }
+
+    private data class ProcessSessionLeaseRelease(
+        val diagnostics: SourceSeparationProcessDiagnostics,
+        val elapsedMs: Long,
+    )
 
     private companion object {
         const val ARG_RUN_ID = "runId"
