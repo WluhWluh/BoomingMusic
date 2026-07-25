@@ -49,7 +49,7 @@ param(
     [string]$RunClass = "cold-session",
     [ValidateSet("pause-resume", "seek", "cancellation", "sequential")]
     [string]$LifecycleScenario = "sequential",
-    [ValidateSet("all", "death", "cache-clear")]
+    [ValidateSet("all", "death", "cache-clear", "representative")]
     [string]$ProcessCacheScope = "all",
     [ValidateSet("single-use", "shared-reusable")]
     [string]$LifecycleSessionMode = "single-use",
@@ -163,10 +163,18 @@ if ($ExecutionHostMode -eq "bound-remote" -and
         $BackendMode -ne "auto" -or $AutoFailpoint -ne "none")) {
     throw "BoundRemote requires a supported process stage, BackendMode=auto, and AutoFailpoint=none."
 }
-if ($Stage -in @("process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-matrix", "process-cache-race-matrix", "process-main-death") -and
+if ($Stage -in @("process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-race-matrix", "process-main-death") -and
         (-not $X86ProcessValidation -or $ProcessAbi -ne "x86" -or
         $ExecutionHostMode -ne "bound-remote" -or $BackendMode -ne "auto")) {
     throw "$Stage requires pure x86, X86ProcessValidation, and BoundRemote Auto."
+}
+if ($Stage -eq "process-cache-matrix") {
+    $validX86 = $ProcessAbi -eq "x86" -and $X86ProcessValidation
+    $validArm64 = $ProcessAbi -eq "arm64-v8a" -and -not $X86ProcessValidation
+    if ((-not $validX86 -and -not $validArm64) -or
+            $ExecutionHostMode -ne "bound-remote" -or $BackendMode -ne "auto") {
+        throw "process-cache-matrix requires x86 validation or regular arm64, and BoundRemote Auto."
+    }
 }
 if ($X86ProcessValidation -and $ProcessAbi -ne "x86") {
     throw "X86ProcessValidation can only build and run the pure-x86 target."
@@ -743,6 +751,16 @@ try {
         }
         Invoke-Adb shell settings put system screen_off_timeout $backgroundScreenTimeoutMs
         $screenTimeoutChanged = $true
+        Invoke-Adb shell input keyevent KEYCODE_WAKEUP
+        Invoke-Adb shell wm dismiss-keyguard
+    }
+
+    if ($Stage -in @(
+            "process-matrix",
+            "process-switch-matrix",
+            "process-cache-matrix",
+            "process-cache-race-matrix"
+        )) {
         Invoke-Adb shell input keyevent KEYCODE_WAKEUP
         Invoke-Adb shell wm dismiss-keyguard
     }

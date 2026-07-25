@@ -83,6 +83,7 @@ import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteRecycleT
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCallbacks
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
+import com.mardous.booming.util.IGNORE_AUDIO_FOCUS
 import com.mardous.booming.util.MINIMUM_SONG_DURATION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
@@ -1647,11 +1648,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
         val processCacheScope = arguments.getString(ARG_PROCESS_CACHE_SCOPE) ?: "all"
-        require(processCacheScope in setOf("all", "death", "cache-clear")) {
+        require(processCacheScope in setOf("all", "death", "cache-clear", "representative")) {
             "Unsupported process-cache matrix scope: $processCacheScope"
         }
-        require(MdxX86ProcessValidationOverride.buildEnabled) {
-            "The process-cache matrix requires the explicit x86 validation build."
+        val processAbi = arguments.requiredString(ARG_PROCESS_ABI)
+        require(
+            (processAbi == "x86" && MdxX86ProcessValidationOverride.buildEnabled) ||
+                (processAbi == "arm64-v8a" && !MdxX86ProcessValidationOverride.buildEnabled)
+        ) {
+            "The process-cache matrix requires its explicit x86 or regular arm64 build."
         }
         val report = baseReport(context, runId, arguments)
         val cases = JSONArray()
@@ -1724,11 +1729,28 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 Triple(SourceSeparationCacheFaultStage.TerminalCommit,
                     SourceSeparationCacheFaultAction.Barrier, 1),
             )
+            val selectedDeathCases = when (processCacheScope) {
+                "cache-clear" -> emptyList()
+                "representative" -> deathCases.filter { (stage, _, _) ->
+                    stage == SourceSeparationCacheFaultStage.Dsp ||
+                        stage == SourceSeparationCacheFaultStage.NativeInvocation ||
+                        stage == SourceSeparationCacheFaultStage.JournalCommit
+                }
+                else -> deathCases
+            }
+            val deathRepetitions = if (processCacheScope == "representative") {
+                PHASE4_REPRESENTATIVE_REPETITIONS
+            } else {
+                PHASE4_DEATH_REPETITIONS
+            }
+            val cacheClearRepetitions = when (processCacheScope) {
+                "death" -> 0
+                "representative" -> PHASE4_REPRESENTATIVE_REPETITIONS
+                else -> PHASE4_CACHE_CLEAR_REPETITIONS
+            }
 
-            deathCases.takeIf { processCacheScope != "cache-clear" }
-                .orEmpty()
-                .forEach { (stage, action, occurrence) ->
-                repeat(PHASE4_DEATH_REPETITIONS) { repetition ->
+            selectedDeathCases.forEach { (stage, action, occurrence) ->
+                repeat(deathRepetitions) { repetition ->
                     clearExactCacheEntry(runtime, cacheKey)
                     val token = "${stage.name.lowercase()}-${repetition + 1}"
                     SourceSeparationCacheFaultInjection.arm(
@@ -1844,9 +1866,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 }
             }
 
-            repeat(
-                if (processCacheScope != "death") PHASE4_CACHE_CLEAR_REPETITIONS else 0,
-            ) { repetition ->
+            repeat(cacheClearRepetitions) { repetition ->
                 clearExactCacheEntry(runtime, cacheKey)
                 val token = "cache-clear-${repetition + 1}"
                 SourceSeparationCacheFaultInjection.arm(
@@ -1906,16 +1926,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("playbackContinuity", playbackProbe.report())
             report.put("cache", report.getJSONObject("cache")
                 .put("cacheKey", cacheKey)
-                .put("deathCaseCount", if (processCacheScope != "cache-clear") {
-                    deathCases.size * PHASE4_DEATH_REPETITIONS
-                } else {
-                    0
-                })
-                .put("cacheClearCaseCount", if (processCacheScope != "death") {
-                    PHASE4_CACHE_CLEAR_REPETITIONS
-                } else {
-                    0
-                })
+                .put("deathCaseCount", selectedDeathCases.size * deathRepetitions)
+                .put("cacheClearCaseCount", cacheClearRepetitions)
             )
         } catch (error: Throwable) {
             report.put("status", "failed")
@@ -3743,13 +3755,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
         source: Song,
         operation: String,
     ): OriginalAudioPlaybackProbe {
+        val audioFocusOverride = installPlaybackAudioFocusTestOverride()
         val sessionToken = SessionToken(
             context,
             ComponentName(context, PlaybackService::class.java),
         )
-        val controller = MediaController.Builder(context, sessionToken)
-            .buildAsync()
-            .get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        val controller = try {
+            MediaController.Builder(context, sessionToken)
+                .buildAsync()
+                .get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        } catch (error: Throwable) {
+            audioFocusOverride.close()
+            throw error
+        }
         try {
             val disableSeparationCommand = SessionCommand(
                 Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
@@ -3787,6 +3805,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 controller = controller,
                 expectedMediaId = source.id.toString(),
                 sourcePreparationAttempts = sourcePreparationAttempts,
+                audioFocusOverride = audioFocusOverride,
             )
             onMediaControllerThread(controller) {
                 controller.addListener(probe)
@@ -3809,8 +3828,32 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     controller.release()
                 }
             }
+            runCatching { audioFocusOverride.close() }
+                .onFailure(error::addSuppressed)
             throw error
         }
+    }
+
+    private fun installPlaybackAudioFocusTestOverride(): PlaybackAudioFocusTestOverride {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            return PlaybackAudioFocusTestOverride.disabled()
+        }
+
+        val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+        val keyWasPresent = preferences.contains(IGNORE_AUDIO_FOCUS)
+        val originalValue = preferences.getBoolean(IGNORE_AUDIO_FOCUS, false)
+        if (!originalValue) {
+            check(preferences.edit().putBoolean(IGNORE_AUDIO_FOCUS, true).commit()) {
+                "Could not bypass audio focus for the API 35 playback probe."
+            }
+        }
+        return PlaybackAudioFocusTestOverride(
+            preferences = preferences,
+            keyWasPresent = keyWasPresent,
+            originalValue = originalValue,
+            changed = !originalValue,
+            bypassed = true,
+        )
     }
 
     private fun setMediaControllerRepeatOne(
@@ -3898,10 +3941,44 @@ class SourceSeparationPhase7WorkerDeviceTest {
         return result.get() as T
     }
 
+    private class PlaybackAudioFocusTestOverride(
+        private val preferences: SharedPreferences?,
+        private val keyWasPresent: Boolean,
+        private val originalValue: Boolean,
+        private val changed: Boolean,
+        val bypassed: Boolean,
+    ) {
+        private val closed = AtomicBoolean(false)
+
+        fun close() {
+            if (!closed.compareAndSet(false, true) || !changed) return
+            val editor = requireNotNull(preferences).edit()
+            if (keyWasPresent) {
+                editor.putBoolean(IGNORE_AUDIO_FOCUS, originalValue)
+            } else {
+                editor.remove(IGNORE_AUDIO_FOCUS)
+            }
+            check(editor.commit()) {
+                "Could not restore the audio-focus preference after the playback probe."
+            }
+        }
+
+        companion object {
+            fun disabled() = PlaybackAudioFocusTestOverride(
+                preferences = null,
+                keyWasPresent = false,
+                originalValue = false,
+                changed = false,
+                bypassed = false,
+            )
+        }
+    }
+
     private inner class OriginalAudioPlaybackProbe(
         private val controller: MediaController,
         private val expectedMediaId: String,
         private val sourcePreparationAttempts: Int,
+        private val audioFocusOverride: PlaybackAudioFocusTestOverride,
     ) : Player.Listener {
         private val armed = AtomicBoolean(false)
         private val closed = AtomicBoolean(false)
@@ -3968,6 +4045,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             return JSONObject()
                 .put("expectedMediaId", expectedMediaId)
                 .put("sourcePreparationAttempts", sourcePreparationAttempts)
+                .put("audioFocusBypassedForApi35", audioFocusOverride.bypassed)
                 .put("repeatMode", "one")
                 .put("muted", true)
                 .put("snapshotCount", snapshotCopy.size)
@@ -3993,6 +4071,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     controller.release()
                 }
             }
+            audioFocusOverride.close()
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -5319,6 +5398,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val PROCESS_DEATH_TIMEOUT_MS = 10_000L
         const val PHASE4_DEATH_REPETITIONS = 3
         const val PHASE4_CACHE_CLEAR_REPETITIONS = 3
+        const val PHASE4_REPRESENTATIVE_REPETITIONS = 1
         const val PHASE4_FAULT_HIT_TIMEOUT_MS = 120_000L
         const val PHASE4_EXECUTION_TIMEOUT_MS = 60_000L
         const val PHASE4_LOCK_RELEASE_TIMEOUT_MS = 30_000L
