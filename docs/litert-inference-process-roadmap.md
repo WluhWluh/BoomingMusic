@@ -863,18 +863,36 @@ and implements a support policy. See
 
 ### Phase 5C: Session-lifetime matrix
 
-- [ ] Test `BoundRemote + ResidentUntilProcessExit` on a non-x86 ABI only after
+- [x] Test `BoundRemote + ResidentUntilProcessExit` on a non-x86 ABI only after
   that ABI's `BoundRemote + SingleUse` host result passes.
-- [ ] Start with armeabi-v7a CPU because it has the strongest non-x86
-  address-space rationale; then test arm64 CPU and x86_64 CPU only if measured
-  setup/reclamation costs justify the experiment.
-- [ ] For every resident candidate, repeat the Phase 3 20-cycle lifecycle,
+- [x] Start with armeabi-v7a CPU because it has the strongest non-x86
+  address-space rationale. Do not advance arm64 CPU or x86_64 CPU because the
+  host matrix found no reliability need and arm32 residency retained roughly
+  633-657 MiB without a measured setup or reliability gain.
+- [x] For every resident candidate, repeat the Phase 3 20-cycle lifecycle,
   same-key full-song bookend, key-change recycle, memory-trend, and original
   playback gates. Do not infer residency safety from a short worker.
-- [ ] Keep GPU sessions single-use in this subphase. GPU residency requires its
+- [x] Keep GPU sessions single-use in this subphase. GPU residency requires its
   own graphics-memory and driver-lifetime decision.
-- [ ] Select `SingleUse` unless residency demonstrates a concrete latency or
+- [x] Select `SingleUse` unless residency demonstrates a concrete latency or
   reliability gain without unacceptable retained memory or recycle cost.
+
+Arm32 resident checkpoint (2026-07-25): S10 `armeabi-v7a` passed one
+process generation, one native session, 141 invocations, 20 lifecycle cases,
+and two byte-identical 273.7-second WAV bookends. Cycle-2 to cycle-20 PSS
+changed by -4,931,584 bytes, mapped regions changed by -9, and the minimum
+largest free VA gap was 486,793,216 bytes. A 20-switch 9662/KARA matrix then
+created 20 acknowledged new generations with exactly one session each, zero
+unexpected Binder deaths, and zero unexpected playback events.
+
+The experiment also confirmed that main-process private warm retention can
+preserve a healthy arm32 generation across a client rebind; it does not create
+independent background execution. Because keeping that idle generation retains
+roughly 633-657 MiB PSS and no latency or reliability advantage over
+`SingleUse` was established, the arm32 session candidate remains `SingleUse`.
+The host candidate remains `BoundRemote`, pending Phase 5E's
+`RemotePreferred` versus `RemoteRequired` decision. See
+`docs/validation/litert-inference-process/phase5/arm32-resident-session-2026-07-25.md`.
 
 ### Phase 5D: GPU host and fallback matrix
 

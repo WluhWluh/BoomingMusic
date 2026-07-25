@@ -1,0 +1,143 @@
+{
+  "schemaVersion": "phase5-arm32-resident-session-v1",
+  "status": "validation-passed",
+  "decision": "single-use-selected",
+  "implementationRevisions": {
+    "arm32Gate": "0b180ed15f4eb04b149c42e859c4920bbf3d3f07",
+    "exactAbiProfile": "6aa8445b5a5d6183bf1d8dc502306b285dc045fc",
+    "warmRetention": "cfa7a1ed517e94ea0fc8f926278f1b0ae59ddb6e",
+    "runnerRevision": "phase7-runner-v23"
+  },
+  "device": {
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "androidApi": 31,
+    "buildFingerprint": "samsung/beyond1qltezc/beyond1q:12/SP1A.210812.016/G9730ZCU8HWE2:user/release-keys",
+    "abi": "armeabi-v7a",
+    "bitness": 32,
+    "processors": 8,
+    "totalMemoryBytes": 7823921152,
+    "runtimeMaxMemoryBytes": 536870912
+  },
+  "runtime": {
+    "litertVersion": "2.1.5",
+    "backend": "LiteRtCpu",
+    "cpuThreads": 4,
+    "primaryModelId": "uvr_mdxnet_3_9662",
+    "primaryContractId": "uvr_mdxnet_3_9662@2",
+    "primaryModelSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "secondaryModelId": "uvr_mdxnet_kara",
+    "secondaryModelSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
+    "executionHost": "BoundRemote",
+    "testedSessionLifetime": "ResidentUntilProcessExit",
+    "selectedSessionLifetime": "SingleUse",
+    "backgroundOwner": "client-bound main process"
+  },
+  "residentMatrix": {
+    "status": "passed",
+    "cycleCount": 20,
+    "scenarioCounts": {
+      "completion": 5,
+      "pauseResume": 5,
+      "pendingTailResume": 5,
+      "cancellation": 5
+    },
+    "fullSongBookendCount": 2,
+    "fullSongOutputFrameCount": 12070130,
+    "fullSongWindowCount": 48,
+    "processGenerationCount": 1,
+    "nativeSessionCreationCount": 1,
+    "finalInvocationCount": 141,
+    "clientRebindPreservedProcess": true,
+    "pssCycle2Bytes": 650509312,
+    "pssCycle20Bytes": 645577728,
+    "pssGrowthCycle2To20Bytes": -4931584,
+    "mappedRegionsCycle2": 2738,
+    "mappedRegionsCycle20": 2729,
+    "mappedRegionGrowthCycle2To20": -9,
+    "maximumSampledPssBytes": 664249344,
+    "minimumLargestFreeAddressGapBytes": 486793216,
+    "maximumCacheLeaseReleaseMs": 3,
+    "maximumSessionLeaseReleaseMs": 755,
+    "unexpectedBinderDeathCount": 0,
+    "finalRecycleExpected": true,
+    "maximumPlaybackDriftMs": 62,
+    "unexpectedPlaybackEventCount": 0,
+    "vocalsWavSha256": "dd076ccabd01e6a4c306d5e0918883e88e93f8f3c8f3c5332fcd0be66b117f61",
+    "instrumentalWavSha256": "0dcbc98621430d8760da17abd516e623a7c821b7175b900b070d00a1c413c9ad"
+  },
+  "modelSwitchMatrix": {
+    "status": "passed",
+    "switchCount": 20,
+    "primaryRunCount": 10,
+    "secondaryRunCount": 10,
+    "newProcessGenerationCount": 20,
+    "newSessionIdCount": 20,
+    "nativeSessionCreationCountPerGeneration": 1,
+    "invocationCountPerGeneration": 3,
+    "expectedBinderDeathCount": 20,
+    "unexpectedBinderDeathCount": 0,
+    "minimumPssBytes": 633376768,
+    "maximumPssBytes": 657419264,
+    "minimumMappedRegionCount": 2642,
+    "maximumMappedRegionCount": 2735,
+    "minimumLargestFreeAddressGapBytes": 486793216,
+    "maximumMismatchLeaseReleaseMs": 1,
+    "maximumPlaybackDriftMs": 128,
+    "unexpectedPlaybackEventCount": 0
+  },
+  "discoveredBoundaries": [
+    {
+      "revision": "0b180ed15f4eb04b149c42e859c4920bbf3d3f07",
+      "classification": "test-gate-generalization",
+      "result": "Resident profile validation still selected only the x86 compatibility record; no arm32 native session was created."
+    },
+    {
+      "revision": "6aa8445b5a5d6183bf1d8dc502306b285dc045fc",
+      "classification": "client-bound-retention-generalization",
+      "result": "The healthy resident process was normally destroyed when the first client binding closed because warm retention still allowed only x86 builds."
+    }
+  ],
+  "normalBuildRegression": {
+    "githubDebugUnitTest": "passed",
+    "fdroidDebugUnitTest": "passed",
+    "githubDebugAndroidTestKotlin": "passed",
+    "fdroidDebugAndroidTestKotlin": "passed",
+    "githubReleaseKotlin": "passed",
+    "fdroidReleaseKotlin": "passed",
+    "residentValidationEnabled": false
+  },
+  "interpretation": {
+    "residentSessionSafeOnTestedArm32Scope": true,
+    "residentSessionLatencyGainMeasured": false,
+    "residentSessionReliabilityGainOverSingleUseMeasured": false,
+    "residentSessionRetainsApproximately650MiB": true,
+    "arm64ResidentAdvanced": false,
+    "x8664ResidentAdvanced": false,
+    "gpuResidentAdvanced": false,
+    "releaseHostPolicyChanged": false,
+    "releasePolicy": "Retain SingleUse as the arm32 session-lifetime candidate. BoundRemote host placement remains a separate Phase 5E decision."
+  },
+  "rawEvidence": [
+    {
+      "fileName": "phase5-arm32-resident-process-v1-process-matrix.json",
+      "byteSize": 6600,
+      "sha256": "dae225c31253dca861cdeeb0f40d40e86ad66fa0ce689f7c89fee892d6e464e8"
+    },
+    {
+      "fileName": "phase5-arm32-resident-process-v2-process-matrix.json",
+      "byteSize": 12526,
+      "sha256": "79f136fe0632c1603a77bb6304a3acb8d495dc13f7fc4dfe723960f1b5690c96"
+    },
+    {
+      "fileName": "phase5-arm32-resident-process-v3-process-matrix.json",
+      "byteSize": 22946,
+      "sha256": "c5483b21232e1524b3d5ab520c39274b1edefcf535e2f863417d2db3cd8788dc"
+    },
+    {
+      "fileName": "phase5-arm32-resident-switch-v1-process-switch-matrix.json",
+      "byteSize": 44061,
+      "sha256": "63877e389134e9aed47a4c9425aca5e4f417286c3c3ae592e7422cc6bdcbc601"
+    }
+  ]
+}
