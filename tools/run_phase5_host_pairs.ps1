@@ -243,6 +243,14 @@ function Add-WorkerReport(
             coldProcessBoundary = [bool]$report.run.coldProcessBoundary
             preRunProcessExitMs = [int64]$report.run.preRunProcessExitMs
             postRunProcessExit = $PostRunExit
+            sessionStateAfter = if ($null -ne $report.executionHost.session) {
+                [string]$report.executionHost.session.state
+            } else { $null }
+            nativeSessionCreationCount = if ($null -ne $report.executionHost.session) {
+                [int]$report.executionHost.session.nativeSessionCreationCount
+            } else { 0 }
+            instrumentationSharesMainProcess =
+                [bool]$report.processRoles.instrumentationSharesMainProcess
         }
         timing = [ordered]@{
             firstReadyMs = [int64]$report.timing.firstReadyMs
@@ -323,6 +331,9 @@ function Test-Gates {
                 -not $record.execution.postRunProcessExit.allExited) {
             throw "$($record.runId) did not preserve the cold process boundary."
         }
+        if (-not $record.execution.instrumentationSharesMainProcess) {
+            throw "$($record.runId) did not record the instrumentation/main PID co-location."
+        }
         if ($record.execution.postRunProcessExit.exitElapsedMs -gt
                 [int64]$thresholds.resource.maximumProcessExitMs) {
             throw "$($record.runId) exceeded the process-exit gate."
@@ -332,6 +343,10 @@ function Test-Gates {
             throw "$($record.runId) failed the main Java heap admission gate."
         }
         if ($record.hostMode -eq "bound-remote") {
+            if ($record.execution.sessionStateAfter -ne "Empty" -or
+                    $record.execution.nativeSessionCreationCount -ne 1) {
+                throw "$($record.runId) did not use the frozen non-x86 SingleUse policy."
+            }
             if ($record.memory.remoteRuntimeMaxMemoryBytes -lt
                     [int64]$thresholds.resource.minimumRuntimeMaxMemoryBytes) {
                 throw "$($record.runId) failed the remote Java heap admission gate."
@@ -436,11 +451,15 @@ try {
     }
 
     for ($pair = 1; $pair -le $PairCount; $pair++) {
-        $order = if ($pair % 2 -eq 1) {
+        $frozenOrders = @($thresholds.measurement.pairOrder)
+        $order = if ($pair -le $frozenOrders.Count) {
+            @($frozenOrders[$pair - 1])
+        } elseif ($pair % 2 -eq 1) {
             @("in-process", "bound-remote")
         } else {
             @("bound-remote", "in-process")
         }
+        if ($order.Count -ne 2) { throw "Pair $pair has an invalid frozen host order." }
         for ($ordinal = 1; $ordinal -le 2; $ordinal++) {
             if ($CooldownSeconds -gt 0 -and $runRecords.Count -gt 0) {
                 Start-Sleep -Seconds $CooldownSeconds
