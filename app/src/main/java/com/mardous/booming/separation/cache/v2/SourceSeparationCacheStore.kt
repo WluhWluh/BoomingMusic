@@ -568,6 +568,12 @@ class SourceSeparationCacheStore(
                 output.write(bytes)
                 output.fd.sync()
             }
+            if (targetName == RUN_JOURNAL_FILE_NAME) {
+                SourceSeparationCacheFaultInjection.reach(
+                    SourceSeparationCacheFaultStage.JournalCommit,
+                    root.directory,
+                )
+            }
             replaceFile(temporary, target)
         } catch (error: Throwable) {
             temporary.delete()

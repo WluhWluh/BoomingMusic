@@ -11,6 +11,8 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPriority
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.SourceSeparationManifest
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultInjection
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultStage
 import java.io.File
 import java.util.LinkedHashMap
 import java.util.Locale
@@ -48,6 +50,7 @@ class MdxRangeSeparator(
         sessionProvider: MdxInferenceSessionProvider,
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
+        requireWorkspaceAvailable: () -> Unit = {},
     ): MdxRangeSeparationResult {
         val timing = MdxRangeTimingAccumulator()
         val totalStartedAt = SystemClock.elapsedRealtime()
@@ -88,6 +91,7 @@ class MdxRangeSeparator(
 
         onProgress(MdxRangeProgress.preparing("Preparing output files"))
         val (vocalsFile, instrumentalFile, timingFile) = measureElapsed(timing, "Output setup") {
+            requireWorkspaceAvailable()
             outputDir.mkdirs()
             val baseName = safeBaseName(displayName)
             val rangeTag =
@@ -128,6 +132,7 @@ class MdxRangeSeparator(
                         existing.segmentCount == segmentPlan.segmentCount
             }
             ?: segmentPlan
+        requireWorkspaceAvailable()
         segmentOutputDir?.mkdirs()
         val segmentPublicationId = java.util.UUID.randomUUID().toString()
 
@@ -165,6 +170,7 @@ class MdxRangeSeparator(
         }
         var runtimeDiagnostics: MdxRuntimeDiagnostics? = null
 
+        requireWorkspaceAvailable()
         WavFileWriter(
             file = vocalsFile,
             sampleRate = config.sampleRate,
@@ -172,6 +178,7 @@ class MdxRangeSeparator(
             declaredDataSizeBytes = declaredOutputDataSizeBytes,
             preserveExistingData = effectiveResume != null,
         ).use { vocalsWriter ->
+            requireWorkspaceAvailable()
             WavFileWriter(
                 file = instrumentalFile,
                 sampleRate = config.sampleRate,
@@ -285,6 +292,10 @@ class MdxRangeSeparator(
                                 scheduler = schedulerProgress,
                             )
                         )
+                        SourceSeparationCacheFaultInjection.reach(
+                            SourceSeparationCacheFaultStage.Decode,
+                        )
+                        requireWorkspaceAvailable()
                         val mixWindow = sourceInput.toStereoFloatContextWindow(
                             windowStartFrame = generationStartFrame - config.trim,
                             frames = config.chunkSize,
@@ -339,12 +350,17 @@ class MdxRangeSeparator(
                         }
 
                         throwIfCanceled(shouldCancel)
+                        SourceSeparationCacheFaultInjection.reach(
+                            SourceSeparationCacheFaultStage.Dsp,
+                        )
+                        requireWorkspaceAvailable()
                         val modelOutputWindow = runWindow(
                             session = session,
                             spectrogram = spectrogram,
                             mixWindow = mixWindow,
                             timing = timing,
                             shouldCancel = shouldCancel,
+                            requireWorkspaceAvailable = requireWorkspaceAvailable,
                         )
                         // Auto may switch from GPU to CPU during invocation; capture the
                         // post-run diagnostics so the completed cache records the real path.
@@ -382,24 +398,32 @@ class MdxRangeSeparator(
                         measureElapsed(timing, "WAV write") {
                             val writeFrameOffset = generationStartFrame - startFrame
                             if (declaredOutputDataSizeBytes != null) {
+                                requireWorkspaceAvailable()
                                 vocalsWriter.writePcm16AtFrame(writeFrameOffset, vocalsPcm)
+                                requireWorkspaceAvailable()
                                 instrumentalWriter.writePcm16AtFrame(writeFrameOffset, instrumentalPcm)
                             } else {
+                                requireWorkspaceAvailable()
                                 vocalsWriter.writePcm16(vocalsPcm)
+                                requireWorkspaceAvailable()
                                 instrumentalWriter.writePcm16(instrumentalPcm)
                             }
                             if (segmentOutputDir != null) {
+                                requireWorkspaceAvailable()
                                 writeSegmentWav(
                                     segmentOutputDir,
                                     segment.vocalsPath,
                                     vocalsPcm,
                                     segmentPublicationId,
+                                    requireWorkspaceAvailable,
                                 )
+                                requireWorkspaceAvailable()
                                 writeSegmentWav(
                                     segmentOutputDir,
                                     segment.instrumentalPath,
                                     instrumentalPcm,
                                     segmentPublicationId,
+                                    requireWorkspaceAvailable,
                                 )
                             }
                         }
@@ -480,6 +504,7 @@ class MdxRangeSeparator(
             executionProfile = executionProfile,
             sourceDecodeDiagnostics = sourceInput.diagnostics,
         )
+        requireWorkspaceAvailable()
         timingFile.writeText(
             timingReport.toFileText(
                 vocalsFile = vocalsFile,
@@ -517,15 +542,19 @@ class MdxRangeSeparator(
         relativePath: String,
         pcm16: ByteArray,
         publicationId: String,
+        requireWorkspaceAvailable: () -> Unit,
     ) {
         val file = File(rootDir.parentFile ?: rootDir, relativePath)
+        requireWorkspaceAvailable()
         file.parentFile?.mkdirs()
+        requireWorkspaceAvailable()
         val temporary = File.createTempFile(
             "${file.name}.$publicationId.",
             ".tmp",
             file.parentFile,
         )
         try {
+            requireWorkspaceAvailable()
             WavFileWriter(
                 temporary,
                 config.sampleRate,
@@ -537,6 +566,10 @@ class MdxRangeSeparator(
             require(temporary.length() == SEGMENT_WAV_HEADER_BYTES + pcm16.size.toLong()) {
                 "Published cache segment WAV has an invalid size."
             }
+            SourceSeparationCacheFaultInjection.reach(
+                SourceSeparationCacheFaultStage.OutputPublish,
+            )
+            requireWorkspaceAvailable()
             try {
                 java.nio.file.Files.move(
                     temporary.toPath(),
@@ -551,6 +584,7 @@ class MdxRangeSeparator(
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                 )
             }
+            requireWorkspaceAvailable()
             runCatching {
                 java.nio.channels.FileChannel.open(
                     requireNotNull(file.parentFile).toPath(),
@@ -589,11 +623,16 @@ class MdxRangeSeparator(
         mixWindow: Array<FloatArray>,
         timing: MdxRangeTimingAccumulator,
         shouldCancel: () -> Boolean,
+        requireWorkspaceAvailable: () -> Unit,
     ): Array<FloatArray> {
         val modelInput = measureElapsed(timing, "STFT") {
             spectrogram.waveformToTensor(mixWindow)
         }
         val modelOutput = measureElapsed(timing, "Model inference") {
+            SourceSeparationCacheFaultInjection.reach(
+                SourceSeparationCacheFaultStage.NativeInvocation,
+            )
+            requireWorkspaceAvailable()
             session.run(modelInput, shouldCancel)
         }
         return measureElapsed(timing, "ISTFT") {

@@ -13,6 +13,7 @@ import com.mardous.booming.separation.model.MdxRuntimePrecision
 import com.mardous.booming.separation.model.MdxRuntimeProfiles
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLostException
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteEventDeliveryException
 import java.nio.file.Files
 import java.util.concurrent.CancellationException
@@ -189,6 +190,39 @@ class SourceSeparationProcessSessionControllerTest {
 
         assertEquals(SourceSeparationProcessSessionState.Poisoned,
             controller.diagnostics().state)
+    }
+
+    @Test
+    fun `typed cache loss leaves a healthy resident session reusable`() {
+        val factory = FakeFactory()
+        val controller = residentController(factory)
+        controller.beginExecution("run-1")
+        val first = controller.acquire(artifact, profile, settings)
+        val firstSession = first.session
+        first.session.run(floatArrayOf(1f))
+        first.close()
+        controller.diagnostics().also {
+            assertEquals(SourceSeparationProcessSessionState.Resident, it.state)
+            assertEquals(0, it.activeLeaseCount)
+        }
+        controller.finishExecution(
+            "run-1",
+            SourceSeparationCacheLostException(
+                cacheKey = "a".repeat(64),
+                message = "The cache was cleared.",
+            ),
+        )
+
+        val afterLoss = controller.diagnostics()
+        assertEquals(SourceSeparationProcessSessionState.Resident, afterLoss.state)
+        assertFalse(afterLoss.poisoned)
+
+        controller.beginExecution("run-2")
+        val second = controller.acquire(artifact, profile, settings)
+        assertSame(firstSession, second.session)
+        second.close()
+        controller.finishExecution("run-2", null)
+        assertEquals(1, factory.createCount)
     }
 
     @Test

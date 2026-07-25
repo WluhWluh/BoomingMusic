@@ -9,6 +9,7 @@ import com.mardous.booming.separation.SourceSeparationModelAwareExecutionWorkspa
 import com.mardous.booming.separation.SourceSeparationModelAwareRangeExecutor
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultInjection
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunRequest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunStart
@@ -48,6 +49,10 @@ internal class SourceSeparationRemoteExecutionEnvironment(
         applicationContext.filesDir,
         SourceSeparationPresetRepository.MODEL_ROOT_DIRECTORY,
     ).canonicalFile
+
+    init {
+        SourceSeparationCacheFaultInjection.initialize(cacheStore.root().directory)
+    }
 
     @Volatile
     private var validationOverrideDiagnostics:
@@ -145,6 +150,7 @@ internal class SourceSeparationRemoteExecutionEnvironment(
             windowDecodeEnabled = descriptor.runtime.windowDecodeEnabled,
             shouldPause = control::shouldPause,
             shouldCancel = control::shouldCancel,
+            requireWorkspaceAvailable = run::requireOpen,
         )
         return SourceSeparationRemoteAdmittedExecution(
             run = run,

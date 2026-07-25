@@ -50,6 +50,7 @@ internal class MdxSourceSeparationModelAwareRangeExecutor(
         sessionProvider = sessionProviderFactory(),
         shouldPause = request.shouldPause,
         shouldCancel = request.shouldCancel,
+        requireWorkspaceAvailable = request.requireWorkspaceAvailable,
     )
 }
 

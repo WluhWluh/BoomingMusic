@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.process
 
 import com.mardous.booming.separation.SourceSeparationPausedException
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLostException
 import com.mardous.booming.separation.model.MdxExecutionProfile
 import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxInferenceSession
@@ -63,6 +64,7 @@ internal class SourceSeparationProcessSessionController(
             failure !is CancellationException &&
             failure !is SourceSeparationPausedException &&
             failure !is SourceSeparationRemoteEventDeliveryException &&
+            failure !is SourceSeparationCacheLostException &&
             failure !is SourceSeparationProcessSessionRecycleRequiredException
         ) {
             poisonLocked("Execution failed after native session acquisition: " +

@@ -89,6 +89,10 @@ class SourceSeparationCacheFlacPromoter(
                     promotedIndexIntegrity = promotedIndexIntegrity,
                 )
             }
+            SourceSeparationCacheFaultInjection.reach(
+                SourceSeparationCacheFaultStage.FlacHandoff,
+                store.root().directory,
+            )
             check(store.deleteRelativePath(manifest.cacheKey, PROMOTION_STAGING_DIRECTORY)) {
                 "Unable to remove FLAC promotion staging directory."
             }

@@ -348,6 +348,7 @@ internal class SourceSeparationModelAwareEngine(
                 windowDecodeEnabled = windowDecodeEnabled,
                 shouldPause = shouldPause,
                 shouldCancel = shouldCancel,
+                requireWorkspaceAvailable = run::requireOpen,
             )
             val descriptor = executionRequest.toExecutionDescriptor(
                 runId = currentRunId,
@@ -559,6 +560,7 @@ internal data class SourceSeparationModelAwareExecutionRequest(
     val windowDecodeEnabled: Boolean,
     val shouldPause: () -> Boolean,
     val shouldCancel: () -> Boolean,
+    val requireWorkspaceAvailable: () -> Unit = {},
 )
 
 internal data class SourceSeparationModelAwareExecutionWorkspace(

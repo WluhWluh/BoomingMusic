@@ -27,7 +27,9 @@ class SourceSeparationCacheRunCoordinator(
             ?: return null
         return manifest.takeIf {
             store.validateCompletedEntry(it, verifyHashes = false) ==
-                SourceSeparationCacheValidationResult.Valid
+                SourceSeparationCacheValidationResult.Valid &&
+                store.readRunJournal(identity.cacheKey)?.lifecycle ==
+                SourceSeparationCacheRunJournalLifecycle.Completed
         }
     }
 
@@ -65,10 +67,43 @@ class SourceSeparationCacheRunCoordinator(
             val entryDirectory = store.entryDirectory(request.identity.cacheKey)
             lease.bindEntryDirectory(entryDirectory)
             val existing = store.readManifest(request.identity.cacheKey)
+            val existingJournal = store.readRunJournal(request.identity.cacheKey)
+                ?.takeIf { journal ->
+                    journal.request.identity == request.identity &&
+                        journal.request.contract == request.contract
+                }
             if (existing?.state == SourceSeparationCacheManifestState.Completed &&
                 store.validateCompletedEntry(existing, verifyHashes = false) ==
                 SourceSeparationCacheValidationResult.Valid
             ) {
+                val completedJournal = existingJournal?.let { journal ->
+                    if (journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Completed) {
+                        journal
+                    } else {
+                        val recovered = if (journal.lifecycle ==
+                            SourceSeparationCacheRunJournalLifecycle.Running
+                        ) {
+                            journal.append(
+                                type = SourceSeparationCacheRunTransitionType.PreviousOwnerDied,
+                                nowEpochMs = nowEpochMs(),
+                            )
+                        } else {
+                            journal
+                        }
+                        recovered.append(
+                            type = SourceSeparationCacheRunTransitionType.Completed,
+                            nowEpochMs = nowEpochMs(),
+                            lifecycle = SourceSeparationCacheRunJournalLifecycle.Completed,
+                        )
+                    }
+                } ?: SourceSeparationCacheRunJournal.admitted(
+                    request.toJournalRequest(nowEpochMs()),
+                ).append(
+                    type = SourceSeparationCacheRunTransitionType.Completed,
+                    nowEpochMs = nowEpochMs(),
+                    lifecycle = SourceSeparationCacheRunJournalLifecycle.Completed,
+                )
+                store.writeRunJournal(completedJournal)
                 lease.close()
                 return SourceSeparationCacheRunStart.AlreadyCompleted(existing)
             }
@@ -81,11 +116,6 @@ class SourceSeparationCacheRunCoordinator(
                 request.identity.cacheKey,
                 SEGMENTS_DIRECTORY,
             )
-            val existingJournal = store.readRunJournal(request.identity.cacheKey)
-                ?.takeIf { journal ->
-                    journal.request.identity == request.identity &&
-                        journal.request.contract == request.contract
-                }
             val committedSegments = existingJournal
                 ?.committedSegments
                 ?.filter { segment -> segment.isValid(store, request.identity.cacheKey) }
@@ -192,7 +222,11 @@ class SourceSeparationCacheRunCoordinator(
         )
         updateJournal(run) { journal, now ->
             preparation.segmentPlan.segments
-                .filter { it.state.isPlaybackReady }
+                .filter { segment ->
+                    segment.state.isPlaybackReady && journal.committedSegments.none {
+                        it.segmentIndex == segment.index
+                    }
+                }
                 .fold(
                     journal.append(
                         type = SourceSeparationCacheRunTransitionType.Prepared,
@@ -343,6 +377,10 @@ class SourceSeparationCacheRunCoordinator(
             output = completed.output?.copy(totalBytes = store.entrySize(run.identity.cacheKey)),
         )
         store.writeManifest(completed)
+        SourceSeparationCacheFaultInjection.reach(
+            SourceSeparationCacheFaultStage.TerminalCommit,
+            store.root().directory,
+        )
         updateJournal(run) { journal, now ->
             journal.append(
                 type = SourceSeparationCacheRunTransitionType.Completed,
