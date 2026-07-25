@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "phase5-paired-method-smoke-v1",
+  "status": "passed",
+  "methodRevision": "041b69b7562f3a3af884dfd61ccb0326b18560e0",
+  "instrumentationRevision": "72d91d0885bd543531707d47842c075be9891336",
+  "thresholdsVersion": "phase5-paired-host-thresholds-v1",
+  "device": {
+    "model": "SM-G9730",
+    "androidApi": 31,
+    "abi": "arm64-v8a",
+    "pairCount": 3,
+    "runCount": 6
+  },
+  "identity": {
+    "appApkSha256": "dc388c28fe4f19a08f0ac9c0fd944f3534be18bd1c816330dcf72e5b6c15a23a",
+    "testApkSha256": "73e83ebc5e4161da14148c26ba8fcfd0ed66d844dfe52a0024b2a4eec3a0408b",
+    "catalogSha256": "a553f227588313578321c07c73ff99654eff7795727d825d16b191aa0f879e1f",
+    "modelId": "uvr_mdxnet_3_9662",
+    "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "fixtureId": "coast_town_short_wav",
+    "fixtureSha256": "0fa980cace732c47647043d1a5fce3589e54771ca3574b003f152acfa6ceec96",
+    "cacheKey": "dc1d709c6620b41263f3ae7cffec778bcf26c3936e790a368f18597afe5638c8"
+  },
+  "results": {
+    "concreteBackend": "LiteRtGpu",
+    "coldProcessBoundaryPassed": true,
+    "singleUseRemoteSessionPassed": true,
+    "instrumentationMainColocationRecorded": true,
+    "exactOutputHashesAcrossAllRuns": true,
+    "outputFrameCount": 529200,
+    "maximumPlaybackDriftMs": 142,
+    "unexpectedPlaybackEventCount": 0,
+    "maximumProcessExitMs": 490,
+    "maximumIdleRemotePssBytes": 88453120,
+    "minimumLargestFreeAddressGapBytes": 400309923840,
+    "startingThermalStatuses": [0, 0, 0, 0, 0, 0],
+    "powerSource": "ac"
+  },
+  "medians": {
+    "inProcess": {
+      "firstReadyMs": 13573,
+      "fullSongMs": 18364,
+      "summedPeakPssBytes": 598360064
+    },
+    "boundRemote": {
+      "firstReadyMs": 13639,
+      "fullSongMs": 18935,
+      "summedPeakPssBytes": 611084288
+    },
+    "boundToInProcess": {
+      "firstReadyRatio": 1.0048625948574375,
+      "firstReadyRegressionMs": 66,
+      "fullSongRatio": 1.0310934436941843,
+      "fullSongRegressionMs": 571,
+      "summedPeakPssRegressionBytes": 12724224
+    }
+  },
+  "rawEvidence": [
+    {
+      "fileName": "phase5-host-pairs-smoke-v1-192.168.8.181_35975-arm64-v8a-summary.json",
+      "byteSize": 25250,
+      "sha256": "c6bc2e13bc5cc70f8f31fe556fd451ffcaa90de8ad4a247f6aa39417020c91b0"
+    },
+    {
+      "fileName": "phase5-host-pairs-smoke-v1-192.168.8.181_35975-arm64-v8a-pair1-1-inprocess-worker.json",
+      "byteSize": 15466,
+      "sha256": "90b2e5e0a34cccdb0e519bea01a6017a2244d03679266bf24333864615f52cf6"
+    },
+    {
+      "fileName": "phase5-host-pairs-smoke-v1-192.168.8.181_35975-arm64-v8a-pair1-2-boundremote-worker.json",
+      "byteSize": 18098,
+      "sha256": "ed5778df346c7b8693bd79e7200a0f44627f0d3383bba15c2381505c0ccd4bac"
+    },
+    {
+      "fileName": "phase5-host-pairs-smoke-v1-192.168.8.181_35975-arm64-v8a-pair2-1-boundremote-worker.json",
+      "byteSize": 18226,
+      "sha256": "26f1b705031c8f828264a5e18d5fdfbd25ecd4f679224959a68a76977585e13c"
+    },
+    {
+      "fileName": "phase5-host-pairs-smoke-v1-192.168.8.181_35975-arm64-v8a-pair2-2-inprocess-worker.json",
+      "byteSize": 15397,
+      "sha256": "3964935d9abedbc0224d51a10ffc42a038de9398476e55ca57fbb57128ca6d55"
+    },
+    {
+      "fileName": "phase5-host-pairs-smoke-v1-192.168.8.181_35975-arm64-v8a-pair3-1-inprocess-worker.json",
+      "byteSize": 15399,
+      "sha256": "b135605a68279e291d028dbeeb15be659f5eb93d048dcf83c98a94c1697bbce8"
+    },
+    {
+      "fileName": "phase5-host-pairs-smoke-v1-192.168.8.181_35975-arm64-v8a-pair3-2-boundremote-worker.json",
+      "byteSize": 18223,
+      "sha256": "021b2e254d175e715fdca81087033aeb7a445d54870ba1c249054c365772d2e1"
+    }
+  ]
+}

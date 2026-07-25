@@ -729,22 +729,31 @@ separate subphases so their effects remain attributable.
 
 ### Phase 5A: Freeze paired-comparison method
 
-- [ ] Pair `InProcess` and `BoundRemote` runs by app revision, exact model and
+- [x] Pair `InProcess` and `BoundRemote` runs by app revision, exact model and
   contract, source fixture, cache identity, backend request, thread settings,
   battery/charger state, and starting thermal status.
-- [ ] Run at least three cold A/B pairs per policy candidate, alternating which
+- [x] Run at least three cold A/B pairs per policy candidate, alternating which
   host runs first. Report all samples and medians; do not select one favorable
   run.
-- [ ] Keep non-x86 comparison runs `SingleUse` initially. Pure x86 uses its
+- [x] Keep non-x86 comparison runs `SingleUse` initially. Pure x86 uses its
   already-qualified resident policy because production-shaped recreation is
   not a valid oracle there.
-- [ ] Separate instrumentation/test-runner PSS and CPU time from the main and
-  inference processes. Record device total/available memory and
+- [x] Account for instrumentation/test-runner PSS and CPU time separately from
+  inference work. Android instrumentation shares the target main PID, so
+  record that co-location and count it once rather than inventing a second
+  process sample. Record device total/available memory and
   `ActivityManager.isLowRamDevice`, memory/large-memory class, and effective
   `Runtime.maxMemory()` at admission.
-- [ ] Freeze performance, summed-memory, playback, process-exit, and output
+- [x] Freeze performance, summed-memory, playback, process-exit, and output
   gates before reviewing the paired results. Include a Java tensor working-set
   gate; total RAM and free virtual-address space are not sufficient proxies.
+
+Phase 5A froze `phase5-paired-host-thresholds-v1` before results and added a
+dedicated AB/BA/AB runner. Six S10 arm64 short-fixture smoke runs passed exact
+identity/output, cold-process, non-x86 `SingleUse`, resource, thermal, power,
+and original-playback gates. This smoke qualifies the method, not a production
+host policy or full-song performance result. See
+`docs/validation/litert-inference-process/phase5/methodology-2026-07-25.md`.
 
 ### Phase 5B: CPU host-placement matrix
 
