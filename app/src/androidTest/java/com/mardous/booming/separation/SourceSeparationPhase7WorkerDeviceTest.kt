@@ -216,6 +216,16 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 executionHostEventSink = hostEvents::add,
                 boundRemoteHostSink = { boundRemoteHost = it },
             )
+            val remoteStartup = boundRemoteHost?.let { host ->
+                host.processGeneration
+                host.connectionDiagnostics
+            }
+            val settledRemotePssBytes = remoteStartup?.pid?.let { pid ->
+                SystemClock.sleep(REMOTE_IDLE_SETTLE_MS)
+                processPssBytes(context, pid).also { pssBytes ->
+                    assertTrue("Settled remote PSS was unavailable.", pssBytes > 0L)
+                }
+            }
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
             val resolved = runtimeFacade.resolve(source)
             val runtimeSong = (resolved as? SourceSeparationRuntimeSongResolution.Ready)?.song
@@ -237,10 +247,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 ).also { originalPlayback = it }
             } else {
                 null
-            }
-            val remoteStartup = boundRemoteHost?.let { host ->
-                host.processGeneration
-                host.connectionDiagnostics
             }
             val remoteProcessBefore = boundRemoteHost?.processDiagnostics()
             val idleMemory = memorySnapshot(context)
@@ -597,6 +603,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("peakNativeBytes", peakNativeBytes)
                 .put("peakGraphicsBytes", peakGraphicsBytes)
                 .put("idleRemotePssBytes", remoteStartup?.idlePssBytes ?: JSONObject.NULL)
+                .put(
+                    "settledIdleRemotePssBytes",
+                    settledRemotePssBytes ?: JSONObject.NULL,
+                )
+                .put(
+                    "remoteIdleSettleMs",
+                    if (remoteStartup != null) REMOTE_IDLE_SETTLE_MS else 0L,
+                )
                 .put("peakRemotePssBytes", peakRemotePssBytes)
                 .put("peakSummedPssBytes", peakSummedPssBytes)
                 .put("peakUssBytes", peakUssBytes)
@@ -5803,6 +5817,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val TEST_KEY_GLOBAL_BLEND = "source_separation.global_blend"
         const val SEEK_FROM_END_MS = 1_000L
         const val POLL_INTERVAL_MS = 250L
+        const val REMOTE_IDLE_SETTLE_MS = 2_000L
         const val WORKER_TIMEOUT_MS = 20 * 60 * 1000L
         const val LIFECYCLE_TIMEOUT_MS = 5 * 60 * 1000L
         const val MEDIA_SESSION_TIMEOUT_SECONDS = 30L

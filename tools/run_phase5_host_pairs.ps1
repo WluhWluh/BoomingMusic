@@ -28,6 +28,7 @@ $thresholdsPath = Join-Path $repoRoot `
     "docs\validation\litert-inference-process\phase5\paired-host-thresholds-v1.json"
 $package = "com.wluhwluh.booming.sourcesep.debug"
 $adb = (Get-Command adb -ErrorAction Stop).Source
+$requiredRemoteIdleSettleMs = 2000
 
 if ([string]::IsNullOrWhiteSpace($SourceRepository)) {
     $SourceRepository = Join-Path $repoRoot "..\..\MusicSourceSeparation"
@@ -265,9 +266,13 @@ function Add-WorkerReport(
         }
         memory = [ordered]@{
             mainPeakPssBytes = [int64]$report.memory.peakPssBytes
-            remoteIdlePssBytes = if ($null -ne $report.memory.idleRemotePssBytes) {
+            remoteStartupPssBytes = if ($null -ne $report.memory.idleRemotePssBytes) {
                 [int64]$report.memory.idleRemotePssBytes
             } else { 0L }
+            remoteIdlePssBytes = if ($null -ne $report.memory.settledIdleRemotePssBytes) {
+                [int64]$report.memory.settledIdleRemotePssBytes
+            } else { 0L }
+            remoteIdleSettleMs = [int64]$report.memory.remoteIdleSettleMs
             remotePeakPssBytes = [int64]$report.memory.peakRemotePssBytes
             summedPeakPssBytes = [int64]$report.memory.peakSummedPssBytes
             mainPeakUssBytes = [int64]$report.memory.peakUssBytes
@@ -371,9 +376,15 @@ function Test-Gates {
                     [int64]$thresholds.resource.minimumRuntimeMaxMemoryBytes) {
                 throw "$($record.runId) failed the remote Java heap admission gate."
             }
-            if ($record.memory.remoteIdlePssBytes -gt
+            if ($record.memory.remoteIdlePssBytes -le 0 -or
+                    $record.memory.remoteIdlePssBytes -gt
                     [int64]$thresholds.resource.maximumIdleRemotePssBytes) {
-                throw "$($record.runId) exceeded the idle remote PSS gate."
+                throw "$($record.runId) exceeded the settled idle remote PSS gate: " +
+                    "$($record.memory.remoteIdlePssBytes) bytes."
+            }
+            if ($record.memory.remoteIdleSettleMs -ne $requiredRemoteIdleSettleMs) {
+                throw "$($record.runId) used an invalid remote idle settle interval: " +
+                    "$($record.memory.remoteIdleSettleMs) ms."
             }
             if ($null -ne $record.memory.minimumLargestFreeAddressGapBytes -and
                     $record.memory.minimumLargestFreeAddressGapBytes -lt
@@ -522,10 +533,15 @@ try {
             }
         }
     }
-    $comparison = Test-Gates
+    try {
+        $comparison = Test-Gates
+    } catch {
+        $failures.Add("gate: $($_.Exception.Message)")
+        throw
+    }
 } finally {
     $summary = [ordered]@{
-        schemaVersion = "phase5-paired-host-report-v1"
+        schemaVersion = "phase5-paired-host-report-v2"
         status = if ($null -ne $comparison -and $failures.Count -eq 0) { "passed" } else { "failed" }
         generatedAtUtc = [DateTime]::UtcNow.ToString("o")
         thresholdsVersion = [string]$thresholds.schemaVersion

@@ -36,7 +36,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v20",
+    [string]$RunnerRevision = "phase7-runner-v21",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet("in-process", "bound-remote")]
