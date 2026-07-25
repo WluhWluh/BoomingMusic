@@ -10,6 +10,7 @@ class WavFileWriter(
     private val channelCount: Int,
     private val declaredDataSizeBytes: Long? = null,
     private val preserveExistingData: Boolean = false,
+    private val durable: Boolean = false,
 ) : Closeable {
     private val output = RandomAccessFile(file, "rw")
     private var dataSize = 0L
@@ -58,6 +59,7 @@ class WavFileWriter(
             "WAV data exceeds declared output size."
         }
         writeHeader(finalDataSize)
+        if (durable) output.fd.sync()
         output.close()
     }
 

@@ -22,7 +22,15 @@ class SourceSeparationCacheRunCoordinator(
         ) == request.identity) {
             "Cache run identity does not match its contract snapshot."
         }
-        val lease = repository.tryAcquireRunWrite(request.identity)
+        val lease = repository.tryAcquireRunWrite(
+            request.identity,
+            SourceSeparationCacheLockOwner(
+                purpose = SourceSeparationCacheLockPurpose.Run,
+                runId = request.runId,
+                processGeneration = request.processGeneration,
+                pid = request.ownerPid,
+            ),
+        )
             ?: return SourceSeparationCacheRunStart.Busy
         return try {
             val entryDirectory = store.entryDirectory(request.identity.cacheKey)
@@ -44,11 +52,21 @@ class SourceSeparationCacheRunCoordinator(
                 request.identity.cacheKey,
                 SEGMENTS_DIRECTORY,
             )
+            val existingJournal = store.readRunJournal(request.identity.cacheKey)
+                ?.takeIf { journal ->
+                    journal.request.identity == request.identity &&
+                        journal.request.contract == request.contract
+                }
+            val committedSegments = existingJournal
+                ?.committedSegments
+                ?.filter { segment -> segment.isValid(store, request.identity.cacheKey) }
+                .orEmpty()
             val resumed = existing?.toResumeState(store)
             val manifest = if (resumed != null) {
                 val resumedPlan = existing.segmentPlan!!.withValidatedReadySegments(
                     store = store,
                     cacheKey = existing.cacheKey,
+                    committedSegments = committedSegments,
                 )
                 existing.copy(
                     state = SourceSeparationCacheManifestState.Running,
@@ -76,6 +94,20 @@ class SourceSeparationCacheRunCoordinator(
                     lastAccessedAtEpochMs = existing?.lastAccessedAtEpochMs ?: now,
                 ).also(store::writeManifest)
             }
+            cleanUncommittedSegments(
+                cacheKey = request.identity.cacheKey,
+                plan = manifest.segmentPlan,
+                committedSegments = committedSegments,
+            )
+            val journalRequest = request.toJournalRequest(nowEpochMs())
+            val journal = existingJournal?.let { previous ->
+                SourceSeparationCacheRunJournal.resume(
+                    previous = previous,
+                    request = journalRequest,
+                    committedSegments = committedSegments,
+                )
+            } ?: SourceSeparationCacheRunJournal.admitted(journalRequest)
+            store.writeRunJournal(journal)
             SourceSeparationCacheRunStart.Ready(
                 SourceSeparationModelAwareCacheRun(
                     identity = request.identity,
@@ -85,6 +117,8 @@ class SourceSeparationCacheRunCoordinator(
                     completedDirectory = completedDirectory,
                     segmentsDirectory = segmentsDirectory,
                     resumeState = manifest.toResumeState(store),
+                    runId = request.runId,
+                    processGeneration = request.processGeneration,
                     lease = lease,
                 )
             )
@@ -127,6 +161,23 @@ class SourceSeparationCacheRunCoordinator(
             elapsedMs = 0L,
             totalBytes = store.entrySize(run.identity.cacheKey),
         )
+        updateJournal(run) { journal, now ->
+            preparation.segmentPlan.segments
+                .filter { it.state.isPlaybackReady }
+                .fold(
+                    journal.append(
+                        type = SourceSeparationCacheRunTransitionType.Prepared,
+                        nowEpochMs = now,
+                    )
+                ) { currentJournal, segment ->
+                    currentJournal.append(
+                        type = SourceSeparationCacheRunTransitionType.SegmentReady,
+                        nowEpochMs = now,
+                        segmentIndex = segment.index,
+                        committedSegment = committedSegment(run, segment),
+                    )
+                }
+        }
         return current.copy(
             state = SourceSeparationCacheManifestState.Running,
             output = output,
@@ -144,6 +195,34 @@ class SourceSeparationCacheRunCoordinator(
         run.requireOpen()
         val current = store.readManifest(run.identity.cacheKey) ?: return null
         val plan = current.segmentPlan ?: return current
+        val segment = plan.segments.singleOrNull { it.index == segmentIndex }
+            ?: return current
+        updateJournal(run) { journal, now ->
+            when (state) {
+                SourceSeparationSegmentState.Running -> journal.append(
+                    type = SourceSeparationCacheRunTransitionType.SegmentRunning,
+                    nowEpochMs = now,
+                    segmentIndex = segmentIndex,
+                )
+
+                SourceSeparationSegmentState.Ready -> {
+                    val committed = committedSegment(run, segment)
+                    journal.append(
+                        type = SourceSeparationCacheRunTransitionType.SegmentReady,
+                        nowEpochMs = now,
+                        segmentIndex = segmentIndex,
+                        committedSegment = committed,
+                    )
+                }
+
+                else -> journal.append(
+                    type = SourceSeparationCacheRunTransitionType.SegmentInvalidated,
+                    nowEpochMs = now,
+                    segmentIndex = segmentIndex,
+                    removeCommittedSegmentIndex = segmentIndex,
+                )
+            }
+        }
         return current.copy(
             segmentPlan = plan.withSegmentState(segmentIndex, state),
             updatedAtEpochMs = nowEpochMs(),
@@ -235,6 +314,13 @@ class SourceSeparationCacheRunCoordinator(
             output = completed.output?.copy(totalBytes = store.entrySize(run.identity.cacheKey)),
         )
         store.writeManifest(completed)
+        updateJournal(run) { journal, now ->
+            journal.append(
+                type = SourceSeparationCacheRunTransitionType.Completed,
+                nowEpochMs = now,
+                lifecycle = SourceSeparationCacheRunJournalLifecycle.Completed,
+            )
+        }
         run.close()
         return completed
     }
@@ -289,8 +375,8 @@ class SourceSeparationCacheRunCoordinator(
         state: SourceSeparationCacheManifestState,
         error: Throwable?,
     ): SourceSeparationCacheManifest? {
-        run.requireOpen()
         return try {
+            run.requireOpen()
             val current = store.readManifest(run.identity.cacheKey) ?: return null
             val resetPlan = current.segmentPlan?.copy(
                 segments = current.segmentPlan.segments.map { segment ->
@@ -301,7 +387,7 @@ class SourceSeparationCacheRunCoordinator(
                     }
                 }
             )
-            current.copy(
+            val updated = current.copy(
                 state = state,
                 segmentPlan = resetPlan,
                 error = error?.let {
@@ -312,6 +398,37 @@ class SourceSeparationCacheRunCoordinator(
                 },
                 updatedAtEpochMs = nowEpochMs(),
             ).also(store::writeManifest)
+            updateJournal(run) { journal, now ->
+                val transition = when (state) {
+                    SourceSeparationCacheManifestState.Running ->
+                        SourceSeparationCacheRunTransitionType.Paused
+                    SourceSeparationCacheManifestState.Canceled ->
+                        SourceSeparationCacheRunTransitionType.UserCanceled
+                    SourceSeparationCacheManifestState.Failed ->
+                        SourceSeparationCacheRunTransitionType.Failed
+                    SourceSeparationCacheManifestState.Completed -> error(
+                        "Incomplete cache run cannot become completed.",
+                    )
+                }
+                val lifecycle = when (state) {
+                    SourceSeparationCacheManifestState.Running ->
+                        SourceSeparationCacheRunJournalLifecycle.Paused
+                    SourceSeparationCacheManifestState.Canceled ->
+                        SourceSeparationCacheRunJournalLifecycle.Canceled
+                    SourceSeparationCacheManifestState.Failed ->
+                        SourceSeparationCacheRunJournalLifecycle.Failed
+                    SourceSeparationCacheManifestState.Completed -> error(
+                        "Incomplete cache run cannot become completed.",
+                    )
+                }
+                journal.append(
+                    type = transition,
+                    nowEpochMs = now,
+                    error = error?.toCacheError(),
+                    lifecycle = lifecycle,
+                )
+            }
+            updated
         } finally {
             run.close()
         }
@@ -339,12 +456,16 @@ class SourceSeparationCacheRunCoordinator(
     private fun SourceSeparationSegmentPlan.withValidatedReadySegments(
         store: SourceSeparationCacheStore,
         cacheKey: String,
+        committedSegments: List<SourceSeparationCacheCommittedSegment>,
     ): SourceSeparationSegmentPlan {
+        val committedByIndex = committedSegments.associateBy { it.segmentIndex }
         return copy(
             segments = segments.map { segment ->
-                val canPreserve = segment.state.isPlaybackReady &&
-                    store.resolveEntryPath(cacheKey, segment.vocalsPath).isFile &&
-                    store.resolveEntryPath(cacheKey, segment.instrumentalPath).isFile
+                val committed = committedByIndex[segment.index]
+                val canPreserve = segment.state.isPlaybackReady && committed != null &&
+                    committed.vocalsPath == segment.vocalsPath &&
+                    committed.instrumentalPath == segment.instrumentalPath &&
+                    committed.isValid(store, cacheKey)
                 segment.copy(
                     state = if (canPreserve) {
                         segment.state
@@ -355,6 +476,88 @@ class SourceSeparationCacheRunCoordinator(
             }
         )
     }
+
+    private fun updateJournal(
+        run: SourceSeparationModelAwareCacheRun,
+        update: (
+            SourceSeparationCacheRunJournal,
+            Long,
+        ) -> SourceSeparationCacheRunJournal,
+    ): SourceSeparationCacheRunJournal {
+        run.requireOpen()
+        val current = requireNotNull(store.readRunJournal(run.identity.cacheKey)) {
+            "Cache run journal disappeared during an active run."
+        }
+        require(current.request.runId == run.runId &&
+            current.request.processGeneration == run.processGeneration
+        ) { "Cache run journal belongs to a stale writer." }
+        return update(current, nowEpochMs()).also(store::writeRunJournal)
+    }
+
+    private fun committedSegment(
+        run: SourceSeparationModelAwareCacheRun,
+        segment: com.mardous.booming.separation.cache.SourceSeparationSegment,
+    ) = SourceSeparationCacheCommittedSegment(
+        segmentIndex = segment.index,
+        vocalsPath = segment.vocalsPath,
+        vocalsIntegrity = store.fileIntegrity(
+            store.resolveEntryPath(run.identity.cacheKey, segment.vocalsPath),
+        ),
+        instrumentalPath = segment.instrumentalPath,
+        instrumentalIntegrity = store.fileIntegrity(
+            store.resolveEntryPath(run.identity.cacheKey, segment.instrumentalPath),
+        ),
+    )
+
+    private fun cleanUncommittedSegments(
+        cacheKey: String,
+        plan: SourceSeparationSegmentPlan?,
+        committedSegments: List<SourceSeparationCacheCommittedSegment>,
+    ) {
+        val committedIndexes = committedSegments.map { it.segmentIndex }.toSet()
+        plan?.segments.orEmpty()
+            .filterNot { it.index in committedIndexes }
+            .forEach { segment ->
+                store.deleteRelativePath(cacheKey, segment.vocalsPath)
+                store.deleteRelativePath(cacheKey, segment.instrumentalPath)
+            }
+        store.resolveEntryPath(cacheKey, SEGMENTS_DIRECTORY)
+            .walkTopDown()
+            .filter { file -> file.isFile && file.name.endsWith(".tmp") }
+            .forEach(File::delete)
+    }
+
+    private fun SourceSeparationCacheCommittedSegment.isValid(
+        store: SourceSeparationCacheStore,
+        cacheKey: String,
+    ): Boolean = store.validateIntegrity(
+        cacheKey = cacheKey,
+        relativePath = vocalsPath,
+        expected = vocalsIntegrity,
+    ) && store.validateIntegrity(
+        cacheKey = cacheKey,
+        relativePath = instrumentalPath,
+        expected = instrumentalIntegrity,
+    )
+
+    private fun SourceSeparationCacheRunRequest.toJournalRequest(
+        admittedAtEpochMs: Long,
+    ) = SourceSeparationCacheRunJournalRequest(
+        cacheKey = identity.cacheKey,
+        identity = identity,
+        contract = contract,
+        song = song,
+        sourceDiagnostics = sourceDiagnostics,
+        runId = runId,
+        processGeneration = processGeneration,
+        ownerPid = ownerPid,
+        admittedAtEpochMs = admittedAtEpochMs,
+    )
+
+    private fun Throwable.toCacheError() = SourceSeparationCacheError(
+        type = this::class.java.name,
+        message = message,
+    )
 
     private fun SourceSeparationModelAwareCacheRun.renderedStem(
         semantic: ContractStemSemantic,
@@ -412,7 +615,16 @@ data class SourceSeparationCacheRunRequest(
     val contract: SourceSeparationCacheContractSnapshot,
     val song: SourceSeparationCacheSongLocator,
     val sourceDiagnostics: SourceSeparationCacheSourceDiagnostics,
-)
+    val runId: String = java.util.UUID.randomUUID().toString(),
+    val processGeneration: Long = 1L,
+    val ownerPid: Int? = null,
+) {
+    init {
+        require(runId.isNotBlank()) { "Cache run ID is empty." }
+        require(processGeneration > 0L) { "Cache run process generation is invalid." }
+        require(ownerPid == null || ownerPid > 0) { "Cache run owner PID is invalid." }
+    }
+}
 
 sealed class SourceSeparationCacheRunStart {
     data class Ready(val run: SourceSeparationModelAwareCacheRun) : SourceSeparationCacheRunStart()
@@ -430,12 +642,15 @@ class SourceSeparationModelAwareCacheRun internal constructor(
     val completedDirectory: File,
     val segmentsDirectory: File,
     val resumeState: MdxRangeResumeState?,
+    val runId: String,
+    val processGeneration: Long,
     private val lease: SourceSeparationCacheEntryLease,
 ) : AutoCloseable {
     private var closed = false
 
     internal fun requireOpen() {
         check(!closed) { "Cache run is closed." }
+        lease.requireCacheAvailable()
     }
 
     override fun close() {

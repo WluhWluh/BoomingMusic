@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.cache.v2
 
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -82,6 +83,27 @@ class SourceSeparationCacheStore(
     fun readManifest(cacheKey: String): SourceSeparationCacheManifest? {
         val directory = entryDirectory(cacheKey)
         return readManifestFromDirectory(directory, cacheKey)
+    }
+
+    fun writeRunJournal(journal: SourceSeparationCacheRunJournal) {
+        writeJsonFile(
+            directory = entryDirectory(journal.request.cacheKey),
+            targetName = RUN_JOURNAL_FILE_NAME,
+            serializer = SourceSeparationCacheRunJournal.serializer(),
+            value = journal,
+        )
+    }
+
+    fun readRunJournal(cacheKey: String): SourceSeparationCacheRunJournal? {
+        val directory = entryDirectory(cacheKey)
+        val file = File(directory, RUN_JOURNAL_FILE_NAME)
+        if (!file.isFile || !file.isWithin(directory)) return null
+        return runCatching {
+            json.decodeFromString(
+                SourceSeparationCacheRunJournal.serializer(),
+                file.readText(Charsets.UTF_8),
+            )
+        }.getOrNull()?.takeIf { journal -> journal.request.cacheKey == cacheKey }
     }
 
     fun listManifests(): List<SourceSeparationCacheManifest> {
@@ -293,6 +315,7 @@ class SourceSeparationCacheStore(
         val temporary = File.createTempFile("${target.name}.", ".tmp", targetDirectory)
         try {
             source.copyTo(temporary, overwrite = true)
+            syncFile(temporary)
             val integrity = fileIntegrity(temporary)
             replaceFile(temporary, target)
             return integrity
@@ -309,6 +332,17 @@ class SourceSeparationCacheStore(
             sha256 = fileHasher.sha256(file),
         )
     }
+
+    fun validateIntegrity(
+        cacheKey: String,
+        relativePath: String,
+        expected: SourceSeparationCacheFileIntegrity,
+        verifyHash: Boolean = true,
+    ): Boolean = validateFile(
+        file = resolveEntryPath(cacheKey, relativePath),
+        expected = expected,
+        verifyHash = verifyHash,
+    )
 
     fun deleteRelativePath(cacheKey: String, relativePath: String): Boolean {
         val target = resolveEntryPath(cacheKey, relativePath)
@@ -528,7 +562,12 @@ class SourceSeparationCacheStore(
         }
         val temporary = File.createTempFile("$targetName.", ".tmp", directory)
         try {
-            temporary.writeText(json.encodeToString(serializer, value), Charsets.UTF_8)
+            val bytes = json.encodeToString(serializer, value).toByteArray(Charsets.UTF_8)
+            RandomAccessFile(temporary, "rw").use { output ->
+                output.setLength(0L)
+                output.write(bytes)
+                output.fd.sync()
+            }
             replaceFile(temporary, target)
         } catch (error: Throwable) {
             temporary.delete()
@@ -571,6 +610,20 @@ class SourceSeparationCacheStore(
                 target.toPath(),
                 StandardCopyOption.REPLACE_EXISTING,
             )
+        }
+        target.parentFile?.let(::syncDirectoryBestEffort)
+    }
+
+    private fun syncFile(file: File) {
+        RandomAccessFile(file, "rw").use { output -> output.fd.sync() }
+    }
+
+    private fun syncDirectoryBestEffort(directory: File) {
+        runCatching {
+            java.nio.channels.FileChannel.open(
+                directory.toPath(),
+                java.nio.file.StandardOpenOption.READ,
+            ).use { channel -> channel.force(true) }
         }
     }
 
@@ -635,6 +688,7 @@ class SourceSeparationCacheStore(
         const val ENTRIES_DIR_NAME = "entries"
         const val STAGING_DIR_NAME = "staging"
         const val MANIFEST_FILE_NAME = "manifest.json"
+        const val RUN_JOURNAL_FILE_NAME = "run-journal.json"
         const val PLAYBACK_SETTINGS_FILE_NAME = "playback-settings.json"
         const val HYDRATION_MARKER_FILE_NAME = "hydration/v1/marker.json"
         const val LOCATOR_INDEX_FILE_NAME = "locator-index.json"

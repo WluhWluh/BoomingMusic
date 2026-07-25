@@ -350,7 +350,7 @@ class SourceSeparationModelAwareEngineTest {
     }
 
     @Test
-    fun `host connection failure records a failed run and releases its lease`() {
+    fun `host connection failure does not admit a cache writer`() {
         val fixture = fixture()
         val executor = SourceSeparationModelAwareRangeExecutor { request ->
             fixture.complete(request, fixture.prepare(request))
@@ -370,9 +370,8 @@ class SourceSeparationModelAwareEngineTest {
         }
 
         assertEquals("injected connection failure", error.message)
-        val manifest = fixture.store.listManifests().single()
-        assertEquals(SourceSeparationCacheManifestState.Failed, manifest.state)
-        assertFalse(fixture.repository.isLeased(manifest.cacheKey))
+        assertTrue(fixture.store.listManifests().isEmpty())
+        assertTrue(fixture.repository.entries().isEmpty())
     }
 
     @Test

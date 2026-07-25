@@ -83,6 +83,12 @@ class SourceSeparationCacheRunCoordinatorTest {
 
         assertEquals(SourceSeparationCacheManifestState.Completed, completed.state)
         assertEquals(SourceSeparationCacheValidationResult.Valid, fixture.store.validateCompletedEntry(completed))
+        val completedJournal = requireNotNull(fixture.store.readRunJournal(completed.cacheKey))
+        assertEquals(SourceSeparationCacheRunJournalLifecycle.Completed, completedJournal.lifecycle)
+        assertEquals(
+            SourceSeparationCacheRunTransitionType.Completed,
+            completedJournal.transitions.last().type,
+        )
         assertFalse(fixture.repository.isLeased(completed.cacheKey))
         assertTrue(fixture.store.resolveEntryPath(completed.cacheKey, "work/vocals.wav").isFile)
         assertTrue(
@@ -175,6 +181,91 @@ class SourceSeparationCacheRunCoordinatorTest {
         val manifest = requireNotNull(fixture.store.readManifest(run.identity.cacheKey))
         assertEquals(SourceSeparationCacheManifestState.Failed, manifest.state)
         assertNull(fixture.repository.openCompletedCache(run.identity.cacheKey))
+        assertFalse(fixture.repository.isLeased(run.identity.cacheKey))
+    }
+
+    @Test
+    fun `ready journal record is integrity checked before resume`() {
+        val fixture = fixture()
+        val first = fixture.beginReady()
+        val preparation = fixture.preparation(first, SourceSeparationSegmentState.Queued)
+        fixture.coordinator.updatePreparation(first, preparation)
+        fixture.coordinator.updateSegmentState(first, 0, SourceSeparationSegmentState.Ready)
+
+        val committed = requireNotNull(fixture.store.readRunJournal(first.identity.cacheKey))
+            .committedSegments.single()
+        assertTrue(
+            fixture.store.validateIntegrity(
+                first.identity.cacheKey,
+                committed.vocalsPath,
+                committed.vocalsIntegrity,
+            )
+        )
+        fixture.coordinator.pause(first)
+        fixture.store.resolveEntryPath(first.identity.cacheKey, committed.vocalsPath)
+            .appendText("corrupt")
+
+        val resumed = fixture.beginReady()
+
+        assertEquals(
+            SourceSeparationSegmentState.Queued,
+            requireNotNull(resumed.resumeState).segmentPlan.segments[0].state,
+        )
+        assertTrue(
+            requireNotNull(fixture.store.readRunJournal(resumed.identity.cacheKey))
+                .committedSegments.isEmpty()
+        )
+        assertFalse(
+            fixture.store.resolveEntryPath(resumed.identity.cacheKey, committed.vocalsPath).exists()
+        )
+        fixture.coordinator.pause(resumed)
+    }
+
+    @Test
+    fun `new process generation records an abandoned running owner`() {
+        val fixture = fixture()
+        val abandoned = fixture.beginReady()
+        abandoned.close()
+        val nextRequest = fixture.request.copy(
+            runId = "next-run",
+            processGeneration = 2L,
+            ownerPid = 200,
+        )
+
+        val resumed = (fixture.coordinator.begin(nextRequest) as SourceSeparationCacheRunStart.Ready)
+            .run
+        val journal = requireNotNull(fixture.store.readRunJournal(resumed.identity.cacheKey))
+
+        assertEquals("next-run", journal.request.runId)
+        assertEquals(2L, journal.request.processGeneration)
+        assertEquals(
+            listOf(
+                SourceSeparationCacheRunTransitionType.Admitted,
+                SourceSeparationCacheRunTransitionType.PreviousOwnerDied,
+                SourceSeparationCacheRunTransitionType.Admitted,
+            ),
+            journal.transitions.map { it.type },
+        )
+        assertEquals(
+            (1L..journal.transitions.size.toLong()).toList(),
+            journal.transitions.map { it.sequence },
+        )
+        fixture.coordinator.pause(resumed)
+    }
+
+    @Test
+    fun `cache disappearance is typed and is not recreated by the active run`() {
+        val fixture = fixture()
+        val run = fixture.beginReady()
+        val entry = run.entryDirectory
+        assertTrue(entry.deleteRecursively())
+
+        val error = assertThrows(SourceSeparationCacheLostException::class.java) {
+            fixture.coordinator.pause(run)
+        }
+
+        assertEquals(run.identity.cacheKey, error.cacheKey)
+        assertFalse(entry.exists())
         assertFalse(fixture.repository.isLeased(run.identity.cacheKey))
     }
 

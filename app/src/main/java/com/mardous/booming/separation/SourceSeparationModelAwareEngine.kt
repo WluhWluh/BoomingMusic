@@ -99,11 +99,20 @@ internal class SourceSeparationModelAwareEngine(
             "The model-aware LiteRT engine is disabled by its construction gate."
         }
         val identity = model.contract.identity(preflight.identity)
+        val executionRunId = runIdFactory().also {
+            require(it.isNotBlank()) { "Execution run ID factory returned an empty ID." }
+        }
+        val executionProcessGeneration = executionHost.processGeneration
         val runRequest = SourceSeparationCacheRunRequest(
             identity = identity,
             contract = model.contract,
             song = input.song,
             sourceDiagnostics = input.sourceDiagnostics,
+            runId = executionRunId,
+            processGeneration = executionProcessGeneration,
+            ownerPid = runCatching { android.os.Process.myPid() }
+                .getOrNull()
+                ?.takeIf { it > 0 },
         )
         return when (val start = coordinator.begin(runRequest)) {
             SourceSeparationCacheRunStart.Busy ->
@@ -128,6 +137,8 @@ internal class SourceSeparationModelAwareEngine(
                 onPrepared = onPrepared,
                 shouldPause = shouldPause,
                 shouldCancel = shouldCancel,
+                runId = executionRunId,
+                processGeneration = executionProcessGeneration,
             )
         }
     }
@@ -145,20 +156,16 @@ internal class SourceSeparationModelAwareEngine(
         onPrepared: (SourceSeparationCacheManifest) -> Unit,
         shouldPause: () -> Boolean,
         shouldCancel: () -> Boolean,
+        runId: String,
+        processGeneration: Long,
     ): SourceSeparationModelAwareEngineResult {
-        var runId: String? = null
-        var processGeneration: Long? = null
         var hostStartAttempted = false
         var hostRunAccepted = false
         var terminalError: Throwable? = null
         val eventLock = Any()
         return try {
-            val currentRunId = runIdFactory().also {
-                require(it.isNotBlank()) { "Execution run ID factory returned an empty ID." }
-            }
-            runId = currentRunId
-            val currentProcessGeneration = executionHost.processGeneration
-            processGeneration = currentProcessGeneration
+            val currentRunId = runId
+            val currentProcessGeneration = processGeneration
             if (shouldCancel()) throw CancellationException("Source separation canceled.")
             val initialPlaybackPositionMs = playbackPositionMsProvider()
                 ?.takeIf { it >= 0L }
@@ -271,8 +278,8 @@ internal class SourceSeparationModelAwareEngine(
         } finally {
             if (hostStartAttempted) {
                 val closeResult = executionHost.closeRun(
-                    requireNotNull(runId),
-                    requireNotNull(processGeneration),
+                    runId,
+                    processGeneration,
                 )
                 check(
                     closeResult == SourceSeparationExecutionHostControlResult.Applied ||

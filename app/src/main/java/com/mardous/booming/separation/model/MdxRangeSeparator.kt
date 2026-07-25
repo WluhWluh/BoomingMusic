@@ -18,6 +18,8 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
+private const val SEGMENT_WAV_HEADER_BYTES = 44L
+
 class MdxRangeSeparator(
     private val context: Context,
     private val config: MdxDspConfig = MdxDspConfig(),
@@ -127,6 +129,7 @@ class MdxRangeSeparator(
             }
             ?: segmentPlan
         segmentOutputDir?.mkdirs()
+        val segmentPublicationId = java.util.UUID.randomUUID().toString()
 
         val windowCount = segmentPlan.segmentCount
         onPrepared(
@@ -386,8 +389,18 @@ class MdxRangeSeparator(
                                 instrumentalWriter.writePcm16(instrumentalPcm)
                             }
                             if (segmentOutputDir != null) {
-                                writeSegmentWav(segmentOutputDir, segment.vocalsPath, vocalsPcm)
-                                writeSegmentWav(segmentOutputDir, segment.instrumentalPath, instrumentalPcm)
+                                writeSegmentWav(
+                                    segmentOutputDir,
+                                    segment.vocalsPath,
+                                    vocalsPcm,
+                                    segmentPublicationId,
+                                )
+                                writeSegmentWav(
+                                    segmentOutputDir,
+                                    segment.instrumentalPath,
+                                    instrumentalPcm,
+                                    segmentPublicationId,
+                                )
                             }
                         }
                         processedSegments += segment.index
@@ -499,11 +512,53 @@ class MdxRangeSeparator(
         )
     }
 
-    private fun writeSegmentWav(rootDir: File, relativePath: String, pcm16: ByteArray) {
+    private fun writeSegmentWav(
+        rootDir: File,
+        relativePath: String,
+        pcm16: ByteArray,
+        publicationId: String,
+    ) {
         val file = File(rootDir.parentFile ?: rootDir, relativePath)
         file.parentFile?.mkdirs()
-        WavFileWriter(file, config.sampleRate, MdxDspConfig.STEREO_CHANNELS).use { writer ->
-            writer.writePcm16(pcm16)
+        val temporary = File.createTempFile(
+            "${file.name}.$publicationId.",
+            ".tmp",
+            file.parentFile,
+        )
+        try {
+            WavFileWriter(
+                temporary,
+                config.sampleRate,
+                MdxDspConfig.STEREO_CHANNELS,
+                durable = true,
+            ).use { writer ->
+                writer.writePcm16(pcm16)
+            }
+            require(temporary.length() == SEGMENT_WAV_HEADER_BYTES + pcm16.size.toLong()) {
+                "Published cache segment WAV has an invalid size."
+            }
+            try {
+                java.nio.file.Files.move(
+                    temporary.toPath(),
+                    file.toPath(),
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                java.nio.file.Files.move(
+                    temporary.toPath(),
+                    file.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                )
+            }
+            runCatching {
+                java.nio.channels.FileChannel.open(
+                    file.parentFile.toPath(),
+                    java.nio.file.StandardOpenOption.READ,
+                ).use { channel -> channel.force(true) }
+            }
+        } finally {
+            temporary.delete()
         }
     }
 
