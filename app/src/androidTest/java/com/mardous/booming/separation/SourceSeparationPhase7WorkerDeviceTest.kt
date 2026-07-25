@@ -184,15 +184,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 preferencesEditor.putInt(MINIMUM_SONG_DURATION, 0)
             }
             preferencesEditor.apply()
-            val playbackProbe = if (probeOriginalPlayback) {
-                startOriginalAudioPlayback(
-                    context = context,
-                    source = source,
-                    operation = "paired host worker playback",
-                ).also { originalPlayback = it }
-            } else {
-                null
-            }
 
             val presetRepository = get<SourceSeparationPresetRepository>(
                 SourceSeparationPresetRepository::class.java,
@@ -226,11 +217,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 boundRemoteHostSink = { boundRemoteHost = it },
             )
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
-            val remoteStartup = boundRemoteHost?.let { host ->
-                host.processGeneration
-                host.connectionDiagnostics
-            }
-            val remoteProcessBefore = boundRemoteHost?.processDiagnostics()
             val resolved = runtimeFacade.resolve(source)
             val runtimeSong = (resolved as? SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The scanned song could not be admitted: $resolved")
@@ -243,6 +229,20 @@ class SourceSeparationPhase7WorkerDeviceTest {
                         runtimeFacade.delete(entry.cacheKey))
                 }
             assertTrue(runtimeFacade.cacheStatus(runtimeSong) is SourceSeparationModelAwareCacheStatus.Missing)
+            val playbackProbe = if (probeOriginalPlayback) {
+                startOriginalAudioPlayback(
+                    context = context,
+                    source = source,
+                    operation = "paired host worker playback",
+                ).also { originalPlayback = it }
+            } else {
+                null
+            }
+            val remoteStartup = boundRemoteHost?.let { host ->
+                host.processGeneration
+                host.connectionDiagnostics
+            }
+            val remoteProcessBefore = boundRemoteHost?.processDiagnostics()
             val idleMemory = memorySnapshot(context)
             val mainProcessBefore = currentProcessDiagnostics()
 
@@ -4127,11 +4127,35 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
 
         fun assertContinuous(label: String): JSONObject {
-            waitForMediaController(controller, "original playback at $label") {
-                controller.currentMediaItem?.mediaId == expectedMediaId &&
-                    controller.repeatMode == Player.REPEAT_MODE_ONE &&
-                    controller.playWhenReady &&
-                    controller.isPlaying
+            try {
+                waitForMediaController(controller, "original playback at $label") {
+                    controller.currentMediaItem?.mediaId == expectedMediaId &&
+                        controller.repeatMode == Player.REPEAT_MODE_ONE &&
+                        controller.playWhenReady &&
+                        controller.isPlaying
+                }
+            } catch (error: Throwable) {
+                val state = runCatching {
+                    onMediaControllerThread(controller) {
+                        JSONObject()
+                            .put("mediaId", controller.currentMediaItem?.mediaId)
+                            .put("positionMs", controller.currentPosition)
+                            .put("durationMs", controller.duration)
+                            .put("playWhenReady", controller.playWhenReady)
+                            .put("isPlaying", controller.isPlaying)
+                            .put("playbackState", controller.playbackState)
+                            .put("repeatMode", controller.repeatMode)
+                    }
+                }.getOrElse { diagnosticError ->
+                    "unavailable: ${diagnosticError::class.java.name}: " +
+                        diagnosticError.message
+                }
+                val events = synchronized(unexpectedEvents) { unexpectedEvents.toList() }
+                throw IllegalStateException(
+                    "Original playback continuity failed at $label: " +
+                        "state=$state, unexpectedEvents=$events",
+                    error,
+                )
             }
             val snapshot = onMediaControllerThread(controller) {
                 JSONObject()
