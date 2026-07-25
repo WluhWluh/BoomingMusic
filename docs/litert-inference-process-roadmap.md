@@ -740,9 +740,11 @@ separate subphases so their effects remain attributable.
   not a valid oracle there.
 - [ ] Separate instrumentation/test-runner PSS and CPU time from the main and
   inference processes. Record device total/available memory and
-  `ActivityManager.isLowRamDevice` at admission.
+  `ActivityManager.isLowRamDevice`, memory/large-memory class, and effective
+  `Runtime.maxMemory()` at admission.
 - [ ] Freeze performance, summed-memory, playback, process-exit, and output
-  gates before reviewing the paired results.
+  gates before reviewing the paired results. Include a Java tensor working-set
+  gate; total RAM and free virtual-address space are not sufficient proxies.
 
 ### Phase 5B: CPU host-placement matrix
 
@@ -765,12 +767,28 @@ separate subphases so their effects remain attributable.
   least three cold process generations per configuration. Treat allocation
   failure, LMKD pressure, or crossing the VA-gap floor as a resource rejection,
   not a reason to lower the gate.
-- [ ] Repeat x86 smoke on a second pure-x86 API image if a compatible image is
-  available. Otherwise record the single API 26 emulator as a support-scope
-  limitation rather than implying real-device coverage.
-- [ ] Verify the x86 APK's LiteRT ELF identity and SHA-256 against the pinned
+- [x] Repeat x86 smoke on a second pure-x86 API image if a compatible image is
+  available. API 29 x86 passed acquisition, packaged-runtime, and IPC controls
+  but rejected 9662 because both app processes had a 16 MiB ART heap.
+- [x] Verify the x86 APK's LiteRT ELF identity and SHA-256 against the pinned
   `bss-litert-android` release and run its CI smoke before any support-tier
   promotion.
+
+Preliminary pure-x86 checkpoint (2026-07-25): the second API image is an API
+29 AVD configured for 1 GiB but exposing roughly 2 GiB to the guest. Its idle
+remote process retained a 1.20 GiB largest free VA gap, and the guest still had
+about 1.24 GiB available when ART rejected an 8 MiB tensor allocation against
+a 16 MiB per-process growth limit. The small-model LiteRT CPU smoke and all
+three process-control tests passed; direct 9662, the production worker, and the
+process-session matrix did not. This is a resource rejection, not an x86 ELF,
+Binder, LMKD, or VA-fragmentation failure. Remaining inference matrices are
+blocked at the same prerequisite and were not repeated. See
+`docs/validation/litert-inference-process/phase5/validation-2026-07-25-x86-api29-low-memory.md`.
+
+Pure x86 therefore remains `Unsupported` at this checkpoint. The API 26 result
+cannot be generalized to lower effective Java-heap classes. Do not promote x86
+unless the complete RAM matrix also records an adequate ART heap or a later
+native/direct tensor pipeline removes the current model-sized Java arrays.
 
 ### Phase 5C: Session-lifetime matrix
 

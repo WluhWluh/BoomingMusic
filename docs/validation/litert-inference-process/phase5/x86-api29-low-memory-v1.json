@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "phase5-x86-low-memory-v1",
+  "status": "resource-rejected",
+  "decision": "unsupported",
+  "testedRevision": "0fa5f53be6a9bca8682e8b817c9f77d231cf3ad0",
+  "device": {
+    "avd": "Small_Phone",
+    "androidApi": 29,
+    "buildFingerprint": "Android/sdk_phone_x86/generic_x86:10/QSR1.210820.001/7663313:userdebug/test-keys",
+    "abi": "x86",
+    "bitness": 32,
+    "processors": 4,
+    "configuredRamMiB": 1024,
+    "guestMemTotalKiB": 2040200,
+    "guestSwapTotalKiB": 1530144,
+    "roConfigLowRam": false,
+    "effectiveJavaHeapGrowthLimitBytes": 16777216
+  },
+  "runtime": {
+    "litertVersion": "2.1.5",
+    "libraryFileName": "libLiteRt.so",
+    "libraryBytes": 7482132,
+    "librarySha256": "02b6556ec235926c11eb0c067eb16e459adcddb1568a42eefe0c40f4cc4b59af",
+    "modelId": "uvr_mdxnet_3_9662",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "modelSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378"
+  },
+  "idleRemoteProcess": {
+    "pssKiB": 39310,
+    "rssKiB": 140052,
+    "vmSizeKiB": 822656,
+    "threadCount": 15,
+    "mappedRegionCount": 1676,
+    "largestFreeAddressGapBytes": 1287872512
+  },
+  "results": {
+    "pinnedAcquisition": "passed after the AndroidTest verifier switched to streaming SHA-256",
+    "packagedSmallModelCpuSmoke": "passed",
+    "boundServiceLifecycle": "3 of 3 passed: startup, acknowledged recycle, and reconnect after death",
+    "direct9662Parity": "failed before invocation while allocating the first 8388624-byte FloatArray",
+    "productionWorker": "failed in the remote process while allocating an 8388624-byte tensor array",
+    "processSessionMatrix": "failed in main-process media preparation and source preflight after the 16 MiB heap was exhausted",
+    "remainingInferenceMatrices": "not run because they share the failed source-preflight and first-invocation prerequisites"
+  },
+  "interpretation": {
+    "wholeDeviceMemoryPressure": false,
+    "virtualAddressGapFailure": false,
+    "lmKdKillObserved": false,
+    "firstBlockingResource": "per-process ART Java heap",
+    "releasePolicy": "Pure x86 remains fail-closed and Unsupported."
+  },
+  "rawEvidence": [
+    {
+      "fileName": "phase5-x86-2g-api29-acquisition-v2-acquisition.json",
+      "byteSize": 3676,
+      "sha256": "9c3bde8f3ddac02cc545c95343db5f504bfa7028d9ef69e4b0b6246cd48cb670"
+    },
+    {
+      "fileName": "phase5-x86-2g-api29-worker-smoke-v2-worker.json",
+      "byteSize": 4200,
+      "sha256": "41d9657b7f6fbb634a073ee4a50d9610e3b48d32a6e0f83b147cf3ca103ce85d"
+    },
+    {
+      "fileName": "phase5-x86-2g-api29-process-matrix-v1-process-matrix.json",
+      "byteSize": 4617,
+      "sha256": "6ca3d8a570bfafb61d529237c1a191d0fdf4239e46c03ba3cbc73cecb73c8c8b"
+    },
+    {
+      "fileName": "phase5-x86-2g-api29-direct-9662-v1.json",
+      "byteSize": 6566,
+      "sha256": "04aa711b959cb11b4d2493497be89ff01150cec586f3c4807ff2397a565ec464"
+    }
+  ]
+}
