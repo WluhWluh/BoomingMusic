@@ -3963,6 +3963,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 controller.clearMediaItems()
                 controller.volume = 0f
             }
+            waitForMediaController(controller, "$operation queue reset") {
+                controller.mediaItemCount == 0 && controller.currentMediaItem == null
+            }
             val sourcePreparationAttempts = prepareMediaControllerSource(
                 controller = controller,
                 source = source,
