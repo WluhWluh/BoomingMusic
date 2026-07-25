@@ -4,8 +4,8 @@ Status: staged research and implementation plan
 
 Updated: 2026-07-24
 
-Current milestone: Phase 4, make exact cache ownership and recovery safe
-across the main and inference processes.
+Current milestone: Phase 5, compare host placement and session policies on
+each ABI without changing background lifetime.
 
 This roadmap governs two related but separate experiments:
 
@@ -634,83 +634,91 @@ failure ends the pure-x86 route without changing other ABI policy.
 
 ## Phase 4: Make Cache Ownership Process-Safe
 
-The current in-process lease graph cannot by itself arbitrate a remote writer
-against main-process cleanup or deletion.
+Phase 4 extends the in-process lease graph with one OS-backed mutation
+authority and a durable run journal. Final evidence is recorded in
+[Phase 4 process-safe cache validation](validation/litert-inference-process/phase4/validation-2026-07-24.md).
 
 ### Phase 4A: Cross-process exact-entry lease
 
-- [ ] Add an OS-backed file lock for each exact cache entry.
-- [ ] Acquire the kernel lock before admitting a writer and retain its open
+- [x] Add an OS-backed file lock for each exact cache entry.
+- [x] Acquire the kernel lock before admitting a writer and retain its open
   file descriptor through the last durable terminal transition. Do not treat a
   successful metadata write as ownership.
-- [ ] Keep run ID, owner process generation, PID, and timestamps as diagnostic
+- [x] Keep run ID, owner process generation, PID, and timestamps as diagnostic
   metadata; the kernel lock, not metadata age, is authoritative.
-- [ ] Make main-process delete, prune, promotion, and inspection respect the
-  same lock.
-- [ ] Route operations through one owner where a file lock alone cannot make a
+- [x] Keep inspection read-only over atomically published state, and make
+  main-process delete, prune, promotion, hydration, playback-settings
+  mutation, and cleanup respect the same exclusive lock.
+- [x] Route operations through one owner where a file lock alone cannot make a
   multi-file transition atomic.
-- [ ] Define one exact-entry mutation authority at every instant. A main and
+- [x] Define one exact-entry mutation authority at every instant. A main and
   remote process may both read, but may not independently update the same
   journal or manifest under separate in-memory locks.
-- [ ] Treat disappearance of the cache directory or lock file during a run as
+- [x] Treat disappearance of the cache directory or lock file during a run as
   a typed cache-loss outcome. Never recreate system-cleared cache from model
   or application data while the old run is still active.
-- [ ] Confirm process death releases the kernel lock.
+- [x] Confirm process death releases the kernel lock.
 
 ### Phase 4B: Durable run journal
 
-- [ ] Write the admitted immutable request and lifecycle state under the cache
+- [x] Write the admitted immutable request and lifecycle state under the cache
   entry before native setup.
-- [ ] Give journal records a schema version, monotonic transition sequence,
+- [x] Give journal records a schema version, monotonic transition sequence,
   run ID, process generation, exact cache/model/contract identity, and last
   committed window.
-- [ ] Freeze the window commit order: write a run-scoped temporary output,
+- [x] Freeze the window commit order: write a run-scoped temporary output,
   flush and close it, verify expected size/integrity, atomically publish the
   segment, and only then journal that window as `Ready`.
-- [ ] Atomically record terminal transitions only after every required segment
+- [x] Atomically record terminal transitions only after every required segment
   and output integrity record is durable. A completed journal must never point
   at a temporary or missing file.
-- [ ] Never persist raw model paths as portable identity.
-- [ ] Mark pause, user cancel, incompatibility, FGS timeout, cache clearing,
+- [x] Never persist raw model paths as portable identity.
+- [x] Mark pause, user cancel, incompatibility, FGS timeout, cache clearing,
   and unexpected process death distinctly.
-- [ ] Make journal replay idempotent. Ignore or clean orphan temporary files,
+- [x] Make journal replay idempotent. Ignore or clean orphan temporary files,
   reject `Ready` records whose published file fails integrity, and ensure an
   incomplete entry cannot become playable.
 
 ### Phase 4C: Death and race injection
 
-- [ ] Kill the inference process during decode, DSP, native invocation, output
-  write, manifest update, FLAC handoff, and terminal commit.
-- [ ] Include a real active native-invocation process kill rather than only a
+- [x] Kill the inference process during decode, DSP, native invocation, output
+  publication, journal/manifest commit, and terminal commit.
+- [x] Keep FLAC promotion main-owned after run-writer release; while its
+  exclusive handoff is blocked, kill the idle inference process and prove it
+  cannot become a second owner or interrupt promotion.
+- [x] Include a real active native-invocation process kill rather than only a
   Kotlin failpoint. Original audio and the main process must survive, and the
   old exact-entry lock must become acquirable only after kernel cleanup.
-- [ ] Kill the main process while the inference process owns the entry.
-- [ ] Race cache inspection, deletion, pruning, model deletion, and active-model
+- [x] Kill the main process while the inference process owns the entry.
+- [x] Race cache inspection, deletion, pruning, model deletion, and active-model
   switching against the remote writer.
-- [ ] Clear cache during an internal test run and require a typed terminal
+- [x] Clear cache during an internal test run and require a typed terminal
   outcome without recreation from model/application data.
-- [ ] Recover only from the next uncommitted window and never duplicate a
+- [x] Recover only from the next uncommitted window and never duplicate a
   completed segment.
-- [ ] Repeat every kill point at least three times and distinguish recovery
+- [x] Repeat every kill point at least three times and distinguish recovery
   correctness from automatic continuation. Phase 4 may require a new explicit
   command to resume; it does not yet authorize background restart.
 
 ### Phase 4D: Cross-process cache qualification
 
-- [ ] Run the complete death/race matrix first with exact 9662 on pure x86,
+- [x] Run the complete death/race matrix first with exact 9662 on pure x86,
   then repeat representative lock, journal, and cache-clear cases on arm64 so
   the contract is not accidentally x86-specific.
-- [ ] Record lock acquisition/release, journal sequence, published segment
+- [x] Record lock acquisition/release, journal sequence, published segment
   integrity, old/new process generations, cache terminal state, and playback
   continuity in compact reports.
-- [ ] Keep FLAC promotion and hydration outside the active writer lease unless
+- [x] Keep FLAC promotion and hydration outside the active writer lease unless
   the test proves a single explicit handoff. No phase may leave two owners
   capable of mutating completed output.
 
 **Phase 4 exit:** process death and management races cannot corrupt, splice,
 misidentify, or prematurely promote a cache. Active native-process death is
 recoverable from a durable boundary without harming original playback, but no
-independent background restart is implied.
+independent background restart is implied. This exit passed on API 26 x86,
+with representative API 31 and API 35 arm64 coverage. Recovery remains an
+explicit later request; production remains `InProcess`, `BoundRemote` remains
+internal-only, and pure x86 remains fail-closed.
 
 ## Phase 5: Compare Host and Session Policies on Every ABI
 

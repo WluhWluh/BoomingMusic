@@ -1,0 +1,145 @@
+{
+  "schemaVersion": "litert-inference-process-phase4-cache-death-v1",
+  "status": "passed",
+  "testedAppCommit": "963ebb7fa16a774402b9980c698fb36d39271cb8",
+  "testedAppTreeDirty": false,
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "flavor": "githubDebug",
+  "identity": {
+    "modelId": "uvr_mdxnet_3_9662",
+    "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "contractSchemaVersion": 2,
+    "pipelineCompatibilityVersion": "booming-ss-mdx-stft-v1",
+    "litertVersion": "2.1.5",
+    "fixtureId": "coast_town_short_wav",
+    "decodeClass": "wav-window",
+    "executionHostMode": "BoundRemote",
+    "backendRequested": "LiteRtAuto"
+  },
+  "x86FullMatrix": {
+    "target": {
+      "id": "api26-x86",
+      "androidApi": 26,
+      "processAbi": "x86",
+      "bitness": 32,
+      "buildFingerprint": "Android/sdk_phone_x86/generic_x86:8.0.0/OSR1.180418.004/4931640:userdebug/test-keys"
+    },
+    "appApkSha256": "ea2abf22e913c49cdd5898f9d8ab2d7b961583c757e7236c2c704c609c5f6c20",
+    "testApkSha256": "842703b23abf4fc465ccc79d04dc17577a72266d1fe4f6f5d45834cb7140f476",
+    "cacheKey": "209b5f037c26a6246ba5b81b749440e2b7231cbd73626cda161f1a4976722ee8",
+    "deathCaseCount": 18,
+    "cacheClearCaseCount": 3,
+    "minimumLockReleaseMs": 9,
+    "maximumLockReleaseMs": 20,
+    "playback": {
+      "snapshotCount": 40,
+      "maximumPositionDriftMs": 97,
+      "unexpectedEventCount": 0
+    },
+    "stages": [
+      {
+        "stage": "Decode",
+        "repetitions": 3,
+        "action": "Barrier",
+        "occurrence": 2,
+        "lockReleaseRangeMs": [11, 19],
+        "finalJournalSequence": 13,
+        "committedSegments": 3
+      },
+      {
+        "stage": "Dsp",
+        "repetitions": 3,
+        "action": "Barrier",
+        "occurrence": 2,
+        "lockReleaseRangeMs": [13, 17],
+        "finalJournalSequence": 13,
+        "committedSegments": 3
+      },
+      {
+        "stage": "NativeInvocation",
+        "repetitions": 3,
+        "action": "Notify",
+        "occurrence": 2,
+        "lockReleaseRangeMs": [10, 20],
+        "finalJournalSequence": 13,
+        "committedSegments": 3
+      },
+      {
+        "stage": "OutputPublish",
+        "repetitions": 3,
+        "action": "Barrier",
+        "occurrence": 3,
+        "lockReleaseRangeMs": [14, 17],
+        "finalJournalSequence": 13,
+        "committedSegments": 3
+      },
+      {
+        "stage": "JournalCommit",
+        "repetitions": 3,
+        "action": "Barrier",
+        "occurrence": 5,
+        "lockReleaseRangeMs": [9, 14],
+        "finalJournalSequence": 12,
+        "committedSegments": 3
+      },
+      {
+        "stage": "TerminalCommit",
+        "repetitions": 3,
+        "action": "Barrier",
+        "occurrence": 1,
+        "lockReleaseRangeMs": [9, 11],
+        "finalJournalSequence": 10,
+        "committedSegments": 3
+      },
+      {
+        "stage": "CacheClear",
+        "repetitions": 3,
+        "typedOutcome": "CacheUnavailable",
+        "activeRunRecreatedDeletedRoot": false
+      }
+    ]
+  },
+  "arm64RepresentativeMatrices": [
+    {
+      "target": "s10-arm64-api31",
+      "buildFingerprint": "samsung/beyond1qltezc/beyond1q:12/SP1A.210812.016/G9730ZCU8HWE2:user/release-keys",
+      "appApkSha256": "36ed929ca5991de6ae2aeea6d3a324e6e20a9ba1b20e5a2c4b02173840d52e94",
+      "testApkSha256": "842703b23abf4fc465ccc79d04dc17577a72266d1fe4f6f5d45834cb7140f476",
+      "cacheKey": "dc1d709c6620b41263f3ae7cffec778bcf26c3936e790a368f18597afe5638c8",
+      "stages": ["Dsp", "NativeInvocation", "JournalCommit", "CacheClear"],
+      "lockReleaseRangeMs": [8, 11],
+      "maximumPlaybackPositionDriftMs": 160,
+      "unexpectedPlaybackEventCount": 0
+    },
+    {
+      "target": "s25-arm64-api35",
+      "buildFingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys",
+      "appApkSha256": "36ed929ca5991de6ae2aeea6d3a324e6e20a9ba1b20e5a2c4b02173840d52e94",
+      "testApkSha256": "842703b23abf4fc465ccc79d04dc17577a72266d1fe4f6f5d45834cb7140f476",
+      "cacheKey": "dc1d709c6620b41263f3ae7cffec778bcf26c3936e790a368f18597afe5638c8",
+      "stages": ["Dsp", "NativeInvocation", "JournalCommit", "CacheClear"],
+      "lockReleaseRangeMs": [1, 3],
+      "maximumPlaybackPositionDriftMs": 148,
+      "unexpectedPlaybackEventCount": 0,
+      "audioFocusBypassedOnlyForLockedDeviceProbe": true
+    }
+  ],
+  "rawEvidence": [
+    {
+      "fileName": "phase4-process-cache-x86-v5-process-cache-matrix.json",
+      "byteSize": 25135,
+      "sha256": "3b2cc588f21c2dbb0c134bf8b78dbe241c4aff8e5041a4451051ff33a0e8aab4"
+    },
+    {
+      "fileName": "phase4-process-cache-s10-arm64-v2-process-cache-matrix.json",
+      "byteSize": 8317,
+      "sha256": "e7d47ad5f2047a16768d88e917a837880e54132c991cc5b223cbaba336084502"
+    },
+    {
+      "fileName": "phase4-process-cache-s25-arm64-v4-process-cache-matrix.json",
+      "byteSize": 8302,
+      "sha256": "5fc8f0f5a1a0f0fd1dc4ae6238d16c68a0f13e3b88fa9981ca712ac7d80bfa99"
+    }
+  ]
+}

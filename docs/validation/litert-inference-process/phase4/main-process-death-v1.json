@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "litert-inference-process-phase4-main-death-v1",
+  "status": "passed",
+  "testedAppCommit": "963ebb7fa16a774402b9980c698fb36d39271cb8",
+  "testedAppTreeDirty": false,
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "flavor": "githubDebug",
+  "target": {
+    "id": "api26-x86",
+    "androidApi": 26,
+    "processAbi": "x86",
+    "bitness": 32,
+    "buildFingerprint": "Android/sdk_phone_x86/generic_x86:8.0.0/OSR1.180418.004/4931640:userdebug/test-keys"
+  },
+  "identity": {
+    "modelId": "uvr_mdxnet_3_9662",
+    "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "appApkSha256": "ea2abf22e913c49cdd5898f9d8ab2d7b961583c757e7236c2c704c609c5f6c20",
+    "testApkSha256": "842703b23abf4fc465ccc79d04dc17577a72266d1fe4f6f5d45834cb7140f476",
+    "cacheKey": "209b5f037c26a6246ba5b81b749440e2b7231cbd73626cda161f1a4976722ee8",
+    "fixtureId": "coast_town_short_wav",
+    "decodeClass": "wav-window",
+    "executionHostMode": "BoundRemote",
+    "backendRequested": "LiteRtAuto"
+  },
+  "repetitions": [
+    {
+      "run": 1,
+      "oldMainPid": 19366,
+      "newMainPid": 19442,
+      "oldRemotePid": 19393,
+      "newRemotePid": 19468,
+      "oldRemoteGeneration": 116719324081912,
+      "newRemoteGeneration": 120826322035792,
+      "lockReleaseMs": 13,
+      "journalSequenceBeforeDeath": 3,
+      "journalSequenceBeforeRecovery": 3,
+      "finalJournalSequence": 13,
+      "committedSegments": 3
+    },
+    {
+      "run": 2,
+      "oldMainPid": 20252,
+      "newMainPid": 20328,
+      "oldRemotePid": 20278,
+      "newRemotePid": 20353,
+      "oldRemoteGeneration": 120150788942768,
+      "newRemoteGeneration": 120881455346292,
+      "lockReleaseMs": 9,
+      "journalSequenceBeforeDeath": 3,
+      "journalSequenceBeforeRecovery": 3,
+      "finalJournalSequence": 13,
+      "committedSegments": 3
+    },
+    {
+      "run": 3,
+      "oldMainPid": 20503,
+      "newMainPid": 20578,
+      "oldRemotePid": 20529,
+      "newRemotePid": 20603,
+      "oldRemoteGeneration": 125647208866176,
+      "newRemoteGeneration": 125360108951448,
+      "lockReleaseMs": 9,
+      "journalSequenceBeforeDeath": 3,
+      "journalSequenceBeforeRecovery": 3,
+      "finalJournalSequence": 13,
+      "committedSegments": 3
+    }
+  ],
+  "allRuns": {
+    "oldRemoteSurvivedMainDeath": false,
+    "remoteProcessReused": false,
+    "previousOwnerDeathRecorded": true,
+    "duplicateCommittedSegments": false,
+    "completedCacheValidAndPlayable": true,
+    "recoveryWasExplicit": true,
+    "automaticBackgroundRestart": false
+  },
+  "rawEvidence": [
+    {
+      "fileName": "phase4-main-death-x86-v2-process-main-death.json",
+      "byteSize": 4508,
+      "sha256": "3e4120c8c2cfd85d42c556c3adc1b6dece2cbe3b50525b225017b4383311753a"
+    },
+    {
+      "fileName": "phase4-main-death-x86-v3-process-main-death.json",
+      "byteSize": 4506,
+      "sha256": "964b04585191fee2fc10beb5d382d92ef0603d27c31d42ada35727bfa83490de"
+    },
+    {
+      "fileName": "phase4-main-death-x86-v4-process-main-death.json",
+      "byteSize": 4507,
+      "sha256": "325d8cdeefddbcea122aa7752f1364d835219ec56257a69a7d7ecb5b4071199c"
+    }
+  ]
+}

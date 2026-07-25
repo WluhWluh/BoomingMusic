@@ -23,6 +23,9 @@ selection, MP3 handling, output frames, and join placement.
   background-semantics summary.
 - `phase3/`: pure-x86 resident-session, whole-process recycle, playback, and
   fault-classification evidence.
+- `phase4/`: OS-backed exact-entry ownership, durable-journal recovery,
+  cache-loss, management-race, main-process-death, and arm64 qualification
+  evidence.
 - Later phase directories use
   `<phase>/<yyyy-mm-dd>/<target>/<run-id>.json`.
 

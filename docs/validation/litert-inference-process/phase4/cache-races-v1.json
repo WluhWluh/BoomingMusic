@@ -1,0 +1,87 @@
+{
+  "schemaVersion": "litert-inference-process-phase4-cache-races-v1",
+  "status": "passed",
+  "testedAppCommit": "963ebb7fa16a774402b9980c698fb36d39271cb8",
+  "testedAppTreeDirty": false,
+  "packageName": "com.wluhwluh.booming.sourcesep.debug",
+  "flavor": "githubDebug",
+  "target": {
+    "id": "api26-x86",
+    "androidApi": 26,
+    "processAbi": "x86",
+    "bitness": 32,
+    "buildFingerprint": "Android/sdk_phone_x86/generic_x86:8.0.0/OSR1.180418.004/4931640:userdebug/test-keys"
+  },
+  "identity": {
+    "primaryModelId": "uvr_mdxnet_3_9662",
+    "primaryArtifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "secondaryModelId": "uvr_mdxnet_kara",
+    "secondaryArtifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
+    "appApkSha256": "ea2abf22e913c49cdd5898f9d8ab2d7b961583c757e7236c2c704c609c5f6c20",
+    "testApkSha256": "842703b23abf4fc465ccc79d04dc17577a72266d1fe4f6f5d45834cb7140f476",
+    "cacheKey": "209b5f037c26a6246ba5b81b749440e2b7231cbd73626cda161f1a4976722ee8",
+    "fixtureId": "coast_town_short_wav",
+    "decodeClass": "wav-window",
+    "executionHostMode": "BoundRemote",
+    "backendRequested": "LiteRtAuto"
+  },
+  "repetitions": 3,
+  "processGenerations": [
+    {
+      "run": 1,
+      "idleRemote": 117650164858000,
+      "admittedModelRun": 117468576422484
+    },
+    {
+      "run": 2,
+      "idleRemote": 122483179516052,
+      "admittedModelRun": 122077724826144
+    },
+    {
+      "run": 3,
+      "idleRemote": 118972582259816,
+      "admittedModelRun": 118862312277532
+    }
+  ],
+  "flacHandoff": {
+    "owner": "main-process-exclusive-promotion-lease",
+    "idleInferenceProcessKilled": true,
+    "inspectionRemainedReadOnly": true,
+    "deleteResultWhileLocked": "Busy",
+    "prunedEntriesWhileLocked": 0,
+    "blendWriteSucceededWhileLocked": false,
+    "hydrationResultWhileLocked": "Busy",
+    "promotionCompletedEveryRun": true,
+    "completedCacheValidEveryRun": true
+  },
+  "modelManagement": {
+    "activeModelChangedDuringAdmittedRun": true,
+    "admittedModelWeightsDeletedDuringRun": true,
+    "cacheDeleteResultWhileRunActive": "Busy",
+    "runCompletedUnderOriginalIdentityEveryRun": true,
+    "completedCachePlayableWithoutInstalledWeightsEveryRun": true,
+    "secondaryModelResolvedToDifferentCacheKeyEveryRun": true,
+    "primaryModelRestoredEveryRun": true
+  },
+  "playback": {
+    "maximumPositionDriftMsAcrossRuns": 113,
+    "unexpectedEventCountAcrossRuns": 0
+  },
+  "rawEvidence": [
+    {
+      "fileName": "phase4-process-cache-races-x86-v2-process-cache-race-matrix.json",
+      "byteSize": 6384,
+      "sha256": "338214fc39db1476c1bfab286c7a6cdcbe2a29d14de611c68d7f0cb4c387ab5c"
+    },
+    {
+      "fileName": "phase4-process-cache-races-x86-v3-process-cache-race-matrix.json",
+      "byteSize": 6387,
+      "sha256": "96fb1f2dc06b3f887f75d3196ca65dc0e72353b81130ec0336b7195941b7ed86"
+    },
+    {
+      "fileName": "phase4-process-cache-races-x86-v4-process-cache-race-matrix.json",
+      "byteSize": 6384,
+      "sha256": "d5aa9cc194381ab9aa44cd1e549a45e5ae547fa8981bdd9b69993e478aaafef0"
+    }
+  ]
+}
