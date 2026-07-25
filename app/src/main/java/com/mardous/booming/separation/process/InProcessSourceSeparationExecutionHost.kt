@@ -5,6 +5,7 @@ import com.mardous.booming.separation.SourceSeparationModelAwareRangeExecutor
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRelativePath
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSongLocator
 import com.mardous.booming.separation.model.MdxRangePreparation
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
@@ -43,7 +44,8 @@ internal class InProcessSourceSeparationExecutionHost(
             require(request.descriptor.processGeneration == processGeneration) {
                 "Execution descriptor targets a stale process generation."
             }
-            request.requireExactDescriptor()
+            request.requireExactDescriptor(remoteWorkspaceAdmitted = mode ==
+                SourceSeparationExecutionHostMode.BoundRemote)
             ActiveRun(request).also { activeRun = it }
         }
         return try {
@@ -283,7 +285,9 @@ internal class InProcessSourceSeparationExecutionHost(
     }
 }
 
-private fun SourceSeparationExecutionHostRequest.requireExactDescriptor() {
+private fun SourceSeparationExecutionHostRequest.requireExactDescriptor(
+    remoteWorkspaceAdmitted: Boolean,
+) {
     val execution = executionRequest
     val descriptor = descriptor
     val model = execution.model
@@ -318,8 +322,14 @@ private fun SourceSeparationExecutionHostRequest.requireExactDescriptor() {
     ) {
         "Execution descriptor does not match the runtime request."
     }
-    require(descriptor.resume == execution.resumeDescriptor()) {
-        "Execution descriptor does not match the admitted resume state."
+    if (remoteWorkspaceAdmitted) {
+        require(descriptor.resume == null) {
+            "A bound-remote descriptor cannot prescribe cache resume state."
+        }
+    } else {
+        require(descriptor.resume == execution.resumeDescriptor()) {
+            "Execution descriptor does not match the admitted resume state."
+        }
     }
 }
 
@@ -327,6 +337,7 @@ internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
     runId: String,
     processGeneration: Long,
     sourceDiagnostics: SourceSeparationCacheSourceDiagnostics,
+    song: SourceSeparationCacheSongLocator,
     initialPlaybackPositionMs: Long?,
     initialPlaybackReadyWindowCount: Int,
 ): SourceSeparationExecutionDescriptor {
@@ -358,6 +369,7 @@ internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
             expectedAudioFingerprint = workspace.identity.source.audioFingerprint,
             diagnostics = sourceDiagnostics,
         ),
+        song = song,
         runtime = SourceSeparationExecutionRuntimeIdentity(
             executionProfileId = profile.profileId,
             executionSessionIdentity = profile.sessionIdentity,

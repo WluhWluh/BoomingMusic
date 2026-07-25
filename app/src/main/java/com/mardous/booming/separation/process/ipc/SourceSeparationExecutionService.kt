@@ -22,6 +22,7 @@ import com.mardous.booming.separation.process.SourceSeparationProcessSessionDiag
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionRecycleRequiredException
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionPoisonedException
 import com.mardous.booming.separation.process.SourceSeparationRemoteCacheUnavailableException
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLostException
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionControl
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionEnvironment
 import com.mardous.booming.separation.process.SourceSeparationRemoteSourceUnavailableException
@@ -366,7 +367,9 @@ internal class SourceSeparationExecutionService : Service() {
                     )
                 }
                 val result = active.host.closeRun(command.runId, command.processGeneration)
-                if (result == SourceSeparationExecutionHostControlResult.Applied) {
+                if (result == SourceSeparationExecutionHostControlResult.Applied ||
+                    result == SourceSeparationExecutionHostControlResult.NoActiveRun
+                ) {
                     active.close()
                     activeRun = null
                 }
@@ -404,7 +407,7 @@ internal class SourceSeparationExecutionService : Service() {
             }
         }
         val environment = executionEnvironment()
-        val executionRequest = try {
+        val admittedExecution = try {
             environment.prepare(command.descriptor, control)
         } catch (error: Throwable) {
             sender.close()
@@ -421,7 +424,7 @@ internal class SourceSeparationExecutionService : Service() {
             sender = sender,
             host = host,
             environment = environment,
-            executionRequest = executionRequest,
+            admittedExecution = admittedExecution,
         ).also { activeRun = it }
     }
 
@@ -438,7 +441,10 @@ internal class SourceSeparationExecutionService : Service() {
                 SourceSeparationExecutionHostRequest(
                     descriptor = command.descriptor,
                     executionRequest = active.executionRequest,
-                    onEvent = active.sender::offer,
+                    onEvent = { event ->
+                        active.admittedExecution.persist(event)
+                        active.sender.offer(event)
+                    },
                 )
             )
             active.sender.closeAndAwait()
@@ -508,6 +514,11 @@ internal class SourceSeparationExecutionService : Service() {
                 is SourceSeparationIpcDuplicateCommandException ->
                     SourceSeparationIpcStatus.Duplicate
                 is SourceSeparationIpcBusyException -> SourceSeparationIpcStatus.Busy
+                is com.mardous.booming.separation.process
+                    .SourceSeparationRemoteCacheBusyException -> SourceSeparationIpcStatus.Busy
+                is com.mardous.booming.separation.process
+                    .SourceSeparationRemoteCacheAlreadyCompletedException ->
+                    SourceSeparationIpcStatus.AlreadyCompleted
                 else -> SourceSeparationIpcStatus.Rejected
             },
             error = error.toIpcError(),
@@ -654,9 +665,13 @@ internal class SourceSeparationExecutionService : Service() {
         val sender: SourceSeparationRemoteEventSender,
         val host: InProcessSourceSeparationExecutionHost,
         val environment: SourceSeparationRemoteExecutionEnvironment,
-        val executionRequest: com.mardous.booming.separation
-            .SourceSeparationModelAwareExecutionRequest,
+        val admittedExecution: com.mardous.booming.separation.process
+            .SourceSeparationRemoteAdmittedExecution,
     ) : AutoCloseable {
+        val executionRequest: com.mardous.booming.separation
+            .SourceSeparationModelAwareExecutionRequest
+            get() = admittedExecution.executionRequest
+
         var highestControlSequence: Long = 0L
 
         fun requestPause() {
@@ -667,6 +682,7 @@ internal class SourceSeparationExecutionService : Service() {
         override fun close() {
             sender.close()
             host.close()
+            admittedExecution.close()
         }
     }
 
@@ -740,6 +756,8 @@ private fun Throwable.toIpcError(): SourceSeparationIpcError {
         is SourceSeparationRemoteSourceUnavailableException ->
             SourceSeparationIpcErrorCategory.SourceUnavailable
         is SourceSeparationRemoteCacheUnavailableException ->
+            SourceSeparationIpcErrorCategory.CacheUnavailable
+        is SourceSeparationCacheLostException ->
             SourceSeparationIpcErrorCategory.CacheUnavailable
         is SourceSeparationRemoteEventDeliveryException ->
             SourceSeparationIpcErrorCategory.HostDied

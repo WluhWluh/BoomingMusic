@@ -9,9 +9,13 @@ import com.mardous.booming.separation.SourceSeparationModelAwareExecutionWorkspa
 import com.mardous.booming.separation.SourceSeparationModelAwareRangeExecutor
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunRequest
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunStart
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRun
 import com.mardous.booming.separation.cache.v2.resolveExactCacheModel
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
-import com.mardous.booming.separation.model.MdxRangeResumeState
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
@@ -19,6 +23,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.CancellationException
 
 internal class SourceSeparationRemoteExecutionEnvironment(
     context: Context,
@@ -33,6 +38,11 @@ internal class SourceSeparationRemoteExecutionEnvironment(
     private val applicationContext = context.applicationContext
     private val cacheStore = SourceSeparationCacheStore(
         AndroidSourceSeparationCacheRootProvider(applicationContext).resolveRoot(),
+    )
+    private val cacheRepository = SourceSeparationModelAwareCacheRepository(cacheStore)
+    private val runCoordinator = SourceSeparationCacheRunCoordinator(
+        store = cacheStore,
+        repository = cacheRepository,
     )
     private val modelRoot = File(
         applicationContext.filesDir,
@@ -62,7 +72,7 @@ internal class SourceSeparationRemoteExecutionEnvironment(
     fun prepare(
         descriptor: SourceSeparationExecutionDescriptor,
         control: SourceSeparationRemoteExecutionControl,
-    ): SourceSeparationModelAwareExecutionRequest {
+    ): SourceSeparationRemoteAdmittedExecution {
         descriptor.requireConsistentIdentity()
         validateSourceAccess(descriptor.source.sourceUri)
         val resolvedModel = presetRepository.resolveExactCacheModel(descriptor.contract)
@@ -94,52 +104,34 @@ internal class SourceSeparationRemoteExecutionEnvironment(
         ) {
             "The exact execution model is outside the canonical model root."
         }
-        val entryDirectory = try {
-            cacheStore.entryDirectory(descriptor.cacheKey).canonicalFile
-        } catch (error: Throwable) {
-            throw SourceSeparationRemoteCacheUnavailableException(
-                "The exact execution cache entry cannot be resolved.",
-                error,
+        val run = when (val start = runCoordinator.begin(
+            SourceSeparationCacheRunRequest(
+                identity = descriptor.cacheIdentity,
+                contract = descriptor.contract,
+                song = descriptor.song,
+                sourceDiagnostics = descriptor.source.diagnostics,
+                runId = descriptor.runId,
+                processGeneration = descriptor.processGeneration,
+                ownerPid = android.os.Process.myPid(),
             )
+        )) {
+            SourceSeparationCacheRunStart.Busy ->
+                throw SourceSeparationRemoteCacheBusyException(descriptor.cacheKey)
+            is SourceSeparationCacheRunStart.AlreadyCompleted ->
+                throw SourceSeparationRemoteCacheAlreadyCompletedException(descriptor.cacheKey)
+            is SourceSeparationCacheRunStart.Ready -> start.run
         }
-        val canonicalEntriesRoot = entryDirectory.parentFile?.canonicalFile
-        if (canonicalEntriesRoot != cacheStore.entriesDirectory().canonicalFile ||
-            entryDirectory.name != descriptor.cacheKey ||
-            !entryDirectory.isDirectory
-        ) {
-            throw SourceSeparationRemoteCacheUnavailableException(
-                "The exact execution cache entry is unavailable or noncanonical.",
-            )
-        }
-        val workDirectory = resolveExecutionDirectory(entryDirectory, WORK_DIRECTORY)
-        val segmentsDirectory = resolveExecutionDirectory(entryDirectory, SEGMENTS_DIRECTORY)
-        val resumeState = descriptor.resume?.let { resume ->
-            MdxRangeResumeState(
-                vocalsFile = cacheStore.resolveRelativePath(
-                    entryDirectory,
-                    resume.vocalsPath,
-                ),
-                instrumentalFile = cacheStore.resolveRelativePath(
-                    entryDirectory,
-                    resume.instrumentalPath,
-                ),
-                timingFile = resume.timingPath?.let { path ->
-                    cacheStore.resolveRelativePath(entryDirectory, path)
-                },
-                segmentPlan = resume.segmentPlan,
-            )
-        }
-        return SourceSeparationModelAwareExecutionRequest(
+        val executionRequest = SourceSeparationModelAwareExecutionRequest(
             sourceUri = descriptor.source.sourceUri,
             displayName = descriptor.source.displayName,
             model = model,
             workspace = SourceSeparationModelAwareExecutionWorkspace(
                 identity = descriptor.cacheIdentity,
                 contract = descriptor.contract,
-                entryDirectory = entryDirectory,
-                workDirectory = workDirectory,
-                segmentsDirectory = segmentsDirectory,
-                resumeState = resumeState,
+                entryDirectory = run.entryDirectory,
+                workDirectory = run.workDirectory,
+                segmentsDirectory = run.segmentsDirectory,
+                resumeState = run.resumeState,
             ),
             runtimeSettings = MdxRuntimeSettings(
                 cpuThreads = descriptor.runtime.cpuThreads,
@@ -154,26 +146,11 @@ internal class SourceSeparationRemoteExecutionEnvironment(
             shouldPause = control::shouldPause,
             shouldCancel = control::shouldCancel,
         )
-    }
-
-    private fun resolveExecutionDirectory(
-        entryDirectory: File,
-        relativePath: String,
-    ): File {
-        val directory = try {
-            cacheStore.resolveRelativePath(entryDirectory, relativePath).canonicalFile
-        } catch (error: Throwable) {
-            throw SourceSeparationRemoteCacheUnavailableException(
-                "The execution cache workspace cannot be resolved.",
-                error,
-            )
-        }
-        if (directory.parentFile != entryDirectory || !directory.isDirectory) {
-            throw SourceSeparationRemoteCacheUnavailableException(
-                "The execution cache workspace is unavailable or noncanonical.",
-            )
-        }
-        return directory
+        return SourceSeparationRemoteAdmittedExecution(
+            run = run,
+            coordinator = runCoordinator,
+            executionRequest = executionRequest,
+        )
     }
 
     private fun validateSourceAccess(sourceUri: String) {
@@ -212,11 +189,78 @@ internal class SourceSeparationRemoteExecutionEnvironment(
         }
     }
 
-    private companion object {
-        const val WORK_DIRECTORY = "work"
-        const val SEGMENTS_DIRECTORY = "segments"
+}
+
+internal class SourceSeparationRemoteAdmittedExecution(
+    private val run: SourceSeparationModelAwareCacheRun,
+    private val coordinator: SourceSeparationCacheRunCoordinator,
+    val executionRequest: SourceSeparationModelAwareExecutionRequest,
+) : AutoCloseable {
+    private var terminal = false
+
+    @Synchronized
+    fun persist(event: SourceSeparationExecutionHostEvent) {
+        check(!terminal) { "Remote cache run already reached a terminal transition." }
+        when (val payload = event.payload) {
+            is SourceSeparationExecutionHostEventPayload.Accepted -> Unit
+            is SourceSeparationExecutionHostEventPayload.Progress -> Unit
+            is SourceSeparationExecutionHostEventPayload.Prepared ->
+                coordinator.updatePreparation(
+                    run,
+                    payload.preparation.toMdxRangePreparation(run.entryDirectory),
+                )
+            is SourceSeparationExecutionHostEventPayload.SegmentStateChanged ->
+                coordinator.updateSegmentState(run, payload.segmentIndex, payload.state)
+            is SourceSeparationExecutionHostEventPayload.Completed -> {
+                coordinator.complete(
+                    run,
+                    payload.completion.toMdxRangeSeparationResult(executionRequest),
+                )
+                terminal = true
+            }
+            is SourceSeparationExecutionHostEventPayload.Paused -> {
+                coordinator.pause(run)
+                terminal = true
+            }
+            is SourceSeparationExecutionHostEventPayload.Canceled -> {
+                coordinator.cancel(
+                    run,
+                    CancellationException(payload.reason ?: "Remote run canceled."),
+                )
+                terminal = true
+            }
+            is SourceSeparationExecutionHostEventPayload.Failed -> {
+                coordinator.fail(
+                    run,
+                    SourceSeparationRemoteExecutionFailure(
+                        payload.errorType,
+                        payload.message,
+                    ),
+                )
+                terminal = true
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        if (!terminal) run.close()
+        terminal = true
     }
 }
+
+internal class SourceSeparationRemoteExecutionFailure(
+    val remoteType: String,
+    message: String?,
+) : IllegalStateException(message ?: remoteType)
+
+internal class SourceSeparationRemoteCacheBusyException(
+    val cacheKey: String,
+) : IllegalStateException("The exact remote cache entry is busy.")
+
+internal class SourceSeparationRemoteCacheAlreadyCompletedException(
+    val cacheKey: String,
+) : IllegalStateException("The exact remote cache entry is already completed.")
 
 private fun createRemoteSessionController(
     context: Context,

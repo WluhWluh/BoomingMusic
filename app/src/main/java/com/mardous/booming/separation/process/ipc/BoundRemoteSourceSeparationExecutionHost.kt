@@ -289,6 +289,12 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             SourceSeparationIpcStatus.Paused -> throw SourceSeparationPausedException()
             SourceSeparationIpcStatus.Canceled ->
                 throw CancellationException(response.error?.message ?: "Remote run canceled.")
+            SourceSeparationIpcStatus.Busy ->
+                throw SourceSeparationRemoteCacheBusyException(request.descriptor.cacheKey)
+            SourceSeparationIpcStatus.AlreadyCompleted ->
+                throw SourceSeparationRemoteCacheAlreadyCompletedException(
+                    request.descriptor.cacheKey,
+                )
             else -> throw SourceSeparationRemoteExecutionException(
                 response.error ?: SourceSeparationIpcError(
                     category = SourceSeparationIpcErrorCategory.Internal,
@@ -1025,6 +1031,14 @@ internal class SourceSeparationRemoteCallbackException(
     cause: Throwable,
 ) : IllegalStateException("Unable to apply a source-separation remote event.", cause)
 
+internal class SourceSeparationRemoteCacheBusyException(
+    val cacheKey: String,
+) : IllegalStateException("The exact remote cache entry is busy.")
+
+internal class SourceSeparationRemoteCacheAlreadyCompletedException(
+    val cacheKey: String,
+) : IllegalStateException("The exact remote cache entry is already completed.")
+
 private fun SourceSeparationIpcStatus.toHostControlResult():
         SourceSeparationExecutionHostControlResult = when (this) {
     SourceSeparationIpcStatus.Applied -> SourceSeparationExecutionHostControlResult.Applied
@@ -1042,6 +1056,7 @@ private fun SourceSeparationIpcStatus.toHostControlResult():
     -> SourceSeparationExecutionHostControlResult.RunActive
     SourceSeparationIpcStatus.Terminal,
     SourceSeparationIpcStatus.Completed,
+    SourceSeparationIpcStatus.AlreadyCompleted,
     SourceSeparationIpcStatus.Paused,
     SourceSeparationIpcStatus.Canceled,
     SourceSeparationIpcStatus.Failed,

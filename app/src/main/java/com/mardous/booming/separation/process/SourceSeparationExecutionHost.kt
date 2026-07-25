@@ -7,11 +7,12 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnap
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRelativePath
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSongLocator
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 2
+internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 3
 
 internal interface SourceSeparationExecutionHost : AutoCloseable {
     val mode: SourceSeparationExecutionHostMode
@@ -63,6 +64,7 @@ internal data class SourceSeparationExecutionDescriptor(
     val contract: SourceSeparationCacheContractSnapshot,
     val model: SourceSeparationExecutionModelIdentity,
     val source: SourceSeparationExecutionSourceIdentity,
+    val song: SourceSeparationCacheSongLocator,
     val runtime: SourceSeparationExecutionRuntimeIdentity,
     val resume: SourceSeparationExecutionResumeState? = null,
 ) {

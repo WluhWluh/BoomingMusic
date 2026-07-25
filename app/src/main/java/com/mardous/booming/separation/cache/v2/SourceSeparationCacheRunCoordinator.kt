@@ -13,6 +13,35 @@ class SourceSeparationCacheRunCoordinator(
     private val repository: SourceSeparationModelAwareCacheRepository,
     private val nowEpochMs: () -> Long = System::currentTimeMillis,
 ) {
+    fun inspectManifest(
+        identity: SourceSeparationCacheIdentity,
+    ): SourceSeparationCacheManifest? = store.readManifest(identity.cacheKey)
+        ?.takeIf { it.identity == identity }
+
+    fun inspectCompleted(
+        identity: SourceSeparationCacheIdentity,
+    ): SourceSeparationCacheManifest? {
+        val manifest = store.readManifest(identity.cacheKey)
+            ?.takeIf { it.identity == identity }
+            ?.takeIf { it.state == SourceSeparationCacheManifestState.Completed }
+            ?: return null
+        return manifest.takeIf {
+            store.validateCompletedEntry(it, verifyHashes = false) ==
+                SourceSeparationCacheValidationResult.Valid
+        }
+    }
+
+    fun previewWorkspace(
+        identity: SourceSeparationCacheIdentity,
+    ): SourceSeparationCacheWorkspacePreview {
+        val entry = store.entryDirectory(identity.cacheKey)
+        return SourceSeparationCacheWorkspacePreview(
+            entryDirectory = entry,
+            workDirectory = store.resolveEntryPath(identity.cacheKey, WORK_DIRECTORY),
+            segmentsDirectory = store.resolveEntryPath(identity.cacheKey, SEGMENTS_DIRECTORY),
+        )
+    }
+
     fun begin(
         request: SourceSeparationCacheRunRequest,
     ): SourceSeparationCacheRunStart {
@@ -625,6 +654,12 @@ data class SourceSeparationCacheRunRequest(
         require(ownerPid == null || ownerPid > 0) { "Cache run owner PID is invalid." }
     }
 }
+
+data class SourceSeparationCacheWorkspacePreview(
+    val entryDirectory: File,
+    val workDirectory: File,
+    val segmentsDirectory: File,
+)
 
 sealed class SourceSeparationCacheRunStart {
     data class Ready(val run: SourceSeparationModelAwareCacheRun) : SourceSeparationCacheRunStart()

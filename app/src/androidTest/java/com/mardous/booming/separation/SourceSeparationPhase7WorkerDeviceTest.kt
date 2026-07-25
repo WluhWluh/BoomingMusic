@@ -31,6 +31,8 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotio
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLifecycle
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunTransitionType
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrator
@@ -199,6 +201,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 executionHostEventSink = hostEvents::add,
                 boundRemoteHostSink = { boundRemoteHost = it },
             )
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
             val remoteStartup = boundRemoteHost?.let { host ->
                 host.processGeneration
                 host.connectionDiagnostics
@@ -252,6 +255,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             var decodeMode: String? = null
             var decodeDiagnostics: String? = null
             var finalState: SourceSeparationUiState = SourceSeparationUiState.Idle
+            var remoteCacheOwnershipChecked = false
             while (SystemClock.elapsedRealtime() - workerStartedAt < WORKER_TIMEOUT_MS) {
                 finalState = worker.workerStateFlow.value
                 val now = SystemClock.elapsedRealtime()
@@ -277,6 +281,23 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     peakSummedPssBytes,
                     memory.getLong("totalPssBytes") + remotePssBytes,
                 )
+                if (!remoteCacheOwnershipChecked && remoteStartup != null) {
+                    store.readRunJournal(cacheKey)
+                        ?.takeIf { it.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running }
+                        ?.let { journal ->
+                            assertEquals(remoteStartup.pid, journal.request.ownerPid)
+                            assertEquals(
+                                remoteStartup.processGeneration,
+                                journal.request.processGeneration,
+                            )
+                            assertNotEquals(Process.myPid(), journal.request.ownerPid)
+                            assertEquals(
+                                SourceSeparationCacheMutationResult.Busy,
+                                runtimeFacade.delete(cacheKey),
+                            )
+                            remoteCacheOwnershipChecked = true
+                        }
+                }
                 when (finalState) {
                     is SourceSeparationUiState.Completed,
                     is SourceSeparationUiState.Failed,
@@ -286,6 +307,12 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
             assertTrue("Worker timed out: ${worker.debugStatus()}",
                 finalState is SourceSeparationUiState.Completed)
+            if (executionHostMode == Phase7ExecutionHostMode.BoundRemote) {
+                assertTrue(
+                    "The remote writer never exposed a process-owned cache lease.",
+                    remoteCacheOwnershipChecked,
+                )
+            }
             assertTrue(
                 "The worker did not publish a completion callback.",
                 runCallbacks.completedCacheKey.get() == cacheKey,
@@ -308,7 +335,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val playback = requireNotNull(runtimeFacade.openCompletedCache(cacheKey))
             val manifest = playback.manifest
             val output = requireNotNull(manifest.output)
-            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
             val entryDirectory = store.entryDirectory(cacheKey)
             val wavStemPaths = output.stems.associate { stem ->
                 stem.semantic.name to store.resolveRelativePath(entryDirectory, stem.wavPath)
@@ -418,6 +444,12 @@ class SourceSeparationPhase7WorkerDeviceTest {
 
             val completedAfter = runtimeFacade.entries().single { it.cacheKey == cacheKey }
             val promotedManifest = requireNotNull(store.readManifest(cacheKey))
+            val runJournal = requireNotNull(store.readRunJournal(cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Completed, runJournal.lifecycle)
+            assertEquals(
+                SourceSeparationCacheRunTransitionType.Completed,
+                runJournal.transitions.last().type,
+            )
             applyRuntimeEvidence(report, promotedManifest)
             val artifactExport = if (exportCacheAudio) {
                 exportCacheArtifacts(
@@ -501,6 +533,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     completedAfter.artifactSha256 == expectedArtifactSha256)
                 .put("completedPlayable", true)
                 .put("clearRecoveryPassed", false)
+                .put("runJournalSequence", runJournal.latestSequence)
+                .put("runJournalOwnerPid", runJournal.request.ownerPid ?: JSONObject.NULL)
+                .put("runJournalProcessGeneration", runJournal.request.processGeneration)
+                .put("remoteOwnershipChecked", remoteCacheOwnershipChecked)
                 .put("manifestPathRelative", "entries/$cacheKey/manifest.json")
                 .put("entryDirectoryPath", entryDirectory.absolutePath)
                 .put("promotedFormat", completedAfter.format.name)

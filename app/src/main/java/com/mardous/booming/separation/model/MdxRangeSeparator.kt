@@ -553,7 +553,7 @@ class MdxRangeSeparator(
             }
             runCatching {
                 java.nio.channels.FileChannel.open(
-                    file.parentFile.toPath(),
+                    requireNotNull(file.parentFile).toPath(),
                     java.nio.file.StandardOpenOption.READ,
                 ).use { channel -> channel.force(true) }
             }

@@ -253,6 +253,7 @@ internal data class SourceSeparationIpcOperationResponse(
 @Serializable
 internal enum class SourceSeparationIpcStatus {
     Completed,
+    AlreadyCompleted,
     Paused,
     Canceled,
     Applied,

@@ -30,11 +30,14 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostContr
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
 import com.mardous.booming.separation.process.toExecutionDescriptor
 import com.mardous.booming.separation.process.toMdxRangePreparation
 import com.mardous.booming.separation.process.toMdxRangeProgress
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
+import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteCacheAlreadyCompletedException
+import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteCacheBusyException
 import java.util.UUID
 import java.util.concurrent.CancellationException
 
@@ -103,6 +106,30 @@ internal class SourceSeparationModelAwareEngine(
             require(it.isNotBlank()) { "Execution run ID factory returned an empty ID." }
         }
         val executionProcessGeneration = executionHost.processGeneration
+        if (executionHost.mode == SourceSeparationExecutionHostMode.BoundRemote) {
+            coordinator.inspectCompleted(identity)?.let { manifest ->
+                return SourceSeparationModelAwareEngineResult.AlreadyCompleted(
+                    manifest = manifest,
+                    preflightElapsedMs = preflight.elapsedMs,
+                )
+            }
+            return executeRemote(
+                input = input,
+                model = model,
+                identity = identity,
+                preflightElapsedMs = preflight.elapsedMs,
+                runtimeSettings = runtimeSettings,
+                onProgress = onProgress,
+                playbackPositionMsProvider = playbackPositionMsProvider,
+                playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
+                windowDecodeEnabled = windowDecodeEnabled,
+                onPrepared = onPrepared,
+                shouldPause = shouldPause,
+                shouldCancel = shouldCancel,
+                runId = executionRunId,
+                processGeneration = executionProcessGeneration,
+            )
+        }
         val runRequest = SourceSeparationCacheRunRequest(
             identity = identity,
             contract = model.contract,
@@ -140,6 +167,142 @@ internal class SourceSeparationModelAwareEngine(
                 runId = executionRunId,
                 processGeneration = executionProcessGeneration,
             )
+        }
+    }
+
+    private fun executeRemote(
+        input: SourceSeparationModelAwareSongInput,
+        model: SourceSeparationResolvedCacheModel,
+        identity: com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity,
+        preflightElapsedMs: Long,
+        runtimeSettings: MdxRuntimeSettings,
+        onProgress: (MdxRangeProgress) -> Unit,
+        playbackPositionMsProvider: () -> Long?,
+        playbackReadyWindowCountProvider: () -> Int,
+        windowDecodeEnabled: Boolean,
+        onPrepared: (SourceSeparationCacheManifest) -> Unit,
+        shouldPause: () -> Boolean,
+        shouldCancel: () -> Boolean,
+        runId: String,
+        processGeneration: Long,
+    ): SourceSeparationModelAwareEngineResult {
+        var hostStartAttempted = false
+        var hostRunAccepted = false
+        var terminalError: Throwable? = null
+        val eventLock = Any()
+        val preview = coordinator.previewWorkspace(identity)
+        val executionRequest = SourceSeparationModelAwareExecutionRequest(
+            sourceUri = input.sourceUri,
+            displayName = input.displayName,
+            model = model,
+            workspace = SourceSeparationModelAwareExecutionWorkspace(
+                identity = identity,
+                contract = model.contract,
+                entryDirectory = preview.entryDirectory,
+                workDirectory = preview.workDirectory,
+                segmentsDirectory = preview.segmentsDirectory,
+                resumeState = null,
+            ),
+            runtimeSettings = runtimeSettings,
+            onProgress = {},
+            onPrepared = {},
+            onSegmentStateChanged = { _, _ -> },
+            playbackPositionMsProvider = playbackPositionMsProvider,
+            playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
+            windowDecodeEnabled = windowDecodeEnabled,
+            shouldPause = shouldPause,
+            shouldCancel = shouldCancel,
+        )
+        val descriptor = executionRequest.toExecutionDescriptor(
+            runId = runId,
+            processGeneration = processGeneration,
+            sourceDiagnostics = input.sourceDiagnostics,
+            song = input.song,
+            initialPlaybackPositionMs = playbackPositionMsProvider()?.takeIf { it >= 0L },
+            initialPlaybackReadyWindowCount = playbackReadyWindowCountProvider().coerceAtLeast(1),
+        )
+        return try {
+            if (shouldCancel()) throw CancellationException("Source separation canceled.")
+            var latestEventSequence = 0L
+            hostStartAttempted = true
+            val hosted = executionHost.start(
+                SourceSeparationExecutionHostRequest(
+                    descriptor = descriptor,
+                    executionRequest = executionRequest,
+                    onEvent = { event ->
+                        synchronized(eventLock) {
+                            require(event.protocolVersion ==
+                                SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION
+                            ) { "Execution host event uses an unsupported protocol version." }
+                            require(event.runId == runId &&
+                                event.processGeneration == processGeneration
+                            ) { "Execution host event targets a stale run or generation." }
+                            require(event.sequence > latestEventSequence) {
+                                "Execution host event sequence is stale."
+                            }
+                            when (val payload = event.payload) {
+                                is SourceSeparationExecutionHostEventPayload.Accepted -> {
+                                    require(payload.descriptor == descriptor) {
+                                        "Execution host accepted a different descriptor."
+                                    }
+                                    hostRunAccepted = true
+                                }
+                                is SourceSeparationExecutionHostEventPayload.Progress ->
+                                    onProgress(payload.progress.toMdxRangeProgress())
+                                is SourceSeparationExecutionHostEventPayload.Prepared ->
+                                    onPrepared(requireNotNull(
+                                        coordinator.inspectManifest(identity),
+                                    ) { "Remote cache preparation was not durably published." })
+                                is SourceSeparationExecutionHostEventPayload
+                                    .SegmentStateChanged,
+                                is SourceSeparationExecutionHostEventPayload.Completed,
+                                is SourceSeparationExecutionHostEventPayload.Paused,
+                                is SourceSeparationExecutionHostEventPayload.Canceled,
+                                is SourceSeparationExecutionHostEventPayload.Failed,
+                                -> Unit
+                            }
+                            executionHostEventSink(event)
+                            latestEventSequence = event.sequence
+                        }
+                    },
+                )
+            )
+            synchronized(eventLock) {
+                check(hostRunAccepted) { "Execution host completed without accepting the run." }
+            }
+            val manifest = requireNotNull(coordinator.inspectCompleted(identity)) {
+                "Remote execution completed without a durable completed cache."
+            }
+            SourceSeparationModelAwareEngineResult.Completed(
+                manifest = manifest,
+                result = hosted.result,
+                preflightElapsedMs = preflightElapsedMs,
+                hostDiagnostics = hosted.diagnostics,
+            )
+        } catch (error: SourceSeparationRemoteCacheBusyException) {
+            terminalError = error
+            SourceSeparationModelAwareEngineResult.Busy(identity.cacheKey, preflightElapsedMs)
+        } catch (error: SourceSeparationRemoteCacheAlreadyCompletedException) {
+            terminalError = error
+            SourceSeparationModelAwareEngineResult.AlreadyCompleted(
+                manifest = requireNotNull(coordinator.inspectCompleted(identity)) {
+                    "Remote cache reported completion without a valid manifest."
+                },
+                preflightElapsedMs = preflightElapsedMs,
+            )
+        } catch (error: Throwable) {
+            terminalError = error
+            throw error
+        } finally {
+            if (hostStartAttempted) {
+                val closeResult = executionHost.closeRun(runId, processGeneration)
+                check(
+                    closeResult == SourceSeparationExecutionHostControlResult.Applied ||
+                        closeResult == SourceSeparationExecutionHostControlResult.NoActiveRun ||
+                        (terminalError != null &&
+                            closeResult == SourceSeparationExecutionHostControlResult.HostClosed)
+                ) { "Execution host did not close the terminal run: $closeResult" }
+            }
         }
     }
 
@@ -190,6 +353,7 @@ internal class SourceSeparationModelAwareEngine(
                 runId = currentRunId,
                 processGeneration = currentProcessGeneration,
                 sourceDiagnostics = input.sourceDiagnostics,
+                song = input.song,
                 initialPlaybackPositionMs = initialPlaybackPositionMs,
                 initialPlaybackReadyWindowCount = initialPlaybackReadyWindowCount,
             )
