@@ -3890,6 +3890,39 @@ class SourceSeparationPhase7WorkerDeviceTest {
         source: Song,
         operation: String,
     ): OriginalAudioPlaybackProbe {
+        val failures = mutableListOf<String>()
+        var lastError: Throwable? = null
+        for (attempt in 1..ORIGINAL_PLAYBACK_START_ATTEMPTS) {
+            try {
+                return startOriginalAudioPlaybackAttempt(
+                    context = context,
+                    source = source,
+                    operation = operation,
+                    startupAttempt = attempt,
+                    startupFailures = failures,
+                )
+            } catch (error: Throwable) {
+                lastError = error
+                failures += "attempt $attempt: ${error::class.java.name}: ${error.message}"
+                if (attempt < ORIGINAL_PLAYBACK_START_ATTEMPTS) {
+                    SystemClock.sleep(ORIGINAL_PLAYBACK_RETRY_DELAY_MS)
+                }
+            }
+        }
+        throw IllegalStateException(
+            "Original playback did not start after $ORIGINAL_PLAYBACK_START_ATTEMPTS attempts " +
+                "for $operation: ${failures.joinToString()}",
+            lastError,
+        )
+    }
+
+    private fun startOriginalAudioPlaybackAttempt(
+        context: Context,
+        source: Song,
+        operation: String,
+        startupAttempt: Int,
+        startupFailures: List<String>,
+    ): OriginalAudioPlaybackProbe {
         val audioFocusOverride = installPlaybackAudioFocusTestOverride()
         val sessionToken = SessionToken(
             context,
@@ -3940,6 +3973,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 controller = controller,
                 expectedMediaId = source.id.toString(),
                 sourcePreparationAttempts = sourcePreparationAttempts,
+                startupAttempt = startupAttempt,
+                startupFailures = startupFailures,
                 audioFocusOverride = audioFocusOverride,
             )
             onMediaControllerThread(controller) {
@@ -4113,6 +4148,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         private val controller: MediaController,
         private val expectedMediaId: String,
         private val sourcePreparationAttempts: Int,
+        private val startupAttempt: Int,
+        private val startupFailures: List<String>,
         private val audioFocusOverride: PlaybackAudioFocusTestOverride,
     ) : Player.Listener {
         private val armed = AtomicBoolean(false)
@@ -4204,6 +4241,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
             return JSONObject()
                 .put("expectedMediaId", expectedMediaId)
                 .put("sourcePreparationAttempts", sourcePreparationAttempts)
+                .put("startupAttempt", startupAttempt)
+                .put("startupFailures", JSONArray(startupFailures))
                 .put("audioFocusBypassedForApi35", audioFocusOverride.bypassed)
                 .put("repeatMode", "one")
                 .put("muted", true)
@@ -5741,6 +5780,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val LIFECYCLE_TIMEOUT_MS = 5 * 60 * 1000L
         const val MEDIA_SESSION_TIMEOUT_SECONDS = 30L
         const val MEDIA_SESSION_TIMEOUT_MS = 30_000L
+        const val ORIGINAL_PLAYBACK_START_ATTEMPTS = 2
+        const val ORIGINAL_PLAYBACK_RETRY_DELAY_MS = 2_000L
         const val MEDIA_SESSION_SEEK_TOLERANCE_MS = 250L
         const val PLAYBACK_CONTINUITY_POSITION_TOLERANCE_MS = 1_000L
         const val REPEAT_MODE_CYCLE_LIMIT = 3
