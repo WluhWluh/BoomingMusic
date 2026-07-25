@@ -739,7 +739,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
         } finally {
             coordinator?.cancel()
             boundRemoteHost?.close()
-            originalPlayback?.close()
+            originalPlayback?.let { playback ->
+                report.put("originalPlayback", playback.report())
+                playback.close()
+            }
             if (!preserveMediaStoreSource) {
                 mediaUri?.let { uri ->
                     runCatching { context.contentResolver.delete(uri, null, null) }
@@ -3937,6 +3940,24 @@ class SourceSeparationPhase7WorkerDeviceTest {
             throw error
         }
         try {
+            val awaitRestorationCommand = SessionCommand(
+                Playback.AWAIT_PLAYBACK_RESTORATION,
+                Bundle.EMPTY,
+            )
+            assertTrue(
+                "PlaybackService did not expose the debug restoration command.",
+                onMediaControllerThread(controller) {
+                    controller.availableSessionCommands.contains(awaitRestorationCommand)
+                },
+            )
+            val restorationWaitStartedAt = SystemClock.elapsedRealtime()
+            val restorationResult = onMediaControllerThread(controller) {
+                controller.sendCustomCommand(awaitRestorationCommand, Bundle.EMPTY)
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            val restorationWaitDurationMs =
+                SystemClock.elapsedRealtime() - restorationWaitStartedAt
+            assertEquals(SessionResult.RESULT_SUCCESS, restorationResult.resultCode)
+
             val disableSeparationCommand = SessionCommand(
                 Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
                 Bundle.EMPTY,
@@ -3979,6 +4000,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 startupAttempt = startupAttempt,
                 startupFailures = startupFailures,
                 audioFocusOverride = audioFocusOverride,
+                restorationWaitDurationMs = restorationWaitDurationMs,
             )
             onMediaControllerThread(controller) {
                 controller.addListener(probe)
@@ -4154,6 +4176,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         private val startupAttempt: Int,
         private val startupFailures: List<String>,
         private val audioFocusOverride: PlaybackAudioFocusTestOverride,
+        private val restorationWaitDurationMs: Long,
     ) : Player.Listener {
         private val armed = AtomicBoolean(false)
         private val closed = AtomicBoolean(false)
@@ -4246,6 +4269,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("sourcePreparationAttempts", sourcePreparationAttempts)
                 .put("startupAttempt", startupAttempt)
                 .put("startupFailures", JSONArray(startupFailures))
+                .put("restorationWaitDurationMs", restorationWaitDurationMs)
                 .put("audioFocusBypassedForApi35", audioFocusOverride.bypassed)
                 .put("repeatMode", "one")
                 .put("muted", true)

@@ -554,6 +554,9 @@ class PlaybackService :
         availableCommands.add(SessionCommand(Playback.TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER, Bundle.EMPTY))
         if (BuildConfig.DEBUG) {
             availableCommands.add(
+                SessionCommand(Playback.AWAIT_PLAYBACK_RESTORATION, Bundle.EMPTY)
+            )
+            availableCommands.add(
                 SessionCommand(Playback.PLAY_SOURCE_SEPARATION_COMPLETED_CACHE, Bundle.EMPTY)
             )
         }
@@ -804,6 +807,14 @@ class PlaybackService :
                     }
                 } else {
                     Futures.immediateFuture(SessionResult(SessionError.ERROR_INVALID_STATE))
+                }
+            }
+
+            Playback.AWAIT_PLAYBACK_RESTORATION -> {
+                CallbackToFutureAdapter.getFuture { completer ->
+                    persistentStorage.waitForRestoration {
+                        completer.set(SessionResult(SessionResult.RESULT_SUCCESS))
+                    }
                 }
             }
 

@@ -6,6 +6,8 @@ object Playback {
     const val CYCLE_REPEAT = "com.mardous.booming.command.repeat.cycle"
     const val TOGGLE_FAVORITE = "com.mardous.booming.command.toggle_favorite"
     const val RESTORE_PLAYBACK = "com.mardous.booming.command.restore_playback"
+    const val AWAIT_PLAYBACK_RESTORATION =
+        "com.mardous.booming.command.await_playback_restoration"
 
     const val SET_UNSHUFFLED_ORDER = "com.mardous.booming.command.set.unshuffled_order"
     const val SET_STOP_POSITION = "com.mardous.booming.command.set.stop_position"
