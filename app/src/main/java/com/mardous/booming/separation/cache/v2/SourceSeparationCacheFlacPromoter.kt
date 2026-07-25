@@ -15,9 +15,13 @@ class SourceSeparationCacheFlacPromoter(
         cacheKey: String,
         shouldCancel: () -> Boolean = { false },
     ): SourceSeparationCacheFlacPromotionResult {
-        val lease = repository.tryAcquireExclusive(cacheKey)
+        val lease = repository.tryAcquireExclusive(
+            cacheKey,
+            SourceSeparationCacheLockPurpose.Promotion,
+        )
             ?: return SourceSeparationCacheFlacPromotionResult.Busy
         return lease.use {
+            it.bindEntryDirectory(store.entryDirectory(cacheKey))
             val manifest = store.readManifest(cacheKey)
                 ?.takeIf { it.state == SourceSeparationCacheManifestState.Completed }
                 ?: return@use SourceSeparationCacheFlacPromotionResult.Unavailable

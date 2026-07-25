@@ -15,9 +15,13 @@ class SourceSeparationCacheHydrator(
         cacheKey: String,
         shouldCancel: () -> Boolean = { false },
     ): SourceSeparationCacheHydrationResult {
-        val lease = repository.tryAcquireRunWrite(cacheKey)
+        val lease = repository.tryAcquireRunWrite(
+            cacheKey,
+            SourceSeparationCacheLockPurpose.Hydration,
+        )
             ?: return SourceSeparationCacheHydrationResult.Busy
         return lease.use {
+            it.bindEntryDirectory(store.entryDirectory(cacheKey))
             val manifest = store.readManifest(cacheKey)
                 ?.takeIf { it.state == SourceSeparationCacheManifestState.Completed }
                 ?: return@use SourceSeparationCacheHydrationResult.Unavailable

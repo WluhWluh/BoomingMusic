@@ -15,6 +15,8 @@ class SourceSeparationCacheStore(
     private val fileHasher: SourceSeparationCacheFileHasher =
         SourceSeparationCacheFileHasher { file -> sha256(file) },
     private val json: Json = DEFAULT_JSON,
+    private val entryLockManager: SourceSeparationCacheEntryLockManager =
+        SourceSeparationCacheEntryLockManager(root),
 ) {
     init {
         require(root.directory.isAbsolute) { "Cache root must be absolute." }
@@ -22,6 +24,8 @@ class SourceSeparationCacheStore(
     }
 
     fun root(): SourceSeparationCacheRoot = root
+
+    fun entryLocks(): SourceSeparationCacheEntryLockManager = entryLockManager
 
     fun ensureLayout() {
         require(root.directory.exists() || root.directory.mkdirs()) {
@@ -362,24 +366,51 @@ class SourceSeparationCacheStore(
         ensureLayout()
         val stagingDirectory = File(root.directory, STAGING_DIR_NAME)
         val entriesDirectory = File(root.directory, ENTRIES_DIR_NAME)
-        val removedTemporaryFiles = removeTemporaryFiles(root.directory, entriesDirectory, stagingDirectory)
+        var removedTemporaryFiles = removeTopLevelTemporaryFiles(root.directory) +
+            removeTemporaryFiles(stagingDirectory)
         val removedStagingRuns = stagingDirectory.listFiles()
             ?.filter { it.isDirectory }
             ?.count { it.deleteRecursively() }
             ?: 0
-        val removedInvalidEntries = entriesDirectory.listFiles()
-            ?.filter { it.isDirectory &&
-                (!CACHE_KEY_PATTERN.matches(it.name) || readManifestFromDirectory(it, it.name) == null)
+        var removedInvalidEntries = 0
+        var removedDerivedArtifacts = 0
+        var skippedLockedEntries = 0
+        entriesDirectory.listFiles()
+            ?.filter(File::isDirectory)
+            .orEmpty()
+            .forEach { directory ->
+                if (!CACHE_KEY_PATTERN.matches(directory.name)) {
+                    if (directory.deleteRecursively()) removedInvalidEntries += 1
+                    return@forEach
+                }
+                val kernelLease = entryLockManager.tryAcquire(
+                    cacheKey = directory.name,
+                    owner = SourceSeparationCacheLockOwner(
+                        SourceSeparationCacheLockPurpose.Recovery,
+                    ),
+                )
+                if (kernelLease == null) {
+                    skippedLockedEntries += 1
+                    return@forEach
+                }
+                kernelLease.use { lease ->
+                    lease.bindEntryDirectory(directory)
+                    removedTemporaryFiles += removeTemporaryFiles(directory)
+                    val manifest = readManifestFromDirectory(directory, directory.name)
+                    if (manifest == null) {
+                        if (directory.deleteRecursively()) removedInvalidEntries += 1
+                    } else {
+                        removedDerivedArtifacts += recoverDerivedArtifacts(manifest)
+                    }
+                }
             }
-            ?.count { it.deleteRecursively() }
-            ?: 0
-        val removedDerivedArtifacts = listManifests().sumOf(::recoverDerivedArtifacts)
         rebuildLocatorIndex()
         return SourceSeparationCacheRecoveryResult(
             removedTemporaryFiles = removedTemporaryFiles,
             removedStagingRuns = removedStagingRuns,
             removedInvalidEntries = removedInvalidEntries,
             removedDerivedArtifacts = removedDerivedArtifacts,
+            skippedLockedEntries = skippedLockedEntries,
         )
     }
 
@@ -560,26 +591,27 @@ class SourceSeparationCacheStore(
     }
 
     private fun removeTemporaryFiles(
-        rootDirectory: File,
-        entriesDirectory: File,
-        stagingDirectory: File,
+        vararg directories: File,
     ): Int {
         var removed = 0
-        val rootTemporaryFiles = rootDirectory.listFiles()
-            ?.asSequence()
-            ?.filter(File::isFile)
-            .orEmpty()
-        val storeTemporaryFiles = sequenceOf(entriesDirectory, stagingDirectory)
-            .filter(File::isDirectory)
-            .flatMap(File::walkTopDown)
-            .filter(File::isFile)
-        (rootTemporaryFiles + storeTemporaryFiles)
+        directories.asSequence()
+            .filter(File::exists)
+            .flatMap { directory ->
+                if (directory.isDirectory) directory.walkTopDown() else sequenceOf(directory)
+            }
             .filter { it.isFile && it.name.endsWith(".tmp") }
             .toList()
             .forEach { file ->
                 if (file.delete()) removed += 1
             }
         return removed
+    }
+
+    private fun removeTopLevelTemporaryFiles(directory: File): Int {
+        return directory.listFiles()
+            ?.filter { file -> file.isFile && file.name.endsWith(".tmp") }
+            ?.count(File::delete)
+            ?: 0
     }
 
     private fun File.isWithin(parent: File): Boolean {
@@ -653,4 +685,5 @@ data class SourceSeparationCacheRecoveryResult(
     val removedStagingRuns: Int,
     val removedInvalidEntries: Int,
     val removedDerivedArtifacts: Int = 0,
+    val skippedLockedEntries: Int = 0,
 )

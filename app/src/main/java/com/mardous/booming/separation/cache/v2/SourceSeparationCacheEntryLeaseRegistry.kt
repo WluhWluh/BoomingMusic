@@ -110,12 +110,38 @@ class SourceSeparationCacheEntryLease internal constructor(
     private val release: (String, SourceSeparationCacheLeaseMode) -> Unit,
 ) : AutoCloseable {
     private var closed = false
+    private var kernelLease: SourceSeparationCacheEntryKernelLease? = null
+
+    internal fun attachKernelLease(lease: SourceSeparationCacheEntryKernelLease) {
+        synchronized(this) {
+            check(!closed && kernelLease == null) { "Cache lease cannot attach a kernel lock." }
+            require(lease.cacheKey == cacheKey) { "Cache kernel lock key is inconsistent." }
+            kernelLease = lease
+        }
+    }
+
+    fun bindEntryDirectory(directory: java.io.File) {
+        synchronized(this) {
+            check(!closed) { "Cache lease is closed." }
+            requireNotNull(kernelLease) { "Cache mutation lease has no kernel lock." }
+                .bindEntryDirectory(directory)
+        }
+    }
+
+    fun requireCacheAvailable() {
+        synchronized(this) {
+            check(!closed) { "Cache lease is closed." }
+            kernelLease?.requireAvailable()
+        }
+    }
 
     override fun close() {
-        synchronized(this) {
+        val kernel = synchronized(this) {
             if (closed) return
             closed = true
+            kernelLease.also { kernelLease = null }
         }
+        kernel?.close()
         release(cacheKey, mode)
     }
 }

@@ -13,6 +13,7 @@ class SourceSeparationModelAwareCacheRepository(
             SourceSeparationCacheModelAvailability.Unknown
         },
     private val nowEpochMs: () -> Long = System::currentTimeMillis,
+    private val entryLocks: SourceSeparationCacheEntryLockManager = store.entryLocks(),
 ) {
     fun entries(): List<SourceSeparationModelAwareCacheEntry> {
         return store.listManifests().map { manifest ->
@@ -232,8 +233,12 @@ class SourceSeparationModelAwareCacheRepository(
 
     fun writeBlend(identity: SourceSeparationCacheIdentity, blend: Float): Boolean {
         val manifest = manifest(identity) ?: return false
-        val lease = leases.tryAcquireRead(manifest.cacheKey) ?: return false
+        val lease = tryAcquireExclusive(
+            manifest.cacheKey,
+            SourceSeparationCacheLockPurpose.PlaybackSettings,
+        ) ?: return false
         return lease.use {
+            it.bindEntryDirectory(store.entryDirectory(manifest.cacheKey))
             store.writePlaybackSettings(
                 manifest = manifest,
                 settings = SourceSeparationCachePlaybackSettings(
@@ -248,9 +253,10 @@ class SourceSeparationModelAwareCacheRepository(
     }
 
     fun delete(cacheKey: String): SourceSeparationCacheMutationResult {
-        val lease = leases.tryAcquireExclusive(cacheKey)
+        val lease = tryAcquireExclusive(cacheKey, SourceSeparationCacheLockPurpose.Delete)
             ?: return SourceSeparationCacheMutationResult.Busy
         return lease.use {
+            store.entryDirectory(cacheKey).takeIf(File::exists)?.let(it::bindEntryDirectory)
             if (store.deleteEntry(cacheKey)) {
                 SourceSeparationCacheMutationResult.Completed
             } else {
@@ -278,9 +284,13 @@ class SourceSeparationModelAwareCacheRepository(
                 .drop(limit.coerceAtLeast(0))
                 .forEach { manifest ->
                     if (manifest.cacheKey in protectedCacheKeys) return@forEach
-                    val lease = leases.tryAcquireExclusive(manifest.cacheKey) ?: return@forEach
+                    val lease = tryAcquireExclusive(
+                        manifest.cacheKey,
+                        SourceSeparationCacheLockPurpose.Prune,
+                    ) ?: return@forEach
                     lease.use {
                         val directory = store.entryDirectory(manifest.cacheKey)
+                        it.bindEntryDirectory(directory)
                         val size = directory.directorySize()
                         if (store.deleteEntry(manifest.cacheKey)) {
                             deletedEntries += 1
@@ -298,20 +308,40 @@ class SourceSeparationModelAwareCacheRepository(
         )
     }
 
-    fun tryAcquireRunWrite(identity: SourceSeparationCacheIdentity): SourceSeparationCacheEntryLease? {
-        return leases.tryAcquireRunWrite(identity.cacheKey)
+    fun tryAcquireRunWrite(
+        identity: SourceSeparationCacheIdentity,
+        owner: SourceSeparationCacheLockOwner = SourceSeparationCacheLockOwner(
+            SourceSeparationCacheLockPurpose.Run,
+        ),
+    ): SourceSeparationCacheEntryLease? {
+        return tryAcquireMutation(
+            localLease = leases.tryAcquireRunWrite(identity.cacheKey),
+            owner = owner,
+        )
     }
 
-    fun tryAcquireRunWrite(cacheKey: String): SourceSeparationCacheEntryLease? {
-        return leases.tryAcquireRunWrite(cacheKey)
+    fun tryAcquireRunWrite(
+        cacheKey: String,
+        purpose: SourceSeparationCacheLockPurpose = SourceSeparationCacheLockPurpose.Hydration,
+    ): SourceSeparationCacheEntryLease? {
+        return tryAcquireMutation(
+            localLease = leases.tryAcquireRunWrite(cacheKey),
+            owner = SourceSeparationCacheLockOwner(purpose),
+        )
     }
 
     fun tryAcquireRead(cacheKey: String): SourceSeparationCacheEntryLease? {
         return leases.tryAcquireRead(cacheKey)
     }
 
-    fun tryAcquireExclusive(cacheKey: String): SourceSeparationCacheEntryLease? {
-        return leases.tryAcquireExclusive(cacheKey)
+    fun tryAcquireExclusive(
+        cacheKey: String,
+        purpose: SourceSeparationCacheLockPurpose = SourceSeparationCacheLockPurpose.Other,
+    ): SourceSeparationCacheEntryLease? {
+        return tryAcquireMutation(
+            localLease = leases.tryAcquireExclusive(cacheKey),
+            owner = SourceSeparationCacheLockOwner(purpose),
+        )
     }
 
     fun isLeased(cacheKey: String): Boolean = leases.isLeased(cacheKey)
@@ -358,8 +388,34 @@ class SourceSeparationModelAwareCacheRepository(
     }
 
     private fun touchAfterPlayback(manifest: SourceSeparationCacheManifest) {
-        val lease = leases.tryAcquireExclusive(manifest.cacheKey) ?: return
-        lease.use { store.touchManifest(manifest) }
+        val lease = tryAcquireExclusive(
+            manifest.cacheKey,
+            SourceSeparationCacheLockPurpose.PlaybackSettings,
+        ) ?: return
+        lease.use {
+            it.bindEntryDirectory(store.entryDirectory(manifest.cacheKey))
+            store.touchManifest(manifest)
+        }
+    }
+
+    private fun tryAcquireMutation(
+        localLease: SourceSeparationCacheEntryLease?,
+        owner: SourceSeparationCacheLockOwner,
+    ): SourceSeparationCacheEntryLease? {
+        localLease ?: return null
+        val kernelLease = entryLocks.tryAcquire(localLease.cacheKey, owner)
+        if (kernelLease == null) {
+            localLease.close()
+            return null
+        }
+        return try {
+            localLease.attachKernelLease(kernelLease)
+            localLease
+        } catch (error: Throwable) {
+            kernelLease.close()
+            localLease.close()
+            throw error
+        }
     }
 
     private fun SourceSeparationCacheManifest.toEntryState(

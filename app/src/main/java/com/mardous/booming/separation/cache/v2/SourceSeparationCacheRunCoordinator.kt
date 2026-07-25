@@ -25,6 +25,8 @@ class SourceSeparationCacheRunCoordinator(
         val lease = repository.tryAcquireRunWrite(request.identity)
             ?: return SourceSeparationCacheRunStart.Busy
         return try {
+            val entryDirectory = store.entryDirectory(request.identity.cacheKey)
+            lease.bindEntryDirectory(entryDirectory)
             val existing = store.readManifest(request.identity.cacheKey)
             if (existing?.state == SourceSeparationCacheManifestState.Completed &&
                 store.validateCompletedEntry(existing, verifyHashes = false) ==
@@ -33,7 +35,6 @@ class SourceSeparationCacheRunCoordinator(
                 lease.close()
                 return SourceSeparationCacheRunStart.AlreadyCompleted(existing)
             }
-            val entryDirectory = store.entryDirectory(request.identity.cacheKey).apply { mkdirs() }
             val workDirectory = store.resolveEntryPath(request.identity.cacheKey, WORK_DIRECTORY)
             val completedDirectory = store.resolveEntryPath(
                 request.identity.cacheKey,
@@ -261,8 +262,12 @@ class SourceSeparationCacheRunCoordinator(
             ?.takeIf { it.state == SourceSeparationCacheManifestState.Completed }
             ?: return false
         val cleanup = manifest.cleanup ?: return false
-        val lease = repository.tryAcquireExclusive(cacheKey) ?: return false
+        val lease = repository.tryAcquireExclusive(
+            cacheKey,
+            SourceSeparationCacheLockPurpose.Cleanup,
+        ) ?: return false
         return lease.use {
+            it.bindEntryDirectory(store.entryDirectory(cacheKey))
             val cleaned = cleanup.paths.all { path ->
                 store.deleteRelativePath(cacheKey, path)
             }
