@@ -280,14 +280,15 @@ internal class SourceSeparationRemoteCacheAlreadyCompletedException(
 private fun createRemoteSessionControllerProvider(
     context: Context,
 ): SourceSeparationRemoteSessionControllerProvider {
-    val persistentX86Validation = MdxX86ProcessValidationOverride.buildEnabled &&
-        runCatching { AndroidMdxRuntimePlatformProvider.current().runtimeAbi }
-            .getOrNull() == com.mardous.booming.separation.model.MdxRuntimeAbi.X86
-    val ownership = if (persistentX86Validation) {
-        SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit
-    } else {
-        SourceSeparationProcessSessionOwnership.SingleUse
-    }
+    val runtimeAbi = runCatching {
+        AndroidMdxRuntimePlatformProvider.current().runtimeAbi
+    }.getOrNull()
+    val ownership = resolveRemoteSessionOwnership(
+        runtimeAbi = runtimeAbi,
+        x86ValidationEnabled = MdxX86ProcessValidationOverride.buildEnabled,
+        arm32ResidentValidationEnabled =
+            SourceSeparationArm32ResidentValidation.buildEnabled,
+    )
     return SourceSeparationRemoteSessionControllerProvider(
         autoControllerFactory = {
             SourceSeparationProcessSessionController(

@@ -36,7 +36,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v22",
+    [string]$RunnerRevision = "phase7-runner-v23",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet("in-process", "bound-remote")]
@@ -64,7 +64,8 @@ param(
     [switch]$ProbeOriginalPlayback,
     [switch]$ForceStopBeforeRun,
     [switch]$ScreenOffAfterReady,
-    [switch]$X86ProcessValidation
+    [switch]$X86ProcessValidation,
+    [switch]$Arm32ResidentProcessValidation
 )
 
 $ErrorActionPreference = "Stop"
@@ -167,7 +168,16 @@ if ($ExecutionHostMode -eq "bound-remote" -and
         -not $boundRemoteBackendSupported -or $AutoFailpoint -ne "none")) {
     throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
 }
-if ($Stage -in @("process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-race-matrix", "process-main-death") -and
+if ($Stage -in @("process-matrix", "process-switch-matrix")) {
+    $validX86Resident = $ProcessAbi -eq "x86" -and $X86ProcessValidation
+    $validArm32Resident = $ProcessAbi -eq "armeabi-v7a" -and
+        $Arm32ResidentProcessValidation
+    if ((-not $validX86Resident -and -not $validArm32Resident) -or
+            $ExecutionHostMode -ne "bound-remote" -or $BackendMode -ne "auto") {
+        throw "$Stage requires its resident ABI validation gate and BoundRemote Auto."
+    }
+}
+if ($Stage -in @("process-fault-matrix", "process-cache-race-matrix", "process-main-death") -and
         (-not $X86ProcessValidation -or $ProcessAbi -ne "x86" -or
         $ExecutionHostMode -ne "bound-remote" -or $BackendMode -ne "auto")) {
     throw "$Stage requires pure x86, X86ProcessValidation, and BoundRemote Auto."
@@ -183,9 +193,19 @@ if ($Stage -eq "process-cache-matrix") {
 if ($X86ProcessValidation -and $ProcessAbi -ne "x86") {
     throw "X86ProcessValidation can only build and run the pure-x86 target."
 }
+if ($Arm32ResidentProcessValidation -and $ProcessAbi -ne "armeabi-v7a") {
+    throw "Arm32ResidentProcessValidation can only build and run armeabi-v7a."
+}
+if ($X86ProcessValidation -and $Arm32ResidentProcessValidation) {
+    throw "Only one resident process-validation gate can be enabled."
+}
 if ($X86ProcessValidation -and $Stage -in $sourceStages -and
         $ExecutionHostMode -ne "bound-remote") {
     throw "X86ProcessValidation execution stages require BoundRemote."
+}
+if ($Arm32ResidentProcessValidation -and $Stage -in $sourceStages -and
+        $Stage -notin @("process-matrix", "process-switch-matrix")) {
+    throw "Arm32ResidentProcessValidation is limited to resident process matrices."
 }
 if ($PreserveMediaStoreSource -and $Stage -notin @("worker", "switching")) {
     throw "PreserveMediaStoreSource applies only to worker and switching stages."
@@ -492,10 +512,13 @@ New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 Push-Location $repoRoot
 try {
     if (-not $SkipBuild) {
-        $validationGradleArgument = if ($X86ProcessValidation) {
-            @("-PboomingSs.x86ProcessValidation=true")
-        } else {
-            @()
+        $validationGradleArgument = @()
+        if ($X86ProcessValidation) {
+            $validationGradleArgument += "-PboomingSs.x86ProcessValidation=true"
+        }
+        if ($Arm32ResidentProcessValidation) {
+            $validationGradleArgument +=
+                "-PboomingSs.arm32ResidentProcessValidation=true"
         }
         $androidTestBuildArguments = @(
             ":app:assembleGithubDebugAndroidTest",
@@ -538,6 +561,10 @@ try {
         if ([bool]$buildIdentity.x86ProcessValidation -ne [bool]$X86ProcessValidation) {
             throw "The selected APK used a different x86 process-validation gate."
         }
+        if ([bool]$buildIdentity.arm32ResidentProcessValidation -ne
+                [bool]$Arm32ResidentProcessValidation) {
+            throw "The selected APK used a different arm32 resident-validation gate."
+        }
         $recordedAppApk = @($buildIdentity.appApks) | Where-Object {
             $_.fileName -eq $appApk.Name
         } | Select-Object -First 1
@@ -566,6 +593,7 @@ try {
             schemaVersion = "phase7-build-identity-v1"
             appCommit = $sourceCommitAtInvocation
             x86ProcessValidation = [bool]$X86ProcessValidation
+            arm32ResidentProcessValidation = [bool]$Arm32ResidentProcessValidation
             appApks = $appApkRecords
             testApk = [ordered]@{
                 fileName = $testApk.Name
@@ -634,6 +662,8 @@ try {
         "-e", "fixturesVersion", $fixtures.schemaVersion,
         "-e", "cleanInstallScenario", $((-not $KeepAppData).ToString().ToLowerInvariant()),
         "-e", "x86ProcessValidation", $X86ProcessValidation.ToString().ToLowerInvariant(),
+        "-e", "arm32ResidentProcessValidation",
+        $Arm32ResidentProcessValidation.ToString().ToLowerInvariant(),
         "-e", "probeOriginalPlayback", $ProbeOriginalPlayback.ToString().ToLowerInvariant(),
         "-e", "coldProcessBoundary", $ForceStopBeforeRun.ToString().ToLowerInvariant(),
         "-e", "preRunProcessExitMs", [string]$preRunProcessBoundary.exitElapsedMs
@@ -997,6 +1027,8 @@ try {
                 probeOriginalPlayback = [bool]$ProbeOriginalPlayback
                 coldProcessBoundary = [bool]$ForceStopBeforeRun
                 preRunProcessBoundary = $preRunProcessBoundary
+                arm32ResidentProcessValidation =
+                    [bool]$Arm32ResidentProcessValidation
                 screenOffAfterReady = [bool]$ScreenOffAfterReady
                 backend = $backendName
                 autoFailpoint = $AutoFailpoint

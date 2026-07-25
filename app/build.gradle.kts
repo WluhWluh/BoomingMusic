@@ -86,6 +86,18 @@ val x86ProcessValidationRequested = x86ProcessValidationProperty?.let { value ->
         "boomingSs.x86ProcessValidation must be true or false"
     }
 } ?: false
+val arm32ResidentProcessValidationProperty = providers.gradleProperty(
+    "boomingSs.arm32ResidentProcessValidation",
+).orNull
+val arm32ResidentProcessValidationRequested =
+    arm32ResidentProcessValidationProperty?.let { value ->
+        requireNotNull(value.toBooleanStrictOrNull()) {
+            "boomingSs.arm32ResidentProcessValidation must be true or false"
+        }
+    } ?: false
+require(!x86ProcessValidationRequested || !arm32ResidentProcessValidationRequested) {
+    "x86 and arm32 resident process validation cannot be enabled together"
+}
 
 android {
     compileSdk = 37
@@ -237,6 +249,12 @@ androidComponents {
                     "boolean",
                     x86ProcessValidationRequested && variant.buildType == "debug" && !isCI,
                     "Opt-in pure-x86 inference-process validation; never enabled in release or CI.",
+                ),
+                "ARM32_RESIDENT_PROCESS_VALIDATION" to BuildConfigField(
+                    "boolean",
+                    arm32ResidentProcessValidationRequested &&
+                        variant.buildType == "debug" && !isCI,
+                    "Opt-in arm32 resident-session validation; never enabled in release or CI.",
                 ),
             )
         )

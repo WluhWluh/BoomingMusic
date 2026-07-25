@@ -78,6 +78,7 @@ import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
 import com.mardous.booming.separation.process.SourceSeparationProcParser
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
+import com.mardous.booming.separation.process.SourceSeparationArm32ResidentValidation
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcRecycleReason
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcErrorCategory
@@ -831,9 +832,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
-        require(MdxX86ProcessValidationOverride.buildEnabled) {
-            "The process-session matrix requires the explicit x86 validation build."
-        }
+        requireResidentProcessValidation(arguments)
         val report = baseReport(context, runId, arguments)
         val events = Collections.synchronizedList(
             mutableListOf<SourceSeparationExecutionHostEvent>(),
@@ -1221,7 +1220,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             snapshotsByCycle.values.forEach { diagnostics ->
                 assertTrue(
-                    "The largest x86 virtual-address gap crossed the frozen floor.",
+                    "The largest resident-process address gap crossed the frozen floor.",
                     requireNotNull(diagnostics.memory.largestFreeAddressGapBytes) >=
                         SourceSeparationProcessLifecyclePolicy
                             .MINIMUM_LARGEST_FREE_ADDRESS_GAP_BYTES,
@@ -1303,9 +1302,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
-        require(MdxX86ProcessValidationOverride.buildEnabled) {
-            "The process model-switch matrix requires the x86 validation build."
-        }
+        requireResidentProcessValidation(arguments)
         val report = baseReport(context, runId, arguments)
         val events = Collections.synchronizedList(
             mutableListOf<SourceSeparationExecutionHostEvent>(),
@@ -4720,6 +4717,17 @@ class SourceSeparationPhase7WorkerDeviceTest {
         )
     }
 
+    private fun requireResidentProcessValidation(arguments: Bundle) {
+        val enabled = when (arguments.requiredString(ARG_PROCESS_ABI)) {
+            "x86" -> MdxX86ProcessValidationOverride.buildEnabled
+            "armeabi-v7a" -> SourceSeparationArm32ResidentValidation.buildEnabled
+            else -> false
+        }
+        require(enabled) {
+            "The resident process matrix requires its explicit ABI validation build."
+        }
+    }
+
     private fun processPssBytes(context: Context, pid: Int): Long {
         if (pid <= 0) return 0L
         val manager = context.getSystemService(ActivityManager::class.java)
@@ -5320,7 +5328,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
             ARG_X86_PROCESS_VALIDATION,
             false,
         )
+        val arm32ResidentProcessValidation = arguments.optionalBoolean(
+            ARG_ARM32_RESIDENT_PROCESS_VALIDATION,
+            false,
+        )
         assertEquals(x86ProcessValidation, MdxX86ProcessValidationOverride.buildEnabled)
+        assertEquals(
+            arm32ResidentProcessValidation,
+            SourceSeparationArm32ResidentValidation.buildEnabled,
+        )
         val activityManager = requireNotNull(context.getSystemService(ActivityManager::class.java))
         val deviceMemory = ActivityManager.MemoryInfo().also(activityManager::getMemoryInfo)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -5444,6 +5460,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     arguments.optionalBoolean(ARG_PROBE_ORIGINAL_PLAYBACK, false),
                 )
                 .put("x86ProcessValidation", x86ProcessValidation)
+                .put("arm32ResidentProcessValidation", arm32ResidentProcessValidation)
                 .put(
                     "xnnPackFlags",
                     arguments.getString(ARG_XNNPACK_FLAGS)?.toIntOrNull() ?: JSONObject.NULL,
@@ -5812,6 +5829,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_RUN_CLASS = "runClass"
         const val ARG_CLEAN_INSTALL = "cleanInstallScenario"
         const val ARG_X86_PROCESS_VALIDATION = "x86ProcessValidation"
+        const val ARG_ARM32_RESIDENT_PROCESS_VALIDATION =
+            "arm32ResidentProcessValidation"
         const val ARG_REBIND_AFTER_COMPLETION = "rebindAfterCompletion"
         const val ARG_PROBE_ORIGINAL_PLAYBACK = "probeOriginalPlayback"
         const val ARG_COLD_PROCESS_BOUNDARY = "coldProcessBoundary"
