@@ -1,0 +1,183 @@
+{
+  "schemaVersion": "phase5-x86-api29-growth228-v1",
+  "status": "validation-passed",
+  "decision": "unsupported",
+  "testedRevisions": {
+    "workerAndDirect": "a11678b42ef55e2db76049e92b92e9822278f71b",
+    "completedMatrices": "8f63c90edf8ccee4d438d341d99bbcfd9b2740e3"
+  },
+  "device": {
+    "avd": "Small_Phone",
+    "androidApi": 29,
+    "buildFingerprint": "Android/sdk_phone_x86/generic_x86:10/QSR1.210820.001/7663313:userdebug/test-keys",
+    "abi": "x86",
+    "bitness": 32,
+    "processors": 4,
+    "configuredRamMiB": 1024,
+    "generatedHardwareRamMiB": 2048,
+    "guestMemTotalKiB": 2040200,
+    "guestSwapTotalKiB": 1530144,
+    "roConfigLowRam": false,
+    "configuredVmHeapMiB": 228,
+    "generatedHardwareVmHeapMiB": 512,
+    "initialEffectiveHeapGrowthLimitBytes": 16777216,
+    "retestEffectiveHeapGrowthLimitBytes": 239075328,
+    "heapOverride": "temporary root setprop followed by Android framework restart"
+  },
+  "runtime": {
+    "litertVersion": "2.1.5",
+    "libraryFileName": "libLiteRt.so",
+    "libraryBytes": 7482132,
+    "librarySha256": "02b6556ec235926c11eb0c067eb16e459adcddb1568a42eefe0c40f4cc4b59af",
+    "primaryModelId": "uvr_mdxnet_3_9662",
+    "primaryContractId": "uvr_mdxnet_3_9662@2",
+    "primaryModelSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "secondaryModelId": "uvr_mdxnet_kara",
+    "secondaryModelSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64"
+  },
+  "results": {
+    "packagedSmallModelCpuSmoke": "passed",
+    "boundServiceLifecycle": "3 of 3 passed",
+    "productionWorker": {
+      "status": "passed",
+      "firstReadyMs": 13479,
+      "fullSourceMs": 17565,
+      "outputFrameCount": 529200,
+      "finite": true,
+      "mainProcessPeakPssBytes": 89444352,
+      "residentRemotePssBytes": 639830016
+    },
+    "direct9662Parity": {
+      "status": "passed",
+      "firstInferenceMs": 2474,
+      "reusedInferenceMs": 1642,
+      "sameSessionReuse": true,
+      "snrDb": 97.59860504552219,
+      "cosineSimilarity": 0.9999999999128177,
+      "maximumAbsoluteError": 0.00005953013896942139,
+      "reconstructionMaximumAbsoluteError": 0.000000014901161193847656,
+      "peakPssKiB": 738941,
+      "peakNativePssKiB": 536558
+    },
+    "processSessionMatrix": {
+      "status": "passed after correcting a test-only lease observation race",
+      "cycleCount": 20,
+      "fullSongBookendCount": 2,
+      "processGenerationCount": 1,
+      "nativeSessionCreationCount": 1,
+      "finalInvocationCount": 156,
+      "unexpectedBinderDeathCount": 0,
+      "maximumPlaybackDriftMs": 39,
+      "maximumPssBytes": 696753152,
+      "minimumLargestFreeAddressGapBytes": 423972864,
+      "pssGrowthCycle2To20Bytes": -7546880,
+      "maximumCacheLeaseReleaseMs": 1,
+      "maximumNativeSessionLeaseReleaseMs": 688
+    },
+    "modelSwitchMatrix": {
+      "status": "passed",
+      "switchCount": 20,
+      "expectedBinderDeathCount": 20,
+      "unexpectedBinderDeathCount": 0,
+      "maximumPlaybackDriftMs": 79,
+      "maximumPssBytes": 654120960,
+      "minimumLargestFreeAddressGapBytes": 464801792
+    },
+    "faultMatrix": {
+      "status": "passed",
+      "callbackDeliveryRetryUsedSameSession": true,
+      "recycleTimeoutRecovered": true,
+      "unexpectedIdleDeathRecovered": true
+    },
+    "cacheSafetyMatrix": {
+      "status": "passed",
+      "deathCaseCount": 18,
+      "cacheClearCaseCount": 3,
+      "lockReleaseRangeMs": [6, 14],
+      "maximumPlaybackDriftMs": 59
+    },
+    "cacheRaceMatrix": {
+      "status": "passed",
+      "flacPromotionCompleted": true,
+      "completedCacheValid": true,
+      "activeSwitchPreservedRunIdentity": true,
+      "deletedWeightsPreservedCompletedPlayback": true,
+      "maximumPlaybackDriftMs": 65
+    },
+    "mainProcessDeath": {
+      "status": "passed",
+      "remoteProcessReused": false,
+      "lockReleaseMs": 5,
+      "journalSequenceBeforeDeath": 3,
+      "journalSequenceBeforeRecovery": 3,
+      "finalJournalSequence": 13,
+      "completedSegments": 3,
+      "completedCachePlayable": true
+    },
+    "hostRegression": {
+      "githubDebugUnitTest": "passed",
+      "fdroidDebugUnitTest": "passed",
+      "githubDebugAndroidTestKotlin": "passed",
+      "fdroidDebugAndroidTestKotlin": "passed",
+      "githubReleaseKotlin": "passed",
+      "fdroidReleaseKotlin": "passed"
+    }
+  },
+  "interpretation": {
+    "priorFailureExplainedBySixteenMiBArtHeap": true,
+    "x86RuntimeOrOperatorFailure": false,
+    "wholeDeviceMemoryPressureObserved": false,
+    "virtualAddressGapFailureObserved": false,
+    "lmKdKillObserved": false,
+    "reproducibleColdBootProfileQualified": false,
+    "runtimeHeapAdmissionFloorQualified": false,
+    "releasePolicy": "Pure x86 remains fail-closed and Unsupported."
+  },
+  "rawEvidence": [
+    {
+      "fileName": "phase5-x86-2g-api29-growth228-worker-v1-worker.json",
+      "byteSize": 11937,
+      "sha256": "91ff768f43dcf20dfb4bd5b4347469641da982927b25fdf6645f1c76f9cc1606"
+    },
+    {
+      "fileName": "phase5-x86-2g-api29-growth228-direct-9662-v1.json",
+      "byteSize": 16604,
+      "sha256": "859351a72f278f226996e40b514f3ae22c095117eb6aa7f6b58a7f09c3791fd8"
+    },
+    {
+      "fileName": "phase5-x86-2g-api29-growth228-process-matrix-v1-process-matrix.json",
+      "byteSize": 12594,
+      "sha256": "d0db2b5a2e59d5f25fcda3503976a0e5676f66395f836df7248a2f9ba6598246"
+    },
+    {
+      "fileName": "phase5-x86-2g-api29-growth228-process-matrix-v2-process-matrix.json",
+      "byteSize": 19816,
+      "sha256": "f62df22f44491ae09fbe911867620a1fa9dc401865249521cf82c7e1c84fa5ac"
+    },
+    {
+      "fileName": "phase5-x86-2g-api29-growth228-switch-v1-process-switch-matrix.json",
+      "byteSize": 42752,
+      "sha256": "69653a02bd62244f861ffaf9cf0801df4be5702da509ce7e3adef72e7f606ac0"
+    },
+    {
+      "fileName": "phase5-x86-2g-api29-growth228-fault-v1-process-fault-matrix.json",
+      "byteSize": 4613,
+      "sha256": "e1df140d1e77984c4faf5de654bcec76daca313cbd232c910812743d3d1257cd"
+    },
+    {
+      "fileName": "phase5-x86-2g-api29-growth228-cache-v1-process-cache-matrix.json",
+      "byteSize": 25029,
+      "sha256": "b0541765ba41f5114893c7a2b31e56f8dfbaa44d319d2c7daff978757c41185a"
+    },
+    {
+      "fileName": "phase5-x86-2g-api29-growth228-cache-race-v1-process-cache-race-matrix.json",
+      "byteSize": 6377,
+      "sha256": "4095833cf00b535c563a392b636b1137e4f663aa7a59aff433aae5f0565b6007"
+    },
+    {
+      "fileName": "phase5-x86-2g-api29-growth228-main-death-v1-process-main-death.json",
+      "byteSize": 4521,
+      "sha256": "76f98d864d26d2e077f77c6e6454eb54b5988dcb322e608ca8e742741dc8d81f"
+    }
+  ]
+}

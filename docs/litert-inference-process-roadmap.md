@@ -2,7 +2,7 @@
 
 Status: staged research and implementation plan
 
-Updated: 2026-07-24
+Updated: 2026-07-25
 
 Current milestone: Phase 5, compare host placement and session policies on
 each ABI without changing background lifetime.
@@ -770,11 +770,21 @@ separate subphases so their effects remain attributable.
 - [x] Repeat x86 smoke on a second pure-x86 API image if a compatible image is
   available. API 29 x86 passed acquisition, packaged-runtime, and IPC controls
   but rejected 9662 because both app processes had a 16 MiB ART heap.
+- [x] Repeat the production worker and full process/cache/recovery matrices on
+  that API 29 image with a verified 228 MiB ART growth limit. All matrices
+  passed, but the limit required a transient privileged property override.
+- [ ] Reproduce the passing API 29 result across at least three complete cold
+  framework boots without relying on an unrecorded transient property. Record
+  `Runtime.maxMemory()` in both app processes and reject the run if it differs
+  from the intended envelope.
+- [ ] Freeze and validate a pure-x86 runtime heap admission floor before any
+  support-tier promotion. AVD `vm.heapSize`, generated hardware settings, and
+  guest RAM are not substitutes for the effective per-process ART limit.
 - [x] Verify the x86 APK's LiteRT ELF identity and SHA-256 against the pinned
   `bss-litert-android` release and run its CI smoke before any support-tier
   promotion.
 
-Preliminary pure-x86 checkpoint (2026-07-25): the second API image is an API
+Initial low-heap pure-x86 checkpoint (2026-07-25): the second API image is an API
 29 AVD configured for 1 GiB but exposing roughly 2 GiB to the guest. Its idle
 remote process retained a 1.20 GiB largest free VA gap, and the guest still had
 about 1.24 GiB available when ART rejected an 8 MiB tensor allocation against
@@ -789,6 +799,25 @@ Pure x86 therefore remains `Unsupported` at this checkpoint. The API 26 result
 cannot be generalized to lower effective Java-heap classes. Do not promote x86
 unless the complete RAM matrix also records an adequate ART heap or a later
 native/direct tensor pipeline removes the current model-sized Java arrays.
+
+Follow-up pure-x86 checkpoint (2026-07-25): editing the AVD heap setting did
+not alter the running 16 MiB growth limit. After a temporary root property
+override set the effective limit to 228 MiB and the Android framework was
+restarted, the same roughly 2 GiB API 29 guest passed the production worker,
+direct 9662 parity, 20-cycle resident-session matrix, 20 alternating
+9662/KARA process generations, fault matrix, 21-case cache matrix, FLAC/model
+management races, and main-process-death recovery. The resident matrix peaked
+at 664.5 MiB PSS with a 404.3 MiB largest free VA gap and showed no PSS growth,
+LMKD event, unexpected playback event, or unexpected Binder death. See
+`docs/validation/litert-inference-process/phase5/validation-2026-07-25-x86-api29-growth228.md`.
+
+This establishes that the prior API 29 rejection was specifically an
+effective Java-heap failure, not a LiteRT x86, model-operator, Binder, LMKD, or
+VA-gap failure. It does not establish a release-compatible device floor: the
+passing limit was transient, the full 2/3/4 GiB matrix and paired host study
+remain incomplete, and normal builds still fail closed. Pure x86 therefore
+remains `Unsupported`; no catalog or production host policy changes in this
+checkpoint.
 
 ### Phase 5C: Session-lifetime matrix
 
