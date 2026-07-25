@@ -303,6 +303,8 @@ function Add-WorkerReport(
             stems = Get-StemSignature $report
         }
         playback = [ordered]@{
+            startupAttempt = [int]$report.originalPlayback.startupAttempt
+            startupFailureCount = @($report.originalPlayback.startupFailures).Count
             snapshotCount = [int]$report.originalPlayback.snapshotCount
             maximumPositionDriftMs = [int64]$report.originalPlayback.maximumPositionDriftMs
             unexpectedEventCount = [int]$report.originalPlayback.unexpectedEventCount
