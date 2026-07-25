@@ -1,0 +1,165 @@
+{
+  "schemaVersion": "phase5-x86-api29-memory-matrix-v1",
+  "status": "validation-passed",
+  "decision": "unsupported-pending-phase5e",
+  "testedRevisions": {
+    "memoryMatrix": "70d323f50d4d1d405125b5f358835922be0e2879",
+    "heapFloor": "383b556bdb2cf69dd9012470da60d46e52604f12",
+    "runnerRevision": "phase7-runner-v22"
+  },
+  "device": {
+    "avd": "Small_Phone",
+    "androidApi": 29,
+    "buildFingerprint": "Android/sdk_phone_x86/generic_x86:10/QSR1.210820.001/7663313:userdebug/test-keys",
+    "abi": "x86",
+    "bitness": 32,
+    "processors": 4,
+    "emulatorVersion": "36.6.11.0",
+    "coldBootCount": 4,
+    "distinctBootIdCount": 4,
+    "heapOverrideMethod": "adb-root-stop-setprop-start"
+  },
+  "runtime": {
+    "litertVersion": "2.1.5",
+    "modelId": "uvr_mdxnet_3_9662",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "modelSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "fixtureId": "coast_town_short_wav",
+    "fixtureFrames": 529200,
+    "cpuThreads": 3,
+    "executionHost": "BoundRemote",
+    "sessionLifetime": "ResidentUntilProcessExit",
+    "minimumRuntimeHeapBytes": 134217728,
+    "minimumLargestFreeAddressGapBytes": 134217728
+  },
+  "memoryMatrix": [
+    {
+      "requestedMemoryMiB": 2048,
+      "actualMemoryBytes": 2089164800,
+      "swapTotalBytes": 1566867456,
+      "bootId": "48c1a9a6-bcdc-440a-b6b2-fff34a9ba1f6",
+      "processGenerationCount": 3,
+      "runtimeMaxMemoryBytes": 536870912,
+      "medianFirstReadyMs": 13285,
+      "medianCompleteFixtureMs": 19157,
+      "maximumSummedPssBytes": 775963648,
+      "minimumLargestFreeAddressGapBytes": 514768896,
+      "maximumPlaybackDriftMs": 63
+    },
+    {
+      "requestedMemoryMiB": 3072,
+      "actualMemoryBytes": 3142983680,
+      "swapTotalBytes": 2357231616,
+      "bootId": "dcdfdf8d-e508-49b3-8248-2774fd650d1d",
+      "processGenerationCount": 3,
+      "runtimeMaxMemoryBytes": 603979776,
+      "medianFirstReadyMs": 14264,
+      "medianCompleteFixtureMs": 20103,
+      "maximumSummedPssBytes": 780835840,
+      "minimumLargestFreeAddressGapBytes": 481251328,
+      "maximumPlaybackDriftMs": 198
+    },
+    {
+      "requestedMemoryMiB": 4096,
+      "actualMemoryBytes": 4132405248,
+      "swapTotalBytes": 3099299840,
+      "bootId": "50823f3a-7cc9-4d99-8620-be057f64b2f0",
+      "processGenerationCount": 3,
+      "runtimeMaxMemoryBytes": 603979776,
+      "medianFirstReadyMs": 13379,
+      "medianCompleteFixtureMs": 19283,
+      "maximumSummedPssBytes": 775841792,
+      "minimumLargestFreeAddressGapBytes": 473837568,
+      "maximumPlaybackDriftMs": 206
+    }
+  ],
+  "heapFloor": {
+    "requestedMemoryMiB": 2048,
+    "actualMemoryBytes": 2089164800,
+    "bootId": "eacb9eab-8d56-4afc-93a0-8ab79fea77d0",
+    "heapGrowthLimit": "128m",
+    "heapSize": "128m",
+    "processGenerationCount": 3,
+    "mainRuntimeMaxMemoryBytes": 134217728,
+    "remoteRuntimeMaxMemoryBytes": 134217728,
+    "medianFirstReadyMs": 13974,
+    "medianCompleteFixtureMs": 20291,
+    "maximumSummedPssBytes": 772467712,
+    "minimumLargestFreeAddressGapBytes": 1079291904,
+    "maximumPlaybackDriftMs": 118
+  },
+  "correctness": {
+    "workerRunCount": 12,
+    "passedWorkerRunCount": 12,
+    "distinctRemotePidCount": 12,
+    "distinctProcessGenerationCount": 12,
+    "nativeSessionCreationCountPerRun": 1,
+    "finalSessionState": "Resident",
+    "unexpectedPlaybackEventCount": 0,
+    "outputFrameCount": 529200,
+    "vocalsWavSha256": "fb65c7a603293bf799a73eb1a97fc5a5192deffd2c3ea29646f34e52966b1c00",
+    "instrumentalWavSha256": "0d1929e7650b746690577b40a9e921d5497aba1b7e11af738d5943189069937b"
+  },
+  "interpretation": {
+    "fourGiBGuestMemoryExposed": true,
+    "fourGiBGuestMemoryBytes": 4132405248,
+    "runtimeHeapFloorValidatedForExactModel": true,
+    "wholeDeviceMemoryPressureObserved": false,
+    "virtualAddressGapFailureObserved": false,
+    "lmKdKillObserved": false,
+    "unknownImportedModelsQualified": false,
+    "hq4Qualified": false,
+    "normalBuildAdmissionChanged": false,
+    "releasePolicy": "Pure x86 remains fail-closed and Unsupported until Phase 5E selects and implements a release policy."
+  },
+  "rawEvidence": [
+    {
+      "fileName": "phase5-x86-api29-memory-v1-summary.json",
+      "byteSize": 11564,
+      "sha256": "65dff1fcbcea2583d889555aa734618cf2f0655ef15b1a0ae9cfd2af4e5b27ed"
+    },
+    {
+      "fileName": "phase5-x86-api29-heap128-v1-summary.json",
+      "byteSize": 4278,
+      "sha256": "4fdfa92e5bbe54002ff6a21fe1c31c2bfd779c6aed7f1b0e8f3ea9dd27d250ba"
+    },
+    {
+      "fileName": "memory-matrix-environments",
+      "count": 3,
+      "sha256": [
+        "1d892735cf67db293e1cb48252fe2adb61e5065f6337cb5b92160bbbe1718ad7",
+        "d61e2384015bbb6754f8b2ef8684c599667aabae2e461a4a346226ef1e29e6ff",
+        "0ed39e1b6fad202cece862845b3c11780d31387f1a685aada75ae16b27abc8a3"
+      ]
+    },
+    {
+      "fileName": "memory-matrix-worker-reports",
+      "count": 9,
+      "sha256": [
+        "cddf2fa964d2c6b14d01178f03be59241ab991ff07039fb5fe0a3c7248b0ca70",
+        "33b8c2237fc17f83e4f3291a387e6a2c691571e643ccda7eb0547225ab218b28",
+        "b052746ca5c7d28347aa07b2ac29e9860f5dd9829709a33479f2b037a1ebca2b",
+        "525834426fa6db17105cafe2fe497f7f6425aa703cc3e9c5b8e2742ac56e2e2b",
+        "30cc115180183ab2d152e821ffa13a2e61630213202da89803ede2bdfd0ffaa7",
+        "cf0f410fa3cd8a367f3c9672830167e938a4c43f162eba87390325058baae43e",
+        "ecca8053e4886ff805f65dff9d392b2b9a7eea79baf40ce774ea570bc2525282",
+        "34cbc16c968336ce61eefce5df60a21c8e63dbd512e0a78334911b56e00ac171",
+        "c5424e93d3b75496e52883dc562f3839468121569c7c3d80eb36619f863def4b"
+      ]
+    },
+    {
+      "fileName": "phase5-x86-api29-heap128-v1-2048m-boot1-environment.json",
+      "byteSize": 1717,
+      "sha256": "b187c54ca2e7e081d601759e96f49ac26d976015fa44251ca4e97c7e26b7e057"
+    },
+    {
+      "fileName": "heap-floor-worker-reports",
+      "count": 3,
+      "sha256": [
+        "57e404c656200e5702b0bae32b8941e4e5adc3bc04212330eac61c951ec93109",
+        "41e912c45eb8fb947de43441e61fdc1b3e4f94730887285ccaaaa284d88eabf8",
+        "1c5e1be2f2a472fb3e86692b74f58a0bb3f611670b6211046a427d72f8f17606"
+      ]
+    }
+  ]
+}

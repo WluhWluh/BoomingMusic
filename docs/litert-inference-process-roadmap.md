@@ -759,7 +759,7 @@ host policy or full-song performance result. See
 
 - [x] Compare `InProcess + SingleUse` with `BoundRemote + SingleUse` on S10
   arm32, S10 arm64, S25 arm64, and x86_64.
-- [ ] Compare pure x86's unsupported baseline only with
+- [x] Compare pure x86's unsupported baseline only with
   `BoundRemote + ResidentUntilProcessExit`.
 - [x] Test 9662 on every eligible non-x86 CPU target. Test KARA and pure x86
   only where their exact CPU contract and support tier permit it.
@@ -774,7 +774,7 @@ host policy or full-song performance result. See
   completed non-x86 matrix already records original-playback position drift,
   MediaSession continuity, and unexpected player events while separation uses
   its production thread policy.
-- [ ] Run pure-x86 9662 on 2, 3, and 4 GiB AVD memory configurations, with at
+- [x] Run pure-x86 9662 on 2, 3, and 4 GiB AVD memory configurations, with at
   least three cold process generations per configuration. Treat allocation
   failure, LMKD pressure, or crossing the VA-gap floor as a resource rejection,
   not a reason to lower the gate.
@@ -784,11 +784,11 @@ host policy or full-song performance result. See
 - [x] Repeat the production worker and full process/cache/recovery matrices on
   that API 29 image with a verified 228 MiB ART growth limit. All matrices
   passed, but the limit required a transient privileged property override.
-- [ ] Reproduce the passing API 29 result across at least three complete cold
+- [x] Reproduce the passing API 29 result across at least three complete cold
   framework boots without relying on an unrecorded transient property. Record
   `Runtime.maxMemory()` in both app processes and reject the run if it differs
   from the intended envelope.
-- [ ] Freeze and validate a pure-x86 runtime heap admission floor before any
+- [x] Freeze and validate a pure-x86 runtime heap admission floor before any
   support-tier promotion. AVD `vm.heapSize`, generated hardware settings, and
   guest RAM are not substitutes for the effective per-process ART limit.
 - [x] Verify the x86 APK's LiteRT ELF identity and SHA-256 against the pinned
@@ -822,13 +822,12 @@ at 664.5 MiB PSS with a 404.3 MiB largest free VA gap and showed no PSS growth,
 LMKD event, unexpected playback event, or unexpected Binder death. See
 `docs/validation/litert-inference-process/phase5/validation-2026-07-25-x86-api29-growth228.md`.
 
-This establishes that the prior API 29 rejection was specifically an
+This established that the prior API 29 rejection was specifically an
 effective Java-heap failure, not a LiteRT x86, model-operator, Binder, LMKD, or
-VA-gap failure. It does not establish a release-compatible device floor: the
-passing limit was transient, the full 2/3/4 GiB matrix and paired host study
-remain incomplete, and normal builds still fail closed. Pure x86 therefore
-remains `Unsupported`; no catalog or production host policy changes in this
-checkpoint.
+VA-gap failure. At that checkpoint it did not establish a release-compatible
+device floor because the passing limit was transient and the RAM matrix was
+incomplete. The later memory checkpoint below closes those resource tests but
+does not itself change the release policy.
 
 Non-x86 CPU checkpoint (2026-07-25): complete three-pair full-WAV matrices
 passed on S10 arm32, S10 arm64, S25 arm64, and API 37 x86_64. Bound remote
@@ -844,6 +843,23 @@ idle settle, while retaining immediate bind-time PSS separately. The first
 arm32 full run remains recorded as rejected under the incorrect v1 field; the
 corrected short and full repeats passed. See
 `docs/validation/litert-inference-process/phase5/cpu-host-matrix-2026-07-25.md`.
+
+Pure x86 memory checkpoint (2026-07-25): an automated API 29 matrix completed
+three cold process generations on each explicitly requested 2, 3, and 4 GiB
+AVD configuration. Three distinct cold boots exposed 2,089,164,800,
+3,142,983,680, and 4,132,405,248 bytes to the guest, so the 32-bit image can
+use nearly 4 GiB rather than being capped at 3 GiB. All nine exact-9662 workers
+passed with one resident native session, identical output, zero unexpected
+playback events, and at least 473,837,568 bytes of largest free VA gap.
+
+A fourth cold boot set both ART growth and large-heap limits to exactly 128
+MiB. Three more process generations reported exactly 134,217,728 bytes from
+`Runtime.maxMemory()` in both processes and passed with at least 1,079,291,904
+bytes of largest free VA gap. This directly validates the frozen runtime-heap
+floor for exact 9662 and the current Java tensor pipeline. It does not qualify
+unknown models or HQ4. Normal builds still fail closed until Phase 5E selects
+and implements a support policy. See
+`docs/validation/litert-inference-process/phase5/validation-2026-07-25-x86-memory-matrix.md`.
 
 ### Phase 5C: Session-lifetime matrix
 
