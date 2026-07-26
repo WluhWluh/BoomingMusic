@@ -921,32 +921,47 @@ unchecked item remains open. See
 
 ### Phase 5E: Process and support policy checkpoint
 
-- [ ] Publish one row per ABI/backend with support tier, release host policy,
+- [x] Publish one row per ABI/backend with support tier, release host policy,
   concrete host execution, session lifetime, model/resource scope, and current
   background owner.
-- [ ] Decide whether pure x86 becomes `Experimental + RemoteRequired` for exact
+- [x] Decide whether pure x86 becomes `Experimental + RemoteRequired` for exact
   9662, remains `Unsupported`, or has enough repeated evidence for a narrower
   `Supported` scope. KARA and every additional model require separate tier
   evidence; HQ4 remains rejected.
-- [ ] Keep unknown imported x86 models outside the stable support promise.
+- [x] Keep unknown imported x86 models outside the stable support promise.
   Decide whether they are blocked from activation or allowed only through an
   explicit unverified-model flow that always uses a fresh process.
-- [ ] Decide whether armeabi-v7a is `RemotePreferred` or `RemoteRequired` based
+- [x] Decide whether armeabi-v7a is `RemotePreferred` or `RemoteRequired` based
   on 32-bit address-space, total-memory, and recovery evidence.
-- [ ] Keep arm64 and x86_64 in process unless remote execution demonstrates a
+- [x] Keep arm64 and x86_64 in process unless remote execution demonstrates a
   concrete reliability benefit without unacceptable total-memory,
   performance, GPU, or playback regressions.
-- [ ] Document why a common all-ABI path is or is not worth its idle and active
+- [x] Document why a common all-ABI path is or is not worth its idle and active
   memory overhead. Never add automatic runtime fallback from a failed remote
   host to in-process inference.
-- [ ] Make an explicit branch decision: a qualified `BoundRemote` policy may
+- [x] Make an explicit branch decision: a qualified `BoundRemote` policy may
   proceed toward release with current client-bound background semantics even
   if Phases 6-8 later reject independent background execution.
+
+Phase 5E checkpoint (2026-07-26): arm32 selects
+`Supported + RemoteRequired + BoundRemote + SingleUse`; 64-bit CPU targets
+remain `Supported + InProcess + SingleUse`; arm64 Auto/GPU remains an
+in-process experimental 9662 scope pending the deferred S25 host matrix. Pure
+x86 selects an exact-9662-only
+`Experimental + RemoteRequired + BoundRemote + ResidentUntilProcessExit`
+candidate with a 128 MiB effective runtime-heap floor, but normal builds stay
+fail-closed until later release qualification. KARA, HQ4, other models, and
+custom imports are not included in the x86 scope. All remote rows remain
+client-bound and never fall back to an in-process host at runtime. See
+`docs/validation/litert-inference-process/phase5/process-support-policy-2026-07-26.md`.
 
 **Phase 5 exit:** each ABI/backend has an evidence-backed support tier, release
 host policy, concrete host execution, and session-lifetime candidate. Process
 isolation can be accepted or rejected independently of the still-unimplemented
 processing foreground service.
+
+Phase 5E satisfies this policy checkpoint. The overall Phase 5 exit remains
+open only for Phase 5D's explicitly deferred S25 full-song GPU host pairs.
 
 ## Phase 6: Prototype an Independent Media-Processing Service
 

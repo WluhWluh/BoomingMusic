@@ -1,0 +1,109 @@
+{
+  "schemaVersion": "phase5-process-support-policy-v1",
+  "status": "policy-selected-s25-gpu-host-deferred",
+  "promotionState": "selected-not-production-promoted",
+  "currentNormalBehavior": {
+    "nonX86Host": "InProcess",
+    "pureX86": "fail-closed",
+    "backgroundOwner": "client-bound",
+    "independentForegroundExecution": false
+  },
+  "rows": [
+    {
+      "abi": "arm64-v8a",
+      "backendScope": "CPU FP32",
+      "supportTier": "Supported",
+      "releaseHostPolicy": "InProcess",
+      "concreteHostExecution": "InProcess",
+      "sessionLifetime": "SingleUse",
+      "modelScope": "Exact 9662 Phase 5 host evidence; every additional model retains its catalog qualification",
+      "resourceScope": "Known-good catalog CPU profile and normal runtime admission",
+      "backgroundOwner": "client-bound PlaybackService/main process",
+      "implementationState": "current production behavior"
+    },
+    {
+      "abi": "arm64-v8a",
+      "backendScope": "Auto resolving to GPU FP32",
+      "supportTier": "Experimental",
+      "releaseHostPolicy": "InProcess",
+      "concreteHostExecution": "InProcess",
+      "sessionLifetime": "SingleUse",
+      "modelScope": "Exact 9662 gpu-auto-fp32-v1 only; KARA GPU and FP16 rejected",
+      "resourceScope": "Eligible accelerator, no Android low-memory state, and provisional available-memory floor",
+      "backgroundOwner": "client-bound PlaybackService/main process",
+      "implementationState": "S10 full host and S10/S25 fault evidence passed; S25 full host pairs deferred"
+    },
+    {
+      "abi": "armeabi-v7a",
+      "backendScope": "Auto resolving to CPU FP32",
+      "supportTier": "Supported",
+      "releaseHostPolicy": "RemoteRequired",
+      "concreteHostExecution": "BoundRemote",
+      "sessionLifetime": "SingleUse",
+      "modelScope": "Exact 9662 Phase 5 host evidence; every additional model retains its catalog qualification",
+      "resourceScope": "Known-good CPU profile; no minimum-RAM claim beyond the tested S10 envelope",
+      "backgroundOwner": "client-bound main process",
+      "implementationState": "selected for later production promotion"
+    },
+    {
+      "abi": "armeabi-v7a",
+      "backendScope": "GPU",
+      "supportTier": "Unsupported",
+      "releaseHostPolicy": "none",
+      "concreteHostExecution": "none",
+      "sessionLifetime": "none",
+      "modelScope": "all current models",
+      "resourceScope": "no packaged or qualified GPU accelerator",
+      "backgroundOwner": "none",
+      "implementationState": "fail before GPU allocation; Auto uses CPU"
+    },
+    {
+      "abi": "x86_64",
+      "backendScope": "Auto resolving to CPU FP32",
+      "supportTier": "Supported",
+      "releaseHostPolicy": "InProcess",
+      "concreteHostExecution": "InProcess",
+      "sessionLifetime": "SingleUse",
+      "modelScope": "Exact 9662 Phase 5 host evidence; every additional model retains its catalog qualification",
+      "resourceScope": "Known-good CPU profile and normal runtime admission",
+      "backgroundOwner": "client-bound PlaybackService/main process",
+      "implementationState": "current production behavior"
+    },
+    {
+      "abi": "x86",
+      "backendScope": "Auto resolving to CPU FP32",
+      "supportTier": "Experimental",
+      "releaseHostPolicy": "RemoteRequired",
+      "concreteHostExecution": "BoundRemote",
+      "sessionLifetime": "ResidentUntilProcessExit",
+      "modelScope": "uvr_mdxnet_3_9662@2 with SHA-256 f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378 only",
+      "resourceScope": "Android API 26 or later and Runtime.maxMemory() at least 134217728 bytes in both processes; minimum tested guest RAM about 2 GiB is evidence, not a published device minimum",
+      "backgroundOwner": "client-bound main process",
+      "implementationState": "selected candidate; normal builds remain fail-closed until release qualification"
+    },
+    {
+      "abi": "x86",
+      "backendScope": "all other models or GPU",
+      "supportTier": "Unsupported",
+      "releaseHostPolicy": "none",
+      "concreteHostExecution": "none",
+      "sessionLifetime": "none",
+      "modelScope": "KARA, HQ4, additional catalog models, sidecars, and custom imports",
+      "resourceScope": "no release-qualified exact model/resource record",
+      "backgroundOwner": "none",
+      "implementationState": "fail before native allocation"
+    }
+  ],
+  "globalDecisions": {
+    "unknownImportedX86Models": "blocked from activation",
+    "runtimeRemoteToInProcessFallback": "forbidden",
+    "commonAllAbiRemotePath": "rejected",
+    "arm64AndX8664RemoteResidency": "not advanced",
+    "gpuResidency": "not advanced",
+    "independentBackgroundExecution": "not implied",
+    "branchDecision": "BoundRemote may advance independently for arm32 and the exact-9662 x86 candidate; later rejection of independent foreground execution does not undo process isolation evidence."
+  },
+  "remainingPhase5Evidence": [
+    "Three alternating S25 full-song InProcess/BoundRemote Auto pairs"
+  ]
+}
