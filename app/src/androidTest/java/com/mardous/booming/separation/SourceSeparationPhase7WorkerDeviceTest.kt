@@ -66,6 +66,9 @@ import com.mardous.booming.separation.model.ReusableMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.SingleUseMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSessionFactory
+import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFailpoint
+import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFaultEvidence
+import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFaultInjection
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
@@ -134,11 +137,29 @@ class SourceSeparationPhase7WorkerDeviceTest {
             arguments.getString(ARG_EXECUTION_HOST_MODE),
         )
         val autoFailpoint = Phase7AutoFailpoint.parse(arguments.getString(ARG_AUTO_FAILPOINT))
+        val remoteAutoFailpoint = MdxLiteRtRemoteFailpoint.parse(
+            arguments.getString(ARG_REMOTE_AUTO_FAILPOINT),
+        )
+        val remoteFaultInvocationCount = arguments.optionalInt(
+            ARG_AUTO_FAIL_INVOCATION_COUNT,
+            DEFAULT_REMOTE_FAULT_INVOCATION_COUNT,
+        )
+        val remoteFaultToken = arguments.getString(ARG_REMOTE_FAULT_TOKEN)
+            ?: "$runId-remote-gpu"
         require(autoFailpoint == Phase7AutoFailpoint.None || backendMode == BackendMode.Auto) {
             "Phase 7 Auto fault injection requires BackendMode=auto."
         }
+        require(remoteAutoFailpoint == MdxLiteRtRemoteFailpoint.None ||
+            (backendMode == BackendMode.Auto &&
+                executionHostMode == Phase7ExecutionHostMode.BoundRemote &&
+                autoFailpoint == Phase7AutoFailpoint.None)
+        ) {
+            "Remote Auto fault injection requires BoundRemote Auto without a local failpoint."
+        }
         val report = baseReport(context, runId, arguments)
-        if (autoFailpoint != Phase7AutoFailpoint.None) {
+        if (autoFailpoint != Phase7AutoFailpoint.None ||
+            remoteAutoFailpoint != MdxLiteRtRemoteFailpoint.None
+        ) {
             report.put("diagnosticOnly", true)
         }
         val preserveMediaStoreSource = arguments.optionalBoolean(
@@ -196,6 +217,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val activeReference = (active as SourceSeparationActivePresetState.Reference).reference
             assertEquals(expectedModelId, activeReference.modelId)
             assertEquals(expectedArtifactSha256, activeReference.artifactSha256)
+
+            if (remoteAutoFailpoint != MdxLiteRtRemoteFailpoint.None) {
+                MdxLiteRtRemoteFaultInjection.arm(
+                    context = context,
+                    token = remoteFaultToken,
+                    failpoint = remoteAutoFailpoint,
+                    failureInvocationCount = remoteFaultInvocationCount,
+                )
+            }
 
             val autoFaultController = autoFailpoint
                 .takeUnless { it == Phase7AutoFailpoint.None }
@@ -418,6 +448,90 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     else -> SystemClock.sleep(POLL_INTERVAL_MS)
                 }
             }
+            if (remoteAutoFailpoint.requiresProcessRecycle) {
+                assertTrue(
+                    "Fatal remote GPU failure did not fail the worker: ${worker.debugStatus()}",
+                    finalState is SourceSeparationUiState.Failed,
+                )
+                val failedAt = SystemClock.elapsedRealtime()
+                thermalSampler.sample(failedAt, force = true)
+                playbackProbe?.assertContinuous("fatal-remote-gpu-failure")
+                val host = requireNotNull(boundRemoteHost)
+                val poisonedProcess = host.processDiagnostics()
+                assertEquals(
+                    SourceSeparationProcessSessionState.Poisoned,
+                    poisonedProcess.session.state,
+                )
+                assertTrue(poisonedProcess.session.poisoned)
+                assertEquals(0, poisonedProcess.session.activeLeaseCount)
+                assertEquals(1, poisonedProcess.session.nativeSessionCreationCount)
+                val evidence = requireNotNull(
+                    MdxLiteRtRemoteFaultInjection.readEvidence(context),
+                )
+                validateRemoteFaultEvidence(
+                    report = report,
+                    evidence = evidence,
+                    expectedToken = remoteFaultToken,
+                    expectedFailpoint = remoteAutoFailpoint,
+                    expectedPid = poisonedProcess.pid,
+                    expectedFallbackStage = null,
+                    expectedBackend = null,
+                    firstReadyAtElapsedMs = firstReadyAt.get(),
+                )
+                assertEquals(0, evidence.cpuCreateCount)
+                assertEquals(0, evidence.cpuCloseCount)
+                assertTrue(runtimeFacade.openCompletedCache(cacheKey) == null)
+                MdxLiteRtRemoteFaultInjection.clear(context)
+                val recycle = host.recycle(
+                    SourceSeparationIpcRecycleReason.PoisonedSession,
+                    "phase5-gpu-cleanup-$runId",
+                )
+                assertNotEquals(
+                    recycle.oldProcess.processGeneration,
+                    recycle.newProcess.processGeneration,
+                )
+                report.put("status", "passed")
+                report.getJSONObject("run")
+                    .put("backendUsed", "terminal-before-cpu")
+                    .put(
+                        "fallbackStage",
+                        remoteAutoFailpoint.expectedFallbackStage?.name ?: JSONObject.NULL,
+                    )
+                    .put("fallbackReason", "Injected remote GPU cleanup failure.")
+                report.put("timing", report.getJSONObject("timing")
+                    .put("firstReadyMs", firstReadyAt.get().takeIf { it > 0L }
+                        ?.minus(workerStartedAt) ?: 0L)
+                    .put("fullSongMs", failedAt - workerStartedAt)
+                )
+                report.put("thermal", thermalSampler.toJson())
+                report.put("cache", report.getJSONObject("cache")
+                    .put("cacheKey", cacheKey)
+                    .put("completedPlayable", false)
+                    .put("remoteOwnershipChecked", remoteCacheOwnershipChecked)
+                )
+                report.put("executionHost", JSONObject()
+                    .put("mode", executionHostMode.argumentValue)
+                    .put("failedProcess", processResourceJson(poisonedProcess))
+                    .put("failedSessionState", poisonedProcess.session.state.name)
+                    .put("recycleReason", recycle.reason.name)
+                    .put("oldProcessGeneration", recycle.oldProcess.processGeneration)
+                    .put("newProcessGeneration", recycle.newProcess.processGeneration)
+                    .put("expectedBinderDeath", recycle.binderDeath.expected)
+                    .put("events", JSONArray(synchronized(hostEvents) {
+                        hostEvents.map { it.payload::class.java.simpleName }
+                    }))
+                )
+                report.put("processResources", JSONObject()
+                    .put("mainBefore", processResourceJson(mainProcessBefore))
+                    .put("mainAfter", processResourceJson(currentProcessDiagnostics()))
+                    .put("remoteBefore", remoteProcessBefore?.let(::processResourceJson)
+                        ?: JSONObject.NULL)
+                    .put("remoteAfterFailure", processResourceJson(poisonedProcess))
+                    .put("remoteAfterRecycle", processResourceJson(recycle.newProcess))
+                    .put("instrumentationSharesMainProcess", true)
+                )
+                return
+            }
             assertTrue("Worker timed out: ${worker.debugStatus()}",
                 finalState is SourceSeparationUiState.Completed)
             if (executionHostMode == Phase7ExecutionHostMode.BoundRemote) {
@@ -541,6 +655,20 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     runtimeRecordBackend = runtimeRecord.backend,
                     runtimeRecordFallbackStage = runtimeRecord.fallbackStage,
                     runtimeRecordFallbackReason = runtimeRecord.fallbackReason,
+                    firstReadyAtElapsedMs = firstReadyAt.get(),
+                )
+            }
+            if (remoteAutoFailpoint != MdxLiteRtRemoteFailpoint.None) {
+                validateRemoteFaultEvidence(
+                    report = report,
+                    evidence = requireNotNull(
+                        MdxLiteRtRemoteFaultInjection.readEvidence(context),
+                    ),
+                    expectedToken = remoteFaultToken,
+                    expectedFailpoint = remoteAutoFailpoint,
+                    expectedPid = requireNotNull(remoteProcessAfter).pid,
+                    expectedFallbackStage = runtimeRecord.fallbackStage,
+                    expectedBackend = runtimeRecord.backend,
                     firstReadyAtElapsedMs = firstReadyAt.get(),
                 )
             }
@@ -804,6 +932,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("backendMode", backendMode.argumentValue)
                 .put("executionHostMode", executionHostMode.argumentValue)
                 .put("autoFailpoint", autoFailpoint.argumentValue)
+                .put("remoteAutoFailpoint", remoteAutoFailpoint.argumentValue)
                 .put("runtimeDiagnostics", manifest.runtimeRecords.map { it.backend + "/" + it.runtimeProfileId }
                     .joinToString(","))
             )
@@ -812,6 +941,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("error", "${error::class.java.name}: ${error.message}")
             throw error
         } finally {
+            MdxLiteRtRemoteFaultInjection.clear(context)
             coordinator?.cancel()
             boundRemoteHost?.close()
             originalPlayback?.let { playback ->
@@ -5490,6 +5620,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     arguments.getString(ARG_AUTO_FAILPOINT)
                         ?: Phase7AutoFailpoint.None.argumentValue,
                 )
+                .put(
+                    "remoteAutoFailpoint",
+                    arguments.getString(ARG_REMOTE_AUTO_FAILPOINT)
+                        ?: MdxLiteRtRemoteFailpoint.None.argumentValue,
+                )
+                .put(
+                    "autoFailInvocationCount",
+                    arguments.optionalInt(
+                        ARG_AUTO_FAIL_INVOCATION_COUNT,
+                        DEFAULT_REMOTE_FAULT_INVOCATION_COUNT,
+                    ),
+                )
                 .put("backendRequested", backendMode.reportBackend)
                 .put(
                     "backendUsed",
@@ -5618,6 +5760,81 @@ class SourceSeparationPhase7WorkerDeviceTest {
             .put("cpuCreateCount", snapshot.cpuCreateCount)
             .put("cpuCloseCount", snapshot.cpuCloseCount)
             .put("events", JSONArray(snapshot.events))
+        )
+    }
+
+    private fun validateRemoteFaultEvidence(
+        report: JSONObject,
+        evidence: MdxLiteRtRemoteFaultEvidence,
+        expectedToken: String,
+        expectedFailpoint: MdxLiteRtRemoteFailpoint,
+        expectedPid: Int,
+        expectedFallbackStage: String?,
+        expectedBackend: String?,
+        firstReadyAtElapsedMs: Long,
+    ) {
+        assertEquals(expectedToken, evidence.token)
+        assertEquals(expectedFailpoint.argumentValue, evidence.failpoint)
+        assertEquals(expectedPid, evidence.pid)
+        assertTrue(evidence.processName.endsWith(":source_separation"))
+        assertEquals(1, evidence.gpuCreateCount)
+        assertEquals(1, evidence.gpuCloseCount)
+        if (expectedFailpoint == MdxLiteRtRemoteFailpoint.Setup) {
+            assertEquals(0, evidence.gpuInvocationCount)
+        } else {
+            assertTrue(evidence.gpuInvocationCount > 0)
+        }
+        assertTrue(evidence.injectedAtElapsedRealtimeMs != null)
+
+        if (expectedFailpoint.requiresProcessRecycle) {
+            assertEquals(0, evidence.cpuCreateCount)
+            assertEquals(0, evidence.cpuCloseCount)
+        } else {
+            assertEquals(
+                requireNotNull(expectedFailpoint.expectedFallbackStage).name,
+                expectedFallbackStage,
+            )
+            assertEquals(MdxInferenceBackend.LiteRtCpu.name, expectedBackend)
+            assertEquals(1, evidence.cpuCreateCount)
+            assertEquals(1, evidence.cpuCloseCount)
+            val gpuClose = evidence.events.indexOf("${MdxInferenceBackend.LiteRtGpu.name}-close")
+            val cpuCreate = evidence.events.indexOf("${MdxInferenceBackend.LiteRtCpu.name}-create")
+            assertTrue(
+                "Remote CPU fallback preceded GPU cleanup: ${evidence.events}",
+                gpuClose >= 0 && cpuCreate > gpuClose,
+            )
+        }
+        if (expectedFailpoint in setOf(
+                MdxLiteRtRemoteFailpoint.Invocation,
+                MdxLiteRtRemoteFailpoint.OutputRead,
+                MdxLiteRtRemoteFailpoint.NonFinite,
+                MdxLiteRtRemoteFailpoint.Cleanup,
+            )
+        ) {
+            assertTrue("No ready window preceded the remote failure.", firstReadyAtElapsedMs > 0L)
+            assertTrue(
+                "The remote failure preceded playback readiness.",
+                firstReadyAtElapsedMs < requireNotNull(evidence.injectedAtElapsedRealtimeMs),
+            )
+        }
+        report.put("remoteAutoFaultInjection", JSONObject()
+            .put("token", evidence.token)
+            .put("failpoint", evidence.failpoint)
+            .put(
+                "expectedFallbackStage",
+                expectedFailpoint.expectedFallbackStage?.name ?: JSONObject.NULL,
+            )
+            .put("failureInvocationCount", evidence.failureInvocationCount)
+            .put("pid", evidence.pid)
+            .put("processName", evidence.processName)
+            .put("injectedAtElapsedRealtimeMs", evidence.injectedAtElapsedRealtimeMs)
+            .put("firstReadyAtElapsedMs", firstReadyAtElapsedMs)
+            .put("gpuCreateCount", evidence.gpuCreateCount)
+            .put("gpuCloseCount", evidence.gpuCloseCount)
+            .put("gpuInvocationCount", evidence.gpuInvocationCount)
+            .put("cpuCreateCount", evidence.cpuCreateCount)
+            .put("cpuCloseCount", evidence.cpuCloseCount)
+            .put("events", JSONArray(evidence.events))
         )
     }
 
@@ -5840,6 +6057,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_EXECUTION_HOST_MODE = "executionHostMode"
         const val ARG_SCREEN_OFF_AFTER_READY = "screenOffAfterReady"
         const val ARG_AUTO_FAILPOINT = "autoFailpoint"
+        const val ARG_REMOTE_AUTO_FAILPOINT = "remoteAutoFailpoint"
+        const val ARG_AUTO_FAIL_INVOCATION_COUNT = "autoFailInvocationCount"
+        const val ARG_REMOTE_FAULT_TOKEN = "remoteFaultToken"
         const val ARG_PROCESSOR_COUNT = "processorCount"
         const val ARG_PROCESS_CACHE_SCOPE = "processCacheScope"
         const val ARG_XNNPACK_FLAGS = "xnnPackFlags"
@@ -5908,6 +6128,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARTIFACT_EXPORT_DIRECTORY = "phase7-validation-artifacts"
         const val EXPECTED_NULL_VALUE = "__none__"
         const val DEFAULT_MAXIMUM_CANCELLATION_LATENCY_MS = 30_000L
+        const val DEFAULT_REMOTE_FAULT_INVOCATION_COUNT = 6
         const val THERMAL_SAMPLE_INTERVAL_MS = 2_000L
         const val REQUIRED_READY_WINDOWS = 2
         const val TEST_BLEND = 0.23f

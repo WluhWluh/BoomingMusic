@@ -36,13 +36,20 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v23",
+    [string]$RunnerRevision = "phase7-runner-v24",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet("in-process", "bound-remote")]
     [string]$ExecutionHostMode = "in-process",
     [ValidateSet("none", "setup", "probe", "invocation-after-ready")]
     [string]$AutoFailpoint = "none",
+
+    [ValidateSet("none", "setup", "probe", "invocation", "output-read", "non-finite", "cleanup")]
+    [string]$RemoteAutoFailpoint = "none",
+
+    [int]$AutoFailInvocationCount = 6,
+
+    [string]$RemoteFaultToken = "",
     [int]$ProcessorCount = 0,
     [int]$XnnPackFlags = -1,
     [ValidateSet("cold-session", "warm-session")]
@@ -160,6 +167,14 @@ if ($BackendMode -eq "auto" -and ($ProcessorCount -gt 0 -or $XnnPackFlags -ge 0)
 }
 if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "worker")) {
     throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
+}
+if ($RemoteAutoFailpoint -ne "none" -and
+        ($BackendMode -ne "auto" -or $Stage -ne "worker" -or
+        $ExecutionHostMode -ne "bound-remote" -or $AutoFailpoint -ne "none")) {
+    throw "RemoteAutoFailpoint requires BoundRemote Auto worker execution without AutoFailpoint."
+}
+if ($AutoFailInvocationCount -lt 2) {
+    throw "AutoFailInvocationCount must preserve the first finite-output probe."
 }
 $boundRemoteBackendSupported = $BackendMode -eq "auto" -or
     ($Stage -eq "worker" -and $BackendMode -eq "cpu" -and -not $X86ProcessValidation)
@@ -647,6 +662,11 @@ try {
         "-e", "backendMode", $BackendMode,
         "-e", "executionHostMode", $ExecutionHostMode,
         "-e", "autoFailpoint", $AutoFailpoint,
+        "-e", "remoteAutoFailpoint", $RemoteAutoFailpoint,
+        "-e", "autoFailInvocationCount", [string]$AutoFailInvocationCount,
+        "-e", "remoteFaultToken", $(if ([string]::IsNullOrWhiteSpace($RemoteFaultToken)) {
+            "$RunId-remote-gpu"
+        } else { $RemoteFaultToken }),
         "-e", "appCommit", $appCommit,
         "-e", "appApkSha256", $appApkSha256,
         "-e", "testApkSha256", $testApkSha256,
@@ -1032,6 +1052,8 @@ try {
                 screenOffAfterReady = [bool]$ScreenOffAfterReady
                 backend = $backendName
                 autoFailpoint = $AutoFailpoint
+                remoteAutoFailpoint = $RemoteAutoFailpoint
+                autoFailInvocationCount = $AutoFailInvocationCount
                 screenTimeoutOverrideMs = if ($Stage -eq "background") {
                     $backgroundScreenTimeoutMs
                 } else { $null }
