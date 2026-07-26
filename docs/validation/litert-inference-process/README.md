@@ -26,6 +26,8 @@ selection, MP3 handling, output frames, and join placement.
 - `phase4/`: OS-backed exact-entry ownership, durable-journal recovery,
   cache-loss, management-race, main-process-death, and arm64 qualification
   evidence.
+- `phase5/`: ABI host/session policy, GPU fallback, playback contention, and
+  foreground GPU UI attribution and tuning evidence.
 - Later phase directories use
   `<phase>/<yyyy-mm-dd>/<target>/<run-id>.json`.
 

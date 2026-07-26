@@ -914,6 +914,8 @@ The host candidate remains `BoundRemote`, pending Phase 5E's
 - [x] Record graphics/native memory, delegate/library identity, driver
   diagnostics, CPU fallback cost, thermal state, and playback continuity
   separately from aggregate PSS.
+- [x] Attribute foreground GPU UI stalls and test the stock AAR's forced
+  OpenGL and OpenCL low-priority controls without changing decode policy.
 
 GPU checkpoint (2026-07-26): S10 passed three alternating full-song Auto pairs
 on each host. Bound remote moved the 265.8 MiB graphics allocation and OpenCL
@@ -926,6 +928,17 @@ without CPU creation. Arm64 Auto therefore remains `InProcess + SingleUse`.
 The S25 three-pair full-song host matrix is explicitly deferred and this one
 unchecked item remains open. See
 `docs/validation/litert-inference-process/phase5/gpu-host-fallback-2026-07-26.md`.
+
+GPU UI tuning checkpoint (2026-07-26): S25 Perfetto traces prove that every
+measured long frame overlaps an app GPU-completion fence. Explicit OpenCL
+reproduces the automatic backend's approximately 240 ms wait. OpenCL low
+priority worsens the maximum wait to approximately 1.4 seconds and full-song
+time from 31.8 to 86.1 seconds. OpenGL worsens the wait to approximately
+0.65 seconds and peak PSS from 813 MiB to 1,236 MiB. Both diagnostic profiles
+are rejected. Stock LiteRT 2.1.5 exposes native OpenCL kernel batching but not
+through its Kotlin/JNI AAR surface; testing smaller flush batches requires a
+separate custom-AAR experiment. See
+`docs/validation/litert-inference-process/phase5/gpu-ui-contention-2026-07-26.md`.
 
 ### Phase 5E: Process and support policy checkpoint
 
@@ -1370,6 +1383,11 @@ These decisions guide implementation but remain subject to the phase gates:
 - Whether unknown imported models may be activated on x86 and, if so, what
   explicit unverified-resource flow contains their failure.
 - Whether GPU Auto remains stable in a service process on both Samsung devices.
+- Whether a custom diagnostic LiteRT AAR can use smaller OpenCL kernel flush
+  batches to keep one foreground fence wait below a display-frame budget
+  without unacceptable throughput or output regressions.
+- Whether production Auto should select CPU whenever MainActivity is visible
+  and reserve GPU for background or screen-off work if batching fails.
 - Whether the service should retain an idle same-model session after pause.
 - Which bounded restart mechanism is reliable across API 26 through target 36.
 - Whether FLAC promotion belongs in the independently running process.

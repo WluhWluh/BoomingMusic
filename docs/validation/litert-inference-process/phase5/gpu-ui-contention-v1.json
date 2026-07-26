@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "gpu-ui-contention-v1",
+  "date": "2026-07-26",
+  "decision": "reject-opengl-and-low-priority",
+  "sourceCommit": "d3b0fffe99814280ae46e5407b84b021cc847dd7",
+  "appApkSha256": "0f300d542ca2ab70d5c51b7db5c991b4c7136235165374f464e5a2a4e56c44b3",
+  "testApkSha256": "34d0b9e89fdc7cb53dc16e66af611d9934abb06d3f110298755dd3d1c48329cc",
+  "device": {
+    "manufacturer": "samsung",
+    "model": "SM-S9310",
+    "androidApi": 35,
+    "abi": "arm64-v8a"
+  },
+  "model": {
+    "modelId": "uvr_mdxnet_3_9662",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "runtime": "LiteRT 2.1.5"
+  },
+  "profiles": [
+    {
+      "profileId": "gpu-opencl-fp32-v1",
+      "runId": "perfetto-s25-gpu-opencl-v2",
+      "peakThermalStatus": 0,
+      "measurementSeconds": 15.375543,
+      "frames": 998,
+      "fps": 64.908,
+      "framesOver200Ms": 80,
+      "maximumFrameMs": 255.088,
+      "longGpuWaits": 27,
+      "meanLongGpuWaitMs": 238.079,
+      "maximumGpuWaitMs": 248.677,
+      "longFramesOverlappingGpuWait": 80,
+      "firstReadyMs": 4397,
+      "fullSongMs": 31825,
+      "peakPssMiB": 812.955,
+      "peakGraphicsPssMiB": 381.805
+    },
+    {
+      "profileId": "gpu-opencl-low-fp32-v1",
+      "runId": "perfetto-s25-gpu-opencl-low-v2",
+      "peakThermalStatus": 0,
+      "measurementSeconds": 35.200582,
+      "frames": 659,
+      "fps": 18.721,
+      "framesOver200Ms": 60,
+      "maximumFrameMs": 1412.090,
+      "longGpuWaits": 20,
+      "meanLongGpuWaitMs": 1377.882,
+      "maximumGpuWaitMs": 1409.399,
+      "longFramesOverlappingGpuWait": 60,
+      "firstReadyMs": 5643,
+      "fullSongMs": 86066,
+      "peakPssMiB": 810.673,
+      "peakGraphicsPssMiB": 387.234
+    },
+    {
+      "profileId": "gpu-opengl-fp32-v1",
+      "runId": "perfetto-s25-gpu-opengl-v2",
+      "peakThermalStatus": 0,
+      "measurementSeconds": 18.734747,
+      "frames": 433,
+      "fps": 23.112,
+      "framesOver200Ms": 59,
+      "maximumFrameMs": 662.650,
+      "longGpuWaits": 20,
+      "meanLongGpuWaitMs": 604.277,
+      "maximumGpuWaitMs": 655.822,
+      "longFramesOverlappingGpuWait": 59,
+      "firstReadyMs": 4681,
+      "fullSongMs": 48443,
+      "peakPssMiB": 1236.205,
+      "peakGraphicsPssMiB": 842.406,
+      "identityNote": "The report source label predates the test-profile commit; the APK SHA-256 matches the clean d3b0fffe identity report."
+    }
+  ],
+  "tensorValidation": [
+    {
+      "profileId": "gpu-opencl-fp32-v1",
+      "reusedInferenceMs": 348,
+      "snrDb": 93.8327580883061,
+      "maximumAbsoluteError": 0.00006687641143798828
+    },
+    {
+      "profileId": "gpu-opencl-low-fp32-v1",
+      "reusedInferenceMs": 1532,
+      "snrDb": 93.8327580883061,
+      "maximumAbsoluteError": 0.00006687641143798828
+    },
+    {
+      "profileId": "gpu-opengl-fp32-v1",
+      "reusedInferenceMs": 708,
+      "snrDb": 94.4535582646127,
+      "maximumAbsoluteError": 0.000056684017181396484
+    }
+  ],
+  "evidence": [
+    {
+      "name": "perfetto-s25-gpu-opencl-v2.trace",
+      "bytes": 267429463,
+      "sha256": "d7d861706dd7fc513d81786fe47fe048cb1517da9358e94e91dd0d16bdcfbb2f"
+    },
+    {
+      "name": "perfetto-s25-gpu-opencl-low-v2.trace",
+      "bytes": 149881949,
+      "sha256": "37273c9e0dc37aeeee84d704a56930fadf93ad35655c3617d3a518144e0b3785"
+    },
+    {
+      "name": "perfetto-s25-gpu-opengl-v2.trace",
+      "bytes": 193534307,
+      "sha256": "9ff6ce2c5fc98161564521f835f83ee79c338e3d787426e263dd3ba3749ef244"
+    },
+    {
+      "name": "gpu-ui-tuning-build-d3b0fffe-identity.json",
+      "bytes": 4055,
+      "sha256": "be998cb461e62fe83e607b55f622589d498c94d60e4e805fbbd39181f9b84fa2"
+    }
+  ]
+}
