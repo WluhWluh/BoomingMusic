@@ -970,6 +970,8 @@ processing foreground service.
 
 Phase 5E satisfies this policy checkpoint. The overall Phase 5 exit remains
 open only for Phase 5D's explicitly deferred S25 full-song GPU host pairs.
+GitHub/F-Droid debug unit tests, AndroidTest Kotlin compilation, and release
+Kotlin compilation all pass with the final Phase 5 observability changes.
 
 ## Phase 6: Prototype an Independent Media-Processing Service
 

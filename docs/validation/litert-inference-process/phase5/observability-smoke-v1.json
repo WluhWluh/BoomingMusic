@@ -56,6 +56,15 @@
     "shortFixtureUsedForHostSelection": false,
     "decoderPolicyChanged": false
   },
+  "normalBuildRegression": {
+    "testedRevision": "920f0c5be7271d9b90c8ca8d558236f673b38b9d",
+    "githubDebugUnitTest": "passed",
+    "fdroidDebugUnitTest": "passed",
+    "githubDebugAndroidTestKotlin": "passed",
+    "fdroidDebugAndroidTestKotlin": "passed",
+    "githubReleaseKotlin": "passed",
+    "fdroidReleaseKotlin": "passed"
+  },
   "rawEvidence": {
     "fileName": "phase5-contention-s10-short-v1-192.168.8.181_35975-arm64-v8a-auto-summary.json",
     "byteSize": 138225,

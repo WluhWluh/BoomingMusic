@@ -50,6 +50,10 @@ present and internally usable.
 The playback observer is attached only in debug builds. Normal release builds
 do not register the AnalyticsListener or read player-thread `/proc` files.
 
+After the device smoke, GitHub and F-Droid debug unit tests, both AndroidTest
+Kotlin compilations, and both release Kotlin compilations passed at revision
+`920f0c5be7271d9b90c8ca8d558236f673b38b9d`.
+
 No decoder, MP3 fallback threshold, overlap calibration, join placement, or
 listening-derived window policy changed.
 
