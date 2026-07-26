@@ -274,9 +274,7 @@ internal class SourceSeparationProcessSessionController(
         } catch (error: Throwable) {
             poisonReason = poisonReason ?: "Native session cleanup failed: " +
                 (error.message ?: error::class.java.name)
-            if (!closeRequested &&
-                ownership == SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit
-            ) {
+            if (!closeRequested) {
                 state = SourceSeparationProcessSessionState.Poisoned
             }
             error

@@ -321,6 +321,32 @@ class SourceSeparationProcessSessionControllerTest {
     }
 
     @Test
+    fun `single-use cleanup failure requires a new process generation`() {
+        val cleanupFailure = IllegalStateException("native cleanup failed")
+        val factory = FakeFactory(closeFailure = cleanupFailure)
+        val controller = SourceSeparationProcessSessionController(
+            factory,
+            SourceSeparationProcessSessionOwnership.SingleUse,
+        )
+        controller.beginExecution("run-1")
+        val lease = controller.acquire(artifact, profile, settings)
+
+        assertSame(cleanupFailure, assertThrows(IllegalStateException::class.java) {
+            lease.close()
+        })
+        controller.finishExecution("run-1", cleanupFailure)
+
+        assertEquals(SourceSeparationProcessSessionState.Poisoned, controller.diagnostics().state)
+        assertTrue(controller.diagnostics().poisoned)
+        controller.beginExecution("run-2")
+        assertThrows(SourceSeparationProcessSessionPoisonedException::class.java) {
+            controller.acquire(artifact, profile, settings)
+        }
+        controller.finishExecution("run-2", null)
+        assertEquals(1, factory.createCount)
+    }
+
+    @Test
     fun `recycle transition is rejected until execution and lease are released`() {
         val controller = residentController(FakeFactory())
         controller.beginExecution("run-1")
@@ -361,6 +387,7 @@ class SourceSeparationProcessSessionControllerTest {
         private val createFailure: Throwable? = null,
         private val runFailure: Throwable? = null,
         private val output: FloatArray? = null,
+        private val closeFailure: Throwable? = null,
     ) : MdxInferenceSessionFactory {
         override val factoryId = "fake-auto"
         override val backend = MdxInferenceBackend.LiteRtAuto
@@ -374,13 +401,14 @@ class SourceSeparationProcessSessionControllerTest {
         ): MdxInferenceSession {
             createCount += 1
             createFailure?.let { throw it }
-            return FakeSession(runFailure, output).also(sessions::add)
+            return FakeSession(runFailure, output, closeFailure).also(sessions::add)
         }
     }
 
     private class FakeSession(
         private val runFailure: Throwable?,
         private val output: FloatArray?,
+        private val closeFailure: Throwable?,
     ) : MdxInferenceSession {
         override val diagnostics = MdxRuntimeDiagnostics(
             runtimeName = "Fake",
@@ -402,6 +430,7 @@ class SourceSeparationProcessSessionControllerTest {
 
         override fun close() {
             closeCount += 1
+            closeFailure?.let { throw it }
         }
     }
 }
