@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "phase5-observability-smoke-v1",
+  "status": "passed",
+  "implementationRevisions": {
+    "inferencePhaseTiming": "f137d6a79bc41ffa8c16d32c0a39bb9a0093c4bf",
+    "playbackContentionCounters": "afaafb3cbb2452a3dcc4f384f5fe37053acbcdd6"
+  },
+  "device": {
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "androidApi": 31,
+    "abi": "arm64-v8a",
+    "powerSource": "AC",
+    "maximumThermalStatus": 0
+  },
+  "runtime": {
+    "litertVersion": "2.1.5",
+    "backend": "LiteRtGpu",
+    "modelId": "uvr_mdxnet_3_9662",
+    "fixtureId": "coast_town_short_wav",
+    "pairCount": 3,
+    "sampleCountPerHost": 3
+  },
+  "inProcessMedians": {
+    "modelSetupNanos": 3570924113,
+    "firstInferenceNanos": 2400898332,
+    "reusedInferenceMeanNanos": 2353269114,
+    "inferenceInvocationCountPerRun": 3,
+    "audioUnderrunCount": 0,
+    "playerRunQueueWaitNanos": 226519741
+  },
+  "boundRemoteMedians": {
+    "bindToConnectedMs": 952,
+    "modelSetupNanos": 3524394270,
+    "firstInferenceNanos": 2390419478,
+    "reusedInferenceMeanNanos": 2347891040.5,
+    "inferenceInvocationCountPerRun": 3,
+    "audioUnderrunCount": 0,
+    "playerRunQueueWaitNanos": 274585321
+  },
+  "playbackCounters": {
+    "allSamplesAvailable": true,
+    "totalAudioUnderrunCount": 0,
+    "minimumPlayerRunQueueWaitNanos": 180557363,
+    "maximumPlayerRunQueueWaitNanos": 308489180,
+    "minimumPlayerRunTimeNanos": 2936399327,
+    "maximumPlayerRunTimeNanos": 3190094801,
+    "maximumVoluntaryContextSwitches": 2219,
+    "maximumInvoluntaryContextSwitches": 398,
+    "maximumPlaybackDriftMs": 131,
+    "unexpectedPlaybackEventCount": 0
+  },
+  "interpretation": {
+    "observabilityQualified": true,
+    "performanceThresholdChanged": false,
+    "shortFixtureUsedForHostSelection": false,
+    "decoderPolicyChanged": false
+  },
+  "rawEvidence": {
+    "fileName": "phase5-contention-s10-short-v1-192.168.8.181_35975-arm64-v8a-auto-summary.json",
+    "byteSize": 138225,
+    "sha256": "e4ac0fbda280b5f2b6ef8659937c21486e5fc0ae1abd7bbf1c6ae0bf58cd9cd3"
+  }
+}

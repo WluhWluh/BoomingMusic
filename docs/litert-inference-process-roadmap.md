@@ -766,14 +766,13 @@ host policy or full-song performance result. See
 - [x] Record main, remote, instrumentation, and summed PSS/USS/RSS; native,
   graphics, and Java memory; `VmSize`/`VmPeak`; largest free VA gap;
   `oom_score_adj`; and mapped-region count.
-- [ ] Add dedicated bind/start, model-setup, and first/reused-inference timing.
-  The completed non-x86 matrix already records idle-process overhead,
-  first-ready-window, full-song throughput, process CPU time, and time until
-  the old PID and its mappings disappear.
-- [ ] Add explicit audio-underrun and scheduler-contention counters. The
-  completed non-x86 matrix already records original-playback position drift,
-  MediaSession continuity, and unexpected player events while separation uses
-  its production thread policy.
+- [x] Add dedicated bind/start, model-setup, and first/reused-inference timing.
+  Keep idle-process overhead, first-ready-window, full-song throughput, process
+  CPU time, and time until the old PID and mappings disappear as separate
+  fields.
+- [x] Add explicit audio-underrun and scheduler-contention counters. Keep
+  original-playback position drift, MediaSession continuity, and unexpected
+  player events separate rather than treating them as underrun proxies.
 - [x] Run pure-x86 9662 on 2, 3, and 4 GiB AVD memory configurations, with at
   least three cold process generations per configuration. Treat allocation
   failure, LMKD pressure, or crossing the VA-gap floor as a resource rejection,
@@ -794,6 +793,15 @@ host policy or full-song performance result. See
 - [x] Verify the x86 APK's LiteRT ELF identity and SHA-256 against the pinned
   `bss-litert-android` release and run its CI smoke before any support-tier
   promotion.
+
+Observability checkpoint (2026-07-26): a six-sample S10 arm64 short-fixture
+matrix retained remote bind-to-connect, model setup, first-inference, and
+reused-inference timing on both hosts. Every sample recorded three real model
+invocations. A debug-only Media3 listener and player-thread `/proc` sampler
+recorded zero audio underruns plus non-zero run-queue wait, timeslice, and
+context-switch deltas in all six runs. This qualifies the counters, not a new
+threshold or host decision. See
+`docs/validation/litert-inference-process/phase5/observability-smoke-2026-07-26.md`.
 
 Initial low-heap pure-x86 checkpoint (2026-07-25): the second API image is an API
 29 AVD configured for 1 GiB but exposing roughly 2 GiB to the guest. Its idle
