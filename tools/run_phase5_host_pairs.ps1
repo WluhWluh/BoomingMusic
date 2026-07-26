@@ -158,6 +158,19 @@ function Get-BatteryState {
     }
 }
 
+function Get-GpuDriverDiagnostics {
+    $surfaceFlinger = (& $adb -s $Serial shell dumpsys SurfaceFlinger 2>$null) -join "`n"
+    $gles = [regex]::Match($surfaceFlinger, '(?m)^GLES:\s*(.+?)\s*$')
+    return [ordered]@{
+        boardPlatform = Get-DeviceProperty "ro.board.platform"
+        hardware = Get-DeviceProperty "ro.hardware"
+        hardwareEgl = Get-DeviceProperty "ro.hardware.egl"
+        graphicsDriver0 = Get-DeviceProperty "ro.gfx.driver.0"
+        graphicsDriver1 = Get-DeviceProperty "ro.gfx.driver.1"
+        gles = if ($gles.Success) { $gles.Groups[1].Value } else { $null }
+    }
+}
+
 function Get-PowerSourceKey($Battery) {
     return "ac=$($Battery.acPowered);usb=$($Battery.usbPowered);wireless=$($Battery.wirelessPowered)"
 }
@@ -240,6 +253,8 @@ function Add-WorkerReport(
             backendRequested = [string]$report.run.backendRequested
             backendUsed = [string]$report.run.backendUsed
             runtimeProfileId = [string]$runtime.runtimeProfileId
+            runtimeName = [string]$report.executionHost.runtime.runtimeName
+            runtimeDetail = [string]$report.executionHost.runtime.detail
             decodeMode = [string]$report.audio.decodeDiagnostics.mode
             decodeProfile = [string]$report.audio.decodeDiagnostics.profile
             cpuThreads = [int]$report.run.cpuThreads
@@ -257,6 +272,12 @@ function Add-WorkerReport(
             } else { 0 }
             instrumentationSharesMainProcess =
                 [bool]$report.processRoles.instrumentationSharesMainProcess
+            mainMappedNativeLibraries = @(
+                $report.processResources.mainAfter.mappedNativeLibraries
+            )
+            remoteMappedNativeLibraries = if ($null -ne $report.processResources.remoteAfter) {
+                @($report.processResources.remoteAfter.mappedNativeLibraries)
+            } else { @() }
         }
         timing = [ordered]@{
             firstReadyMs = [int64]$report.timing.firstReadyMs
@@ -334,6 +355,20 @@ function Test-Gates {
         if ($BackendMode -eq "cpu") {
             Require-Equal "LiteRtCpu" $record.execution.backendUsed `
                 "$($record.runId) concrete CPU backend"
+        } else {
+            Require-Equal "LiteRtGpu" $record.execution.backendUsed `
+                "$($record.runId) concrete GPU backend"
+            if ($record.execution.runtimeDetail -notmatch 'eligibility=Eligible') {
+                throw "$($record.runId) did not retain eligible GPU runtime diagnostics."
+            }
+            $acceleratorLibraries = if ($record.hostMode -eq "bound-remote") {
+                @($record.execution.remoteMappedNativeLibraries)
+            } else {
+                @($record.execution.mainMappedNativeLibraries)
+            }
+            if ($acceleratorLibraries -notcontains "libLiteRtClGlAccelerator.so") {
+                throw "$($record.runId) did not map the packaged GPU accelerator in its host process."
+            }
         }
         foreach ($field in @(
             "appCommit", "appApkSha256", "testApkSha256", "catalogSha256",
@@ -424,11 +459,23 @@ function Test-Gates {
             firstReadyMs = Get-Median @($inProcess.timing.firstReadyMs)
             fullSongMs = Get-Median @($inProcess.timing.fullSongMs)
             summedPeakPssBytes = Get-Median @($inProcess.memory.summedPeakPssBytes)
+            summedPeakNativePssBytes = Get-Median @($inProcess | ForEach-Object {
+                $_.memory.mainPeakNativePssBytes + $_.memory.remotePeakNativePssBytes
+            })
+            summedPeakGraphicsPssBytes = Get-Median @($inProcess | ForEach-Object {
+                $_.memory.mainPeakGraphicsPssBytes + $_.memory.remotePeakGraphicsPssBytes
+            })
         }
         boundRemote = [ordered]@{
             firstReadyMs = Get-Median @($boundRemote.timing.firstReadyMs)
             fullSongMs = Get-Median @($boundRemote.timing.fullSongMs)
             summedPeakPssBytes = Get-Median @($boundRemote.memory.summedPeakPssBytes)
+            summedPeakNativePssBytes = Get-Median @($boundRemote | ForEach-Object {
+                $_.memory.mainPeakNativePssBytes + $_.memory.remotePeakNativePssBytes
+            })
+            summedPeakGraphicsPssBytes = Get-Median @($boundRemote | ForEach-Object {
+                $_.memory.mainPeakGraphicsPssBytes + $_.memory.remotePeakGraphicsPssBytes
+            })
         }
     }
     $firstReadyRatio = $medians.boundRemote.firstReadyMs / $medians.inProcess.firstReadyMs
@@ -557,6 +604,7 @@ try {
             processAbi = $ProcessAbi
             abiList = Get-DeviceProperty "ro.product.cpu.abilist"
             heapGrowthLimit = Get-DeviceProperty "dalvik.vm.heapgrowthlimit"
+            gpuDriver = Get-GpuDriverDiagnostics
         }
         fixture = [ordered]@{
             fileName = $fixture.fileName

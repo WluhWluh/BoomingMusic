@@ -15,6 +15,7 @@ internal data class SourceSeparationProcessDiagnostics(
     val capturedAtElapsedRealtimeNanos: Long,
     val activeRunId: String? = null,
     val memory: SourceSeparationProcessMemoryDiagnostics,
+    val mappedNativeLibraries: List<String> = emptyList(),
     val session: SourceSeparationProcessSessionDiagnostics =
         SourceSeparationProcessSessionDiagnostics.empty(),
     val validationOverride: SourceSeparationProcessValidationOverrideDiagnostics? = null,
@@ -26,6 +27,11 @@ internal data class SourceSeparationProcessDiagnostics(
         require(processStartTicks > 0L) { "Process diagnostic start identity is invalid." }
         require(capturedAtElapsedRealtimeNanos > 0L) {
             "Process diagnostic capture time is invalid."
+        }
+        require(mappedNativeLibraries.all { library ->
+            library.isNotBlank() && '/' !in library && '\\' !in library
+        }) {
+            "Process diagnostic native-library identity is invalid."
         }
     }
 }
@@ -199,6 +205,7 @@ internal object SourceSeparationProcessDiagnosticsCollector {
                 processCpuTimeMs = Process.getElapsedCpuTime().coerceAtLeast(0L),
                 oomScoreAdj = readText(File(procRoot, "oom_score_adj"))?.trim()?.toIntOrNull(),
             ),
+            mappedNativeLibraries = SourceSeparationProcParser.mappedNativeLibraryNames(maps),
             session = session,
             validationOverride = validationOverride,
         )
@@ -296,6 +303,19 @@ internal object SourceSeparationProcParser {
         return largest.coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
     }
 
+    fun mappedNativeLibraryNames(maps: List<String>): List<String> = maps
+        .asSequence()
+        .mapNotNull { line ->
+            line.trim()
+                .split(WHITESPACE, limit = MAPS_FIELD_COUNT)
+                .getOrNull(MAPS_PATH_INDEX)
+        }
+        .map { path -> path.removeSuffix(" (deleted)").substringAfterLast('/') }
+        .filter { name -> name.endsWith(".so") || ".so." in name }
+        .distinct()
+        .sorted()
+        .toList()
+
     private fun findFieldValue(status: String?, field: String): String? = status
         ?.lineSequence()
         ?.firstOrNull { it.substringBefore(':') == field }
@@ -303,6 +323,8 @@ internal object SourceSeparationProcParser {
         ?.trim()
 
     private val WHITESPACE = Regex("\\s+")
+    private const val MAPS_FIELD_COUNT = 6
+    private const val MAPS_PATH_INDEX = 5
     private const val PROCESS_START_TICKS_OFFSET_FROM_STATE = 19
     private const val KIBIBYTE = 1_024L
 }

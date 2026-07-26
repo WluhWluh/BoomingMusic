@@ -52,4 +52,20 @@ class SourceSeparationProcessDiagnosticsTest {
         )
         assertNull(SourceSeparationProcParser.largestMappedAddressGapBytes(maps.take(1)))
     }
+
+    @Test
+    fun `maps parser retains native library names without device paths`() {
+        val maps = listOf(
+            "7000-8000 r-xp 00000000 00:00 0 /data/app/pkg/lib/arm64/libLiteRt.so",
+            "8000-9000 r--p 00000000 00:00 0 /data/app/pkg/lib/arm64/libLiteRt.so",
+            "9000-a000 r-xp 00000000 00:00 0 /vendor/lib64/libOpenCL.so (deleted)",
+            "a000-b000 rw-p 00000000 00:00 0 [anon:dalvik-main space]",
+            "b000-c000 r-xp 00000000 00:00 0 /vendor/lib64/libgpu_driver.so.1",
+        )
+
+        assertEquals(
+            listOf("libLiteRt.so", "libOpenCL.so", "libgpu_driver.so.1"),
+            SourceSeparationProcParser.mappedNativeLibraryNames(maps),
+        )
+    }
 }

@@ -4773,6 +4773,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
             runCatching { host.processDiagnostics() }.getOrNull()
                 ?: host.connectionDiagnostics.latestProcessDiagnostics
         }
+        val completion = (events.last().payload as
+            SourceSeparationExecutionHostEventPayload.Completed).completion
         if (mode == Phase7ExecutionHostMode.BoundRemote) {
             assertEquals(
                 SourceSeparationRemoteConnectionState.Connected,
@@ -4791,6 +4793,23 @@ class SourceSeparationPhase7WorkerDeviceTest {
             .put(
                 "process",
                 processDiagnostics?.let(::processResourceJson) ?: JSONObject.NULL,
+            )
+            .put("runtime", JSONObject()
+                .put("runtimeName", completion.runtimeDiagnostics.runtimeName)
+                .put("backend", completion.runtimeDiagnostics.backend)
+                .put(
+                    "cpuThreads",
+                    completion.runtimeDiagnostics.cpuThreads ?: JSONObject.NULL,
+                )
+                .put("detail", completion.runtimeDiagnostics.detail)
+                .put(
+                    "fallbackStage",
+                    completion.runtimeDiagnostics.fallbackStage ?: JSONObject.NULL,
+                )
+                .put(
+                    "fallbackReason",
+                    completion.runtimeDiagnostics.fallbackReason ?: JSONObject.NULL,
+                )
             )
             .put("session", processDiagnostics?.session?.let { session ->
                 JSONObject()
@@ -5188,6 +5207,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             .put("processStartTicks", process.processStartTicks)
             .put("capturedAtElapsedRealtimeNanos", process.capturedAtElapsedRealtimeNanos)
             .put("activeRunId", process.activeRunId ?: JSONObject.NULL)
+            .put("mappedNativeLibraries", JSONArray(process.mappedNativeLibraries))
             .put("vmSizeBytes", process.memory.vmSizeBytes ?: JSONObject.NULL)
             .put("vmPeakBytes", process.memory.vmPeakBytes ?: JSONObject.NULL)
             .put("vmRssBytes", process.memory.vmRssBytes ?: JSONObject.NULL)
