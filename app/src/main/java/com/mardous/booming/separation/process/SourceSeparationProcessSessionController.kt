@@ -14,6 +14,8 @@ import com.mardous.booming.separation.model.MdxRuntimeProfiles
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.litert.MdxLiteRtAutoFailureStage
+import com.mardous.booming.separation.model.litert.MdxLiteRtAutoInferenceException
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteEventDeliveryException
 import java.security.MessageDigest
 import java.util.Locale
@@ -224,7 +226,9 @@ internal class SourceSeparationProcessSessionController(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            if (ownership == SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit) {
+            if (ownership == SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit ||
+                error.requiresFreshProcessGeneration()
+            ) {
                 poisonLocked("Native inference failed: " +
                     (error.message ?: error::class.java.name))
             }
@@ -366,6 +370,10 @@ internal class SourceSeparationProcessSessionController(
             .joinToString("") { byte -> "%02x".format(Locale.US, byte.toInt() and 0xff) }
     }
 }
+
+private fun Throwable.requiresFreshProcessGeneration(): Boolean =
+    this is MdxLiteRtAutoInferenceException &&
+        stage == MdxLiteRtAutoFailureStage.GpuCleanup
 
 internal class SourceSeparationProcessSessionRecycleRequiredException(
     val currentSessionKey: String?,

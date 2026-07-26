@@ -13,6 +13,8 @@ import com.mardous.booming.separation.model.MdxRuntimePrecision
 import com.mardous.booming.separation.model.MdxRuntimeProfiles
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
+import com.mardous.booming.separation.model.litert.MdxLiteRtAutoFailureStage
+import com.mardous.booming.separation.model.litert.MdxLiteRtAutoInferenceException
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLostException
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteEventDeliveryException
 import java.nio.file.Files
@@ -338,6 +340,35 @@ class SourceSeparationProcessSessionControllerTest {
 
         assertEquals(SourceSeparationProcessSessionState.Poisoned, controller.diagnostics().state)
         assertTrue(controller.diagnostics().poisoned)
+        controller.beginExecution("run-2")
+        assertThrows(SourceSeparationProcessSessionPoisonedException::class.java) {
+            controller.acquire(artifact, profile, settings)
+        }
+        controller.finishExecution("run-2", null)
+        assertEquals(1, factory.createCount)
+    }
+
+    @Test
+    fun `single-use Auto cleanup failure poisons before its empty outer close`() {
+        val cleanupFailure = MdxLiteRtAutoInferenceException(
+            MdxLiteRtAutoFailureStage.GpuCleanup,
+            IllegalStateException("GPU cleanup failed"),
+        )
+        val factory = FakeFactory(runFailure = cleanupFailure)
+        val controller = SourceSeparationProcessSessionController(
+            factory,
+            SourceSeparationProcessSessionOwnership.SingleUse,
+        )
+        controller.beginExecution("run-1")
+        val lease = controller.acquire(artifact, profile, settings)
+
+        assertSame(cleanupFailure, assertThrows(MdxLiteRtAutoInferenceException::class.java) {
+            lease.session.run(floatArrayOf(1f))
+        })
+        lease.close()
+        controller.finishExecution("run-1", cleanupFailure)
+
+        assertEquals(SourceSeparationProcessSessionState.Poisoned, controller.diagnostics().state)
         controller.beginExecution("run-2")
         assertThrows(SourceSeparationProcessSessionPoisonedException::class.java) {
             controller.acquire(artifact, profile, settings)
