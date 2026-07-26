@@ -67,6 +67,7 @@ import com.mardous.booming.separation.model.ReusableMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.SingleUseMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSessionFactory
+import com.mardous.booming.separation.model.litert.MdxLiteRtGpuRuntimeProfile
 import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFailpoint
 import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFaultEvidence
 import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFaultInjection
@@ -138,6 +139,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             arguments.getString(ARG_EXECUTION_HOST_MODE),
         )
         val autoFailpoint = Phase7AutoFailpoint.parse(arguments.getString(ARG_AUTO_FAILPOINT))
+        val gpuRuntimeProfile = arguments.getString(ARG_GPU_RUNTIME_PROFILE_ID)?.let { profileId ->
+            MdxLiteRtGpuRuntimeProfile.find(profileId)
+                ?: error("Unsupported Phase 7 GPU runtime profile: $profileId")
+        }
         val remoteAutoFailpoint = MdxLiteRtRemoteFailpoint.parse(
             arguments.getString(ARG_REMOTE_AUTO_FAILPOINT),
         )
@@ -149,6 +154,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
             ?: "$runId-remote-gpu"
         require(autoFailpoint == Phase7AutoFailpoint.None || backendMode == BackendMode.Auto) {
             "Phase 7 Auto fault injection requires BackendMode=auto."
+        }
+        require(
+            gpuRuntimeProfile == null ||
+                (backendMode == BackendMode.Auto &&
+                    executionHostMode == Phase7ExecutionHostMode.InProcess &&
+                    autoFailpoint == Phase7AutoFailpoint.None)
+        ) {
+            "A diagnostic GPU profile requires in-process Auto without fault injection."
         }
         require(remoteAutoFailpoint == MdxLiteRtRemoteFailpoint.None ||
             (backendMode == BackendMode.Auto &&
@@ -242,8 +255,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 xnnPackFlags = arguments.getString(ARG_XNNPACK_FLAGS)
                     ?.toIntOrNull()
                     ?.takeIf { it >= 0 },
-                sessionProviderFactoryOverride = autoFaultController
-                    ?.createSessionProviderFactory(context),
+                sessionProviderFactoryOverride = when {
+                    autoFaultController != null ->
+                        autoFaultController.createSessionProviderFactory(context)
+                    gpuRuntimeProfile != null -> ({
+                        createAutoLiteRtSessionProvider(context, gpuRuntimeProfile)
+                    })
+                    else -> null
+                },
                 executionHostMode = executionHostMode,
                 executionHostEventSink = hostEvents::add,
                 boundRemoteHostSink = { boundRemoteHost = it },
@@ -6108,6 +6127,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_SOURCE_PATH = "sourcePath"
         const val ARG_CURRENT_SOURCE_PATH = "currentSourcePath"
         const val ARG_BACKEND_MODE = "backendMode"
+        const val ARG_GPU_RUNTIME_PROFILE_ID = "gpuRuntimeProfileId"
         const val ARG_EXECUTION_HOST_MODE = "executionHostMode"
         const val ARG_SCREEN_OFF_AFTER_READY = "screenOffAfterReady"
         const val ARG_AUTO_FAILPOINT = "autoFailpoint"

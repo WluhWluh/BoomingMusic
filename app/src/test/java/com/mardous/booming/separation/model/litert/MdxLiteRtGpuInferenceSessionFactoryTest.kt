@@ -27,11 +27,18 @@ class MdxLiteRtGpuInferenceSessionFactoryTest {
     fun `GPU runtime profiles have stable distinct identities`() {
         val fp32 = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1
         val fp16 = MdxLiteRtGpuRuntimeProfile.AutomaticFp16V1
+        val openClLow = MdxLiteRtGpuRuntimeProfile.LowPriorityOpenClFp32V1
+        val openGl = MdxLiteRtGpuRuntimeProfile.OpenGlFp32V1
 
         assertEquals("gpu-auto-fp32-v1", fp32.profileId)
         assertEquals(MdxLiteRtGpuPrecision.Float32, fp32.precision)
         assertEquals("gpu-auto-fp16-v1", fp16.profileId)
         assertEquals(MdxLiteRtGpuPrecision.Float16, fp16.precision)
+        assertEquals(MdxLiteRtGpuApi.OpenCl, openClLow.api)
+        assertEquals(MdxLiteRtGpuPriority.Low, openClLow.priority)
+        assertEquals(fp32.profileId, openClLow.qualificationProfileId)
+        assertEquals(MdxLiteRtGpuApi.OpenGl, openGl.api)
+        assertEquals(fp32.profileId, openGl.qualificationProfileId)
         assertNotEquals(fp32, fp16)
         assertThrows(IllegalArgumentException::class.java) {
             MdxLiteRtGpuRuntimeProfile(
@@ -40,6 +47,29 @@ class MdxLiteRtGpuInferenceSessionFactoryTest {
                 precision = MdxLiteRtGpuPrecision.Float32,
             )
         }
+    }
+
+    @Test
+    fun `derived GPU profile is restricted to internal validation`() {
+        val profile = profile("uvr_mdxnet_3_9662")
+        val internalAllocator = RecordingGpuAllocator()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            factory(
+                abi = MdxRuntimeAbi.Arm64V8a,
+                policy = MdxCompatibilityPolicy.KnownGoodOnly,
+                allocator = RecordingGpuAllocator(),
+                runtimeProfile = MdxLiteRtGpuRuntimeProfile.LowPriorityOpenClFp32V1,
+            ).create(artifact(profile), profile, MdxRuntimeSettings())
+        }
+        factory(
+            abi = MdxRuntimeAbi.Arm64V8a,
+            policy = MdxCompatibilityPolicy.AllowUntestedInternal,
+            allocator = internalAllocator,
+            runtimeProfile = MdxLiteRtGpuRuntimeProfile.LowPriorityOpenClFp32V1,
+        ).create(artifact(profile), profile, MdxRuntimeSettings())
+
+        assertEquals(1, internalAllocator.createCount)
     }
 
     @Test

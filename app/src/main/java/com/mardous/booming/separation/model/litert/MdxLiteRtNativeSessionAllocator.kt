@@ -82,6 +82,7 @@ internal object MdxLiteRtNativeGpuSessionAllocator : MdxLiteRtGpuSessionAllocato
             gpuOptions = CompiledModel.GpuOptions(
                 precision = runtimeProfile.precision.toLiteRtPrecision(),
                 backend = runtimeProfile.api.toLiteRtBackend(),
+                priority = runtimeProfile.priority?.toLiteRtPriority(),
             )
         },
         diagnostics = MdxRuntimeDiagnostics(
@@ -92,6 +93,7 @@ internal object MdxLiteRtNativeGpuSessionAllocator : MdxLiteRtGpuSessionAllocato
                 append("layout=NHWC, profile=").append(runtimeProfile.profileId)
                 append(", api=").append(runtimeProfile.api.name)
                 append(", precision=").append(runtimeProfile.precision.name)
+                append(", priority=").append(runtimeProfile.priority?.name ?: "Default")
                 append(", ").append(compatibilityDetail(compatibility))
             },
         ),
@@ -293,6 +295,13 @@ private fun MdxLiteRtGpuApi.toLiteRtBackend(): CompiledModel.GpuOptions.Backend 
     MdxLiteRtGpuApi.OpenCl -> CompiledModel.GpuOptions.Backend.OPENCL
     MdxLiteRtGpuApi.OpenGl -> CompiledModel.GpuOptions.Backend.OPENGL
 }
+
+private fun MdxLiteRtGpuPriority.toLiteRtPriority(): CompiledModel.GpuOptions.Priority =
+    when (this) {
+        MdxLiteRtGpuPriority.Low -> CompiledModel.GpuOptions.Priority.LOW
+        MdxLiteRtGpuPriority.Normal -> CompiledModel.GpuOptions.Priority.NORMAL
+        MdxLiteRtGpuPriority.High -> CompiledModel.GpuOptions.Priority.HIGH
+    }
 
 internal fun validateLiteRtTensorMetadata(
     declared: MdxTensorSpec,

@@ -24,14 +24,25 @@ internal enum class MdxLiteRtGpuPrecision {
     Float16,
 }
 
+internal enum class MdxLiteRtGpuPriority {
+    Low,
+    Normal,
+    High,
+}
+
 internal data class MdxLiteRtGpuRuntimeProfile(
     val profileId: String,
     val api: MdxLiteRtGpuApi,
     val precision: MdxLiteRtGpuPrecision,
+    val priority: MdxLiteRtGpuPriority? = null,
+    val qualificationProfileId: String = profileId,
 ) {
     init {
         require(PROFILE_ID_PATTERN.matches(profileId)) {
             "LiteRT GPU runtime profile ID is invalid."
+        }
+        require(PROFILE_ID_PATTERN.matches(qualificationProfileId)) {
+            "LiteRT GPU qualification profile ID is invalid."
         }
     }
 
@@ -49,6 +60,39 @@ internal data class MdxLiteRtGpuRuntimeProfile(
             api = MdxLiteRtGpuApi.Automatic,
             precision = MdxLiteRtGpuPrecision.Float16,
         )
+
+        val ExplicitOpenClFp32V1 = MdxLiteRtGpuRuntimeProfile(
+            profileId = "gpu-opencl-fp32-v1",
+            api = MdxLiteRtGpuApi.OpenCl,
+            precision = MdxLiteRtGpuPrecision.Float32,
+            qualificationProfileId = AutomaticFp32V1.profileId,
+        )
+
+        val LowPriorityOpenClFp32V1 = MdxLiteRtGpuRuntimeProfile(
+            profileId = "gpu-opencl-low-fp32-v1",
+            api = MdxLiteRtGpuApi.OpenCl,
+            precision = MdxLiteRtGpuPrecision.Float32,
+            priority = MdxLiteRtGpuPriority.Low,
+            qualificationProfileId = AutomaticFp32V1.profileId,
+        )
+
+        val OpenGlFp32V1 = MdxLiteRtGpuRuntimeProfile(
+            profileId = "gpu-opengl-fp32-v1",
+            api = MdxLiteRtGpuApi.OpenGl,
+            precision = MdxLiteRtGpuPrecision.Float32,
+            qualificationProfileId = AutomaticFp32V1.profileId,
+        )
+
+        val all = listOf(
+            AutomaticFp32V1,
+            AutomaticFp16V1,
+            ExplicitOpenClFp32V1,
+            LowPriorityOpenClFp32V1,
+            OpenGlFp32V1,
+        )
+
+        fun find(profileId: String): MdxLiteRtGpuRuntimeProfile? =
+            all.singleOrNull { it.profileId == profileId }
     }
 }
 
@@ -71,12 +115,18 @@ internal class MdxLiteRtGpuInferenceSessionFactory(
     ): MdxInferenceSession {
         profile.validateArtifact(artifact)
         validateLiteRtExecutionProfile(profile)
+        require(
+            compatibilityPolicy == MdxCompatibilityPolicy.AllowUntestedInternal ||
+                runtimeProfile.qualificationProfileId == runtimeProfile.profileId
+        ) {
+            "A derived LiteRT GPU profile is available only for internal validation."
+        }
         val decision = MdxLiteRtCompatibilityResolver.resolve(
             profile = profile,
             backend = backend,
             platform = platformProvider.current(),
             policy = compatibilityPolicy,
-            profileId = runtimeProfile.profileId,
+            profileId = runtimeProfile.qualificationProfileId,
             precision = runtimeProfile.precision.toMdxRuntimePrecision(),
         )
         decision.requireAllowed()

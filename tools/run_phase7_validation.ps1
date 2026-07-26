@@ -39,6 +39,14 @@ param(
     [string]$RunnerRevision = "phase7-runner-v24",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
+    [ValidateSet(
+        "",
+        "gpu-auto-fp32-v1",
+        "gpu-opencl-fp32-v1",
+        "gpu-opencl-low-fp32-v1",
+        "gpu-opengl-fp32-v1"
+    )]
+    [string]$GpuRuntimeProfileId = "",
     [ValidateSet("in-process", "bound-remote")]
     [string]$ExecutionHostMode = "in-process",
     [ValidateSet("none", "setup", "probe", "invocation-after-ready")]
@@ -164,6 +172,12 @@ if ($Stage -notin $sourceStages -and ($ProcessorCount -gt 0 -or $XnnPackFlags -g
 }
 if ($BackendMode -eq "auto" -and ($ProcessorCount -gt 0 -or $XnnPackFlags -ge 0)) {
     throw "ProcessorCount and XnnPackFlags are CPU-only diagnostics and cannot be combined with BackendMode=auto."
+}
+if (-not [string]::IsNullOrWhiteSpace($GpuRuntimeProfileId) -and
+        ($BackendMode -ne "auto" -or $Stage -ne "worker" -or
+        $ExecutionHostMode -ne "in-process" -or $AutoFailpoint -ne "none" -or
+        $RemoteAutoFailpoint -ne "none")) {
+    throw "GpuRuntimeProfileId requires an in-process Auto worker without fault injection."
 }
 if ($AutoFailpoint -ne "none" -and ($BackendMode -ne "auto" -or $Stage -ne "worker")) {
     throw "AutoFailpoint requires BackendMode=auto and Stage=worker."
@@ -688,6 +702,11 @@ try {
         "-e", "coldProcessBoundary", $ForceStopBeforeRun.ToString().ToLowerInvariant(),
         "-e", "preRunProcessExitMs", [string]$preRunProcessBoundary.exitElapsedMs
     )
+    if (-not [string]::IsNullOrWhiteSpace($GpuRuntimeProfileId)) {
+        $instrumentArguments += @(
+            "-e", "gpuRuntimeProfileId", $GpuRuntimeProfileId
+        )
+    }
     if ($null -ne $secondaryModel) {
         $instrumentArguments += @(
             "-e", "secondaryModelId", $SecondaryModelId,

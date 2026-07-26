@@ -20,7 +20,13 @@ param(
     [string]$SecondaryModelId = "",
     [string]$SecondaryModelPath = "",
     [string]$OutputRoot = "",
-    [ValidateSet("gpu-auto-fp32-v1", "gpu-auto-fp16-v1")]
+    [ValidateSet(
+        "gpu-auto-fp32-v1",
+        "gpu-auto-fp16-v1",
+        "gpu-opencl-fp32-v1",
+        "gpu-opencl-low-fp32-v1",
+        "gpu-opengl-fp32-v1"
+    )]
     [string]$GpuProfileId = "gpu-auto-fp32-v1",
     [ValidateSet("setup", "probe", "invocation", "output-read")]
     [string]$GpuFailpoint = "invocation",

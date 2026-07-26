@@ -261,7 +261,7 @@ internal class MdxLiteRtAutoInferenceSessionFactory(
             backend = MdxInferenceBackend.LiteRtGpu,
             platform = platform,
             policy = gpuCompatibilityPolicy,
-            profileId = gpuRuntimeProfile.profileId,
+            profileId = gpuRuntimeProfile.qualificationProfileId,
             precision = gpuRuntimeProfile.precision.toMdxRuntimePrecision(),
         )
         if (!gpuCompatibility.isAllowed) {

@@ -57,14 +57,17 @@ internal class MdxSourceSeparationModelAwareRangeExecutor(
 
 internal fun createAutoLiteRtSessionProvider(
     context: Context,
+    gpuProfile: MdxLiteRtGpuRuntimeProfile = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1,
 ): MdxInferenceSessionProvider {
-    return SingleUseMdxInferenceSessionProvider(createAutoLiteRtSessionFactory(context))
+    return SingleUseMdxInferenceSessionProvider(
+        createAutoLiteRtSessionFactory(context, gpuProfile)
+    )
 }
 
 internal fun createAutoLiteRtSessionFactory(
     context: Context,
+    gpuProfile: MdxLiteRtGpuRuntimeProfile = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1,
 ): MdxInferenceSessionFactory {
-    val gpuProfile = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1
     val factory = MdxLiteRtAutoInferenceSessionFactory(
         gpuRuntimeProfile = gpuProfile,
         gpuCompatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,

@@ -782,15 +782,8 @@ class MdxLiteRtCpuValidationTest {
     }
 
     private fun gpuRuntimeProfile(profileId: String): MdxLiteRtGpuRuntimeProfile =
-        when (profileId) {
-            MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1.profileId ->
-                MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1
-
-            MdxLiteRtGpuRuntimeProfile.AutomaticFp16V1.profileId ->
-                MdxLiteRtGpuRuntimeProfile.AutomaticFp16V1
-
-            else -> error("Unsupported LiteRT GPU runtime profile: $profileId")
-        }
+        MdxLiteRtGpuRuntimeProfile.find(profileId)
+            ?: error("Unsupported LiteRT GPU runtime profile: $profileId")
 
     private fun availableLiteRtAccelerators(): List<String> {
         val environment = Environment.create()
