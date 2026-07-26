@@ -542,6 +542,12 @@ internal fun MdxRangeSeparationResult.toExecutionCompletion(
         detail = runtimeDiagnostics.detail,
         fallbackStage = runtimeDiagnostics.fallbackStage,
         fallbackReason = runtimeDiagnostics.fallbackReason,
+        modelSetupNanos = runtimeDiagnostics.modelSetupNanos,
+        inferenceInvocationCount = runtimeDiagnostics.inferenceInvocationCount,
+        firstInferenceNanos = runtimeDiagnostics.firstInferenceNanos,
+        reusedInferenceCount = runtimeDiagnostics.reusedInferenceCount,
+        reusedInferenceTotalNanos = runtimeDiagnostics.reusedInferenceTotalNanos,
+        lastInferenceNanos = runtimeDiagnostics.lastInferenceNanos,
     ),
     sourceDecodeDiagnostics = sourceDecodeDiagnostics.toExecutionDiagnostics(),
     timingAudioDurationSeconds = timingReport.audioDurationSeconds,
@@ -563,6 +569,12 @@ internal fun SourceSeparationExecutionCompletion.toMdxRangeSeparationResult(
         detail = this.runtimeDiagnostics.detail,
         fallbackStage = this.runtimeDiagnostics.fallbackStage,
         fallbackReason = this.runtimeDiagnostics.fallbackReason,
+        modelSetupNanos = this.runtimeDiagnostics.modelSetupNanos,
+        inferenceInvocationCount = this.runtimeDiagnostics.inferenceInvocationCount,
+        firstInferenceNanos = this.runtimeDiagnostics.firstInferenceNanos,
+        reusedInferenceCount = this.runtimeDiagnostics.reusedInferenceCount,
+        reusedInferenceTotalNanos = this.runtimeDiagnostics.reusedInferenceTotalNanos,
+        lastInferenceNanos = this.runtimeDiagnostics.lastInferenceNanos,
     )
     val sourceDiagnostics = sourceDecodeDiagnostics.toMdxDiagnostics()
     val profile = request.model.executionProfile

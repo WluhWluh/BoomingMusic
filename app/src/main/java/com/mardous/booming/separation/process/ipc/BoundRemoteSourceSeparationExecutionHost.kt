@@ -52,6 +52,8 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private var expectedBinderDeathCount = 0
     private var unexpectedBinderDeathCount = 0
     private var expectedRecycle: SourceSeparationIpcRecycleAcknowledgement? = null
+    private var bindingStartedNanos: Long? = null
+    private var lastBindToConnectedMs: Long? = null
     private var bound = false
     private var bindingSequence = 0L
     private var activeBindingGeneration = 0L
@@ -80,6 +82,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 lastBinderDeath = lastBinderDeath,
                 expectedBinderDeathCount = expectedBinderDeathCount,
                 unexpectedBinderDeathCount = unexpectedBinderDeathCount,
+                bindToConnectedMs = lastBindToConnectedMs,
                 failure = terminalConnectionFailure.get()?.message,
             )
         }
@@ -451,6 +454,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                         "A dead bound-remote run cannot rebind in place."
                     }
                     connectionState = SourceSeparationRemoteConnectionState.Binding
+                    bindingStartedNanos = System.nanoTime()
                     terminalConnectionFailure.set(null)
                     bindingSequence += 1L
                     val generation = bindingSequence.coerceAtLeast(1L)
@@ -583,6 +587,9 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                     remoteDeathRecipient = recipient
                     connectResponse = response
                     lastProcessDiagnostics = response.diagnostics
+                    lastBindToConnectedMs = bindingStartedNanos?.let { started ->
+                        ((System.nanoTime() - started).coerceAtLeast(0L) / 1_000_000L)
+                    }
                     connectionState = SourceSeparationRemoteConnectionState.Connected
                     connectionChanged.signalAll()
                     true
@@ -986,6 +993,7 @@ internal data class SourceSeparationRemoteConnectionDiagnostics(
     val lastBinderDeath: SourceSeparationRemoteBinderDeathDiagnostics?,
     val expectedBinderDeathCount: Int,
     val unexpectedBinderDeathCount: Int,
+    val bindToConnectedMs: Long?,
     val failure: String?,
 )
 

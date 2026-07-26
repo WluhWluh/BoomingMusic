@@ -8,6 +8,7 @@ import com.mardous.booming.separation.model.MdxInferenceSessionFactory
 import com.mardous.booming.separation.model.MdxRangeSeparator
 import com.mardous.booming.separation.model.MdxSeparationExecution
 import com.mardous.booming.separation.model.SingleUseMdxInferenceSessionProvider
+import com.mardous.booming.separation.model.withMdxInferenceTiming
 import com.mardous.booming.separation.model.litert.AndroidMdxLiteRtGpuEligibilityProvider
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoInferenceSessionFactory
 import com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSessionFactory
@@ -86,5 +87,5 @@ internal fun createAutoLiteRtSessionFactory(
             compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
         ),
     )
-    return factory
+    return factory.withMdxInferenceTiming()
 }

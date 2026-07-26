@@ -4920,6 +4920,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             .put("remotePid", diagnostics?.pid ?: JSONObject.NULL)
             .put("processStartTicks", diagnostics?.processStartTicks ?: JSONObject.NULL)
             .put("idleRemotePssBytes", diagnostics?.idlePssBytes ?: JSONObject.NULL)
+            .put("bindToConnectedMs", diagnostics?.bindToConnectedMs ?: JSONObject.NULL)
             .put(
                 "process",
                 processDiagnostics?.let(::processResourceJson) ?: JSONObject.NULL,
@@ -4932,6 +4933,30 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     completion.runtimeDiagnostics.cpuThreads ?: JSONObject.NULL,
                 )
                 .put("detail", completion.runtimeDiagnostics.detail)
+                .put(
+                    "modelSetupNanos",
+                    completion.runtimeDiagnostics.modelSetupNanos ?: JSONObject.NULL,
+                )
+                .put(
+                    "inferenceInvocationCount",
+                    completion.runtimeDiagnostics.inferenceInvocationCount,
+                )
+                .put(
+                    "firstInferenceNanos",
+                    completion.runtimeDiagnostics.firstInferenceNanos ?: JSONObject.NULL,
+                )
+                .put(
+                    "reusedInferenceCount",
+                    completion.runtimeDiagnostics.reusedInferenceCount,
+                )
+                .put(
+                    "reusedInferenceTotalNanos",
+                    completion.runtimeDiagnostics.reusedInferenceTotalNanos,
+                )
+                .put(
+                    "lastInferenceNanos",
+                    completion.runtimeDiagnostics.lastInferenceNanos ?: JSONObject.NULL,
+                )
                 .put(
                     "fallbackStage",
                     completion.runtimeDiagnostics.fallbackStage ?: JSONObject.NULL,

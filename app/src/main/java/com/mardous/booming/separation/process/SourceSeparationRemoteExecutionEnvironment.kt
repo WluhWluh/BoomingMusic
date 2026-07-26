@@ -20,6 +20,7 @@ import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
+import com.mardous.booming.separation.model.withMdxInferenceTiming
 import com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSessionFactory
 import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFaultInjection
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
@@ -293,8 +294,8 @@ private fun createRemoteSessionControllerProvider(
     return SourceSeparationRemoteSessionControllerProvider(
         autoControllerFactory = {
             SourceSeparationProcessSessionController(
-                factory = MdxLiteRtRemoteFaultInjection.takeFactoryIfArmed(context)
-                    ?: createAutoLiteRtSessionFactory(context),
+                factory = (MdxLiteRtRemoteFaultInjection.takeFactoryIfArmed(context)
+                    ?: createAutoLiteRtSessionFactory(context)).withMdxInferenceTiming(),
                 ownership = ownership,
                 runtimeAbi = runtimeAbi,
             )
@@ -303,7 +304,7 @@ private fun createRemoteSessionControllerProvider(
             SourceSeparationProcessSessionController(
                 factory = MdxLiteRtCpuInferenceSessionFactory(
                     compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
-                ),
+                ).withMdxInferenceTiming(),
                 ownership = ownership,
                 runtimeAbi = runtimeAbi,
             )

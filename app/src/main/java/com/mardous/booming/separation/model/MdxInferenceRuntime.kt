@@ -178,12 +178,46 @@ data class MdxRuntimeDiagnostics(
     val detail: String,
     val fallbackStage: String? = null,
     val fallbackReason: String? = null,
+    val modelSetupNanos: Long? = null,
+    val inferenceInvocationCount: Long = 0L,
+    val firstInferenceNanos: Long? = null,
+    val reusedInferenceCount: Long = 0L,
+    val reusedInferenceTotalNanos: Long = 0L,
+    val lastInferenceNanos: Long? = null,
 ) {
+    init {
+        require(
+            modelSetupNanos?.let { it >= 0L } != false &&
+                inferenceInvocationCount >= 0L &&
+                firstInferenceNanos?.let { it >= 0L } != false &&
+                reusedInferenceCount >= 0L && reusedInferenceTotalNanos >= 0L &&
+                lastInferenceNanos?.let { it >= 0L } != false,
+        ) { "Runtime timing diagnostics are invalid." }
+        require(reusedInferenceCount == (inferenceInvocationCount - 1L).coerceAtLeast(0L)) {
+            "Runtime reused-inference count is inconsistent."
+        }
+        require((inferenceInvocationCount == 0L) == (firstInferenceNanos == null)) {
+            "Runtime first-inference timing is inconsistent."
+        }
+        require((inferenceInvocationCount == 0L) == (lastInferenceNanos == null)) {
+            "Runtime last-inference timing is inconsistent."
+        }
+    }
+
     fun toDisplayText(): String = buildString {
         append("Runtime: ").append(runtimeName)
         append(", backend=").append(backend.name)
         cpuThreads?.let { append(", threads=").append(it) }
+        modelSetupNanos?.let { append(", setupMs=").append(it / NANOS_PER_MILLISECOND) }
+        firstInferenceNanos?.let { append(", firstInferenceMs=").append(it / NANOS_PER_MILLISECOND) }
+        if (reusedInferenceCount > 0L) {
+            append(", reusedInferenceCount=").append(reusedInferenceCount)
+        }
         if (detail.isNotBlank()) append(", ").append(detail)
+    }
+
+    private companion object {
+        const val NANOS_PER_MILLISECOND = 1_000_000L
     }
 }
 

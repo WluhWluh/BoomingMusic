@@ -89,6 +89,25 @@ class MdxInferenceRuntimeTest {
     }
 
     @Test
+    fun `timed factory separates setup first and reused inference`() {
+        val timestamps = ArrayDeque(listOf(10L, 20L, 30L, 50L, 60L, 90L))
+        val factory = FakeFactory().withMdxInferenceTiming { timestamps.removeFirst() }
+        val profile = MdxExecutionProfile.legacy(MdxModelVariant.MDXNET_9482)
+        val session = factory.create(artifact(profile), profile, MdxRuntimeSettings())
+
+        session.run(floatArrayOf(1f))
+        session.run(floatArrayOf(2f))
+
+        assertEquals(10L, session.diagnostics.modelSetupNanos)
+        assertEquals(2L, session.diagnostics.inferenceInvocationCount)
+        assertEquals(20L, session.diagnostics.firstInferenceNanos)
+        assertEquals(1L, session.diagnostics.reusedInferenceCount)
+        assertEquals(30L, session.diagnostics.reusedInferenceTotalNanos)
+        assertEquals(30L, session.diagnostics.lastInferenceNanos)
+        assertSame(factory, factory.withMdxInferenceTiming())
+    }
+
+    @Test
     fun `ORT output flattening enforces the declared element count`() {
         val output = arrayOf(
             arrayOf(

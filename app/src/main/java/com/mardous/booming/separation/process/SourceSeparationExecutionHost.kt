@@ -493,6 +493,12 @@ internal data class SourceSeparationExecutionRuntimeDiagnostics(
     val detail: String,
     val fallbackStage: String?,
     val fallbackReason: String?,
+    val modelSetupNanos: Long? = null,
+    val inferenceInvocationCount: Long = 0L,
+    val firstInferenceNanos: Long? = null,
+    val reusedInferenceCount: Long = 0L,
+    val reusedInferenceTotalNanos: Long = 0L,
+    val lastInferenceNanos: Long? = null,
 )
 
 private val SHA256_PATTERN = Regex("^[0-9a-fA-F]{64}$")

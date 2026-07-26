@@ -333,6 +333,17 @@ function Add-WorkerReport(
         timing = [ordered]@{
             firstReadyMs = [int64]$report.timing.firstReadyMs
             fullSongMs = [int64]$report.timing.fullSongMs
+            bindToConnectedMs = if ($null -ne $report.executionHost.bindToConnectedMs) {
+                [int64]$report.executionHost.bindToConnectedMs
+            } else { $null }
+            modelSetupNanos = [int64]$report.executionHost.runtime.modelSetupNanos
+            inferenceInvocationCount =
+                [int64]$report.executionHost.runtime.inferenceInvocationCount
+            firstInferenceNanos = [int64]$report.executionHost.runtime.firstInferenceNanos
+            reusedInferenceCount = [int64]$report.executionHost.runtime.reusedInferenceCount
+            reusedInferenceTotalNanos =
+                [int64]$report.executionHost.runtime.reusedInferenceTotalNanos
+            lastInferenceNanos = [int64]$report.executionHost.runtime.lastInferenceNanos
             mainProcessCpuMs = [int64]$report.processResources.mainProcessCpuMs
             remoteProcessCpuMs = [int64]$report.processResources.remoteProcessCpuMs
         }
@@ -436,6 +447,19 @@ function Test-Gates {
         Require-Equal $reference.execution.decodeMode $record.execution.decodeMode "Decode mode"
         Require-Equal $reference.execution.decodeProfile $record.execution.decodeProfile `
             "Decode profile"
+        if ($record.timing.modelSetupNanos -le 0 -or
+                $record.timing.inferenceInvocationCount -lt 2 -or
+                $record.timing.firstInferenceNanos -le 0 -or
+                $record.timing.reusedInferenceCount -lt 1 -or
+                $record.timing.reusedInferenceTotalNanos -le 0 -or
+                $record.timing.lastInferenceNanos -le 0) {
+            throw "$($record.runId) did not retain complete inference timing diagnostics."
+        }
+        if ($record.hostMode -eq "bound-remote" -and
+                ($null -eq $record.timing.bindToConnectedMs -or
+                    $record.timing.bindToConnectedMs -lt 0)) {
+            throw "$($record.runId) did not retain remote bind/start timing."
+        }
         Require-Equal $reference.output.frameCount $record.output.frameCount "Output frame count"
         Require-Equal ($reference.output.stems | ConvertTo-Json -Compress) `
             ($record.output.stems | ConvertTo-Json -Compress) "Stem integrity"
@@ -515,6 +539,11 @@ function Test-Gates {
         inProcess = [ordered]@{
             firstReadyMs = Get-Median @($inProcess.timing.firstReadyMs)
             fullSongMs = Get-Median @($inProcess.timing.fullSongMs)
+            modelSetupNanos = Get-Median @($inProcess.timing.modelSetupNanos)
+            firstInferenceNanos = Get-Median @($inProcess.timing.firstInferenceNanos)
+            reusedInferenceMeanNanos = Get-Median @($inProcess | ForEach-Object {
+                $_.timing.reusedInferenceTotalNanos / $_.timing.reusedInferenceCount
+            })
             summedPeakPssBytes = Get-Median @($inProcess.memory.summedPeakPssBytes)
             summedPeakNativePssBytes = Get-Median @($inProcess | ForEach-Object {
                 $_.memory.mainPeakNativePssBytes + $_.memory.remotePeakNativePssBytes
@@ -526,6 +555,12 @@ function Test-Gates {
         boundRemote = [ordered]@{
             firstReadyMs = Get-Median @($boundRemote.timing.firstReadyMs)
             fullSongMs = Get-Median @($boundRemote.timing.fullSongMs)
+            bindToConnectedMs = Get-Median @($boundRemote.timing.bindToConnectedMs)
+            modelSetupNanos = Get-Median @($boundRemote.timing.modelSetupNanos)
+            firstInferenceNanos = Get-Median @($boundRemote.timing.firstInferenceNanos)
+            reusedInferenceMeanNanos = Get-Median @($boundRemote | ForEach-Object {
+                $_.timing.reusedInferenceTotalNanos / $_.timing.reusedInferenceCount
+            })
             summedPeakPssBytes = Get-Median @($boundRemote.memory.summedPeakPssBytes)
             summedPeakNativePssBytes = Get-Median @($boundRemote | ForEach-Object {
                 $_.memory.mainPeakNativePssBytes + $_.memory.remotePeakNativePssBytes
