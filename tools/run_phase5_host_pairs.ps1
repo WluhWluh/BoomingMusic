@@ -16,6 +16,7 @@ param(
     [int]$PairCount = 3,
     [int[]]$PairsToRun = @(),
     [string]$SeedSummary = "",
+    [switch]$ValidateSeedOnly,
     [int]$CooldownSeconds = 15,
     [int]$ThermalWaitTimeoutSeconds = 600,
     [switch]$SkipBuild,
@@ -71,10 +72,18 @@ New-Item -ItemType Directory -Force -Path $deviceDirectory | Out-Null
 $runRecords = [System.Collections.Generic.List[object]]::new()
 $failures = [System.Collections.Generic.List[string]]::new()
 $buildNeeded = -not $SkipBuild
-$selectedPairs = if ($PairsToRun.Count -eq 0) {
+$selectedPairs = if ($ValidateSeedOnly) {
+    @()
+} elseif ($PairsToRun.Count -eq 0) {
     @(1..$PairCount)
 } else {
     @($PairsToRun | Select-Object -Unique | Sort-Object)
+}
+if ($ValidateSeedOnly -and $PairsToRun.Count -gt 0) {
+    throw "ValidateSeedOnly cannot be combined with PairsToRun."
+}
+if ($ValidateSeedOnly -and [string]::IsNullOrWhiteSpace($SeedSummary)) {
+    throw "ValidateSeedOnly requires SeedSummary."
 }
 if (($PairsToRun.Count -gt 0 -and $selectedPairs.Count -ne $PairsToRun.Count) -or
         @($selectedPairs | Where-Object { $_ -lt 1 -or $_ -gt $PairCount }).Count -gt 0) {
@@ -237,6 +246,15 @@ function Require-Equal($Expected, $Actual, [string]$Label) {
     if ([string]$Expected -cne [string]$Actual) {
         throw "$Label mismatch: expected '$Expected', actual '$Actual'."
     }
+}
+
+function Get-ObjectField($Object, [string]$Name) {
+    if ($Object -is [System.Collections.IDictionary]) {
+        return $Object[$Name]
+    }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
 }
 
 function Add-WorkerReport(
@@ -412,7 +430,8 @@ function Test-Gates {
             "appCommit", "appApkSha256", "testApkSha256", "catalogSha256",
             "artifactSha256", "contractId", "fixtureSha256", "cacheKey"
         )) {
-            Require-Equal $reference.identity[$field] $record.identity[$field] "Identity $field"
+            Require-Equal (Get-ObjectField $reference.identity $field) `
+                (Get-ObjectField $record.identity $field) "Identity $field"
         }
         Require-Equal $reference.execution.decodeMode $record.execution.decodeMode "Decode mode"
         Require-Equal $reference.execution.decodeProfile $record.execution.decodeProfile `
@@ -637,6 +656,7 @@ try {
         pairCount = $PairCount
         pairsRun = $selectedPairs
         seedSummary = $seedSummaryReportPath
+        validationOnly = [bool]$ValidateSeedOnly
         device = [ordered]@{
             serial = $Serial
             manufacturer = Get-DeviceProperty "ro.product.manufacturer"
