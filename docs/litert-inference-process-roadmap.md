@@ -896,16 +896,28 @@ The host candidate remains `BoundRemote`, pending Phase 5E's
 
 ### Phase 5D: GPU host and fallback matrix
 
-- [ ] Verify accelerator library discovery from the remote arm64 process.
+- [x] Verify accelerator library discovery from the remote arm64 process.
 - [ ] Re-run 9662 GPU eligibility, finite-output probe, and at least three
   alternating full-song `InProcess`/`BoundRemote` Auto pairs on S10 and S25.
-- [ ] Inject setup, invocation, output-read/non-finite, and cleanup failures.
+- [x] Inject setup, invocation, output-read/non-finite, and cleanup failures.
   Confirm GPU closes before CPU fallback is created when cleanup is known-good.
-- [ ] If GPU cleanup is uncertain or fatal, require whole-process recycle
+- [x] If GPU cleanup is uncertain or fatal, require whole-process recycle
   before CPU creation rather than risking a second allocator in one process.
-- [ ] Record graphics/native memory, delegate/library identity, driver
+- [x] Record graphics/native memory, delegate/library identity, driver
   diagnostics, CPU fallback cost, thermal state, and playback continuity
   separately from aggregate PSS.
+
+GPU checkpoint (2026-07-26): S10 passed three alternating full-song Auto pairs
+on each host. Bound remote moved the 265.8 MiB graphics allocation and OpenCL
+mapping out of the main process without duplicating graphics PSS, but added
+32.1 MiB median summed PSS, 595 ms first-ready time, and 2.27 seconds full-song
+time. Both S10 and S25 passed setup, invocation, output-read, non-finite, and
+cleanup fault matrices. Known-good cleanup closes GPU before creating CPU;
+fatal cleanup poisons the generation and forces acknowledged process recycle
+without CPU creation. Arm64 Auto therefore remains `InProcess + SingleUse`.
+The S25 three-pair full-song host matrix is explicitly deferred and this one
+unchecked item remains open. See
+`docs/validation/litert-inference-process/phase5/gpu-host-fallback-2026-07-26.md`.
 
 ### Phase 5E: Process and support policy checkpoint
 

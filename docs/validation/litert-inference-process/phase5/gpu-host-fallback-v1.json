@@ -1,0 +1,162 @@
+{
+  "schemaVersion": "phase5-gpu-host-fallback-v1",
+  "status": "s10-host-passed-fallback-passed-s25-host-deferred",
+  "implementationRevisions": {
+    "hostDiagnostics": "5a6a7dec5f453bca1a570aa7c2b49ef6ae170ae8",
+    "acceleratorDiscovery": "14fa6b6b6cfaebcb6d8b9842c080ddf2aa5f4ab5",
+    "faultInjection": "23acae9552a17c16d0bd5522ce72660612f700a3",
+    "fallbackOrdering": "4e0b1243439d6790311bc52cb6f6ad1ec622c5fb",
+    "fatalCleanupRecycle": "d360271ba86ba3c0507aa38892287a00b5969e7f",
+    "matrixRunner": "cedccbed08eb4f351d11366b01c5d8f5c340b1fb",
+    "resumedPairValidation": "24e2c7fb030757cac37b8770f3aa28891ef84235"
+  },
+  "runtime": {
+    "litertVersion": "2.1.5",
+    "modelId": "uvr_mdxnet_3_9662",
+    "contractId": "uvr_mdxnet_3_9662@2",
+    "modelSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+    "requestedBackend": "LiteRtAuto",
+    "successfulBackend": "LiteRtGpu",
+    "gpuProfile": "gpu-auto-fp32-v1",
+    "accelerator": "libLiteRtClGlAccelerator.so",
+    "sessionLifetime": "SingleUse"
+  },
+  "s10HostMatrix": {
+    "status": "passed",
+    "device": {
+      "model": "SM-G9730",
+      "androidApi": 31,
+      "abi": "arm64-v8a",
+      "runtimeMaxMemoryBytes": 536870912,
+      "gpu": "Qualcomm Adreno 640",
+      "gpuDriverLibrary": "libOpenCL.so"
+    },
+    "fixtureId": "coast_town_full_wav",
+    "fixtureSha256": "e845e52aeeeb69be702d3a28d756eaf7a3137dbe5338ea50fb0ac3d8c4f9bd89",
+    "pairCount": 3,
+    "sampleCountPerHost": 3,
+    "outputFrameCount": 12070130,
+    "outputHashesIdentical": true,
+    "inProcessMedians": {
+      "firstReadyMs": 12799,
+      "fullSongMs": 196244,
+      "summedPeakPssBytes": 630362112,
+      "summedPeakNativePssBytes": 138289152,
+      "summedPeakGraphicsPssBytes": 278745088
+    },
+    "boundRemoteMedians": {
+      "firstReadyMs": 13394,
+      "fullSongMs": 198514,
+      "summedPeakPssBytes": 664032256,
+      "summedPeakNativePssBytes": 152996864,
+      "summedPeakGraphicsPssBytes": 278745088
+    },
+    "boundRemoteRegression": {
+      "firstReadyRatio": 1.046488006875537,
+      "firstReadyMs": 595,
+      "fullSongRatio": 1.0115672326287684,
+      "fullSongMs": 2270,
+      "summedPeakPssBytes": 33670144
+    },
+    "maximumPlaybackDriftMs": 176,
+    "unexpectedPlaybackEventCount": 0,
+    "maximumThermalStatus": 0,
+    "maximumProcessExitMs": 438,
+    "graphicsAllocationMovedToRemoteWithoutDuplication": true,
+    "gpuDriverMovedToRemoteWithoutMainProcessMapping": true
+  },
+  "faultMatrix": {
+    "status": "passed",
+    "fixtureId": "coast_town_short_wav",
+    "failureInvocationCount": 4,
+    "failpoints": [
+      "setup",
+      "invocation",
+      "output-read",
+      "non-finite",
+      "cleanup"
+    ],
+    "knownGoodCleanupBehavior": {
+      "gpuClosedBeforeCpuCreated": true,
+      "cpuFallbackCountPerDevice": 4,
+      "finitePlayableOutput": true
+    },
+    "fatalCleanupBehavior": {
+      "gpuCreateCount": 1,
+      "gpuCloseAttemptCount": 1,
+      "cpuCreateCount": 0,
+      "failedSessionState": "Poisoned",
+      "processRecycleRequired": true,
+      "expectedBinderDeath": true,
+      "processGenerationChanged": true
+    },
+    "devices": [
+      {
+        "model": "SM-G9730",
+        "androidApi": 31,
+        "abi": "arm64-v8a",
+        "maximumFirstReadyMs": 14154,
+        "maximumFullSongMs": 21405,
+        "maximumPlaybackDriftMs": 139,
+        "unexpectedPlaybackEventCount": 0,
+        "remoteGpuDriverLibraries": [
+          "libOpenCL.so",
+          "libGLESv2.so"
+        ]
+      },
+      {
+        "model": "SM-S9310",
+        "androidApi": 35,
+        "abi": "arm64-v8a",
+        "runtimeMaxMemoryBytes": 536870912,
+        "maximumFirstReadyMs": 5922,
+        "maximumFullSongMs": 8929,
+        "maximumPlaybackDriftMs": 140,
+        "unexpectedPlaybackEventCount": 0,
+        "remoteGpuDriverLibraries": [
+          "libOpenCL.so",
+          "libOpenCL_adreno.so",
+          "libGLESv2.so"
+        ]
+      }
+    ]
+  },
+  "deferredEvidence": {
+    "s25FullSongHostPairs": true,
+    "reason": "The S25 three-pair full-song host matrix was explicitly deferred; its five-case remote fault matrix passed but does not substitute for paired host evidence."
+  },
+  "normalBuildRegression": {
+    "githubDebugUnitTest": "passed",
+    "fdroidDebugUnitTest": "passed",
+    "githubDebugAndroidTestKotlin": "passed",
+    "fdroidDebugAndroidTestKotlin": "passed",
+    "githubReleaseKotlin": "passed",
+    "fdroidReleaseKotlin": "passed"
+  },
+  "interpretation": {
+    "remoteGpuViableOnTestedS10Scope": true,
+    "remoteGpuReliabilityGainOverInProcessMeasured": false,
+    "remoteGpuDuplicatesGraphicsAllocation": false,
+    "fatalCleanupCanFallBackWithinSameProcess": false,
+    "s25HostPlacementQualified": false,
+    "releaseHostPolicyChanged": false,
+    "releasePolicy": "Retain InProcess + SingleUse for arm64 Auto. BoundRemote remains qualified for controlled fault recovery and future background experiments; S25 full-song host placement remains pending."
+  },
+  "rawEvidence": [
+    {
+      "fileName": "phase5-gpu-s10-full-v3-192.168.8.181_35975-arm64-v8a-auto-summary.json",
+      "byteSize": 133163,
+      "sha256": "cf69298f13a80c7ce827383496478de53ab89123520b355a71e97eb908f72835"
+    },
+    {
+      "fileName": "phase5-gpu-fault-matrix-s10-v1-192.168.8.181_35975-summary.json",
+      "byteSize": 5102,
+      "sha256": "6ca946255adc5d3849a356a4153b36115eb7fefad25bbc495a18685589e79742"
+    },
+    {
+      "fileName": "phase5-gpu-fault-matrix-s25-v1-192.168.8.197_39801-summary.json",
+      "byteSize": 5094,
+      "sha256": "a5452e13f9626f5a19ac0083de942cf73ec082c72d55fffa3af697cd2e0cf401"
+    }
+  ]
+}
