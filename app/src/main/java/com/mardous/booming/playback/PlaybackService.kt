@@ -398,6 +398,9 @@ class PlaybackService :
         )
 
         player.exoPlayer.shuffleOrder = ImprovedShuffleOrder(0, 0, Random.nextLong())
+        if (BuildConfig.DEBUG) {
+            PlaybackContentionDiagnostics.attach(player.exoPlayer, playerThread.threadId)
+        }
         player.setSequentialTimelineEnabled(sequentialTimeline)
         player.addListener(this)
         observeSourceSeparationForegroundWorker()
@@ -503,6 +506,9 @@ class PlaybackService :
         sourceSeparationMixProcessor.disable()
         sourceSeparationMixProcessor.debugTraceSink = null
         sourceSeparationMixProcessor.mixedOutputStartedSink = null
+        if (BuildConfig.DEBUG) {
+            PlaybackContentionDiagnostics.detach(player.exoPlayer)
+        }
         player.release()
         playerThread.quitSafely()
         equalizerManager.release()

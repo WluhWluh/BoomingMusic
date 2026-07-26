@@ -396,6 +396,23 @@ function Add-WorkerReport(
             snapshotCount = [int]$report.originalPlayback.snapshotCount
             maximumPositionDriftMs = [int64]$report.originalPlayback.maximumPositionDriftMs
             unexpectedEventCount = [int]$report.originalPlayback.unexpectedEventCount
+            contentionCountersAvailable =
+                [bool]$report.originalPlayback.contentionCountersAvailable
+            audioUnderrunCount = [int64]$report.originalPlayback.audioUnderrunCount
+            audioUnderrunElapsedSinceLastFeedTotalMs =
+                [int64]$report.originalPlayback.audioUnderrunElapsedSinceLastFeedTotalMs
+            maximumAudioUnderrunElapsedSinceLastFeedMs =
+                [int64]$report.originalPlayback.maximumAudioUnderrunElapsedSinceLastFeedMs
+            maximumAudioUnderrunBufferSizeMs =
+                $report.originalPlayback.maximumAudioUnderrunBufferSizeMs
+            playerRunTimeNanos = [int64]$report.originalPlayback.playerRunTimeNanos
+            playerRunQueueWaitNanos =
+                [int64]$report.originalPlayback.playerRunQueueWaitNanos
+            playerTimesliceCount = [int64]$report.originalPlayback.playerTimesliceCount
+            playerVoluntaryContextSwitches =
+                [int64]$report.originalPlayback.playerVoluntaryContextSwitches
+            playerInvoluntaryContextSwitches =
+                [int64]$report.originalPlayback.playerInvoluntaryContextSwitches
         }
     }
     $runRecords.Add($record)
@@ -514,6 +531,9 @@ function Test-Gates {
                 [int]$thresholds.playback.maximumUnexpectedEventCount) {
             throw "$($record.runId) failed original playback continuity."
         }
+        if (-not $record.playback.contentionCountersAvailable) {
+            throw "$($record.runId) did not retain playback contention counters."
+        }
     }
 
     foreach ($pair in 1..$PairCount) {
@@ -544,6 +564,9 @@ function Test-Gates {
             reusedInferenceMeanNanos = Get-Median @($inProcess | ForEach-Object {
                 $_.timing.reusedInferenceTotalNanos / $_.timing.reusedInferenceCount
             })
+            audioUnderrunCount = Get-Median @($inProcess.playback.audioUnderrunCount)
+            playerRunQueueWaitNanos =
+                Get-Median @($inProcess.playback.playerRunQueueWaitNanos)
             summedPeakPssBytes = Get-Median @($inProcess.memory.summedPeakPssBytes)
             summedPeakNativePssBytes = Get-Median @($inProcess | ForEach-Object {
                 $_.memory.mainPeakNativePssBytes + $_.memory.remotePeakNativePssBytes
@@ -561,6 +584,9 @@ function Test-Gates {
             reusedInferenceMeanNanos = Get-Median @($boundRemote | ForEach-Object {
                 $_.timing.reusedInferenceTotalNanos / $_.timing.reusedInferenceCount
             })
+            audioUnderrunCount = Get-Median @($boundRemote.playback.audioUnderrunCount)
+            playerRunQueueWaitNanos =
+                Get-Median @($boundRemote.playback.playerRunQueueWaitNanos)
             summedPeakPssBytes = Get-Median @($boundRemote.memory.summedPeakPssBytes)
             summedPeakNativePssBytes = Get-Median @($boundRemote | ForEach-Object {
                 $_.memory.mainPeakNativePssBytes + $_.memory.remotePeakNativePssBytes

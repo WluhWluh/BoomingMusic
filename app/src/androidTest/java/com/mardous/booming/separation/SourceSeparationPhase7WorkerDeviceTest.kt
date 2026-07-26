@@ -27,6 +27,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.PlaybackService
+import com.mardous.booming.playback.PlaybackContentionDiagnostics
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultAction
@@ -4379,6 +4380,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         private val audioFocusOverride: PlaybackAudioFocusTestOverride,
         private val restorationWaitDurationMs: Long,
     ) : Player.Listener {
+        private val contentionBaseline = PlaybackContentionDiagnostics.snapshot()
         private val armed = AtomicBoolean(false)
         private val closed = AtomicBoolean(false)
         private val automaticDiscontinuityCount = AtomicInteger(0)
@@ -4465,6 +4467,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         fun report(): JSONObject {
             val snapshotCopy = synchronized(snapshots) { snapshots.toList() }
             val eventCopy = synchronized(unexpectedEvents) { unexpectedEvents.toList() }
+            val contention = PlaybackContentionDiagnostics.snapshot()
+                .deltaFrom(contentionBaseline)
             return JSONObject()
                 .put("expectedMediaId", expectedMediaId)
                 .put("sourcePreparationAttempts", sourcePreparationAttempts)
@@ -4483,6 +4487,31 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 )
                 .put("unexpectedEventCount", eventCopy.size)
                 .put("unexpectedEvents", JSONArray(eventCopy))
+                .put("contentionCountersAvailable", contention.available)
+                .put("audioUnderrunCount", contention.audioUnderrunCount)
+                .put(
+                    "audioUnderrunElapsedSinceLastFeedTotalMs",
+                    contention.audioUnderrunElapsedSinceLastFeedTotalMs,
+                )
+                .put(
+                    "maximumAudioUnderrunElapsedSinceLastFeedMs",
+                    contention.maximumAudioUnderrunElapsedSinceLastFeedMs,
+                )
+                .put(
+                    "maximumAudioUnderrunBufferSizeMs",
+                    contention.maximumAudioUnderrunBufferSizeMs ?: JSONObject.NULL,
+                )
+                .put("playerRunTimeNanos", contention.playerRunTimeNanos)
+                .put("playerRunQueueWaitNanos", contention.playerRunQueueWaitNanos)
+                .put("playerTimesliceCount", contention.playerTimesliceCount)
+                .put(
+                    "playerVoluntaryContextSwitches",
+                    contention.playerVoluntaryContextSwitches,
+                )
+                .put(
+                    "playerInvoluntaryContextSwitches",
+                    contention.playerInvoluntaryContextSwitches,
+                )
                 .put("snapshots", JSONArray(snapshotCopy))
         }
 
