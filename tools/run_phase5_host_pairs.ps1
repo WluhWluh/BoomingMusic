@@ -14,6 +14,8 @@ param(
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "auto",
     [int]$PairCount = 3,
+    [int[]]$PairsToRun = @(),
+    [string]$SeedSummary = "",
     [int]$CooldownSeconds = 15,
     [int]$ThermalWaitTimeoutSeconds = 600,
     [switch]$SkipBuild,
@@ -69,6 +71,37 @@ New-Item -ItemType Directory -Force -Path $deviceDirectory | Out-Null
 $runRecords = [System.Collections.Generic.List[object]]::new()
 $failures = [System.Collections.Generic.List[string]]::new()
 $buildNeeded = -not $SkipBuild
+$selectedPairs = if ($PairsToRun.Count -eq 0) {
+    @(1..$PairCount)
+} else {
+    @($PairsToRun | Select-Object -Unique | Sort-Object)
+}
+if (($PairsToRun.Count -gt 0 -and $selectedPairs.Count -ne $PairsToRun.Count) -or
+        @($selectedPairs | Where-Object { $_ -lt 1 -or $_ -gt $PairCount }).Count -gt 0) {
+    throw "PairsToRun contains duplicate or out-of-range pair numbers."
+}
+if ([string]::IsNullOrWhiteSpace($SeedSummary) -and
+        $selectedPairs.Count -ne $PairCount) {
+    throw "A partial paired-host run requires SeedSummary."
+}
+$seedSummaryReportPath = $null
+if (-not [string]::IsNullOrWhiteSpace($SeedSummary)) {
+    $seedPath = (Resolve-Path -LiteralPath $SeedSummary).Path
+    $seedSummaryReportPath = $seedPath.Substring($OutputRoot.Length).TrimStart('\', '/').Replace('\', '/')
+    $seed = Get-Content -LiteralPath $seedPath -Raw | ConvertFrom-Json
+    if ($seed.schemaVersion -ne "phase5-paired-host-report-v2" -or
+            $seed.modelId -ne $ModelId -or $seed.fixtureId -ne $FixtureId -or
+            $seed.backendMode -ne $BackendMode -or [int]$seed.pairCount -ne $PairCount -or
+            $seed.device.serial -ne $Serial -or $seed.device.processAbi -ne $ProcessAbi) {
+        throw "SeedSummary does not match this paired-host matrix identity."
+    }
+    @($seed.runs) |
+        Where-Object { [int]$_.pair -notin $selectedPairs } |
+        ForEach-Object { $runRecords.Add($_) }
+    if ($runRecords.Count -ne ($PairCount - $selectedPairs.Count) * 2) {
+        throw "SeedSummary does not contain every retained pair exactly once."
+    }
+}
 
 function Invoke-Adb {
     & $adb -s $Serial @args
@@ -517,7 +550,7 @@ function Test-Gates {
 
 $comparison = $null
 try {
-    if (-not $SkipAcquisition) {
+    if (-not $SkipAcquisition -and [string]::IsNullOrWhiteSpace($SeedSummary)) {
         $acquisitionId = "$RunPrefix-$safeSerial-$ProcessAbi-$BackendMode-acquisition"
         $arguments = @{
             Serial = $Serial
@@ -534,6 +567,7 @@ try {
     }
 
     for ($pair = 1; $pair -le $PairCount; $pair++) {
+        if ($pair -notin $selectedPairs) { continue }
         $frozenOrders = @($thresholds.measurement.pairOrder)
         $order = if ($pair -le $frozenOrders.Count) {
             @($frozenOrders[$pair - 1])
@@ -601,6 +635,8 @@ try {
         fixtureId = $FixtureId
         backendMode = $BackendMode
         pairCount = $PairCount
+        pairsRun = $selectedPairs
+        seedSummary = $seedSummaryReportPath
         device = [ordered]@{
             serial = $Serial
             manufacturer = Get-DeviceProperty "ro.product.manufacturer"
