@@ -21,6 +21,7 @@ import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSessionFactory
+import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFaultInjection
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -292,7 +293,8 @@ private fun createRemoteSessionControllerProvider(
     return SourceSeparationRemoteSessionControllerProvider(
         autoControllerFactory = {
             SourceSeparationProcessSessionController(
-                factory = createAutoLiteRtSessionFactory(context),
+                factory = MdxLiteRtRemoteFaultInjection.takeFactoryIfArmed(context)
+                    ?: createAutoLiteRtSessionFactory(context),
                 ownership = ownership,
                 runtimeAbi = runtimeAbi,
             )
