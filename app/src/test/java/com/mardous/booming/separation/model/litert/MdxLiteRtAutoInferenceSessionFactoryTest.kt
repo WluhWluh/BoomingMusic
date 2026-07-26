@@ -164,6 +164,7 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
         assertEquals(MdxInferenceBackend.LiteRtGpu, diagnostics.acceptedOutputBackend)
         assertTrue(diagnostics.gpuSetupNanos != null)
         assertTrue(diagnostics.gpuProbeNanos != null)
+        assertTrue(session.diagnostics.detail.contains("eligibilityDetail=test eligible"))
         session.close()
     }
 

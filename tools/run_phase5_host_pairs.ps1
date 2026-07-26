@@ -361,13 +361,18 @@ function Test-Gates {
             if ($record.execution.runtimeDetail -notmatch 'eligibility=Eligible') {
                 throw "$($record.runId) did not retain eligible GPU runtime diagnostics."
             }
+            if ($record.execution.runtimeDetail -notmatch
+                    'accelerator=libLiteRtClGlAccelerator\.so') {
+                throw "$($record.runId) did not resolve the packaged GPU accelerator."
+            }
             $acceleratorLibraries = if ($record.hostMode -eq "bound-remote") {
                 @($record.execution.remoteMappedNativeLibraries)
             } else {
                 @($record.execution.mainMappedNativeLibraries)
             }
-            if ($acceleratorLibraries -notcontains "libLiteRtClGlAccelerator.so") {
-                throw "$($record.runId) did not map the packaged GPU accelerator in its host process."
+            if ($acceleratorLibraries -notcontains "libOpenCL.so" -and
+                    $acceleratorLibraries -notcontains "libGLESv2.so") {
+                throw "$($record.runId) did not map an OpenCL or OpenGL GPU driver in its host process."
             }
         }
         foreach ($field in @(

@@ -16,6 +16,7 @@ import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import java.io.File
 import java.util.concurrent.CancellationException
 import kotlin.math.max
 
@@ -147,7 +148,8 @@ internal class AndroidMdxLiteRtGpuEligibilityProvider(
             )
         }
         return MdxLiteRtGpuEligibilityDecision.eligible(
-            "Resolved $GPU_ACCELERATOR_LIBRARY with ${memoryInfo.availMem} bytes available.",
+            "accelerator=${File(acceleratorPath).name}, " +
+                "availableMemoryBytes=${memoryInfo.availMem}",
         )
     }
 
@@ -537,6 +539,7 @@ private class MdxLiteRtAutoInferenceSession(
                     append("policy=Auto, profile=").append(snapshot.gpuProfileId)
                     append(", state=").append(snapshot.state.name)
                     append(", eligibility=").append(snapshot.eligibilityReason.name)
+                    append(", eligibilityDetail=").append(snapshot.eligibilityDetail)
                     snapshot.fallbackStage?.let { append(", fallbackStage=").append(it.name) }
                     snapshot.fallbackReason?.let { append(", fallbackReason=").append(it) }
                 },
