@@ -916,6 +916,10 @@ The host candidate remains `BoundRemote`, pending Phase 5E's
   separately from aggregate PSS.
 - [x] Attribute foreground GPU UI stalls and test the stock AAR's forced
   OpenGL and OpenCL low-priority controls without changing decode policy.
+- [x] Test a MACE-style bounded OpenCL command queue through a strict
+  diagnostic AAR, including tensor parity, whole-song output hashes,
+  throughput, memory, thermal state, and foreground FrameTimeline/fence
+  attribution on S10 and S25.
 
 GPU checkpoint (2026-07-26): S10 passed three alternating full-song Auto pairs
 on each host. Bound remote moved the 265.8 MiB graphics allocation and OpenCL
@@ -939,6 +943,22 @@ are rejected. Stock LiteRT 2.1.5 exposes native OpenCL kernel batching but not
 through its Kotlin/JNI AAR surface; testing smaller flush batches requires a
 separate custom-AAR experiment. See
 `docs/validation/litert-inference-process/phase5/gpu-ui-contention-2026-07-26.md`.
+
+OpenCL queue-window checkpoint (2026-07-26): the diagnostic AAR redirects the
+otherwise unused Kotlin command-preparation setter to native
+`kernel_batch_size` and waits on every Nth NDRange boundary event only during
+`CompiledModel.run()`. `N=1` preserved the frozen tensor result and produced
+identical WAV/FLAC hashes across 11 whole-song runs. On S25 it raised the
+marked swipe interval from 61.5 to 116.8 fps, removed all frames above 50 ms,
+and reduced the maximum GPU wait from 247 to 30 ms. On S10 it raised 22.3 to
+37.0 fps and reduced the maximum frame from 1,364 to 201 ms, but one long
+kernel still exceeds 200 ms. No no-Perfetto pair showed a systematic
+whole-song throughput regression. The mechanism is effective, but the binary
+patch is not a release surface and S10 remains visibly imperfect. Production
+work therefore requires an upstream or pinned source-built option plus wider
+vendor qualification; CPU-while-visible remains the conservative fallback
+for devices that fail the UI gate. See
+`docs/validation/litert-inference-process/phase5/gpu-opencl-queue-window-2026-07-26.md`.
 
 ### Phase 5E: Process and support policy checkpoint
 
@@ -1383,11 +1403,12 @@ These decisions guide implementation but remain subject to the phase gates:
 - Whether unknown imported models may be activated on x86 and, if so, what
   explicit unverified-resource flow contains their failure.
 - Whether GPU Auto remains stable in a service process on both Samsung devices.
-- Whether a custom diagnostic LiteRT AAR can use smaller OpenCL kernel flush
-  batches to keep one foreground fence wait below a display-frame budget
-  without unacceptable throughput or output regressions.
-- Whether production Auto should select CPU whenever MainActivity is visible
-  and reserve GPU for background or screen-off work if batching fails.
+- Whether an upstream or pinned source-built `kernel_batch_size=1` surface is
+  maintainable, and whether it passes the same gate on Adreno, Mali, and a
+  non-Samsung device. The diagnostic binary patch is not a release option.
+- Whether production Auto should use qualified bounded GPU while MainActivity
+  is visible, or select CPU on devices like S10 where one kernel still exceeds
+  the foreground responsiveness budget.
 - Whether the service should retain an idle same-model session after pause.
 - Which bounded restart mechanism is reliable across API 26 through target 36.
 - Whether FLAC promotion belongs in the independently running process.

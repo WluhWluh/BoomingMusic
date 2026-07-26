@@ -31,6 +31,10 @@ selection, MP3 handling, output frames, and join placement.
 - Later phase directories use
   `<phase>/<yyyy-mm-dd>/<target>/<run-id>.json`.
 
+The Phase 5 GPU records include the stock-runtime
+[UI contention attribution](phase5/gpu-ui-contention-2026-07-26.md) and the
+follow-up [bounded OpenCL queue experiment](phase5/gpu-opencl-queue-window-2026-07-26.md).
+
 Large profiler traces, PCM/stem exports, `/proc/<pid>/maps` snapshots,
 and repeated-run logs remain under ignored `build/` output. A
 committed summary must identify hashes for any ignored evidence used in a

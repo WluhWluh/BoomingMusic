@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "gpu-opencl-queue-window-v1",
+  "date": "2026-07-26",
+  "status": "effective-but-not-release-ready",
+  "identity": {
+    "appBaseCommit": "eacd5ee0b880657b0f49bca3cbbd51643053db74",
+    "experimentIntegrationCommit": "a577c32b",
+    "appApkSha256": "c88825dc953e524679d9b1aa15b221f4cc25d35f3e344c2b734827c9cc2f8be3",
+    "testApkSha256": "e281cf508889768c8ef7015231c8759931aa7dcfff43be3384d7f846c84cfc6e",
+    "catalogSha256": "a553f227588313578321c07c73ff99654eff7795727d825d16b191aa0f879e1f",
+    "testedAar": {
+      "coordinate": "com.google.ai.edge.litert:litert:2.1.5-bss.oclq4",
+      "sha256": "2f71791bac5268f170954d7b673e95aabfab492292cf715690d8691c106eddf7",
+      "runtimeSha256": "ae2b996fde27021b070e88b56eebc9626a5261feb72f09791bdac38b2f09abd2",
+      "acceleratorSha256": "cef6e4dc72485d84c18e673e205064b4a5390bb9ed8b9f61a5361a3f279e6a8c",
+      "shimSha256": "0bc56359e8d8e0a787558ea1d94099a8b33149a8607032859f31bd2ded9a619d"
+    },
+    "reproducibleAar": {
+      "builderCommit": "e061de6e5a4170b30ad249f19d8e3b4315989356",
+      "manifestSchemaVersion": "bss-litert-opencl-queue-experiment-v2",
+      "sha256": "06bf391df0e8b74c5a80ed5d272d847e4147493d17478afe426f30839c81276b",
+      "archiveEpoch": 315532800,
+      "nativeComponentsMatchTestedApk": true
+    },
+    "model": {
+      "id": "uvr_mdxnet_3_9662",
+      "contractId": "uvr_mdxnet_3_9662@2",
+      "artifactSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378"
+    }
+  },
+  "devices": [
+    {
+      "id": "s10",
+      "model": "SM-G9730",
+      "androidApi": 31,
+      "fingerprint": "samsung/beyond1qltezc/beyond1q:12/SP1A.210812.016/G9730ZCU8HWE2:user/release-keys"
+    },
+    {
+      "id": "s25",
+      "model": "SM-S9310",
+      "androidApi": 35,
+      "fingerprint": "samsung/pa1qzcx/pa1q:15/AP3A.240905.015.A2/S9310ZCU5AYHA_CHC5AYHA:user/release-keys"
+    }
+  ],
+  "syntheticTensor": {
+    "inputSha256": "195c81b8c72c2865f18080a78433c4377b4375a8569f3bc4d7a243ffbc1b3a33",
+    "ortReferenceSha256": "9c78d8489bb9be47f0be707f52f5d5be3d398382cf63fe8de1355f96e34c09d3",
+    "snrDb": 93.8327580883061,
+    "maximumAbsoluteError": 0.00006687641143798828,
+    "reuseMaximumAbsoluteError": 0.0,
+    "rows": [
+      {"device": "s25", "window": 0, "setupMs": 814, "firstMs": 426, "reuseMs": 354, "waits": 0, "meanWaitMs": 0.0, "maximumWaitMs": 0.0},
+      {"device": "s25", "window": 1, "setupMs": 823, "firstMs": 472, "reuseMs": 376, "waits": 254, "meanWaitMs": 2.183, "maximumWaitMs": 28.205},
+      {"device": "s25", "window": 4, "setupMs": 823, "firstMs": 452, "reuseMs": 365, "waits": 63, "meanWaitMs": 8.222, "maximumWaitMs": 38.534},
+      {"device": "s25", "window": 8, "setupMs": 818, "firstMs": 447, "reuseMs": 364, "waits": 31, "meanWaitMs": 14.318, "maximumWaitMs": 69.804},
+      {"device": "s25", "window": 16, "setupMs": 831, "firstMs": 440, "reuseMs": 355, "waits": 15, "meanWaitMs": 23.217, "maximumWaitMs": 104.417},
+      {"device": "s25", "window": 32, "setupMs": 824, "firstMs": 440, "reuseMs": 350, "waits": 7, "meanWaitMs": 37.494, "maximumWaitMs": 120.042},
+      {"device": "s10", "window": 0, "setupMs": 1074, "firstMs": 2489, "reuseMs": 2444, "waits": 0, "meanWaitMs": 0.0, "maximumWaitMs": 0.0},
+      {"device": "s10", "window": 1, "setupMs": 1080, "firstMs": 2612, "reuseMs": 2558, "waits": 254, "meanWaitMs": 19.26, "maximumWaitMs": 372.43},
+      {"device": "s10", "window": 4, "setupMs": 1068, "firstMs": 2451, "reuseMs": 2445, "waits": 63, "meanWaitMs": 74.18, "maximumWaitMs": 480.79},
+      {"device": "s10", "window": 8, "setupMs": 1087, "firstMs": 2482, "reuseMs": 2448, "waits": 31, "meanWaitMs": 122.82, "maximumWaitMs": 683.56},
+      {"device": "s10", "window": 16, "setupMs": 1126, "firstMs": 2465, "reuseMs": 2433, "waits": 15, "meanWaitMs": 181.99, "maximumWaitMs": 902.77},
+      {"device": "s10", "window": 32, "setupMs": 1110, "firstMs": 2520, "reuseMs": 2474, "waits": 7, "meanWaitMs": 314.9, "maximumWaitMs": 1052.97}
+    ]
+  },
+  "fullSong": {
+    "fixtureId": "coast_town_full_wav",
+    "fixtureSha256": "e845e52aeeeb69be702d3a28d756eaf7a3137dbe5338ea50fb0ac3d8c4f9bd89",
+    "outputFrames": 12070130,
+    "outputHashes": {
+      "vocalsWav": "bc9b564be8b05a828c890c0ae6cfcb03bcfb40104df7fecf4d3a9e9d57eb2c91",
+      "instrumentalWav": "b5ec4830cc968b9633299053b6ac1b53348d4e2eafccd78a9e4ce33561e19a1d",
+      "vocalsFlac": "fc36b957e7e3f274a82bcc450a8a8342c13ad2c820352e54b3dff75f2b5efa9b",
+      "instrumentalFlac": "e5727252ab9b42cc072e4e8e4ea7978d2a3f331a1449112032fc7adf91a536b4"
+    },
+    "identicalHashRunCount": 11,
+    "rows": [
+      {"runId": "oclq4-s10-window0-ui-v1", "window": 0, "firstReadyMs": 13636, "fullSongMs": 181340, "peakPssMiB": 659.7, "thermalPeak": 0, "reportSha256": "5443b589091bd9b8880f253db49a7f5fb68e7d99ad0d7a110d1ab95fe78752ae"},
+      {"runId": "oclq4-s10-window1-ui-v1", "window": 1, "firstReadyMs": 12557, "fullSongMs": 175753, "peakPssMiB": 675.8, "thermalPeak": 0, "reportSha256": "243e4fb83e7968ecef6f8f694239d2fcc73824fba3da7216188306b4407577e3"},
+      {"runId": "oclq4-s10-window1-ui-v2", "window": 1, "firstReadyMs": 13682, "fullSongMs": 192241, "peakPssMiB": 679.8, "thermalPeak": 0, "reportSha256": "118a5d97e9035e39e3992ebbeaaee814269f0465527bff16fd67cf0075fdf18b"},
+      {"runId": "oclq4-s10-window0-ui-v2", "window": 0, "firstReadyMs": 14368, "fullSongMs": 212275, "peakPssMiB": 677.0, "thermalPeak": 0, "reportSha256": "9a8143e8b164488f411f208ee57ad0f23ca0382253f68f0b0a032a416a7461b4"},
+      {"runId": "oclq4-s25-window0-ui-v1", "window": 0, "firstReadyMs": 3839, "fullSongMs": 31049, "peakPssMiB": 868.8, "thermalPeak": 0, "reportSha256": "809d0ae9015a44443b99abf161fa1338f19956c9cbae971bc6ea2aa272a5a5d8"},
+      {"runId": "oclq4-s25-window1-ui-v1", "window": 1, "firstReadyMs": 3876, "fullSongMs": 33844, "peakPssMiB": 824.4, "thermalPeak": 0, "reportSha256": "29d229738d23b33b0ac785fbf21d978fcd97b8ea53f6b8b17b47cdbd272ef5fb"},
+      {"runId": "oclq4-s25-window1-ui-v2", "window": 1, "firstReadyMs": 4069, "fullSongMs": 33387, "peakPssMiB": 812.3, "thermalPeak": 0, "reportSha256": "3c93cab9da7db4d1fbfb631e8dcebeda1dcf3d6f76895b17229c572a2dbcd49f"},
+      {"runId": "oclq4-s25-window0-ui-v2", "window": 0, "firstReadyMs": 4390, "fullSongMs": 40255, "peakPssMiB": 871.2, "thermalPeak": 0, "reportSha256": "c3fdf20e784197b0b4aa0979e61edc3cae03c7582cdf90cabbb45e9dab9bd4d8"}
+    ]
+  },
+  "perfetto": {
+    "traceProcessorSha256": "100334b6091596fbc97f872556849a5747bf47a7f7190c485ba8cea8d2409c7b",
+    "rows": [
+      {"runId": "oclq4-s25-window0-perfetto-v1", "intervalSeconds": 15.696, "frames": 965, "fps": 61.481, "framesOver20Ms": 81, "framesOver200Ms": 78, "p99Ms": 244.139, "maximumFrameMs": 249.658, "longGpuWaits": 27, "meanLongGpuWaitMs": 236.326, "maximumGpuWaitMs": 246.958, "longFramesOverlappingGpuWait": 81, "traceSha256": "5dcf16cc4d3f85ed8813a21743ae979e9f23cee2eb1d55016b820ea63281a5d6"},
+      {"runId": "oclq4-s25-window1-perfetto-v1", "intervalSeconds": 14.831, "frames": 1732, "fps": 116.786, "framesOver20Ms": 85, "framesOver200Ms": 0, "p99Ms": 26.593, "maximumFrameMs": 35.121, "longGpuWaits": 24, "meanLongGpuWaitMs": 24.514, "maximumGpuWaitMs": 30.373, "longFramesOverlappingGpuWait": 85, "traceSha256": "9c42e7e8dfeac35d2a7e5251291155c5e9c9b377fd8584b3b5bf755fb522f9b8"},
+      {"runId": "oclq4-s10-window0-perfetto-v1", "intervalSeconds": 23.079, "frames": 515, "fps": 22.315, "framesOver20Ms": 353, "framesOver200Ms": 14, "p99Ms": 1188.152, "maximumFrameMs": 1364.312, "longGpuWaits": 21, "meanLongGpuWaitMs": 758.643, "maximumGpuWaitMs": 1251.186, "longFramesOverlappingGpuWait": 353, "traceSha256": "460f127ec8744a497695a77eb4d51051a1d7c527ae4d238933a95b189bd854fb"},
+      {"runId": "oclq4-s10-window1-perfetto-v1", "intervalSeconds": 15.635, "frames": 578, "fps": 36.968, "framesOver20Ms": 263, "framesOver200Ms": 1, "p99Ms": 48.4, "maximumFrameMs": 200.973, "longGpuWaits": 125, "meanLongGpuWaitMs": 75.958, "maximumGpuWaitMs": 411.613, "longFramesOverlappingGpuWait": 263, "traceSha256": "1f7f4e4bf8b81fb7bec50d8badc58e4982b8bb2453345c9779a3602f8dc54498"}
+    ],
+    "s10BoundaryMethod": "Android 12 lacked the android.log data source. N=1 used retained epoch log markers plus REALTIME/BOOTTIME clock snapshots. N=0 used host UTC shifted by the measured 136 ms adb-log latency and was cross-checked against input-event clusters.",
+    "traceHealth": "No ftrace overrun, buffer overwrite, or packet-loss statistic was present. S10 dropped 41 and 306 negative-timestamp packets from old producers; FrameTimeline, app GPU-completion waits, and all swipe clusters remained present."
+  },
+  "decision": {
+    "bestTestedWindow": 1,
+    "s25": "Effective: near-120 fps and no frame over 50 ms in the marked interval.",
+    "s10": "Material improvement but incomplete: maximum frame fell from 1364 ms to 201 ms and one frame still exceeded 200 ms.",
+    "release": "Do not ship the binary-patched runtime yet. Prefer an upstream or pinned source-built API, broaden vendor coverage, and retain foreground CPU fallback for devices where one kernel still exceeds the UI budget."
+  }
+}
