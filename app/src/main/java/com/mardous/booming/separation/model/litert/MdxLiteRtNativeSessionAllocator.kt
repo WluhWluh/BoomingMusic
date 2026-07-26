@@ -74,30 +74,36 @@ internal object MdxLiteRtNativeGpuSessionAllocator : MdxLiteRtGpuSessionAllocato
         profile: MdxExecutionProfile,
         runtimeProfile: MdxLiteRtGpuRuntimeProfile,
         compatibility: MdxCompatibilityDecision,
-    ): MdxInferenceSession = createNativeLiteRtSession(
-        artifact = artifact,
-        profile = profile,
-        requiredAccelerator = Accelerator.GPU,
-        options = CompiledModel.Options(Accelerator.GPU).apply {
-            gpuOptions = CompiledModel.GpuOptions(
-                precision = runtimeProfile.precision.toLiteRtPrecision(),
-                backend = runtimeProfile.api.toLiteRtBackend(),
-                priority = runtimeProfile.priority?.toLiteRtPriority(),
-            )
-        },
-        diagnostics = MdxRuntimeDiagnostics(
-            runtimeName = "LiteRT 2.1.5",
-            backend = MdxInferenceBackend.LiteRtGpu,
-            cpuThreads = null,
-            detail = buildString {
-                append("layout=NHWC, profile=").append(runtimeProfile.profileId)
-                append(", api=").append(runtimeProfile.api.name)
-                append(", precision=").append(runtimeProfile.precision.name)
-                append(", priority=").append(runtimeProfile.priority?.name ?: "Default")
-                append(", ").append(compatibilityDetail(compatibility))
+    ): MdxInferenceSession {
+        val queueExperimentEnabled = MdxLiteRtOpenClQueueExperiment.isEnabled()
+        return createNativeLiteRtSession(
+            artifact = artifact,
+            profile = profile,
+            requiredAccelerator = Accelerator.GPU,
+            options = CompiledModel.Options(Accelerator.GPU).apply {
+                gpuOptions = CompiledModel.GpuOptions(
+                    precision = runtimeProfile.precision.toLiteRtPrecision(),
+                    backend = runtimeProfile.api.toLiteRtBackend(),
+                    priority = runtimeProfile.priority?.toLiteRtPriority(),
+                    numStepsOfCommandBufferPreparations =
+                        MdxLiteRtOpenClQueueExperiment.kernelBatchSize(),
+                )
             },
-        ),
-    )
+            diagnostics = MdxRuntimeDiagnostics(
+                runtimeName = "LiteRT 2.1.5",
+                backend = MdxInferenceBackend.LiteRtGpu,
+                cpuThreads = null,
+                detail = buildString {
+                    append("layout=NHWC, profile=").append(runtimeProfile.profileId)
+                    append(", api=").append(runtimeProfile.api.name)
+                    append(", precision=").append(runtimeProfile.precision.name)
+                    append(", priority=").append(runtimeProfile.priority?.name ?: "Default")
+                    append(", ").append(compatibilityDetail(compatibility))
+                },
+            ),
+            queueExperimentEnabled = queueExperimentEnabled,
+        )
+    }
 }
 
 private fun createNativeLiteRtSession(
@@ -106,6 +112,7 @@ private fun createNativeLiteRtSession(
     requiredAccelerator: Accelerator,
     options: CompiledModel.Options,
     diagnostics: MdxRuntimeDiagnostics,
+    queueExperimentEnabled: Boolean = false,
 ): MdxInferenceSession {
     val environment = runLiteRtOperation(MdxLiteRtFailureStage.EnvironmentCreate) {
         Environment.create()
@@ -176,6 +183,7 @@ private fun createNativeLiteRtSession(
             outputBuffer = outputBuffers.single(),
             profile = profile,
             diagnostics = diagnostics,
+            queueExperimentEnabled = queueExperimentEnabled,
         )
     } catch (error: Throwable) {
         closeAfterFailure(
@@ -198,12 +206,19 @@ private class MdxLiteRtInferenceSession(
     private val outputBuffer: TensorBuffer,
     private val profile: MdxExecutionProfile,
     override val diagnostics: MdxRuntimeDiagnostics,
+    private val queueExperimentEnabled: Boolean,
 ) : MdxInferenceSession {
     private val inputNhwc = FloatArray(profile.inputTensor.elementCount)
     private val outputNchw = FloatArray(profile.outputTensor.elementCount)
     private val inputBuffers = listOf(inputBuffer)
     private val outputBuffers = listOf(outputBuffer)
     private var closed = false
+
+    init {
+        if (queueExperimentEnabled) {
+            MdxLiteRtOpenClQueueExperiment.reset()
+        }
+    }
 
     @Synchronized
     override fun run(
@@ -227,8 +242,17 @@ private class MdxLiteRtInferenceSession(
             inputBuffer.writeFloat(inputNhwc)
         }
         runNonInterruptibleMdxInference(shouldCancel) {
-            runLiteRtOperation(MdxLiteRtFailureStage.Invocation) {
-                compiledModel.run(inputBuffers, outputBuffers)
+            if (queueExperimentEnabled) {
+                MdxLiteRtOpenClQueueExperiment.beginInference()
+            }
+            try {
+                runLiteRtOperation(MdxLiteRtFailureStage.Invocation) {
+                    compiledModel.run(inputBuffers, outputBuffers)
+                }
+            } finally {
+                if (queueExperimentEnabled) {
+                    MdxLiteRtOpenClQueueExperiment.endInference()
+                }
             }
         }
         val rawOutputNhwc = runLiteRtOperation(MdxLiteRtFailureStage.OutputRead) {
