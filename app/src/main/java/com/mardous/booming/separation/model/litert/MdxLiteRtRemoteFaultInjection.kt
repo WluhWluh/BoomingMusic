@@ -17,6 +17,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 
+private val REMOTE_FAULT_TOKEN_PATTERN = Regex("^[A-Za-z0-9._-]{1,96}$")
+
 internal enum class MdxLiteRtRemoteFailpoint(
     val argumentValue: String,
     val expectedFallbackStage: MdxLiteRtAutoFailureStage?,
@@ -48,7 +50,9 @@ internal data class MdxLiteRtRemoteFaultControl(
 ) {
     init {
         require(schemaVersion == 1) { "Unsupported remote fault-control schema." }
-        require(TOKEN_PATTERN.matches(token)) { "Remote fault-control token is invalid." }
+        require(REMOTE_FAULT_TOKEN_PATTERN.matches(token)) {
+            "Remote fault-control token is invalid."
+        }
         require(MdxLiteRtRemoteFailpoint.parse(failpoint) != MdxLiteRtRemoteFailpoint.None) {
             "Remote fault control must select a failpoint."
         }
@@ -58,10 +62,6 @@ internal data class MdxLiteRtRemoteFaultControl(
         require(expiresAtElapsedRealtimeMs > 0L) {
             "Remote fault-control expiry is invalid."
         }
-    }
-
-    private companion object {
-        val TOKEN_PATTERN = Regex("^[A-Za-z0-9._-]{1,96}$")
     }
 }
 
