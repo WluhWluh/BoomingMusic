@@ -39,7 +39,14 @@ object BackupSettingsRestoreDecoder {
         ) {
             BackupContractJson.decodeSourceSeparationSettings(
                 requireNotNull(archive.file(sourceDescriptor.path)).readText(),
-            ).also(BackupContractValidator::validateSourceSeparationSettings)
+            ).also { snapshot ->
+                if (snapshot.schemaVersion != manifest.sourceSeparationSettingsSchema) {
+                    throw BackupContractException(
+                        "Source-separation snapshot schema does not match the manifest"
+                    )
+                }
+                BackupContractValidator.validateSourceSeparationSettings(snapshot)
+            }
         } else {
             null
         }

@@ -51,7 +51,8 @@ data class PortableActiveModelReference(
 object BackupFormatV1 {
     const val FORMAT_VERSION = 1
     const val COMMON_SETTINGS_SCHEMA = 1
-    const val SOURCE_SEPARATION_SETTINGS_SCHEMA = 1
+    const val SOURCE_SEPARATION_SETTINGS_SCHEMA_V1 = 1
+    const val SOURCE_SEPARATION_SETTINGS_SCHEMA = 2
 
     const val MANIFEST_PATH = "backup-manifest.json"
     const val COMMON_SETTINGS_PATH = "settings/common.json"

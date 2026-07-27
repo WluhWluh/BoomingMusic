@@ -420,7 +420,7 @@ object BackupHelper : KoinComponent {
             presetRepository.restoreCustomProfiles(source.customProfiles)
         }
         if (plan.commonPreferences.isNotEmpty() || plan.sourceSettings != null) {
-            applyPortablePreferences(plan.commonPreferences, plan.sourceSettings?.preferences.orEmpty())
+            applyPortablePreferences(plan.commonPreferences, plan.sourceSettings)
         }
         plan.sourceSettings?.let { source ->
             source.activeModel?.let { activeModel ->
@@ -437,11 +437,18 @@ object BackupHelper : KoinComponent {
 
     private fun applyPortablePreferences(
         common: Map<String, JsonElement>,
-        source: Map<String, JsonElement>,
+        source: SourceSeparationSettingsSnapshotV1?,
     ) {
         val editor = preferences.edit()
         editor.putPortablePreferences(common, BackupSettingsPolicy.commonSettingsByKey)
-        editor.putPortablePreferences(source, BackupSettingsPolicy.sourceSeparationSettingsByKey)
+        source?.let { snapshot ->
+            val definitions = requireNotNull(
+                BackupSettingsPolicy.sourceSeparationSettingsForSchema(
+                    snapshot.schemaVersion
+                )
+            ) { "Unsupported source-separation settings schema" }
+            editor.putPortablePreferences(snapshot.preferences, definitions)
+        }
         if (!editor.commit()) throw IOException("Unable to commit restored preferences.")
     }
 

@@ -18,7 +18,8 @@ class BackupContractV1Test {
     fun `format and settings schema versions are independent constants`() {
         assertEquals(1, BackupFormatV1.FORMAT_VERSION)
         assertEquals(1, BackupFormatV1.COMMON_SETTINGS_SCHEMA)
-        assertEquals(1, BackupFormatV1.SOURCE_SEPARATION_SETTINGS_SCHEMA)
+        assertEquals(1, BackupFormatV1.SOURCE_SEPARATION_SETTINGS_SCHEMA_V1)
+        assertEquals(2, BackupFormatV1.SOURCE_SEPARATION_SETTINGS_SCHEMA)
         assertEquals("backup-manifest.json", BackupFormatV1.MANIFEST_PATH)
         assertEquals("settings/common.json", BackupFormatV1.COMMON_SETTINGS_PATH)
         assertEquals(
@@ -69,9 +70,21 @@ class BackupContractV1Test {
             "source_separation.auto_cache_cleanup",
             "source_separation.auto_cache_cleanup_partial_limit",
             "source_separation.auto_cache_cleanup_completed_limit",
+            "source_separation.try_gpu",
         )
 
         assertEquals(expected, BackupSettingsPolicy.sourceSeparationSettingsByKey.keys)
+        assertFalse(
+            BackupSettingsPolicy.sourceSeparationSettingsForSchema(1)
+                .orEmpty()
+                .containsKey("source_separation.try_gpu")
+        )
+        assertEquals(
+            2,
+            BackupSettingsPolicy.sourceSeparationSettingsByKey
+                .getValue("source_separation.try_gpu")
+                .introducedInSchema,
+        )
         assertTrue(
             expected.none(BackupSettingsPolicy::isExplicitlyNonBackupPreference)
         )
@@ -126,6 +139,24 @@ class BackupContractV1Test {
                     schemaVersion = 1,
                     preferences = mapOf(
                         "source_separation.per_song_blend.pending.song" to JsonPrimitive(0.2f)
+                    ),
+                )
+            )
+        }
+        BackupContractValidator.validateSourceSeparationSettings(
+            SourceSeparationSettingsSnapshotV1(
+                schemaVersion = 2,
+                preferences = mapOf(
+                    "source_separation.try_gpu" to JsonPrimitive(false)
+                ),
+            )
+        )
+        assertThrows(BackupContractException::class.java) {
+            BackupContractValidator.validateSourceSeparationSettings(
+                SourceSeparationSettingsSnapshotV1(
+                    schemaVersion = 1,
+                    preferences = mapOf(
+                        "source_separation.try_gpu" to JsonPrimitive(false)
                     ),
                 )
             )

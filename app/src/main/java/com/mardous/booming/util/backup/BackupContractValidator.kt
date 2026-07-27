@@ -76,12 +76,15 @@ object BackupContractValidator {
     fun validateSourceSeparationSettings(
         snapshot: SourceSeparationSettingsSnapshotV1,
     ): SourceSeparationSettingsSnapshotV1 {
-        requireBackup(
-            snapshot.schemaVersion == BackupFormatV1.SOURCE_SEPARATION_SETTINGS_SCHEMA
-        ) { "Unsupported source-separation settings snapshot schema" }
+        val definitions = BackupSettingsPolicy.sourceSeparationSettingsForSchema(
+            snapshot.schemaVersion
+        ) ?: fail(
+            "Unsupported source-separation settings snapshot schema: " +
+                snapshot.schemaVersion
+        )
         validatePreferenceMap(
             snapshot.preferences,
-            BackupSettingsPolicy.sourceSeparationSettingsByKey,
+            definitions,
         )
         requireBackup(snapshot.preferences.keys.none(BackupSettingsPolicy::isExplicitlyNonBackupPreference)) {
             "Source-separation snapshot contains a non-backup preference"
@@ -275,7 +278,7 @@ object BackupContractValidator {
     }
 
     fun isSupportedSourceSeparationSchema(schemaVersion: Int): Boolean =
-        schemaVersion == BackupFormatV1.SOURCE_SEPARATION_SETTINGS_SCHEMA
+        BackupSettingsPolicy.sourceSeparationSettingsForSchema(schemaVersion) != null
 
     private inline fun requireBackup(condition: Boolean, message: () -> String) {
         if (!condition) throw BackupContractException(message())

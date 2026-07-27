@@ -183,6 +183,13 @@ object BackupSettingsPolicy {
         integer("source_separation.auto_cache_cleanup_completed_limit", 10),
     )
 
+    val sourceSeparationSettingsV2: List<PortablePreferenceDefinition> =
+        sourceSeparationSettingsV1 + bool(
+            key = "source_separation.try_gpu",
+            value = true,
+            introducedInSchema = 2,
+        )
+
     val nonBackupPreferenceKeys: Set<String> = setOf(
         "source_separation.window_decode",
         "source_separation.average_window_ms",
@@ -250,8 +257,22 @@ object BackupSettingsPolicy {
     val commonSettingsByKey: Map<String, PortablePreferenceDefinition> =
         commonSettingsV1.associateBy(PortablePreferenceDefinition::key)
 
-    val sourceSeparationSettingsByKey: Map<String, PortablePreferenceDefinition> =
+    private val sourceSeparationSettingsV1ByKey:
+        Map<String, PortablePreferenceDefinition> =
         sourceSeparationSettingsV1.associateBy(PortablePreferenceDefinition::key)
+
+    val sourceSeparationSettingsByKey: Map<String, PortablePreferenceDefinition> =
+        sourceSeparationSettingsV2.associateBy(PortablePreferenceDefinition::key)
+
+    fun sourceSeparationSettingsForSchema(
+        schemaVersion: Int,
+    ): Map<String, PortablePreferenceDefinition>? = when (schemaVersion) {
+        BackupFormatV1.SOURCE_SEPARATION_SETTINGS_SCHEMA_V1 ->
+            sourceSeparationSettingsV1ByKey
+        BackupFormatV1.SOURCE_SEPARATION_SETTINGS_SCHEMA ->
+            sourceSeparationSettingsByKey
+        else -> null
+    }
 
     fun isCommonSettingAllowed(key: String): Boolean = key in commonSettingsByKey
 
@@ -261,10 +282,15 @@ object BackupSettingsPolicy {
     fun isExplicitlyNonBackupPreference(key: String): Boolean =
         key in nonBackupPreferenceKeys || nonBackupPreferencePrefixes.any(key::startsWith)
 
-    private fun bool(key: String, value: Boolean) = definition(
+    private fun bool(
+        key: String,
+        value: Boolean,
+        introducedInSchema: Int = 1,
+    ) = definition(
         key,
         PortablePreferenceType.Boolean,
         JsonPrimitive(value),
+        introducedInSchema,
     )
 
     private fun integer(key: String, value: Int) = definition(
@@ -312,9 +338,11 @@ object BackupSettingsPolicy {
         key: String,
         type: PortablePreferenceType,
         defaultValue: JsonElement,
+        introducedInSchema: Int = 1,
     ) = PortablePreferenceDefinition(
         key = key,
         type = type,
         defaultValue = defaultValue,
+        introducedInSchema = introducedInSchema,
     )
 }

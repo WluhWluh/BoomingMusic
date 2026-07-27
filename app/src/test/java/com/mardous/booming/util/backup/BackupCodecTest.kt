@@ -27,6 +27,7 @@ class BackupCodecTest {
             "recursive_folder_actions" to setOf("play", "enqueue"),
             "source_separation.global_blend" to 0.25f,
             "source_separation.mixed_output_preroll_ms" to 600L,
+            "source_separation.try_gpu" to false,
             "source_separation.worker.current" to "excluded",
         )
 
@@ -165,17 +166,59 @@ class BackupCodecTest {
         val optional = payload(
             path = BackupFormatV1.SOURCE_SEPARATION_SETTINGS_PATH,
             kind = BackupPayloadKinds.SOURCE_SEPARATION_SETTINGS,
-            schemaVersion = 2,
+            schemaVersion = 3,
             optional = true,
         )
         BackupContractValidator.validateManifest(
-            manifest(listOf(optional), sourceSchema = 2),
+            manifest(listOf(optional), sourceSchema = 3),
         )
-        assertFalse(BackupContractValidator.isSupportedSourceSeparationSchema(2))
+        assertTrue(BackupContractValidator.isSupportedSourceSeparationSchema(1))
+        assertTrue(BackupContractValidator.isSupportedSourceSeparationSchema(2))
+        assertFalse(BackupContractValidator.isSupportedSourceSeparationSchema(3))
 
         assertThrows(BackupContractException::class.java) {
             BackupContractValidator.validateManifest(
-                manifest(listOf(optional.copy(optional = false)), sourceSchema = 2),
+                manifest(listOf(optional.copy(optional = false)), sourceSchema = 3),
+            )
+        }
+    }
+
+    @Test
+    fun `schema v1 restore does not synthesize the v2 GPU preference`() {
+        temporaryDirectory().useDirectory { root ->
+            val source = root.resolve("source-settings.json").apply {
+                writeText(
+                    BackupContractJson.json.encodeToString(
+                        SourceSeparationSettingsSnapshotV1(
+                            schemaVersion = 1,
+                            preferences = mapOf(
+                                "source_separation.global_blend" to JsonPrimitive(0.25f)
+                            ),
+                        )
+                    )
+                )
+            }
+            val descriptor = payload(
+                path = BackupFormatV1.SOURCE_SEPARATION_SETTINGS_PATH,
+                kind = BackupPayloadKinds.SOURCE_SEPARATION_SETTINGS,
+                schemaVersion = 1,
+                optional = true,
+            )
+            val archive = StagedBackupArchive(
+                root = root,
+                manifest = manifest(listOf(descriptor), sourceSchema = 1),
+                files = mapOf(BackupFormatV1.SOURCE_SEPARATION_SETTINGS_PATH to source),
+            )
+
+            val decoded = BackupSettingsRestoreDecoder.decode(
+                archive,
+                "com.wluhwluh.booming.sourcesep",
+            )
+
+            assertEquals(1, decoded.sourceSettings?.schemaVersion)
+            assertFalse(
+                decoded.sourceSettings?.preferences.orEmpty()
+                    .containsKey("source_separation.try_gpu")
             )
         }
     }
