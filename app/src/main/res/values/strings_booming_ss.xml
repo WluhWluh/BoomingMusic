@@ -56,6 +56,8 @@
     <string name="source_separation_playback_initial_processing_estimate">%1$s. About %2$d s remaining.</string>
     <string name="source_separation_active_mode">Mode: %1$s</string>
     <string name="source_separation_advanced_title">Advanced</string>
+    <string name="source_separation_try_gpu_title">Try GPU acceleration</string>
+    <string name="source_separation_try_gpu_description">When supported, newly started separation tasks use GPU acceleration and fall back to CPU after a GPU failure.</string>
     <string name="source_separation_auto_start_title">Automatically start separation</string>
     <string name="source_separation_auto_start_description">Start separation for the current song when separated playback needs a non-centered blend, and preprocess the next song\'s opening buffer windows when possible.</string>
     <string name="source_separation_window_decode_title">Use window decoding</string>

@@ -179,6 +179,9 @@ private fun SourceSeparationSettingsSheet(
     val autoStartSeparation by viewModel
         .sourceSeparationAutoStartFlow
         .collectAsState()
+    val tryGpu by viewModel
+        .sourceSeparationTryGpuFlow
+        .collectAsState()
     val windowDecode by viewModel
         .sourceSeparationWindowDecodeFlow
         .collectAsState()
@@ -553,6 +556,18 @@ private fun SourceSeparationSettingsSheet(
                         Column(
                             modifier = Modifier.padding(cardContentPadding)
                         ) {
+                            LabeledSwitch(
+                                checked = tryGpu,
+                                title = stringResource(
+                                    R.string.source_separation_try_gpu_title
+                                ),
+                                description = stringResource(
+                                    R.string.source_separation_try_gpu_description
+                                )
+                            ) { checked ->
+                                viewModel.setSourceSeparationTryGpu(checked)
+                            }
+
                             LabeledSwitch(
                                 checked = autoStartSeparation,
                                 title = stringResource(

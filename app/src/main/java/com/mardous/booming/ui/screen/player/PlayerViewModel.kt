@@ -62,6 +62,7 @@ import com.mardous.booming.util.REMEMBER_SHUFFLE_MODE
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_TRY_GPU
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
@@ -78,6 +79,7 @@ import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_MESSAGES
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS
+import com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Dispatchers.IO
@@ -253,6 +255,11 @@ class PlayerViewModel(
     val sourceSeparationAutoStartFlow =
         _sourceSeparationAutoStartFlow.asStateFlow()
 
+    private val _sourceSeparationTryGpuFlow =
+        MutableStateFlow(readSourceSeparationTryGpu())
+    val sourceSeparationTryGpuFlow =
+        _sourceSeparationTryGpuFlow.asStateFlow()
+
     private val _sourceSeparationWindowDecodeFlow =
         MutableStateFlow(readSourceSeparationWindowDecode())
     val sourceSeparationWindowDecodeFlow =
@@ -303,11 +310,21 @@ class PlayerViewModel(
     val sourceSeparationAutoCacheCleanupCompletedLimitFlow =
         _sourceSeparationAutoCacheCleanupCompletedLimitFlow.asStateFlow()
 
+    private val sourceSeparationPreferenceChangeListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == SOURCE_SEPARATION_TRY_GPU) {
+                _sourceSeparationTryGpuFlow.value = readSourceSeparationTryGpu()
+            }
+        }
+
     private val internalJobs = mutableListOf<Job>()
 
     init {
         SourceSeparationForegroundWorkerDebugBridge.register(this)
         sourceSeparationForegroundWorkerCoordinator.attachCallbacks(this)
+        preferences.registerOnSharedPreferenceChangeListener(
+            sourceSeparationPreferenceChangeListener
+        )
         observeSourceSeparationForegroundWorkerCoordinator()
     }
 
@@ -315,6 +332,9 @@ class PlayerViewModel(
         progressObserver.stop()
         SourceSeparationForegroundWorkerDebugBridge.unregister(this)
         sourceSeparationForegroundWorkerCoordinator.detachCallbacks(this)
+        preferences.unregisterOnSharedPreferenceChangeListener(
+            sourceSeparationPreferenceChangeListener
+        )
         sourceSeparationSettingsApplyJob?.cancel()
         sourceSeparationAutoStartJob?.cancel()
         sourceSeparationPreStartJob?.cancel()
@@ -1380,6 +1400,13 @@ class PlayerViewModel(
         }
     }
 
+    fun setSourceSeparationTryGpu(enabled: Boolean) {
+        preferences.edit {
+            putBoolean(SOURCE_SEPARATION_TRY_GPU, enabled)
+        }
+        _sourceSeparationTryGpuFlow.value = enabled
+    }
+
     fun setSourceSeparationWindowDecodeEnabled(enabled: Boolean) {
         preferences.edit {
             putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, enabled)
@@ -1847,6 +1874,13 @@ class PlayerViewModel(
         return preferences.getBoolean(
             SOURCE_SEPARATION_AUTO_START,
             DEFAULT_SOURCE_SEPARATION_AUTO_START,
+        )
+    }
+
+    private fun readSourceSeparationTryGpu(): Boolean {
+        return preferences.getBoolean(
+            SOURCE_SEPARATION_TRY_GPU,
+            DEFAULT_SOURCE_SEPARATION_TRY_GPU,
         )
     }
 

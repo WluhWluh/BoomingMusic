@@ -56,6 +56,8 @@
     <string name="source_separation_playback_initial_processing_estimate">%1$s。约剩余 %2$d 秒。</string>
     <string name="source_separation_active_mode">模式：%1$s</string>
     <string name="source_separation_advanced_title">高级</string>
+    <string name="source_separation_try_gpu_title">尝试使用 GPU</string>
+    <string name="source_separation_try_gpu_description">设备和模型支持时，新开始的音源分离任务会尝试使用 GPU 加速；若 GPU 失败，则回退到 CPU。</string>
     <string name="source_separation_auto_start_title">自动开始音源分离</string>
     <string name="source_separation_auto_start_description">当分轨播放需要非居中混音比例时，开始当前歌曲的音源分离。条件允许时预处理下一首歌开头的缓冲窗口。</string>
     <string name="source_separation_window_decode_title">使用窗口解码</string>

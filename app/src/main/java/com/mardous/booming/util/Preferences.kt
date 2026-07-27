@@ -618,6 +618,7 @@ const val PLAY_ALL_SONGS_WHEN_SEARCHING = "play_all_songs_when_searching"
 const val CLEAR_QUEUE_ON_COMPLETION = "clear_queue_on_completion"
 const val REMEMBER_SHUFFLE_MODE = "remember_shuffle_mode"
 const val SOURCE_SEPARATION_AUTO_START = "source_separation.auto_start"
+const val SOURCE_SEPARATION_TRY_GPU = "source_separation.try_gpu"
 const val SOURCE_SEPARATION_WINDOW_DECODE = "source_separation.window_decode"
 const val SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION = "source_separation.auto_flac_compression"
 const val SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS = "source_separation.show_snackbar_progress"
@@ -636,6 +637,7 @@ const val SOURCE_SEPARATION_AVERAGE_WINDOW_MS = "source_separation.average_windo
 const val SOURCE_SEPARATION_AVERAGE_WINDOW_SAMPLE_COUNT =
     "source_separation.average_window_sample_count"
 const val DEFAULT_SOURCE_SEPARATION_AUTO_START = true
+const val DEFAULT_SOURCE_SEPARATION_TRY_GPU = true
 const val DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE = true
 const val DEFAULT_SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE = false
 const val DEFAULT_SOURCE_SEPARATION_QUICK_CONTROLS_VISIBLE = true
