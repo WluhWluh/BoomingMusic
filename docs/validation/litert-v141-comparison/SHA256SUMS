@@ -1,0 +1,10 @@
+09a1c6bcb5e8df609814f8a22de23d8a5b6871179674f8482a518f2fa06c71a5  raw/current-s10-cpu.json
+bab3f5cbc61ef7d9056b0ce6331de909ccc44ceae3b1ce3b10d1f148401b1fff  raw/current-s10-gpu-opencl.json
+ad187589d835f1b48a464b504079c5f783ac1f726be0e25b1ae99bdb51c9c8e1  raw/current-s25-cpu.json
+21f8b7a8733f514b6847b5711b7c14a50ddd107131e27a3ebaed00c6ff9159b1  raw/current-s25-gpu-opencl.json
+e7f66c29548ce4d564138c246db7667c94d6f7565f763c0187a7c6027779971c  raw/legacy-s10-cpu.json
+24c46693835c50aa7fbfa47ca42d1ccc0b0b187c7a2cc497c72f87a9cc709c46  raw/legacy-s10-gpu-fast.json
+991d8547ec47ea5a62dd892a7b761e5cc7023550989b5805ec2e148b2ccc3aae  raw/legacy-s10-gpu-sustained.json
+480f6438b1b429588d44da69631edf4ca1312b19db14bcdd7609603db6103efc  raw/legacy-s25-cpu.json
+51a0e782a50a224ae95898728a58910274309bd832267b33757b9e13452006d5  raw/legacy-s25-gpu-fast.json
+1c843e6b96fd3fede4ddc8dac4d36692e605495ae8372603bec9d9ebc1ad8305  raw/legacy-s25-gpu-sustained.json

@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 1,
+  "status": "complete",
+  "runtime": "com.google.ai.edge.litert:litert:1.4.1",
+  "backend": "gpu-opencl-fp32",
+  "tag": "s10-9662-litert141-gpu-opencl-fp32",
+  "modelId": "uvr_mdxnet_3_9662",
+  "modelBytes": 29700464,
+  "modelSha256": "f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378",
+  "inputBytes": 8388608,
+  "inputSha256": "195c81b8c72c2865f18080a78433c4377b4375a8569f3bc4d7a243ffbc1b3a33",
+  "referenceBytes": 8388608,
+  "referenceSha256": "9c78d8489bb9be47f0be707f52f5d5be3d398382cf63fe8de1355f96e34c09d3",
+  "iterations": 2,
+  "warmups": 0,
+  "threads": 4,
+  "useXnnpack": false,
+  "gpuOptions": {
+    "forceBackend": "OPENCL",
+    "precisionLossAllowed": false,
+    "inferencePreference": "SUSTAINED_SPEED"
+  },
+  "singleThreadLifecycle": true,
+  "device": {
+    "manufacturer": "samsung",
+    "model": "SM-G9730",
+    "device": "beyond1q",
+    "sdk": 31,
+    "abis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "armeabi"
+    ]
+  },
+  "inputShapeNchw": [
+    1,
+    4,
+    2048,
+    256
+  ],
+  "runtimeInputShape": [
+    1,
+    2048,
+    256,
+    4
+  ],
+  "runtimeOutputShape": [
+    1,
+    2048,
+    256,
+    4
+  ],
+  "runtimeInputBytes": 8388608,
+  "runtimeOutputBytes": 8388608,
+  "setupWallMs": 301922.402593,
+  "setupCpuMs": 8915,
+  "inferenceWallMs": [
+    1083.739374,
+    1066.803177
+  ],
+  "inferenceCpuMs": [
+    73,
+    54
+  ],
+  "runWallMs": [
+    1073.364582,
+    1055.814947
+  ],
+  "runCpuMs": [
+    62,
+    43
+  ],
+  "outputReadWallMs": [
+    10.128125,
+    10.759114
+  ],
+  "outputReadCpuMs": [
+    10,
+    11
+  ],
+  "firstInferenceWallMs": 1083.739374,
+  "reusedInferenceWallMs": 1066.803177,
+  "inferenceSummary": {
+    "wallMeanMs": 1075.2712755,
+    "wallMedianMs": 1066.803177,
+    "wallMinMs": 1066.803177,
+    "wallMaxMs": 1083.739374,
+    "cpuMeanMs": 63.5,
+    "cpuToWallRatio": 0.059054864987881844
+  },
+  "output": {
+    "elementCount": 2097152,
+    "nonFiniteCount": 0,
+    "absMean": 0.19525522781935578,
+    "rms": 0.25638821101117143,
+    "min": -2.6068177223205566,
+    "max": 2.711505889892578
+  },
+  "firstComparisonToOrt": {
+    "maxAbsError": 5.447864532470703E-5,
+    "meanAbsError": 3.3657346412141464E-6,
+    "rmse": 4.8260985087166444E-6,
+    "signalRms": 0.2563881918091796,
+    "snrInfinite": false,
+    "cosineSimilarity": 0.9999999998225636,
+    "snrDb": 94.50603674286504
+  },
+  "reusedComparisonToOrt": {
+    "maxAbsError": 5.447864532470703E-5,
+    "meanAbsError": 3.3657346412141464E-6,
+    "rmse": 4.8260985087166444E-6,
+    "signalRms": 0.2563881918091796,
+    "snrInfinite": false,
+    "cosineSimilarity": 0.9999999998225636,
+    "snrDb": 94.50603674286504
+  },
+  "reuseComparison": {
+    "maxAbsError": 0,
+    "meanAbsError": 0,
+    "rmse": 0,
+    "signalRms": 0.25638821101117143,
+    "snrInfinite": true,
+    "cosineSimilarity": 1,
+    "snrDb": null,
+    "bitExact": true
+  },
+  "processStart": {
+    "elapsedRealtimeMs": 1831670,
+    "processCpuMs": 387,
+    "totalPssKb": 45452,
+    "totalPrivateDirtyKb": 37684,
+    "nativeHeapAllocatedBytes": 9514560
+  },
+  "processAfterSetup": {
+    "elapsedRealtimeMs": 2133636,
+    "processCpuMs": 9345,
+    "totalPssKb": 480853,
+    "totalPrivateDirtyKb": 221956,
+    "nativeHeapAllocatedBytes": 89098304
+  },
+  "processAfterFirstInference": {
+    "elapsedRealtimeMs": 2134801,
+    "processCpuMs": 9496,
+    "totalPssKb": 513645,
+    "totalPrivateDirtyKb": 258484,
+    "nativeHeapAllocatedBytes": 89098304
+  },
+  "processAfterReusedInference": {
+    "elapsedRealtimeMs": 2135944,
+    "processCpuMs": 9622,
+    "totalPssKb": 521869,
+    "totalPrivateDirtyKb": 266708,
+    "nativeHeapAllocatedBytes": 89098304
+  },
+  "processBeforeClose": {
+    "elapsedRealtimeMs": 2135990,
+    "processCpuMs": 9667,
+    "totalPssKb": 521869,
+    "totalPrivateDirtyKb": 266708,
+    "nativeHeapAllocatedBytes": 89098304
+  },
+  "processAfterClose": {
+    "elapsedRealtimeMs": 2136144,
+    "processCpuMs": 9818,
+    "totalPssKb": 171601,
+    "totalPrivateDirtyKb": 108576,
+    "nativeHeapAllocatedBytes": 9210048
+  },
+  "peakPssDeltaKb": 476417,
+  "deviceStart": {
+    "elapsedRealtimeMs": 1831671,
+    "thermalStatus": 0,
+    "batteryLevelPercent": 92,
+    "batteryTemperatureDeciC": 205
+  },
+  "deviceEnd": {
+    "elapsedRealtimeMs": 2136186,
+    "thermalStatus": 0,
+    "batteryLevelPercent": 89,
+    "batteryTemperatureDeciC": 240
+  }
+}
