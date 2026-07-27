@@ -10,17 +10,28 @@ import sys
 import zipfile
 
 
-X86_SHA256 = "02b6556ec235926c11eb0c067eb16e459adcddb1568a42eefe0c40f4cc4b59af"
+NATIVE_SHA256 = {
+    "lib/arm64-v8a/libBssOcl.so":
+        "fc7deeb3081dda82cffbdc6d1bd8460c0491bbbc48478b781028e9413e8cb6f8",
+    "lib/arm64-v8a/libLiteRt.so":
+        "ae2b996fde27021b070e88b56eebc9626a5261feb72f09791bdac38b2f09abd2",
+    "lib/arm64-v8a/libLiteRtClGlAccelerator.so":
+        "83f2be273fdc0391ad977c8889d65ba6b947c3ebabc432bf51829e5c9e91f93c",
+    "lib/armeabi-v7a/libLiteRt.so":
+        "836ee7a2321c9453f02658b6774fc4c5951716432b450ba6bc4e9a94fe524e6c",
+    "lib/x86/libLiteRt.so":
+        "02b6556ec235926c11eb0c067eb16e459adcddb1568a42eefe0c40f4cc4b59af",
+    "lib/x86_64/libLiteRt.so":
+        "6d5b2f35d536a3b2d38b26d26328cc9c259133ef2aa0413ec554cd7ef84f6604",
+}
 EXPECTED_BY_VARIANT = {
     "arm64-v8a": {
+        "lib/arm64-v8a/libBssOcl.so",
         "lib/arm64-v8a/libLiteRt.so",
         "lib/arm64-v8a/libLiteRtClGlAccelerator.so",
     },
     "armeabi-v7a": {"lib/armeabi-v7a/libLiteRt.so"},
-    "x86_64": {
-        "lib/x86_64/libLiteRt.so",
-        "lib/x86_64/libLiteRtClGlAccelerator.so",
-    },
+    "x86_64": {"lib/x86_64/libLiteRt.so"},
     "x86": {"lib/x86/libLiteRt.so"},
 }
 EXPECTED_UNIVERSAL = set().union(*EXPECTED_BY_VARIANT.values())
@@ -38,7 +49,7 @@ def litert_entries(archive: zipfile.ZipFile) -> list[str]:
     return [
         entry.filename
         for entry in archive.infolist()
-        if entry.filename.startswith("lib/") and "/libLiteRt" in entry.filename
+        if entry.filename in NATIVE_SHA256
     ]
 
 
@@ -54,10 +65,12 @@ def verify_apk(path: Path, variant: str) -> None:
                 f"Unexpected LiteRT inventory in {path.name}: {sorted(actual)}; "
                 f"expected {sorted(expected)}"
             )
-        if "lib/x86/libLiteRt.so" in actual:
-            digest = hashlib.sha256(archive.read("lib/x86/libLiteRt.so")).hexdigest()
-            if digest != X86_SHA256:
-                raise RuntimeError(f"Unexpected x86 LiteRT SHA-256 in {path.name}: {digest}")
+        for name in actual:
+            digest = hashlib.sha256(archive.read(name)).hexdigest()
+            if digest != NATIVE_SHA256[name]:
+                raise RuntimeError(
+                    f"Unexpected SHA-256 for {name} in {path.name}: {digest}"
+                )
     print(f"Verified {path.name}: {', '.join(sorted(expected))}")
 
 

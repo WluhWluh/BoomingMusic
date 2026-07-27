@@ -98,30 +98,20 @@ val arm32ResidentProcessValidationRequested =
 require(!x86ProcessValidationRequested || !arm32ResidentProcessValidationRequested) {
     "x86 and arm32 resident process validation cannot be enabled together"
 }
-val liteRtExperimentVersion = providers.gradleProperty(
-    "boomingSs.litertExperimentVersion",
-).orNull?.trim()?.takeIf { it.isNotEmpty() }
-liteRtExperimentVersion?.let { version ->
-    require(Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$").matches(version)) {
-        "boomingSs.litertExperimentVersion is invalid"
+val boundedLiteRtAar = file(
+    requireNotNull(
+        gradle.extensions.extraProperties.get("boomingSsBoundedLiteRtAar") as? String
+    ) { "The checksum-verified Booming SS LiteRT runtime was not materialized." }
+)
+
+configurations.configureEach {
+    resolutionStrategy.eachDependency {
+        if (requested.group == "com.google.ai.edge.litert" && requested.name == "litert") {
+            throw GradleException(
+                "Stock LiteRT must not be resolved alongside the bounded Booming SS runtime."
+            )
+        }
     }
-    require(
-        providers.gradleProperty("boomingSs.litertExperimentRepository")
-            .orNull
-            ?.isNotBlank() == true
-    ) {
-        "boomingSs.litertExperimentRepository is required for an experimental LiteRT version"
-    }
-}
-val liteRtOpenClQueueExperimentRequested = providers.gradleProperty(
-    "boomingSs.litertOpenClQueueExperiment",
-).orNull?.let { value ->
-    requireNotNull(value.toBooleanStrictOrNull()) {
-        "boomingSs.litertOpenClQueueExperiment must be true or false"
-    }
-} ?: false
-require(!liteRtOpenClQueueExperimentRequested || liteRtExperimentVersion != null) {
-    "The OpenCL queue experiment requires an experimental LiteRT version"
 }
 
 android {
@@ -281,12 +271,6 @@ androidComponents {
                         variant.buildType == "debug" && !isCI,
                     "Opt-in arm32 resident-session validation; never enabled in release or CI.",
                 ),
-                "LITERT_OPENCL_QUEUE_EXPERIMENT" to BuildConfigField(
-                    "boolean",
-                    liteRtOpenClQueueExperimentRequested &&
-                        variant.buildType == "debug" && !isCI,
-                    "Opt-in OpenCL queue-window experiment; never enabled in release or CI.",
-                ),
             )
         )
 
@@ -396,11 +380,7 @@ dependencies {
     implementation(libs.commons.text)
     implementation(libs.juniversalchardet)
     implementation(libs.onnxruntime.android)
-    if (liteRtExperimentVersion == null) {
-        implementation(libs.litert)
-    } else {
-        implementation("com.google.ai.edge.litert:litert:$liteRtExperimentVersion")
-    }
+    implementation(files(boundedLiteRtAar))
     implementation(libs.jtransforms)
 
     testImplementation(libs.junit)

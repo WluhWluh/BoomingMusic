@@ -48,6 +48,7 @@ internal enum class MdxLiteRtGpuEligibilityReason {
     Eligible,
     GpuCompatibilityUnavailable,
     CpuOnlyAbi,
+    BoundedRuntimeUnavailable,
     AcceleratorLibraryUnavailable,
     DeviceLowMemory,
     InsufficientAvailableMemory,
@@ -92,6 +93,8 @@ internal fun interface MdxLiteRtGpuEligibilityProvider {
 internal class AndroidMdxLiteRtGpuEligibilityProvider(
     context: Context,
     private val minimumAvailableBytes: Long = DEFAULT_MINIMUM_AVAILABLE_BYTES,
+    private val boundedCapabilityProvider: MdxLiteRtBoundedGpuCapabilityProvider =
+        MdxLiteRtNativeBoundedGpuCapabilityProvider,
 ) : MdxLiteRtGpuEligibilityProvider {
     private val applicationContext = context.applicationContext
 
@@ -106,12 +109,19 @@ internal class AndroidMdxLiteRtGpuEligibilityProvider(
         profile: MdxExecutionProfile,
         platform: MdxRuntimePlatform,
     ): MdxLiteRtGpuEligibilityDecision {
-        if (platform.runtimeAbi != MdxRuntimeAbi.Arm64V8a &&
-            platform.runtimeAbi != MdxRuntimeAbi.X86_64
-        ) {
+        if (platform.runtimeAbi != MdxRuntimeAbi.Arm64V8a) {
             return MdxLiteRtGpuEligibilityDecision.ineligible(
                 MdxLiteRtGpuEligibilityReason.CpuOnlyAbi,
                 "${platform.runtimeAbi.androidName} has no packaged GPU accelerator.",
+            )
+        }
+        val capability = MdxLiteRtBoundedGpuContract.evaluate(
+            boundedCapabilityProvider.query()
+        )
+        if (!capability.isExact) {
+            return MdxLiteRtGpuEligibilityDecision.ineligible(
+                MdxLiteRtGpuEligibilityReason.BoundedRuntimeUnavailable,
+                capability.detail,
             )
         }
         val acceleratorPath = (applicationContext.classLoader as? BaseDexClassLoader)
@@ -148,7 +158,7 @@ internal class AndroidMdxLiteRtGpuEligibilityProvider(
             )
         }
         return MdxLiteRtGpuEligibilityDecision.eligible(
-            "accelerator=${File(acceleratorPath).name}, " +
+            "${capability.detail}, accelerator=${File(acceleratorPath).name}, " +
                 "availableMemoryBytes=${memoryInfo.availMem}",
         )
     }

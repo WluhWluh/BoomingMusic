@@ -63,7 +63,8 @@ internal class MdxSourceSeparationModelAwareRangeExecutor(
 
 internal fun createAutoLiteRtSessionProvider(
     context: Context,
-    gpuProfile: MdxLiteRtGpuRuntimeProfile = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1,
+    gpuProfile: MdxLiteRtGpuRuntimeProfile =
+        MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1,
 ): MdxInferenceSessionProvider {
     return SingleUseMdxInferenceSessionProvider(
         createAutoLiteRtSessionFactory(context, gpuProfile)
@@ -79,11 +80,13 @@ internal fun createCpuLiteRtSessionProvider(): MdxInferenceSessionProvider =
 
 internal fun createAutoLiteRtSessionFactory(
     context: Context,
-    gpuProfile: MdxLiteRtGpuRuntimeProfile = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1,
+    gpuProfile: MdxLiteRtGpuRuntimeProfile =
+        MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1,
 ): MdxInferenceSessionFactory {
+    val gpuCompatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal
     val factory = MdxLiteRtAutoInferenceSessionFactory(
         gpuRuntimeProfile = gpuProfile,
-        gpuCompatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+        gpuCompatibilityPolicy = gpuCompatibilityPolicy,
         gpuEligibilityProvider = AndroidMdxLiteRtGpuEligibilityProvider(context),
         gpuProbe = { session, profile ->
             val output = session.run(FloatArray(profile.inputTensor.elementCount))
@@ -97,7 +100,7 @@ internal fun createAutoLiteRtSessionFactory(
         },
         gpuFactory = MdxLiteRtGpuInferenceSessionFactory(
             runtimeProfile = gpuProfile,
-            compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+            compatibilityPolicy = gpuCompatibilityPolicy,
         ),
         cpuFactory = MdxLiteRtCpuInferenceSessionFactory(
             compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,

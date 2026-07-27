@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the pinned supplemental Android x86 LiteRT shared library."""
+"""Verify the pinned Booming SS bounded-GPU LiteRT Android AAR."""
 
 from __future__ import annotations
 
@@ -9,10 +9,27 @@ from pathlib import Path
 import re
 import struct
 import sys
+import zipfile
 
 
+ARTIFACT_VERSION = "2.1.5-bss.2"
+EXPECTED_AAR_BYTES = 11_486_057
+EXPECTED_AAR_SHA256 = "88cd2f7eaf1443d1c570085b1c24f239db87eb24c788a590adf5158e17443d0e"
 EXPECTED_BYTES = 7_482_132
 EXPECTED_SHA256 = "02b6556ec235926c11eb0c067eb16e459adcddb1568a42eefe0c40f4cc4b59af"
+EXPECTED_NATIVE_SHA256 = {
+    "jni/arm64-v8a/libBssOcl.so":
+        "fc7deeb3081dda82cffbdc6d1bd8460c0491bbbc48478b781028e9413e8cb6f8",
+    "jni/arm64-v8a/libLiteRt.so":
+        "ae2b996fde27021b070e88b56eebc9626a5261feb72f09791bdac38b2f09abd2",
+    "jni/arm64-v8a/libLiteRtClGlAccelerator.so":
+        "83f2be273fdc0391ad977c8889d65ba6b947c3ebabc432bf51829e5c9e91f93c",
+    "jni/armeabi-v7a/libLiteRt.so":
+        "836ee7a2321c9453f02658b6774fc4c5951716432b450ba6bc4e9a94fe524e6c",
+    "jni/x86/libLiteRt.so": EXPECTED_SHA256,
+    "jni/x86_64/libLiteRt.so":
+        "6d5b2f35d536a3b2d38b26d26328cc9c259133ef2aa0413ec554cd7ef84f6604",
+}
 EXPECTED_DEPENDENCIES = {
     "libandroid.so",
     "libc.so",
@@ -121,20 +138,17 @@ class Elf32:
         return symbols
 
 
-def verify(path: Path) -> None:
-    if not path.is_file():
-        raise RuntimeError(f"LiteRT x86 library is missing: {path}")
-
-    elf = Elf32(path.read_bytes())
+def verify_x86_runtime(data: bytes) -> None:
+    elf = Elf32(data)
     if elf.elf_type != 3:
         raise RuntimeError(f"ELF type is {elf.elf_type}, expected ET_DYN (3)")
     if elf.machine != 3:
         raise RuntimeError(f"ELF machine is {elf.machine}, expected Intel 80386 (3)")
-    if path.stat().st_size != EXPECTED_BYTES:
+    if len(data) != EXPECTED_BYTES:
         raise RuntimeError(
-            f"Unexpected LiteRT x86 size: {path.stat().st_size}, expected {EXPECTED_BYTES}"
+            f"Unexpected LiteRT x86 size: {len(data)}, expected {EXPECTED_BYTES}"
         )
-    actual_hash = sha256(path)
+    actual_hash = hashlib.sha256(data).hexdigest()
     if actual_hash != EXPECTED_SHA256:
         raise RuntimeError(f"Unexpected LiteRT x86 SHA-256: {actual_hash}")
 
@@ -152,9 +166,38 @@ def verify(path: Path) -> None:
     if missing_symbols:
         raise RuntimeError(f"Required LiteRT exports are missing: {missing_symbols}")
 
+
+def verify(path: Path) -> None:
+    if not path.is_file():
+        raise RuntimeError(f"Bounded LiteRT AAR is missing: {path}")
+    if path.stat().st_size != EXPECTED_AAR_BYTES:
+        raise RuntimeError(
+            f"Unexpected bounded LiteRT AAR size: {path.stat().st_size}, "
+            f"expected {EXPECTED_AAR_BYTES}"
+        )
+    actual_hash = sha256(path)
+    if actual_hash != EXPECTED_AAR_SHA256:
+        raise RuntimeError(f"Unexpected bounded LiteRT AAR SHA-256: {actual_hash}")
+
+    with zipfile.ZipFile(path) as archive:
+        native_entries = {
+            info.filename
+            for info in archive.infolist()
+            if info.filename.startswith("jni/") and not info.is_dir()
+        }
+        if native_entries != EXPECTED_NATIVE_SHA256.keys():
+            raise RuntimeError(
+                f"Unexpected bounded LiteRT native inventory: {sorted(native_entries)}"
+            )
+        for name, expected in EXPECTED_NATIVE_SHA256.items():
+            actual = hashlib.sha256(archive.read(name)).hexdigest()
+            if actual != expected:
+                raise RuntimeError(f"Unexpected SHA-256 for {name}: {actual}")
+        verify_x86_runtime(archive.read("jni/x86/libLiteRt.so"))
+
     print(f"Verified {path}")
     print(f"SHA-256: {actual_hash}")
-    print(f"DT_NEEDED: {' '.join(sorted(dependencies))}")
+    print(f"Native entries: {' '.join(sorted(EXPECTED_NATIVE_SHA256))}")
 
 
 def main() -> int:
@@ -162,7 +205,12 @@ def main() -> int:
     parser.add_argument(
         "library",
         nargs="?",
-        default="app/src/main/jniLibs/x86/libLiteRt.so",
+        default=(
+            Path.home()
+            / ".gradle/caches/booming-ss/litert"
+            / ARTIFACT_VERSION
+            / f"litert-android-{ARTIFACT_VERSION}.aar"
+        ),
         type=Path,
     )
     args = parser.parse_args()

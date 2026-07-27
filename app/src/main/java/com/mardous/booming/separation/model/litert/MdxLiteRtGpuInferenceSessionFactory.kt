@@ -36,6 +36,7 @@ internal data class MdxLiteRtGpuRuntimeProfile(
     val precision: MdxLiteRtGpuPrecision,
     val priority: MdxLiteRtGpuPriority? = null,
     val qualificationProfileId: String = profileId,
+    val productionEligible: Boolean = false,
 ) {
     init {
         require(PROFILE_ID_PATTERN.matches(profileId)) {
@@ -53,6 +54,14 @@ internal data class MdxLiteRtGpuRuntimeProfile(
             profileId = "gpu-auto-fp32-v1",
             api = MdxLiteRtGpuApi.Automatic,
             precision = MdxLiteRtGpuPrecision.Float32,
+        )
+
+        val BoundedOpenClFp32V1 = MdxLiteRtGpuRuntimeProfile(
+            profileId = MdxLiteRtBoundedGpuContract.PROFILE_ID,
+            api = MdxLiteRtGpuApi.OpenCl,
+            precision = MdxLiteRtGpuPrecision.Float32,
+            qualificationProfileId = AutomaticFp32V1.profileId,
+            productionEligible = true,
         )
 
         val AutomaticFp16V1 = MdxLiteRtGpuRuntimeProfile(
@@ -84,6 +93,7 @@ internal data class MdxLiteRtGpuRuntimeProfile(
         )
 
         val all = listOf(
+            BoundedOpenClFp32V1,
             AutomaticFp32V1,
             AutomaticFp16V1,
             ExplicitOpenClFp32V1,
@@ -98,7 +108,7 @@ internal data class MdxLiteRtGpuRuntimeProfile(
 
 internal class MdxLiteRtGpuInferenceSessionFactory(
     private val runtimeProfile: MdxLiteRtGpuRuntimeProfile =
-        MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1,
+        MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1,
     private val platformProvider: MdxRuntimePlatformProvider = AndroidMdxRuntimePlatformProvider,
     private val compatibilityPolicy: MdxCompatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
     private val sessionAllocator: MdxLiteRtGpuSessionAllocator =
@@ -116,7 +126,8 @@ internal class MdxLiteRtGpuInferenceSessionFactory(
         profile.validateArtifact(artifact)
         validateLiteRtExecutionProfile(profile)
         require(
-            compatibilityPolicy == MdxCompatibilityPolicy.AllowUntestedInternal ||
+            runtimeProfile.productionEligible ||
+                compatibilityPolicy == MdxCompatibilityPolicy.AllowUntestedInternal ||
                 runtimeProfile.qualificationProfileId == runtimeProfile.profileId
         ) {
             "A derived LiteRT GPU profile is available only for internal validation."

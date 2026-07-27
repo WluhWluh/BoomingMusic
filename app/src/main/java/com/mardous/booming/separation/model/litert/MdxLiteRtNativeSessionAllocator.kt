@@ -75,7 +75,21 @@ internal object MdxLiteRtNativeGpuSessionAllocator : MdxLiteRtGpuSessionAllocato
         runtimeProfile: MdxLiteRtGpuRuntimeProfile,
         compatibility: MdxCompatibilityDecision,
     ): MdxInferenceSession {
-        val queueExperimentEnabled = MdxLiteRtOpenClQueueExperiment.isEnabled()
+        val boundedRuntimeEnabled = runtimeProfile.profileId ==
+            MdxLiteRtBoundedGpuContract.PROFILE_ID
+        val boundedCapability = if (boundedRuntimeEnabled) {
+            try {
+                MdxLiteRtBoundedGpuRuntime.requireExactCapability()
+            } catch (error: Exception) {
+                throw MdxLiteRtBackendException(
+                    stage = MdxLiteRtFailureStage.AcceleratorDiscovery,
+                    isRecoverable = true,
+                    cause = error,
+                )
+            }
+        } else {
+            null
+        }
         return createNativeLiteRtSession(
             artifact = artifact,
             profile = profile,
@@ -85,8 +99,11 @@ internal object MdxLiteRtNativeGpuSessionAllocator : MdxLiteRtGpuSessionAllocato
                     precision = runtimeProfile.precision.toLiteRtPrecision(),
                     backend = runtimeProfile.api.toLiteRtBackend(),
                     priority = runtimeProfile.priority?.toLiteRtPriority(),
-                    numStepsOfCommandBufferPreparations =
-                        MdxLiteRtOpenClQueueExperiment.kernelBatchSize(),
+                    numStepsOfCommandBufferPreparations = if (boundedRuntimeEnabled) {
+                        MdxLiteRtBoundedGpuContract.KERNEL_BATCH_SIZE
+                    } else {
+                        null
+                    },
                 )
             },
             diagnostics = MdxRuntimeDiagnostics(
@@ -98,10 +115,13 @@ internal object MdxLiteRtNativeGpuSessionAllocator : MdxLiteRtGpuSessionAllocato
                     append(", api=").append(runtimeProfile.api.name)
                     append(", precision=").append(runtimeProfile.precision.name)
                     append(", priority=").append(runtimeProfile.priority?.name ?: "Default")
+                    boundedCapability?.let {
+                        append(", boundedRuntime=").append(it.detail)
+                    }
                     append(", ").append(compatibilityDetail(compatibility))
                 },
             ),
-            queueExperimentEnabled = queueExperimentEnabled,
+            boundedRuntimeEnabled = boundedRuntimeEnabled,
         )
     }
 }
@@ -112,7 +132,7 @@ private fun createNativeLiteRtSession(
     requiredAccelerator: Accelerator,
     options: CompiledModel.Options,
     diagnostics: MdxRuntimeDiagnostics,
-    queueExperimentEnabled: Boolean = false,
+    boundedRuntimeEnabled: Boolean = false,
 ): MdxInferenceSession {
     val environment = runLiteRtOperation(MdxLiteRtFailureStage.EnvironmentCreate) {
         Environment.create()
@@ -182,8 +202,8 @@ private fun createNativeLiteRtSession(
             inputBuffer = inputBuffers.single(),
             outputBuffer = outputBuffers.single(),
             profile = profile,
-            diagnostics = diagnostics,
-            queueExperimentEnabled = queueExperimentEnabled,
+            baseDiagnostics = diagnostics,
+            boundedRuntimeEnabled = boundedRuntimeEnabled,
         )
     } catch (error: Throwable) {
         closeAfterFailure(
@@ -205,8 +225,8 @@ private class MdxLiteRtInferenceSession(
     private val inputBuffer: TensorBuffer,
     private val outputBuffer: TensorBuffer,
     private val profile: MdxExecutionProfile,
-    override val diagnostics: MdxRuntimeDiagnostics,
-    private val queueExperimentEnabled: Boolean,
+    private val baseDiagnostics: MdxRuntimeDiagnostics,
+    private val boundedRuntimeEnabled: Boolean,
 ) : MdxInferenceSession {
     private val inputNhwc = FloatArray(profile.inputTensor.elementCount)
     private val outputNchw = FloatArray(profile.outputTensor.elementCount)
@@ -214,9 +234,22 @@ private class MdxLiteRtInferenceSession(
     private val outputBuffers = listOf(outputBuffer)
     private var closed = false
 
+    override val diagnostics: MdxRuntimeDiagnostics
+        get() {
+            if (!boundedRuntimeEnabled) return baseDiagnostics
+            val statistics = runCatching {
+                MdxLiteRtBoundedGpuRuntime.statistics()
+            }.getOrNull() ?: return baseDiagnostics
+            return baseDiagnostics.copy(
+                detail = baseDiagnostics.detail +
+                    ", boundedDispatches=${statistics.dispatchCount}" +
+                    ", boundedEventWaits=${statistics.eventWaitCount}",
+            )
+        }
+
     init {
-        if (queueExperimentEnabled) {
-            MdxLiteRtOpenClQueueExperiment.reset()
+        if (boundedRuntimeEnabled) {
+            MdxLiteRtBoundedGpuRuntime.resetInferenceCounters()
         }
     }
 
@@ -242,16 +275,16 @@ private class MdxLiteRtInferenceSession(
             inputBuffer.writeFloat(inputNhwc)
         }
         runNonInterruptibleMdxInference(shouldCancel) {
-            if (queueExperimentEnabled) {
-                MdxLiteRtOpenClQueueExperiment.beginInference()
+            if (boundedRuntimeEnabled) {
+                MdxLiteRtBoundedGpuRuntime.beginInference()
             }
             try {
                 runLiteRtOperation(MdxLiteRtFailureStage.Invocation) {
                     compiledModel.run(inputBuffers, outputBuffers)
                 }
             } finally {
-                if (queueExperimentEnabled) {
-                    MdxLiteRtOpenClQueueExperiment.endInference()
+                if (boundedRuntimeEnabled) {
+                    MdxLiteRtBoundedGpuRuntime.endInference()
                 }
             }
         }

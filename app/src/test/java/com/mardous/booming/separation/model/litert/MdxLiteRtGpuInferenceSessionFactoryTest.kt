@@ -25,11 +25,17 @@ import java.io.File
 class MdxLiteRtGpuInferenceSessionFactoryTest {
     @Test
     fun `GPU runtime profiles have stable distinct identities`() {
+        val bounded = MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1
         val fp32 = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1
         val fp16 = MdxLiteRtGpuRuntimeProfile.AutomaticFp16V1
         val openClLow = MdxLiteRtGpuRuntimeProfile.LowPriorityOpenClFp32V1
         val openGl = MdxLiteRtGpuRuntimeProfile.OpenGlFp32V1
 
+        assertEquals("gpu-opencl-bounded-fp32-v1", bounded.profileId)
+        assertEquals(MdxLiteRtGpuApi.OpenCl, bounded.api)
+        assertEquals(MdxLiteRtGpuPrecision.Float32, bounded.precision)
+        assertEquals(fp32.profileId, bounded.qualificationProfileId)
+        assertTrue(bounded.productionEligible)
         assertEquals("gpu-auto-fp32-v1", fp32.profileId)
         assertEquals(MdxLiteRtGpuPrecision.Float32, fp32.precision)
         assertEquals("gpu-auto-fp16-v1", fp16.profileId)
