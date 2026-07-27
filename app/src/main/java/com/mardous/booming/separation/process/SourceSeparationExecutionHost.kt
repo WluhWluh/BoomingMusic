@@ -3,6 +3,7 @@ package com.mardous.booming.separation.process
 import com.mardous.booming.separation.SourceSeparationModelAwareExecutionRequest
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
+import com.mardous.booming.separation.cache.v2.SourceSeparationAdmittedGpuRuntimeIdentity
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRelativePath
@@ -12,7 +13,7 @@ import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 5
+internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 6
 
 internal interface SourceSeparationExecutionHost : AutoCloseable {
     val mode: SourceSeparationExecutionHostMode
@@ -216,6 +217,7 @@ internal data class SourceSeparationExecutionRuntimeIdentity(
     val executionSessionIdentity: String,
     val backendPolicy: SourceSeparationExecutionBackendPolicy,
     val tryGpu: Boolean,
+    val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
     val cpuThreads: Int,
     val useXnnpack: Boolean,
     val windowDecodeEnabled: Boolean,
@@ -232,6 +234,9 @@ internal data class SourceSeparationExecutionRuntimeIdentity(
         require(cpuThreads > 0) { "Runtime CPU thread count is invalid." }
         require(tryGpu == (backendPolicy == SourceSeparationExecutionBackendPolicy.Auto)) {
             "Runtime GPU preference does not match its backend policy."
+        }
+        require(tryGpu == (gpuRuntimeIdentity != null)) {
+            "Runtime GPU preference and admitted runtime identity disagree."
         }
         require(initialPlaybackPositionMs == null || initialPlaybackPositionMs >= 0L) {
             "Initial playback position is invalid."

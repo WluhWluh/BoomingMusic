@@ -318,6 +318,7 @@ private fun SourceSeparationExecutionHostRequest.requireExactDescriptor(
         descriptor.runtime.executionSessionIdentity == profile.sessionIdentity &&
         descriptor.runtime.backendPolicy == execution.backendPolicy &&
         descriptor.runtime.tryGpu == execution.tryGpu &&
+        descriptor.runtime.gpuRuntimeIdentity == execution.gpuRuntimeIdentity &&
         descriptor.runtime.cpuThreads == execution.runtimeSettings.cpuThreads &&
         descriptor.runtime.useXnnpack == execution.runtimeSettings.useXnnpack &&
         descriptor.runtime.windowDecodeEnabled == execution.windowDecodeEnabled
@@ -378,6 +379,7 @@ internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
             executionSessionIdentity = profile.sessionIdentity,
             backendPolicy = backendPolicy,
             tryGpu = tryGpu,
+            gpuRuntimeIdentity = gpuRuntimeIdentity,
             cpuThreads = runtimeSettings.cpuThreads,
             useXnnpack = runtimeSettings.useXnnpack,
             windowDecodeEnabled = windowDecodeEnabled,

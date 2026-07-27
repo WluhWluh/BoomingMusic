@@ -28,6 +28,8 @@ internal object MdxLiteRtBoundedGpuContract {
     const val CAPABILITY_SCHEMA_VERSION = 1
     const val ARTIFACT_VERSION = "2.1.5-bss.2"
     const val PROFILE_ID = "gpu-opencl-bounded-fp32-v1"
+    const val BACKEND = "OpenCL"
+    const val PRECISION = "FP32"
     const val KERNEL_BATCH_SIZE = 1
     const val COMMAND_QUEUE_WINDOW_SIZE = 1
 

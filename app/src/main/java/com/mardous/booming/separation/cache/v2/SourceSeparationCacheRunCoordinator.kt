@@ -33,16 +33,21 @@ class SourceSeparationCacheRunCoordinator(
         }
     }
 
-    fun inspectAdmittedTryGpu(
+    fun inspectAdmittedRuntimePolicy(
         identity: SourceSeparationCacheIdentity,
-    ): Boolean? = store.readRunJournal(identity.cacheKey)
+    ): SourceSeparationCacheAdmittedRuntimePolicy? = store.readRunJournal(identity.cacheKey)
         ?.takeIf { journal ->
             journal.request.identity == identity &&
                 (journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running ||
                     journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused)
         }
         ?.request
-        ?.tryGpu
+        ?.let { request ->
+            SourceSeparationCacheAdmittedRuntimePolicy(
+                tryGpu = request.tryGpu,
+                gpuRuntimeIdentity = request.gpuRuntimeIdentity,
+            )
+        }
 
     fun previewWorkspace(
         identity: SourceSeparationCacheIdentity,
@@ -630,6 +635,7 @@ class SourceSeparationCacheRunCoordinator(
         processGeneration = processGeneration,
         ownerPid = ownerPid,
         tryGpu = tryGpu,
+        gpuRuntimeIdentity = gpuRuntimeIdentity,
         admittedAtEpochMs = admittedAtEpochMs,
     )
 
@@ -694,15 +700,30 @@ data class SourceSeparationCacheRunRequest(
     val contract: SourceSeparationCacheContractSnapshot,
     val song: SourceSeparationCacheSongLocator,
     val sourceDiagnostics: SourceSeparationCacheSourceDiagnostics,
+    val tryGpu: Boolean,
+    val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
     val runId: String = java.util.UUID.randomUUID().toString(),
     val processGeneration: Long = 1L,
     val ownerPid: Int? = null,
-    val tryGpu: Boolean = true,
 ) {
     init {
         require(runId.isNotBlank()) { "Cache run ID is empty." }
         require(processGeneration > 0L) { "Cache run process generation is invalid." }
         require(ownerPid == null || ownerPid > 0) { "Cache run owner PID is invalid." }
+        require(tryGpu == (gpuRuntimeIdentity != null)) {
+            "Cache run GPU preference and runtime identity disagree."
+        }
+    }
+}
+
+data class SourceSeparationCacheAdmittedRuntimePolicy(
+    val tryGpu: Boolean,
+    val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
+) {
+    init {
+        require(tryGpu == (gpuRuntimeIdentity != null)) {
+            "Admitted GPU preference and runtime identity disagree."
+        }
     }
 }
 

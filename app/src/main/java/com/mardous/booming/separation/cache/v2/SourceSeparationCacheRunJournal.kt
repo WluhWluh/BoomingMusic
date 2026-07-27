@@ -83,7 +83,7 @@ data class SourceSeparationCacheRunJournal(
     }
 
     companion object {
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
 
         fun admitted(
             request: SourceSeparationCacheRunJournalRequest,
@@ -114,8 +114,10 @@ data class SourceSeparationCacheRunJournal(
             if (previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running ||
                 previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused
             ) {
-                require(previous.request.tryGpu == request.tryGpu) {
-                    "An active or paused cache run cannot change its admitted GPU policy."
+                require(previous.request.tryGpu == request.tryGpu &&
+                    previous.request.gpuRuntimeIdentity == request.gpuRuntimeIdentity
+                ) {
+                    "An active or paused cache run cannot change its admitted GPU runtime."
                 }
             }
             var sequence = previous.latestSequence
@@ -159,6 +161,31 @@ data class SourceSeparationCacheRunJournal(
 }
 
 @Serializable
+data class SourceSeparationAdmittedGpuRuntimeIdentity(
+    val profileId: String,
+    val artifactVersion: String,
+    val capabilitySchemaVersion: Int,
+    val backend: String,
+    val precision: String,
+    val kernelBatchSize: Int,
+    val commandQueueWindowSize: Int,
+) {
+    init {
+        require(profileId.isNotBlank()) { "Admitted GPU profile ID is empty." }
+        require(artifactVersion.isNotBlank()) { "Admitted GPU artifact version is empty." }
+        require(capabilitySchemaVersion > 0) {
+            "Admitted GPU capability schema is invalid."
+        }
+        require(backend.isNotBlank() && precision.isNotBlank()) {
+            "Admitted GPU backend identity is incomplete."
+        }
+        require(kernelBatchSize > 0 && commandQueueWindowSize > 0) {
+            "Admitted GPU queue policy is invalid."
+        }
+    }
+}
+
+@Serializable
 data class SourceSeparationCacheRunJournalRequest(
     val cacheKey: String,
     val identity: SourceSeparationCacheIdentity,
@@ -169,12 +196,16 @@ data class SourceSeparationCacheRunJournalRequest(
     val processGeneration: Long,
     val ownerPid: Int? = null,
     val tryGpu: Boolean,
+    val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
     val admittedAtEpochMs: Long,
 ) {
     init {
         require(runId.isNotBlank()) { "Cache run journal ID is empty." }
         require(processGeneration > 0L) { "Cache run process generation is invalid." }
         require(ownerPid == null || ownerPid > 0) { "Cache run owner PID is invalid." }
+        require(tryGpu == (gpuRuntimeIdentity != null)) {
+            "Cache run GPU preference and runtime identity disagree."
+        }
         require(admittedAtEpochMs >= 0L) { "Cache run admission time is invalid." }
         require(contract.identity(
             source = identity.source,

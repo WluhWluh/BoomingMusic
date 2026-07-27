@@ -5,6 +5,8 @@ import android.net.Uri
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
+import com.mardous.booming.separation.cache.v2.SourceSeparationAdmittedGpuRuntimeIdentity
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheAdmittedRuntimePolicy
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunRequest
@@ -22,6 +24,7 @@ import com.mardous.booming.separation.cache.v2.resolveActiveCacheModel
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.litert.MdxLiteRtBoundedGpuContract
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.process.InProcessSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION
@@ -110,13 +113,13 @@ internal class SourceSeparationModelAwareEngine(
             "The model-aware LiteRT engine is disabled by its construction gate."
         }
         val identity = model.contract.identity(preflight.identity)
-        val admittedBackendPolicy = coordinator.inspectAdmittedTryGpu(identity)?.let { tryGpu ->
-            if (tryGpu) {
-                SourceSeparationExecutionBackendPolicy.Auto
-            } else {
-                SourceSeparationExecutionBackendPolicy.Cpu
-            }
-        } ?: executionBackendPolicy
+        val admittedRuntimePolicy = coordinator.inspectAdmittedRuntimePolicy(identity)
+            ?: executionBackendPolicy.toAdmittedRuntimePolicy()
+        val admittedBackendPolicy = if (admittedRuntimePolicy.tryGpu) {
+            SourceSeparationExecutionBackendPolicy.Auto
+        } else {
+            SourceSeparationExecutionBackendPolicy.Cpu
+        }
         val executionRunId = runIdFactory().also {
             require(it.isNotBlank()) { "Execution run ID factory returned an empty ID." }
         }
@@ -135,6 +138,7 @@ internal class SourceSeparationModelAwareEngine(
                 preflightElapsedMs = preflight.elapsedMs,
                 runtimeSettings = runtimeSettings,
                 executionBackendPolicy = admittedBackendPolicy,
+                gpuRuntimeIdentity = admittedRuntimePolicy.gpuRuntimeIdentity,
                 onProgress = onProgress,
                 playbackPositionMsProvider = playbackPositionMsProvider,
                 playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
@@ -157,6 +161,7 @@ internal class SourceSeparationModelAwareEngine(
                 .getOrNull()
                 ?.takeIf { it > 0 },
             tryGpu = admittedBackendPolicy == SourceSeparationExecutionBackendPolicy.Auto,
+            gpuRuntimeIdentity = admittedRuntimePolicy.gpuRuntimeIdentity,
         )
         return when (val start = coordinator.begin(runRequest)) {
             SourceSeparationCacheRunStart.Busy ->
@@ -175,6 +180,7 @@ internal class SourceSeparationModelAwareEngine(
                 preflightElapsedMs = preflight.elapsedMs,
                 runtimeSettings = runtimeSettings,
                 executionBackendPolicy = admittedBackendPolicy,
+                gpuRuntimeIdentity = admittedRuntimePolicy.gpuRuntimeIdentity,
                 onProgress = onProgress,
                 playbackPositionMsProvider = playbackPositionMsProvider,
                 playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
@@ -195,6 +201,7 @@ internal class SourceSeparationModelAwareEngine(
         preflightElapsedMs: Long,
         runtimeSettings: MdxRuntimeSettings,
         executionBackendPolicy: SourceSeparationExecutionBackendPolicy,
+        gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
         onProgress: (MdxRangeProgress) -> Unit,
         playbackPositionMsProvider: () -> Long?,
         playbackReadyWindowCountProvider: () -> Int,
@@ -224,6 +231,7 @@ internal class SourceSeparationModelAwareEngine(
             ),
             runtimeSettings = runtimeSettings,
             backendPolicy = executionBackendPolicy,
+            gpuRuntimeIdentity = gpuRuntimeIdentity,
             onProgress = {},
             onPrepared = {},
             onSegmentStateChanged = { _, _ -> },
@@ -334,6 +342,7 @@ internal class SourceSeparationModelAwareEngine(
         preflightElapsedMs: Long,
         runtimeSettings: MdxRuntimeSettings,
         executionBackendPolicy: SourceSeparationExecutionBackendPolicy,
+        gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
         onProgress: (MdxRangeProgress) -> Unit,
         playbackPositionMsProvider: () -> Long?,
         playbackReadyWindowCountProvider: () -> Int,
@@ -363,6 +372,7 @@ internal class SourceSeparationModelAwareEngine(
                 workspace = SourceSeparationModelAwareExecutionWorkspace.from(run),
                 runtimeSettings = runtimeSettings,
                 backendPolicy = executionBackendPolicy,
+                gpuRuntimeIdentity = gpuRuntimeIdentity,
                 onProgress = {},
                 onPrepared = {},
                 onSegmentStateChanged = { _, _ -> },
@@ -580,6 +590,7 @@ internal data class SourceSeparationModelAwareExecutionRequest(
     val workspace: SourceSeparationModelAwareExecutionWorkspace,
     val runtimeSettings: MdxRuntimeSettings,
     val backendPolicy: SourceSeparationExecutionBackendPolicy,
+    val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
     val onProgress: (MdxRangeProgress) -> Unit,
     val onPrepared: (com.mardous.booming.separation.model.MdxRangePreparation) -> Unit,
     val onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit,
@@ -592,7 +603,40 @@ internal data class SourceSeparationModelAwareExecutionRequest(
 ) {
     val tryGpu: Boolean
         get() = backendPolicy == SourceSeparationExecutionBackendPolicy.Auto
+
+    init {
+        require(tryGpu == (gpuRuntimeIdentity != null)) {
+            "Execution GPU preference and admitted runtime identity disagree."
+        }
+        require(!tryGpu || gpuRuntimeIdentity == BOUNDED_GPU_RUNTIME_IDENTITY) {
+            "Execution GPU runtime identity is not supported by this build."
+        }
+    }
 }
+
+private val BOUNDED_GPU_RUNTIME_IDENTITY = SourceSeparationAdmittedGpuRuntimeIdentity(
+    profileId = MdxLiteRtBoundedGpuContract.PROFILE_ID,
+    artifactVersion = MdxLiteRtBoundedGpuContract.ARTIFACT_VERSION,
+    capabilitySchemaVersion = MdxLiteRtBoundedGpuContract.CAPABILITY_SCHEMA_VERSION,
+    backend = MdxLiteRtBoundedGpuContract.BACKEND,
+    precision = MdxLiteRtBoundedGpuContract.PRECISION,
+    kernelBatchSize = MdxLiteRtBoundedGpuContract.KERNEL_BATCH_SIZE,
+    commandQueueWindowSize = MdxLiteRtBoundedGpuContract.COMMAND_QUEUE_WINDOW_SIZE,
+)
+
+private fun SourceSeparationExecutionBackendPolicy.toAdmittedRuntimePolicy() =
+    when (this) {
+        SourceSeparationExecutionBackendPolicy.Auto ->
+            SourceSeparationCacheAdmittedRuntimePolicy(
+                tryGpu = true,
+                gpuRuntimeIdentity = BOUNDED_GPU_RUNTIME_IDENTITY,
+            )
+        SourceSeparationExecutionBackendPolicy.Cpu ->
+            SourceSeparationCacheAdmittedRuntimePolicy(
+                tryGpu = false,
+                gpuRuntimeIdentity = null,
+            )
+    }
 
 internal data class SourceSeparationModelAwareExecutionWorkspace(
     val identity: com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity,

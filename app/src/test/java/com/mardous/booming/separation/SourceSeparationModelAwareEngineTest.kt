@@ -2,6 +2,7 @@ package com.mardous.booming.separation
 
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
+import com.mardous.booming.separation.cache.v2.SourceSeparationAdmittedGpuRuntimeIdentity
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
@@ -30,6 +31,7 @@ import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalo
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContract
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
+import com.mardous.booming.separation.model.litert.MdxLiteRtBoundedGpuContract
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPresetOrigin
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
@@ -42,6 +44,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostLifecycle
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostStartResult
 import com.mardous.booming.separation.process.ipc.SourceSeparationExecutionIpcCodec
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcStartCommand
 import java.io.File
@@ -357,6 +360,57 @@ class SourceSeparationModelAwareEngineTest {
         assertEquals(false, observedTryGpu)
         assertEquals(SourceSeparationExecutionBackendPolicy.Cpu, observedRequestPolicy)
         assertEquals(false, fixture.currentRunJournal().request.tryGpu)
+        assertEquals(null, fixture.currentRunJournal().request.gpuRuntimeIdentity)
+    }
+
+    @Test
+    fun `bounded GPU runtime identity survives admission and IPC`() {
+        val fixture = fixture()
+        val executor = SourceSeparationModelAwareRangeExecutor { request ->
+            fixture.complete(request, fixture.prepare(request))
+        }
+        val delegate = InProcessSourceSeparationExecutionHost(executor)
+        var observedRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity? = null
+        val observingHost = object : SourceSeparationExecutionHost by delegate {
+            override fun start(
+                request: SourceSeparationExecutionHostRequest,
+            ): SourceSeparationExecutionHostStartResult {
+                val descriptor = SourceSeparationExecutionIpcCodec.decodeStartCommand(
+                    SourceSeparationExecutionIpcCodec.encodeStartCommand(
+                        SourceSeparationIpcStartCommand(
+                            commandId = "start-bounded-runtime",
+                            descriptor = request.descriptor,
+                        )
+                    )
+                ).descriptor
+                observedRuntimeIdentity = descriptor.runtime.gpuRuntimeIdentity
+                return delegate.start(request.copy(descriptor = descriptor))
+            }
+        }
+
+        val result = fixture.engine(
+            executionHost = observingHost,
+            executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Auto,
+            executor = executor,
+        ).separate(fixture.input)
+
+        assertTrue(result is SourceSeparationModelAwareEngineResult.Completed)
+        val identity = requireNotNull(observedRuntimeIdentity)
+        assertEquals(MdxLiteRtBoundedGpuContract.PROFILE_ID, identity.profileId)
+        assertEquals(MdxLiteRtBoundedGpuContract.ARTIFACT_VERSION, identity.artifactVersion)
+        assertEquals(
+            MdxLiteRtBoundedGpuContract.CAPABILITY_SCHEMA_VERSION,
+            identity.capabilitySchemaVersion,
+        )
+        assertEquals(MdxLiteRtBoundedGpuContract.BACKEND, identity.backend)
+        assertEquals(MdxLiteRtBoundedGpuContract.PRECISION, identity.precision)
+        assertEquals(MdxLiteRtBoundedGpuContract.KERNEL_BATCH_SIZE, identity.kernelBatchSize)
+        assertEquals(
+            MdxLiteRtBoundedGpuContract.COMMAND_QUEUE_WINDOW_SIZE,
+            identity.commandQueueWindowSize,
+        )
+        assertEquals(identity, fixture.currentRunJournal().request.gpuRuntimeIdentity)
+        assertEquals(3, fixture.currentRunJournal().journalSchemaVersion)
     }
 
     @Test

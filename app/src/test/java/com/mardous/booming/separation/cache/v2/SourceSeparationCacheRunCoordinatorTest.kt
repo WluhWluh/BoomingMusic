@@ -13,6 +13,7 @@ import com.mardous.booming.separation.model.MdxSourceDecodeMode
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
+import com.mardous.booming.separation.model.litert.MdxLiteRtBoundedGpuContract
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -254,42 +255,66 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
-    fun `resumable journal preserves its admitted GPU policy`() {
+    fun `resumable journal preserves its exact admitted GPU runtime`() {
         val fixture = fixture()
-        val cpuRequest = fixture.request.copy(
-            runId = "cpu-run",
-            tryGpu = false,
+        val runtimeIdentity = admittedGpuRuntimeIdentity()
+        val gpuRequest = fixture.request.copy(
+            runId = "gpu-run",
+            tryGpu = true,
+            gpuRuntimeIdentity = runtimeIdentity,
         )
-        val first = fixture.coordinator.begin(cpuRequest)
+        val first = fixture.coordinator.begin(gpuRequest)
             as SourceSeparationCacheRunStart.Ready
 
-        assertEquals(false, fixture.coordinator.inspectAdmittedTryGpu(cpuRequest.identity))
         assertEquals(
-            false,
-            requireNotNull(fixture.store.readRunJournal(cpuRequest.identity.cacheKey))
+            SourceSeparationCacheAdmittedRuntimePolicy(true, runtimeIdentity),
+            fixture.coordinator.inspectAdmittedRuntimePolicy(gpuRequest.identity),
+        )
+        assertEquals(
+            runtimeIdentity,
+            requireNotNull(fixture.store.readRunJournal(gpuRequest.identity.cacheKey))
                 .request
-                .tryGpu,
+                .gpuRuntimeIdentity,
+        )
+        assertEquals(
+            3,
+            fixture.store.readRunJournal(gpuRequest.identity.cacheKey)?.journalSchemaVersion,
         )
         fixture.coordinator.pause(first.run)
 
         assertThrows(IllegalArgumentException::class.java) {
             fixture.coordinator.begin(
-                cpuRequest.copy(
-                    runId = "changed-policy-run",
+                gpuRequest.copy(
+                    runId = "changed-runtime-run",
                     processGeneration = 2L,
-                    tryGpu = true,
+                    gpuRuntimeIdentity = runtimeIdentity.copy(
+                        artifactVersion = "different-runtime",
+                    ),
                 )
             )
         }
-        assertFalse(fixture.repository.isLeased(cpuRequest.identity.cacheKey))
+        assertThrows(IllegalArgumentException::class.java) {
+            fixture.coordinator.begin(
+                gpuRequest.copy(
+                    runId = "changed-policy-run",
+                    processGeneration = 2L,
+                    tryGpu = false,
+                    gpuRuntimeIdentity = null,
+                )
+            )
+        }
+        assertFalse(fixture.repository.isLeased(gpuRequest.identity.cacheKey))
 
         val resumed = fixture.coordinator.begin(
-            cpuRequest.copy(
-                runId = "resumed-cpu-run",
+            gpuRequest.copy(
+                runId = "resumed-gpu-run",
                 processGeneration = 2L,
             )
         ) as SourceSeparationCacheRunStart.Ready
-        assertEquals(false, fixture.coordinator.inspectAdmittedTryGpu(cpuRequest.identity))
+        assertEquals(
+            SourceSeparationCacheAdmittedRuntimePolicy(true, runtimeIdentity),
+            fixture.coordinator.inspectAdmittedRuntimePolicy(gpuRequest.identity),
+        )
         fixture.coordinator.pause(resumed.run)
     }
 
@@ -325,6 +350,16 @@ class SourceSeparationCacheRunCoordinatorTest {
         fixture.coordinator.pause(first)
         fixture.coordinator.pause((other as SourceSeparationCacheRunStart.Ready).run)
     }
+
+    private fun admittedGpuRuntimeIdentity() = SourceSeparationAdmittedGpuRuntimeIdentity(
+        profileId = MdxLiteRtBoundedGpuContract.PROFILE_ID,
+        artifactVersion = MdxLiteRtBoundedGpuContract.ARTIFACT_VERSION,
+        capabilitySchemaVersion = MdxLiteRtBoundedGpuContract.CAPABILITY_SCHEMA_VERSION,
+        backend = MdxLiteRtBoundedGpuContract.BACKEND,
+        precision = MdxLiteRtBoundedGpuContract.PRECISION,
+        kernelBatchSize = MdxLiteRtBoundedGpuContract.KERNEL_BATCH_SIZE,
+        commandQueueWindowSize = MdxLiteRtBoundedGpuContract.COMMAND_QUEUE_WINDOW_SIZE,
+    )
 
     private fun fixture(): CoordinatorFixture {
         val store = SourceSeparationCacheStore(
@@ -369,6 +404,8 @@ class SourceSeparationCacheRunCoordinatorTest {
                     rawDateModified = 50L,
                     durationMs = 2_000L,
                 ),
+                tryGpu = false,
+                gpuRuntimeIdentity = null,
             ),
         )
     }

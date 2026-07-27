@@ -245,6 +245,8 @@ class SourceSeparationCacheFlacPromoterTest {
                     album = "Album",
                 ),
                 sourceDiagnostics = SourceSeparationCacheSourceDiagnostics(1_024L, 50L, 2_000L),
+                tryGpu = false,
+                gpuRuntimeIdentity = null,
             )
             val run = (coordinator.begin(request) as SourceSeparationCacheRunStart.Ready).run
             val vocals = File(run.workDirectory, "vocals.wav").apply { writeText("vocals") }
