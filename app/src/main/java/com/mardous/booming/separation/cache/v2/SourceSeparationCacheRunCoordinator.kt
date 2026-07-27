@@ -33,6 +33,17 @@ class SourceSeparationCacheRunCoordinator(
         }
     }
 
+    fun inspectAdmittedTryGpu(
+        identity: SourceSeparationCacheIdentity,
+    ): Boolean? = store.readRunJournal(identity.cacheKey)
+        ?.takeIf { journal ->
+            journal.request.identity == identity &&
+                (journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running ||
+                    journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused)
+        }
+        ?.request
+        ?.tryGpu
+
     fun previewWorkspace(
         identity: SourceSeparationCacheIdentity,
     ): SourceSeparationCacheWorkspacePreview {
@@ -618,6 +629,7 @@ class SourceSeparationCacheRunCoordinator(
         runId = runId,
         processGeneration = processGeneration,
         ownerPid = ownerPid,
+        tryGpu = tryGpu,
         admittedAtEpochMs = admittedAtEpochMs,
     )
 
@@ -685,6 +697,7 @@ data class SourceSeparationCacheRunRequest(
     val runId: String = java.util.UUID.randomUUID().toString(),
     val processGeneration: Long = 1L,
     val ownerPid: Int? = null,
+    val tryGpu: Boolean = true,
 ) {
     init {
         require(runId.isNotBlank()) { "Cache run ID is empty." }

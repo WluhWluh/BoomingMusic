@@ -316,6 +316,8 @@ private fun SourceSeparationExecutionHostRequest.requireExactDescriptor(
     }
     require(descriptor.runtime.executionProfileId == profile.profileId &&
         descriptor.runtime.executionSessionIdentity == profile.sessionIdentity &&
+        descriptor.runtime.backendPolicy == execution.backendPolicy &&
+        descriptor.runtime.tryGpu == execution.tryGpu &&
         descriptor.runtime.cpuThreads == execution.runtimeSettings.cpuThreads &&
         descriptor.runtime.useXnnpack == execution.runtimeSettings.useXnnpack &&
         descriptor.runtime.windowDecodeEnabled == execution.windowDecodeEnabled
@@ -375,6 +377,7 @@ internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
             executionProfileId = profile.profileId,
             executionSessionIdentity = profile.sessionIdentity,
             backendPolicy = backendPolicy,
+            tryGpu = tryGpu,
             cpuThreads = runtimeSettings.cpuThreads,
             useXnnpack = runtimeSettings.useXnnpack,
             windowDecodeEnabled = windowDecodeEnabled,

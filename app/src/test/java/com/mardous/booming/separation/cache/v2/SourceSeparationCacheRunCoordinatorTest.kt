@@ -254,6 +254,46 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `resumable journal preserves its admitted GPU policy`() {
+        val fixture = fixture()
+        val cpuRequest = fixture.request.copy(
+            runId = "cpu-run",
+            tryGpu = false,
+        )
+        val first = fixture.coordinator.begin(cpuRequest)
+            as SourceSeparationCacheRunStart.Ready
+
+        assertEquals(false, fixture.coordinator.inspectAdmittedTryGpu(cpuRequest.identity))
+        assertEquals(
+            false,
+            requireNotNull(fixture.store.readRunJournal(cpuRequest.identity.cacheKey))
+                .request
+                .tryGpu,
+        )
+        fixture.coordinator.pause(first.run)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            fixture.coordinator.begin(
+                cpuRequest.copy(
+                    runId = "changed-policy-run",
+                    processGeneration = 2L,
+                    tryGpu = true,
+                )
+            )
+        }
+        assertFalse(fixture.repository.isLeased(cpuRequest.identity.cacheKey))
+
+        val resumed = fixture.coordinator.begin(
+            cpuRequest.copy(
+                runId = "resumed-cpu-run",
+                processGeneration = 2L,
+            )
+        ) as SourceSeparationCacheRunStart.Ready
+        assertEquals(false, fixture.coordinator.inspectAdmittedTryGpu(cpuRequest.identity))
+        fixture.coordinator.pause(resumed.run)
+    }
+
+    @Test
     fun `cache disappearance is typed and is not recreated by the active run`() {
         val fixture = fixture()
         val run = fixture.beginReady()

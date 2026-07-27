@@ -12,7 +12,7 @@ import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 4
+internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 5
 
 internal interface SourceSeparationExecutionHost : AutoCloseable {
     val mode: SourceSeparationExecutionHostMode
@@ -215,6 +215,7 @@ internal data class SourceSeparationExecutionRuntimeIdentity(
     val executionProfileId: String,
     val executionSessionIdentity: String,
     val backendPolicy: SourceSeparationExecutionBackendPolicy,
+    val tryGpu: Boolean,
     val cpuThreads: Int,
     val useXnnpack: Boolean,
     val windowDecodeEnabled: Boolean,
@@ -229,6 +230,9 @@ internal data class SourceSeparationExecutionRuntimeIdentity(
             "Runtime execution session identity is empty."
         }
         require(cpuThreads > 0) { "Runtime CPU thread count is invalid." }
+        require(tryGpu == (backendPolicy == SourceSeparationExecutionBackendPolicy.Auto)) {
+            "Runtime GPU preference does not match its backend policy."
+        }
         require(initialPlaybackPositionMs == null || initialPlaybackPositionMs >= 0L) {
             "Initial playback position is invalid."
         }

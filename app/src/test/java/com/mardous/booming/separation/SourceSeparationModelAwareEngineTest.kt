@@ -42,6 +42,8 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostLifecycle
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
+import com.mardous.booming.separation.process.ipc.SourceSeparationExecutionIpcCodec
+import com.mardous.booming.separation.process.ipc.SourceSeparationIpcStartCommand
 import java.io.File
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
@@ -315,26 +317,86 @@ class SourceSeparationModelAwareEngineTest {
     @Test
     fun `execution backend policy is frozen into the host descriptor`() {
         val fixture = fixture()
+        var observedRequestPolicy: SourceSeparationExecutionBackendPolicy? = null
         val executor = SourceSeparationModelAwareRangeExecutor { request ->
+            observedRequestPolicy = request.backendPolicy
             fixture.complete(request, fixture.prepare(request))
         }
         val delegate = InProcessSourceSeparationExecutionHost(executor)
         var observedPolicy: SourceSeparationExecutionBackendPolicy? = null
+        var observedTryGpu: Boolean? = null
         val observingHost = object : SourceSeparationExecutionHost by delegate {
             override fun start(
                 request: SourceSeparationExecutionHostRequest,
-            ) = delegate.start(request.also {
-                observedPolicy = it.descriptor.runtime.backendPolicy
-            })
+            ) = delegate.start(
+                SourceSeparationExecutionIpcCodec.decodeStartCommand(
+                    SourceSeparationExecutionIpcCodec.encodeStartCommand(
+                        SourceSeparationIpcStartCommand(
+                            commandId = "start-policy",
+                            descriptor = request.descriptor,
+                        )
+                    )
+                ).descriptor.let { descriptor ->
+                    observedPolicy = descriptor.runtime.backendPolicy
+                    observedTryGpu = descriptor.runtime.tryGpu
+                    request.copy(descriptor = descriptor)
+                }
+            )
         }
 
         fixture.engine(
             executionHost = observingHost,
-            executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Cpu,
+            executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Auto,
             executor = executor,
-        ).separate(fixture.input)
+        ).separate(
+            input = fixture.input,
+            executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Cpu,
+        )
 
         assertEquals(SourceSeparationExecutionBackendPolicy.Cpu, observedPolicy)
+        assertEquals(false, observedTryGpu)
+        assertEquals(SourceSeparationExecutionBackendPolicy.Cpu, observedRequestPolicy)
+        assertEquals(false, fixture.currentRunJournal().request.tryGpu)
+    }
+
+    @Test
+    fun `paused run keeps its admitted GPU policy when the next call changes`() {
+        val fixture = fixture()
+        val observedPolicies = mutableListOf<SourceSeparationExecutionBackendPolicy>()
+        var attempt = 0
+        val engine = fixture.engine { request ->
+            attempt += 1
+            observedPolicies += request.backendPolicy
+            val preparation = fixture.prepare(request, preserveFiles = attempt > 1)
+            if (attempt == 1) {
+                request.onPrepared(preparation)
+                throw SourceSeparationPausedException()
+            }
+            fixture.complete(request, preparation)
+        }
+
+        assertThrows(SourceSeparationPausedException::class.java) {
+            engine.separate(
+                input = fixture.input,
+                executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Cpu,
+            )
+        }
+        assertEquals(false, fixture.currentRunJournal().request.tryGpu)
+
+        val completed = engine.separate(
+            input = fixture.input,
+            executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Auto,
+        )
+
+        assertTrue(completed is SourceSeparationModelAwareEngineResult.Completed)
+        assertEquals(
+            listOf(
+                SourceSeparationExecutionBackendPolicy.Cpu,
+                SourceSeparationExecutionBackendPolicy.Cpu,
+            ),
+            observedPolicies,
+        )
+        assertEquals(false, fixture.currentRunJournal().request.tryGpu)
     }
 
     @Test
@@ -634,6 +696,10 @@ class SourceSeparationModelAwareEngineTest {
                 executionProfile = contract.toMdxExecutionProfile(catalog.runtimeQualifications),
             )
         }
+
+        fun currentRunJournal() = requireNotNull(
+            store.readRunJournal(store.listManifests().single().cacheKey)
+        )
 
         fun prepare(
             request: SourceSeparationModelAwareExecutionRequest,

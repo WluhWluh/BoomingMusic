@@ -36,7 +36,7 @@ internal class SourceSeparationRemoteExecutionEnvironment(
     private val sessionControllers: SourceSeparationRemoteSessionControllerProvider =
         createRemoteSessionControllerProvider(context.applicationContext),
     val rangeExecutor: SourceSeparationModelAwareRangeExecutor =
-        MdxSourceSeparationModelAwareRangeExecutor(context.applicationContext) {
+        MdxSourceSeparationModelAwareRangeExecutor(context.applicationContext) { _ ->
             sessionControllers.requireCurrent()
         },
 ) : AutoCloseable {
@@ -129,6 +129,7 @@ internal class SourceSeparationRemoteExecutionEnvironment(
                 runId = descriptor.runId,
                 processGeneration = descriptor.processGeneration,
                 ownerPid = android.os.Process.myPid(),
+                tryGpu = descriptor.runtime.tryGpu,
             )
         )) {
             SourceSeparationCacheRunStart.Busy ->
@@ -153,6 +154,7 @@ internal class SourceSeparationRemoteExecutionEnvironment(
                 cpuThreads = descriptor.runtime.cpuThreads,
                 useXnnpack = descriptor.runtime.useXnnpack,
             ),
+            backendPolicy = descriptor.runtime.backendPolicy,
             onProgress = {},
             onPrepared = {},
             onSegmentStateChanged = { _, _ -> },

@@ -59,6 +59,8 @@ internal class SourceSeparationModelAwareEngine(
     fun separate(
         input: SourceSeparationModelAwareSongInput,
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
+        executionBackendPolicy: SourceSeparationExecutionBackendPolicy =
+            this.executionBackendPolicy,
         onProgress: (MdxRangeProgress) -> Unit = {},
         playbackPositionMsProvider: () -> Long? = { null },
         playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
@@ -78,6 +80,7 @@ internal class SourceSeparationModelAwareEngine(
             model = model,
             preflight = preflight,
             runtimeSettings = runtimeSettings,
+            executionBackendPolicy = executionBackendPolicy,
             onProgress = onProgress,
             playbackPositionMsProvider = playbackPositionMsProvider,
             playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
@@ -93,6 +96,8 @@ internal class SourceSeparationModelAwareEngine(
         model: SourceSeparationResolvedCacheModel,
         preflight: SourceSeparationCacheSourcePreflight,
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
+        executionBackendPolicy: SourceSeparationExecutionBackendPolicy =
+            this.executionBackendPolicy,
         onProgress: (MdxRangeProgress) -> Unit = {},
         playbackPositionMsProvider: () -> Long? = { null },
         playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
@@ -105,6 +110,13 @@ internal class SourceSeparationModelAwareEngine(
             "The model-aware LiteRT engine is disabled by its construction gate."
         }
         val identity = model.contract.identity(preflight.identity)
+        val admittedBackendPolicy = coordinator.inspectAdmittedTryGpu(identity)?.let { tryGpu ->
+            if (tryGpu) {
+                SourceSeparationExecutionBackendPolicy.Auto
+            } else {
+                SourceSeparationExecutionBackendPolicy.Cpu
+            }
+        } ?: executionBackendPolicy
         val executionRunId = runIdFactory().also {
             require(it.isNotBlank()) { "Execution run ID factory returned an empty ID." }
         }
@@ -122,6 +134,7 @@ internal class SourceSeparationModelAwareEngine(
                 identity = identity,
                 preflightElapsedMs = preflight.elapsedMs,
                 runtimeSettings = runtimeSettings,
+                executionBackendPolicy = admittedBackendPolicy,
                 onProgress = onProgress,
                 playbackPositionMsProvider = playbackPositionMsProvider,
                 playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
@@ -143,6 +156,7 @@ internal class SourceSeparationModelAwareEngine(
             ownerPid = runCatching { android.os.Process.myPid() }
                 .getOrNull()
                 ?.takeIf { it > 0 },
+            tryGpu = admittedBackendPolicy == SourceSeparationExecutionBackendPolicy.Auto,
         )
         return when (val start = coordinator.begin(runRequest)) {
             SourceSeparationCacheRunStart.Busy ->
@@ -160,6 +174,7 @@ internal class SourceSeparationModelAwareEngine(
                 run = start.run,
                 preflightElapsedMs = preflight.elapsedMs,
                 runtimeSettings = runtimeSettings,
+                executionBackendPolicy = admittedBackendPolicy,
                 onProgress = onProgress,
                 playbackPositionMsProvider = playbackPositionMsProvider,
                 playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
@@ -179,6 +194,7 @@ internal class SourceSeparationModelAwareEngine(
         identity: com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity,
         preflightElapsedMs: Long,
         runtimeSettings: MdxRuntimeSettings,
+        executionBackendPolicy: SourceSeparationExecutionBackendPolicy,
         onProgress: (MdxRangeProgress) -> Unit,
         playbackPositionMsProvider: () -> Long?,
         playbackReadyWindowCountProvider: () -> Int,
@@ -207,6 +223,7 @@ internal class SourceSeparationModelAwareEngine(
                 resumeState = null,
             ),
             runtimeSettings = runtimeSettings,
+            backendPolicy = executionBackendPolicy,
             onProgress = {},
             onPrepared = {},
             onSegmentStateChanged = { _, _ -> },
@@ -219,7 +236,7 @@ internal class SourceSeparationModelAwareEngine(
         val descriptor = executionRequest.toExecutionDescriptor(
             runId = runId,
             processGeneration = processGeneration,
-            backendPolicy = executionBackendPolicy,
+            backendPolicy = executionRequest.backendPolicy,
             sourceDiagnostics = input.sourceDiagnostics,
             song = input.song,
             initialPlaybackPositionMs = playbackPositionMsProvider()?.takeIf { it >= 0L },
@@ -316,6 +333,7 @@ internal class SourceSeparationModelAwareEngine(
         run: SourceSeparationModelAwareCacheRun,
         preflightElapsedMs: Long,
         runtimeSettings: MdxRuntimeSettings,
+        executionBackendPolicy: SourceSeparationExecutionBackendPolicy,
         onProgress: (MdxRangeProgress) -> Unit,
         playbackPositionMsProvider: () -> Long?,
         playbackReadyWindowCountProvider: () -> Int,
@@ -344,6 +362,7 @@ internal class SourceSeparationModelAwareEngine(
                 model = model,
                 workspace = SourceSeparationModelAwareExecutionWorkspace.from(run),
                 runtimeSettings = runtimeSettings,
+                backendPolicy = executionBackendPolicy,
                 onProgress = {},
                 onPrepared = {},
                 onSegmentStateChanged = { _, _ -> },
@@ -357,7 +376,7 @@ internal class SourceSeparationModelAwareEngine(
             val descriptor = executionRequest.toExecutionDescriptor(
                 runId = currentRunId,
                 processGeneration = currentProcessGeneration,
-                backendPolicy = executionBackendPolicy,
+                backendPolicy = executionRequest.backendPolicy,
                 sourceDiagnostics = input.sourceDiagnostics,
                 song = input.song,
                 initialPlaybackPositionMs = initialPlaybackPositionMs,
@@ -560,6 +579,7 @@ internal data class SourceSeparationModelAwareExecutionRequest(
     val model: SourceSeparationResolvedCacheModel,
     val workspace: SourceSeparationModelAwareExecutionWorkspace,
     val runtimeSettings: MdxRuntimeSettings,
+    val backendPolicy: SourceSeparationExecutionBackendPolicy,
     val onProgress: (MdxRangeProgress) -> Unit,
     val onPrepared: (com.mardous.booming.separation.model.MdxRangePreparation) -> Unit,
     val onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit,
@@ -569,7 +589,10 @@ internal data class SourceSeparationModelAwareExecutionRequest(
     val shouldPause: () -> Boolean,
     val shouldCancel: () -> Boolean,
     val requireWorkspaceAvailable: () -> Unit = {},
-)
+) {
+    val tryGpu: Boolean
+        get() = backendPolicy == SourceSeparationExecutionBackendPolicy.Auto
+}
 
 internal data class SourceSeparationModelAwareExecutionWorkspace(
     val identity: com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity,

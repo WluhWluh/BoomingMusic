@@ -30,6 +30,7 @@ import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
+import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
 import java.util.concurrent.CancellationException
 
 interface SourceSeparationRuntimeFacade {
@@ -64,6 +65,7 @@ interface SourceSeparationRuntimeFacade {
     fun separate(
         song: SourceSeparationRuntimeSong,
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
+        tryGpu: Boolean = true,
         onProgress: (MdxRangeProgress) -> Unit = {},
         onPrepared: (SourceSeparationCacheManifest) -> Unit = {},
         playbackPositionMsProvider: () -> Long? = { null },
@@ -205,6 +207,7 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
     override fun separate(
         song: SourceSeparationRuntimeSong,
         runtimeSettings: MdxRuntimeSettings,
+        tryGpu: Boolean,
         onProgress: (MdxRangeProgress) -> Unit,
         onPrepared: (SourceSeparationCacheManifest) -> Unit,
         playbackPositionMsProvider: () -> Long?,
@@ -217,6 +220,11 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
         model = song.model,
         preflight = song.preflight,
         runtimeSettings = runtimeSettings,
+        executionBackendPolicy = if (tryGpu) {
+            SourceSeparationExecutionBackendPolicy.Auto
+        } else {
+            SourceSeparationExecutionBackendPolicy.Cpu
+        },
         onProgress = onProgress,
         onPrepared = onPrepared,
         playbackPositionMsProvider = playbackPositionMsProvider,

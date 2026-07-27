@@ -15,11 +15,17 @@ import com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSessionF
 import com.mardous.booming.separation.model.litert.MdxLiteRtGpuInferenceSessionFactory
 import com.mardous.booming.separation.model.litert.MdxLiteRtGpuProbeResult
 import com.mardous.booming.separation.model.litert.MdxLiteRtGpuRuntimeProfile
+import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
 
 internal class MdxSourceSeparationModelAwareRangeExecutor(
     context: Context,
-    private val sessionProviderFactory: () -> MdxInferenceSessionProvider = {
-        createAutoLiteRtSessionProvider(context.applicationContext)
+    private val sessionProviderFactory:
+        (SourceSeparationExecutionBackendPolicy) -> MdxInferenceSessionProvider = { policy ->
+        when (policy) {
+            SourceSeparationExecutionBackendPolicy.Auto ->
+                createAutoLiteRtSessionProvider(context.applicationContext)
+            SourceSeparationExecutionBackendPolicy.Cpu -> createCpuLiteRtSessionProvider()
+        }
     },
 ) : SourceSeparationModelAwareRangeExecutor {
     private val applicationContext = context.applicationContext
@@ -48,7 +54,7 @@ internal class MdxSourceSeparationModelAwareRangeExecutor(
             profile = request.model.executionProfile,
         ),
         expectedSourceAudioFingerprint = request.workspace.identity.source.audioFingerprint,
-        sessionProvider = sessionProviderFactory(),
+        sessionProvider = sessionProviderFactory(request.backendPolicy),
         shouldPause = request.shouldPause,
         shouldCancel = request.shouldCancel,
         requireWorkspaceAvailable = request.requireWorkspaceAvailable,
@@ -63,6 +69,13 @@ internal fun createAutoLiteRtSessionProvider(
         createAutoLiteRtSessionFactory(context, gpuProfile)
     )
 }
+
+internal fun createCpuLiteRtSessionProvider(): MdxInferenceSessionProvider =
+    SingleUseMdxInferenceSessionProvider(
+        MdxLiteRtCpuInferenceSessionFactory(
+            compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
+        ).withMdxInferenceTiming()
+    )
 
 internal fun createAutoLiteRtSessionFactory(
     context: Context,

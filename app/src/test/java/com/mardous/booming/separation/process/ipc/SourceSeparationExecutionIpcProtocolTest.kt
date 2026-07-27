@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.process.ipc
 
+import com.mardous.booming.separation.process.SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
 import com.mardous.booming.separation.process.SourceSeparationExecutionProgress
@@ -61,9 +62,15 @@ class SourceSeparationExecutionIpcProtocolTest {
                 SourceSeparationExecutionIpcCodec.encodeRecycleCommand(recycle),
             ),
         )
+        assertEquals(5, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":1,"commandId":"connect","clientProcessName":"x","extra":1}""",
+                """{"protocolVersion":4,"commandId":"connect","clientProcessName":"x"}""",
+            )
+        }
+        assertThrows(SourceSeparationIpcProtocolException::class.java) {
+            SourceSeparationExecutionIpcCodec.decodeConnectRequest(
+                """{"protocolVersion":5,"commandId":"connect","clientProcessName":"x","extra":1}""",
             )
         }
     }

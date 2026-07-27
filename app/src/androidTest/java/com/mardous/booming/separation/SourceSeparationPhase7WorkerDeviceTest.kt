@@ -5143,8 +5143,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
             } else {
                 MdxSourceSeparationModelAwareRangeExecutor(
                     context,
-                    requireNotNull(sessionProviderFactory),
-                )
+                ) { _ ->
+                    requireNotNull(sessionProviderFactory).invoke()
+                }
             }
             SourceSeparationModelAwareEngine(
                 activeModelResolver = presetRepository::resolveActiveCacheModel,

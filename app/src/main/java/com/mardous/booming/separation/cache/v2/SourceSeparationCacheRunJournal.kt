@@ -83,7 +83,7 @@ data class SourceSeparationCacheRunJournal(
     }
 
     companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
 
         fun admitted(
             request: SourceSeparationCacheRunJournalRequest,
@@ -111,6 +111,13 @@ data class SourceSeparationCacheRunJournal(
             require(previous.request.identity == request.identity &&
                 previous.request.contract == request.contract
             ) { "Cache run journal cannot resume a different exact identity." }
+            if (previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running ||
+                previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused
+            ) {
+                require(previous.request.tryGpu == request.tryGpu) {
+                    "An active or paused cache run cannot change its admitted GPU policy."
+                }
+            }
             var sequence = previous.latestSequence
             val resumedTransitions = buildList {
                 addAll(previous.transitions)
@@ -161,6 +168,7 @@ data class SourceSeparationCacheRunJournalRequest(
     val runId: String,
     val processGeneration: Long,
     val ownerPid: Int? = null,
+    val tryGpu: Boolean,
     val admittedAtEpochMs: Long,
 ) {
     init {
