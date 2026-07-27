@@ -1,11 +1,12 @@
 # LiteRT Inference Process and Background Execution Roadmap
 
-Status: staged research and implementation plan
+Status: Phase 5 policy selected; bounded-GPU GitHub runtime productionization
+in progress
 
-Updated: 2026-07-25
+Updated: 2026-07-27
 
-Current milestone: Phase 5, compare host placement and session policies on
-each ABI without changing background lifetime.
+Current milestone: Phase 5F, freeze the GitHub-only custom LiteRT artifact and
+qualify the `N=1` bounded OpenCL profile before changing background lifetime.
 
 This roadmap governs two related but separate experiments:
 
@@ -23,7 +24,48 @@ This is a companion to the
 [LiteRT and Multi-Preset Roadmap](litert-multi-preset-roadmap.md). The main
 roadmap remains authoritative for model contracts, runtime compatibility,
 cache identity, playback, model management, and release qualification. This
-document is authoritative only for process placement and background execution.
+document is authoritative for process placement and background execution. Its
+post-Phase-3 fixed bounded-GPU and `tryGpu` decisions supersede the main
+roadmap's earlier generic `Auto` and device-eligibility wording until Phase 9
+synchronizes both documents.
+
+## Current Release and GPU Runtime Decision
+
+The near-term product is distributed through GitHub only. F-Droid acceptance,
+Maven Central publication, and a fully source-rebuilt ML Drift GPU accelerator
+are not release gates for this roadmap. They may be reconsidered in a separate
+distribution track without blocking the GitHub APK.
+
+The GitHub release candidate will use the already validated MACE-style bounded
+OpenCL queue behavior with `N=1`. This means the exact tested wait boundary is
+part of a versioned GPU runtime profile, not a user preference or an adaptive
+hint. The stock unbounded `N=0` runtime remains a diagnostic and rollback
+oracle only. It is not an automatic runtime fallback.
+
+Every device that can run the admitted model through the packaged bounded GPU
+runtime should attempt GPU by default. The source-separation panel therefore
+exposes one persistent switch under Advanced settings: `尝试使用 GPU` (`Try to
+use GPU`). It defaults to enabled. Enabled means that each newly admitted run
+attempts `gpu-opencl-bounded-fp32-v1` when runtime and model eligibility pass;
+a recoverable setup, probe, invocation, or output failure may fall back once to
+CPU only after GPU cleanup is confirmed. Uncertain cleanup, native death, or
+unsafe memory pressure poisons the process generation and must recycle or end
+without allocating CPU beside it. Disabled means CPU-only execution and no GPU
+environment, accelerator, probe, or session allocation attempt.
+
+The switch is frozen when a run is admitted. Changing it affects later runs
+only. Foreground, background, Activity visibility, and screen state never
+change the frozen choice or cause a GPU/CPU session transition. GPU capability
+is determined at runtime from the packaged bounded capability, ABI and model
+profile eligibility, accelerator discovery, successful setup/probe, and valid
+output. It is not determined by an OEM, device-model, or GPU-driver allowlist.
+
+Until public ML Drift sources can replace the binary transformation, the
+custom AAR may be produced from the pinned official LiteRT AAR by the audited,
+deterministic `bss-litert-android` workflow. GitHub-only distribution permits
+that binary-derived artifact, but does not relax artifact hashes, patch
+manifests, native-component inventory, reproducibility, device qualification,
+or one-way GPU-to-CPU fallback requirements.
 
 ## Goals
 
@@ -37,6 +79,13 @@ document is authoritative only for process placement and background execution.
 - Measure whether a remote process is useful on `armeabi-v7a`,
   `arm64-v8a`, and `x86_64` rather than assuming one policy
   fits every ABI.
+- Make bounded `N=1` OpenCL submission the only production-candidate GPU
+  profile and verify that its foreground responsiveness gain survives final
+  app integration and background-process placement.
+- Default every dynamically eligible device to attempting that GPU profile,
+  while preserving a persistent user-controlled CPU-only choice.
+- Keep the admitted GPU preference and backend policy invariant across
+  foreground, background, and screen-state changes.
 - Separately determine whether an active run should continue after the main
   playback process is killed.
 - Preserve a graceful fallback: if an experiment fails, supported ABIs remain
@@ -57,6 +106,12 @@ document is authoritative only for process placement and background execution.
   clearing, or cache clearing.
 - It does not add a user-facing process-mode preference until a production
   policy has passed all gates.
+- It does not expose queue-window size, forced backend, or stock `N=0` GPU as a
+  user setting.
+- It does not maintain an OEM, device-model, or GPU-driver allowlist. Device
+  coverage remains validation evidence, not an admission database.
+- It does not make F-Droid, Maven Central, or a source-only GPU accelerator a
+  prerequisite for the near-term GitHub release.
 
 ## Frozen Behavioral Invariants
 
@@ -85,9 +140,23 @@ be folded into any phase in this document.
 
 - Exact model artifact SHA-256, contract revision, execution profile, backend
   profile, and runtime settings are frozen when a run is admitted.
+- The admitted request freezes the persistent `tryGpu` value. A value of
+  `false` selects CPU before any GPU allocation attempt. A value of `true`
+  selects the bounded GPU attempt whenever the ABI, model profile, packaged
+  capability, and runtime accelerator checks permit it.
+- A bounded GPU run additionally freezes the custom LiteRT artifact identity,
+  bounded-queue capability version, forced OpenCL FP32 profile, and queue
+  window `N=1`. A process that cannot attest to that exact capability must not
+  create an unbounded GPU session.
 - GPU fallback remains one-way within the same exact run and cache identity.
+- A missing, mismatched, or failed bounded GPU capability is a typed GPU skip
+  or failure and may proceed only through the existing known-good CPU path. It
+  must never fall back to stock `N=0` GPU in the same release.
 - Cancellation is not a fallback.
 - A model switch affects only work admitted afterward.
+- A `tryGpu` setting change affects only work admitted afterward. App
+  foreground/background transitions and screen state never rewrite it or
+  trigger backend recreation.
 - Unknown or unsupported ABI/model/backend combinations continue to fail
   before native allocation.
 - HQ4 retains its current compatibility and resource gates.
@@ -97,6 +166,29 @@ pinned x86 9662 and KARA artifacts. Every such report must retain the original
 `Unsupported` decision and identify the effective validation-only override.
 Normal debug, CI, and release graphs must continue to reject those records
 before native allocation until a later explicit compatibility decision.
+
+### GPU preference and capability policy
+
+- `尝试使用 GPU` is a stable Booming SS setting in the source-separation
+  panel's Advanced section, not a debug backend selector.
+- A clean install and a missing preference key resolve to enabled. Both enabled
+  and disabled values survive process and app restarts.
+- The setting belongs to the source-separation backup allowlist. It is restored
+  only when that category is selected and the versioned payload contains the
+  key. An upstream Booming Music backup or older payload without the key leaves
+  the destination value unchanged; on a clean install that remains enabled.
+- Enabling the setting never promises that GPU will produce the accepted
+  output. It requests one bounded attempt for every newly admitted,
+  GPU-eligible model run. Typed ineligibility or failure uses the known-good
+  CPU path when fallback is safe.
+- Disabling the setting is strict CPU-only policy: no GPU accelerator
+  discovery, model compilation, deterministic probe, command submission, or
+  graphics allocation may occur for the admitted run.
+- A run records the requested setting, eligibility result, concrete backend,
+  and fallback reason. Runtime failure must not silently mutate the persistent
+  setting or create a per-device blacklist.
+- `N`, OpenCL/OpenGL choice, CPU thread count, process placement, GPU-only mode,
+  and fallback internals remain unavailable as user settings.
 
 ### Cache and storage policy
 
@@ -174,7 +266,7 @@ recovery.
 
 - Own playback, MediaSession, UI, user commands, and active-model selection.
 - Resolve and admit an exact model-aware run.
-- Freeze a small, versioned execution request.
+- Read `tryGpu` once and freeze it in a small, versioned execution request.
 - Bind to or start the inference service according to the qualified host mode.
 - Observe progress and reconcile it with playback readiness.
 - Keep model download, activation, deletion, and cache-management UI in the
@@ -192,7 +284,12 @@ recovery.
   contract, cache identity, and runtime compatibility again.
 - Own source decode, DSP, LiteRT session creation, inference, residual
   reconstruction, segment commits, and run diagnostics.
-- Own GPU probe and one-way CPU fallback when the selected policy permits it.
+- When the admitted request has `tryGpu=true`, evaluate dynamic GPU eligibility
+  and own the bounded GPU probe and one-way CPU fallback. When it is false,
+  enter the CPU path without touching GPU allocation APIs.
+- Verify the release-candidate bounded-queue runtime capability before GPU
+  model creation and record the exact AAR/native identities and observed wait
+  counters.
 - Return compact state and progress events only.
 - In the later independent-background phases, own foreground-service and
   wake-lock lifetime for the exact active run.
@@ -211,6 +308,8 @@ must include:
 - exact cache key and source fingerprint;
 - model ID, artifact SHA-256, contract ID/revision, pipeline identity, and
   runtime settings;
+- the admitted `tryGpu` value, exact bounded GPU profile/capability identity
+  when requested, and a one-way fallback latch;
 - source URI and immutable source metadata needed by the existing decoder;
 - requested run class, including full song or bounded prefetch;
 - pause/cancel semantics;
@@ -246,6 +345,8 @@ Later phases must vary and decide these axes independently:
 | Release host policy | `InProcess`, `RemotePreferred`, `RemoteRequired` | which qualified host a release selects for one scope |
 | Session lifetime | `SingleUse`, `ResidentUntilProcessExit` | whether one process may retain native state across runs |
 | Background owner | client-bound, independent processing FGS | whether work may outlive the playback/main process |
+| GPU dispatch profile | bounded `N=1`, stock `N=0` oracle | which exact command-submission contract is under test |
+| User GPU policy | `TryGpu` (default), `CpuOnly` | whether a newly admitted eligible run may allocate GPU resources |
 
 A successful remote host does not authorize a resident session. A successful
 resident session does not authorize independent background execution. A
@@ -294,9 +395,20 @@ No phase passes unless:
 - process death cannot promote a partial cache to completed;
 - unsupported models and ABIs fail before native allocation outside an
   explicitly identified AndroidTest-only compatibility override;
+- `tryGpu=false` produces no GPU allocation attempt, while `tryGpu=true`
+  attempts bounded GPU on every dynamically eligible device without consulting
+  a static device allowlist;
+- an admitted run keeps the same user GPU policy across Activity, process
+  binding, foreground/background, and screen-state transitions;
 - original playback survives a remote runtime failure; and
 - reports identify app commit, model hash, contract, ABI, Android API, process
   mode, process generation, backend, and source fixture.
+
+Any GPU promotion report must also identify the custom AAR release and
+SHA-256, accelerator and shim hashes, bounded-queue capability version,
+persisted and admitted `tryGpu` values, eligibility result, requested `N`,
+observed wait count, and proof that the app did not resolve a stock or duplicate
+LiteRT artifact.
 
 Performance and memory thresholds must be frozen in Phase 0 before remote
 results are reviewed. They may be revised only with an explicit rationale,
@@ -514,8 +626,8 @@ Accepted evidence is recorded in
   destroy the resident provider.
 - [x] Key the resident session by factory, artifact SHA-256, contract and
   execution-profile identity, backend profile, precision, and runtime
-  settings. Auto on pure x86 must resolve to the CPU backend before the key is
-  accepted.
+  settings. `tryGpu=true` on CPU-only pure x86 must resolve to the CPU backend
+  before the key is accepted and without a GPU allocation attempt.
 - [x] Permit exactly one native session creation and one active lease at a time
   in each x86 process generation. A same-key request reuses the exact session;
   a different key returns `RecycleRequired` without closing or creating a
@@ -906,7 +1018,11 @@ The host candidate remains `BoundRemote`, pending Phase 5E's
 
 - [x] Verify accelerator library discovery from the remote arm64 process.
 - [ ] Re-run 9662 GPU eligibility, finite-output probe, and at least three
-  alternating full-song `InProcess`/`BoundRemote` Auto pairs on S10 and S25.
+  alternating full-song `InProcess`/`BoundRemote` pairs on S10 and S25 with
+  app-level `TryGpu` admission and the final `gpu-opencl-bounded-fp32-v1`
+  artifact. The GPU branch must be FP32/OpenCL/`N=1`, with only one-way CPU
+  fallback. The completed stock `N=0` S10 pairs remain a baseline, not
+  promotion evidence for the new profile.
 - [x] Inject setup, invocation, output-read/non-finite, and cleanup failures.
   Confirm GPU closes before CPU fallback is created when cleanup is known-good.
 - [x] If GPU cleanup is uncertain or fatal, require whole-process recycle
@@ -921,16 +1037,17 @@ The host candidate remains `BoundRemote`, pending Phase 5E's
   throughput, memory, thermal state, and foreground FrameTimeline/fence
   attribution on S10 and S25.
 
-GPU checkpoint (2026-07-26): S10 passed three alternating full-song Auto pairs
-on each host. Bound remote moved the 265.8 MiB graphics allocation and OpenCL
-mapping out of the main process without duplicating graphics PSS, but added
-32.1 MiB median summed PSS, 595 ms first-ready time, and 2.27 seconds full-song
-time. Both S10 and S25 passed setup, invocation, output-read, non-finite, and
-cleanup fault matrices. Known-good cleanup closes GPU before creating CPU;
-fatal cleanup poisons the generation and forces acknowledged process recycle
-without CPU creation. Arm64 Auto therefore remains `InProcess + SingleUse`.
-The S25 three-pair full-song host matrix is explicitly deferred and this one
-unchecked item remains open. See
+GPU checkpoint (2026-07-26): the stock-`N=0` baseline passed three alternating
+full-song Auto pairs on each S10 host. Bound remote moved the 265.8 MiB graphics
+allocation and OpenCL mapping out of the main process without duplicating
+graphics PSS, but added 32.1 MiB median summed PSS, 595 ms first-ready time, and
+2.27 seconds full-song time. Both S10 and S25 passed setup, invocation,
+output-read, non-finite, and cleanup fault matrices. Known-good cleanup closes
+GPU before creating CPU; fatal cleanup poisons the generation and forces
+acknowledged process recycle without CPU creation. This historical host
+baseline selected `InProcess + SingleUse`; it does not qualify the bounded
+profile. The S25 host matrix and final S10/S25 bounded-profile pairs remain
+open. See
 `docs/validation/litert-inference-process/phase5/gpu-host-fallback-2026-07-26.md`.
 
 GPU UI tuning checkpoint (2026-07-26): S25 Perfetto traces prove that every
@@ -954,10 +1071,15 @@ and reduced the maximum GPU wait from 247 to 30 ms. On S10 it raised 22.3 to
 37.0 fps and reduced the maximum frame from 1,364 to 201 ms, but one long
 kernel still exceeds 200 ms. No no-Perfetto pair showed a systematic
 whole-song throughput regression. The mechanism is effective, but the binary
-patch is not a release surface and S10 remains visibly imperfect. Production
-work therefore requires an upstream or pinned source-built option plus wider
-vendor qualification; CPU-while-visible remains the conservative fallback
-for devices that fail the UI gate. See
+transformation was diagnostic at this checkpoint and S10 remains visibly
+imperfect. The GitHub-only decision now permits the same deterministic binary
+transformation to advance through a pinned release-candidate AAR instead of
+waiting for upstream ML Drift sources. It does not promote that AAR without
+the Phase 5F identity, fallback, final-integration, and runtime-capability
+gates. The product will not switch S10 or any other device to CPU merely while
+the UI is visible. `N=1` remains active for the admitted GPU run in every app
+state; a user who prefers strict CPU execution can disable `尝试使用 GPU` for
+subsequent runs. See
 `docs/validation/litert-inference-process/phase5/gpu-opencl-queue-window-2026-07-26.md`.
 
 ### Phase 5E: Process and support policy checkpoint
@@ -986,9 +1108,10 @@ for devices that fail the UI gate. See
 
 Phase 5E checkpoint (2026-07-26): arm32 selects
 `Supported + RemoteRequired + BoundRemote + SingleUse`; 64-bit CPU targets
-remain `Supported + InProcess + SingleUse`; arm64 Auto/GPU remains an
-in-process experimental 9662 scope pending the deferred S25 host matrix. Pure
-x86 selects an exact-9662-only
+remain `Supported + InProcess + SingleUse`; arm64 GPU selects the
+`InProcess + SingleUse + gpu-opencl-bounded-fp32-v1 + N=1` candidate for 9662,
+pending the final AAR and S10/S25 host/UI/full-song matrices. Pure x86 selects
+an exact-9662-only
 `Experimental + RemoteRequired + BoundRemote + ResidentUntilProcessExit`
 candidate with a 128 MiB effective runtime-heap floor, but normal builds stay
 fail-closed until later release qualification. KARA, HQ4, other models, and
@@ -996,22 +1119,102 @@ custom imports are not included in the x86 scope. All remote rows remain
 client-bound and never fall back to an in-process host at runtime. See
 `docs/validation/litert-inference-process/phase5/process-support-policy-2026-07-26.md`.
 
+### Phase 5F: Freeze the GitHub bounded-GPU runtime
+
+This subphase converts the successful diagnostic `N=1` experiment into the
+only GPU artifact/profile eligible for the near-term GitHub release. It does
+not change the Phase 5 host decision: an admitted arm64 GPU run remains
+`InProcess + SingleUse` until a later background-ownership phase explicitly
+tests another host.
+
+- [ ] Publish an immutable `bss-litert-android` GitHub Release that records the
+  pinned official LiteRT input AAR, deterministic transformation and shim
+  revisions, output AAR/Maven-bundle SHA-256, every native component hash,
+  per-ABI ELF inventory, notices, SBOM, and build provenance. Reproduce the
+  same release candidate on a clean runner before app integration.
+- [ ] Make the Booming SS build fetch or materialize that exact release asset
+  through a checksum-verifying setup step. Pin tag and hash; never use
+  `latest`. Fail the build if stock LiteRT is also resolved transitively, if a
+  required native component is missing, or if an ABI contains duplicate
+  runtime/accelerator libraries.
+- [ ] Introduce the explicit runtime profile
+  `gpu-opencl-bounded-fp32-v1`. It freezes FP32, OpenCL, and the exact tested
+  `N=1` wait boundary. If the binary implementation must reuse an otherwise
+  unused upstream option internally, contain that detail inside the runtime
+  adapter and expose only the bounded-queue name and capability to app code.
+- [ ] Add the persistent `尝试使用 GPU` switch to the source-separation panel's
+  Advanced section. Default a missing key to enabled. Do not expose `N`, a
+  forced graphics API, GPU-only mode, process placement, or CPU thread count.
+- [ ] Freeze `tryGpu` at run admission and carry it through the execution
+  request, protocol, journal, diagnostics, and restart snapshot. A setting
+  change during an active or paused run affects only a newly admitted run.
+  Bump the protocol and journal schemas rather than interpreting absent fields
+  through mutable process preferences.
+- [ ] Add `tryGpu` to the versioned source-separation settings backup allowlist.
+  Restore it only when that category and key are present; an upstream or older
+  backup without the key must not overwrite the destination value.
+- [ ] Add an early native capability/build-ID check. Missing or mismatched
+  capability must skip GPU and use the known-good CPU path; it must not create
+  stock `N=0` GPU and must not rely on a log message as capability proof.
+- [ ] Replace static OEM/device/GPU-driver admission with dynamic eligibility:
+  `tryGpu=true`, GPU-capable packaged ABI, GPU-eligible model profile, exact
+  bounded capability, accelerator discovery, successful compile/probe, and
+  valid output. A failure is typed and falls back one-way to CPU when cleanup
+  is safe; it must not persistently disable the user's setting.
+- [ ] Keep `N=1` unchanged while the app is foregrounded, backgrounded, or
+  screen-off. Do not rebuild a session merely because Activity visibility
+  changed. Retain `N=0` only in internal A/B tests and require a new versioned
+  profile plus fresh evidence for any future queue-window value.
+- [ ] Repeat tensor parity, first/reused invocation, finite output, setup and
+  invocation failure, output validation, known-good cleanup and CPU fallback,
+  fatal cleanup and process recycle, cancellation, and session close using the
+  final release-candidate AAR. Prove that no fallback path silently creates an
+  unbounded GPU session.
+- [ ] Test a clean install, missing-key default, app/process restart,
+  source-separation backup and restore of both values, and an upstream backup
+  with no key. With the switch off, prove zero GPU discovery, compile, probe,
+  graphics-allocation, and event-wait attempts. With it on, prove successful
+  bounded GPU and each typed one-way CPU fallback.
+- [ ] Toggle the setting during active, paused, foreground, background, and
+  screen-off runs. Prove the admitted request and backend do not change and the
+  new value is observed by the next run only.
+- [ ] Repeat at least three no-Perfetto full-song pairs and three foreground
+  Perfetto swipe intervals per phone with alternating `N=0` oracle/`N=1`
+  candidate order. Freeze S10 and S25 responsiveness, throughput, first-ready,
+  memory, thermal, and output thresholds before reviewing those final runs.
+- [ ] Attempt bounded GPU by default on every runtime-eligible device; do not
+  ship a Samsung, device-model, GPU-vendor, or driver allowlist. Exercise Mali
+  and non-Samsung devices when available to broaden regression coverage, but
+  treat missing coverage as a documented evidence limit rather than a reason
+  to force otherwise eligible devices to CPU.
+- [ ] Verify GitHub debug, release-like split APKs, and universal APKs use the
+  identical pinned artifact and profile. Record a build-level rollback that
+  returns an affected scope to CPU or a later GitHub build; do not implement a
+  live downgrade from bounded to stock GPU.
+
 **Phase 5 exit:** each ABI/backend has an evidence-backed support tier, release
 host policy, concrete host execution, and session-lifetime candidate. Process
 isolation can be accepted or rejected independently of the still-unimplemented
 processing foreground service.
 
 Phase 5E satisfies this policy checkpoint. The overall Phase 5 exit remains
-open only for Phase 5D's explicitly deferred S25 full-song GPU host pairs.
-GitHub/F-Droid debug unit tests, AndroidTest Kotlin compilation, and release
-Kotlin compilation all pass with the final Phase 5 observability changes.
+open for Phase 5D's final bounded-profile host pairs and Phase 5F's immutable
+runtime, fallback, UI, and release-APK qualification. Historical GitHub debug
+unit tests, AndroidTest Kotlin compilation, and release Kotlin compilation pass
+with the Phase 5 observability changes; they must be repeated with the pinned
+bounded runtime.
 
 ## Phase 6: Prototype an Independent Media-Processing Service
 
 This phase changes background ownership. It must remain behind a separate
-internal gate from `BoundRemote`. It uses the Phase 5-selected host and session
-policy and must not silently change either while background behavior is under
-test.
+internal gate from `BoundRemote`. Because an independent inference foreground
+service requires the dedicated process, Phase 6 may start only after the exact
+`BoundRemote + SingleUse` CPU candidate, and separately the bounded-GPU
+candidate where tested, has passed the corresponding Phase 5 host matrix. The
+production host remains unchanged until this phase passes. Within each Phase 6
+comparison, host and session policy are fixed while background ownership is
+varied. Any GPU case must also use the Phase 5F-pinned
+`gpu-opencl-bounded-fp32-v1` runtime; stock `N=0` is not a background candidate.
 
 ### Phase 6A: Freeze run-class eligibility
 
@@ -1029,6 +1232,10 @@ test.
   broadening the run implicitly.
 - [ ] Record the selected run-class/background policy in diagnostics and
   exclude the internal gate from backup.
+- [ ] Freeze the admitted GPU runtime profile and custom artifact identity in
+  the protocol and durable journal together with `tryGpu` and the one-way
+  fallback latch, so reattachment or restart cannot resume a run with stock or
+  mismatched GPU code or reinterpret a later preference change.
 
 ### Phase 6B: Foreground-service ownership
 
@@ -1078,8 +1285,20 @@ test.
 - [ ] Test API 35, API 36, and the current highest emulator API before
   expanding to older devices. Record cumulative media-processing FGS budget
   for long and repeated runs.
-- [ ] After CPU lifecycle semantics pass, repeat the prototype with the
-  Phase 5-qualified S25 GPU policy and verify graphics memory and fallback.
+- [ ] After CPU lifecycle semantics pass, repeat the prototype on both S25 and
+  S10 with `tryGpu=true` and the Phase 5F bounded-GPU policy. Verify graphics
+  memory, queue-wait diagnostics, output, one-way CPU fallback, and process
+  recycle on fatal cleanup. UI measurements inform runtime fixes and user
+  guidance; they must not create a foreground-only CPU policy.
+- [ ] Repeat the lifecycle prototype with `tryGpu=false` and prove that
+  foreground-service handoff, backgrounding, and screen-off never cause a GPU
+  discovery or allocation attempt.
+- [ ] While bounded GPU runs in the processing service, repeat foreground app
+  swipes and FrameTimeline/fence attribution, then background and screen-off
+  throughput. Process isolation does not remove shared physical-GPU
+  contention, so a remote host may not inherit the in-process UI result.
+- [ ] Keep `N=1` for the whole admitted run. Do not transition between bounded
+  and unbounded GPU, or recreate GPU solely on foreground/background changes.
 - [ ] During this phase, treat main-process Binder death as a controlled durable
   pause. Continuing without the main process is enabled only after Phase 7
   transfers active-run authority and passes its recovery gates.
@@ -1088,7 +1307,9 @@ test.
 protected on the primary arm64 target with playback stopped and the screen off,
 without relying on `PlaybackService`'s processing lease. Playback-demand and
 prefetch work remain client-bound, and main-process death continuation is not
-yet enabled.
+yet enabled. CPU lifecycle proof and GPU-profile proof are promoted separately.
+Any GPU evidence uses the pinned bounded profile, preserves admitted `tryGpu`
+across every app state, and cannot be inferred from CPU-only success.
 
 ## Phase 7: Support Independent Process Lifetime and Recovery
 
@@ -1115,7 +1336,8 @@ yet enabled.
   durable-journal restart, then select at most one mechanism. Do not combine
   Android restart modes with a second application retry loop.
 - [ ] Gate restart on a matching nonterminal journal, intact model/cache,
-  released old kernel lock, available FGS permission/quota, and retry budget.
+  released old kernel lock, exact bounded-runtime artifact/capability when GPU
+  was admitted, available FGS permission/quota, and retry budget.
 - [ ] Distinguish system/LMKD death, native fatal state, FGS timeout, and
   protocol incompatibility. Each class needs an explicit retry or terminal
   policy rather than a generic service restart.
@@ -1124,6 +1346,13 @@ yet enabled.
   one retry slot.
 - [ ] Never restart work canceled or paused by the user, stopped by FGS
   timeout, invalidated by cache clearing, or made incompatible by model loss.
+- [ ] Treat an app update or artifact mismatch as a typed re-admission/deferred
+  outcome. Do not resume the old journal with stock `N=0`. After safe
+  re-admission, preserve its frozen `tryGpu` value: recreate only the exact
+  bounded profile when no CPU fallback was previously latched, or remain on
+  CPU when the run had already fallen back. If the required capability is no
+  longer available, take the typed one-way CPU path or defer according to the
+  cleanup and memory gates.
 - [ ] Surface a stable terminal/deferred state after the retry budget ends.
 
 ### Phase 7C: User and task lifecycle
@@ -1156,8 +1385,14 @@ yet enabled.
 - [ ] Kill the inference process at the same boundaries and verify the selected
   bounded-restart policy never duplicates a writer, segment, notification,
   wake lock, or native session.
-- [ ] Run user Pause, Cancel, recents removal with both setting values, force
-  stop, model deletion, and cache clearing against pending restart state.
+- [ ] For GPU, include death during an `N=1` event wait, after the final queued
+  command, during output read, and during bounded-session close. Require the
+  next generation to prove the custom capability before any GPU recreation.
+  A journal with a persisted CPU fallback latch must not retry GPU.
+- [ ] Run user Pause, Cancel, recents removal with both recents-policy and
+  `tryGpu` values, force stop, model deletion, and cache clearing against
+  pending restart state. Change `tryGpu` while detached and prove the admitted
+  run still uses its frozen value after reattachment.
 - [ ] Commit compact reports that separate continuation, explicit resume,
   bounded restart, and terminal defer; a single generic "recovered" result is
   insufficient.
@@ -1165,7 +1400,9 @@ yet enabled.
 **Phase 7 exit:** an admitted run may survive main-process death, or the feature
 is rejected with a documented reason. Only the explicitly selected run classes
 may continue. Recovery is bounded, cache-safe, visible, and incapable of
-creating duplicate ownership.
+creating duplicate ownership. CPU and bounded-GPU recovery are qualified
+separately; CPU success cannot promote GPU recovery, and neither app-state
+changes nor a later preference value may alter the admitted backend policy.
 
 ## Phase 8: Background and OEM Qualification
 
@@ -1192,6 +1429,10 @@ independent host:
 - Doze and battery saver;
 - charger connected and disconnected;
 - thermal throttling;
+- sustained foreground interaction while an admitted bounded-GPU run executes
+  in each candidate host;
+- foreground/background/screen transitions and a live `tryGpu` toggle while
+  both a GPU-admitted run and a CPU-only admitted run are active;
 - model switch and x86 process recycle; and
 - media-processing foreground-service timeout.
 
@@ -1203,6 +1444,12 @@ prefetch may outlive playback.
 
 - [ ] Run the complete scenario, notification, recents, screen-off, and Samsung
   battery-policy matrix on Galaxy S10 arm64 and Galaxy S25 arm64.
+- [ ] Repeat the final bounded-GPU FrameTimeline/fence and full-song smoke on at
+  least one non-Samsung Adreno device and one Mali device when available.
+  Record this as driver-diversity coverage and use failures to improve dynamic
+  eligibility, fallback, or the bounded runtime. Missing coverage must be
+  disclosed, but must not create a static allowlist or force an otherwise
+  runtime-eligible device to CPU.
 - [ ] Run the complete modern foreground-service policy matrix on API 35, API
   36, and the current highest supported emulator API.
 - [ ] Run targeted long-job, low-memory, process-death, and recovery smokes on
@@ -1219,6 +1466,14 @@ prefetch may outlive playback.
 
 - [ ] Compare windows per minute, first-ready time, full-song duration, CPU
   time, thermal status, and battery discharge.
+- [ ] For every GPU case, record requested/observed `N`, event-wait count and
+  duration, longest wait, app FrameTimeline distribution, GPU-completion fence
+  overlap, and proof of the pinned custom accelerator. Use stock `N=0` only as
+  an internal paired oracle.
+- [ ] Record the persisted and admitted `tryGpu` values, each dynamic
+  eligibility stage, actual backend, fallback latch/reason, and app/screen-state
+  transitions. Prove no transition changes backend and no runtime failure
+  rewrites the preference.
 - [ ] Compare main, remote, instrumentation, and summed memory plus
   graphics/native allocation, total available system memory, LMKD events,
   `oom_score_adj`, and memory returned after process exit.
@@ -1241,6 +1496,9 @@ prefetch may outlive playback.
   session lifetime, background owner, model/resource scope, minimum tested
   memory, Android API range, and device-evidence scope for every production
   candidate.
+- [ ] Publish the exact bounded GPU profile and custom runtime release in every
+  GPU row, plus the dynamic eligibility and one-way fallback contract. Device
+  evidence describes tested coverage; it must not become an OEM/GPU allowlist.
 - [ ] Reject independent background without rejecting an otherwise qualified
   `BoundRemote` process-isolation policy.
 - [ ] Reject one ABI/backend/model scope without weakening another row's
@@ -1250,7 +1508,10 @@ prefetch may outlive playback.
 correctness and playback, has bounded recovery, meets the Phase 0 memory and
 performance thresholds, and behaves acceptably on both Samsung generations
 and modern Android FGS policy. Promotion is per run class and support tier, not
-an all-or-nothing app-wide switch.
+an all-or-nothing app-wide switch. All dynamically eligible devices still
+default to the same bounded GPU attempt; vendor-diverse testing measures the
+strength of that claim and guides fixes, fallback diagnostics, and user-facing
+limitations rather than selecting devices through a static list.
 
 ## Phase 9: Select Production Policy and Remove Transitional Ownership
 
@@ -1260,6 +1521,10 @@ an all-or-nothing app-wide switch.
   selects support tier, release host policy, concrete host execution, session
   lifetime, and background owner for manual full-song, playback-demand, and
   prefetch work.
+- [ ] For every GPU-eligible ABI/model row, select only
+  `gpu-opencl-bounded-fp32-v1`, its exact `bss-litert-android` GitHub Release,
+  dynamic runtime eligibility, and one-way CPU fallback contract. Stock `N=0`
+  remains internal, and no device/GPU/driver allowlist may be emitted.
 - [ ] Prefer one common production architecture only when the all-ABI evidence
   justifies its memory and lifecycle cost.
 - [ ] Keep pure x86 fail-closed if cache safety, process recycling, memory-tier
@@ -1273,6 +1538,10 @@ an all-or-nothing app-wide switch.
 - [ ] Record process isolation and independent background as separate release
   decisions. Failure of the latter must not force a qualified host policy back
   in process.
+- [ ] Verify release workflows, dependency resolution, and user documentation
+  implement the already selected GitHub-only channel. F-Droid or Maven
+  publication work, if resumed later, is a separate release track and cannot
+  silently replace the qualified native artifact in an existing GitHub build.
 
 ### Phase 9B: Production cleanup
 
@@ -1283,11 +1552,21 @@ an all-or-nothing app-wide switch.
 - [ ] Remove internal process-mode controls from release UI. User-visible
   labels may describe experimental support or resource rejection, but users do
   not select an unsafe host/session combination manually.
+- [ ] Keep `尝试使用 GPU` as the sole user-facing backend policy in the
+  source-separation panel's Advanced section. Verify that it remains distinct
+  from internal host/session controls and is included only in the versioned
+  source-separation settings backup category.
 - [ ] Update compatibility catalog evidence only after device reports are
   committed.
 - [ ] Update the main LiteRT roadmap, runtime documentation, release notes, and
   user-visible unsupported-device messages.
+- [ ] Replace the diagnostic local-repository/binary-injection controls with
+  the pinned release-candidate dependency path. Keep explicit internal stock
+  and `N=0` oracles for tests, but ensure no production variant resolves them.
 - [ ] Verify ABI split APK and universal APK service/native-library inventory.
+- [ ] Pin the bounded LiteRT GitHub release tag, input/output AAR hashes,
+  accelerator and shim identities, transformation manifest, capability
+  version, and CI smoke in the application release record.
 - [ ] Pin the x86 LiteRT release URL/version, ELF identity, SHA-256, build
   provenance, and CI smoke in the application release record whenever x86 is
   not `Unsupported`.
@@ -1295,17 +1574,29 @@ an all-or-nothing app-wide switch.
 ### Phase 9C: Release gate
 
 - [ ] Repeat clean-install model acquisition, selection, separation, playback,
-  cache management, backup/restore, and clear-cache recovery.
+  cache management, backup/restore, and clear-cache recovery. Verify default-on
+  `tryGpu`, persistence of both values, selective-category restore, and older
+  or upstream backup behavior.
 - [ ] Repeat full-song and every enabled run-class/background smoke on each
   production-enabled ABI/backend/model scope, including the minimum tested
   memory configuration for a resource-limited tier.
+- [ ] With `tryGpu=true`, repeat foreground UI interaction for every
+  GPU-eligible ABI/model test row and prove the release APK reports `N=1`; a
+  mismatched capability must take the CPU path and must never run stock GPU.
+  With `tryGpu=false`, prove there is no GPU allocation attempt.
 - [ ] Verify no service, binder callback, session, file lock, notification, or
   wake lock remains after completion or cancellation.
 - [ ] Record the final app commit, protocol version, process policy, model
-  hashes, x86 runtime artifact where applicable, support tier, and device/API
-  evidence scope.
-- [ ] Verify unsupported and out-of-scope combinations still fail before native
-  allocation with a stable user-facing reason.
+  hashes, bounded GPU Release/AAR/ELF hashes and capability version, observed
+  `N=1`, x86 runtime artifact where applicable, support tier, and device/API
+  evidence coverage.
+- [ ] Build and install the final GitHub split and universal APKs from a clean
+  runner using only pinned GitHub assets, verify their checksums, and repeat a
+  clean-device acquisition/separation smoke without a developer-local Maven
+  repository.
+- [ ] Verify unsupported ABI/model combinations fail before native allocation,
+  and runtime-ineligible GPU attempts take the typed CPU path without changing
+  the persistent setting or loading stock GPU.
 
 **Phase 9 exit:** process placement and background ownership are explicit
 production contracts, not incidental consequences of where a coroutine runs.
@@ -1331,9 +1622,14 @@ Every report should identify:
 - process mode and process generations;
 - main and inference PIDs;
 - model artifact SHA-256 and contract/profile identity;
-- LiteRT binary/ELF identity and SHA-256 when a custom packaged runtime is
-  under qualification;
+- LiteRT GitHub release tag, input and output AAR SHA-256, transformation
+  manifest, bounded capability version, shim and per-ABI ELF identities when a
+  custom packaged runtime is under qualification;
 - concrete CPU/GPU backend and fallback;
+- persisted and admitted `tryGpu` values, dynamic eligibility result, and
+  one-way fallback-latch state;
+- requested and observed GPU queue window, event-wait count/duration, and proof
+  that no stock or duplicate GPU runtime was loaded;
 - source fixture and decode route;
 - cache key and run ID;
 - foreground-service and wake-lock timeline;
@@ -1356,7 +1652,12 @@ Every report should identify:
 | Remote process dies | atomic window commits and bounded recovery |
 | x86 model switch recreates in fragmented process | deterministic dedicated-process recycle |
 | x86 passes only on an oversized emulator | fixed 2/3/4 GiB AVD matrix, minimum passing scope, and emulator-only disclosure |
-| Custom x86 runtime drifts from its build source | pinned release, ELF/hash verification, provenance, and CI smoke |
+| Custom LiteRT runtime drifts from its pinned inputs | immutable GitHub release, deterministic transformation manifest, AAR/ELF/hash verification, provenance, and CI smoke |
+| Wrong or stock AAR silently restores unbounded GPU | native capability/build-ID admission, dependency graph audit, APK inventory, and CPU-only fallback on mismatch |
+| Binary transformation targets the wrong native layout | exact upstream AAR hash, patch preconditions, post-transform disassembly/ELF checks, and connected `N=1` wait-count smoke |
+| `N=1` behaves differently on another GPU driver | dynamic discovery/compile/probe/output validation, typed one-way CPU fallback, user CPU-only control, and vendor-diverse regression coverage without a static allowlist |
+| A valid GPU still causes unacceptable UI contention | keep one `N=1` policy across app states, publish measured limitations, let the user disable GPU for later runs, and improve or replace the runtime rather than switching on visibility |
+| GPU preference changes during a run or restore | freeze it in request/journal state, version and allowlist the backup key, and test missing-key plus selective-restore behavior |
 | Two foreground owners drift | explicit ownership handoff and one active processing lease |
 | Screen-off stalls | inference-owned bounded partial wake lock |
 | FGS start is denied | typed deferred state, no retry loop |
@@ -1367,9 +1668,34 @@ Every report should identify:
 | Source output changes during migration | frozen decode routes and Phase 7 fixture parity |
 | Debug host mode leaks into backup | internal-only setting excluded from backup |
 
-## Provisional Decisions
+## Fixed Product Decisions
 
-These decisions guide implementation but remain subject to the phase gates:
+Qualification may reject an artifact or delay release, but implementation must
+not replace these decisions with a device allowlist, visibility heuristic, or
+stock GPU fallback:
+
+- Ship the near-term product through GitHub only; do not block this roadmap on
+  F-Droid, Maven Central, or public ML Drift source availability.
+- Consume one immutable, checksum-pinned `bss-litert-android` GitHub artifact
+  produced by the audited deterministic transformation workflow.
+- Use `gpu-opencl-bounded-fp32-v1` with `N=1` as the only production-candidate
+  GPU profile. Keep stock `N=0` as an internal oracle only.
+- Keep `N=1` fixed across foreground, background, and screen-off execution.
+  Do not add visibility-driven GPU session recreation.
+- Expose `尝试使用 GPU` in the source-separation panel's Advanced section,
+  default it to enabled, persist it, and include it in the versioned
+  source-separation backup allowlist.
+- Freeze `tryGpu` when a run is admitted. Enabled attempts bounded GPU on every
+  dynamically eligible device; disabled performs no GPU allocation attempt.
+- Determine eligibility at runtime from the packaged capability, ABI/model
+  profile, accelerator setup/probe, and valid output. Do not ship an OEM,
+  device-model, GPU-vendor, or driver allowlist.
+- If the bounded capability is absent or mismatched, select the known-good CPU
+  path; never silently run unbounded GPU.
+
+## Provisional Process Decisions
+
+These process and lifecycle decisions remain subject to their phase gates:
 
 - Use a private same-UID process, not Android isolated-process mode.
 - Move the full separation range executor, not individual tensor invocation.
@@ -1395,20 +1721,24 @@ These decisions guide implementation but remain subject to the phase gates:
 
 ## Decisions That Must Remain Open Until Tested
 
-- Whether armeabi-v7a should use remote execution by default.
-- Whether arm64/x86_64 reliability gains justify active total-memory overhead.
-- Whether non-x86 CPU or GPU sessions should ever remain resident after a run.
+- Whether any future GPU session should remain resident after a run; the
+  current bounded profile remains `SingleUse`.
 - Whether pure x86 can pass a useful minimum-memory scope repeatedly enough for
   `Experimental` or `Supported`, given emulator-only device evidence.
 - Whether unknown imported models may be activated on x86 and, if so, what
   explicit unverified-resource flow contains their failure.
-- Whether GPU Auto remains stable in a service process on both Samsung devices.
-- Whether an upstream or pinned source-built `kernel_batch_size=1` surface is
-  maintainable, and whether it passes the same gate on Adreno, Mali, and a
-  non-Samsung device. The diagnostic binary patch is not a release option.
-- Whether production Auto should use qualified bounded GPU while MainActivity
-  is visible, or select CPU on devices like S10 where one kernel still exceeds
-  the foreground responsiveness budget.
+- Whether `TryGpu` with `gpu-opencl-bounded-fp32-v1` remains stable in the
+  processing service on S10, S25, and available non-Samsung/Mali coverage after
+  final AAR integration.
+- Which conservative memory floor and probe cadence best contain repeated
+  driver failures without creating a persistent blacklist or changing the
+  default-on preference.
+- Whether repeated final-AAR S10 traces justify further bounded-runtime work or
+  user-facing performance guidance. They must not create CPU-while-visible or
+  foreground/background backend switching.
+- Whether a later public-source LiteRT release can replace the deterministic
+  binary transformation without changing the bounded profile's behavior. This
+  is a maintenance opportunity, not a GitHub release gate.
 - Whether the service should retain an idle same-model session after pause.
 - Which bounded restart mechanism is reliable across API 26 through target 36.
 - Whether FLAC promotion belongs in the independently running process.
@@ -1438,4 +1768,11 @@ This roadmap is complete only when:
 7. foreground-service and wake-lock ownership are singular and bounded; and
 8. the final support tier, release host policy, concrete host execution,
    session/background policy, model/resource scope, and evidence limitations
-   are reflected in catalog and release documentation.
+   are reflected in catalog and release documentation; and
+9. `尝试使用 GPU` defaults on, persists and restores correctly, and is frozen
+   per admitted run; every dynamically eligible device then uses the
+   checksum-pinned GitHub bounded runtime and attests `N=1`, while disabled or
+   ineligible runs allocate no GPU or route one-way to CPU rather than stock
+   GPU; and
+10. no foreground, background, Activity-visibility, or screen-state transition
+    changes the admitted backend policy.
