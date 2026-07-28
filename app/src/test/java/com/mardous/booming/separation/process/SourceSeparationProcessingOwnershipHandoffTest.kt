@@ -100,6 +100,49 @@ class SourceSeparationProcessingOwnershipHandoffTest {
         ))
     }
 
+    @Test
+    fun `playback lease diagnostics retain exact start and stop ownership`() {
+        var now = 60L
+        val handoff = SourceSeparationProcessingOwnershipHandoff { now++ }
+
+        handoff.recordPlaybackServiceLease(
+            cacheKey = null,
+            ownsProcessing = true,
+            wakeLockHeld = true,
+            foregroundServiceType = 0x2001,
+            reason = "transition",
+        )
+        handoff.recordPlaybackServiceLease(
+            cacheKey = "model-a-song-1",
+            ownsProcessing = true,
+            wakeLockHeld = true,
+            foregroundServiceType = 0x2001,
+            reason = "cache-resolved",
+        )
+
+        val active = requireNotNull(handoff.stateFlow.value.activePlaybackLease)
+        assertEquals("model-a-song-1", active.cacheKey)
+        assertEquals(60L, active.startedAtElapsedRealtimeNanos)
+        assertEquals(61L, active.updatedAtElapsedRealtimeNanos)
+        assertTrue(active.wakeLockHeld)
+
+        handoff.recordPlaybackServiceLease(
+            cacheKey = "model-a-song-1",
+            ownsProcessing = false,
+            wakeLockHeld = false,
+            foregroundServiceType = 0x0001,
+            reason = "remote-ownership-changed",
+        )
+
+        val snapshot = handoff.stateFlow.value
+        assertNull(snapshot.activePlaybackLease)
+        val stopped = requireNotNull(snapshot.lastStoppedPlaybackLease)
+        assertEquals(62L, stopped.stoppedAtElapsedRealtimeNanos)
+        assertEquals("remote-ownership-changed", stopped.stopReason)
+        assertEquals(0x0001, stopped.foregroundServiceType)
+        assertFalse(stopped.wakeLockHeld)
+    }
+
     private fun owner(
         cacheKey: String = "model-a-song-1",
         runId: String = "manual-run",

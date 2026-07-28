@@ -40,6 +40,8 @@ internal data class SourceSeparationProcessingOwnershipRecord(
 internal data class SourceSeparationProcessingOwnershipSnapshot(
     val activeOwner: SourceSeparationProcessingOwnershipRecord? = null,
     val lastReleasedOwner: SourceSeparationProcessingOwnershipRecord? = null,
+    val activePlaybackLease: SourceSeparationPlaybackProcessingLeaseRecord? = null,
+    val lastStoppedPlaybackLease: SourceSeparationPlaybackProcessingLeaseRecord? = null,
 ) {
     init {
         require(activeOwner?.releasedAtElapsedRealtimeNanos == null) {
@@ -48,6 +50,42 @@ internal data class SourceSeparationProcessingOwnershipSnapshot(
         require(lastReleasedOwner == null ||
             lastReleasedOwner.releasedAtElapsedRealtimeNanos != null
         ) { "Live processing ownership is exposed as released." }
+        require(activePlaybackLease?.stoppedAtElapsedRealtimeNanos == null) {
+            "Stopped playback processing ownership is exposed as active."
+        }
+        require(lastStoppedPlaybackLease == null ||
+            lastStoppedPlaybackLease.stoppedAtElapsedRealtimeNanos != null
+        ) { "Live playback processing ownership is exposed as stopped." }
+    }
+}
+
+internal data class SourceSeparationPlaybackProcessingLeaseRecord(
+    val cacheKey: String?,
+    val startedAtElapsedRealtimeNanos: Long,
+    val updatedAtElapsedRealtimeNanos: Long,
+    val wakeLockHeld: Boolean,
+    val foregroundServiceType: Int?,
+    val lastReason: String,
+    val stoppedAtElapsedRealtimeNanos: Long? = null,
+    val stopReason: String? = null,
+) {
+    init {
+        require(cacheKey == null || cacheKey.isNotBlank()) {
+            "Playback processing cache key is empty."
+        }
+        require(startedAtElapsedRealtimeNanos >= 0L &&
+            updatedAtElapsedRealtimeNanos >= startedAtElapsedRealtimeNanos
+        ) { "Playback processing lease timestamp is invalid." }
+        require(lastReason.isNotBlank()) { "Playback processing update reason is empty." }
+        require(stoppedAtElapsedRealtimeNanos == null ||
+            stoppedAtElapsedRealtimeNanos >= updatedAtElapsedRealtimeNanos
+        ) { "Playback processing stop timestamp is invalid." }
+        require((stoppedAtElapsedRealtimeNanos == null) == (stopReason == null)) {
+            "Playback processing stop state is inconsistent."
+        }
+        require(stopReason == null || stopReason.isNotBlank()) {
+            "Playback processing stop reason is empty."
+        }
     }
 }
 
@@ -59,6 +97,8 @@ internal class SourceSeparationProcessingOwnershipHandoff(
     private var nextLeaseId = 1L
     private var activeOwner: ActiveOwner? = null
     private var lastReleasedOwner: SourceSeparationProcessingOwnershipRecord? = null
+    private var activePlaybackLease: SourceSeparationPlaybackProcessingLeaseRecord? = null
+    private var lastStoppedPlaybackLease: SourceSeparationPlaybackProcessingLeaseRecord? = null
     private val mutableStateFlow = MutableStateFlow(
         SourceSeparationProcessingOwnershipSnapshot(),
     )
@@ -70,6 +110,53 @@ internal class SourceSeparationProcessingOwnershipHandoff(
             tracker = this,
             leaseId = nextLeaseId++,
         )
+    }
+
+    fun recordPlaybackServiceLease(
+        cacheKey: String?,
+        ownsProcessing: Boolean,
+        wakeLockHeld: Boolean,
+        foregroundServiceType: Int?,
+        reason: String,
+    ) = synchronized(lock) {
+        require(cacheKey == null || cacheKey.isNotBlank()) {
+            "Playback processing cache key is empty."
+        }
+        require(reason.isNotBlank()) { "Playback processing update reason is empty." }
+        val timestamp = now()
+        val current = activePlaybackLease
+        if (ownsProcessing) {
+            activePlaybackLease = if (current == null) {
+                SourceSeparationPlaybackProcessingLeaseRecord(
+                    cacheKey = cacheKey,
+                    startedAtElapsedRealtimeNanos = timestamp,
+                    updatedAtElapsedRealtimeNanos = timestamp,
+                    wakeLockHeld = wakeLockHeld,
+                    foregroundServiceType = foregroundServiceType,
+                    lastReason = reason,
+                )
+            } else {
+                current.copy(
+                    cacheKey = cacheKey,
+                    updatedAtElapsedRealtimeNanos = timestamp,
+                    wakeLockHeld = wakeLockHeld,
+                    foregroundServiceType = foregroundServiceType,
+                    lastReason = reason,
+                )
+            }
+        } else if (current != null) {
+            lastStoppedPlaybackLease = current.copy(
+                cacheKey = cacheKey ?: current.cacheKey,
+                updatedAtElapsedRealtimeNanos = timestamp,
+                wakeLockHeld = wakeLockHeld,
+                foregroundServiceType = foregroundServiceType,
+                lastReason = reason,
+                stoppedAtElapsedRealtimeNanos = timestamp,
+                stopReason = reason,
+            )
+            activePlaybackLease = null
+        }
+        publishLocked()
     }
 
     private fun accept(
@@ -112,6 +199,8 @@ internal class SourceSeparationProcessingOwnershipHandoff(
         mutableStateFlow.value = SourceSeparationProcessingOwnershipSnapshot(
             activeOwner = activeOwner?.record,
             lastReleasedOwner = lastReleasedOwner,
+            activePlaybackLease = activePlaybackLease,
+            lastStoppedPlaybackLease = lastStoppedPlaybackLease,
         )
     }
 

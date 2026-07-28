@@ -168,6 +168,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -2620,21 +2622,25 @@ class PlaybackService :
 
     private fun observeSourceSeparationProcessingOwnership() {
         serviceScope.launch {
-            sourceSeparationProcessingOwnershipHandoff.stateFlow.collect { handoff ->
-                val owner = handoff.activeOwner?.owner
-                val released = handoff.lastReleasedOwner
-                traceSourceSeparationPlayback(
-                    "lease.handoff",
-                    "ownerCache=${owner?.cacheKey?.take(12)} run=${owner?.runId} " +
-                        "generation=${owner?.processGeneration} " +
-                        "acceptedAt=${handoff.activeOwner?.acceptedAtElapsedRealtimeNanos} " +
-                        "releasedRun=${released?.owner?.runId} " +
-                        "releasedAt=${released?.releasedAtElapsedRealtimeNanos} " +
-                        "releaseReason=${released?.releaseReason} " +
-                        "waitingCache=${sourceSeparationPlaybackProcessingCacheKey?.take(12)}",
-                )
-                updateSourceSeparationProcessingLease("remoteOwnershipChanged")
-            }
+            sourceSeparationProcessingOwnershipHandoff.stateFlow
+                .map { it.activeOwner }
+                .distinctUntilChanged()
+                .collect { activeOwner ->
+                    val owner = activeOwner?.owner
+                    val released = sourceSeparationProcessingOwnershipHandoff.stateFlow.value
+                        .lastReleasedOwner
+                    traceSourceSeparationPlayback(
+                        "lease.handoff",
+                        "ownerCache=${owner?.cacheKey?.take(12)} run=${owner?.runId} " +
+                            "generation=${owner?.processGeneration} " +
+                            "acceptedAt=${activeOwner?.acceptedAtElapsedRealtimeNanos} " +
+                            "releasedRun=${released?.owner?.runId} " +
+                            "releasedAt=${released?.releasedAtElapsedRealtimeNanos} " +
+                            "releaseReason=${released?.releaseReason} " +
+                            "waitingCache=${sourceSeparationPlaybackProcessingCacheKey?.take(12)}",
+                    )
+                    updateSourceSeparationProcessingLease("remoteOwnershipChanged")
+                }
         }
     }
 
@@ -4154,6 +4160,17 @@ class PlaybackService :
             stopSourceSeparationProcessingLease(reason)
         }
         updateSourceSeparationForegroundServiceType(reason)
+        recordSourceSeparationProcessingLease(reason)
+    }
+
+    private fun recordSourceSeparationProcessingLease(reason: String) {
+        sourceSeparationProcessingOwnershipHandoff.recordPlaybackServiceLease(
+            cacheKey = sourceSeparationPlaybackProcessingCacheKey,
+            ownsProcessing = isSourceSeparationProcessingLeaseNeeded(),
+            wakeLockHeld = sourceSeparationProcessingWakeLock?.isHeld == true,
+            foregroundServiceType = sourceSeparationForegroundServiceType,
+            reason = reason,
+        )
     }
 
     private fun updateSourceSeparationMediaSessionBuffering() {
