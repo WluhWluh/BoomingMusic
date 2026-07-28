@@ -1,8 +1,9 @@
 # LiteRT Inference Process and Background Execution Roadmap
 
-Status: Phase 7A authority transfer, observer reattachment, and product
-main-process recreation at one durable boundary proved on S10 and S25 for CPU
-and bounded GPU; remote-process death policy remains open
+Status: Phase 7A authority transfer, observer reattachment, product
+main-process recreation at one durable boundary, and active-run Pause cleanup
+proved on S10 and S25 for CPU and bounded GPU; remote-process death policy
+remains open
 
 Updated: 2026-07-28
 
@@ -1282,7 +1283,7 @@ release gates rather than Phase 6A implementation blockers.
   user-comprehensible processing notification.
 - [x] Provide Pause and Cancel notification actions with idempotent command
   IDs and exact run identity.
-- [ ] Do not keep an idle or manually paused process in foreground solely to
+- [x] Do not keep an idle or manually paused process in foreground solely to
   retain a model session.
 - [ ] Record both foreground services, types, notification IDs, start/stop
   timestamps, and ownership handoffs when playback and separation overlap.
@@ -1297,10 +1298,12 @@ cannot release a newer or unrelated lease. Manifest and device tests also
 prove the dedicated processing service, legacy and timed platform policies,
 notification identity, pre-admission Pause/Cancel, duplicate command handling,
 stale-action isolation, and notification removal on S25/API 35, S10/API 31,
-and an API 26 x86 AVD. The current API 37 x86_64 AVD terminated
+and an API 26 x86 AVD. Active-run Pause cleanup on S10 and S25 for CPU and
+bounded GPU additionally proves that no processing notification or FGS remains
+after the durable Pause transition. The current API 37 x86_64 AVD terminated
 instrumentation before running any test, so current-highest-API coverage
-remains open. No-foreground-after-active-pause, complete overlap diagnostics,
-and startup by tapping the visible UI remain unchecked. See
+remains open. Complete overlap diagnostics and startup by tapping the visible
+UI remain unchecked. See
 `docs/validation/litert-inference-process/phase6/foreground-ownership-2026-07-27.md`
 and `product-ownership-handoff-2026-07-27.md`.
 
@@ -1467,8 +1470,10 @@ actual Android main-process kill.
   The terminal path releases the processing FGS and wake lock, and normal
   builds use `SingleUse` native sessions. The resident x86/arm32 validation
   gate may retain only a successfully completed run, never Pause, Cancel,
-  Deferred, Failed, or an unknown outcome. Active-run device cleanup remains
-  part of the matrix below.
+  Deferred, Failed, or an unknown outcome. Active-run Pause cleanup passes on
+  S10 and S25 for CPU and bounded GPU: ownership, notification, FGS, wake lock,
+  binding, and native session are all released while the cache remains
+  durably `Incomplete`.
 - [x] An expired idle-retention deadline merely releases the private binding;
   idle memory pressure is left to Android. Do not add automatic self-recycle,
   sticky service lifetime, or a second restart mechanism. Explicit
@@ -1517,10 +1522,15 @@ recorded in
   command, during output read, and during bounded-session close. Require the
   next generation to prove the custom capability before any GPU recreation.
   A journal with a persisted CPU fallback latch must not retry GPU.
-- [ ] Run user Pause, Cancel, recents removal with both recents-policy and
-  `tryGpu` values, force stop, model deletion, and cache clearing against
-  pending restart state. Change `tryGpu` while detached and prove the admitted
-  run still uses its frozen value after reattachment.
+- [x] Run user Pause against an active manual full-song run on S10 and S25 with
+  CPU and bounded GPU. Require durable `Paused`, an `Incomplete` cache, released
+  ownership, and no retained notification, FGS, wake lock, binding, or native
+  session. See
+  [Phase 7 user and task lifecycle](validation/litert-inference-process/phase7/user-task-lifecycle-2026-07-28.md).
+- [ ] Run user Cancel, recents removal with both recents-policy and `tryGpu`
+  values, force stop, model deletion, and cache clearing against pending
+  restart state. Change `tryGpu` while detached and prove the admitted run
+  still uses its frozen value after reattachment.
 - [ ] Commit compact reports that separate continuation, explicit resume,
   bounded restart, and terminal defer; a single generic "recovered" result is
   insufficient.
@@ -1842,6 +1852,9 @@ These process and lifecycle decisions remain subject to their phase gates:
   independent-background experiment.
 - Make only explicit manual full-song work eligible for the first independent
   foreground prototype; keep playback-demand and prefetch client-bound.
+- Release the private binding and native session after a manual Pause. An idle
+  cached process may remain at Android's discretion, but it owns no run, FGS,
+  wake lock, or LiteRT session.
 - Allow Phase 5 to accept process isolation independently of whether later
   independent background execution is accepted.
 - Treat all ABI process placement as evidence-driven.
@@ -1867,7 +1880,6 @@ These process and lifecycle decisions remain subject to their phase gates:
 - Whether a later public-source LiteRT release can replace the deterministic
   binary transformation without changing the bounded profile's behavior. This
   is a maintenance opportunity, not a GitHub release gate.
-- Whether the service should retain an idle same-model session after pause.
 - Which bounded restart mechanism is reliable across API 26 through target 36.
 - Whether FLAC promotion belongs in the independently running process.
 - Whether a separate processing notification can be grouped without obscuring
