@@ -890,8 +890,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("completedPlayable", true)
                 .put("clearRecoveryPassed", false)
                 .put("runJournalSequence", runJournal.latestSequence)
+                .put("runJournalSchemaVersion", runJournal.journalSchemaVersion)
                 .put("runJournalOwnerPid", runJournal.request.ownerPid ?: JSONObject.NULL)
                 .put("runJournalProcessGeneration", runJournal.request.processGeneration)
+                .put("runClass", runJournal.request.runClass.name)
+                .put("backgroundPolicy", runJournal.request.backgroundPolicy.name)
                 .put("remoteOwnershipChecked", remoteCacheOwnershipChecked)
                 .put("manifestPathRelative", "entries/$cacheKey/manifest.json")
                 .put("entryDirectoryPath", entryDirectory.absolutePath)
@@ -4966,6 +4969,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
         val completion = (events.last().payload as
             SourceSeparationExecutionHostEventPayload.Completed).completion
+        val acceptedDescriptor = (events.first().payload as
+            SourceSeparationExecutionHostEventPayload.Accepted).descriptor
         if (mode == Phase7ExecutionHostMode.BoundRemote) {
             assertEquals(
                 SourceSeparationRemoteConnectionState.Connected,
@@ -4977,6 +4982,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
         return JSONObject()
             .put("mode", mode.argumentValue)
+            .put("protocolVersion", acceptedDescriptor.protocolVersion)
+            .put("runClass", acceptedDescriptor.runtime.runClass.name)
+            .put("backgroundPolicy", acceptedDescriptor.runtime.backgroundPolicy.name)
             .put("processGeneration", diagnostics?.processGeneration ?: JSONObject.NULL)
             .put("remotePid", diagnostics?.pid ?: JSONObject.NULL)
             .put("processStartTicks", diagnostics?.processStartTicks ?: JSONObject.NULL)
@@ -5816,6 +5824,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
 
         report.put("runAdmission", JSONObject()
+            .put("runClass", request.runClass.name)
+            .put("backgroundPolicy", request.backgroundPolicy.name)
             .put("tryGpu", request.tryGpu)
             .put(
                 "requestedGpuRuntimeProfileId",
