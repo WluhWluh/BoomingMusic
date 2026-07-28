@@ -26,6 +26,10 @@ class SourceSeparationIndependentRunRecoveryClientTest {
             "playback",
             SourceSeparationExecutionRunClass.PlaybackDemandWindow,
         )
+        val prefetch = journal(
+            "prefetch",
+            SourceSeparationExecutionRunClass.NextSongPrefetch,
+        )
         val completed = independent.copy(
             lifecycle = SourceSeparationCacheRunJournalLifecycle.Completed,
             transitions = independent.transitions + independent.transitions.last().copy(
@@ -39,11 +43,11 @@ class SourceSeparationIndependentRunRecoveryClientTest {
         assertEquals(
             listOf(independent),
             SourceSeparationIndependentRunRecoveryCandidateSelector.select(
-                listOf(independent, playback, completed),
+                listOf(independent, playback, prefetch, completed),
             ),
         )
         assertTrue(SourceSeparationIndependentRunRecoveryCandidateSelector.select(
-            listOf(playback, completed),
+            listOf(playback, prefetch, completed),
         ).isEmpty())
     }
 
