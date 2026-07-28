@@ -80,10 +80,12 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelecti
 import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseLifecycle
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnosticsCollector
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
 import com.mardous.booming.separation.process.SourceSeparationProcessingWakeLockLeaseRecord
+import com.mardous.booming.separation.process.SourceSeparationProcessingWakeLockLifecycle
 import com.mardous.booming.separation.process.SourceSeparationProcParser
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
 import com.mardous.booming.separation.process.SourceSeparationArm32ResidentValidation
@@ -109,6 +111,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -194,6 +197,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
             ARG_PROBE_ORIGINAL_PLAYBACK,
             false,
         )
+        val screenOffAfterReady = arguments.optionalBoolean(
+            ARG_SCREEN_OFF_AFTER_READY,
+            false,
+        )
+        require(!screenOffAfterReady ||
+            executionHostMode == Phase7ExecutionHostMode.IndependentForeground
+        ) {
+            "Worker screen-off validation requires independent foreground execution."
+        }
         require(!rebindAfterCompletion ||
             executionHostMode == Phase7ExecutionHostMode.BoundRemote
         ) {
@@ -203,6 +215,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         var boundRemoteHost: BoundRemoteSourceSeparationExecutionHost? = null
         var originalPlayback: OriginalAudioPlaybackProbe? = null
         var mediaUri: Uri? = null
+        var screenOffIssued = false
         val hostEvents = Collections.synchronizedList(
             mutableListOf<SourceSeparationExecutionHostEvent>(),
         )
@@ -369,6 +382,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
             var decodeDiagnostics: String? = null
             var finalState: SourceSeparationUiState = SourceSeparationUiState.Idle
             var remoteCacheOwnershipChecked = false
+            var backgroundLifecycleStarted = false
+            var screenOffObserved = false
+            var completedWhileScreenOff = false
+            var eventsAdvancedWhileScreenOff = false
+            var journalAdvancedWhileScreenOff = false
+            var eventsBeforeScreenOff = 0
+            var journalSequenceBeforeScreenOff = 0L
+            var importanceBeforeHome: Int? = null
+            var importanceAfterHome: Int? = null
             while (SystemClock.elapsedRealtime() - workerStartedAt < WORKER_TIMEOUT_MS) {
                 finalState = worker.workerStateFlow.value
                 val now = SystemClock.elapsedRealtime()
@@ -470,6 +492,65 @@ class SourceSeparationPhase7WorkerDeviceTest {
                             remoteCacheOwnershipChecked = true
                         }
                 }
+                if (screenOffAfterReady && firstReadyAt.get() > 0L &&
+                    remoteCacheOwnershipChecked && !backgroundLifecycleStarted
+                ) {
+                    val host = requireNotNull(boundRemoteHost)
+                    val process = host.processDiagnostics()
+                    val foregroundLease = requireNotNull(
+                        process.foregroundService.activeLease,
+                    ) { "Independent worker has no active foreground lease." }
+                    val wakeLockLease = requireNotNull(
+                        process.processingWakeLock.activeLease,
+                    ) { "Independent worker has no active processing wake lock." }
+                    val journal = requireNotNull(store.readRunJournal(cacheKey))
+                    assertEquals(
+                        SourceSeparationForegroundLeaseLifecycle.Active,
+                        foregroundLease.lifecycle,
+                    )
+                    assertEquals(
+                        SourceSeparationProcessingWakeLockLifecycle.Held,
+                        wakeLockLease.lifecycle,
+                    )
+                    assertTrue(process.processingWakeLock.platformHeld)
+                    assertEquals(foregroundLease.request, wakeLockLease.request)
+                    assertEquals(journal.request.runId, foregroundLease.request.runId)
+                    assertEquals(
+                        journal.request.processGeneration,
+                        foregroundLease.request.processGeneration,
+                    )
+                    assertEquals(process.pid, journal.request.ownerPid)
+                    eventsBeforeScreenOff = synchronized(hostEvents) { hostEvents.size }
+                    journalSequenceBeforeScreenOff = journal.latestSequence
+                    importanceBeforeHome = currentProcessImportance()
+                    instrumentation.uiAutomation
+                        .executeShellCommand("input keyevent KEYCODE_HOME")
+                        .close()
+                    SystemClock.sleep(BACKGROUND_SETTLE_MS)
+                    importanceAfterHome = currentProcessImportance()
+                    instrumentation.uiAutomation
+                        .executeShellCommand("input keyevent KEYCODE_SLEEP")
+                        .close()
+                    screenOffIssued = true
+                    val powerManager = context.getSystemService(PowerManager::class.java)
+                    val screenOffDeadline = SystemClock.elapsedRealtime() +
+                        SCREEN_STATE_TIMEOUT_MS
+                    while (powerManager.isInteractive &&
+                        SystemClock.elapsedRealtime() < screenOffDeadline
+                    ) {
+                        SystemClock.sleep(POLL_INTERVAL_MS)
+                    }
+                    screenOffObserved = !powerManager.isInteractive
+                    assertTrue("The device did not enter screen-off state.", screenOffObserved)
+                    backgroundLifecycleStarted = true
+                }
+                if (screenOffIssued) {
+                    eventsAdvancedWhileScreenOff = eventsAdvancedWhileScreenOff ||
+                        synchronized(hostEvents) { hostEvents.size > eventsBeforeScreenOff }
+                    journalAdvancedWhileScreenOff = journalAdvancedWhileScreenOff ||
+                        (store.readRunJournal(cacheKey)?.latestSequence ?: 0L) >
+                        journalSequenceBeforeScreenOff
+                }
                 when (finalState) {
                     is SourceSeparationUiState.Completed,
                     is SourceSeparationUiState.Failed,
@@ -563,6 +644,17 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
             assertTrue("Worker timed out: ${worker.debugStatus()}",
                 finalState is SourceSeparationUiState.Completed)
+            completedWhileScreenOff = screenOffIssued &&
+                !context.getSystemService(PowerManager::class.java).isInteractive
+            if (screenOffIssued) {
+                instrumentation.uiAutomation
+                    .executeShellCommand("input keyevent KEYCODE_WAKEUP")
+                    .close()
+                instrumentation.uiAutomation
+                    .executeShellCommand("wm dismiss-keyguard")
+                    .close()
+                screenOffIssued = false
+            }
             if (executionHostMode.isRemote) {
                 assertTrue(
                     "The remote writer never exposed a process-owned cache lease.",
@@ -584,6 +676,21 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val fullSongMs = completedAt - workerStartedAt
             val mainProcessAfter = currentProcessDiagnostics()
             val remoteProcessAfter = boundRemoteHost?.processDiagnostics()
+            if (executionHostMode == Phase7ExecutionHostMode.IndependentForeground) {
+                val completedProcess = requireNotNull(remoteProcessAfter)
+                assertNull(completedProcess.foregroundService.activeLease)
+                assertNull(completedProcess.processingWakeLock.activeLease)
+                assertFalse(completedProcess.processingWakeLock.platformHeld)
+                val foregroundLease = requireNotNull(
+                    completedProcess.foregroundService.lastStoppedLease,
+                )
+                val wakeLockLease = requireNotNull(
+                    completedProcess.processingWakeLock.lastReleasedLease,
+                )
+                assertEquals(foregroundLease.request, wakeLockLease.request)
+                assertEquals("completed", foregroundLease.stopReason)
+                assertEquals("completed", wakeLockLease.releaseReason)
+            }
             peakPssBytes = maxOf(peakPssBytes, mainProcessAfter.memory.pssBytes)
             peakJavaBytes = maxOf(peakJavaBytes, mainProcessAfter.memory.javaPssBytes)
             peakNativeBytes = maxOf(peakNativeBytes, mainProcessAfter.memory.nativePssBytes)
@@ -854,7 +961,22 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("thermal", thermalSampler.toJson())
             report.put("lifecycle", report.getJSONObject("lifecycle")
                 .put("workerCompleted", true)
+                .put("homeCommandIssuedAfterReady", backgroundLifecycleStarted)
+                .put("screenOffRequested", screenOffAfterReady)
+                .put("screenOffObserved", screenOffObserved)
+                .put("completedWhileScreenOff", completedWhileScreenOff)
+                .put("eventsAdvancedWhileScreenOff", eventsAdvancedWhileScreenOff)
+                .put("journalAdvancedWhileScreenOff", journalAdvancedWhileScreenOff)
+                .put("processImportanceBeforeHome",
+                    importanceBeforeHome ?: JSONObject.NULL)
+                .put("processImportanceAfterHome",
+                    importanceAfterHome ?: JSONObject.NULL)
             )
+            if (screenOffAfterReady) {
+                assertTrue(eventsAdvancedWhileScreenOff)
+                assertTrue(journalAdvancedWhileScreenOff)
+                assertTrue(completedWhileScreenOff)
+            }
             report.put("audio", report.getJSONObject("audio")
                 .put("finite", true)
                 .put("outputFrameCount", output.outputFrameCount)
@@ -982,6 +1104,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
             MdxLiteRtRemoteFaultInjection.clear(context)
             coordinator?.cancel()
             boundRemoteHost?.close()
+            if (screenOffIssued) {
+                instrumentation.uiAutomation
+                    .executeShellCommand("input keyevent KEYCODE_WAKEUP")
+                    .close()
+                instrumentation.uiAutomation
+                    .executeShellCommand("wm dismiss-keyguard")
+                    .close()
+            }
             originalPlayback?.let { playback ->
                 report.put("originalPlayback", playback.report())
                 playback.close()

@@ -36,7 +36,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v28",
+    [string]$RunnerRevision = "phase7-runner-v29",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -253,8 +253,11 @@ if ($Arm32ResidentProcessValidation -and $Stage -in $sourceStages -and
 if ($PreserveMediaStoreSource -and $Stage -notin @("worker", "switching")) {
     throw "PreserveMediaStoreSource applies only to worker and switching stages."
 }
-if ($ScreenOffAfterReady -and $Stage -ne "background") {
-    throw "ScreenOffAfterReady applies only to the background stage."
+if ($ScreenOffAfterReady -and
+        ($Stage -notin @("background", "worker") -or
+        ($Stage -eq "worker" -and
+            $ExecutionHostMode -ne "independent-foreground"))) {
+    throw "ScreenOffAfterReady requires background stage or the independent foreground worker."
 }
 if ($RebindAfterCompletion -and
         ($Stage -ne "worker" -or $ExecutionHostMode -ne "bound-remote")) {
@@ -878,13 +881,15 @@ try {
         $instrumentArguments += @("-e", "litertSha256", $litertSha256)
     }
 
-        if ($Stage -eq "background") {
+        if ($Stage -eq "background" -or
+                ($Stage -eq "worker" -and $ScreenOffAfterReady)) {
             $instrumentArguments += @(
                 "-e", "screenOffAfterReady",
                 $ScreenOffAfterReady.ToString().ToLowerInvariant()
             )
         }
-        if ($Stage -eq "background") {
+        if ($Stage -eq "background" -or
+                ($Stage -eq "worker" -and $ScreenOffAfterReady)) {
             $originalScreenOffTimeout = (
             & $adb -s $Serial shell settings get system screen_off_timeout
         ).Trim()
@@ -1087,7 +1092,8 @@ try {
                 autoFailpoint = $AutoFailpoint
                 remoteAutoFailpoint = $RemoteAutoFailpoint
                 autoFailInvocationCount = $AutoFailInvocationCount
-                screenTimeoutOverrideMs = if ($Stage -eq "background") {
+                screenTimeoutOverrideMs = if ($Stage -eq "background" -or
+                        ($Stage -eq "worker" -and $ScreenOffAfterReady)) {
                     $backgroundScreenTimeoutMs
                 } else { $null }
                 lifecycleScenario = if ($Stage -eq "lifecycle") { $LifecycleScenario } else { $null }
@@ -1117,6 +1123,10 @@ try {
     Write-Host "Saved Phase 7 $reportStage report to $reportPath"
     Write-Host "Saved Phase 7 input envelope to $envelopePath"
 } finally {
+    if ($ScreenOffAfterReady) {
+        & $adb -s $Serial shell input keyevent KEYCODE_WAKEUP 2>$null | Out-Null
+        & $adb -s $Serial shell wm dismiss-keyguard 2>$null | Out-Null
+    }
     if ($screenTimeoutChanged) {
         & $adb -s $Serial shell settings put system screen_off_timeout `
             $originalScreenOffTimeout 2>$null | Out-Null
