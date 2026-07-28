@@ -93,6 +93,10 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
         command: String,
         intent: Intent,
     ): Boolean {
+        if (SourceSeparationMainDeathDebugHarness.handle(context, command, intent)) {
+            writeStatus(context, command, "launched")
+            return true
+        }
         return when (command) {
             COMMAND_CONFIGURE_WORKER -> {
                 val configured = SourceSeparationForegroundWorkerDebugBridge.configure(

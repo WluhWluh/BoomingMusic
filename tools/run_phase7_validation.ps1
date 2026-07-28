@@ -21,6 +21,7 @@ param(
         "process-cache-matrix",
         "process-cache-race-matrix",
         "process-main-death",
+        "independent-main-death",
         "lifecycle",
         "recreation",
         "playback",
@@ -38,7 +39,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v32",
+    [string]$RunnerRevision = "phase7-runner-v34",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -100,6 +101,7 @@ $sourceStages = @(
     "process-cache-matrix",
     "process-cache-race-matrix",
     "process-main-death",
+    "independent-main-death",
     "lifecycle",
     "recreation",
     "playback",
@@ -123,6 +125,7 @@ $testMethod = switch ($Stage) {
     "process-cache-matrix" { "validateProcessCacheSafetyMatrix"; break }
     "process-cache-race-matrix" { "validateProcessCacheManagementRaces"; break }
     "process-main-death" { "validateProcessMainDeathRecovery"; break }
+    "independent-main-death" { "validateIndependentMainDeathReattachment"; break }
     "lifecycle" { "validateWorkerLifecycle"; break }
     "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
     "playback" { "validateMediaSessionPlayback"; break }
@@ -211,7 +214,7 @@ if ($ExecutionHostMode -eq "bound-remote" -and
     throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
 }
 if ($ExecutionHostMode -eq "independent-foreground" -and
-        ($Stage -notin @("worker", "ownership-handoff", "reattachment") -or
+        ($Stage -notin @("worker", "ownership-handoff", "reattachment", "independent-main-death") -or
         $ProcessAbi -ne "arm64-v8a" -or
         $ProcessorCount -gt 0 -or $XnnPackFlags -ge 0 -or
         $AutoFailpoint -ne "none" -or
@@ -395,6 +398,49 @@ function Read-RemoteFile([string]$RelativePath) {
         throw "Could not read remote file: $RelativePath"
     }
     return ($result -join "`n")
+}
+
+function Try-ReadRemoteFile([string]$RelativePath) {
+    $result = & $adb -s $Serial exec-out run-as $package cat $RelativePath 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return ($result -join "`n")
+}
+
+function Wait-RemoteJsonFile(
+    [string]$RelativePath,
+    [int]$TimeoutSeconds,
+    [string]$FailurePath = ""
+) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $text = Try-ReadRemoteFile $RelativePath
+        if (-not [string]::IsNullOrWhiteSpace($text) -and
+                $text.TrimStart().StartsWith("{", [System.StringComparison]::Ordinal)) {
+            return $text
+        }
+        if (-not [string]::IsNullOrWhiteSpace($FailurePath)) {
+            $failure = Try-ReadRemoteFile $FailurePath
+            if (-not [string]::IsNullOrWhiteSpace($failure) -and
+                    $failure.TrimStart().StartsWith("{", [System.StringComparison]::Ordinal)) {
+                $failureObject = $failure | ConvertFrom-Json
+                if ([string]$failureObject.status -eq "failed") {
+                    throw "Debug process-death command failed: $failure"
+                }
+            }
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Timed out waiting for remote JSON file: $RelativePath"
+}
+
+function Get-NamedProcessIds([string]$ProcessName) {
+    $output = & $adb -s $Serial shell pidof $ProcessName 2>$null
+    if ($LASTEXITCODE -ne 0) { return @() }
+    return @(
+        (($output -join " ") -split '\s+') |
+            Where-Object { $_ -match '^\d+$' } |
+            ForEach-Object { [int]$_ }
+    )
 }
 
 function Get-Sha256([string]$Path) {
@@ -925,7 +971,88 @@ try {
         Invoke-Adb shell wm dismiss-keyguard
     }
 
-    if ($Stage -eq "process-main-death") {
+    if ($Stage -eq "independent-main-death") {
+        Invoke-Adb shell am force-stop --user $deviceUserId $package
+        $debugDirectory = "files/phase7-debug-main-death"
+        $scenarioRelativePath = "$debugDirectory/$RunId-scenario.json"
+        $debugReportRelativePath = "$debugDirectory/$RunId-report.json"
+        & $adb -s $Serial shell run-as $package rm -f -- `
+            $scenarioRelativePath $debugReportRelativePath 2>$null | Out-Null
+
+        Invoke-Adb shell am start --user $deviceUserId -n `
+            "$package/com.mardous.booming.debug.SourceSeparationProcessValidationActivity"
+        $debugReceiver =
+            "$package/com.mardous.booming.debug.SourceSeparationDebugReceiver"
+        $debugAction = "com.mardous.booming.debug.SOURCE_SEPARATION"
+        $debugArguments = @(
+            "shell", "am", "broadcast", "--user", $deviceUserId,
+            "-a", $debugAction,
+            "-n", $debugReceiver,
+            "--es", "runId", $RunId,
+            "--es", "sourcePath", $remoteSourcePath,
+            "--es", "modelId", $ModelId,
+            "--es", "artifactSha256", $artifact.sha256,
+            "--es", "backendMode", $BackendMode
+        )
+        Invoke-Adb @debugArguments --es command beginIndependentMainDeath
+        $scenarioText = Wait-RemoteJsonFile `
+            -RelativePath $scenarioRelativePath `
+            -TimeoutSeconds 300 `
+            -FailurePath $debugReportRelativePath
+        $scenario = $scenarioText | ConvertFrom-Json
+        $oldMainPid = [int]$scenario.mainPid
+        $remotePid = [int]$scenario.remotePid
+        if ($oldMainPid -le 0 -or $remotePid -le 0 -or $oldMainPid -eq $remotePid) {
+            throw "The debug process-death scenario contains invalid process identities."
+        }
+        if ($oldMainPid -notin @(Get-NamedProcessIds $package)) {
+            throw "The debug scenario main PID is no longer the active main process."
+        }
+        if ($remotePid -notin @(Get-NamedProcessIds "${package}:source_separation")) {
+            throw "The debug scenario remote PID is no longer authoritative."
+        }
+
+        Invoke-Adb shell run-as $package kill -9 $oldMainPid
+        $deathDeadline = [DateTime]::UtcNow.AddSeconds(30)
+        do {
+            $oldMainAlive = $oldMainPid -in @(Get-NamedProcessIds $package)
+            $remoteAlive = $remotePid -in @(
+                Get-NamedProcessIds "${package}:source_separation"
+            )
+            if (-not $oldMainAlive -and $remoteAlive) { break }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $deathDeadline)
+        if ($oldMainAlive) {
+            throw "The debug main process survived SIGKILL."
+        }
+        if (-not $remoteAlive) {
+            throw "The authoritative inference process died with the main process."
+        }
+
+        Invoke-Adb shell am start --user $deviceUserId -n `
+            "$package/com.mardous.booming.debug.SourceSeparationProcessValidationActivity"
+        $restartDeadline = [DateTime]::UtcNow.AddSeconds(30)
+        do {
+            $newMainPids = @(Get-NamedProcessIds $package) |
+                Where-Object { $_ -ne $oldMainPid }
+            if ($newMainPids.Count -eq 1) { break }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $restartDeadline)
+        if ($newMainPids.Count -ne 1) {
+            throw "The debug main process did not restart with one fresh PID."
+        }
+        Invoke-Adb @debugArguments --es command validateIndependentMainDeath
+        $reportText = Wait-RemoteJsonFile `
+            -RelativePath $debugReportRelativePath `
+            -TimeoutSeconds 1800
+        $debugReport = $reportText | ConvertFrom-Json
+        $instrumentExit = if ([string]$debugReport.status -eq "passed") { 0 } else { 1 }
+        $instrumentText = if ($instrumentExit -eq 0) {
+            "OK (1 test)"
+        } else {
+            "Debug process-death validation failed: $reportText"
+        }
+    } elseif ($Stage -eq "process-main-death") {
         Invoke-Adb shell am force-stop --user $deviceUserId $package
         $prepareArguments = @($instrumentArguments)
         $classArgumentIndex = [Array]::IndexOf($prepareArguments, "class")
@@ -939,7 +1066,7 @@ try {
         $prepareText = $prepareOutput -join "`n"
         Write-Host $prepareText
         if ($prepareText -match 'OK \(1 test\)') {
-            throw "The process main-death setup returned without killing its main process."
+            throw "The process-main-death setup returned without killing its main process."
         }
         $scenarioRelativePath = "files/phase4-main-death/$RunId.json"
         $scenarioText = Read-RemoteFile $scenarioRelativePath
@@ -967,10 +1094,12 @@ try {
         } while ($true)
     }
     Write-Host $instrumentText
-    $remoteReport = "files/phase7-validation-reports/$RunId-$reportStage.json"
-    $reportText = Read-RemoteFile $remoteReport
-    if ($reportText.TrimStart() -notmatch '^\{') {
-        throw "Phase 7 instrumentation did not create a JSON report for $RunId."
+    if ($Stage -ne "independent-main-death") {
+        $remoteReport = "files/phase7-validation-reports/$RunId-$reportStage.json"
+        $reportText = Read-RemoteFile $remoteReport
+        if ($reportText.TrimStart() -notmatch '^\{') {
+            throw "Phase 7 instrumentation did not create a JSON report for $RunId."
+        }
     }
 
     $deviceDirectory = Join-Path $OutputRoot ($Serial -replace '[^A-Za-z0-9._-]', '_')
@@ -1155,6 +1284,10 @@ try {
     if ($remoteArtifactDirectory -eq $expectedRemoteArtifactDirectory) {
         & $adb -s $Serial shell run-as $package rm -rf -- `
             $remoteArtifactDirectory 2>$null | Out-Null
+    }
+    if ($Stage -eq "independent-main-death") {
+        & $adb -s $Serial shell am force-stop --user $deviceUserId $package `
+            2>$null | Out-Null
     }
     Pop-Location
 }

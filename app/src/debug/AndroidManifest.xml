@@ -31,6 +31,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".debug.SourceSeparationProcessValidationActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
         <receiver
             android:name=".debug.SourceSeparationDebugReceiver"
             android:enabled="true"
