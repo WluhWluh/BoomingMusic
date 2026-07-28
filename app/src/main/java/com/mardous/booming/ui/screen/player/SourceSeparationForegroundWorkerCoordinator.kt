@@ -26,6 +26,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationPlaybackLifecyclePolicy
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
 import com.mardous.booming.separation.process.ipc.SourceSeparationReconnectedSession
+import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteHostDiedException
 import com.mardous.booming.separation.process.toMdxRangeProgress
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
@@ -571,6 +572,15 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 val event = events.receiveCatching().getOrNull() ?: break
                 terminal = applyRecoveredEvent(session, event)
             }
+        } catch (_: SourceSeparationRemoteHostDiedException) {
+            val song = reconnectedSong
+            if (song != null) {
+                _workerStateFlow.value = SourceSeparationUiState.Failed(
+                    songId = song.id,
+                    songTitle = song.title,
+                    message = remoteProcessStoppedMessage(),
+                )
+            }
         } catch (error: Throwable) {
             val song = reconnectedSong
             if (song != null && error !is CancellationException) {
@@ -1095,6 +1105,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             )
             callbacks?.onSourceSeparationWorkerModelLoadFailed(message)
             cancelRequested.set(true)
+        } catch (_: SourceSeparationRemoteHostDiedException) {
+            _workerStateFlow.value = SourceSeparationUiState.Failed(
+                songId = song.id,
+                songTitle = song.title,
+                message = remoteProcessStoppedMessage(),
+            )
+            cancelRequested.set(true)
         } catch (error: Throwable) {
             _workerStateFlow.value = SourceSeparationUiState.Failed(
                 songId = song.id,
@@ -1112,6 +1129,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             pauseRequested.set(false)
         }
     }
+
+    private fun remoteProcessStoppedMessage(): String = context.getString(
+        R.string.source_separation_process_stopped_unexpectedly,
+    )
 
     private suspend fun hasCompletedCache(song: SourceSeparationRuntimeSong): Boolean {
         return withContext(Dispatchers.IO) {

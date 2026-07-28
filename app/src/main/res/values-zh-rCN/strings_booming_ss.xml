@@ -286,6 +286,7 @@
     <string name="source_separation_complete">音源分离完成</string>
     <string name="source_separation_canceled">已取消音源分离</string>
     <string name="source_separation_failed">音源分离失败</string>
+    <string name="source_separation_process_stopped_unexpectedly">音源分离进程意外停止。请重新开始分离，以从已保存的进度继续。</string>
     <string name="about_booming_ss_title">Booming SS</string>
     <string name="about_booming_ss_summary_title">音源分离分支</string>
     <string name="about_booming_ss_summary">Booming SS 是基于 Booming Music 的非官方音源分离版本。它保留原本的本地音乐播放器体验，并加入分轨播放、分轨混音控制、单曲混音记忆和分离缓存管理。</string>

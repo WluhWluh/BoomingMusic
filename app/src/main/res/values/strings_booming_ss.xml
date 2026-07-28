@@ -286,6 +286,7 @@
     <string name="source_separation_complete">Source separation complete</string>
     <string name="source_separation_canceled">Source separation canceled</string>
     <string name="source_separation_failed">Source separation failed</string>
+    <string name="source_separation_process_stopped_unexpectedly">The source separation process stopped unexpectedly. Start separation again to resume from saved progress.</string>
     <string name="about_booming_ss_title">Booming SS</string>
     <string name="about_booming_ss_summary_title">Source separation fork</string>
     <string name="about_booming_ss_summary">Booming SS is an unofficial source-separation build based on Booming Music. It keeps the original local music player experience and adds separated playback, stem blend controls, per-song blend memory, and separated cache management.</string>
