@@ -6,7 +6,7 @@ and bounded GPU; remote-process death policy remains open
 
 Updated: 2026-07-28
 
-Current milestone: freeze the Phase 7C user/task lifecycle policy, cover the
+Current milestone: validate the frozen Phase 7C policy on devices, cover the
 remaining highest-value Phase 7D main-process boundaries, then select one
 conservative Phase 7B remote-process death policy.
 Remaining Phase 5F and Phase 6D full-song, fallback, UI, current-API, and
@@ -1453,18 +1453,31 @@ actual Android main-process kill.
 
 ### Phase 7C: User and task lifecycle
 
-- [ ] Preserve the existing "stop when closed from recents" setting.
-- [ ] Define and test behavior when playback stops while an eligible manual
+- [x] Preserve the existing "stop when closed from recents" setting as a
+  playback setting. Swiping the task with the setting enabled still stops
+  playback; it does not reinterpret an already admitted manual full-song job
+  as playback-owned work. The dynamic setting-on/setting-off device matrix
+  remains below.
+- [x] Define and unit-test behavior when playback stops while an eligible manual
   full-song run continues. Playback-demand and prefetch work must stop or pause
-  with their owning playback intent.
-- [ ] Define whether a manually paused session retains the remote process and
-  for how long; do not hold foreground state or wake lock while paused.
-- [ ] Decide whether an expired idle-retention deadline or idle memory pressure
-  should request acknowledged self-recycle or merely release the private
-  binding. Phase 3 proves explicit recycle only; its five-minute API 26
-  experiment currently releases the binding and classifies later OS death.
-- [ ] Decide whether completed-stem FLAC promotion must move into the remote
-  process so an independently running job can finish without the main process.
+  with their owning playback intent. `PlaybackService` shutdown now freezes
+  the playback clock, clears queued work, and pauses only those two classes;
+  the worker exits after an independently admitted manual run completes.
+- [x] A manually paused production session retains no private warm binding.
+  The terminal path releases the processing FGS and wake lock, and normal
+  builds use `SingleUse` native sessions. The resident x86/arm32 validation
+  gate may retain only a successfully completed run, never Pause, Cancel,
+  Deferred, Failed, or an unknown outcome. Active-run device cleanup remains
+  part of the matrix below.
+- [x] An expired idle-retention deadline merely releases the private binding;
+  idle memory pressure is left to Android. Do not add automatic self-recycle,
+  sticky service lifetime, or a second restart mechanism. Explicit
+  acknowledged recycle remains available only when a new run requires a fresh
+  process generation.
+- [x] Keep completed-stem FLAC promotion in the main process initially. The
+  remote owner publishes a valid completed WAV cache without it; after
+  reattachment, the existing deferred terminal callback may request promotion.
+  Promotion must not extend the inference FGS or wake-lock lifetime.
 - [x] Restore worker progress, protected-cache ownership, Pause/Cancel routing,
   and deferred terminal callbacks from an adopted snapshot and event stream.
 - [x] Recreate the product `MainActivity`, reconnect the worker observer before
@@ -1474,6 +1487,10 @@ actual Android main-process kill.
   management UI after main-process recreation.
 - [ ] Confirm Android force-stop always terminates work without automatic
   resurrection.
+
+The selected Phase 7C product policy and its remaining device-only gates are
+recorded in
+[Phase 7 user and task lifecycle](validation/litert-inference-process/phase7/user-task-lifecycle-2026-07-28.md).
 
 ### Phase 7D: Recovery and reattachment matrix
 
