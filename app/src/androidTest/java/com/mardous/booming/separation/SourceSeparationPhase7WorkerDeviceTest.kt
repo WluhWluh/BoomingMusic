@@ -1568,6 +1568,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 instrumentation,
                 "pidof ${context.packageName}:source_separation",
             ).trim()
+            val idleHost = BoundRemoteSourceSeparationExecutionHost(context.applicationContext)
+            val idleDiagnostics = try {
+                idleHost.processDiagnostics()
+            } finally {
+                idleHost.close()
+            }
+            assertNull(idleDiagnostics.activeRunId)
+            assertEquals(SourceSeparationProcessSessionState.Empty, idleDiagnostics.session.state)
+            assertEquals(0, idleDiagnostics.session.activeLeaseCount)
+            assertNull(idleDiagnostics.session.sessionId)
+            assertNull(idleDiagnostics.foregroundService.activeLease)
+            assertNull(idleDiagnostics.processingWakeLock.activeLease)
+            assertFalse(idleDiagnostics.processingWakeLock.platformHeld)
             applyRunAdmissionEvidence(
                 report = report,
                 request = journalAfter.request,
@@ -1599,6 +1612,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("wakeLockDuring", true)
                 .put("wakeLockAfter", wakeLockActive)
                 .put("remoteProcessAfter", remoteProcessAfter)
+                .put("idleProcess", processResourceJson(idleDiagnostics))
             )
         } catch (error: Throwable) {
             report.put("status", "failed")
