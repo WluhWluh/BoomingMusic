@@ -59,7 +59,9 @@ internal class SourceSeparationModelAwareEngine(
     private val constructionGate: () -> Boolean,
     private val runIdFactory: () -> String = { UUID.randomUUID().toString() },
     private val executionHostEventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
-) {
+) : AutoCloseable {
+    override fun close() = executionHost.close()
+
     fun separate(
         input: SourceSeparationModelAwareSongInput,
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),

@@ -117,6 +117,7 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
     private val inputFactory: SourceSeparationRuntimeSongInputFactory =
         SourceSeparationRuntimeSongInputFactory(SourceSeparationModelAwareSongInput::from),
     private val engine: SourceSeparationModelAwareEngine,
+    private val manualFullSongEngineFactory: (() -> SourceSeparationModelAwareEngine)? = null,
     private val cacheRepository: SourceSeparationModelAwareCacheRepository,
     private val runCoordinator: SourceSeparationCacheRunCoordinator,
     private val flacPromoter: SourceSeparationCacheFlacPromoter,
@@ -218,25 +219,37 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
         windowDecodeEnabled: Boolean,
         shouldPause: () -> Boolean,
         shouldCancel: () -> Boolean,
-    ): SourceSeparationModelAwareEngineResult = engine.separateResolved(
-        input = song.input,
-        model = song.model,
-        preflight = song.preflight,
-        runtimeSettings = runtimeSettings,
-        executionBackendPolicy = if (tryGpu) {
-            SourceSeparationExecutionBackendPolicy.Auto
+    ): SourceSeparationModelAwareEngineResult {
+        val scopedEngine = if (runClass == SourceSeparationExecutionRunClass.ManualFullSong) {
+            manualFullSongEngineFactory?.invoke()
         } else {
-            SourceSeparationExecutionBackendPolicy.Cpu
-        },
-        runClass = runClass,
-        onProgress = onProgress,
-        onPrepared = onPrepared,
-        playbackPositionMsProvider = playbackPositionMsProvider,
-        playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
-        windowDecodeEnabled = windowDecodeEnabled,
-        shouldPause = shouldPause,
-        shouldCancel = shouldCancel,
-    )
+            null
+        }
+        val selectedEngine = scopedEngine ?: engine
+        return try {
+            selectedEngine.separateResolved(
+                input = song.input,
+                model = song.model,
+                preflight = song.preflight,
+                runtimeSettings = runtimeSettings,
+                executionBackendPolicy = if (tryGpu) {
+                    SourceSeparationExecutionBackendPolicy.Auto
+                } else {
+                    SourceSeparationExecutionBackendPolicy.Cpu
+                },
+                runClass = runClass,
+                onProgress = onProgress,
+                onPrepared = onPrepared,
+                playbackPositionMsProvider = playbackPositionMsProvider,
+                playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
+                windowDecodeEnabled = windowDecodeEnabled,
+                shouldPause = shouldPause,
+                shouldCancel = shouldCancel,
+            )
+        } finally {
+            scopedEngine?.close()
+        }
+    }
 
     override fun promote(
         cacheKey: String,

@@ -214,6 +214,13 @@ private val mainModule = module {
             compatibilityResolver = AndroidSourceSeparationRuntimeCompatibilityResolver,
             preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(androidContext()),
             engine = get(),
+            manualFullSongEngineFactory = {
+                SourceSeparationModelAwareEngine.createIndependentForegroundPrototype(
+                    context = androidContext(),
+                    presetRepository = presetRepository,
+                    coordinator = get(),
+                )
+            },
             cacheRepository = get(),
             runCoordinator = get(),
             flacPromoter = get(),

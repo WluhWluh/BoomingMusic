@@ -27,6 +27,8 @@ import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelRe
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPresetOrigin
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
+import com.mardous.booming.separation.process.InProcessSourceSeparationExecutionHost
+import com.mardous.booming.separation.process.SourceSeparationExecutionHost
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -131,6 +133,54 @@ class SourceSeparationRuntimeFacadeTest {
         assertEquals("source cannot be opened", result.detail)
     }
 
+    @Test
+    fun `only manual full-song work uses the scoped execution engine`() {
+        val fixture = fixture()
+        fixture.activeResolution = SourceSeparationActiveCacheModelResolution.Ready(
+            fixture.resolvedModel("uvr_mdxnet_3_9662"),
+        )
+        val routes = mutableListOf<String>()
+        var scopedCloseCount = 0
+        val facade = fixture.facade(
+            executor = SourceSeparationModelAwareRangeExecutor {
+                routes += "shared"
+                throw RouteSelectedException
+            },
+            manualFullSongEngineFactory = {
+                fixture.engine(
+                    executor = SourceSeparationModelAwareRangeExecutor {
+                        routes += "manual"
+                        throw RouteSelectedException
+                    },
+                    onClose = { scopedCloseCount += 1 },
+                )
+            },
+        )
+        val resolved = (facade.resolve(fixture.song) as SourceSeparationRuntimeSongResolution.Ready).song
+
+        assertThrows(RouteSelectedException::class.java) {
+            facade.separate(
+                song = resolved,
+                runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+            )
+        }
+        assertThrows(RouteSelectedException::class.java) {
+            facade.separate(
+                song = resolved,
+                runClass = SourceSeparationExecutionRunClass.NextSongPrefetch,
+            )
+        }
+        assertThrows(RouteSelectedException::class.java) {
+            facade.separate(
+                song = resolved,
+                runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+            )
+        }
+
+        assertEquals(listOf("shared", "shared", "manual"), routes)
+        assertEquals(1, scopedCloseCount)
+    }
+
     private fun fixture(): FacadeFixture {
         val root = temporary.newFolder().absoluteFile
         val store = SourceSeparationCacheStore(
@@ -194,14 +244,9 @@ class SourceSeparationRuntimeFacadeTest {
                 SourceSeparationModelAwareRangeExecutor {
                     throw IllegalStateException("executor should not run")
                 },
+            manualFullSongEngineFactory: (() -> SourceSeparationModelAwareEngine)? = null,
         ): SourceSeparationRuntimeFacade {
-            val engine = SourceSeparationModelAwareEngine(
-                activeModelResolver = { null },
-                preflightResolver = preflightResolver,
-                coordinator = coordinator,
-                rangeExecutor = executor,
-                constructionGate = { true },
-            )
+            val engine = engine(executor)
             return DefaultSourceSeparationRuntimeFacade(
                 activeModelResolver = { activeResolution },
                 compatibilityResolver = compatibilityResolver,
@@ -226,12 +271,27 @@ class SourceSeparationRuntimeFacadeTest {
                     )
                 },
                 engine = engine,
+                manualFullSongEngineFactory = manualFullSongEngineFactory,
                 cacheRepository = repository,
                 runCoordinator = coordinator,
                 flacPromoter = SourceSeparationCacheFlacPromoter(store, repository),
                 hydrator = SourceSeparationCacheHydrator(store, repository),
             )
         }
+
+        fun engine(
+            executor: SourceSeparationModelAwareRangeExecutor,
+            onClose: () -> Unit = {},
+        ): SourceSeparationModelAwareEngine = SourceSeparationModelAwareEngine(
+            activeModelResolver = { null },
+            preflightResolver = SourceSeparationModelAwarePreflightResolver { _, _ ->
+                error("Resolved execution must not repeat source preflight.")
+            },
+            coordinator = coordinator,
+            rangeExecutor = executor,
+            executionHost = CloseTrackingExecutionHost(executor, onClose),
+            constructionGate = { true },
+        )
 
         fun resolvedModel(modelId: String): SourceSeparationResolvedCacheModel {
             val contract = catalog.contracts.single { it.modelId == modelId }
@@ -287,6 +347,40 @@ class SourceSeparationRuntimeFacadeTest {
             catalog = resource.use { input ->
                 SourceSeparationModelMetadata.decodeCatalog(input.readBytes().toString(Charsets.UTF_8))
             }
+        }
+    }
+
+    private data object RouteSelectedException : RuntimeException()
+
+    private class CloseTrackingExecutionHost(
+        executor: SourceSeparationModelAwareRangeExecutor,
+        private val onClose: () -> Unit,
+    ) : SourceSeparationExecutionHost {
+        private val delegate = InProcessSourceSeparationExecutionHost(executor)
+
+        override val mode
+            get() = delegate.mode
+        override val processGeneration
+            get() = delegate.processGeneration
+
+        override fun start(request: com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest) =
+            delegate.start(request)
+
+        override fun snapshot(runId: String, processGeneration: Long) =
+            delegate.snapshot(runId, processGeneration)
+
+        override fun pause(runId: String, processGeneration: Long) =
+            delegate.pause(runId, processGeneration)
+
+        override fun cancel(runId: String, processGeneration: Long) =
+            delegate.cancel(runId, processGeneration)
+
+        override fun closeRun(runId: String, processGeneration: Long) =
+            delegate.closeRun(runId, processGeneration)
+
+        override fun close() {
+            delegate.close()
+            onClose()
         }
     }
 }
