@@ -1190,7 +1190,11 @@ try {
         $forceStopBoundary = Stop-AppProcesses
         $stoppedAfterStop = Get-PackageStoppedState
         $afterStopJournal = Get-RemoteJournalSnapshot $journalPath
-        $entryPath = Split-Path -Parent $journalPath
+        $journalSeparator = $journalPath.LastIndexOf('/')
+        if ($journalSeparator -le 0) {
+            throw "The force-stop journal has no device-side parent path."
+        }
+        $entryPath = $journalPath.Substring(0, $journalSeparator)
         $afterStopEntry = Get-RemoteEntrySnapshot $entryPath
         $afterStop = Get-TaskLifecycleObservation
         $silentStarted = [Diagnostics.Stopwatch]::StartNew()
