@@ -4,7 +4,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Binder
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
@@ -26,6 +28,10 @@ import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseOpe
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.process.SourceSeparationIndependentRunAuthorityEvidence
 import com.mardous.booming.separation.process.SourceSeparationIndependentRunAuthorityPolicy
+import com.mardous.booming.separation.process.SourceSeparationIndependentRunDeadlineCancellation
+import com.mardous.booming.separation.process.SourceSeparationIndependentRunDeadlineScheduler
+import com.mardous.booming.separation.process.SourceSeparationIndependentRunIdentity
+import com.mardous.booming.separation.process.SourceSeparationIndependentRunObserverDeadline
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnosticsCollector
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
@@ -56,6 +62,19 @@ internal class SourceSeparationExecutionService : Service() {
     private var activeRun: ActiveRemoteRun? = null
     private var recycleAcknowledgement: SourceSeparationIpcRecycleAcknowledgement? = null
     private val retentionBinder = Binder()
+    private val observerDeadlineHandler = Handler(Looper.getMainLooper())
+    private val observerDeadline = SourceSeparationIndependentRunObserverDeadline(
+        scheduler = SourceSeparationIndependentRunDeadlineScheduler { delayMs, action ->
+            val runnable = Runnable(action)
+            check(observerDeadlineHandler.postDelayed(runnable, delayMs)) {
+                "Unable to schedule the independent observer deadline."
+            }
+            SourceSeparationIndependentRunDeadlineCancellation {
+                observerDeadlineHandler.removeCallbacks(runnable)
+            }
+        },
+        onExpired = ::handleIndependentObserverDeadline,
+    )
     private val foregroundController by lazy {
         SourceSeparationMediaProcessingForegroundController(this)
     }
@@ -142,6 +161,7 @@ internal class SourceSeparationExecutionService : Service() {
     }
 
     override fun onDestroy() {
+        observerDeadline.close()
         processingWakeLockController.releaseActive("service-destroyed")
         foregroundController.stopActive("service-destroyed")
         val acknowledgedRecycle = synchronized(stateLock) {
@@ -192,6 +212,9 @@ internal class SourceSeparationExecutionService : Service() {
                 client = connected
                 try {
                     active?.attachObserver(connected)
+                    active?.let { run ->
+                        observerDeadline.observerConnected(run.identity)
+                    }
                 } catch (error: Throwable) {
                     unlinkClientDeathLocked()
                     client = null
@@ -454,6 +477,7 @@ internal class SourceSeparationExecutionService : Service() {
                 if (result == SourceSeparationExecutionHostControlResult.Applied ||
                     result == SourceSeparationExecutionHostControlResult.NoActiveRun
                 ) {
+                    observerDeadline.runClosed(active.identity)
                     active.close()
                     activeRun = null
                 }
@@ -829,6 +853,7 @@ internal class SourceSeparationExecutionService : Service() {
         val connected = client
         if (active != null && connected != null && hasIndependentAuthorityLocked(active)) {
             if (active.detachObserver(connected.state.observerId, reason)) {
+                observerDeadline.observerDisconnected(active.identity)
                 unlinkClientDeathLocked()
                 client = null
                 return
@@ -851,6 +876,7 @@ internal class SourceSeparationExecutionService : Service() {
     private fun closeAbandonedRun(active: ActiveRemoteRun) {
         synchronized(stateLock) {
             if (client != null || activeRun !== active) return
+            observerDeadline.runClosed(active.identity)
             active.host.closeRun(
                 active.descriptor.runId,
                 active.descriptor.processGeneration,
@@ -887,6 +913,18 @@ internal class SourceSeparationExecutionService : Service() {
                 platformWakeLockHeld = wakeLock.platformHeld,
             )
         )
+    }
+
+    private fun handleIndependentObserverDeadline(
+        identity: SourceSeparationIndependentRunIdentity,
+    ) {
+        synchronized(stateLock) {
+            val active = activeRun?.takeIf { run ->
+                run.identity == identity && !run.observerConnected
+            } ?: return
+            Log.w(TAG, "Independent source-separation observer deadline expired: $identity")
+            active.requestPause()
+        }
     }
 
     private fun requireSameUidCaller() {
@@ -956,6 +994,14 @@ internal class SourceSeparationExecutionService : Service() {
         private val foregroundDeferredReason =
             AtomicReference<SourceSeparationForegroundDeferredReason?>(null)
         private var observerState = observerState
+
+        val identity = SourceSeparationIndependentRunIdentity(
+            runId = descriptor.runId,
+            processGeneration = descriptor.processGeneration,
+        )
+
+        val observerConnected: Boolean
+            get() = observerState.connected
 
         val independentAuthorityEligible: Boolean
             get() = descriptor.runtime.runClass == SourceSeparationExecutionRunClass.ManualFullSong &&
