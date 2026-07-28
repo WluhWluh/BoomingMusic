@@ -15,6 +15,7 @@ param(
         "worker",
         "ownership-handoff",
         "pause-cleanup",
+        "task-removal",
         "force-stop",
         "reattachment",
         "process-matrix",
@@ -41,7 +42,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v40",
+    [string]$RunnerRevision = "phase7-runner-v41",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -84,6 +85,7 @@ param(
     [switch]$RebindAfterCompletion,
     [switch]$ProbeOriginalPlayback,
     [switch]$ForceStopBeforeRun,
+    [bool]$StopWhenClosedFromRecents = $false,
     [ValidateRange(5, 300)]
     [int]$SilentObservationSeconds = 30,
     [switch]$ScreenOffAfterReady,
@@ -99,6 +101,7 @@ $sourceStages = @(
     "worker",
     "ownership-handoff",
     "pause-cleanup",
+    "task-removal",
     "force-stop",
     "reattachment",
     "process-matrix",
@@ -125,6 +128,7 @@ $testMethod = switch ($Stage) {
     "worker" { "validateProductionWorker"; break }
     "ownership-handoff" { "validateProductOwnershipHandoff"; break }
     "pause-cleanup" { "validateProductPauseCleanup"; break }
+    "task-removal" { "validateTaskRemovalLifecycle"; break }
     "force-stop" { "validateDeviceEvidenceIdentity"; break }
     "reattachment" { "validateIndependentRunReattachment"; break }
     "process-matrix" { "validateProcessSessionMatrix"; break }
@@ -222,7 +226,7 @@ if ($ExecutionHostMode -eq "bound-remote" -and
     throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
 }
 if ($ExecutionHostMode -eq "independent-foreground" -and
-        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "force-stop", "reattachment", "independent-main-death") -or
+        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "task-removal", "force-stop", "reattachment", "independent-main-death") -or
         $ProcessAbi -ne "arm64-v8a" -or
         $ProcessorCount -gt 0 -or $XnnPackFlags -ge 0 -or
         $AutoFailpoint -ne "none" -or
@@ -240,6 +244,12 @@ if ($Stage -eq "pause-cleanup" -and
         $ProcessAbi -ne "arm64-v8a" -or
         $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
     throw "pause-cleanup requires the production arm64 independent foreground route without fault injection."
+}
+if ($Stage -eq "task-removal" -and
+        ($ExecutionHostMode -ne "independent-foreground" -or
+        $ProcessAbi -ne "arm64-v8a" -or
+        $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
+    throw "task-removal requires the production arm64 independent foreground route without fault injection."
 }
 if ($Stage -eq "force-stop" -and
         ($ExecutionHostMode -ne "independent-foreground" -or
@@ -1070,6 +1080,12 @@ try {
                 "-e", "processCacheScope", $ProcessCacheScope
             )
         }
+        if ($Stage -eq "task-removal") {
+            $instrumentArguments += @(
+                "-e", "stopWhenClosedFromRecents",
+                $StopWhenClosedFromRecents.ToString().ToLowerInvariant()
+            )
+        }
         if ($Stage -eq "worker" -and $RebindAfterCompletion) {
             $instrumentArguments += @("-e", "rebindAfterCompletion", "true")
         }
@@ -1534,6 +1550,9 @@ try {
                 probeOriginalPlayback = [bool]$ProbeOriginalPlayback
                 coldProcessBoundary = [bool]$ForceStopBeforeRun
                 preRunProcessBoundary = $preRunProcessBoundary
+                stopWhenClosedFromRecents = if ($Stage -eq "task-removal") {
+                    $StopWhenClosedFromRecents
+                } else { $null }
                 silentObservationSeconds = if ($Stage -eq "force-stop") {
                     $SilentObservationSeconds
                 } else { $null }

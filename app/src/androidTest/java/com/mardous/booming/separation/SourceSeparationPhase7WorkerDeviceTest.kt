@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.net.Uri
@@ -103,6 +104,7 @@ import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteExecutio
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteConnectionState
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteRecycleTimeoutException
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteForegroundPolicy
+import com.mardous.booming.ui.screen.MainActivity
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCallbacks
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
@@ -114,6 +116,7 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
+import com.mardous.booming.util.STOP_WHEN_CLOSED_FROM_RECENTS
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -1635,6 +1638,330 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
             writeReport(context, runId, "pause-cleanup", report)
+        }
+    }
+
+    @Test
+    fun validateTaskRemovalLifecycle() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
+        val executionHostMode = Phase7ExecutionHostMode.parse(
+            arguments.getString(ARG_EXECUTION_HOST_MODE),
+        )
+        require(executionHostMode == Phase7ExecutionHostMode.IndependentForeground) {
+            "Task removal requires the independent foreground route."
+        }
+        val stopWhenClosed = arguments.optionalBoolean(
+            ARG_STOP_WHEN_CLOSED_FROM_RECENTS,
+            false,
+        )
+        val report = baseReport(context, runId, arguments)
+            .put("stage", "task-removal")
+        val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+        val stopPreferenceWasPresent = preferences.contains(STOP_WHEN_CLOSED_FROM_RECENTS)
+        val previousStopPreference = preferences.getBoolean(
+            STOP_WHEN_CLOSED_FROM_RECENTS,
+            false,
+        )
+        var activity: MainActivity? = null
+        var mediaUri: Uri? = null
+        var playbackProbe: OriginalAudioPlaybackProbe? = null
+        var worker: SourceSeparationForegroundWorkerCoordinator? = null
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            check(preferences.edit()
+                .putBoolean(SOURCE_SEPARATION_AUTO_START, false)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putBoolean(
+                    SOURCE_SEPARATION_WINDOW_DECODE,
+                    arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true),
+                )
+                .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
+                .putBoolean(STOP_WHEN_CLOSED_FROM_RECENTS, stopWhenClosed)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
+                .commit()
+            ) { "Could not configure the task-removal test." }
+
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            val active = presetRepository.activeModel() as?
+                SourceSeparationActivePresetState.Reference
+                ?: error("The task-removal test has no active model.")
+            assertEquals(arguments.requiredString(ARG_MODEL_ID), active.reference.modelId)
+            assertEquals(
+                arguments.requiredString(ARG_ARTIFACT_SHA256),
+                active.reference.artifactSha256,
+            )
+
+            val registeredUri = registerSourceInMediaStore(context, sourcePath, runId)
+            mediaUri = registeredUri
+            val source = resolveMediaStoreSong(context, registeredUri, sourcePath)
+            val runtime = get<SourceSeparationRuntimeFacade>(
+                SourceSeparationRuntimeFacade::class.java,
+            )
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val handoff = get<SourceSeparationProcessingOwnershipHandoff>(
+                SourceSeparationProcessingOwnershipHandoff::class.java,
+            )
+            val runtimeSong = (runtime.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The task-removal source could not be resolved.")
+            clearExactCacheEntry(runtime, runtimeSong.cacheKey)
+
+            activity = instrumentation.startActivitySync(
+                Intent(context, MainActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK,
+                ),
+            ) as MainActivity
+            instrumentation.waitForIdleSync()
+            val taskId = activity.taskId
+            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE)
+                as ActivityManager
+            fun appTask() = activityManager.appTasks.singleOrNull { candidate ->
+                candidate.taskInfo?.taskId == taskId
+            }
+            fun recentsContainsTask(): Boolean {
+                val packagePattern = Regex.escape(context.packageName)
+                val taskPattern = Regex(
+                    "(?m)^\\s*\\* Recent #\\d+: Task\\{[^\\r\\n]* #$taskId\\b" +
+                        "[^\\r\\n]*\\b$packagePattern\\b",
+                )
+                return taskPattern.containsMatchIn(
+                    readShellCommand(instrumentation, "dumpsys activity recents"),
+                )
+            }
+            val taskBefore = requireNotNull(appTask())
+            val taskBaseComponent = taskBefore.taskInfo?.baseIntent?.component
+                ?.flattenToShortString()
+            assertTrue(recentsContainsTask())
+
+            val probe = startOriginalAudioPlayback(
+                context = context,
+                source = source,
+                operation = "task-removal playback",
+            ).also { playbackProbe = it }
+            val playbackBefore = probe.assertContinuous("before-task-removal")
+
+            val coordinator = get<SourceSeparationForegroundWorkerCoordinator>(
+                SourceSeparationForegroundWorkerCoordinator::class.java,
+            ).also { worker = it }
+            coordinator.updateSong(
+                song = source,
+                positionMs = playbackBefore.getLong("positionMs"),
+                durationMs = source.duration,
+                isPlaying = true,
+                sourceSeparationBlend = TEST_BLEND,
+            )
+            assertTrue(coordinator.startCurrentSong())
+            waitForReady(coordinator, minimumReadyWindows = 1)
+
+            val journalBefore = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Running, journalBefore.lifecycle)
+            assertEquals(
+                SourceSeparationExecutionRunClass.ManualFullSong,
+                journalBefore.request.runClass,
+            )
+            val ownerBefore = requireNotNull(handoff.stateFlow.value.activeOwner)
+            assertEquals(runtimeSong.cacheKey, ownerBefore.owner.cacheKey)
+            val serviceDumpBefore = readShellCommand(
+                instrumentation,
+                "dumpsys activity services ${context.packageName}",
+            )
+            assertTrue(serviceDumpBefore.contains("PlaybackService"))
+            assertTrue(serviceDumpBefore.contains("SourceSeparationExecutionService"))
+
+            instrumentation.runOnMainSync { taskBefore.finishAndRemoveTask() }
+            val removalDeadline = SystemClock.elapsedRealtime() + TASK_REMOVAL_TIMEOUT_MS
+            var taskPresentAfter: Boolean
+            var taskInRecentsAfter: Boolean
+            do {
+                taskPresentAfter = appTask() != null
+                taskInRecentsAfter = recentsContainsTask()
+                if (!taskPresentAfter && !taskInRecentsAfter) break
+                SystemClock.sleep(TASK_REMOVAL_POLL_MS)
+            } while (SystemClock.elapsedRealtime() < removalDeadline)
+            assertFalse("The app task survived finishAndRemoveTask().", taskPresentAfter)
+            assertFalse("The task remained in dumpsys recents.", taskInRecentsAfter)
+
+            val playbackAfterRemoval = if (stopWhenClosed) {
+                probe.awaitStopped("task-removal stop policy")
+            } else {
+                probe.assertContinuous("after-task-removal")
+            }
+            if (stopWhenClosed) {
+                probe.releaseControllerOnly()
+                playbackProbe = null
+            }
+
+            val playbackServiceDeadline =
+                SystemClock.elapsedRealtime() + TASK_REMOVAL_TIMEOUT_MS
+            var playbackServiceAfter: Boolean
+            do {
+                playbackServiceAfter = readShellCommand(
+                    instrumentation,
+                    "dumpsys activity services ${context.packageName}",
+                ).contains("PlaybackService")
+                if (playbackServiceAfter == !stopWhenClosed) break
+                SystemClock.sleep(TASK_REMOVAL_POLL_MS)
+            } while (SystemClock.elapsedRealtime() < playbackServiceDeadline)
+            assertEquals(
+                "PlaybackService did not follow the recents policy.",
+                !stopWhenClosed,
+                playbackServiceAfter,
+            )
+
+            val continuationDeadline =
+                SystemClock.elapsedRealtime() + TASK_REMOVAL_CONTINUATION_TIMEOUT_MS
+            var journalAfter = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+            while (SystemClock.elapsedRealtime() < continuationDeadline) {
+                journalAfter = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+                when (journalAfter.lifecycle) {
+                    SourceSeparationCacheRunJournalLifecycle.Paused,
+                    SourceSeparationCacheRunJournalLifecycle.Canceled,
+                    SourceSeparationCacheRunJournalLifecycle.Failed,
+                    SourceSeparationCacheRunJournalLifecycle.CacheLost,
+                    -> error("Task removal terminated the manual run: ${journalAfter.lifecycle}")
+                    SourceSeparationCacheRunJournalLifecycle.Completed -> break
+                    SourceSeparationCacheRunJournalLifecycle.Running -> {
+                        val continued = journalAfter.transitions.any { transition ->
+                            transition.sequence > journalBefore.latestSequence &&
+                                (transition.type ==
+                                    SourceSeparationCacheRunTransitionType.SegmentReady ||
+                                    transition.type ==
+                                    SourceSeparationCacheRunTransitionType.SegmentRunning)
+                        }
+                        if (continued) break
+                    }
+                }
+                SystemClock.sleep(TASK_REMOVAL_POLL_MS)
+            }
+            assertTrue(
+                "The manual run made no progress after task removal.",
+                journalAfter.lifecycle == SourceSeparationCacheRunJournalLifecycle.Completed ||
+                    journalAfter.transitions.any { transition ->
+                        transition.sequence > journalBefore.latestSequence &&
+                            (transition.type ==
+                                SourceSeparationCacheRunTransitionType.SegmentReady ||
+                                transition.type ==
+                                SourceSeparationCacheRunTransitionType.SegmentRunning)
+                    },
+            )
+            val continuationLifecycle = journalAfter.lifecycle
+            val continuationSequence = journalAfter.latestSequence
+
+            if (journalAfter.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running) {
+                coordinator.pauseCurrentSong(source)
+                waitForPaused(coordinator)
+                journalAfter = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+                assertEquals(
+                    SourceSeparationCacheRunJournalLifecycle.Paused,
+                    journalAfter.lifecycle,
+                )
+            }
+
+            val cleanupDeadline = SystemClock.elapsedRealtime() + TASK_REMOVAL_TIMEOUT_MS
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                as NotificationManager
+            val inferenceWakeLockTag = "${context.packageName}:SourceSeparationInference"
+            var inferenceServiceAfter: Boolean
+            var processingNotificationAfter: Boolean
+            var inferenceWakeLockAfter: Boolean
+            do {
+                inferenceServiceAfter = readShellCommand(
+                    instrumentation,
+                    "dumpsys activity services ${context.packageName}",
+                ).contains("SourceSeparationExecutionService")
+                processingNotificationAfter = notificationManager.activeNotifications.any {
+                    it.id == SourceSeparationMediaProcessingForegroundController.NOTIFICATION_ID
+                }
+                inferenceWakeLockAfter = activeWakeLocks(
+                    readShellCommand(instrumentation, "dumpsys power"),
+                ).contains(inferenceWakeLockTag)
+                if (!inferenceServiceAfter && !processingNotificationAfter &&
+                    !inferenceWakeLockAfter
+                ) break
+                SystemClock.sleep(TASK_REMOVAL_POLL_MS)
+            } while (SystemClock.elapsedRealtime() < cleanupDeadline)
+            assertFalse(inferenceServiceAfter)
+            assertFalse(processingNotificationAfter)
+            assertFalse(inferenceWakeLockAfter)
+            assertNull(handoff.stateFlow.value.activeOwner)
+
+            applyRunAdmissionEvidence(
+                report = report,
+                request = journalAfter.request,
+                backendMode = backendMode,
+                requestedGpuRuntimeProfile = MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1
+                    .takeIf { backendMode == BackendMode.Auto },
+            )
+            report.put("status", "passed")
+            report.put("cache", report.getJSONObject("cache")
+                .put("cacheKey", runtimeSong.cacheKey)
+                .put("exactIdentity", true)
+                .put(
+                    "completedPlayable",
+                    journalAfter.lifecycle == SourceSeparationCacheRunJournalLifecycle.Completed,
+                )
+                .put("runJournalSequence", journalAfter.latestSequence)
+                .put("runJournalOwnerPid", journalAfter.request.ownerPid ?: JSONObject.NULL)
+            )
+            report.put("taskLifecycle", JSONObject()
+                .put("action", "finish-and-remove-task")
+                .put("taskId", taskId)
+                .put("taskBaseComponent", taskBaseComponent ?: JSONObject.NULL)
+                .put("taskPresentBefore", true)
+                .put("taskPresentAfter", false)
+                .put("taskInRecentsBefore", true)
+                .put("taskInRecentsAfter", false)
+                .put("stopWhenClosedFromRecents", stopWhenClosed)
+                .put("playbackServiceBefore", true)
+                .put("playbackServiceAfter", playbackServiceAfter)
+                .put("playbackBefore", playbackBefore)
+                .put("playbackAfterRemoval", playbackAfterRemoval)
+                .put("manualRunLifecycleAfterRemoval", continuationLifecycle.name)
+                .put("manualRunSequenceBefore", journalBefore.latestSequence)
+                .put("manualRunSequenceAfterRemoval", continuationSequence)
+                .put("manualRunFinalLifecycle", journalAfter.lifecycle.name)
+                .put("manualRunFinalSequence", journalAfter.latestSequence)
+                .put("manualRunContinued", true)
+                .put("processingNotificationAfterCleanup", false)
+                .put("inferenceServiceAfterCleanup", false)
+                .put("inferenceWakeLockAfterCleanup", false)
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            playbackProbe?.close()
+            worker?.cancel()
+            activity?.let { current ->
+                runCatching {
+                    instrumentation.runOnMainSync {
+                        if (!current.isFinishing) current.finishAndRemoveTask()
+                    }
+                }
+            }
+            runCatching { context.stopService(Intent(context, PlaybackService::class.java)) }
+            val preferenceEditor = preferences.edit()
+            if (stopPreferenceWasPresent) {
+                preferenceEditor.putBoolean(
+                    STOP_WHEN_CLOSED_FROM_RECENTS,
+                    previousStopPreference,
+                )
+            } else {
+                preferenceEditor.remove(STOP_WHEN_CLOSED_FROM_RECENTS)
+            }
+            preferenceEditor.commit()
+            mediaUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            writeReport(context, runId, "task-removal", report)
         }
     }
 
@@ -5469,14 +5796,41 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("snapshots", JSONArray(snapshotCopy))
         }
 
+        fun awaitStopped(label: String): JSONObject {
+            waitForMediaController(controller, label) {
+                !controller.playWhenReady || !controller.isPlaying
+            }
+            return onMediaControllerThread(controller) {
+                JSONObject()
+                    .put("label", label)
+                    .put("sampledAtElapsedRealtimeMs", SystemClock.elapsedRealtime())
+                    .put("mediaId", controller.currentMediaItem?.mediaId)
+                    .put("positionMs", controller.currentPosition)
+                    .put("durationMs", controller.duration)
+                    .put("playWhenReady", controller.playWhenReady)
+                    .put("isPlaying", controller.isPlaying)
+                    .put("playbackState", controller.playbackState)
+            }
+        }
+
+        fun releaseControllerOnly() {
+            release(clearPlayback = false)
+        }
+
         fun close() {
+            release(clearPlayback = true)
+        }
+
+        private fun release(clearPlayback: Boolean) {
             if (!closed.compareAndSet(false, true)) return
             armed.set(false)
             runCatching {
                 onMediaControllerThread(controller) {
                     controller.removeListener(this@OriginalAudioPlaybackProbe)
-                    controller.pause()
-                    controller.clearMediaItems()
+                    if (clearPlayback) {
+                        controller.pause()
+                        controller.clearMediaItems()
+                    }
                     controller.release()
                 }
             }
@@ -7246,9 +7600,13 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_PROBE_ORIGINAL_PLAYBACK = "probeOriginalPlayback"
         const val ARG_COLD_PROCESS_BOUNDARY = "coldProcessBoundary"
         const val ARG_PRE_RUN_PROCESS_EXIT_MS = "preRunProcessExitMs"
+        const val ARG_STOP_WHEN_CLOSED_FROM_RECENTS = "stopWhenClosedFromRecents"
         const val PROCESS_RESOURCE_SAMPLE_INTERVAL_MS = 1_000L
         const val PLAYBACK_RESOURCE_SAMPLE_INTERVAL_MS = 15_000L
         const val PROCESS_REBIND_SETTLE_MS = 250L
+        const val TASK_REMOVAL_TIMEOUT_MS = 30_000L
+        const val TASK_REMOVAL_CONTINUATION_TIMEOUT_MS = 120_000L
+        const val TASK_REMOVAL_POLL_MS = 100L
         const val PROCESS_MATRIX_CYCLE_COUNT = 20
         const val PROCESS_MODEL_SWITCH_COUNT = 20
         const val PROCESS_MATRIX_FIRST_PAUSE_CYCLE = 6
