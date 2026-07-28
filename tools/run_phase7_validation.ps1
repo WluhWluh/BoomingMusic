@@ -15,6 +15,7 @@ param(
         "worker",
         "ownership-handoff",
         "pause-cleanup",
+        "force-stop",
         "reattachment",
         "process-matrix",
         "process-switch-matrix",
@@ -40,7 +41,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v37",
+    [string]$RunnerRevision = "phase7-runner-v38",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -96,6 +97,7 @@ $sourceStages = @(
     "worker",
     "ownership-handoff",
     "pause-cleanup",
+    "force-stop",
     "reattachment",
     "process-matrix",
     "process-switch-matrix",
@@ -121,6 +123,7 @@ $testMethod = switch ($Stage) {
     "worker" { "validateProductionWorker"; break }
     "ownership-handoff" { "validateProductOwnershipHandoff"; break }
     "pause-cleanup" { "validateProductPauseCleanup"; break }
+    "force-stop" { "validateDeviceEvidenceIdentity"; break }
     "reattachment" { "validateIndependentRunReattachment"; break }
     "process-matrix" { "validateProcessSessionMatrix"; break }
     "process-switch-matrix" { "validateProcessModelSwitchMatrix"; break }
@@ -217,7 +220,7 @@ if ($ExecutionHostMode -eq "bound-remote" -and
     throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
 }
 if ($ExecutionHostMode -eq "independent-foreground" -and
-        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "reattachment", "independent-main-death") -or
+        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "force-stop", "reattachment", "independent-main-death") -or
         $ProcessAbi -ne "arm64-v8a" -or
         $ProcessorCount -gt 0 -or $XnnPackFlags -ge 0 -or
         $AutoFailpoint -ne "none" -or
@@ -235,6 +238,12 @@ if ($Stage -eq "pause-cleanup" -and
         $ProcessAbi -ne "arm64-v8a" -or
         $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
     throw "pause-cleanup requires the production arm64 independent foreground route without fault injection."
+}
+if ($Stage -eq "force-stop" -and
+        ($ExecutionHostMode -ne "independent-foreground" -or
+        $ProcessAbi -ne "arm64-v8a" -or
+        $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
+    throw "force-stop requires the production arm64 independent foreground route without fault injection."
 }
 if ($Stage -in @("process-matrix", "process-switch-matrix")) {
     $validX86Resident = $ProcessAbi -eq "x86" -and $X86ProcessValidation
@@ -450,6 +459,71 @@ function Get-NamedProcessIds([string]$ProcessName) {
             Where-Object { $_ -match '^\d+$' } |
             ForEach-Object { [int]$_ }
     )
+}
+
+function Get-RemoteFileSha256([string]$Path) {
+    $output = ((& $adb -s $Serial shell run-as $package sha256sum $Path 2>$null) -join " ").Trim()
+    if ($LASTEXITCODE -ne 0 -or $output -notmatch '^([0-9a-fA-F]{64})\s+') {
+        throw "Could not hash remote file: $Path"
+    }
+    return $Matches[1].ToLowerInvariant()
+}
+
+function Get-RemoteJournalSnapshot([string]$Path) {
+    $text = Read-RemoteFile $Path
+    $journal = $text | ConvertFrom-Json
+    $transitions = @($journal.transitions)
+    if ($transitions.Count -eq 0) {
+        throw "Remote journal has no transitions: $Path"
+    }
+    return [ordered]@{
+        sha256 = Get-RemoteFileSha256 $Path
+        sequence = [int64]$transitions[-1].sequence
+        lifecycle = [string]$journal.lifecycle
+        runId = [string]$journal.request.runId
+        processGeneration = [int64]$journal.request.processGeneration
+    }
+}
+
+function Get-TaskLifecycleObservation {
+    $serviceOutput = & $adb -s $Serial shell dumpsys activity services $package 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect app services."
+    }
+    $notificationOutput = & $adb -s $Serial shell cmd notification list 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect active notifications."
+    }
+    $powerOutput = & $adb -s $Serial shell dumpsys power 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect active wake locks."
+    }
+    $powerText = $powerOutput -join "`n"
+    $wakeLockStart = $powerText.IndexOf("Wake Locks: size=", [System.StringComparison]::Ordinal)
+    $wakeLockEnd = $powerText.IndexOf(
+        "Suspend Blockers: size=",
+        [Math]::Max(0, $wakeLockStart),
+        [System.StringComparison]::Ordinal
+    )
+    if ($wakeLockStart -lt 0 -or $wakeLockEnd -le $wakeLockStart) {
+        throw "Power diagnostics do not contain the active wake-lock section."
+    }
+    $activeWakeLocks = $powerText.Substring($wakeLockStart, $wakeLockEnd - $wakeLockStart)
+    $notificationPattern = "^[^|]*\|$([Regex]::Escape($package))\|21331\|"
+    return [ordered]@{
+        processIds = @(Get-AppProcessIds)
+        processingService = (($serviceOutput -join "`n").Contains(
+            "SourceSeparationExecutionService",
+            [System.StringComparison]::Ordinal
+        ))
+        processingNotification = @(
+            $notificationOutput | Where-Object { [string]$_ -match $notificationPattern }
+        ).Count -gt 0
+        inferenceWakeLock = $activeWakeLocks.Contains(
+            "${package}:SourceSeparationInference",
+            [System.StringComparison]::Ordinal
+        )
+    }
 }
 
 function Get-Sha256([string]$Path) {
@@ -980,7 +1054,117 @@ try {
         Invoke-Adb shell wm dismiss-keyguard
     }
 
-    if ($Stage -eq "independent-main-death") {
+    if ($Stage -eq "force-stop") {
+        Invoke-Adb shell am force-stop --user $deviceUserId $package
+        $debugDirectory = "files/phase7-debug-main-death"
+        $scenarioRelativePath = "$debugDirectory/$RunId-scenario.json"
+        $debugReportRelativePath = "$debugDirectory/$RunId-report.json"
+        & $adb -s $Serial shell run-as $package rm -f -- `
+            $scenarioRelativePath $debugReportRelativePath 2>$null | Out-Null
+
+        Invoke-Adb shell am start -W --user $deviceUserId -n `
+            "$package/com.mardous.booming.activities.MainActivity"
+        $debugReceiver =
+            "$package/com.mardous.booming.debug.SourceSeparationDebugReceiver"
+        $debugAction = "com.mardous.booming.debug.SOURCE_SEPARATION"
+        $debugArguments = @(
+            "shell", "am", "broadcast", "--user", $deviceUserId,
+            "-a", $debugAction,
+            "-n", $debugReceiver,
+            "--es", "runId", $RunId,
+            "--es", "sourcePath", $remoteSourcePath,
+            "--es", "modelId", $ModelId,
+            "--es", "artifactSha256", $artifact.sha256,
+            "--es", "backendMode", $BackendMode
+        )
+        Invoke-Adb @debugArguments --es command beginIndependentForceStop
+        $scenarioText = Wait-RemoteJsonFile `
+            -RelativePath $scenarioRelativePath `
+            -TimeoutSeconds 300 `
+            -FailurePath $debugReportRelativePath
+        $scenario = $scenarioText | ConvertFrom-Json
+        $oldMainPid = [int]$scenario.mainPid
+        $oldRemotePid = [int]$scenario.remotePid
+        $journalPath = [string]$scenario.journalPath
+        if ($oldMainPid -le 0 -or $oldRemotePid -le 0 -or
+                $oldMainPid -eq $oldRemotePid) {
+            throw "The force-stop scenario contains invalid process identities."
+        }
+        if (-not $journalPath.StartsWith("$appDataRoot/", [System.StringComparison]::Ordinal) -or
+                $journalPath.Contains("..", [System.StringComparison]::Ordinal)) {
+            throw "The force-stop scenario contains an unsafe journal path."
+        }
+        $beforeStop = Get-TaskLifecycleObservation
+        if ($oldMainPid -notin @($beforeStop.processIds) -or
+                $oldRemotePid -notin @($beforeStop.processIds)) {
+            throw "The force-stop scenario lost an authoritative process before force-stop."
+        }
+        if (-not $beforeStop.processingService -or
+                -not $beforeStop.processingNotification -or
+                -not $beforeStop.inferenceWakeLock) {
+            throw "The force-stop scenario was not protected by its service, notification, and wake lock."
+        }
+
+        $forceStopBoundary = Stop-AppProcesses
+        $afterStopJournal = Get-RemoteJournalSnapshot $journalPath
+        $afterStop = Get-TaskLifecycleObservation
+        $silentStarted = [Diagnostics.Stopwatch]::StartNew()
+        Start-Sleep -Seconds 5
+        $silentStarted.Stop()
+        $afterSilenceJournal = Get-RemoteJournalSnapshot $journalPath
+        $afterSilence = Get-TaskLifecycleObservation
+
+        Invoke-Adb shell am start -W --user $deviceUserId -n `
+            "$package/com.mardous.booming.activities.MainActivity"
+        Start-Sleep -Seconds 5
+        $afterRestartJournal = Get-RemoteJournalSnapshot $journalPath
+        $afterRestart = Get-TaskLifecycleObservation
+
+        $validationArguments = @($debugArguments) + @(
+            "--es", "command", "validateIndependentForceStop",
+            "--es", "journalSha256AfterStop", $afterStopJournal.sha256,
+            "--es", "journalSha256AfterSilence", $afterSilenceJournal.sha256,
+            "--es", "journalSha256AfterRestart", $afterRestartJournal.sha256,
+            "--el", "journalSequenceAfterStop", [string]$afterStopJournal.sequence,
+            "--el", "journalSequenceAfterSilence", [string]$afterSilenceJournal.sequence,
+            "--el", "journalSequenceAfterRestart", [string]$afterRestartJournal.sequence,
+            "--el", "forceStopExitElapsedMs", [string]$forceStopBoundary.exitElapsedMs,
+            "--el", "silentObservationMs", [string]$silentStarted.ElapsedMilliseconds,
+            "--ez", "allProcessesExitedAfterStop",
+            (($forceStopBoundary.allExited -and @($afterStop.processIds).Count -eq 0).ToString().ToLowerInvariant()),
+            "--ez", "allProcessesExitedAfterSilence",
+            ((@($afterSilence.processIds).Count -eq 0).ToString().ToLowerInvariant()),
+            "--ez", "notificationAfterStop",
+            ($afterStop.processingNotification.ToString().ToLowerInvariant()),
+            "--ez", "notificationAfterSilence",
+            ($afterSilence.processingNotification.ToString().ToLowerInvariant()),
+            "--ez", "notificationAfterRestart",
+            ($afterRestart.processingNotification.ToString().ToLowerInvariant()),
+            "--ez", "processingServiceAfterStop",
+            ($afterStop.processingService.ToString().ToLowerInvariant()),
+            "--ez", "processingServiceAfterSilence",
+            ($afterSilence.processingService.ToString().ToLowerInvariant()),
+            "--ez", "processingServiceAfterRestart",
+            ($afterRestart.processingService.ToString().ToLowerInvariant()),
+            "--ez", "wakeLockAfterStop",
+            ($afterStop.inferenceWakeLock.ToString().ToLowerInvariant()),
+            "--ez", "wakeLockAfterSilence",
+            ($afterSilence.inferenceWakeLock.ToString().ToLowerInvariant()),
+            "--ez", "wakeLockAfterRestart",
+            ($afterRestart.inferenceWakeLock.ToString().ToLowerInvariant())
+        )
+        Invoke-Adb @validationArguments
+        $reportText = Wait-RemoteJsonFile `
+            -RelativePath $debugReportRelativePath `
+            -TimeoutSeconds 120
+        $debugReport = $reportText | ConvertFrom-Json
+        $instrumentExit = if ([string]$debugReport.status -eq "passed") { 0 } else { 1 }
+        $instrumentText = if ($instrumentExit -eq 0) {
+            "OK (1 test)"
+        } else {
+            "Debug force-stop validation failed: $reportText"
+        }
+    } elseif ($Stage -eq "independent-main-death") {
         Invoke-Adb shell am force-stop --user $deviceUserId $package
         $debugDirectory = "files/phase7-debug-main-death"
         $scenarioRelativePath = "$debugDirectory/$RunId-scenario.json"
@@ -1100,7 +1284,7 @@ try {
         } while ($true)
     }
     Write-Host $instrumentText
-    if ($Stage -ne "independent-main-death") {
+    if ($Stage -notin @("force-stop", "independent-main-death")) {
         $remoteReport = "files/phase7-validation-reports/$RunId-$reportStage.json"
         $reportText = Read-RemoteFile $remoteReport
         if ($reportText.TrimStart() -notmatch '^\{') {
@@ -1291,7 +1475,7 @@ try {
         & $adb -s $Serial shell run-as $package rm -rf -- `
             $remoteArtifactDirectory 2>$null | Out-Null
     }
-    if ($Stage -eq "independent-main-death") {
+    if ($Stage -in @("force-stop", "independent-main-death")) {
         & $adb -s $Serial shell am force-stop --user $deviceUserId $package `
             2>$null | Out-Null
     }
