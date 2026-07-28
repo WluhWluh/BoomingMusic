@@ -32,7 +32,9 @@ class SourceSeparationProductionRouteAuditTest {
         ).readText()
 
         assertTrue(source.contains("createAutoLiteRtSessionProvider"))
-        assertTrue(source.contains("sessionProvider = sessionProviderFactory()"))
+        assertTrue(source.contains("createCpuLiteRtSessionProvider"))
+        assertTrue(source.contains("sessionProviderFactory(request.backendPolicy)"))
+        assertTrue(source.contains("MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1"))
         assertFalse(source.contains("SourceSeparationOrtOracle"))
         assertFalse(source.contains("MdxInferenceBackend.OrtCpu"))
     }
