@@ -1568,6 +1568,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 repository = cacheRepository,
                 cacheKey = runtimeSong.cacheKey,
             )
+            val kernelLockReleaseMs = waitForKernelCacheLockRelease(
+                store = store,
+                cacheKey = runtimeSong.cacheKey,
+            )
             val cacheStatus = runtime.cacheStatus(runtimeSong)
             when (action) {
                 ProductTerminalCleanupAction.Pause -> assertTrue(
@@ -1632,6 +1636,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
             assertNull(idleDiagnostics.activeRunId)
             assertEquals(SourceSeparationProcessSessionState.Empty, idleDiagnostics.session.state)
+            assertEquals(0, idleDiagnostics.session.nativeSessionCreationCount)
             assertEquals(0, idleDiagnostics.session.activeLeaseCount)
             assertNull(idleDiagnostics.session.sessionId)
             assertNull(idleDiagnostics.foregroundService.activeLease)
@@ -1658,6 +1663,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("runJournalSequence", journalAfter.latestSequence)
                 .put("runJournalOwnerPid", remotePid)
                 .put("leaseReleaseMs", cacheLeaseReleaseMs)
+                .put("kernelLockReleaseMs", kernelLockReleaseMs)
             )
             report.put("taskLifecycle", JSONObject()
                 .put("action", action.reportAction)
@@ -1666,7 +1672,13 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("processGeneration", journalAfter.request.processGeneration)
                 .put("remotePid", remotePid)
                 .put("journalLifecycle", journalAfter.lifecycle.name)
+                .put("journalTerminalTransition", journalAfter.transitions.last().type.name)
                 .put("cacheStatus", cacheStatus::class.java.simpleName)
+                .put(
+                    "cacheManifestState",
+                    (cacheStatus as? SourceSeparationModelAwareCacheStatus.Incomplete)
+                        ?.manifest?.state?.name ?: JSONObject.NULL,
+                )
                 .put("ownershipReleased", true)
                 .put("notificationDuring", true)
                 .put("notificationAfter", notificationActive)
