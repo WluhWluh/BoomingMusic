@@ -168,6 +168,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("remoteProcessGeneration", journal.request.processGeneration)
                     .put("executionRunId", journal.request.runId)
                     .put("journalSequence", journal.latestSequence)
+                    .put("cacheRootPath", store.root().directory.absolutePath)
                     .put("journalPath", journalFile.absolutePath)
                     .put("journalSha256", journalFile.sha256())
                     .put("committedSegments", journal.committedSegments.size)

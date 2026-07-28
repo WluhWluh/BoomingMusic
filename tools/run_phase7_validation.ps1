@@ -1085,12 +1085,35 @@ try {
         $scenario = $scenarioText | ConvertFrom-Json
         $oldMainPid = [int]$scenario.mainPid
         $oldRemotePid = [int]$scenario.remotePid
+        $cacheRootPath = [string]$scenario.cacheRootPath
         $journalPath = [string]$scenario.journalPath
         if ($oldMainPid -le 0 -or $oldRemotePid -le 0 -or
                 $oldMainPid -eq $oldRemotePid) {
             throw "The force-stop scenario contains invalid process identities."
         }
-        if (-not $journalPath.StartsWith("$appDataRoot/", [System.StringComparison]::Ordinal) -or
+        $allowedInternalCacheRoot = "$appDataRoot/cache"
+        $allowedExternalCacheRoot =
+            "/storage/emulated/$deviceUserId/Android/data/$package/cache"
+        $cacheRootAllowed = $cacheRootPath.Equals(
+            $allowedInternalCacheRoot,
+            [System.StringComparison]::Ordinal
+        ) -or $cacheRootPath.StartsWith(
+            "$allowedInternalCacheRoot/",
+            [System.StringComparison]::Ordinal
+        ) -or $cacheRootPath.Equals(
+            $allowedExternalCacheRoot,
+            [System.StringComparison]::Ordinal
+        ) -or $cacheRootPath.StartsWith(
+            "$allowedExternalCacheRoot/",
+            [System.StringComparison]::Ordinal
+        )
+        $expectedJournalPath =
+            "$cacheRootPath/entries/$($scenario.cacheKey)/run-journal.json"
+        if (-not $cacheRootAllowed -or
+                -not $journalPath.Equals(
+                    $expectedJournalPath,
+                    [System.StringComparison]::Ordinal
+                ) -or
                 $journalPath.Contains("..", [System.StringComparison]::Ordinal)) {
             throw "The force-stop scenario contains an unsafe journal path."
         }
