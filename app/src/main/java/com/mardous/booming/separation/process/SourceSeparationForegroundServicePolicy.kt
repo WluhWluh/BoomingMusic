@@ -186,9 +186,12 @@ internal class SourceSeparationForegroundLeaseTracker(
     ): SourceSeparationForegroundLeaseOperationResult {
         require(commandId.isNotBlank()) { "Foreground control command ID is empty." }
         val existing = activeLease
-            ?: return stoppedControlResult(request, commandId)
+            ?: return stoppedControlResult(request, commandId, action)
         requireExact(existing.request, request)?.let { return it }
-        if (existing.controls.any { it.commandId == commandId }) {
+        existing.controls.firstOrNull { it.commandId == commandId }?.let { previous ->
+            require(previous.action == action) {
+                "Foreground control command ID was reused for another action."
+            }
             return SourceSeparationForegroundLeaseOperationResult.AlreadyApplied
         }
         activeLease = existing.copy(
@@ -231,15 +234,17 @@ internal class SourceSeparationForegroundLeaseTracker(
     private fun stoppedControlResult(
         request: SourceSeparationForegroundLeaseRequest,
         commandId: String,
+        action: SourceSeparationForegroundControlAction,
     ): SourceSeparationForegroundLeaseOperationResult {
         val stopped = lastStoppedLease
             ?: return SourceSeparationForegroundLeaseOperationResult.NoActiveLease
         requireExact(stopped.request, request)?.let { return it }
-        return if (stopped.controls.any { it.commandId == commandId }) {
-            SourceSeparationForegroundLeaseOperationResult.AlreadyApplied
-        } else {
-            SourceSeparationForegroundLeaseOperationResult.NoActiveLease
+        val previous = stopped.controls.firstOrNull { it.commandId == commandId }
+            ?: return SourceSeparationForegroundLeaseOperationResult.NoActiveLease
+        require(previous.action == action) {
+            "Foreground control command ID was reused for another action."
         }
+        return SourceSeparationForegroundLeaseOperationResult.AlreadyApplied
     }
 
     private fun requireExact(

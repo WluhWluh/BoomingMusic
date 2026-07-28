@@ -1,11 +1,13 @@
 package com.mardous.booming.separation.process.ipc
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
 import android.os.Process
 import android.os.SystemClock
+import android.util.Log
 import com.mardous.booming.AppProcessResolver
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.v2.SourceSeparationExactCacheModelException
@@ -14,6 +16,9 @@ import com.mardous.booming.separation.process.InProcessSourceSeparationExecution
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
+import com.mardous.booming.separation.process.SourceSeparationForegroundControlAction
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseOperationResult
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnosticsCollector
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
@@ -43,6 +48,9 @@ internal class SourceSeparationExecutionService : Service() {
     private var activeRun: ActiveRemoteRun? = null
     private var recycleAcknowledgement: SourceSeparationIpcRecycleAcknowledgement? = null
     private val retentionBinder = Binder()
+    private val foregroundController by lazy {
+        SourceSeparationMediaProcessingForegroundController(this)
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -78,11 +86,26 @@ internal class SourceSeparationExecutionService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        stopSelf(startId)
+        foregroundController.observeStartCommand(startId)
+        when (intent?.action) {
+            ACTION_START_MEDIA_PROCESSING -> handleForegroundStart(intent, startId)
+            ACTION_PAUSE_MEDIA_PROCESSING -> handleForegroundControl(
+                intent,
+                startId,
+                SourceSeparationForegroundControlAction.Pause,
+            )
+            ACTION_CANCEL_MEDIA_PROCESSING -> handleForegroundControl(
+                intent,
+                startId,
+                SourceSeparationForegroundControlAction.Cancel,
+            )
+            else -> foregroundController.releaseUnownedStart(startId)
+        }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
+        foregroundController.stopActive("service-destroyed")
         val acknowledgedRecycle = synchronized(stateLock) {
             activeRun?.close()
             activeRun = null
@@ -143,6 +166,9 @@ internal class SourceSeparationExecutionService : Service() {
             val active = try {
                 reserveRun(command)
             } catch (error: Throwable) {
+                command.foregroundLease?.let { lease ->
+                    foregroundController.stop(lease, "start-rejected")
+                }
                 return rejectedStartResponse(command.commandId, error)
             }
             return executeRun(command, active)
@@ -392,6 +418,7 @@ internal class SourceSeparationExecutionService : Service() {
         val callback = requireNotNull(clientCallback) {
             "The remote execution client is not connected."
         }
+        ensureForegroundStarted(command.foregroundLease)
         val control = SourceSeparationRemoteExecutionControl(
             initialPlaybackPositionMs = command.descriptor.runtime.initialPlaybackPositionMs,
             initialPlaybackReadyWindowCount =
@@ -413,19 +440,33 @@ internal class SourceSeparationExecutionService : Service() {
             sender.close()
             throw error
         }
-        val host = InProcessSourceSeparationExecutionHost(
-            rangeExecutor = environment.rangeExecutor,
-            processGeneration = processGeneration,
-            mode = SourceSeparationExecutionHostMode.BoundRemote,
-        )
-        ActiveRemoteRun(
-            descriptor = command.descriptor,
-            control = control,
-            sender = sender,
-            host = host,
-            environment = environment,
-            admittedExecution = admittedExecution,
-        ).also { activeRun = it }
+        try {
+            val host = InProcessSourceSeparationExecutionHost(
+                rangeExecutor = environment.rangeExecutor,
+                processGeneration = processGeneration,
+                mode = SourceSeparationExecutionHostMode.BoundRemote,
+            )
+            val active = ActiveRemoteRun(
+                descriptor = command.descriptor,
+                control = control,
+                sender = sender,
+                host = host,
+                environment = environment,
+                admittedExecution = admittedExecution,
+            )
+            command.foregroundLease?.let { lease ->
+                val attached = foregroundController.attach(lease)
+                require(attached == SourceSeparationForegroundLeaseOperationResult.Applied ||
+                    attached == SourceSeparationForegroundLeaseOperationResult.AlreadyApplied
+                ) { "The media-processing foreground lease could not attach to its run." }
+                applyForegroundControls(active, lease)
+            }
+            active.also { activeRun = it }
+        } catch (error: Throwable) {
+            admittedExecution.close()
+            sender.close()
+            throw error
+        }
     }
 
     private fun executeRun(
@@ -434,6 +475,7 @@ internal class SourceSeparationExecutionService : Service() {
     ): String {
         var executionBegan = false
         var executionFailure: Throwable? = null
+        var foregroundStopReason = "failed"
         return try {
             active.environment.beginExecution(command.descriptor.runId)
             executionBegan = true
@@ -448,20 +490,26 @@ internal class SourceSeparationExecutionService : Service() {
                 )
             )
             active.sender.closeAndAwait()
+            foregroundStopReason = "completed"
             SourceSeparationExecutionIpcCodec.encodeStartResponse(
                 SourceSeparationIpcStartResponse(
                     commandId = command.commandId,
                     status = SourceSeparationIpcStatus.Completed,
                     completion = hosted.result.toExecutionCompletion(active.executionRequest),
-                    diagnostics = hosted.diagnostics,
+                    diagnostics = hosted.diagnostics.copy(
+                        foregroundService = foregroundController.diagnostics(),
+                    ),
                 )
             )
         } catch (error: SourceSeparationPausedException) {
+            foregroundStopReason = "paused"
             terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Paused, error)
         } catch (error: CancellationException) {
+            foregroundStopReason = "canceled"
             terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Canceled, error)
         } catch (error: SourceSeparationProcessSessionRecycleRequiredException) {
             executionFailure = error
+            foregroundStopReason = "recycle-required"
             terminalStartResponse(
                 command.commandId,
                 SourceSeparationIpcStatus.RecycleRequired,
@@ -469,6 +517,7 @@ internal class SourceSeparationExecutionService : Service() {
             )
         } catch (error: SourceSeparationProcessSessionPoisonedException) {
             executionFailure = error
+            foregroundStopReason = "session-poisoned"
             terminalStartResponse(
                 command.commandId,
                 SourceSeparationIpcStatus.RecycleRequired,
@@ -476,6 +525,7 @@ internal class SourceSeparationExecutionService : Service() {
             )
         } catch (error: Throwable) {
             executionFailure = error
+            foregroundStopReason = "failed:${error::class.java.simpleName}"
             terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Failed, error)
         } finally {
             if (executionBegan) {
@@ -484,7 +534,99 @@ internal class SourceSeparationExecutionService : Service() {
                     executionFailure,
                 )
             }
+            command.foregroundLease?.let { lease ->
+                foregroundController.stop(lease, foregroundStopReason)
+            }
             closeAbandonedRun(active)
+        }
+    }
+
+    private fun ensureForegroundStarted(
+        lease: SourceSeparationForegroundLeaseRequest?,
+    ) {
+        if (lease == null) {
+            require(foregroundController.diagnostics().activeLease == null) {
+                "A foreground lease is pending for a different execution command."
+            }
+            return
+        }
+        val active = foregroundController.diagnostics().activeLease
+        if (active == null) {
+            val started = foregroundController.start(lease, startId = 0)
+            require(started == SourceSeparationForegroundLeaseOperationResult.Applied &&
+                foregroundController.diagnostics().activeLease != null
+            ) { "The media-processing foreground lease is unavailable." }
+        } else {
+            require(active.request == lease) {
+                "The active media-processing foreground lease has another identity."
+            }
+        }
+    }
+
+    private fun applyForegroundControls(
+        active: ActiveRemoteRun,
+        lease: SourceSeparationForegroundLeaseRequest,
+    ) {
+        val controls = foregroundController.diagnostics().activeLease
+            ?.takeIf { it.request == lease }
+            ?.controls
+            .orEmpty()
+        when {
+            controls.any { it.action == SourceSeparationForegroundControlAction.Cancel } ->
+                active.requestCancel()
+            controls.any { it.action == SourceSeparationForegroundControlAction.Pause } ->
+                active.requestPause()
+        }
+    }
+
+    private fun handleForegroundStart(intent: Intent, startId: Int) {
+        runCatching {
+            val lease = intent.requireForegroundLease()
+            require(lease.processGeneration == processGeneration) {
+                "Foreground start targets a stale process generation."
+            }
+            foregroundController.start(lease, startId)
+        }.onFailure { error ->
+            Log.e(TAG, "Unable to start media-processing foreground ownership", error)
+            foregroundController.releaseUnownedStart(startId)
+        }
+    }
+
+    private fun handleForegroundControl(
+        intent: Intent,
+        startId: Int,
+        action: SourceSeparationForegroundControlAction,
+    ) {
+        runCatching {
+            val lease = intent.requireForegroundLease()
+            val commandId = requireNotNull(intent.getStringExtra(EXTRA_COMMAND_ID)) {
+                "Foreground control command ID is missing."
+            }
+            val result = foregroundController.control(
+                request = lease,
+                commandId = commandId,
+                action = action,
+                startId = startId,
+            )
+            if (result != SourceSeparationForegroundLeaseOperationResult.Applied) return
+            synchronized(stateLock) {
+                activeRun
+                    ?.takeIf { active ->
+                        active.descriptor.runId == lease.runId &&
+                            active.descriptor.processGeneration == lease.processGeneration
+                    }
+                    ?.let { active ->
+                        when (action) {
+                            SourceSeparationForegroundControlAction.Pause ->
+                                active.requestPause()
+                            SourceSeparationForegroundControlAction.Cancel ->
+                                active.requestCancel()
+                        }
+                    }
+            }
+        }.onFailure { error ->
+            Log.e(TAG, "Unable to apply media-processing notification action", error)
+            foregroundController.releaseUnownedStart(startId)
         }
     }
 
@@ -639,6 +781,7 @@ internal class SourceSeparationExecutionService : Service() {
             session = environment?.sessionDiagnostics()
                 ?: SourceSeparationProcessSessionDiagnostics.empty(),
             validationOverride = environment?.validationOverrideDiagnostics(),
+            foregroundService = foregroundController.diagnostics(),
         )
     }
 
@@ -679,6 +822,11 @@ internal class SourceSeparationExecutionService : Service() {
             host.pause(descriptor.runId, descriptor.processGeneration)
         }
 
+        fun requestCancel() {
+            control.requestCancel()
+            host.cancel(descriptor.runId, descriptor.processGeneration)
+        }
+
         override fun close() {
             sender.close()
             host.close()
@@ -691,10 +839,64 @@ internal class SourceSeparationExecutionService : Service() {
             "com.wluhwluh.booming.sourcesep.action.BIND_SOURCE_SEPARATION_EXECUTION"
         const val ACTION_RETAIN_WITHOUT_CLIENT =
             "com.wluhwluh.booming.sourcesep.action.RETAIN_SOURCE_SEPARATION_EXECUTION"
+        const val ACTION_START_MEDIA_PROCESSING =
+            "com.wluhwluh.booming.sourcesep.action.START_MEDIA_PROCESSING"
+        const val ACTION_PAUSE_MEDIA_PROCESSING =
+            "com.wluhwluh.booming.sourcesep.action.PAUSE_MEDIA_PROCESSING"
+        const val ACTION_CANCEL_MEDIA_PROCESSING =
+            "com.wluhwluh.booming.sourcesep.action.CANCEL_MEDIA_PROCESSING"
+        private const val EXTRA_LEASE_ID = "foreground_lease_id"
+        private const val EXTRA_RUN_ID = "foreground_run_id"
+        private const val EXTRA_PROCESS_GENERATION = "foreground_process_generation"
+        private const val EXTRA_DISPLAY_NAME = "foreground_display_name"
+        private const val EXTRA_COMMAND_ID = "foreground_command_id"
         private const val SELF_TERMINATION_DELAY_MS =
             SourceSeparationProcessLifecyclePolicy.RECYCLE_ACKNOWLEDGEMENT_GRACE_MS
         private const val SELF_TERMINATION_THREAD_NAME = "SourceSeparationProcessRecycle"
+        private const val TAG = "SourceSeparationFgs"
+
+        fun foregroundStartIntent(
+            context: Context,
+            request: SourceSeparationForegroundLeaseRequest,
+        ): Intent = foregroundIntent(context, request)
+            .setAction(ACTION_START_MEDIA_PROCESSING)
+
+        fun foregroundControlIntent(
+            context: Context,
+            request: SourceSeparationForegroundLeaseRequest,
+            commandId: String,
+            action: SourceSeparationForegroundControlAction,
+        ): Intent = foregroundIntent(context, request)
+            .setAction(when (action) {
+                SourceSeparationForegroundControlAction.Pause ->
+                    ACTION_PAUSE_MEDIA_PROCESSING
+                SourceSeparationForegroundControlAction.Cancel ->
+                    ACTION_CANCEL_MEDIA_PROCESSING
+            })
+            .putExtra(EXTRA_COMMAND_ID, commandId)
+
+        private fun foregroundIntent(
+            context: Context,
+            request: SourceSeparationForegroundLeaseRequest,
+        ) = Intent(context, SourceSeparationExecutionService::class.java)
+            .putExtra(EXTRA_LEASE_ID, request.leaseId)
+            .putExtra(EXTRA_RUN_ID, request.runId)
+            .putExtra(EXTRA_PROCESS_GENERATION, request.processGeneration)
+            .putExtra(EXTRA_DISPLAY_NAME, request.displayName)
     }
+
+    private fun Intent.requireForegroundLease() = SourceSeparationForegroundLeaseRequest(
+        leaseId = requireNotNull(getStringExtra(EXTRA_LEASE_ID)) {
+            "Foreground lease ID is missing."
+        },
+        runId = requireNotNull(getStringExtra(EXTRA_RUN_ID)) {
+            "Foreground run ID is missing."
+        },
+        processGeneration = getLongExtra(EXTRA_PROCESS_GENERATION, 0L),
+        displayName = requireNotNull(getStringExtra(EXTRA_DISPLAY_NAME)) {
+            "Foreground display name is missing."
+        },
+    )
 }
 
 private class SourceSeparationIpcCommandLedger(

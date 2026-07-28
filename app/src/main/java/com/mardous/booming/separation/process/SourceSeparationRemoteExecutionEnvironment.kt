@@ -365,6 +365,7 @@ internal class SourceSeparationRemoteExecutionControl(
     }
 
     fun requestCancel() {
+        pauseRequested.set(false)
         cancelRequested.set(true)
     }
 
@@ -373,7 +374,7 @@ internal class SourceSeparationRemoteExecutionControl(
 
     fun playbackReadyWindowCount(): Int = playbackReadyWindowCount.get()
 
-    fun shouldPause(): Boolean = pauseRequested.get()
+    fun shouldPause(): Boolean = !cancelRequested.get() && pauseRequested.get()
 
     fun shouldCancel(): Boolean = cancelRequested.get()
 

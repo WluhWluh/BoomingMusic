@@ -40,6 +40,7 @@ import com.mardous.booming.separation.process.toExecutionDescriptor
 import com.mardous.booming.separation.process.toMdxRangePreparation
 import com.mardous.booming.separation.process.toMdxRangeProgress
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
+import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteForegroundPolicy
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteCacheAlreadyCompletedException
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteCacheBusyException
 import java.util.UUID
@@ -573,6 +574,25 @@ internal class SourceSeparationModelAwareEngine(
                 executionHostEventSink = executionHostEventSink,
             )
         }
+
+        fun createIndependentForegroundPrototype(
+            context: Context,
+            presetRepository: SourceSeparationPresetRepository,
+            coordinator: SourceSeparationCacheRunCoordinator,
+            executionBackendPolicy: SourceSeparationExecutionBackendPolicy =
+                SourceSeparationExecutionBackendPolicy.Auto,
+            executionHostEventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
+        ): SourceSeparationModelAwareEngine = createBoundRemotePrototype(
+            context = context,
+            presetRepository = presetRepository,
+            coordinator = coordinator,
+            executionHost = BoundRemoteSourceSeparationExecutionHost(
+                context.applicationContext,
+                foregroundPolicy = SourceSeparationRemoteForegroundPolicy.ManualFullSong,
+            ),
+            executionBackendPolicy = executionBackendPolicy,
+            executionHostEventSink = executionHostEventSink,
+        )
 
         fun createProduction(
             context: Context,

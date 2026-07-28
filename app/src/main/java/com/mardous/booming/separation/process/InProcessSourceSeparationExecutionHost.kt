@@ -138,6 +138,7 @@ internal class InProcessSourceSeparationExecutionHost(
         runId = runId,
         processGeneration = processGeneration,
     ) { active ->
+        active.pauseRequested.set(false)
         if (active.cancelRequested.compareAndSet(false, true)) {
             SourceSeparationExecutionHostControlResult.Applied
         } else {
@@ -265,7 +266,7 @@ internal class InProcessSourceSeparationExecutionHost(
                 }
             },
             shouldPause = {
-                pauseRequested.get() || original.shouldPause()
+                !cancelRequested.get() && (pauseRequested.get() || original.shouldPause())
             },
             shouldCancel = {
                 cancelRequested.get() || original.shouldCancel()

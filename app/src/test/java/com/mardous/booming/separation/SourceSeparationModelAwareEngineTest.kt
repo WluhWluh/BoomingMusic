@@ -793,6 +793,7 @@ class SourceSeparationModelAwareEngineTest {
             assertEquals(null, fixture.repository.tryAcquireRunWrite(request.workspace.identity))
             started.countDown()
             check(release.await(5, TimeUnit.SECONDS)) { "Cancel test timed out." }
+            assertFalse(request.shouldPause())
             if (request.shouldCancel()) throw CancellationException("host cancel")
             fixture.complete(request, fixture.prepare(request, preserveFiles = true))
         }
@@ -809,6 +810,10 @@ class SourceSeparationModelAwareEngineTest {
                 engine.separate(fixture.input)
             }
             assertTrue(started.await(5, TimeUnit.SECONDS))
+            assertEquals(
+                SourceSeparationExecutionHostControlResult.Applied,
+                host.pause("run-cancel", 11L),
+            )
             assertEquals(
                 SourceSeparationExecutionHostControlResult.Applied,
                 host.cancel("run-cancel", 11L),

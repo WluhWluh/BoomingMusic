@@ -43,6 +43,13 @@ class SourceSeparationForegroundLeaseTrackerTest {
                 action = SourceSeparationForegroundControlAction.Pause,
             ),
         )
+        assertThrows(IllegalArgumentException::class.java) {
+            tracker.control(
+                request,
+                commandId = "notification-pause-lease-0001",
+                action = SourceSeparationForegroundControlAction.Cancel,
+            )
+        }
         assertEquals(
             SourceSeparationForegroundLeaseOperationResult.AlreadyApplied,
             tracker.control(
@@ -59,6 +66,13 @@ class SourceSeparationForegroundLeaseTrackerTest {
             SourceSeparationForegroundLeaseOperationResult.AlreadyApplied,
             tracker.stop(request, "paused"),
         )
+        assertThrows(IllegalArgumentException::class.java) {
+            tracker.control(
+                request,
+                commandId = "notification-pause-lease-0001",
+                action = SourceSeparationForegroundControlAction.Cancel,
+            )
+        }
         assertEquals(
             SourceSeparationForegroundLeaseOperationResult.AlreadyApplied,
             tracker.started(

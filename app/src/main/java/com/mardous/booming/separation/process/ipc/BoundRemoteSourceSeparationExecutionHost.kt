@@ -7,7 +7,9 @@ import android.content.ServiceConnection
 import android.os.DeadObjectException
 import android.os.IBinder
 import android.os.RemoteException
+import androidx.core.content.ContextCompat
 import com.mardous.booming.AppProcessResolver
+import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.process.SourceSeparationExecutionHost
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
@@ -15,6 +17,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostSnapshot
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostStartResult
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
 import com.mardous.booming.separation.process.SourceSeparationProcParser
@@ -33,6 +36,11 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private val connectionTimeoutMs: Long = DEFAULT_CONNECTION_TIMEOUT_MS,
     private val recycleTimeoutMs: Long = DEFAULT_RECYCLE_TIMEOUT_MS,
     private val controlPollIntervalMs: Long = DEFAULT_CONTROL_POLL_INTERVAL_MS,
+    private val foregroundPolicy: SourceSeparationRemoteForegroundPolicy =
+        SourceSeparationRemoteForegroundPolicy.Disabled,
+    private val foregroundLeaseIdFactory: () -> String = {
+        "foreground-${UUID.randomUUID()}"
+    },
     private val commandIdFactory: (String) -> String = { prefix ->
         "$prefix-${UUID.randomUUID()}"
     },
@@ -237,11 +245,29 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         require(request.descriptor.processGeneration == connection.processGeneration) {
             "Bound-remote request targets a stale process generation."
         }
+        val foregroundLease = foregroundPolicy.createLease(
+            descriptor = request.descriptor,
+            leaseIdFactory = foregroundLeaseIdFactory,
+        )
         val service = connectionLock.withLock {
             check(activeRequest == null) { "Bound-remote execution host is busy." }
             callbackFailure.set(null)
             activeRequest = request
             requireNotNull(remoteService)
+        }
+        try {
+            foregroundLease?.let { lease ->
+                ContextCompat.startForegroundService(
+                    applicationContext,
+                    SourceSeparationExecutionService.foregroundStartIntent(
+                        applicationContext,
+                        lease,
+                    ),
+                )
+            }
+        } catch (error: Throwable) {
+            clearActiveRequest()
+            throw error
         }
         val pump = RemoteControlPump(request).also {
             connectionLock.withLock { activePump = it }
@@ -252,6 +278,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 SourceSeparationIpcStartCommand(
                     commandId = nextCommandId("start"),
                     descriptor = request.descriptor,
+                    foregroundLease = foregroundLease,
                 )
             )
             SourceSeparationExecutionIpcCodec.decodeStartResponse(service.start(payload))
@@ -971,6 +998,31 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         val generation: Long,
         val serviceConnection: ServiceConnection,
     )
+}
+
+internal enum class SourceSeparationRemoteForegroundPolicy {
+    Disabled,
+    ManualFullSong,
+    ;
+
+    fun createLease(
+        descriptor: com.mardous.booming.separation.process.SourceSeparationExecutionDescriptor,
+        leaseIdFactory: () -> String,
+    ): SourceSeparationForegroundLeaseRequest? = when (this) {
+        Disabled -> null
+        ManualFullSong -> descriptor
+            .takeIf {
+                it.runtime.runClass == SourceSeparationExecutionRunClass.ManualFullSong
+            }
+            ?.let {
+                SourceSeparationForegroundLeaseRequest(
+                    leaseId = leaseIdFactory(),
+                    runId = it.runId,
+                    processGeneration = it.processGeneration,
+                    displayName = it.source.displayName,
+                )
+            }
+    }
 }
 
 internal enum class SourceSeparationRemoteConnectionState {
