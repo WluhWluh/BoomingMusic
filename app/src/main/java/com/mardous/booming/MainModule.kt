@@ -79,6 +79,8 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloa
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportCoordinator
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
+import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
+import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecoveryClient
 import com.mardous.booming.ui.screen.equalizer.EqualizerViewModel
 import com.mardous.booming.ui.screen.info.InfoViewModel
 import com.mardous.booming.ui.screen.library.LibraryViewModel
@@ -190,6 +192,12 @@ private val mainModule = module {
             AndroidSourceSeparationCacheRootProvider(androidContext()).resolveRoot(),
         ).also(SourceSeparationCacheStore::recover)
     }
+    single {
+        SourceSeparationIndependentRunRecoveryClient(
+            context = androidContext(),
+            store = get(),
+        )
+    } bind SourceSeparationIndependentRunRecovery::class
     single { SourceSeparationCacheEntryLeaseRegistry() }
     single {
         SourceSeparationModelAwareCacheRepository(
@@ -367,6 +375,7 @@ private val viewModule = module {
             context = androidContext(),
             preferences = get(),
             sourceSeparationRuntime = get(),
+            independentRunRecovery = get(),
         )
     }
 

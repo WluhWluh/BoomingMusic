@@ -8,7 +8,12 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLi
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
-import com.mardous.booming.separation.process.SourceSeparationExecutionHostSnapshot
+
+internal interface SourceSeparationIndependentRunRecovery {
+    fun reconnect(
+        onEvent: (SourceSeparationExecutionHostEvent) -> Unit,
+    ): SourceSeparationReconnectedSession?
+}
 
 internal class SourceSeparationIndependentRunRecoveryClient(
     context: Context,
@@ -16,9 +21,8 @@ internal class SourceSeparationIndependentRunRecoveryClient(
     private val hostFactory: () -> BoundRemoteSourceSeparationExecutionHost = {
         BoundRemoteSourceSeparationExecutionHost(context.applicationContext)
     },
-) {
-    fun reconnect(
-        onSnapshot: (SourceSeparationExecutionHostSnapshot) -> Unit,
+) : SourceSeparationIndependentRunRecovery {
+    override fun reconnect(
         onEvent: (SourceSeparationExecutionHostEvent) -> Unit,
     ): SourceSeparationReconnectedSession? {
         val candidates = SourceSeparationIndependentRunRecoveryCandidateSelector.select(
@@ -34,12 +38,12 @@ internal class SourceSeparationIndependentRunRecoveryClient(
             val matching = candidates.singleOrNull { journal ->
                 remote.matches(journal)
             } ?: return host.close().let { null }
-            val adopted = host.adoptReconnectableRun(onSnapshot, onEvent)
+            val adopted = host.adoptReconnectableRun(onSnapshot = {}, onEvent = onEvent)
                 ?: return host.close().let { null }
             require(adopted.state.matches(matching)) {
                 "The adopted source-separation run changed its durable identity."
             }
-            SourceSeparationReconnectedSession(
+            BoundSourceSeparationReconnectedSession(
                 journal = matching,
                 adopted = adopted,
                 host = host,
@@ -80,27 +84,44 @@ internal object SourceSeparationIndependentRunRecoveryCandidateSelector {
     }
 }
 
-internal class SourceSeparationReconnectedSession(
-    val journal: SourceSeparationCacheRunJournal,
-    val adopted: SourceSeparationReconnectedRun,
-    private val host: BoundRemoteSourceSeparationExecutionHost,
-) : AutoCloseable {
+internal interface SourceSeparationReconnectedSession : AutoCloseable {
+    val journal: SourceSeparationCacheRunJournal
+    val baselineEvent: SourceSeparationExecutionHostEvent
     val runId: String
-        get() = adopted.state.descriptor.runId
-
     val processGeneration: Long
-        get() = adopted.state.descriptor.processGeneration
-
     val cacheKey: String
-        get() = adopted.state.descriptor.cacheKey
 
-    fun pause(): SourceSeparationExecutionHostControlResult =
+    fun pause(): SourceSeparationExecutionHostControlResult
+
+    fun cancel(): SourceSeparationExecutionHostControlResult
+
+    fun closeTerminal(): SourceSeparationExecutionHostControlResult
+}
+
+private class BoundSourceSeparationReconnectedSession(
+    override val journal: SourceSeparationCacheRunJournal,
+    adopted: SourceSeparationReconnectedRun,
+    private val host: BoundRemoteSourceSeparationExecutionHost,
+) : SourceSeparationReconnectedSession {
+    override val baselineEvent: SourceSeparationExecutionHostEvent =
+        adopted.snapshot.latestEvent
+
+    override val runId: String
+        get() = journal.request.runId
+
+    override val processGeneration: Long
+        get() = journal.request.processGeneration
+
+    override val cacheKey: String
+        get() = journal.request.cacheKey
+
+    override fun pause(): SourceSeparationExecutionHostControlResult =
         host.pause(runId, processGeneration)
 
-    fun cancel(): SourceSeparationExecutionHostControlResult =
+    override fun cancel(): SourceSeparationExecutionHostControlResult =
         host.cancel(runId, processGeneration)
 
-    fun closeTerminal(): SourceSeparationExecutionHostControlResult =
+    override fun closeTerminal(): SourceSeparationExecutionHostControlResult =
         host.closeRun(runId, processGeneration).also { close() }
 
     override fun close() {

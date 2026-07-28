@@ -15,11 +15,17 @@ import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
 import com.mardous.booming.separation.SourceSeparationRuntimeUnavailableReason
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournal
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
 import com.mardous.booming.separation.model.SourceSeparationModelLoadException
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
+import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
+import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
+import com.mardous.booming.separation.process.ipc.SourceSeparationReconnectedSession
+import com.mardous.booming.separation.process.toMdxRangeProgress
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
@@ -36,10 +42,12 @@ import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,10 +59,11 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
 
-class SourceSeparationForegroundWorkerCoordinator(
+class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private val context: Context,
     private val preferences: SharedPreferences,
     private val sourceSeparationRuntime: SourceSeparationRuntimeFacade,
+    private val independentRunRecovery: SourceSeparationIndependentRunRecovery? = null,
 ) {
     private val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val performanceStats = SourceSeparationPerformanceStats(preferences)
@@ -68,9 +77,19 @@ class SourceSeparationForegroundWorkerCoordinator(
     private var pendingStartRequest: SourceSeparationWorkerRequest? = null
     private var activeWorkerRequest: SourceSeparationWorkerRequest? = null
     private var activeWorkerSong: SourceSeparationRuntimeSong? = null
+    private var recoveryJob: Job? = null
+    @Volatile
+    private var reconnectedSession: SourceSeparationReconnectedSession? = null
+    @Volatile
+    private var reconnectedSong: Song? = null
+    @Volatile
+    private var reconnectedLatestSequence = 0L
     private var autoStartSuppressedSongId: Long? = null
     private var debugLastWindowSample: SourceSeparationDebugWindowSample? = null
+    private val callbackLock = Any()
+    @Volatile
     private var callbacks: SourceSeparationForegroundWorkerCallbacks? = null
+    private var pendingRecoveredTerminal: SourceSeparationRecoveredTerminal? = null
 
     private val _playbackStateFlow =
         MutableStateFlow(SourceSeparationForegroundPlaybackState())
@@ -85,6 +104,10 @@ class SourceSeparationForegroundWorkerCoordinator(
             extraBufferCapacity = 32,
         )
     val eventFlow = _eventFlow.asSharedFlow()
+
+    init {
+        independentRunRecovery?.let(::startIndependentRunRecovery)
+    }
 
     fun updateSong(
         song: Song,
@@ -144,12 +167,18 @@ class SourceSeparationForegroundWorkerCoordinator(
     }
 
     fun attachCallbacks(callbacks: SourceSeparationForegroundWorkerCallbacks) {
-        this.callbacks = callbacks
+        val terminal = synchronized(callbackLock) {
+            this.callbacks = callbacks
+            pendingRecoveredTerminal.also { pendingRecoveredTerminal = null }
+        }
+        terminal?.dispatch(callbacks)
     }
 
     fun detachCallbacks(callbacks: SourceSeparationForegroundWorkerCallbacks) {
-        if (this.callbacks === callbacks) {
-            this.callbacks = null
+        synchronized(callbackLock) {
+            if (this.callbacks === callbacks) {
+                this.callbacks = null
+            }
         }
     }
 
@@ -180,11 +209,16 @@ class SourceSeparationForegroundWorkerCoordinator(
         reason: SourceSeparationPendingStartReason,
     ) {
         if (song == Song.emptySong) return
+        val incoming = SourceSeparationWorkerRequest.Full(song, reason)
         workerActivated = true
         autoStartSuppressedSongId = null
+        if (recoveryJob?.isActive == true || reconnectedSession != null) {
+            setPendingStart(incoming)
+            maybePauseRecoveredRunFor(incoming)
+            return
+        }
         if (workerJob?.isActive == true) {
             if (workerSongId == song.id) {
-                val incoming = SourceSeparationWorkerRequest.Full(song, reason)
                 val active = activeWorkerRequest
                 if (active != null && incoming.priority > active.priority) {
                     setPendingStart(incoming)
@@ -210,15 +244,10 @@ class SourceSeparationForegroundWorkerCoordinator(
                 return
             }
             if (pendingStartRequest?.song?.id == song.id) {
-                setPendingStart(SourceSeparationWorkerRequest.Full(song, reason))
+                setPendingStart(incoming)
                 return
             }
-            setPendingStart(
-                SourceSeparationWorkerRequest.Full(
-                    song = song,
-                    reason = reason,
-                )
-            )
+            setPendingStart(incoming)
             if (workerSongId != null) {
                 pauseRequested.set(true)
             }
@@ -227,12 +256,7 @@ class SourceSeparationForegroundWorkerCoordinator(
 
         cancelRequested.set(false)
         pauseRequested.set(false)
-        setPendingStart(
-            SourceSeparationWorkerRequest.Full(
-                song = song,
-                reason = reason,
-            )
-        )
+        setPendingStart(incoming)
         workerJob = workerScope.launch {
             runWorkerLoop()
         }
@@ -240,7 +264,7 @@ class SourceSeparationForegroundWorkerCoordinator(
 
     fun preStartSong(song: Song, readyWindowCount: Int): Boolean {
         if (song == Song.emptySong || readyWindowCount <= 0) return false
-        if (workerSongId == song.id) return false
+        if (runningSongId() == song.id) return false
         if (hasReadyPlaybackStartCache(song, readyWindowCount)) return false
 
         workerActivated = true
@@ -248,6 +272,10 @@ class SourceSeparationForegroundWorkerCoordinator(
             song = song,
             readyWindowCount = readyWindowCount,
         )
+        if (recoveryJob?.isActive == true || reconnectedSession != null) {
+            setPendingStart(request)
+            return true
+        }
         if (pendingStartRequest?.song?.id == song.id) {
             setPendingStart(request)
             return true
@@ -267,6 +295,15 @@ class SourceSeparationForegroundWorkerCoordinator(
     }
 
     fun pauseCurrentSong(currentSong: Song) {
+        val recovered = reconnectedSession
+        val recoveredSong = reconnectedSong
+        if (recovered != null && recoveredSong != null) {
+            _workerStateFlow.value = SourceSeparationUiState.Paused(
+                songId = recoveredSong.id,
+                songTitle = recoveredSong.title,
+            )
+            requestRecoveredControl(recovered, SourceSeparationRecoveredControl.Pause)
+        }
         if (workerJob?.isActive == true) {
             _workerStateFlow.value = SourceSeparationUiState.Paused(
                 songId = currentSong.id,
@@ -283,6 +320,10 @@ class SourceSeparationForegroundWorkerCoordinator(
     fun cancel() {
         workerActivated = false
         cancelRequested.set(true)
+        clearPendingStart()
+        reconnectedSession?.let { session ->
+            requestRecoveredControl(session, SourceSeparationRecoveredControl.Cancel)
+        }
         workerJob?.cancel()
     }
 
@@ -292,6 +333,11 @@ class SourceSeparationForegroundWorkerCoordinator(
             clearPendingStart()
         }
         pauseRequested.set(true)
+        reconnectedSession
+            ?.takeIf { reconnectedSong?.id == songId }
+            ?.let { session ->
+                requestRecoveredControl(session, SourceSeparationRecoveredControl.Pause)
+            }
     }
 
     fun clearAutoStartSuppressionForSong(songId: Long) {
@@ -301,7 +347,9 @@ class SourceSeparationForegroundWorkerCoordinator(
     }
 
     suspend fun waitForWorkerToLeaveSong(songId: Long) {
-        while (workerSongId == songId && workerJob?.isActive == true) {
+        while ((workerSongId == songId && workerJob?.isActive == true) ||
+            (reconnectedSong?.id == songId && reconnectedSession != null)
+        ) {
             delay(SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS)
         }
     }
@@ -312,15 +360,19 @@ class SourceSeparationForegroundWorkerCoordinator(
         }
     }
 
-    fun isWorkerActive(): Boolean = workerJob?.isActive == true
+    fun isWorkerActive(): Boolean = workerJob?.isActive == true ||
+            recoveryJob?.isActive == true || reconnectedSession != null
 
-    fun runningSongId(): Long? = workerSongId
+    fun runningSongId(): Long? = reconnectedSong?.id ?: workerSongId
 
-    fun runningCacheKey(): String? = activeWorkerSong?.cacheKey
+    fun runningCacheKey(): String? = reconnectedSession?.cacheKey ?: activeWorkerSong?.cacheKey
 
     fun pendingSongId(): Long? = pendingStartRequest?.song?.id
 
-    fun protectedCacheKeys(): Set<String> = setOfNotNull(activeWorkerSong?.cacheKey)
+    fun protectedCacheKeys(): Set<String> = setOfNotNull(
+        activeWorkerSong?.cacheKey,
+        reconnectedSession?.cacheKey,
+    )
 
     suspend fun autoStartDecision(
         song: Song,
@@ -337,7 +389,7 @@ class SourceSeparationForegroundWorkerCoordinator(
                 hasCompletedCache = false,
             )
         }
-        if (workerSongId == song.id || pendingStartRequest?.song?.id == song.id) {
+        if (runningSongId() == song.id || pendingStartRequest?.song?.id == song.id) {
             return SourceSeparationAutoStartDecision(
                 shouldStart = false,
                 shouldWaitForProcessingCache = true,
@@ -416,6 +468,10 @@ class SourceSeparationForegroundWorkerCoordinator(
             append(" title=").append(playbackState.song.title)
             append(" workerActive=").append(workerJob?.isActive == true)
             append(" workerSong=").append(workerSongId)
+            append(" recoveryActive=").append(recoveryJob?.isActive == true)
+            append(" reconnectedSong=").append(reconnectedSong?.id)
+            append(" reconnectedRun=").append(reconnectedSession?.runId)
+            append(" reconnectedSequence=").append(reconnectedLatestSequence)
             append(" pending=").append(pendingStartRequest?.song?.id)
             append(" pendingReason=").append(pendingStartRequest?.debugReason)
             append(" suppressed=").append(autoStartSuppressedSongId)
@@ -444,6 +500,246 @@ class SourceSeparationForegroundWorkerCoordinator(
     fun clearWindowSamples() {
         debugWindowSamples.clear()
         debugLastWindowSample = null
+    }
+
+    private fun startIndependentRunRecovery(
+        recovery: SourceSeparationIndependentRunRecovery,
+    ) {
+        val job = workerScope.launch(start = CoroutineStart.LAZY) {
+            runIndependentRunRecovery(recovery)
+        }
+        recoveryJob = job
+        job.start()
+    }
+
+    private suspend fun runIndependentRunRecovery(
+        recovery: SourceSeparationIndependentRunRecovery,
+    ) {
+        val activeJob = coroutineContext[Job]
+        val events = Channel<SourceSeparationExecutionHostEvent>(Channel.UNLIMITED)
+        var session: SourceSeparationReconnectedSession? = null
+        var terminal = false
+        try {
+            session = recovery.reconnect(
+                onEvent = { event -> events.trySend(event) },
+            ) ?: return
+            reconnectedSession = session
+            reconnectedSong = session.journal.toRecoveredSong()
+            reconnectedLatestSequence = 0L
+            terminal = applyRecoveredBaseline(session)
+            if (!terminal) {
+                when {
+                    cancelRequested.get() -> requestRecoveredControl(
+                        session,
+                        SourceSeparationRecoveredControl.Cancel,
+                    )
+                    pauseRequested.get() -> requestRecoveredControl(
+                        session,
+                        SourceSeparationRecoveredControl.Pause,
+                    )
+                    else -> pendingStartRequest?.let(::maybePauseRecoveredRunFor)
+                }
+            }
+            while (!terminal && activeJob?.isActive == true) {
+                val event = events.receiveCatching().getOrNull() ?: break
+                terminal = applyRecoveredEvent(session, event)
+            }
+        } catch (error: Throwable) {
+            val song = reconnectedSong
+            if (song != null && error !is CancellationException) {
+                _workerStateFlow.value = SourceSeparationUiState.Failed(
+                    songId = song.id,
+                    songTitle = song.title,
+                    message = error.message,
+                )
+            }
+        } finally {
+            events.close()
+            if (!terminal) {
+                runCatching { session?.close() }
+            }
+            if (reconnectedSession === session || reconnectedSession == null) {
+                reconnectedSession = null
+                reconnectedSong = null
+                reconnectedLatestSequence = 0L
+            }
+            if (recoveryJob == activeJob) {
+                recoveryJob = null
+            }
+            cancelRequested.set(false)
+            pauseRequested.set(false)
+            if (pendingStartRequest != null) {
+                ensureWorkerRunningIfActivated()
+            }
+        }
+    }
+
+    private fun applyRecoveredBaseline(
+        session: SourceSeparationReconnectedSession,
+    ): Boolean {
+        val song = requireNotNull(reconnectedSong)
+        _workerStateFlow.value = SourceSeparationUiState.Running(
+            songId = song.id,
+            songTitle = song.title,
+        )
+        return applyRecoveredEvent(session, session.baselineEvent)
+    }
+
+    private fun applyRecoveredEvent(
+        session: SourceSeparationReconnectedSession,
+        event: SourceSeparationExecutionHostEvent,
+    ): Boolean {
+        require(event.runId == session.runId &&
+            event.processGeneration == session.processGeneration
+        ) { "Recovered source-separation event has a stale identity." }
+        if (event.sequence <= reconnectedLatestSequence) return false
+        reconnectedLatestSequence = event.sequence
+        val recoveredSong = requireNotNull(reconnectedSong)
+        val callbackSong = recoveredSong.callbackSong()
+        return when (val payload = event.payload) {
+            is SourceSeparationExecutionHostEventPayload.Accepted -> {
+                require(payload.descriptor.runId == session.runId &&
+                    payload.descriptor.processGeneration == session.processGeneration &&
+                    payload.descriptor.cacheKey == session.cacheKey
+                ) { "Recovered source-separation acceptance has a stale identity." }
+                _workerStateFlow.value = SourceSeparationUiState.Running(
+                    songId = recoveredSong.id,
+                    songTitle = recoveredSong.title,
+                )
+                false
+            }
+            is SourceSeparationExecutionHostEventPayload.Progress -> {
+                publishWorkerProgress(recoveredSong, payload.progress.toMdxRangeProgress())
+                false
+            }
+            is SourceSeparationExecutionHostEventPayload.Prepared -> {
+                if (_workerStateFlow.value !is SourceSeparationUiState.Running) {
+                    _workerStateFlow.value = SourceSeparationUiState.Running(
+                        songId = recoveredSong.id,
+                        songTitle = recoveredSong.title,
+                    )
+                }
+                callbacks?.onSourceSeparationWorkerPrepared(callbackSong)
+                false
+            }
+            is SourceSeparationExecutionHostEventPayload.SegmentStateChanged,
+            is SourceSeparationExecutionHostEventPayload.GpuFallbackLatched,
+            -> false
+            is SourceSeparationExecutionHostEventPayload.Completed -> {
+                _workerStateFlow.value = SourceSeparationUiState.Completed(
+                    songId = recoveredSong.id,
+                    songTitle = recoveredSong.title,
+                )
+                pruneCachesIfEnabled()
+                closeRecoveredTerminal(session)
+                dispatchRecoveredTerminal(
+                    SourceSeparationRecoveredTerminal.Completed(
+                        song = callbackSong,
+                        cacheKey = session.cacheKey,
+                        shouldPromoteCompletedStems = preferences.getBoolean(
+                            SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+                            true,
+                        ),
+                    )
+                )
+                true
+            }
+            is SourceSeparationExecutionHostEventPayload.Paused -> {
+                _workerStateFlow.value = SourceSeparationUiState.Idle
+                closeRecoveredTerminal(session)
+                dispatchRecoveredTerminal(
+                    SourceSeparationRecoveredTerminal.Paused(callbackSong)
+                )
+                true
+            }
+            is SourceSeparationExecutionHostEventPayload.Canceled -> {
+                _workerStateFlow.value = SourceSeparationUiState.Canceled(
+                    songId = recoveredSong.id,
+                    songTitle = recoveredSong.title,
+                )
+                workerActivated = false
+                clearPendingStart()
+                cancelRequested.set(true)
+                closeRecoveredTerminal(session)
+                true
+            }
+            is SourceSeparationExecutionHostEventPayload.Failed -> {
+                val modelLoadFailure = payload.errorType ==
+                        SourceSeparationModelLoadException::class.java.name
+                val message = if (modelLoadFailure) {
+                    context.getString(R.string.source_separation_model_load_failed)
+                } else {
+                    payload.message
+                }
+                _workerStateFlow.value = SourceSeparationUiState.Failed(
+                    songId = recoveredSong.id,
+                    songTitle = recoveredSong.title,
+                    message = message,
+                )
+                workerActivated = false
+                clearPendingStart()
+                cancelRequested.set(true)
+                closeRecoveredTerminal(session)
+                if (modelLoadFailure) {
+                    dispatchRecoveredTerminal(
+                        SourceSeparationRecoveredTerminal.ModelLoadFailed(
+                            requireNotNull(message),
+                        )
+                    )
+                }
+                true
+            }
+        }
+    }
+
+    private fun closeRecoveredTerminal(session: SourceSeparationReconnectedSession) {
+        runCatching { session.closeTerminal() }
+        if (reconnectedSession === session) {
+            reconnectedSession = null
+        }
+    }
+
+    private fun maybePauseRecoveredRunFor(request: SourceSeparationWorkerRequest) {
+        val session = reconnectedSession ?: return
+        val song = reconnectedSong ?: return
+        if (request.song.id == song.id) {
+            clearPendingStart()
+            workerActivated = false
+            return
+        }
+        if (request.priority >= SourceSeparationPendingStartReason.Manual.priority) {
+            requestRecoveredControl(session, SourceSeparationRecoveredControl.Pause)
+        }
+    }
+
+    private fun requestRecoveredControl(
+        session: SourceSeparationReconnectedSession,
+        control: SourceSeparationRecoveredControl,
+    ) {
+        workerScope.launch {
+            runCatching {
+                when (control) {
+                    SourceSeparationRecoveredControl.Pause -> session.pause()
+                    SourceSeparationRecoveredControl.Cancel -> session.cancel()
+                }
+            }
+        }
+    }
+
+    private fun dispatchRecoveredTerminal(terminal: SourceSeparationRecoveredTerminal) {
+        val callback = synchronized(callbackLock) {
+            callbacks ?: run {
+                pendingRecoveredTerminal = terminal
+                null
+            }
+        }
+        callback?.let(terminal::dispatch)
+    }
+
+    private fun Song.callbackSong(): Song {
+        return _playbackStateFlow.value.song.takeIf { current ->
+            current != Song.emptySong && current.id == id
+        } ?: this
     }
 
     private suspend fun runWorkerLoop() {
@@ -589,7 +885,11 @@ class SourceSeparationForegroundWorkerCoordinator(
     }
 
     private fun ensureWorkerRunningIfActivated() {
-        if (!workerActivated || workerJob?.isActive == true) return
+        if (!workerActivated || workerJob?.isActive == true ||
+            recoveryJob?.isActive == true || reconnectedSession != null
+        ) {
+            return
+        }
         cancelRequested.set(false)
         pauseRequested.set(false)
         workerJob = workerScope.launch {
@@ -653,10 +953,6 @@ class SourceSeparationForegroundWorkerCoordinator(
                 tryGpu = tryGpu,
                 runClass = request.runClass,
                 onProgress = { progress ->
-                    val averageWindowMs = progress.completedWindowElapsedMs
-                        ?.let(performanceStats::recordWindowElapsed)
-                        ?: performanceStats.averageWindowMs()
-                    recordDebugWindowSample(song, progress)
                     if (preStartReadyWindowCount != null &&
                         progress.scheduler?.playbackSegmentIndex == 0 &&
                         progress.scheduler.playbackReadyWindowReadyCount >=
@@ -664,41 +960,7 @@ class SourceSeparationForegroundWorkerCoordinator(
                     ) {
                         preStartSatisfied = true
                     }
-                    _workerStateFlow.value = SourceSeparationUiState.Running(
-                        songId = song.id,
-                        songTitle = song.title,
-                        completedWindows = progress.completedWindows,
-                        totalWindows = progress.totalWindows,
-                        percent = progress.percent,
-                        stage = progress.stage,
-                        sourceDecodeDiagnostics = progress.sourceDecodeDiagnostics?.toDisplayText(),
-                        sourceDecodeMode = progress.sourceDecodeDiagnostics
-                            ?.mode
-                            ?.toUiState(),
-                        averageWindowMs = averageWindowMs,
-                        lastWindowMs = progress.completedWindowElapsedMs,
-                        scheduler = progress.scheduler?.let { scheduler ->
-                            SourceSeparationSchedulerUiState(
-                                playbackSegmentIndex = scheduler.playbackSegmentIndex,
-                                playbackSegmentState = scheduler.playbackSegmentState,
-                                nextSegmentIndex = scheduler.nextSegmentIndex,
-                                nextSegmentState = scheduler.nextSegmentState,
-                                processingSegmentIndex = scheduler.processingSegmentIndex,
-                                priority = scheduler.priority,
-                                readySegments = scheduler.readySegments,
-                                totalSegments = scheduler.totalSegments,
-                                readyWindowCount = scheduler.readyWindowCount,
-                                playbackReadyWindowReadyCount =
-                                    scheduler.playbackReadyWindowReadyCount,
-                                playbackReadyWindowPendingCount =
-                                    scheduler.playbackReadyWindowPendingCount,
-                            )
-                        },
-                    )
-                    if (pendingStartRequest?.song?.id == song.id) {
-                        clearPendingStart()
-                    }
-                    callbacks?.onSourceSeparationWorkerProgress(song)
+                    publishWorkerProgress(song, progress)
                 },
                 onPrepared = {
                     if (preStartReadyWindowCount == null &&
@@ -880,6 +1142,46 @@ class SourceSeparationForegroundWorkerCoordinator(
         cancelRequested.set(true)
     }
 
+    private fun publishWorkerProgress(song: Song, progress: MdxRangeProgress) {
+        val averageWindowMs = progress.completedWindowElapsedMs
+            ?.let(performanceStats::recordWindowElapsed)
+            ?: performanceStats.averageWindowMs()
+        recordDebugWindowSample(song, progress)
+        _workerStateFlow.value = SourceSeparationUiState.Running(
+            songId = song.id,
+            songTitle = song.title,
+            completedWindows = progress.completedWindows,
+            totalWindows = progress.totalWindows,
+            percent = progress.percent,
+            stage = progress.stage,
+            sourceDecodeDiagnostics = progress.sourceDecodeDiagnostics?.toDisplayText(),
+            sourceDecodeMode = progress.sourceDecodeDiagnostics?.mode?.toUiState(),
+            averageWindowMs = averageWindowMs,
+            lastWindowMs = progress.completedWindowElapsedMs,
+            scheduler = progress.scheduler?.let { scheduler ->
+                SourceSeparationSchedulerUiState(
+                    playbackSegmentIndex = scheduler.playbackSegmentIndex,
+                    playbackSegmentState = scheduler.playbackSegmentState,
+                    nextSegmentIndex = scheduler.nextSegmentIndex,
+                    nextSegmentState = scheduler.nextSegmentState,
+                    processingSegmentIndex = scheduler.processingSegmentIndex,
+                    priority = scheduler.priority,
+                    readySegments = scheduler.readySegments,
+                    totalSegments = scheduler.totalSegments,
+                    readyWindowCount = scheduler.readyWindowCount,
+                    playbackReadyWindowReadyCount =
+                        scheduler.playbackReadyWindowReadyCount,
+                    playbackReadyWindowPendingCount =
+                        scheduler.playbackReadyWindowPendingCount,
+                )
+            },
+        )
+        if (pendingStartRequest?.song?.id == song.id) {
+            clearPendingStart()
+        }
+        callbacks?.onSourceSeparationWorkerProgress(song.callbackSong())
+    }
+
     private fun recordDebugWindowSample(
         song: Song,
         progress: MdxRangeProgress,
@@ -1048,9 +1350,9 @@ class SourceSeparationForegroundWorkerCoordinator(
     }
 }
 
-private enum class SourceSeparationPendingStartReason {
-    Manual,
-    PlaybackDemand,
+private enum class SourceSeparationPendingStartReason(val priority: Int) {
+    Manual(priority = 2),
+    PlaybackDemand(priority = 1),
 }
 
 private sealed interface SourceSeparationWorkerRequest {
@@ -1070,10 +1372,7 @@ private sealed interface SourceSeparationWorkerRequest {
             SourceSeparationPendingStartReason.PlaybackDemand ->
                 SourceSeparationExecutionRunClass.PlaybackDemandWindow
         }
-        override val priority: Int = when (reason) {
-            SourceSeparationPendingStartReason.Manual -> 2
-            SourceSeparationPendingStartReason.PlaybackDemand -> 1
-        }
+        override val priority: Int = reason.priority
     }
 
     data class StartWindowPreStart(
@@ -1084,6 +1383,57 @@ private sealed interface SourceSeparationWorkerRequest {
         override val runClass = SourceSeparationExecutionRunClass.NextSongPrefetch
         override val priority: Int = 0
     }
+}
+
+private enum class SourceSeparationRecoveredControl {
+    Pause,
+    Cancel,
+}
+
+private sealed interface SourceSeparationRecoveredTerminal {
+    fun dispatch(callbacks: SourceSeparationForegroundWorkerCallbacks) {
+        when (this) {
+            is Completed -> callbacks.onSourceSeparationWorkerCompleted(
+                song = song,
+                cacheKey = cacheKey,
+                shouldPromoteCompletedStems = shouldPromoteCompletedStems,
+            )
+            is Paused -> callbacks.onSourceSeparationWorkerPaused(song)
+            is ModelLoadFailed -> callbacks.onSourceSeparationWorkerModelLoadFailed(message)
+        }
+    }
+
+    data class Completed(
+        val song: Song,
+        val cacheKey: String,
+        val shouldPromoteCompletedStems: Boolean,
+    ) : SourceSeparationRecoveredTerminal
+
+    data class Paused(val song: Song) : SourceSeparationRecoveredTerminal
+
+    data class ModelLoadFailed(val message: String) : SourceSeparationRecoveredTerminal
+}
+
+private fun SourceSeparationCacheRunJournal.toRecoveredSong(): Song {
+    val locator = request.song
+    val diagnostics = request.sourceDiagnostics
+    return Song(
+        id = locator.songId,
+        data = locator.filePath,
+        title = locator.title,
+        trackNumber = 0,
+        year = 0,
+        size = diagnostics.fileSize,
+        duration = diagnostics.durationMs,
+        dateAdded = 0L,
+        rawDateModified = diagnostics.rawDateModified,
+        albumId = 0L,
+        albumName = locator.album,
+        artistId = 0L,
+        artistName = locator.artist,
+        albumArtistName = null,
+        genreName = null,
+    )
 }
 
 interface SourceSeparationForegroundWorkerCallbacks {
