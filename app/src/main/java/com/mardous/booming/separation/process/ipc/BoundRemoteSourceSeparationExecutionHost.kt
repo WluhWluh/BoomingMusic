@@ -48,10 +48,13 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         "$prefix-${UUID.randomUUID()}"
     },
     private val observerId: String = "observer-${UUID.randomUUID()}",
+    deadForegroundResourceCleaner: SourceSeparationDeadForegroundResourceCleaner? = null,
 ) : SourceSeparationExecutionHost {
     override val mode = SourceSeparationExecutionHostMode.BoundRemote
 
     private val applicationContext = context.applicationContext
+    private val deadForegroundResourceCleaner = deadForegroundResourceCleaner
+        ?: SourceSeparationDeadForegroundResourceCleaner.create(applicationContext)
     private val connectionLock = ReentrantLock()
     private val connectionChanged = connectionLock.newCondition()
     private var connectionState = SourceSeparationRemoteConnectionState.Unbound
@@ -836,6 +839,8 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 deathRecipient = remoteDeathRecipient,
                 serviceConnection = activeServiceConnection,
                 wasBound = bound,
+                processPid = deadProcess?.pid,
+                processStartTicks = deadProcess?.processStartTicks,
             )
             connectionState = SourceSeparationRemoteConnectionState.Dead
             bound = false
@@ -858,6 +863,11 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 applicationContext.unbindService(disconnected.serviceConnection)
             }
         }
+        deadForegroundResourceCleaner.cleanupIfProcessDied(
+            foregroundPolicy = foregroundPolicy,
+            pid = disconnected.processPid,
+            expectedProcessStartTicks = disconnected.processStartTicks,
+        )
     }
 
     private fun waitForProcessIncarnationExit(
@@ -1107,6 +1117,8 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         val deathRecipient: IBinder.DeathRecipient?,
         val serviceConnection: ServiceConnection?,
         val wasBound: Boolean,
+        val processPid: Int?,
+        val processStartTicks: Long?,
     )
 
     private data class BindingAttempt(

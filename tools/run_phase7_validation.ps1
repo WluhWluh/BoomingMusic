@@ -45,7 +45,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v52",
+    [string]$RunnerRevision = "phase7-runner-v53",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -1527,7 +1527,10 @@ try {
         if ($afterDeath.processingService -or
                 $afterDeath.processingNotification -or
                 $afterDeath.inferenceWakeLock) {
-            throw "Remote-death processing resources did not release within 30 seconds."
+            throw "Remote-death processing resources did not release within 30 seconds: " +
+                "service=$($afterDeath.processingService) " +
+                "notification=$($afterDeath.processingNotification) " +
+                "wakeLock=$($afterDeath.inferenceWakeLock)."
         }
         $packageStoppedAfterDeath = Get-PackageStoppedState
         if ($packageStoppedAfterDeath) {
