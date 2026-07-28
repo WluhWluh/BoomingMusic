@@ -64,6 +64,8 @@ internal class SourceSeparationModelAwareEngine(
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
         executionBackendPolicy: SourceSeparationExecutionBackendPolicy =
             this.executionBackendPolicy,
+        runClass: SourceSeparationExecutionRunClass =
+            SourceSeparationExecutionRunClass.PlaybackDemandWindow,
         onProgress: (MdxRangeProgress) -> Unit = {},
         playbackPositionMsProvider: () -> Long? = { null },
         playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
@@ -84,6 +86,7 @@ internal class SourceSeparationModelAwareEngine(
             preflight = preflight,
             runtimeSettings = runtimeSettings,
             executionBackendPolicy = executionBackendPolicy,
+            runClass = runClass,
             onProgress = onProgress,
             playbackPositionMsProvider = playbackPositionMsProvider,
             playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
@@ -101,6 +104,8 @@ internal class SourceSeparationModelAwareEngine(
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
         executionBackendPolicy: SourceSeparationExecutionBackendPolicy =
             this.executionBackendPolicy,
+        runClass: SourceSeparationExecutionRunClass =
+            SourceSeparationExecutionRunClass.PlaybackDemandWindow,
         onProgress: (MdxRangeProgress) -> Unit = {},
         playbackPositionMsProvider: () -> Long? = { null },
         playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
@@ -138,6 +143,7 @@ internal class SourceSeparationModelAwareEngine(
                 preflightElapsedMs = preflight.elapsedMs,
                 runtimeSettings = runtimeSettings,
                 executionBackendPolicy = admittedBackendPolicy,
+                runClass = runClass,
                 gpuRuntimeIdentity = admittedRuntimePolicy.gpuRuntimeIdentity,
                 onProgress = onProgress,
                 playbackPositionMsProvider = playbackPositionMsProvider,
@@ -160,6 +166,8 @@ internal class SourceSeparationModelAwareEngine(
             ownerPid = runCatching { android.os.Process.myPid() }
                 .getOrNull()
                 ?.takeIf { it > 0 },
+            runClass = runClass,
+            backgroundPolicy = runClass.backgroundPolicy,
             tryGpu = admittedBackendPolicy == SourceSeparationExecutionBackendPolicy.Auto,
             gpuRuntimeIdentity = admittedRuntimePolicy.gpuRuntimeIdentity,
         )
@@ -180,6 +188,7 @@ internal class SourceSeparationModelAwareEngine(
                 preflightElapsedMs = preflight.elapsedMs,
                 runtimeSettings = runtimeSettings,
                 executionBackendPolicy = admittedBackendPolicy,
+                runClass = runClass,
                 gpuRuntimeIdentity = admittedRuntimePolicy.gpuRuntimeIdentity,
                 onProgress = onProgress,
                 playbackPositionMsProvider = playbackPositionMsProvider,
@@ -201,6 +210,7 @@ internal class SourceSeparationModelAwareEngine(
         preflightElapsedMs: Long,
         runtimeSettings: MdxRuntimeSettings,
         executionBackendPolicy: SourceSeparationExecutionBackendPolicy,
+        runClass: SourceSeparationExecutionRunClass,
         gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
         onProgress: (MdxRangeProgress) -> Unit,
         playbackPositionMsProvider: () -> Long?,
@@ -231,6 +241,8 @@ internal class SourceSeparationModelAwareEngine(
             ),
             runtimeSettings = runtimeSettings,
             backendPolicy = executionBackendPolicy,
+            runClass = runClass,
+            backgroundPolicy = runClass.backgroundPolicy,
             gpuRuntimeIdentity = gpuRuntimeIdentity,
             onProgress = {},
             onPrepared = {},
@@ -342,6 +354,7 @@ internal class SourceSeparationModelAwareEngine(
         preflightElapsedMs: Long,
         runtimeSettings: MdxRuntimeSettings,
         executionBackendPolicy: SourceSeparationExecutionBackendPolicy,
+        runClass: SourceSeparationExecutionRunClass,
         gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
         onProgress: (MdxRangeProgress) -> Unit,
         playbackPositionMsProvider: () -> Long?,
@@ -372,6 +385,8 @@ internal class SourceSeparationModelAwareEngine(
                 workspace = SourceSeparationModelAwareExecutionWorkspace.from(run),
                 runtimeSettings = runtimeSettings,
                 backendPolicy = executionBackendPolicy,
+                runClass = runClass,
+                backgroundPolicy = runClass.backgroundPolicy,
                 gpuRuntimeIdentity = gpuRuntimeIdentity,
                 onProgress = {},
                 onPrepared = {},
@@ -590,6 +605,8 @@ internal data class SourceSeparationModelAwareExecutionRequest(
     val workspace: SourceSeparationModelAwareExecutionWorkspace,
     val runtimeSettings: MdxRuntimeSettings,
     val backendPolicy: SourceSeparationExecutionBackendPolicy,
+    val runClass: SourceSeparationExecutionRunClass,
+    val backgroundPolicy: SourceSeparationBackgroundPolicy,
     val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
     val onProgress: (MdxRangeProgress) -> Unit,
     val onPrepared: (com.mardous.booming.separation.model.MdxRangePreparation) -> Unit,
@@ -607,6 +624,9 @@ internal data class SourceSeparationModelAwareExecutionRequest(
     init {
         require(tryGpu == (gpuRuntimeIdentity != null)) {
             "Execution GPU preference and admitted runtime identity disagree."
+        }
+        require(backgroundPolicy == runClass.backgroundPolicy) {
+            "Execution background policy does not match its run class."
         }
         require(!tryGpu || gpuRuntimeIdentity == BOUNDED_GPU_RUNTIME_IDENTITY) {
             "Execution GPU runtime identity is not supported by this build."

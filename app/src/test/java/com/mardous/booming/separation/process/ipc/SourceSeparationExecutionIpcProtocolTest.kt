@@ -62,15 +62,15 @@ class SourceSeparationExecutionIpcProtocolTest {
                 SourceSeparationExecutionIpcCodec.encodeRecycleCommand(recycle),
             ),
         )
-        assertEquals(6, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
+        assertEquals(7, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":5,"commandId":"connect","clientProcessName":"x"}""",
+                """{"protocolVersion":6,"commandId":"connect","clientProcessName":"x"}""",
             )
         }
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":6,"commandId":"connect","clientProcessName":"x","extra":1}""",
+                """{"protocolVersion":7,"commandId":"connect","clientProcessName":"x","extra":1}""",
             )
         }
     }

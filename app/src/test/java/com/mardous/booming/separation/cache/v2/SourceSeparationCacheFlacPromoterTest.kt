@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.cache.v2
 
+import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.MdxInferenceBackend
@@ -245,6 +246,9 @@ class SourceSeparationCacheFlacPromoterTest {
                     album = "Album",
                 ),
                 sourceDiagnostics = SourceSeparationCacheSourceDiagnostics(1_024L, 50L, 2_000L),
+                runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+                backgroundPolicy =
+                    SourceSeparationExecutionRunClass.PlaybackDemandWindow.backgroundPolicy,
                 tryGpu = false,
                 gpuRuntimeIdentity = null,
             )

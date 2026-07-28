@@ -1,6 +1,8 @@
 package com.mardous.booming.separation.process
 
 import com.mardous.booming.separation.SourceSeparationModelAwareExecutionRequest
+import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
+import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.SourceSeparationAdmittedGpuRuntimeIdentity
@@ -13,7 +15,7 @@ import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 6
+internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 7
 
 internal interface SourceSeparationExecutionHost : AutoCloseable {
     val mode: SourceSeparationExecutionHostMode
@@ -223,8 +225,8 @@ internal data class SourceSeparationExecutionRuntimeIdentity(
     val windowDecodeEnabled: Boolean,
     val initialPlaybackPositionMs: Long?,
     val initialPlaybackReadyWindowCount: Int,
-    val runClass: SourceSeparationExecutionRunClass =
-        SourceSeparationExecutionRunClass.PlaybackAware,
+    val runClass: SourceSeparationExecutionRunClass,
+    val backgroundPolicy: SourceSeparationBackgroundPolicy,
 ) {
     init {
         require(executionProfileId.isNotBlank()) { "Runtime execution profile ID is empty." }
@@ -244,6 +246,9 @@ internal data class SourceSeparationExecutionRuntimeIdentity(
         require(initialPlaybackReadyWindowCount > 0) {
             "Initial playback ready-window count is invalid."
         }
+        require(backgroundPolicy == runClass.backgroundPolicy) {
+            "Runtime background policy does not match its run class."
+        }
     }
 }
 
@@ -254,11 +259,6 @@ internal enum class SourceSeparationExecutionBackendPolicy {
 
     @SerialName("cpu")
     Cpu,
-}
-
-@Serializable
-internal enum class SourceSeparationExecutionRunClass {
-    PlaybackAware,
 }
 
 @Serializable
@@ -311,6 +311,8 @@ data class SourceSeparationExecutionHostDiagnostics(
     val runId: String,
     val processGeneration: Long,
     val lifecycle: SourceSeparationExecutionHostLifecycle,
+    val runClass: SourceSeparationExecutionRunClass,
+    val backgroundPolicy: SourceSeparationBackgroundPolicy,
     val backend: String? = null,
     val runtimeName: String? = null,
     val latestEventSequence: Long,

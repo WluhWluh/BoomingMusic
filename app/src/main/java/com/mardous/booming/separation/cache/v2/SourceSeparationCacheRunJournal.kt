@@ -1,5 +1,7 @@
 package com.mardous.booming.separation.cache.v2
 
+import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
+import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -67,6 +69,8 @@ data class SourceSeparationCacheRunJournal(
                 runId = request.runId,
                 processGeneration = request.processGeneration,
                 ownerPid = request.ownerPid,
+                runClass = request.runClass,
+                backgroundPolicy = request.backgroundPolicy,
                 type = type,
                 segmentIndex = segmentIndex,
                 error = error,
@@ -83,7 +87,7 @@ data class SourceSeparationCacheRunJournal(
     }
 
     companion object {
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
 
         fun admitted(
             request: SourceSeparationCacheRunJournalRequest,
@@ -96,6 +100,8 @@ data class SourceSeparationCacheRunJournal(
                     runId = request.runId,
                     processGeneration = request.processGeneration,
                     ownerPid = request.ownerPid,
+                    runClass = request.runClass,
+                    backgroundPolicy = request.backgroundPolicy,
                     type = SourceSeparationCacheRunTransitionType.Admitted,
                     timestampEpochMs = request.admittedAtEpochMs,
                 )
@@ -120,6 +126,13 @@ data class SourceSeparationCacheRunJournal(
                     "An active or paused cache run cannot change its admitted GPU runtime."
                 }
             }
+            if (previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running) {
+                require(previous.request.runClass == request.runClass &&
+                    previous.request.backgroundPolicy == request.backgroundPolicy
+                ) {
+                    "An active cache run cannot change its run class or background policy."
+                }
+            }
             var sequence = previous.latestSequence
             val resumedTransitions = buildList {
                 addAll(previous.transitions)
@@ -131,6 +144,8 @@ data class SourceSeparationCacheRunJournal(
                             runId = previous.request.runId,
                             processGeneration = previous.request.processGeneration,
                             ownerPid = previous.request.ownerPid,
+                            runClass = previous.request.runClass,
+                            backgroundPolicy = previous.request.backgroundPolicy,
                             type = SourceSeparationCacheRunTransitionType.PreviousOwnerDied,
                             timestampEpochMs = request.admittedAtEpochMs,
                         )
@@ -143,6 +158,8 @@ data class SourceSeparationCacheRunJournal(
                         runId = request.runId,
                         processGeneration = request.processGeneration,
                         ownerPid = request.ownerPid,
+                        runClass = request.runClass,
+                        backgroundPolicy = request.backgroundPolicy,
                         type = SourceSeparationCacheRunTransitionType.Admitted,
                         timestampEpochMs = request.admittedAtEpochMs,
                     )
@@ -195,6 +212,8 @@ data class SourceSeparationCacheRunJournalRequest(
     val runId: String,
     val processGeneration: Long,
     val ownerPid: Int? = null,
+    val runClass: SourceSeparationExecutionRunClass,
+    val backgroundPolicy: SourceSeparationBackgroundPolicy,
     val tryGpu: Boolean,
     val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
     val admittedAtEpochMs: Long,
@@ -203,6 +222,9 @@ data class SourceSeparationCacheRunJournalRequest(
         require(runId.isNotBlank()) { "Cache run journal ID is empty." }
         require(processGeneration > 0L) { "Cache run process generation is invalid." }
         require(ownerPid == null || ownerPid > 0) { "Cache run owner PID is invalid." }
+        require(backgroundPolicy == runClass.backgroundPolicy) {
+            "Cache run background policy does not match its run class."
+        }
         require(tryGpu == (gpuRuntimeIdentity != null)) {
             "Cache run GPU preference and runtime identity disagree."
         }
@@ -220,11 +242,19 @@ data class SourceSeparationCacheRunJournalTransition(
     val runId: String,
     val processGeneration: Long,
     val ownerPid: Int? = null,
+    val runClass: SourceSeparationExecutionRunClass,
+    val backgroundPolicy: SourceSeparationBackgroundPolicy,
     val type: SourceSeparationCacheRunTransitionType,
     val segmentIndex: Int? = null,
     val error: SourceSeparationCacheError? = null,
     val timestampEpochMs: Long,
-)
+) {
+    init {
+        require(backgroundPolicy == runClass.backgroundPolicy) {
+            "Cache run transition background policy does not match its run class."
+        }
+    }
+}
 
 @Serializable
 enum class SourceSeparationCacheRunTransitionType {

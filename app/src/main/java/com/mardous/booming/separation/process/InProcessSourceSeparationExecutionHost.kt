@@ -69,6 +69,8 @@ internal class InProcessSourceSeparationExecutionHost(
                 diagnostics = event.toDiagnostics(
                     mode = mode,
                     lifecycle = SourceSeparationExecutionHostLifecycle.Completed,
+                    runClass = request.descriptor.runtime.runClass,
+                    backgroundPolicy = request.descriptor.runtime.backgroundPolicy,
                     backend = result.runtimeDiagnostics.backend.name,
                     runtimeName = result.runtimeDiagnostics.runtimeName,
                 ),
@@ -274,6 +276,8 @@ internal class InProcessSourceSeparationExecutionHost(
             runId = request.descriptor.runId,
             processGeneration = request.descriptor.processGeneration,
             lifecycle = lifecycle,
+            runClass = request.descriptor.runtime.runClass,
+            backgroundPolicy = request.descriptor.runtime.backgroundPolicy,
             backend = backend,
             runtimeName = runtimeName,
             latestEventSequence = sequence,
@@ -317,6 +321,8 @@ private fun SourceSeparationExecutionHostRequest.requireExactDescriptor(
     require(descriptor.runtime.executionProfileId == profile.profileId &&
         descriptor.runtime.executionSessionIdentity == profile.sessionIdentity &&
         descriptor.runtime.backendPolicy == execution.backendPolicy &&
+        descriptor.runtime.runClass == execution.runClass &&
+        descriptor.runtime.backgroundPolicy == execution.backgroundPolicy &&
         descriptor.runtime.tryGpu == execution.tryGpu &&
         descriptor.runtime.gpuRuntimeIdentity == execution.gpuRuntimeIdentity &&
         descriptor.runtime.cpuThreads == execution.runtimeSettings.cpuThreads &&
@@ -385,6 +391,8 @@ internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
             windowDecodeEnabled = windowDecodeEnabled,
             initialPlaybackPositionMs = initialPlaybackPositionMs,
             initialPlaybackReadyWindowCount = initialPlaybackReadyWindowCount,
+            runClass = runClass,
+            backgroundPolicy = backgroundPolicy,
         ),
         resume = resumeDescriptor(),
     )
@@ -622,6 +630,8 @@ internal fun SourceSeparationExecutionCompletion.toMdxRangeSeparationResult(
 private fun SourceSeparationExecutionHostEvent.toDiagnostics(
     mode: SourceSeparationExecutionHostMode,
     lifecycle: SourceSeparationExecutionHostLifecycle,
+    runClass: com.mardous.booming.separation.SourceSeparationExecutionRunClass,
+    backgroundPolicy: com.mardous.booming.separation.SourceSeparationBackgroundPolicy,
     backend: String?,
     runtimeName: String?,
 ) = SourceSeparationExecutionHostDiagnostics(
@@ -629,6 +639,8 @@ private fun SourceSeparationExecutionHostEvent.toDiagnostics(
     runId = runId,
     processGeneration = processGeneration,
     lifecycle = lifecycle,
+    runClass = runClass,
+    backgroundPolicy = backgroundPolicy,
     backend = backend,
     runtimeName = runtimeName,
     latestEventSequence = sequence,

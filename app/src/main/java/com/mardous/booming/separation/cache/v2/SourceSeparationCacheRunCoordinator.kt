@@ -1,5 +1,7 @@
 package com.mardous.booming.separation.cache.v2
 
+import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
+import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.MdxRangePreparation
@@ -634,6 +636,8 @@ class SourceSeparationCacheRunCoordinator(
         runId = runId,
         processGeneration = processGeneration,
         ownerPid = ownerPid,
+        runClass = runClass,
+        backgroundPolicy = backgroundPolicy,
         tryGpu = tryGpu,
         gpuRuntimeIdentity = gpuRuntimeIdentity,
         admittedAtEpochMs = admittedAtEpochMs,
@@ -700,6 +704,8 @@ data class SourceSeparationCacheRunRequest(
     val contract: SourceSeparationCacheContractSnapshot,
     val song: SourceSeparationCacheSongLocator,
     val sourceDiagnostics: SourceSeparationCacheSourceDiagnostics,
+    val runClass: SourceSeparationExecutionRunClass,
+    val backgroundPolicy: SourceSeparationBackgroundPolicy,
     val tryGpu: Boolean,
     val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
     val runId: String = java.util.UUID.randomUUID().toString(),
@@ -710,6 +716,9 @@ data class SourceSeparationCacheRunRequest(
         require(runId.isNotBlank()) { "Cache run ID is empty." }
         require(processGeneration > 0L) { "Cache run process generation is invalid." }
         require(ownerPid == null || ownerPid > 0) { "Cache run owner PID is invalid." }
+        require(backgroundPolicy == runClass.backgroundPolicy) {
+            "Cache run background policy does not match its run class."
+        }
         require(tryGpu == (gpuRuntimeIdentity != null)) {
             "Cache run GPU preference and runtime identity disagree."
         }

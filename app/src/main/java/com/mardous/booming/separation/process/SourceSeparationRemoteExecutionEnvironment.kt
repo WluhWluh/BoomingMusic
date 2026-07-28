@@ -129,6 +129,8 @@ internal class SourceSeparationRemoteExecutionEnvironment(
                 runId = descriptor.runId,
                 processGeneration = descriptor.processGeneration,
                 ownerPid = android.os.Process.myPid(),
+                runClass = descriptor.runtime.runClass,
+                backgroundPolicy = descriptor.runtime.backgroundPolicy,
                 tryGpu = descriptor.runtime.tryGpu,
                 gpuRuntimeIdentity = descriptor.runtime.gpuRuntimeIdentity,
             )
@@ -156,6 +158,8 @@ internal class SourceSeparationRemoteExecutionEnvironment(
                 useXnnpack = descriptor.runtime.useXnnpack,
             ),
             backendPolicy = descriptor.runtime.backendPolicy,
+            runClass = descriptor.runtime.runClass,
+            backgroundPolicy = descriptor.runtime.backgroundPolicy,
             gpuRuntimeIdentity = descriptor.runtime.gpuRuntimeIdentity,
             onProgress = {},
             onPrepared = {},

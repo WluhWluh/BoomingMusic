@@ -364,6 +364,64 @@ class SourceSeparationModelAwareEngineTest {
     }
 
     @Test
+    fun `run class and background policy survive admission IPC and diagnostics`() {
+        SourceSeparationExecutionRunClass.entries.forEach { runClass ->
+            val fixture = fixture()
+            var observedDescriptorClass: SourceSeparationExecutionRunClass? = null
+            var observedDescriptorPolicy: SourceSeparationBackgroundPolicy? = null
+            var observedRequestClass: SourceSeparationExecutionRunClass? = null
+            var observedRequestPolicy: SourceSeparationBackgroundPolicy? = null
+            val executor = SourceSeparationModelAwareRangeExecutor { request ->
+                observedRequestClass = request.runClass
+                observedRequestPolicy = request.backgroundPolicy
+                fixture.complete(request, fixture.prepare(request))
+            }
+            val delegate = InProcessSourceSeparationExecutionHost(executor)
+            val observingHost = object : SourceSeparationExecutionHost by delegate {
+                override fun start(
+                    request: SourceSeparationExecutionHostRequest,
+                ): SourceSeparationExecutionHostStartResult {
+                    val descriptor = SourceSeparationExecutionIpcCodec.decodeStartCommand(
+                        SourceSeparationExecutionIpcCodec.encodeStartCommand(
+                            SourceSeparationIpcStartCommand(
+                                commandId = "start-${runClass.name}",
+                                descriptor = request.descriptor,
+                            )
+                        )
+                    ).descriptor
+                    observedDescriptorClass = descriptor.runtime.runClass
+                    observedDescriptorPolicy = descriptor.runtime.backgroundPolicy
+                    return delegate.start(request.copy(descriptor = descriptor))
+                }
+            }
+
+            val completed = fixture.engine(
+                executionHost = observingHost,
+                executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Cpu,
+                executor = executor,
+            ).separate(
+                input = fixture.input,
+                executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Cpu,
+                runClass = runClass,
+            ) as SourceSeparationModelAwareEngineResult.Completed
+
+            assertEquals(runClass, observedDescriptorClass)
+            assertEquals(runClass.backgroundPolicy, observedDescriptorPolicy)
+            assertEquals(runClass, observedRequestClass)
+            assertEquals(runClass.backgroundPolicy, observedRequestPolicy)
+            assertEquals(runClass, completed.hostDiagnostics.runClass)
+            assertEquals(runClass.backgroundPolicy, completed.hostDiagnostics.backgroundPolicy)
+            val journal = fixture.currentRunJournal()
+            assertEquals(runClass, journal.request.runClass)
+            assertEquals(runClass.backgroundPolicy, journal.request.backgroundPolicy)
+            assertTrue(journal.transitions.all { it.runClass == runClass })
+            assertTrue(journal.transitions.all {
+                it.backgroundPolicy == runClass.backgroundPolicy
+            })
+        }
+    }
+
+    @Test
     fun `bounded GPU runtime identity survives admission and IPC`() {
         val fixture = fixture()
         val executor = SourceSeparationModelAwareRangeExecutor { request ->
@@ -410,7 +468,7 @@ class SourceSeparationModelAwareEngineTest {
             identity.commandQueueWindowSize,
         )
         assertEquals(identity, fixture.currentRunJournal().request.gpuRuntimeIdentity)
-        assertEquals(3, fixture.currentRunJournal().journalSchemaVersion)
+        assertEquals(4, fixture.currentRunJournal().journalSchemaVersion)
     }
 
     @Test

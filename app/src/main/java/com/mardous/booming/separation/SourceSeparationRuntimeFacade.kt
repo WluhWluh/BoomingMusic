@@ -66,6 +66,8 @@ interface SourceSeparationRuntimeFacade {
         song: SourceSeparationRuntimeSong,
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
         tryGpu: Boolean = true,
+        runClass: SourceSeparationExecutionRunClass =
+            SourceSeparationExecutionRunClass.PlaybackDemandWindow,
         onProgress: (MdxRangeProgress) -> Unit = {},
         onPrepared: (SourceSeparationCacheManifest) -> Unit = {},
         playbackPositionMsProvider: () -> Long? = { null },
@@ -208,6 +210,7 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
         song: SourceSeparationRuntimeSong,
         runtimeSettings: MdxRuntimeSettings,
         tryGpu: Boolean,
+        runClass: SourceSeparationExecutionRunClass,
         onProgress: (MdxRangeProgress) -> Unit,
         onPrepared: (SourceSeparationCacheManifest) -> Unit,
         playbackPositionMsProvider: () -> Long?,
@@ -225,6 +228,7 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
         } else {
             SourceSeparationExecutionBackendPolicy.Cpu
         },
+        runClass = runClass,
         onProgress = onProgress,
         onPrepared = onPrepared,
         playbackPositionMsProvider = playbackPositionMsProvider,

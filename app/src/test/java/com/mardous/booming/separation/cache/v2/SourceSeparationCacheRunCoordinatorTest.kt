@@ -1,5 +1,7 @@
 package com.mardous.booming.separation.cache.v2
 
+import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.MdxInferenceBackend
@@ -255,6 +257,65 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `run class is immutable for a running owner and explicit on paused readmission`() {
+        val activeFixture = fixture()
+        val prefetchRequest = activeFixture.request.copy(
+            runClass = SourceSeparationExecutionRunClass.NextSongPrefetch,
+            backgroundPolicy = SourceSeparationBackgroundPolicy.ClientBound,
+        )
+        val abandoned = (activeFixture.coordinator.begin(prefetchRequest) as
+            SourceSeparationCacheRunStart.Ready).run
+        abandoned.close()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            activeFixture.coordinator.begin(
+                prefetchRequest.copy(
+                    runId = "illegal-upgrade",
+                    processGeneration = 2L,
+                    runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+                    backgroundPolicy =
+                        SourceSeparationBackgroundPolicy.IndependentForegroundEligible,
+                )
+            )
+        }
+        assertFalse(activeFixture.repository.isLeased(prefetchRequest.identity.cacheKey))
+
+        val pausedFixture = fixture()
+        val pausedPrefetchRequest = pausedFixture.request.copy(
+            runClass = SourceSeparationExecutionRunClass.NextSongPrefetch,
+            backgroundPolicy = SourceSeparationBackgroundPolicy.ClientBound,
+        )
+        val prefetch = (pausedFixture.coordinator.begin(pausedPrefetchRequest) as
+            SourceSeparationCacheRunStart.Ready).run
+        pausedFixture.coordinator.pause(prefetch)
+        val playbackRequest = pausedPrefetchRequest.copy(
+            runId = "playback-readmission",
+            processGeneration = 2L,
+            runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+            backgroundPolicy = SourceSeparationBackgroundPolicy.PlaybackServiceOwned,
+        )
+        val playback = (pausedFixture.coordinator.begin(playbackRequest) as
+            SourceSeparationCacheRunStart.Ready).run
+        val journal = requireNotNull(
+            pausedFixture.store.readRunJournal(playbackRequest.identity.cacheKey)
+        )
+
+        assertEquals(SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+            journal.request.runClass)
+        assertEquals(SourceSeparationBackgroundPolicy.PlaybackServiceOwned,
+            journal.request.backgroundPolicy)
+        assertEquals(
+            listOf(
+                SourceSeparationExecutionRunClass.NextSongPrefetch,
+                SourceSeparationExecutionRunClass.NextSongPrefetch,
+                SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+            ),
+            journal.transitions.map { it.runClass },
+        )
+        pausedFixture.coordinator.pause(playback)
+    }
+
+    @Test
     fun `resumable journal preserves its exact admitted GPU runtime`() {
         val fixture = fixture()
         val runtimeIdentity = admittedGpuRuntimeIdentity()
@@ -277,7 +338,7 @@ class SourceSeparationCacheRunCoordinatorTest {
                 .gpuRuntimeIdentity,
         )
         assertEquals(
-            3,
+            4,
             fixture.store.readRunJournal(gpuRequest.identity.cacheKey)?.journalSchemaVersion,
         )
         fixture.coordinator.pause(first.run)
@@ -404,6 +465,9 @@ class SourceSeparationCacheRunCoordinatorTest {
                     rawDateModified = 50L,
                     durationMs = 2_000L,
                 ),
+                runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+                backgroundPolicy =
+                    SourceSeparationExecutionRunClass.PlaybackDemandWindow.backgroundPolicy,
                 tryGpu = false,
                 gpuRuntimeIdentity = null,
             ),
