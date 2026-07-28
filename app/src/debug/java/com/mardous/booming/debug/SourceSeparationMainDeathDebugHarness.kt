@@ -525,11 +525,14 @@ internal object SourceSeparationMainDeathDebugHarness {
             } == 1)
             validateCommittedSegmentEvidence(committedBeforeDeath, finalJournal)
             check(waitUntil(REATTACH_TIMEOUT_MS) {
-                !coordinator.isWorkerActive() &&
+                val state = coordinator.workerStateFlow.value
+                state is SourceSeparationUiState.Completed &&
+                    state.songId == source.id &&
                     coordinator.runningCacheKey() == null &&
                     coordinator.protectedCacheKeys().isEmpty() &&
                     handoff.stateFlow.value.activeOwner == null
             }) { "The explicitly resumed run did not release terminal ownership." }
+            val schedulerResidentAfterCompletion = coordinator.isWorkerActive()
 
             val completed = runtime.cacheStatus(runtimeSong) as?
                 SourceSeparationModelAwareCacheStatus.Completed
@@ -602,6 +605,8 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("committedSegmentsPreserved", true)
                     .put("finalCommittedSegments", finalJournal.committedSegments.size)
                     .put("plannedSegments", plannedSegments)
+                    .put("schedulerResidentAfterCompletion",
+                        schedulerResidentAfterCompletion)
                     .put("previousOwnerDied", true)
                     .put("abandonedObserverId", oldObserverId)
                     .put("abandonedObserverProcessName", oldObserverProcessName)
