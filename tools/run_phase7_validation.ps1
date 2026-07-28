@@ -27,6 +27,7 @@ param(
         "process-cache-race-matrix",
         "process-main-death",
         "independent-main-death",
+        "independent-remote-death",
         "lifecycle",
         "recreation",
         "playback",
@@ -44,7 +45,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v47",
+    [string]$RunnerRevision = "phase7-runner-v48",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -120,6 +121,7 @@ $sourceStages = @(
     "process-cache-race-matrix",
     "process-main-death",
     "independent-main-death",
+    "independent-remote-death",
     "lifecycle",
     "recreation",
     "playback",
@@ -149,6 +151,7 @@ $testMethod = switch ($Stage) {
     "process-cache-race-matrix" { "validateProcessCacheManagementRaces"; break }
     "process-main-death" { "validateProcessMainDeathRecovery"; break }
     "independent-main-death" { "validateIndependentMainDeathReattachment"; break }
+    "independent-remote-death" { "validateDeviceEvidenceIdentity"; break }
     "lifecycle" { "validateWorkerLifecycle"; break }
     "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
     "playback" { "validateMediaSessionPlayback"; break }
@@ -237,7 +240,7 @@ if ($ExecutionHostMode -eq "bound-remote" -and
     throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
 }
 if ($ExecutionHostMode -eq "independent-foreground" -and
-        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "cancel-cleanup", "task-removal", "force-stop", "reattachment", "independent-main-death") -or
+        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "cancel-cleanup", "task-removal", "force-stop", "reattachment", "independent-main-death", "independent-remote-death") -or
         $ProcessAbi -ne "arm64-v8a" -or
         $ProcessorCount -gt 0 -or $XnnPackFlags -ge 0 -or
         $AutoFailpoint -ne "none" -or
@@ -277,6 +280,17 @@ if ($Stage -eq "force-stop" -and
 if ($Stage -ne "independent-main-death" -and
         $MainDeathBoundary -ne "segment-running") {
     throw "MainDeathBoundary applies only to independent-main-death."
+}
+if ($Stage -eq "independent-remote-death" -and
+        ($ExecutionHostMode -ne "independent-foreground" -or
+        $ProcessAbi -ne "arm64-v8a" -or
+        $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
+    throw "independent-remote-death requires the production arm64 independent foreground route without runtime fault injection."
+}
+if ($Stage -eq "independent-remote-death" -and
+        ($ModelId -ne "uvr_mdxnet_3_9662" -or
+        $FixtureId -ne "coast_town_full_mp3")) {
+    throw "independent-remote-death is pinned to the 9662 coast_town MP3 full-song fixture."
 }
 if ($Stage -in @("process-matrix", "process-switch-matrix")) {
     $validX86Resident = $ProcessAbi -eq "x86" -and $X86ProcessValidation
@@ -1332,6 +1346,294 @@ try {
         } else {
             "Debug force-stop validation failed: $reportText"
         }
+    } elseif ($Stage -eq "independent-remote-death") {
+        Invoke-Adb shell am force-stop --user $deviceUserId $package
+        $debugDirectory = "files/phase7-debug-main-death"
+        $scenarioRelativePath = "$debugDirectory/$RunId-scenario.json"
+        $debugReportRelativePath = "$debugDirectory/$RunId-report.json"
+        & $adb -s $Serial shell run-as $package rm -f -- `
+            $scenarioRelativePath $debugReportRelativePath 2>$null | Out-Null
+
+        Invoke-Adb shell am start -W --user $deviceUserId -n `
+            "$package/com.mardous.booming.activities.MainActivity"
+        $debugReceiver =
+            "$package/com.mardous.booming.debug.SourceSeparationDebugReceiver"
+        $debugAction = "com.mardous.booming.debug.SOURCE_SEPARATION"
+        $debugArguments = @(
+            "shell", "am", "broadcast", "--user", $deviceUserId,
+            "-a", $debugAction,
+            "-n", $debugReceiver,
+            "--es", "runId", $RunId,
+            "--es", "sourcePath", $remoteSourcePath,
+            "--es", "modelId", $ModelId,
+            "--es", "artifactSha256", $artifact.sha256,
+            "--es", "backendMode", $BackendMode,
+            "--es", "killBoundary", "after-first-committed-segment"
+        )
+        Invoke-Adb @debugArguments --es command beginIndependentRemoteDeath
+        $scenarioText = Wait-RemoteJsonFile `
+            -RelativePath $scenarioRelativePath `
+            -TimeoutSeconds 300 `
+            -FailurePath $debugReportRelativePath
+        $scenario = $scenarioText | ConvertFrom-Json
+        $oldMainPid = [int]$scenario.mainPid
+        $oldRemotePid = [int]$scenario.remotePid
+        $cacheRootPath = [string]$scenario.cacheRootPath
+        $journalPath = [string]$scenario.journalPath
+        if ($oldMainPid -le 0 -or $oldRemotePid -le 0 -or
+                $oldMainPid -eq $oldRemotePid -or
+                [int]$scenario.faultHitPid -ne $oldRemotePid -or
+                [int]$scenario.committedSegments -le 0) {
+            throw "The independent remote-death scenario contains invalid frozen evidence."
+        }
+        $allowedInternalCacheRoot = "$appDataRoot/cache"
+        $allowedExternalCacheRoot =
+            "/storage/emulated/$deviceUserId/Android/data/$package/cache"
+        $cacheRootAllowed = $cacheRootPath.Equals(
+            $allowedInternalCacheRoot,
+            [System.StringComparison]::Ordinal
+        ) -or $cacheRootPath.StartsWith(
+            "$allowedInternalCacheRoot/",
+            [System.StringComparison]::Ordinal
+        ) -or $cacheRootPath.Equals(
+            $allowedExternalCacheRoot,
+            [System.StringComparison]::Ordinal
+        ) -or $cacheRootPath.StartsWith(
+            "$allowedExternalCacheRoot/",
+            [System.StringComparison]::Ordinal
+        )
+        $expectedJournalPath =
+            "$cacheRootPath/entries/$($scenario.cacheKey)/run-journal.json"
+        if (-not $cacheRootAllowed -or
+                -not $journalPath.Equals(
+                    $expectedJournalPath,
+                    [System.StringComparison]::Ordinal
+                ) -or
+                $journalPath.Contains("..", [System.StringComparison]::Ordinal)) {
+            throw "The independent remote-death scenario contains an unsafe journal path."
+        }
+        $journalSeparator = $journalPath.LastIndexOf('/')
+        if ($journalSeparator -le 0) {
+            throw "The independent remote-death journal has no device-side parent path."
+        }
+        $entryPath = $journalPath.Substring(0, $journalSeparator)
+        $beforeKillJournal = Get-RemoteJournalSnapshot $journalPath
+        $beforeKillEntry = Get-RemoteEntrySnapshot $entryPath
+        $beforeKill = Get-TaskLifecycleObservation
+        $packageStoppedBeforeKill = Get-PackageStoppedState
+        $mainPidsBeforeKill = @(Get-NamedProcessIds $package)
+        $remotePidsBeforeKill = @(Get-NamedProcessIds "${package}:source_separation")
+        if ($mainPidsBeforeKill.Count -ne 1 -or
+                $mainPidsBeforeKill[0] -ne $oldMainPid -or
+                $remotePidsBeforeKill.Count -ne 1 -or
+                $remotePidsBeforeKill[0] -ne $oldRemotePid) {
+            throw "The independent remote-death scenario lost its authoritative processes before kill."
+        }
+        if (-not $beforeKill.processingService -or
+                -not $beforeKill.processingNotification -or
+                -not $beforeKill.inferenceWakeLock) {
+            throw "The remote-death run was not protected by its service, notification, and wake lock."
+        }
+        if ($packageStoppedBeforeKill) {
+            throw "The remote-death run unexpectedly had a stopped package state before kill."
+        }
+
+        Invoke-Adb shell run-as $package kill -9 $oldRemotePid
+        $deathStarted = [Diagnostics.Stopwatch]::StartNew()
+        $deathDeadline = [DateTime]::UtcNow.AddSeconds(30)
+        $unexpectedRemotePids = [System.Collections.Generic.HashSet[int]]::new()
+        $unexpectedRemotePresenceSampleCount = 0
+        $remoteProcessSampleCount = 0
+        $mainProcessSampleCount = 0
+        $mainDisappearanceCount = 0
+        do {
+            $mainPidsAfterKill = @(Get-NamedProcessIds $package)
+            $remotePidsAfterKill = @(
+                Get-NamedProcessIds "${package}:source_separation"
+            )
+            $mainProcessSampleCount += 1
+            $remoteProcessSampleCount += 1
+            if ($mainPidsAfterKill.Count -ne 1 -or
+                    $mainPidsAfterKill[0] -ne $oldMainPid) {
+                $mainDisappearanceCount += 1
+            }
+            foreach ($pid in $remotePidsAfterKill) {
+                if ($pid -ne $oldRemotePid) {
+                    [void]$unexpectedRemotePids.Add($pid)
+                    $unexpectedRemotePresenceSampleCount += 1
+                }
+            }
+            if ($mainDisappearanceCount -gt 0) {
+                throw "The main process did not survive inference-process death."
+            }
+            if ($remotePidsAfterKill.Count -eq 0) { break }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $deathDeadline)
+        if ($remotePidsAfterKill.Count -ne 0) {
+            throw "The killed inference process did not exit within 30 seconds."
+        }
+        $deathStarted.Stop()
+        $killExitElapsedMs = [int64]$deathStarted.ElapsedMilliseconds
+
+        $cleanupDeadline = [DateTime]::UtcNow.AddSeconds(30)
+        do {
+            $afterDeath = Get-TaskLifecycleObservation
+            $mainProcessSampleCount += 1
+            $remoteProcessSampleCount += 1
+            $cleanupMainPids = @(Get-NamedProcessIds $package)
+            if ($cleanupMainPids.Count -ne 1 -or
+                    $cleanupMainPids[0] -ne $oldMainPid) {
+                $mainDisappearanceCount += 1
+                throw "The main process changed while remote-death resources were releasing."
+            }
+            $cleanupRemotePids = @(
+                Get-NamedProcessIds "${package}:source_separation"
+            )
+            foreach ($pid in $cleanupRemotePids) {
+                if ($pid -ne $oldRemotePid) {
+                    [void]$unexpectedRemotePids.Add($pid)
+                    $unexpectedRemotePresenceSampleCount += 1
+                }
+            }
+            if (-not $afterDeath.processingService -and
+                    -not $afterDeath.processingNotification -and
+                    -not $afterDeath.inferenceWakeLock) {
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $cleanupDeadline)
+        if ($afterDeath.processingService -or
+                $afterDeath.processingNotification -or
+                $afterDeath.inferenceWakeLock) {
+            throw "Remote-death processing resources did not release within 30 seconds."
+        }
+        $packageStoppedAfterDeath = Get-PackageStoppedState
+        if ($packageStoppedAfterDeath) {
+            throw "The package entered stopped state after remote process death."
+        }
+        $afterDeathJournal = Get-RemoteJournalSnapshot $journalPath
+        $afterDeathEntry = Get-RemoteEntrySnapshot $entryPath
+
+        $silentStarted = [Diagnostics.Stopwatch]::StartNew()
+        $silentProcessSampleCount = 0
+        do {
+            $silentProcessSampleCount += 1
+            $currentMainPids = @(Get-NamedProcessIds $package)
+            $mainProcessSampleCount += 1
+            $remoteProcessSampleCount += 1
+            if ($currentMainPids.Count -ne 1 -or
+                    $currentMainPids[0] -ne $oldMainPid) {
+                throw "The main process changed during remote-death silence."
+            }
+            foreach ($pid in @(Get-NamedProcessIds "${package}:source_separation")) {
+                if ($pid -ne $oldRemotePid) {
+                    [void]$unexpectedRemotePids.Add($pid)
+                    $unexpectedRemotePresenceSampleCount += 1
+                }
+            }
+            Start-Sleep -Milliseconds 250
+        } while ($silentStarted.Elapsed.TotalSeconds -lt $SilentObservationSeconds)
+        $silentStarted.Stop()
+        $afterSilenceJournal = Get-RemoteJournalSnapshot $journalPath
+        $afterSilenceEntry = Get-RemoteEntrySnapshot $entryPath
+        $afterSilence = Get-TaskLifecycleObservation
+        $packageStoppedAfterSilence = Get-PackageStoppedState
+
+        $validationArguments = @($debugArguments) + @(
+            "--es", "command", "validateIndependentRemoteDeath",
+            "--es", "journalSha256BeforeKill", $beforeKillJournal.sha256,
+            "--es", "journalSha256AfterDeath", $afterDeathJournal.sha256,
+            "--es", "journalSha256AfterSilence", $afterSilenceJournal.sha256,
+            "--es", "entrySha256BeforeKill", $beforeKillEntry.sha256,
+            "--es", "entrySha256AfterDeath", $afterDeathEntry.sha256,
+            "--es", "entrySha256AfterSilence", $afterSilenceEntry.sha256,
+            "--el", "journalSequenceBeforeKill", [string]$beforeKillJournal.sequence,
+            "--el", "journalSequenceAfterDeath", [string]$afterDeathJournal.sequence,
+            "--el", "journalSequenceAfterSilence", [string]$afterSilenceJournal.sequence,
+            "--el", "silentObservationMs", [string]$silentStarted.ElapsedMilliseconds,
+            "--el", "silentProcessSampleCount", [string]$silentProcessSampleCount,
+            "--el", "unexpectedRemoteRelaunchCount",
+            [string]$unexpectedRemotePids.Count,
+            "--el", "unexpectedRemotePresenceSampleCount",
+            [string]$unexpectedRemotePresenceSampleCount,
+            "--el", "remoteProcessSampleCount", [string]$remoteProcessSampleCount,
+            "--el", "mainProcessSampleCount", [string]$mainProcessSampleCount,
+            "--el", "mainDisappearanceCount", [string]$mainDisappearanceCount,
+            "--el", "killExitElapsedMs", [string]$killExitElapsedMs,
+            "--el", "entryFileCountBeforeKill", [string]$beforeKillEntry.fileCount,
+            "--el", "entryFileCountAfterDeath", [string]$afterDeathEntry.fileCount,
+            "--el", "entryFileCountAfterSilence", [string]$afterSilenceEntry.fileCount,
+            "--el", "entryBytesBeforeKill", [string]$beforeKillEntry.totalBytes,
+            "--el", "entryBytesAfterDeath", [string]$afterDeathEntry.totalBytes,
+            "--el", "entryBytesAfterSilence", [string]$afterSilenceEntry.totalBytes,
+            "--ez", "mainProcessSurvived", "true",
+            "--ez", "packageStoppedBeforeKill",
+            ($packageStoppedBeforeKill.ToString().ToLowerInvariant()),
+            "--ez", "packageStoppedAfterDeath",
+            ($packageStoppedAfterDeath.ToString().ToLowerInvariant()),
+            "--ez", "packageStoppedAfterSilence",
+            ($packageStoppedAfterSilence.ToString().ToLowerInvariant()),
+            "--ez", "processingServiceBeforeKill",
+            ($beforeKill.processingService.ToString().ToLowerInvariant()),
+            "--ez", "processingServiceAfterDeath",
+            ($afterDeath.processingService.ToString().ToLowerInvariant()),
+            "--ez", "processingServiceAfterSilence",
+            ($afterSilence.processingService.ToString().ToLowerInvariant()),
+            "--ez", "notificationBeforeKill",
+            ($beforeKill.processingNotification.ToString().ToLowerInvariant()),
+            "--ez", "notificationAfterDeath",
+            ($afterDeath.processingNotification.ToString().ToLowerInvariant()),
+            "--ez", "notificationAfterSilence",
+            ($afterSilence.processingNotification.ToString().ToLowerInvariant()),
+            "--ez", "wakeLockBeforeKill",
+            ($beforeKill.inferenceWakeLock.ToString().ToLowerInvariant()),
+            "--ez", "wakeLockAfterDeath",
+            ($afterDeath.inferenceWakeLock.ToString().ToLowerInvariant()),
+            "--ez", "wakeLockAfterSilence",
+            ($afterSilence.inferenceWakeLock.ToString().ToLowerInvariant())
+        )
+        Invoke-Adb @validationArguments
+        $reportText = Wait-RemoteJsonFile `
+            -RelativePath $debugReportRelativePath `
+            -TimeoutSeconds 1800
+        $debugReport = $reportText | ConvertFrom-Json
+        if ([string]$debugReport.status -eq "passed") {
+            $terminalDeadline = [DateTime]::UtcNow.AddSeconds(30)
+            do {
+                $terminalObservation = Get-TaskLifecycleObservation
+                if (-not $terminalObservation.processingService -and
+                        -not $terminalObservation.processingNotification -and
+                        -not $terminalObservation.inferenceWakeLock) {
+                    break
+                }
+                Start-Sleep -Milliseconds 100
+            } while ([DateTime]::UtcNow -lt $terminalDeadline)
+            $debugReport | Add-Member -NotePropertyName terminalExternalResources `
+                -NotePropertyValue ([pscustomobject]@{
+                    processingService = [bool]$terminalObservation.processingService
+                    processingNotification = [bool]$terminalObservation.processingNotification
+                    inferenceWakeLock = [bool]$terminalObservation.inferenceWakeLock
+                }) -Force
+            if ($terminalObservation.processingService -or
+                    $terminalObservation.processingNotification -or
+                    $terminalObservation.inferenceWakeLock) {
+                $debugReport.status = "failed"
+                $debugReport | Add-Member -NotePropertyName error `
+                    -NotePropertyValue "Terminal processing resources survived explicit-resume completion." `
+                    -Force
+            }
+            $reportText = $debugReport | ConvertTo-Json -Depth 20
+            $instrumentExit = if ($terminalObservation.processingService -or
+                    $terminalObservation.processingNotification -or
+                    $terminalObservation.inferenceWakeLock) { 1 } else { 0 }
+        } else {
+            $instrumentExit = 1
+        }
+        $instrumentText = if ($instrumentExit -eq 0) {
+            "OK (1 test)"
+        } else {
+            "Debug independent remote-death validation failed: $reportText"
+        }
     } elseif ($Stage -eq "independent-main-death") {
         Invoke-Adb shell am force-stop --user $deviceUserId $package
         $debugDirectory = "files/phase7-debug-main-death"
@@ -1453,7 +1755,11 @@ try {
         } while ($true)
     }
     Write-Host $instrumentText
-    if ($Stage -notin @("force-stop", "independent-main-death")) {
+    if ($Stage -notin @(
+            "force-stop",
+            "independent-main-death",
+            "independent-remote-death"
+        )) {
         $remoteReport = "files/phase7-validation-reports/$RunId-$reportStage.json"
         $reportText = Read-RemoteFile $remoteReport
         if ($reportText.TrimStart() -notmatch '^\{') {
@@ -1595,7 +1901,10 @@ try {
                 mainDeathBoundary = if ($Stage -eq "independent-main-death") {
                     $MainDeathBoundary
                 } else { $null }
-                silentObservationSeconds = if ($Stage -eq "force-stop") {
+                silentObservationSeconds = if ($Stage -in @(
+                        "force-stop",
+                        "independent-remote-death"
+                    )) {
                     $SilentObservationSeconds
                 } else { $null }
                 arm32ResidentProcessValidation =
@@ -1656,7 +1965,11 @@ try {
         & $adb -s $Serial shell run-as $package rm -rf -- `
             $remoteArtifactDirectory 2>$null | Out-Null
     }
-    if ($Stage -in @("force-stop", "independent-main-death")) {
+    if ($Stage -in @(
+            "force-stop",
+            "independent-main-death",
+            "independent-remote-death"
+        )) {
         & $adb -s $Serial shell am force-stop --user $deviceUserId $package `
             2>$null | Out-Null
     }
