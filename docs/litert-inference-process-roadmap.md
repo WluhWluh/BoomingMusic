@@ -1,13 +1,14 @@
 # LiteRT Inference Process and Background Execution Roadmap
 
-Status: Phase 6 exact product ownership handoff proved on S10 and S25 for CPU
-and bounded GPU; remaining lifecycle and release qualification stays open
+Status: Phase 7A authority transfer and observer reattachment proved on S10
+and S25 for CPU and bounded GPU; process-death recovery remains open
 
 Updated: 2026-07-27
 
-Current milestone: advance Phase 7A authority transfer and reattachment from
-the now-proved Phase 6B/6C product handoff. Remaining Phase 5F and Phase 6D
-full-song, fallback, UI, current-API, and long-running platform matrices are
+Current milestone: close the remaining unobserved-lifetime and actual
+main-process-recreation work in Phase 7A/7D, then select the single Phase 7B
+remote-process restart policy. Remaining Phase 5F and Phase 6D full-song,
+fallback, UI, current-API, and long-running platform matrices are
 release-qualification work and may remain open while product implementation
 continues.
 
@@ -1397,20 +1398,30 @@ across every app state, and cannot be inferred from CPU-only success.
 
 ### Phase 7A: Transfer active-run authority
 
-- [ ] Once an eligible manual full-song run has a durable journal, exact-entry
+- [x] Once an eligible manual full-song run has a durable journal, exact-entry
   kernel lock, and acknowledged processing FGS, make the inference service
   authoritative for that exact admitted run until a durable terminal
   transition.
-- [ ] Keep the main coordinator as a proxy and observer rather than a second
+- [x] Keep the main coordinator as a proxy and observer rather than a second
   in-memory worker.
-- [ ] Let a reconnecting main process query and adopt the current snapshot.
-- [ ] Do not let callback loss cancel an otherwise valid foreground run, but
-  persist that the observer disconnected and bound how long unobserved work may
-  continue.
-- [ ] Do not let the inference process admit a new song after completing the
+- [x] Let a reconnecting main process query and adopt the current snapshot.
+- [x] Do not let callback loss cancel an otherwise valid foreground run, and
+  persist the exact observer disconnection before accepting a replacement.
+- [ ] Bound how long an otherwise valid foreground run may continue without an
+  observer. The current implementation relies on its admitted FGS lifetime and
+  has no shorter application deadline.
+- [x] Do not let the inference process admit a new song after completing the
   frozen request without a live main-process decision.
-- [ ] Keep playback-demand and prefetch authority in the main/playback process;
+- [x] Keep playback-demand and prefetch authority in the main/playback process;
   they must not inherit manual full-song survival semantics accidentally.
+
+The deterministic S10/S25 CPU and bounded-GPU observer-loss matrix is recorded
+in
+[Phase 7 observer reattachment](validation/litert-inference-process/phase7/observer-reattachment-2026-07-27.md).
+It proves callback-loss continuation, journal-based discovery, snapshot
+adoption, UI/cache ownership reconstruction, terminal callback delivery, and
+the absence of a second `start()`. It deliberately does not stand in for an
+actual Android main-process kill.
 
 ### Phase 7B: Bounded restart policy
 
@@ -1451,6 +1462,8 @@ across every app state, and cannot be inferred from CPU-only success.
   experiment currently releases the binding and classifies later OS death.
 - [ ] Decide whether completed-stem FLAC promotion must move into the remote
   process so an independently running job can finish without the main process.
+- [x] Restore worker progress, protected-cache ownership, Pause/Cancel routing,
+  and deferred terminal callbacks from an adopted snapshot and event stream.
 - [ ] Reconnect notifications, UI, playback readiness, and cache management
   after main-process recreation.
 - [ ] Confirm Android force-stop always terminates work without automatic
@@ -1458,6 +1471,9 @@ across every app state, and cannot be inferred from CPU-only success.
 
 ### Phase 7D: Recovery and reattachment matrix
 
+- [x] Detach the original observer after the first durable progress event,
+  adopt the same run from a second observer, and complete without a second
+  writer or `start()` on S10 and S25 for CPU and bounded GPU.
 - [ ] Kill and restart the main process before FGS handoff, after first durable
   window, during native invocation, after final segment publication, and during
   terminal journal commit.
