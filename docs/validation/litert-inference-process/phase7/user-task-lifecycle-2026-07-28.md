@@ -1,8 +1,8 @@
 # Phase 7 user and task lifecycle policy
 
 Status: product policy implemented and unit-tested; active-run Pause cleanup
-passes on S10 and S25 for CPU and bounded GPU; recents, Cancel, and force-stop
-device matrices remain open
+passes on S10 and S25 for CPU and bounded GPU, and force-stop passes on S25 for
+CPU and bounded GPU; recents, Cancel, and S10 force-stop coverage remain open
 
 Implementation revisions:
 
@@ -12,6 +12,10 @@ Implementation revisions:
 - `02e0973f` (capture the rebound idle-process state)
 - `39b25efb` (report native-session release after Pause)
 - `90ed5157` (close playback-owner admission races during service teardown)
+- `5df6b9eb` (prepare the debug-only force-stop probe)
+- `b7891c38` (drive force-stop from the ADB host)
+- `3cfbcfe3` (continuously sample the silent force-stop interval)
+- `a2d1b86d` (make malformed force-stop evidence reportable)
 
 ## Playback lifetime
 
@@ -101,6 +105,43 @@ and app APK SHA-256
 All four use runner `phase7-runner-v37` and test APK SHA-256
 `2ee024f5c606504754cb3afc9de2abe2231ab35ce4b85288a45707fca09f47ab`.
 
+### Force-stop
+
+The `force-stop` gate prepares the same product-shaped independent manual run
+without instrumentation, proves that its processing service, notification, and
+wake lock are active, and then executes `am force-stop` from the host. It does
+not expect `onDestroy()` to run or invent a terminal journal transition.
+Instead, a nonterminal journal may remain durably `Running` while its old PID
+and process generation are treated as stale ownership evidence.
+
+The accepted S25/API 35 matrix is:
+
+| Backend | Run | Process exit | Silent PID samples | Report SHA-256 |
+| --- | --- | ---: | ---: | --- |
+| CPU | `phase7-s25-force-stop-cpu-v6` | 269 ms | 54 | `746dbda86199732779effbdc3cd3ffe6e49c2c3b1b166cf508593dc1b4e486ad` |
+| bounded GPU | `phase7-s25-force-stop-gpu-v2` | 390 ms | 57 | `17e6324b12922c9b39006372c9633927bae642c76edd96efb9627d14499f022f` |
+
+Both rows observed every package process exit, kept the package
+`stopped=true`, and found zero process relaunches throughout a 30-second silent
+interval. No processing service, notification, or wake lock remained. The
+journal sequence and SHA-256, plus the complete cache-entry file count, byte
+count, and content digest, were identical immediately after force-stop, after
+the silent interval, and after an explicit app restart.
+
+The explicit restart is allowed to create an empty inference-service process
+while discovery asks whether the stale journal has a matching live run. Both
+rows returned no reconnectable run and reported an `Empty` session with no
+session ID, zero native-session creations, zero active leases, no foreground
+lease, and no wake lock. The stale entry was then removed through the normal
+cache API. This proves no automatic resurrection; the mere presence of an idle
+service record after explicit restart is not execution.
+
+Both reports use app commit `3cfbcfe3073d628ceb35f9303a10c7f8dca52b67`,
+app APK SHA-256
+`9d80b148da5e760b041aa911b8da07c836f6dee3aca1592d7c77be241b413046`,
+runner `phase7-runner-v40`, and test APK SHA-256
+`2ee024f5c606504754cb3afc9de2abe2231ab35ce4b85288a45707fca09f47ab`.
+
 The following claims remain deliberately open until device evidence exists:
 
 - recents removal with the setting enabled and disabled while playback and a
@@ -109,8 +150,7 @@ The following claims remain deliberately open until device evidence exists:
   process binding, native session, and cache lease;
 - playback-demand and prefetch shutdown through a real `PlaybackService`
   teardown;
-- force-stop with a nonterminal journal, proving that `START_NOT_STICKY` and
-  reconnection discovery cannot resurrect work; and
+- force-stop repetition on S10/API 31 and later current-API coverage; and
 - deferred FLAC promotion after actual main-process recreation.
 
 No source decoder, MP3 fallback boundary, window size, overlap, join placement,
