@@ -1,5 +1,6 @@
 package com.mardous.booming.debug
 
+import android.app.NotificationManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -27,6 +28,8 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheSt
 import com.mardous.booming.separation.model.litert.MdxLiteRtGpuRuntimeProfile
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
+import com.mardous.booming.separation.process.ipc.SourceSeparationMediaProcessingForegroundController
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
 import com.mardous.booming.util.MINIMUM_SONG_DURATION
@@ -39,6 +42,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.koin.java.KoinJavaComponent.get
 import java.io.File
+import java.security.MessageDigest
 
 /** Debug-only process-death harness driven by the Phase 7 ADB runner. */
 internal object SourceSeparationMainDeathDebugHarness {
@@ -48,7 +52,7 @@ internal object SourceSeparationMainDeathDebugHarness {
             COMMAND_BEGIN -> {
                 val request = request(intent)
                 launch("SrcSepMainDeathBegin") {
-                    begin(context.applicationContext, request)
+                    begin(context.applicationContext, request, BeginMode.MainProcessDeath)
                 }
                 true
             }
@@ -59,11 +63,26 @@ internal object SourceSeparationMainDeathDebugHarness {
                 }
                 true
             }
+            COMMAND_BEGIN_FORCE_STOP -> {
+                val request = request(intent)
+                launch("SrcSepForceStopBegin") {
+                    begin(context.applicationContext, request, BeginMode.ForceStop)
+                }
+                true
+            }
+            COMMAND_VALIDATE_FORCE_STOP -> {
+                val request = request(intent)
+                val evidence = forceStopEvidence(intent)
+                launch("SrcSepForceStopValidate") {
+                    validateForceStop(context.applicationContext, request, evidence)
+                }
+                true
+            }
             else -> false
         }
     }
 
-    private fun begin(context: Context, request: Request) {
+    private fun begin(context: Context, request: Request, mode: BeginMode) {
         val scenarioFile = scenarioFile(context, request.runId)
         val reportFile = reportFile(context, request.runId)
         scenarioFile.delete()
@@ -130,6 +149,11 @@ internal object SourceSeparationMainDeathDebugHarness {
             val remotePid = requireNotNull(journal.request.ownerPid)
             check(remotePid != Process.myPid())
             check(File("/proc/$remotePid").isDirectory)
+            val journalFile = File(
+                store.entryDirectory(runtimeSong.cacheKey),
+                SourceSeparationCacheStore.RUN_JOURNAL_FILE_NAME,
+            )
+            check(journalFile.isFile)
 
             writeJson(
                 scenarioFile,
@@ -144,21 +168,25 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("remoteProcessGeneration", journal.request.processGeneration)
                     .put("executionRunId", journal.request.runId)
                     .put("journalSequence", journal.latestSequence)
+                    .put("journalPath", journalFile.absolutePath)
+                    .put("journalSha256", journalFile.sha256())
                     .put("committedSegments", journal.committedSegments.size)
                     .put("killBoundary", "segment-running")
-                    .put("killRequester", "debug-main-process")
+                    .put("killRequester", mode.killRequester)
                     .put("backendMode", request.backendMode)
                     .put("tryGpu", request.tryGpu),
             )
-            Log.i(TAG, "Main-death scenario is ready for ${request.runId}.")
-            SystemClock.sleep(MAIN_DEATH_SETTLE_MS)
-            Process.killProcess(Process.myPid())
-            error("The debug main process survived its requested death.")
+            Log.i(TAG, "${mode.stage} scenario is ready for ${request.runId}.")
+            if (mode == BeginMode.MainProcessDeath) {
+                SystemClock.sleep(MAIN_DEATH_SETTLE_MS)
+                Process.killProcess(Process.myPid())
+                error("The debug main process survived its requested death.")
+            }
         } catch (error: Throwable) {
             mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
             scenarioFile.delete()
-            writeFailure(reportFile, request, "setup", error)
-            Log.e(TAG, "Could not prepare main-death scenario ${request.runId}.", error)
+            writeFailure(reportFile, request, mode.stage, "setup", error)
+            Log.e(TAG, "Could not prepare ${mode.stage} scenario ${request.runId}.", error)
         }
     }
 
@@ -325,8 +353,125 @@ internal object SourceSeparationMainDeathDebugHarness {
             )
             Log.i(TAG, "Main-death validation passed for ${request.runId}.")
         } catch (error: Throwable) {
-            writeFailure(outputFile, request, "validation", error)
+            writeFailure(outputFile, request, STAGE_MAIN_DEATH, "validation", error)
             Log.e(TAG, "Main-death validation failed for ${request.runId}.", error)
+        } finally {
+            mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+        }
+    }
+
+    private fun validateForceStop(
+        context: Context,
+        request: Request,
+        evidence: ForceStopEvidence,
+    ) {
+        val scenarioFile = scenarioFile(context, request.runId)
+        val outputFile = reportFile(context, request.runId)
+        var mediaUri: Uri? = null
+        try {
+            val scenario = JSONObject(scenarioFile.readText(Charsets.UTF_8))
+            check(scenario.getInt("schemaVersion") == SCENARIO_SCHEMA_VERSION)
+            check(scenario.getString("runId") == request.runId)
+            check(scenario.getString("backendMode") == request.backendMode)
+            check(scenario.getString("killRequester") == BeginMode.ForceStop.killRequester)
+            val cacheKey = scenario.getString("cacheKey")
+            mediaUri = Uri.parse(scenario.getString("sourceMediaUri"))
+
+            check(evidence.allProcessesExitedAfterStop)
+            check(evidence.allProcessesExitedAfterSilence)
+            check(!evidence.notificationAfterStop && !evidence.notificationAfterSilence)
+            check(!evidence.processingServiceAfterStop &&
+                !evidence.processingServiceAfterSilence)
+            check(!evidence.wakeLockAfterStop && !evidence.wakeLockAfterSilence)
+            check(!evidence.notificationAfterRestart)
+            check(!evidence.processingServiceAfterRestart)
+            check(!evidence.wakeLockAfterRestart)
+            check(evidence.journalSha256AfterStop == evidence.journalSha256AfterSilence)
+            check(evidence.journalSha256AfterStop == evidence.journalSha256AfterRestart)
+            check(evidence.journalSequenceAfterStop == evidence.journalSequenceAfterSilence)
+            check(evidence.journalSequenceAfterStop == evidence.journalSequenceAfterRestart)
+
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val journal = requireNotNull(store.readRunJournal(cacheKey))
+            check(journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running) {
+                "Force-stop must not depend on onDestroy changing the journal."
+            }
+            check(journal.latestSequence == evidence.journalSequenceAfterRestart)
+            check(journal.request.runId == scenario.getString("executionRunId"))
+            check(journal.request.processGeneration ==
+                scenario.getLong("remoteProcessGeneration"))
+
+            val worker = get<SourceSeparationForegroundWorkerCoordinator>(
+                SourceSeparationForegroundWorkerCoordinator::class.java,
+            )
+            check(waitUntil(REATTACH_TIMEOUT_MS) {
+                !worker.isWorkerActive() &&
+                    worker.runningCacheKey() == null &&
+                    worker.protectedCacheKeys().isEmpty()
+            }) { "The explicit app restart attempted to resume force-stopped work." }
+            val ownership = get<SourceSeparationProcessingOwnershipHandoff>(
+                SourceSeparationProcessingOwnershipHandoff::class.java,
+            ).stateFlow.value
+            check(ownership.activeOwner == null)
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                as NotificationManager
+            check(notificationManager.activeNotifications.none { notification ->
+                notification.id == SourceSeparationMediaProcessingForegroundController
+                    .NOTIFICATION_ID
+            })
+
+            val runtime = get<SourceSeparationRuntimeFacade>(
+                SourceSeparationRuntimeFacade::class.java,
+            )
+            check(runtime.delete(cacheKey) == SourceSeparationCacheMutationResult.Completed) {
+                "The stale force-stop cache could not be removed after validation."
+            }
+            writeJson(
+                outputFile,
+                JSONObject()
+                    .put("schemaVersion", FORCE_STOP_REPORT_SCHEMA_VERSION)
+                    .put("status", "passed")
+                    .put("stage", STAGE_FORCE_STOP)
+                    .put("runId", request.runId)
+                    .put("cacheKey", cacheKey)
+                    .put("oldMainPid", scenario.getInt("mainPid"))
+                    .put("oldRemotePid", scenario.getInt("remotePid"))
+                    .put("newMainPid", Process.myPid())
+                    .put("executionRunId", journal.request.runId)
+                    .put("processGeneration", journal.request.processGeneration)
+                    .put("journalLifecycleAfterRestart", journal.lifecycle.name)
+                    .put("journalSequenceAtReady", scenario.getLong("journalSequence"))
+                    .put("journalSha256AtReady", scenario.getString("journalSha256"))
+                    .put("journalSequenceAfterStop", evidence.journalSequenceAfterStop)
+                    .put("journalSequenceAfterSilence", evidence.journalSequenceAfterSilence)
+                    .put("journalSequenceAfterRestart", evidence.journalSequenceAfterRestart)
+                    .put("journalSha256AfterStop", evidence.journalSha256AfterStop)
+                    .put("journalSha256AfterSilence", evidence.journalSha256AfterSilence)
+                    .put("journalSha256AfterRestart", evidence.journalSha256AfterRestart)
+                    .put("forceStopExitElapsedMs", evidence.forceStopExitElapsedMs)
+                    .put("silentObservationMs", evidence.silentObservationMs)
+                    .put("allProcessesExitedAfterStop", true)
+                    .put("allProcessesExitedAfterSilence", true)
+                    .put("notificationAfterStop", false)
+                    .put("notificationAfterSilence", false)
+                    .put("notificationAfterRestart", false)
+                    .put("processingServiceAfterStop", false)
+                    .put("processingServiceAfterSilence", false)
+                    .put("processingServiceAfterRestart", false)
+                    .put("wakeLockAfterStop", false)
+                    .put("wakeLockAfterSilence", false)
+                    .put("wakeLockAfterRestart", false)
+                    .put("automaticResumeObserved", false)
+                    .put("onDestroyJournalTransitionRequired", false)
+                    .put("staleRunningJournalAccepted", true)
+                    .put("staleCacheCleanup", "Completed")
+                    .put("tryGpu", journal.request.tryGpu)
+                    .put("admittedGpuRuntime", gpuRuntimeJson(journal)),
+            )
+            Log.i(TAG, "Force-stop validation passed for ${request.runId}.")
+        } catch (error: Throwable) {
+            writeFailure(outputFile, request, STAGE_FORCE_STOP, "validation", error)
+            Log.e(TAG, "Force-stop validation failed for ${request.runId}.", error)
         } finally {
             mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
         }
@@ -402,6 +547,41 @@ internal object SourceSeparationMainDeathDebugHarness {
         )
     }
 
+    private fun forceStopEvidence(intent: Intent): ForceStopEvidence = ForceStopEvidence(
+        journalSha256AfterStop = intent.requiredString(EXTRA_JOURNAL_SHA_AFTER_STOP),
+        journalSha256AfterSilence = intent.requiredString(EXTRA_JOURNAL_SHA_AFTER_SILENCE),
+        journalSha256AfterRestart = intent.requiredString(EXTRA_JOURNAL_SHA_AFTER_RESTART),
+        journalSequenceAfterStop = intent.getLongExtra(EXTRA_JOURNAL_SEQUENCE_AFTER_STOP, -1L)
+            .also { require(it >= 0L) },
+        journalSequenceAfterSilence =
+            intent.getLongExtra(EXTRA_JOURNAL_SEQUENCE_AFTER_SILENCE, -1L)
+                .also { require(it >= 0L) },
+        journalSequenceAfterRestart =
+            intent.getLongExtra(EXTRA_JOURNAL_SEQUENCE_AFTER_RESTART, -1L)
+                .also { require(it >= 0L) },
+        forceStopExitElapsedMs = intent.getLongExtra(EXTRA_FORCE_STOP_EXIT_MS, -1L)
+            .also { require(it >= 0L) },
+        silentObservationMs = intent.getLongExtra(EXTRA_SILENT_OBSERVATION_MS, -1L)
+            .also { require(it > 0L) },
+        allProcessesExitedAfterStop =
+            intent.getBooleanExtra(EXTRA_ALL_PROCESSES_EXITED_AFTER_STOP, false),
+        allProcessesExitedAfterSilence =
+            intent.getBooleanExtra(EXTRA_ALL_PROCESSES_EXITED_AFTER_SILENCE, false),
+        notificationAfterStop = intent.getBooleanExtra(EXTRA_NOTIFICATION_AFTER_STOP, true),
+        notificationAfterSilence =
+            intent.getBooleanExtra(EXTRA_NOTIFICATION_AFTER_SILENCE, true),
+        notificationAfterRestart = intent.getBooleanExtra(EXTRA_NOTIFICATION_AFTER_RESTART, true),
+        processingServiceAfterStop =
+            intent.getBooleanExtra(EXTRA_PROCESSING_SERVICE_AFTER_STOP, true),
+        processingServiceAfterSilence =
+            intent.getBooleanExtra(EXTRA_PROCESSING_SERVICE_AFTER_SILENCE, true),
+        processingServiceAfterRestart =
+            intent.getBooleanExtra(EXTRA_PROCESSING_SERVICE_AFTER_RESTART, true),
+        wakeLockAfterStop = intent.getBooleanExtra(EXTRA_WAKE_LOCK_AFTER_STOP, true),
+        wakeLockAfterSilence = intent.getBooleanExtra(EXTRA_WAKE_LOCK_AFTER_SILENCE, true),
+        wakeLockAfterRestart = intent.getBooleanExtra(EXTRA_WAKE_LOCK_AFTER_RESTART, true),
+    )
+
     private fun Intent.requiredString(key: String): String =
         requireNotNull(getStringExtra(key)?.takeIf(String::isNotBlank)) {
             "Missing debug process-death argument: $key"
@@ -425,6 +605,7 @@ internal object SourceSeparationMainDeathDebugHarness {
     private fun writeFailure(
         file: File,
         request: Request,
+        stage: String,
         phase: String,
         error: Throwable,
     ) {
@@ -433,7 +614,7 @@ internal object SourceSeparationMainDeathDebugHarness {
             JSONObject()
                 .put("schemaVersion", REPORT_SCHEMA_VERSION)
                 .put("status", "failed")
-                .put("stage", "independent-main-death")
+                .put("stage", stage)
                 .put("phase", phase)
                 .put("runId", request.runId)
                 .put("backendMode", request.backendMode)
@@ -450,6 +631,10 @@ internal object SourceSeparationMainDeathDebugHarness {
             check(temporary.delete()) { "Could not remove temporary debug report." }
         }
     }
+
+    private fun File.sha256(): String = MessageDigest.getInstance("SHA-256")
+        .digest(readBytes())
+        .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
     private fun registerSourceInMediaStore(context: Context, path: String, runId: String): Uri {
         val resolver = context.contentResolver
@@ -590,17 +775,72 @@ internal object SourceSeparationMainDeathDebugHarness {
             get() = backendMode == "auto"
     }
 
+    private data class ForceStopEvidence(
+        val journalSha256AfterStop: String,
+        val journalSha256AfterSilence: String,
+        val journalSha256AfterRestart: String,
+        val journalSequenceAfterStop: Long,
+        val journalSequenceAfterSilence: Long,
+        val journalSequenceAfterRestart: Long,
+        val forceStopExitElapsedMs: Long,
+        val silentObservationMs: Long,
+        val allProcessesExitedAfterStop: Boolean,
+        val allProcessesExitedAfterSilence: Boolean,
+        val notificationAfterStop: Boolean,
+        val notificationAfterSilence: Boolean,
+        val notificationAfterRestart: Boolean,
+        val processingServiceAfterStop: Boolean,
+        val processingServiceAfterSilence: Boolean,
+        val processingServiceAfterRestart: Boolean,
+        val wakeLockAfterStop: Boolean,
+        val wakeLockAfterSilence: Boolean,
+        val wakeLockAfterRestart: Boolean,
+    )
+
+    private enum class BeginMode(
+        val stage: String,
+        val killRequester: String,
+    ) {
+        MainProcessDeath(STAGE_MAIN_DEATH, "debug-main-process"),
+        ForceStop(STAGE_FORCE_STOP, "adb-am-force-stop"),
+    }
+
     const val COMMAND_BEGIN = "beginIndependentMainDeath"
     const val COMMAND_VALIDATE = "validateIndependentMainDeath"
+    const val COMMAND_BEGIN_FORCE_STOP = "beginIndependentForceStop"
+    const val COMMAND_VALIDATE_FORCE_STOP = "validateIndependentForceStop"
 
     private const val EXTRA_RUN_ID = "runId"
     private const val EXTRA_SOURCE_PATH = "sourcePath"
     private const val EXTRA_MODEL_ID = "modelId"
     private const val EXTRA_ARTIFACT_SHA256 = "artifactSha256"
     private const val EXTRA_BACKEND_MODE = "backendMode"
+    private const val EXTRA_JOURNAL_SHA_AFTER_STOP = "journalSha256AfterStop"
+    private const val EXTRA_JOURNAL_SHA_AFTER_SILENCE = "journalSha256AfterSilence"
+    private const val EXTRA_JOURNAL_SHA_AFTER_RESTART = "journalSha256AfterRestart"
+    private const val EXTRA_JOURNAL_SEQUENCE_AFTER_STOP = "journalSequenceAfterStop"
+    private const val EXTRA_JOURNAL_SEQUENCE_AFTER_SILENCE = "journalSequenceAfterSilence"
+    private const val EXTRA_JOURNAL_SEQUENCE_AFTER_RESTART = "journalSequenceAfterRestart"
+    private const val EXTRA_FORCE_STOP_EXIT_MS = "forceStopExitElapsedMs"
+    private const val EXTRA_SILENT_OBSERVATION_MS = "silentObservationMs"
+    private const val EXTRA_ALL_PROCESSES_EXITED_AFTER_STOP = "allProcessesExitedAfterStop"
+    private const val EXTRA_ALL_PROCESSES_EXITED_AFTER_SILENCE =
+        "allProcessesExitedAfterSilence"
+    private const val EXTRA_NOTIFICATION_AFTER_STOP = "notificationAfterStop"
+    private const val EXTRA_NOTIFICATION_AFTER_SILENCE = "notificationAfterSilence"
+    private const val EXTRA_NOTIFICATION_AFTER_RESTART = "notificationAfterRestart"
+    private const val EXTRA_PROCESSING_SERVICE_AFTER_STOP = "processingServiceAfterStop"
+    private const val EXTRA_PROCESSING_SERVICE_AFTER_SILENCE = "processingServiceAfterSilence"
+    private const val EXTRA_PROCESSING_SERVICE_AFTER_RESTART = "processingServiceAfterRestart"
+    private const val EXTRA_WAKE_LOCK_AFTER_STOP = "wakeLockAfterStop"
+    private const val EXTRA_WAKE_LOCK_AFTER_SILENCE = "wakeLockAfterSilence"
+    private const val EXTRA_WAKE_LOCK_AFTER_RESTART = "wakeLockAfterRestart"
     private const val OUTPUT_DIRECTORY = "phase7-debug-main-death"
     private const val SCENARIO_SCHEMA_VERSION = 1
     private const val REPORT_SCHEMA_VERSION = 1
+    private const val FORCE_STOP_REPORT_SCHEMA_VERSION = "phase7-task-lifecycle-report-v1"
+    private const val STAGE_MAIN_DEATH = "independent-main-death"
+    private const val STAGE_FORCE_STOP = "force-stop"
     private const val SETUP_TIMEOUT_MS = 5L * 60L * 1_000L
     private const val REATTACH_TIMEOUT_MS = 60_000L
     private const val COMPLETION_TIMEOUT_MS = 30L * 60L * 1_000L
