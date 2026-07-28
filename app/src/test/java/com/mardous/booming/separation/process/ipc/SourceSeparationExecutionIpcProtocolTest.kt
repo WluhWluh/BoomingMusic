@@ -236,6 +236,40 @@ class SourceSeparationExecutionIpcProtocolTest {
     }
 
     @Test
+    fun `event queue drains durable events and latest progress in order`() {
+        val queue = SourceSeparationRemoteEventQueue()
+        queue.offer(event(1L, SourceSeparationExecutionHostEventPayload.Accepted::class.java.name))
+        queue.offer(progressEvent(2L, 1))
+        queue.offer(progressEvent(3L, 2))
+
+        assertEquals(listOf(1L, 3L), queue.drain().map { it.sequence })
+        assertTrue(queue.drain().isEmpty())
+    }
+
+    @Test
+    fun `reconnected observer applies snapshot baseline before newer events`() {
+        val delivered = mutableListOf<Long>()
+        val observer = SourceSeparationReconnectedEventObserver(
+            runId = "run-1",
+            processGeneration = 7L,
+            baselineSequence = 3L,
+            delivery = { delivered += it.sequence },
+        )
+
+        observer.offer(progressEvent(2L, 2))
+        observer.offer(progressEvent(4L, 4))
+        observer.offer(progressEvent(5L, 5))
+        assertTrue(delivered.isEmpty())
+
+        observer.activate()
+        observer.offer(progressEvent(6L, 6))
+        assertEquals(listOf(4L, 5L, 6L), delivered)
+        assertThrows(IllegalArgumentException::class.java) {
+            observer.offer(progressEvent(7L, 7).copy(runId = "stale"))
+        }
+    }
+
+    @Test
     fun `event sender detaches a failed observer and resumes with a replacement`() {
         val failed = CountDownLatch(1)
         val delivered = CountDownLatch(1)

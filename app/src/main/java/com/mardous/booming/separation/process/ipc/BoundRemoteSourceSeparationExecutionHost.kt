@@ -72,6 +72,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private var activeServiceConnection: ServiceConnection? = null
     private var activeRequest: SourceSeparationExecutionHostRequest? = null
     private var activePump: RemoteControlPump? = null
+    private var adoptedObserver: SourceSeparationReconnectedEventObserver? = null
     private val controlSequence = AtomicLong(0L)
     private val terminalConnectionFailure = AtomicReference<Throwable?>(null)
     private val callbackFailure = AtomicReference<Throwable?>(null)
@@ -103,6 +104,46 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     fun reconnectableRun(): SourceSeparationIpcActiveRunState? {
         ensureConnected()
         return connectionLock.withLock { connectResponse?.activeRun }
+    }
+
+    fun adoptReconnectableRun(
+        onSnapshot: (SourceSeparationExecutionHostSnapshot) -> Unit,
+        onEvent: (com.mardous.booming.separation.process
+            .SourceSeparationExecutionHostEvent) -> Unit,
+    ): SourceSeparationReconnectedRun? {
+        val announced = reconnectableRun() ?: return null
+        require(announced.authority == SourceSeparationIpcRunAuthority.IndependentForeground) {
+            "Only an independent foreground run can be adopted after reconnect."
+        }
+        val descriptor = announced.descriptor
+        val snapshot = requireNotNull(snapshot(descriptor.runId, descriptor.processGeneration)) {
+            "The reconnectable run no longer has an active host snapshot."
+        }
+        val observer = SourceSeparationReconnectedEventObserver(
+            runId = descriptor.runId,
+            processGeneration = descriptor.processGeneration,
+            baselineSequence = snapshot.latestEvent.sequence,
+            delivery = onEvent,
+        )
+        connectionLock.withLock {
+            check(activeRequest == null && adoptedObserver == null) {
+                "The bound-remote host already owns an active observer."
+            }
+            val current = requireNotNull(connectResponse?.activeRun) {
+                "The reconnectable run disappeared before adoption."
+            }
+            require(current.descriptor == descriptor) {
+                "The reconnectable run changed before adoption."
+            }
+            reconnectEvents.drain().forEach(observer::offer)
+            adoptedObserver = observer
+        }
+        onSnapshot(snapshot)
+        observer.activate()
+        return SourceSeparationReconnectedRun(
+            state = announced.copy(snapshot = snapshot),
+            snapshot = snapshot,
+        )
     }
 
     fun processDiagnostics(): SourceSeparationProcessDiagnostics {
@@ -260,7 +301,9 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             leaseIdFactory = foregroundLeaseIdFactory,
         )
         val service = connectionLock.withLock {
-            check(activeRequest == null) { "Bound-remote execution host is busy." }
+            check(activeRequest == null && adoptedObserver == null) {
+                "Bound-remote execution host is busy."
+            }
             callbackFailure.set(null)
             activeRequest = request
             requireNotNull(remoteService)
@@ -444,6 +487,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             connectResponse = null
             expectedRecycle = null
             activeRequest = null
+            adoptedObserver = null
             callbackFailure.set(null)
             connectionChanged.signalAll()
             state
@@ -494,7 +538,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 SourceSeparationRemoteConnectionState.Unbound,
                 SourceSeparationRemoteConnectionState.Dead,
                 -> {
-                    check(activeRequest == null) {
+                    check(activeRequest == null && adoptedObserver == null) {
                         "A dead bound-remote run cannot rebind in place."
                     }
                     connectionState = SourceSeparationRemoteConnectionState.Binding
@@ -659,13 +703,23 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private val callback = object : ISourceSeparationExecutionCallback.Stub() {
         override fun onEvent(eventJson: String) {
             val event = SourceSeparationExecutionIpcCodec.decodeEvent(eventJson)
-            val request = connectionLock.withLock {
-                activeRequest
-            }
-            if (request == null) {
+            val target = connectionLock.withLock {
+                activeRequest?.let { return@withLock EventTarget.Request(it) }
+                adoptedObserver?.let { return@withLock EventTarget.Observer(it) }
                 reconnectEvents.offer(event)
-                return
+                null
             }
+            when (target) {
+                is EventTarget.Request -> deliverToRequest(target.request, event)
+                is EventTarget.Observer -> target.observer.offer(event)
+                null -> Unit
+            }
+        }
+
+        private fun deliverToRequest(
+            request: SourceSeparationExecutionHostRequest,
+            event: com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent,
+        ) {
             require(event.runId == request.descriptor.runId &&
                 event.processGeneration == request.descriptor.processGeneration
             ) {
@@ -678,6 +732,16 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 throw error
             }
         }
+    }
+
+    private sealed interface EventTarget {
+        data class Request(
+            val request: SourceSeparationExecutionHostRequest,
+        ) : EventTarget
+
+        data class Observer(
+            val observer: SourceSeparationReconnectedEventObserver,
+        ) : EventTarget
     }
 
     private fun createServiceConnection(bindingGeneration: Long) =
@@ -814,12 +878,13 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             ) {
                 return SourceSeparationExecutionHostControlResult.HostClosed
             }
-            val request = activeRequest
+            val descriptor = activeRequest?.descriptor
+                ?: connectResponse?.activeRun?.descriptor?.takeIf { adoptedObserver != null }
                 ?: return SourceSeparationExecutionHostControlResult.NoActiveRun
-            if (request.descriptor.processGeneration != processGeneration) {
+            if (descriptor.processGeneration != processGeneration) {
                 return SourceSeparationExecutionHostControlResult.StaleGeneration
             }
-            if (request.descriptor.runId != runId) {
+            if (descriptor.runId != runId) {
                 return SourceSeparationExecutionHostControlResult.StaleRun
             }
             requireNotNull(remoteService)
@@ -883,6 +948,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             val value = activePump
             activePump = null
             activeRequest = null
+            adoptedObserver = null
             controlSequence.set(0L)
             callbackFailure.set(null)
             value
@@ -1018,6 +1084,51 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         val generation: Long,
         val serviceConnection: ServiceConnection,
     )
+}
+
+internal data class SourceSeparationReconnectedRun(
+    val state: SourceSeparationIpcActiveRunState,
+    val snapshot: SourceSeparationExecutionHostSnapshot,
+)
+
+internal class SourceSeparationReconnectedEventObserver(
+    private val runId: String,
+    private val processGeneration: Long,
+    baselineSequence: Long,
+    private val delivery: (com.mardous.booming.separation.process
+        .SourceSeparationExecutionHostEvent) -> Unit,
+) {
+    private val pending = ArrayDeque<com.mardous.booming.separation.process
+        .SourceSeparationExecutionHostEvent>()
+    private var highestSequence = baselineSequence
+    private var active = false
+
+    init {
+        require(runId.isNotBlank() && processGeneration > 0L && baselineSequence > 0L) {
+            "Reconnect observer identity is invalid."
+        }
+    }
+
+    @Synchronized
+    fun offer(event: com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent) {
+        require(event.runId == runId && event.processGeneration == processGeneration) {
+            "Reconnect observer received a stale event."
+        }
+        if (event.sequence <= highestSequence) return
+        highestSequence = event.sequence
+        if (active) {
+            delivery(event)
+        } else {
+            pending.addLast(event)
+        }
+    }
+
+    @Synchronized
+    fun activate() {
+        if (active) return
+        active = true
+        while (pending.isNotEmpty()) delivery(pending.removeFirst())
+    }
 }
 
 internal enum class SourceSeparationRemoteForegroundPolicy {

@@ -74,6 +74,15 @@ internal class SourceSeparationRemoteEventQueue(
         }
     }
 
+    fun drain(): List<SourceSeparationExecutionHostEvent> = lock.withLock {
+        buildList {
+            while (durableEvents.isNotEmpty()) add(durableEvents.removeFirst())
+            pendingProgress?.let(::add)
+        }.also {
+            pendingProgress = null
+        }
+    }
+
     fun snapshot(): SourceSeparationRemoteEventQueueSnapshot = lock.withLock {
         SourceSeparationRemoteEventQueueSnapshot(
             durableEventCount = durableEvents.size,
