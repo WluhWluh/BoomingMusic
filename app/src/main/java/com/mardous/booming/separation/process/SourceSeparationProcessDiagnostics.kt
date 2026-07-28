@@ -21,6 +21,8 @@ internal data class SourceSeparationProcessDiagnostics(
     val validationOverride: SourceSeparationProcessValidationOverrideDiagnostics? = null,
     val foregroundService: SourceSeparationForegroundServiceDiagnostics =
         SourceSeparationForegroundServiceDiagnostics(),
+    val processingWakeLock: SourceSeparationProcessingWakeLockDiagnostics =
+        SourceSeparationProcessingWakeLockDiagnostics(),
 ) {
     init {
         require(processGeneration > 0L) { "Process diagnostic generation is invalid." }
@@ -164,6 +166,8 @@ internal object SourceSeparationProcessDiagnosticsCollector {
         validationOverride: SourceSeparationProcessValidationOverrideDiagnostics? = null,
         foregroundService: SourceSeparationForegroundServiceDiagnostics =
             SourceSeparationForegroundServiceDiagnostics(),
+        processingWakeLock: SourceSeparationProcessingWakeLockDiagnostics =
+            SourceSeparationProcessingWakeLockDiagnostics(),
         procRoot: File = File("/proc/self"),
     ): SourceSeparationProcessDiagnostics {
         val status = readText(File(procRoot, "status"))
@@ -213,6 +217,7 @@ internal object SourceSeparationProcessDiagnosticsCollector {
             session = session,
             validationOverride = validationOverride,
             foregroundService = foregroundService,
+            processingWakeLock = processingWakeLock,
         )
     }
 

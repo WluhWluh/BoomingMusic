@@ -16,7 +16,7 @@ import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 9
+internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 10
 
 internal interface SourceSeparationExecutionHost : AutoCloseable {
     val mode: SourceSeparationExecutionHostMode
@@ -327,6 +327,7 @@ data class SourceSeparationExecutionHostDiagnostics(
     val runtimeName: String? = null,
     val latestEventSequence: Long,
     val foregroundService: SourceSeparationForegroundServiceDiagnostics? = null,
+    val processingWakeLock: SourceSeparationProcessingWakeLockDiagnostics? = null,
 )
 
 @Serializable
