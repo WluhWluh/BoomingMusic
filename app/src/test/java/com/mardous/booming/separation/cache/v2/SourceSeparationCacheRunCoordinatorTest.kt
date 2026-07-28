@@ -430,6 +430,59 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `clearing an abandoned run starts a fresh backend admission`() {
+        val fixture = fixture()
+        val runtimeIdentity = admittedGpuRuntimeIdentity()
+        val abandonedRequest = fixture.request.copy(
+            runId = "abandoned-gpu-run",
+            processGeneration = 1L,
+            ownerPid = 100,
+            tryGpu = true,
+            gpuRuntimeIdentity = runtimeIdentity,
+        )
+        val abandoned = (fixture.coordinator.begin(abandonedRequest) as
+            SourceSeparationCacheRunStart.Ready).run
+        val preparation = fixture.preparation(abandoned, SourceSeparationSegmentState.Queued)
+        fixture.coordinator.updatePreparation(abandoned, preparation)
+        fixture.coordinator.updateSegmentState(abandoned, 0, SourceSeparationSegmentState.Ready)
+        assertEquals(
+            1,
+            fixture.store.readRunJournal(abandoned.identity.cacheKey)?.committedSegments?.size,
+        )
+        abandoned.close()
+
+        assertEquals(
+            SourceSeparationCacheMutationResult.Completed,
+            fixture.repository.delete(abandoned.identity.cacheKey),
+        )
+        assertNull(fixture.store.readRunJournal(abandoned.identity.cacheKey))
+        assertNull(fixture.coordinator.inspectAdmittedRuntimePolicy(abandoned.identity))
+
+        val freshRequest = fixture.request.copy(
+            runId = "fresh-cpu-run",
+            processGeneration = 2L,
+            ownerPid = 200,
+            tryGpu = false,
+            gpuRuntimeIdentity = null,
+        )
+        val fresh = (fixture.coordinator.begin(freshRequest) as
+            SourceSeparationCacheRunStart.Ready).run
+        val freshJournal = requireNotNull(
+            fixture.store.readRunJournal(fresh.identity.cacheKey)
+        )
+
+        assertNull(fresh.resumeState)
+        assertFalse(freshJournal.request.tryGpu)
+        assertNull(freshJournal.request.gpuRuntimeIdentity)
+        assertEquals(
+            listOf(SourceSeparationCacheRunTransitionType.Admitted),
+            freshJournal.transitions.map { it.type },
+        )
+        assertEquals(listOf(1L), freshJournal.transitions.map { it.sequence })
+        fixture.coordinator.pause(fresh)
+    }
+
+    @Test
     fun `GPU fallback latch is durable idempotent and required on resume`() {
         val fixture = fixture()
         val runtimeIdentity = admittedGpuRuntimeIdentity()

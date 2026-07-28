@@ -1586,7 +1586,13 @@ policy changed in response.
   incomplete-cache retention, complete owner/resource release, rejection of
   stale playback admission, and no independent inference FGS.
 - [ ] Run model deletion and cache clearing against pending explicit-retry
-  state and require typed rejection without automatic resurrection.
+  state. Deleting the still-active model remains blocked. After an explicit
+  model switch and old-model deletion, a later start must use the new model
+  identity and cache key. Clearing the old cache must remove its journal and
+  frozen backend policy; only another explicit user start may create a fresh
+  sequence-1 admission from zero with the then-current `tryGpu` value. The
+  coordinator-level cache-clear contract is unit-tested; product/device paths
+  remain open. None of these operations may resurrect the old generation.
 - [x] Change `tryGpu` after inference-process death and prove explicit retry
   still uses the original admitted value. This passes with false-to-true CPU
   and true-to-false bounded GPU changes on both S10 and S25.
