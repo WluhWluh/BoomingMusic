@@ -490,6 +490,7 @@ class PlaybackService :
 
     override fun onDestroy() {
         traceSourceSeparationPlayback("service.onDestroy")
+        sourceSeparationForegroundWorkerCoordinator.onPlaybackServiceStopped()
         clearSourceSeparationPlayback(restoreOriginalItem = false, broadcast = false)
         flushSourceSeparationPlaybackTrace()
         sourceSeparationPreStartJob?.cancel()

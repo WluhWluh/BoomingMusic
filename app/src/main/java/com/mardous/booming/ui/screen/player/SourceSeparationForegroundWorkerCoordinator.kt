@@ -23,6 +23,7 @@ import com.mardous.booming.separation.model.MdxSourceDecodeMode
 import com.mardous.booming.separation.model.SourceSeparationModelLoadException
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
+import com.mardous.booming.separation.process.SourceSeparationPlaybackLifecyclePolicy
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
 import com.mardous.booming.separation.process.ipc.SourceSeparationReconnectedSession
 import com.mardous.booming.separation.process.toMdxRangeProgress
@@ -160,6 +161,24 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             )
         )
         ensureWorkerRunningIfActivated()
+    }
+
+    fun onPlaybackServiceStopped() {
+        val nowElapsedMs = SystemClock.elapsedRealtime()
+        val playback = _playbackStateFlow.value
+        _playbackStateFlow.value = playback.copy(
+            positionMs = playback.estimatedPositionMs(nowElapsedMs),
+            isPlaying = false,
+            updatedAtElapsedMs = nowElapsedMs,
+        )
+        workerActivated = false
+        clearPendingStart()
+        if (SourceSeparationPlaybackLifecyclePolicy.shouldPauseWhenPlaybackStops(
+                activeWorkerRequest?.runClass,
+            )
+        ) {
+            pauseRequested.set(true)
+        }
     }
 
     fun estimatedPositionMs(): Long {
@@ -749,6 +768,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 val request = nextWorkerRequest()
                 if (request == null) {
                     workerSongId = null
+                    if (!workerActivated) break
                     delay(SOURCE_SEPARATION_FOREGROUND_WORKER_IDLE_MS)
                     continue
                 }
