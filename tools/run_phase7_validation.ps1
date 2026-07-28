@@ -36,11 +36,12 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v24",
+    [string]$RunnerRevision = "phase7-runner-v25",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
         "",
+        "gpu-opencl-bounded-fp32-v1",
         "gpu-auto-fp32-v1",
         "gpu-opencl-fp32-v1",
         "gpu-opencl-low-fp32-v1",
@@ -189,6 +190,12 @@ if ($RemoteAutoFailpoint -ne "none" -and
 }
 if ($AutoFailInvocationCount -lt 2) {
     throw "AutoFailInvocationCount must preserve the first finite-output probe."
+}
+if ([string]::IsNullOrWhiteSpace($GpuRuntimeProfileId) -and
+        $BackendMode -eq "auto" -and $Stage -eq "worker" -and
+        $ExecutionHostMode -eq "in-process" -and $AutoFailpoint -eq "none" -and
+        $RemoteAutoFailpoint -eq "none") {
+    $GpuRuntimeProfileId = "gpu-opencl-bounded-fp32-v1"
 }
 $boundRemoteBackendSupported = $BackendMode -eq "auto" -or
     ($Stage -eq "worker" -and $BackendMode -eq "cpu" -and -not $X86ProcessValidation)
