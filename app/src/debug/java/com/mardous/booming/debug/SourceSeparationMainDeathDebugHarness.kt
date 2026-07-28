@@ -235,6 +235,8 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("stage", mode.stage)
                     .put("runId", request.runId)
                     .put("cacheKey", runtimeSong.cacheKey)
+                    .put("remoteDeathRecoveryAction",
+                        request.remoteDeathRecoveryAction.argumentValue)
                     .put("sourceMediaUri", mediaUri.toString())
                     .put("sourcePath", request.sourcePath)
                     .put("mainPid", Process.myPid())
@@ -307,6 +309,8 @@ internal object SourceSeparationMainDeathDebugHarness {
             check(scenario.getString("stage") == STAGE_REMOTE_DEATH)
             check(scenario.getString("runId") == request.runId)
             check(scenario.getString("backendMode") == request.backendMode)
+            check(scenario.getString("remoteDeathRecoveryAction") ==
+                request.remoteDeathRecoveryAction.argumentValue)
             check(scenario.getString("killBoundary") ==
                 MainDeathBoundary.AfterFirstCommittedSegment.argumentValue)
             check(scenario.getString("killRequester") ==
@@ -445,6 +449,160 @@ internal object SourceSeparationMainDeathDebugHarness {
             ) { "Could not toggle the GPU preference before explicit resume." }
             check(preferences.getBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu) ==
                 persistedTryGpu)
+            if (request.remoteDeathRecoveryAction ==
+                RemoteDeathRecoveryAction.ClearCacheThenStart
+            ) {
+                check(runtime.delete(cacheKey) == SourceSeparationCacheMutationResult.Completed) {
+                    "The abandoned cache could not be cleared after owner death."
+                }
+                check(!store.entryDirectory(cacheKey).exists())
+                check(store.readRunJournal(cacheKey) == null)
+                check(runtime.cacheStatus(runtimeSong) ==
+                    SourceSeparationModelAwareCacheStatus.Missing)
+                coordinator.clearStatusIfNotRunning()
+                check(coordinator.workerStateFlow.value == SourceSeparationUiState.Idle)
+
+                val root = store.root().directory
+                val freshFaultToken = "remote-clear-${request.runId}"
+                    .take(MAX_FAULT_TOKEN_LENGTH)
+                SourceSeparationCacheFaultInjection.arm(
+                    root,
+                    SourceSeparationCacheFaultControl(
+                        token = freshFaultToken,
+                        stage = SourceSeparationCacheFaultStage.NativeInvocation,
+                        action = SourceSeparationCacheFaultAction.Barrier,
+                        timeoutMs = REMOTE_DEATH_BARRIER_TIMEOUT_MS,
+                    ),
+                )
+                coordinator.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = source.duration,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+                check(coordinator.startCurrentSong())
+                val freshFaultHit = waitForCacheFaultHit(root, freshFaultToken)
+                val freshJournal = waitForJournal(SETUP_TIMEOUT_MS) {
+                    store.readRunJournal(cacheKey)?.takeIf { journal ->
+                        journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running &&
+                            journal.request.runId != oldExecutionRunId &&
+                            journal.request.processGeneration != oldProcessGeneration &&
+                            journal.request.ownerPid != oldRemotePid
+                    }
+                }
+                val freshRemotePid = requireNotNull(freshJournal.request.ownerPid)
+                check(freshFaultHit.pid == freshRemotePid)
+                check(freshJournal.committedSegments.isEmpty())
+                check(freshJournal.transitions.first().let { transition ->
+                    transition.sequence == 1L &&
+                        transition.type == SourceSeparationCacheRunTransitionType.Admitted &&
+                        transition.runId == freshJournal.request.runId
+                })
+                check(freshJournal.transitions.none { transition ->
+                    transition.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+                })
+                check(freshJournal.request.tryGpu == persistedTryGpu)
+                check(freshJournal.request.gpuFallbackLatch == null)
+                if (persistedTryGpu) {
+                    val freshGpuRuntime = requireNotNull(
+                        freshJournal.request.gpuRuntimeIdentity
+                    )
+                    check(freshGpuRuntime.profileId ==
+                        MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1.profileId)
+                    check(freshGpuRuntime.kernelBatchSize == 1)
+                    check(freshGpuRuntime.commandQueueWindowSize == 1)
+                } else {
+                    check(freshJournal.request.gpuRuntimeIdentity == null)
+                }
+                val freshRemoteProcessStartTicks = SourceSeparationProcParser
+                    .parseProcessStartTicks(File("/proc/$freshRemotePid/stat").readText())
+                    ?: error("Could not read the fresh remote process start ticks.")
+                check(freshRemoteProcessStartTicks != oldRemoteProcessStartTicks)
+
+                coordinator.pauseCurrentSong(source)
+                SourceSeparationCacheFaultInjection.release(root, freshFaultToken)
+                val pausedFreshJournal = waitForJournal(COMPLETION_TIMEOUT_MS) {
+                    store.readRunJournal(cacheKey)?.takeIf { journal ->
+                        journal.request.runId == freshJournal.request.runId &&
+                            journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused
+                    }
+                }
+                check(waitUntil(REATTACH_TIMEOUT_MS) {
+                    coordinator.runningCacheKey() == null &&
+                        coordinator.protectedCacheKeys().isEmpty() &&
+                        handoff.stateFlow.value.activeOwner == null &&
+                        notificationManager.activeNotifications.none { notification ->
+                            notification.id == SourceSeparationMediaProcessingForegroundController
+                                .NOTIFICATION_ID
+                        }
+                }) { "The fresh post-clear admission did not release after Pause." }
+
+                writeJson(
+                    outputFile,
+                    JSONObject()
+                        .put("schemaVersion", REMOTE_DEATH_CACHE_CLEAR_REPORT_SCHEMA_VERSION)
+                        .put("status", "passed")
+                        .put("stage", STAGE_REMOTE_DEATH)
+                        .put("recoveryAction", request.remoteDeathRecoveryAction.argumentValue)
+                        .put("runId", request.runId)
+                        .put("cacheKey", cacheKey)
+                        .put("mainPid", Process.myPid())
+                        .put("oldRemotePid", oldRemotePid)
+                        .put("freshRemotePid", freshRemotePid)
+                        .put("oldRemoteProcessStartTicks", oldRemoteProcessStartTicks)
+                        .put("freshRemoteProcessStartTicks", freshRemoteProcessStartTicks)
+                        .put("oldProcessGeneration", oldProcessGeneration)
+                        .put("freshProcessGeneration", freshJournal.request.processGeneration)
+                        .put("oldExecutionRunId", oldExecutionRunId)
+                        .put("freshExecutionRunId", freshJournal.request.runId)
+                        .put("automaticRetryBudget", 0)
+                        .put("automaticRemoteRelaunchCount",
+                            evidence.unexpectedRemoteRelaunchCount)
+                        .put("unexpectedRemotePresenceSampleCount",
+                            evidence.unexpectedRemotePresenceSampleCount)
+                        .put("deathRequester", evidence.deathRequester)
+                        .put("silentObservationMs", evidence.silentObservationMs)
+                        .put("failureMessage", failureMessage)
+                        .put("journalSequenceBeforeKill", evidence.journalSequenceBeforeKill)
+                        .put("journalSequenceAfterDeath", evidence.journalSequenceAfterDeath)
+                        .put("journalSequenceAfterSilence",
+                            evidence.journalSequenceAfterSilence)
+                        .put("journalSha256BeforeKill", evidence.journalSha256BeforeKill)
+                        .put("journalSha256AfterDeath", evidence.journalSha256AfterDeath)
+                        .put("journalSha256AfterSilence", evidence.journalSha256AfterSilence)
+                        .put("entrySha256BeforeKill", evidence.entrySha256BeforeKill)
+                        .put("entrySha256AfterDeath", evidence.entrySha256AfterDeath)
+                        .put("entrySha256AfterSilence", evidence.entrySha256AfterSilence)
+                        .put("committedSegmentsBeforeDeath", committedBeforeDeath.length())
+                        .put("oldCacheAndJournalCleared", true)
+                        .put("freshAdmissionSequence", freshJournal.transitions.first().sequence)
+                        .put("freshCommittedSegmentsAtBarrier",
+                            freshJournal.committedSegments.size)
+                        .put("freshPreviousOwnerDeathCount", freshJournal.transitions.count {
+                            transition ->
+                            transition.type ==
+                                SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+                        })
+                        .put("freshLifecycleAfterPause", pausedFreshJournal.lifecycle.name)
+                        .put("freshCommittedSegmentsAfterPause",
+                            pausedFreshJournal.committedSegments.size)
+                        .put("originalTryGpu", originalTryGpu)
+                        .put("persistedTryGpuBeforeFreshStart", persistedTryGpu)
+                        .put("freshTryGpu", freshJournal.request.tryGpu)
+                        .put("freshGpuRuntime", gpuRuntimeJson(freshJournal))
+                        .put("oldBackendPolicyDiscarded", true)
+                        .put("cacheWriteLockReleased", cacheLockReleased)
+                        .put("cacheLockReleaseMs", cacheLockReleaseMs)
+                        .put("processingServiceAfterSilence",
+                            evidence.processingServiceAfterSilence)
+                        .put("notificationAfterSilence", evidence.notificationAfterSilence)
+                        .put("wakeLockAfterSilence", evidence.wakeLockAfterSilence)
+                        .put("terminalNotification", false),
+                )
+                Log.i(TAG, "Remote-death cache-clear validation passed for ${request.runId}.")
+                return
+            }
             coordinator.updateSong(
                 song = source,
                 positionMs = 0L,
@@ -584,6 +742,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("schemaVersion", REMOTE_DEATH_REPORT_SCHEMA_VERSION)
                     .put("status", "passed")
                     .put("stage", STAGE_REMOTE_DEATH)
+                    .put("recoveryAction", request.remoteDeathRecoveryAction.argumentValue)
                     .put("runId", request.runId)
                     .put("cacheKey", cacheKey)
                     .put("mainPid", Process.myPid())
@@ -1154,6 +1313,9 @@ internal object SourceSeparationMainDeathDebugHarness {
             mainDeathBoundary = MainDeathBoundary.parse(
                 intent.getStringExtra(EXTRA_KILL_BOUNDARY),
             ),
+            remoteDeathRecoveryAction = RemoteDeathRecoveryAction.parse(
+                intent.getStringExtra(EXTRA_REMOTE_DEATH_RECOVERY_ACTION),
+            ),
         )
     }
 
@@ -1482,6 +1644,7 @@ internal object SourceSeparationMainDeathDebugHarness {
         val artifactSha256: String,
         val backendMode: String,
         val mainDeathBoundary: MainDeathBoundary,
+        val remoteDeathRecoveryAction: RemoteDeathRecoveryAction,
     ) {
         val tryGpu: Boolean
             get() = backendMode == "auto"
@@ -1595,6 +1758,22 @@ internal object SourceSeparationMainDeathDebugHarness {
         }
     }
 
+    private enum class RemoteDeathRecoveryAction(val argumentValue: String) {
+        Resume("resume"),
+        ClearCacheThenStart("clear-cache"),
+        ;
+
+        companion object {
+            fun parse(value: String?): RemoteDeathRecoveryAction = entries.firstOrNull {
+                it.argumentValue == value
+            } ?: if (value.isNullOrBlank()) {
+                Resume
+            } else {
+                error("Unsupported remote-death recovery action: $value")
+            }
+        }
+    }
+
     const val COMMAND_BEGIN = "beginIndependentMainDeath"
     const val COMMAND_VALIDATE = "validateIndependentMainDeath"
     const val COMMAND_BEGIN_FORCE_STOP = "beginIndependentForceStop"
@@ -1608,6 +1787,7 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val EXTRA_ARTIFACT_SHA256 = "artifactSha256"
     private const val EXTRA_BACKEND_MODE = "backendMode"
     private const val EXTRA_KILL_BOUNDARY = "killBoundary"
+    private const val EXTRA_REMOTE_DEATH_RECOVERY_ACTION = "remoteDeathRecoveryAction"
     private const val EXTRA_JOURNAL_SHA_AFTER_STOP = "journalSha256AfterStop"
     private const val EXTRA_JOURNAL_SHA_AFTER_SILENCE = "journalSha256AfterSilence"
     private const val EXTRA_JOURNAL_SHA_AFTER_RESTART = "journalSha256AfterRestart"
@@ -1674,6 +1854,8 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val REPORT_SCHEMA_VERSION = 1
     private const val FORCE_STOP_REPORT_SCHEMA_VERSION = "phase7-task-lifecycle-report-v1"
     private const val REMOTE_DEATH_REPORT_SCHEMA_VERSION = "phase7-remote-death-report-v1"
+    private const val REMOTE_DEATH_CACHE_CLEAR_REPORT_SCHEMA_VERSION =
+        "phase7-remote-death-cache-clear-report-v1"
     private const val STAGE_MAIN_DEATH = "independent-main-death"
     private const val STAGE_FORCE_STOP = "force-stop"
     private const val STAGE_REMOTE_DEATH = "independent-remote-death"

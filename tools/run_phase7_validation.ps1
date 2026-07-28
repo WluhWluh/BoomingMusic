@@ -45,7 +45,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v54",
+    [string]$RunnerRevision = "phase7-runner-v55",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -94,6 +94,8 @@ param(
     [string]$PlaybackOwnedRunClass = "playback-demand",
     [ValidateSet("segment-running", "after-first-committed-segment")]
     [string]$MainDeathBoundary = "segment-running",
+    [ValidateSet("resume", "clear-cache")]
+    [string]$RemoteDeathRecoveryAction = "resume",
     [ValidateRange(5, 300)]
     [int]$SilentObservationSeconds = 30,
     [switch]$ScreenOffAfterReady,
@@ -280,6 +282,10 @@ if ($Stage -eq "force-stop" -and
 if ($Stage -ne "independent-main-death" -and
         $MainDeathBoundary -ne "segment-running") {
     throw "MainDeathBoundary applies only to independent-main-death."
+}
+if ($Stage -ne "independent-remote-death" -and
+        $RemoteDeathRecoveryAction -ne "resume") {
+    throw "RemoteDeathRecoveryAction applies only to independent-remote-death."
 }
 if ($Stage -eq "independent-remote-death" -and
         ($ExecutionHostMode -ne "independent-foreground" -or
@@ -1378,7 +1384,8 @@ try {
             "--es", "modelId", $ModelId,
             "--es", "artifactSha256", $artifact.sha256,
             "--es", "backendMode", $BackendMode,
-            "--es", "killBoundary", "after-first-committed-segment"
+            "--es", "killBoundary", "after-first-committed-segment",
+            "--es", "remoteDeathRecoveryAction", $RemoteDeathRecoveryAction
         )
         Invoke-Adb @debugArguments --es command beginIndependentRemoteDeath
         $scenarioText = Wait-RemoteJsonFile `
@@ -1955,6 +1962,9 @@ try {
                 } else { $null }
                 mainDeathBoundary = if ($Stage -eq "independent-main-death") {
                     $MainDeathBoundary
+                } else { $null }
+                remoteDeathRecoveryAction = if ($Stage -eq "independent-remote-death") {
+                    $RemoteDeathRecoveryAction
                 } else { $null }
                 silentObservationSeconds = if ($Stage -in @(
                         "force-stop",
