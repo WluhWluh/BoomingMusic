@@ -21,11 +21,80 @@ internal data class SourceSeparationIpcConnectRequest(
     val protocolVersion: Int = SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION,
     val commandId: String,
     val clientProcessName: String,
+    val observerId: String,
 ) {
     init {
         requireProtocolVersion(protocolVersion)
         requireCommandId(commandId)
         require(clientProcessName.isNotBlank()) { "IPC client process name is empty." }
+        requireObserverId(observerId)
+    }
+}
+
+@Serializable
+internal enum class SourceSeparationIpcRunAuthority {
+    ClientBound,
+    IndependentForeground,
+}
+
+@Serializable
+internal data class SourceSeparationIpcObserverState(
+    val observerId: String,
+    val clientProcessName: String,
+    val connectedAtElapsedRealtimeNanos: Long,
+    val disconnectedAtElapsedRealtimeNanos: Long? = null,
+    val disconnectReason: String? = null,
+) {
+    init {
+        requireObserverId(observerId)
+        require(clientProcessName.isNotBlank()) { "IPC observer process name is empty." }
+        require(connectedAtElapsedRealtimeNanos > 0L) {
+            "IPC observer connection time is invalid."
+        }
+        require((disconnectedAtElapsedRealtimeNanos == null) == (disconnectReason == null)) {
+            "IPC observer disconnect state is inconsistent."
+        }
+        disconnectedAtElapsedRealtimeNanos?.let {
+            require(it >= connectedAtElapsedRealtimeNanos) {
+                "IPC observer disconnect time is invalid."
+            }
+            require(!disconnectReason.isNullOrBlank()) {
+                "IPC observer disconnect reason is empty."
+            }
+        }
+    }
+
+    val connected: Boolean
+        get() = disconnectedAtElapsedRealtimeNanos == null
+}
+
+@Serializable
+internal data class SourceSeparationIpcActiveRunState(
+    val descriptor: SourceSeparationExecutionDescriptor,
+    val authority: SourceSeparationIpcRunAuthority,
+    val snapshot: SourceSeparationExecutionHostSnapshot? = null,
+    val observer: SourceSeparationIpcObserverState? = null,
+) {
+    init {
+        val expectedAuthority = if (descriptor.runtime.runClass ==
+            com.mardous.booming.separation.SourceSeparationExecutionRunClass.ManualFullSong &&
+            descriptor.runtime.backgroundPolicy ==
+            com.mardous.booming.separation.SourceSeparationBackgroundPolicy
+                .IndependentForegroundEligible
+        ) {
+            SourceSeparationIpcRunAuthority.IndependentForeground
+        } else {
+            SourceSeparationIpcRunAuthority.ClientBound
+        }
+        require(authority == expectedAuthority) {
+            "IPC active-run authority does not match its descriptor."
+        }
+        snapshot?.let {
+            require(it.descriptor == descriptor &&
+                it.diagnostics.runId == descriptor.runId &&
+                it.diagnostics.processGeneration == descriptor.processGeneration
+            ) { "IPC active-run snapshot identity is inconsistent." }
+        }
     }
 }
 
@@ -38,6 +107,7 @@ internal data class SourceSeparationIpcConnectResponse(
     val pid: Int,
     val idlePssBytes: Long,
     val diagnostics: SourceSeparationProcessDiagnostics,
+    val activeRun: SourceSeparationIpcActiveRunState? = null,
 ) {
     init {
         requireProtocolVersion(protocolVersion)
@@ -51,6 +121,11 @@ internal data class SourceSeparationIpcConnectResponse(
             diagnostics.pid == pid
         ) {
             "IPC connect process diagnostics are inconsistent."
+        }
+        activeRun?.let {
+            require(it.descriptor.processGeneration == processGeneration &&
+                diagnostics.activeRunId == it.descriptor.runId
+            ) { "IPC connect active-run identity is inconsistent." }
         }
     }
 }
@@ -454,5 +529,10 @@ private fun requireCommandId(commandId: String) {
     require(COMMAND_ID_PATTERN.matches(commandId)) { "IPC command ID is invalid." }
 }
 
+private fun requireObserverId(observerId: String) {
+    require(OBSERVER_ID_PATTERN.matches(observerId)) { "IPC observer ID is invalid." }
+}
+
 private val COMMAND_ID_PATTERN = Regex("^[A-Za-z0-9._-]{1,128}$")
+private val OBSERVER_ID_PATTERN = Regex("^[A-Za-z0-9._-]{1,128}$")
 private val RECYCLE_TOKEN_PATTERN = Regex("^[A-Za-z0-9._-]{16,128}$")

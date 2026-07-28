@@ -25,6 +25,7 @@ class SourceSeparationExecutionIpcProtocolTest {
         val connect = SourceSeparationIpcConnectRequest(
             commandId = "connect-1",
             clientProcessName = "com.example",
+            observerId = "observer-1",
         )
         val control = SourceSeparationIpcControlCommand(
             commandId = "control-1",
@@ -71,15 +72,15 @@ class SourceSeparationExecutionIpcProtocolTest {
                 SourceSeparationExecutionIpcCodec.encodeRecycleCommand(recycle),
             ),
         )
-        assertEquals(12, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
+        assertEquals(13, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":11,"commandId":"connect","clientProcessName":"x"}""",
+                """{"protocolVersion":12,"commandId":"connect","clientProcessName":"x","observerId":"observer-1"}""",
             )
         }
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":12,"commandId":"connect","clientProcessName":"x","extra":1}""",
+                """{"protocolVersion":13,"commandId":"connect","clientProcessName":"x","observerId":"observer-1","extra":1}""",
             )
         }
     }

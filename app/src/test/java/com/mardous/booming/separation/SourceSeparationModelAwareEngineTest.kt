@@ -530,7 +530,7 @@ class SourceSeparationModelAwareEngineTest {
             identity.commandQueueWindowSize,
         )
         assertEquals(identity, fixture.currentRunJournal().request.gpuRuntimeIdentity)
-        assertEquals(5, fixture.currentRunJournal().journalSchemaVersion)
+        assertEquals(6, fixture.currentRunJournal().journalSchemaVersion)
     }
 
     @Test

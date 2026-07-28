@@ -68,6 +68,9 @@ data class SourceSeparationCacheRunJournal(
         committedSegment: SourceSeparationCacheCommittedSegment? = null,
         removeCommittedSegmentIndex: Int? = null,
         gpuFallbackLatch: SourceSeparationGpuFallbackLatch? = null,
+        observerId: String? = null,
+        observerProcessName: String? = null,
+        observerReason: String? = null,
     ): SourceSeparationCacheRunJournal {
         var committed = committedSegments
         if (removeCommittedSegmentIndex != null) {
@@ -88,6 +91,9 @@ data class SourceSeparationCacheRunJournal(
                 runClass = request.runClass,
                 backgroundPolicy = request.backgroundPolicy,
                 gpuFallbackLatch = gpuFallbackLatch,
+                observerId = observerId,
+                observerProcessName = observerProcessName,
+                observerReason = observerReason,
                 type = type,
                 segmentIndex = segmentIndex,
                 error = error,
@@ -123,8 +129,66 @@ data class SourceSeparationCacheRunJournal(
         )
     }
 
+    fun observerConnected(
+        observerId: String,
+        observerProcessName: String,
+        nowEpochMs: Long,
+    ): SourceSeparationCacheRunJournal {
+        require(lifecycle == SourceSeparationCacheRunJournalLifecycle.Running) {
+            "An observer can attach only to a running cache run."
+        }
+        val latest = latestObserverTransition()
+        if (latest?.type == SourceSeparationCacheRunTransitionType.ObserverConnected &&
+            latest.observerId == observerId &&
+            latest.observerProcessName == observerProcessName
+        ) {
+            return this
+        }
+        require(latest == null ||
+            latest.type == SourceSeparationCacheRunTransitionType.ObserverDisconnected
+        ) { "A different cache-run observer is still connected." }
+        return append(
+            type = SourceSeparationCacheRunTransitionType.ObserverConnected,
+            nowEpochMs = nowEpochMs,
+            observerId = observerId,
+            observerProcessName = observerProcessName,
+        )
+    }
+
+    fun observerDisconnected(
+        observerId: String,
+        observerProcessName: String,
+        reason: String,
+        nowEpochMs: Long,
+    ): SourceSeparationCacheRunJournal {
+        val latest = latestObserverTransition()
+        if (latest?.type == SourceSeparationCacheRunTransitionType.ObserverDisconnected &&
+            latest.observerId == observerId &&
+            latest.observerProcessName == observerProcessName
+        ) {
+            return this
+        }
+        require(latest?.type == SourceSeparationCacheRunTransitionType.ObserverConnected &&
+            latest.observerId == observerId &&
+            latest.observerProcessName == observerProcessName
+        ) { "The cache-run observer identity is stale." }
+        return append(
+            type = SourceSeparationCacheRunTransitionType.ObserverDisconnected,
+            nowEpochMs = nowEpochMs,
+            observerId = observerId,
+            observerProcessName = observerProcessName,
+            observerReason = reason,
+        )
+    }
+
+    private fun latestObserverTransition(): SourceSeparationCacheRunJournalTransition? =
+        transitions.lastOrNull { transition ->
+            transition.type == SourceSeparationCacheRunTransitionType.ObserverConnected ||
+                transition.type == SourceSeparationCacheRunTransitionType.ObserverDisconnected
+        }
+
     companion object {
-        const val SCHEMA_VERSION = 5
+        const val SCHEMA_VERSION = 6
 
         fun admitted(
             request: SourceSeparationCacheRunJournalRequest,
@@ -287,6 +351,9 @@ data class SourceSeparationCacheRunJournalTransition(
     val runClass: SourceSeparationExecutionRunClass,
     val backgroundPolicy: SourceSeparationBackgroundPolicy,
     val gpuFallbackLatch: SourceSeparationGpuFallbackLatch? = null,
+    val observerId: String? = null,
+    val observerProcessName: String? = null,
+    val observerReason: String? = null,
     val type: SourceSeparationCacheRunTransitionType,
     val segmentIndex: Int? = null,
     val error: SourceSeparationCacheError? = null,
@@ -299,12 +366,42 @@ data class SourceSeparationCacheRunJournalTransition(
         require((type == SourceSeparationCacheRunTransitionType.GpuFallbackLatched) ==
             (gpuFallbackLatch != null)
         ) { "Cache run transition fallback payload is inconsistent." }
+        val observerTransition = type == SourceSeparationCacheRunTransitionType.ObserverConnected ||
+            type == SourceSeparationCacheRunTransitionType.ObserverDisconnected
+        if (observerTransition) {
+            require(observerId != null && observerProcessName != null) {
+                "Cache run transition observer identity is incomplete."
+            }
+        } else {
+            require(observerId == null && observerProcessName == null) {
+                "Cache run transition has an unexpected observer identity."
+            }
+        }
+        observerId?.let {
+            require(OBSERVER_ID_PATTERN.matches(it)) {
+                "Cache run observer ID is invalid."
+            }
+        }
+        observerProcessName?.let {
+            require(it.isNotBlank()) { "Cache run observer process name is empty." }
+        }
+        if (type == SourceSeparationCacheRunTransitionType.ObserverDisconnected) {
+            require(!observerReason.isNullOrBlank()) {
+                "Cache run observer disconnect reason is empty."
+            }
+        } else {
+            require(observerReason == null) {
+                "Cache run transition has an unexpected observer reason."
+            }
+        }
     }
 }
 
 @Serializable
 enum class SourceSeparationCacheRunTransitionType {
     Admitted,
+    ObserverConnected,
+    ObserverDisconnected,
     GpuFallbackLatched,
     PreviousOwnerDied,
     Prepared,
@@ -319,6 +416,8 @@ enum class SourceSeparationCacheRunTransitionType {
     CacheCleared,
     Failed,
 }
+
+private val OBSERVER_ID_PATTERN = Regex("^[A-Za-z0-9._-]{1,128}$")
 
 @Serializable
 enum class SourceSeparationCacheRunJournalLifecycle {

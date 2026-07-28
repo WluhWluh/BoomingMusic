@@ -47,6 +47,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private val commandIdFactory: (String) -> String = { prefix ->
         "$prefix-${UUID.randomUUID()}"
     },
+    private val observerId: String = "observer-${UUID.randomUUID()}",
 ) : SourceSeparationExecutionHost {
     override val mode = SourceSeparationExecutionHostMode.BoundRemote
 
@@ -599,6 +600,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             val request = SourceSeparationIpcConnectRequest(
                 commandId = nextCommandId("connect"),
                 clientProcessName = processName,
+                observerId = observerId,
             )
             val response = SourceSeparationExecutionIpcCodec.decodeConnectResponse(
                 service.connect(

@@ -339,7 +339,7 @@ class SourceSeparationCacheRunCoordinatorTest {
                 .gpuRuntimeIdentity,
         )
         assertEquals(
-            5,
+            6,
             fixture.store.readRunJournal(gpuRequest.identity.cacheKey)?.journalSchemaVersion,
         )
         fixture.coordinator.pause(first.run)
@@ -448,6 +448,65 @@ class SourceSeparationCacheRunCoordinatorTest {
             },
         )
         fixture.coordinator.pause(resumed.run)
+    }
+
+    @Test
+    fun `observer ownership transitions are durable idempotent and exact`() {
+        val fixture = fixture()
+        val run = fixture.beginReady()
+
+        val connected = fixture.coordinator.observerConnected(
+            run,
+            observerId = "observer-main-1",
+            observerProcessName = "com.example",
+        )
+        val duplicateConnected = fixture.coordinator.observerConnected(
+            run,
+            observerId = "observer-main-1",
+            observerProcessName = "com.example",
+        )
+        val disconnected = fixture.coordinator.observerDisconnected(
+            run,
+            observerId = "observer-main-1",
+            observerProcessName = "com.example",
+            reason = "binder-died",
+        )
+        val duplicateDisconnected = fixture.coordinator.observerDisconnected(
+            run,
+            observerId = "observer-main-1",
+            observerProcessName = "com.example",
+            reason = "duplicate",
+        )
+
+        assertEquals(connected, duplicateConnected)
+        assertEquals(disconnected, duplicateDisconnected)
+        assertEquals(6, disconnected.journalSchemaVersion)
+        assertEquals(
+            listOf(
+                SourceSeparationCacheRunTransitionType.ObserverConnected,
+                SourceSeparationCacheRunTransitionType.ObserverDisconnected,
+            ),
+            disconnected.transitions.takeLast(2).map { it.type },
+        )
+        assertEquals("binder-died", disconnected.transitions.last().observerReason)
+        assertThrows(IllegalArgumentException::class.java) {
+            fixture.coordinator.observerDisconnected(
+                run,
+                observerId = "observer-stale",
+                observerProcessName = "com.example",
+                reason = "stale",
+            )
+        }
+        val reconnected = fixture.coordinator.observerConnected(
+            run,
+            observerId = "observer-main-2",
+            observerProcessName = "com.example",
+        )
+        assertEquals(
+            SourceSeparationCacheRunTransitionType.ObserverConnected,
+            reconnected.transitions.last().type,
+        )
+        fixture.coordinator.pause(run)
     }
 
     @Test

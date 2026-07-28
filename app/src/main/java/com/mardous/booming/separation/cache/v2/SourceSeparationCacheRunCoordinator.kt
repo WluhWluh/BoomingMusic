@@ -277,6 +277,23 @@ class SourceSeparationCacheRunCoordinator(
         journal.latchGpuFallback(latch, now)
     }
 
+    fun observerConnected(
+        run: SourceSeparationModelAwareCacheRun,
+        observerId: String,
+        observerProcessName: String,
+    ): SourceSeparationCacheRunJournal = updateJournal(run) { journal, now ->
+        journal.observerConnected(observerId, observerProcessName, now)
+    }
+
+    fun observerDisconnected(
+        run: SourceSeparationModelAwareCacheRun,
+        observerId: String,
+        observerProcessName: String,
+        reason: String,
+    ): SourceSeparationCacheRunJournal = updateJournal(run) { journal, now ->
+        journal.observerDisconnected(observerId, observerProcessName, reason, now)
+    }
+
     fun updateSegmentState(
         run: SourceSeparationModelAwareCacheRun,
         segmentIndex: Int,
