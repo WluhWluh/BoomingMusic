@@ -41,7 +41,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v39",
+    [string]$RunnerRevision = "phase7-runner-v40",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -527,7 +527,9 @@ function Get-RemoteEntrySnapshot([string]$Path) {
     return [ordered]@{
         sha256 = [Convert]::ToHexString($digestBytes).ToLowerInvariant()
         fileCount = $records.Count
-        totalBytes = [int64](($records | Measure-Object -Property bytes -Sum).Sum)
+        totalBytes = [int64](
+            ($records | ForEach-Object { [int64]$_.bytes } | Measure-Object -Sum).Sum
+        )
     }
 }
 

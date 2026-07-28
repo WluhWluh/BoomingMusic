@@ -74,9 +74,8 @@ internal object SourceSeparationMainDeathDebugHarness {
             }
             COMMAND_VALIDATE_FORCE_STOP -> {
                 val request = request(intent)
-                val evidence = forceStopEvidence(intent)
                 launch("SrcSepForceStopValidate") {
-                    validateForceStop(context.applicationContext, request, evidence)
+                    validateForceStop(context.applicationContext, request, intent)
                 }
                 true
             }
@@ -366,12 +365,13 @@ internal object SourceSeparationMainDeathDebugHarness {
     private fun validateForceStop(
         context: Context,
         request: Request,
-        evidence: ForceStopEvidence,
+        intent: Intent,
     ) {
         val scenarioFile = scenarioFile(context, request.runId)
         val outputFile = reportFile(context, request.runId)
         var mediaUri: Uri? = null
         try {
+            val evidence = forceStopEvidence(intent)
             val scenario = JSONObject(scenarioFile.readText(Charsets.UTF_8))
             check(scenario.getInt("schemaVersion") == SCENARIO_SCHEMA_VERSION)
             check(scenario.getString("runId") == request.runId)
