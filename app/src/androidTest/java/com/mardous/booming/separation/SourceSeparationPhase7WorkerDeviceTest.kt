@@ -2060,6 +2060,327 @@ class SourceSeparationPhase7WorkerDeviceTest {
     }
 
     @Test
+    fun validatePlaybackServiceStopPausesOwnedWork() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
+        val executionHostMode = Phase7ExecutionHostMode.parse(
+            arguments.getString(ARG_EXECUTION_HOST_MODE),
+        )
+        require(executionHostMode == Phase7ExecutionHostMode.InProcess) {
+            "Playback-owned shutdown requires the production in-process route."
+        }
+        val scenario = PlaybackOwnedStopScenario.parse(
+            arguments.getString(ARG_PLAYBACK_OWNED_RUN_CLASS),
+        )
+        val report = baseReport(context, runId, arguments)
+            .put("stage", "playback-owner-stop")
+        val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+        val preferenceSnapshot = snapshotPreferences(
+            preferences,
+            PLAYBACK_OWNER_TEST_PREFERENCE_KEYS,
+        )
+        var targetUri: Uri? = null
+        var currentUri: Uri? = null
+        var playbackProbe: OriginalAudioPlaybackProbe? = null
+        var worker: SourceSeparationForegroundWorkerCoordinator? = null
+
+        try {
+            check(preferences.edit()
+                .putInt(MINIMUM_SONG_DURATION, 0)
+                .putBoolean(SOURCE_SEPARATION_AUTO_CACHE_CLEANUP, false)
+                .putBoolean(SOURCE_SEPARATION_AUTO_START, true)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putBoolean(
+                    SOURCE_SEPARATION_WINDOW_DECODE,
+                    arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true),
+                )
+                .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, REQUIRED_READY_WINDOWS)
+                .putBoolean(TEST_KEY_PLAYBACK_ENABLED, true)
+                .putBoolean(TEST_KEY_REMEMBER_PER_SONG, false)
+                .putFloat(TEST_KEY_GLOBAL_BLEND, TEST_BLEND)
+                .commit()
+            ) { "Could not configure the playback-owned shutdown test." }
+            assertExpectedActivePreset(arguments)
+
+            val targetSourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            val registeredTargetUri = registerSourceInMediaStore(
+                context,
+                targetSourcePath,
+                "$runId-target",
+            )
+            targetUri = registeredTargetUri
+            val targetSource = resolveMediaStoreSong(
+                context,
+                registeredTargetUri,
+                targetSourcePath,
+            )
+            val playbackSource = if (scenario == PlaybackOwnedStopScenario.NextSongPrefetch) {
+                val currentSourcePath = arguments.requiredString(ARG_CURRENT_SOURCE_PATH)
+                val registeredCurrentUri = registerSourceInMediaStore(
+                    context,
+                    currentSourcePath,
+                    "$runId-current",
+                )
+                currentUri = registeredCurrentUri
+                resolveMediaStoreSong(
+                    context,
+                    registeredCurrentUri,
+                    currentSourcePath,
+                ).also { current -> assertNotEquals(current.id, targetSource.id) }
+            } else {
+                targetSource
+            }
+
+            val runtime = get<SourceSeparationRuntimeFacade>(
+                SourceSeparationRuntimeFacade::class.java,
+            )
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
+                SourceSeparationModelAwareCacheRepository::class.java,
+            )
+            val handoff = get<SourceSeparationProcessingOwnershipHandoff>(
+                SourceSeparationProcessingOwnershipHandoff::class.java,
+            )
+            val runtimeSong = (runtime.resolve(targetSource) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The playback-owned target source could not be resolved.")
+            clearExactCacheEntry(runtime, runtimeSong.cacheKey)
+
+            val probe = startOriginalAudioPlayback(
+                context = context,
+                source = playbackSource,
+                operation = "${scenario.argumentValue} service shutdown",
+            ).also { playbackProbe = it }
+            val playbackBefore = probe.assertContinuous("before-playback-owner-stop")
+            val coordinator = get<SourceSeparationForegroundWorkerCoordinator>(
+                SourceSeparationForegroundWorkerCoordinator::class.java,
+            ).also { worker = it }
+            coordinator.attachCallbacks(RecordingCallbacks())
+            coordinator.updateSong(
+                song = playbackSource,
+                positionMs = playbackBefore.getLong("positionMs"),
+                durationMs = playbackSource.duration,
+                isPlaying = true,
+                sourceSeparationBlend = TEST_BLEND,
+            )
+            when (scenario) {
+                PlaybackOwnedStopScenario.PlaybackDemand ->
+                    coordinator.requestPlaybackDemandSong(targetSource)
+                PlaybackOwnedStopScenario.NextSongPrefetch -> assertTrue(
+                    "The live PlaybackService owner rejected next-song prefetch.",
+                    coordinator.preStartSong(
+                        targetSource,
+                        PLAYBACK_OWNER_ACTIVE_PREFETCH_READY_WINDOWS,
+                    ),
+                )
+            }
+            waitForReady(coordinator, minimumReadyWindows = 1)
+
+            val journalDuring = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Running, journalDuring.lifecycle)
+            assertEquals(scenario.runClass, journalDuring.request.runClass)
+            assertEquals(Process.myPid(), journalDuring.request.ownerPid)
+            assertTrue(journalDuring.committedSegments.isNotEmpty())
+            val serviceDumpDuring = readShellCommand(
+                instrumentation,
+                "dumpsys activity services ${context.packageName}",
+            )
+            assertTrue(serviceDumpDuring.contains("PlaybackService"))
+            assertFalse(
+                "Playback-owned work unexpectedly created the independent inference FGS.",
+                serviceDumpDuring.contains("SourceSeparationExecutionService"),
+            )
+            assertNull(handoff.stateFlow.value.activeOwner)
+
+            probe.disarm()
+            val stopStartedAtMs = SystemClock.elapsedRealtime()
+            probe.close()
+            playbackProbe = null
+            val explicitStopAccepted = context.stopService(
+                Intent(context, PlaybackService::class.java),
+            )
+            var serviceDumpAfter = serviceDumpDuring
+            val serviceStopDeadline = stopStartedAtMs + PLAYBACK_OWNER_STOP_TIMEOUT_MS
+            while (SystemClock.elapsedRealtime() < serviceStopDeadline) {
+                serviceDumpAfter = readShellCommand(
+                    instrumentation,
+                    "dumpsys activity services ${context.packageName}",
+                )
+                if (!serviceDumpAfter.contains("PlaybackService")) break
+                SystemClock.sleep(PLAYBACK_OWNER_STOP_POLL_MS)
+            }
+            assertFalse(
+                "PlaybackService survived its explicit teardown.",
+                serviceDumpAfter.contains("PlaybackService"),
+            )
+            waitForPaused(coordinator)
+            val serviceStopLatencyMs = SystemClock.elapsedRealtime() - stopStartedAtMs
+
+            val journalAfter = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Paused, journalAfter.lifecycle)
+            assertEquals(SourceSeparationCacheRunTransitionType.Paused,
+                journalAfter.transitions.last().type)
+            assertEquals(scenario.runClass, journalAfter.request.runClass)
+            assertEquals(journalDuring.request.runId, journalAfter.request.runId)
+            val cacheLeaseReleaseMs = waitForCacheLeaseRelease(
+                repository = cacheRepository,
+                cacheKey = runtimeSong.cacheKey,
+            )
+            val kernelLockReleaseMs = waitForKernelCacheLockRelease(
+                store = store,
+                cacheKey = runtimeSong.cacheKey,
+            )
+            val cacheStatus = runtime.cacheStatus(runtimeSong) as?
+                SourceSeparationModelAwareCacheStatus.Incomplete
+                ?: error("PlaybackService teardown did not leave an incomplete cache.")
+            assertEquals(SourceSeparationCacheManifestState.Running,
+                cacheStatus.manifest.state)
+            assertTrue(cacheStatus.readySegments >= 1)
+            applyRunAdmissionEvidence(
+                report = report,
+                request = journalAfter.request,
+                backendMode = backendMode,
+                requestedGpuRuntimeProfile = MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1
+                    .takeIf { backendMode == BackendMode.Auto },
+            )
+            assertNull(journalAfter.request.gpuFallbackLatch)
+            report.getJSONObject("run")
+                .put(
+                    "backendUsed",
+                    if (backendMode == BackendMode.Auto) {
+                        MdxInferenceBackend.LiteRtGpu.name
+                    } else {
+                        MdxInferenceBackend.LiteRtCpu.name
+                    },
+                )
+                .put("fallbackStage", JSONObject.NULL)
+                .put("fallbackReason", JSONObject.NULL)
+
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                as NotificationManager
+            val playbackWakeLockTag = "com.mardous.booming:SourceSeparationProcessing"
+            val inferenceWakeLockTag =
+                "${context.packageName}:SourceSeparationInference"
+            var processingNotificationAfter: Boolean
+            var playbackNotificationAfter: Boolean
+            var playbackWakeLockAfter: Boolean
+            var inferenceWakeLockAfter: Boolean
+            val resourceDeadline = SystemClock.elapsedRealtime() + PLAYBACK_OWNER_STOP_TIMEOUT_MS
+            do {
+                processingNotificationAfter = notificationManager.activeNotifications.any {
+                    it.id == SourceSeparationMediaProcessingForegroundController.NOTIFICATION_ID
+                }
+                playbackNotificationAfter = notificationManager.activeNotifications.any {
+                    it.id == PLAYBACK_NOTIFICATION_ID
+                }
+                val wakeLocks = activeWakeLocks(
+                    readShellCommand(instrumentation, "dumpsys power"),
+                )
+                playbackWakeLockAfter = wakeLocks.contains(playbackWakeLockTag)
+                inferenceWakeLockAfter = wakeLocks.contains(inferenceWakeLockTag)
+                if (!processingNotificationAfter && !playbackNotificationAfter &&
+                    !playbackWakeLockAfter && !inferenceWakeLockAfter
+                ) break
+                SystemClock.sleep(PLAYBACK_OWNER_STOP_POLL_MS)
+            } while (SystemClock.elapsedRealtime() < resourceDeadline)
+            assertFalse(processingNotificationAfter)
+            assertFalse(playbackNotificationAfter)
+            assertFalse(playbackWakeLockAfter)
+            assertFalse(inferenceWakeLockAfter)
+            assertNull(handoff.stateFlow.value.activeOwner)
+            assertNull(handoff.stateFlow.value.activePlaybackLease)
+            assertFalse(coordinator.isWorkerActive())
+            assertNull(coordinator.runningSongId())
+            assertNull(coordinator.pendingSongId())
+
+            val pausedSequence = journalAfter.latestSequence
+            val pausedCommittedSegments = journalAfter.committedSegments
+            coordinator.updatePosition(
+                positionMs = playbackBefore.getLong("positionMs") + 1_000L,
+                durationMs = playbackSource.duration,
+                isPlaying = true,
+                sourceSeparationBlend = TEST_BLEND,
+            )
+            coordinator.requestPlaybackDemandSong(targetSource)
+            assertFalse(
+                "A stale playback owner admitted new prefetch work.",
+                coordinator.preStartSong(
+                    targetSource,
+                    PLAYBACK_OWNER_ACTIVE_PREFETCH_READY_WINDOWS,
+                ),
+            )
+            SystemClock.sleep(PLAYBACK_OWNER_STALE_OBSERVATION_MS)
+            assertFalse(coordinator.isWorkerActive())
+            assertNull(coordinator.runningSongId())
+            assertNull(coordinator.pendingSongId())
+            val stableJournal = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Paused,
+                stableJournal.lifecycle)
+            assertEquals(pausedSequence, stableJournal.latestSequence)
+            assertEquals(pausedCommittedSegments, stableJournal.committedSegments)
+
+            report.put("status", "passed")
+            report.put("cache", report.getJSONObject("cache")
+                .put("cacheKey", runtimeSong.cacheKey)
+                .put("exactIdentity", true)
+                .put("completedPlayable", false)
+                .put("manifestState", cacheStatus.manifest.state.name)
+                .put("readySegments", cacheStatus.readySegments)
+                .put("runJournalSequence", stableJournal.latestSequence)
+                .put("runJournalOwnerPid", stableJournal.request.ownerPid ?: JSONObject.NULL)
+                .put("leaseReleaseMs", cacheLeaseReleaseMs)
+                .put("kernelLockReleaseMs", kernelLockReleaseMs)
+            )
+            report.put("playbackOwnerStop", JSONObject()
+                .put("scenario", scenario.argumentValue)
+                .put("runClass", scenario.runClass.name)
+                .put("backgroundPolicy", scenario.runClass.backgroundPolicy.name)
+                .put("playbackSongId", playbackSource.id)
+                .put("targetSongId", targetSource.id)
+                .put("serviceObservedBefore", true)
+                .put("serviceObservedAfter", false)
+                .put("explicitStopAccepted", explicitStopAccepted)
+                .put("serviceStopLatencyMs", serviceStopLatencyMs)
+                .put("journalLifecycle", stableJournal.lifecycle.name)
+                .put("journalTerminalTransition", stableJournal.transitions.last().type.name)
+                .put("coordinatorInactive", true)
+                .put("pendingWorkCleared", true)
+                .put("staleAdmissionRejected", true)
+                .put("staleObservationMs", PLAYBACK_OWNER_STALE_OBSERVATION_MS)
+                .put("journalStableAfterStop", true)
+                .put("processingNotificationAfter", processingNotificationAfter)
+                .put("playbackNotificationAfter", playbackNotificationAfter)
+                .put("playbackWakeLockAfter", playbackWakeLockAfter)
+                .put("inferenceWakeLockAfter", inferenceWakeLockAfter)
+                .put("independentInferenceServiceAfter",
+                    serviceDumpAfter.contains("SourceSeparationExecutionService"))
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            playbackProbe?.let { probe ->
+                runCatching { probe.close() }
+            }
+            runCatching { context.stopService(Intent(context, PlaybackService::class.java)) }
+            worker?.cancel()
+            restorePreferences(preferences, preferenceSnapshot)
+            targetUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            currentUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            writeReport(context, runId, "playback-owner-stop", report)
+        }
+    }
+
+    @Test
     fun validateIndependentRunReattachment() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -6221,6 +6542,42 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
     }
 
+    private fun snapshotPreferences(
+        preferences: SharedPreferences,
+        keys: Collection<String>,
+    ): Map<String, Any?> {
+        val values = preferences.all
+        return keys.associateWith(values::get)
+    }
+
+    private fun restorePreferences(
+        preferences: SharedPreferences,
+        snapshot: Map<String, Any?>,
+    ) {
+        val editor = preferences.edit()
+        snapshot.forEach { (key, value) ->
+            when (value) {
+                null -> editor.remove(key)
+                is Boolean -> editor.putBoolean(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is String -> editor.putString(key, value)
+                is Set<*> -> editor.putStringSet(
+                    key,
+                    value.map { entry ->
+                        require(entry is String) {
+                            "Preference $key contains a non-string set entry."
+                        }
+                        entry
+                    }.toSet(),
+                )
+                else -> error("Unsupported preference value for $key: ${value::class.java.name}")
+            }
+        }
+        check(editor.commit()) { "Could not restore playback-owned test preferences." }
+    }
+
     private fun processMatrixSnapshot(
         label: String,
         cycle: Int,
@@ -7573,6 +7930,27 @@ class SourceSeparationPhase7WorkerDeviceTest {
         ),
     }
 
+    private enum class PlaybackOwnedStopScenario(
+        val argumentValue: String,
+        val runClass: SourceSeparationExecutionRunClass,
+    ) {
+        PlaybackDemand(
+            argumentValue = "playback-demand",
+            runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+        ),
+        NextSongPrefetch(
+            argumentValue = "next-song-prefetch",
+            runClass = SourceSeparationExecutionRunClass.NextSongPrefetch,
+        ),
+        ;
+
+        companion object {
+            fun parse(value: String?): PlaybackOwnedStopScenario = entries.singleOrNull {
+                it.argumentValue == value
+            } ?: error("Unsupported playback-owned stop scenario: $value")
+        }
+    }
+
     private enum class BackendMode(
         val argumentValue: String,
         val reportBackend: String,
@@ -7718,12 +8096,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_COLD_PROCESS_BOUNDARY = "coldProcessBoundary"
         const val ARG_PRE_RUN_PROCESS_EXIT_MS = "preRunProcessExitMs"
         const val ARG_STOP_WHEN_CLOSED_FROM_RECENTS = "stopWhenClosedFromRecents"
+        const val ARG_PLAYBACK_OWNED_RUN_CLASS = "playbackOwnedRunClass"
         const val PROCESS_RESOURCE_SAMPLE_INTERVAL_MS = 1_000L
         const val PLAYBACK_RESOURCE_SAMPLE_INTERVAL_MS = 15_000L
         const val PROCESS_REBIND_SETTLE_MS = 250L
         const val TASK_REMOVAL_TIMEOUT_MS = 30_000L
         const val TASK_REMOVAL_CONTINUATION_TIMEOUT_MS = 120_000L
         const val TASK_REMOVAL_POLL_MS = 100L
+        const val PLAYBACK_OWNER_STOP_TIMEOUT_MS = 30_000L
+        const val PLAYBACK_OWNER_STOP_POLL_MS = 100L
+        const val PLAYBACK_OWNER_STALE_OBSERVATION_MS = 2_000L
+        const val PLAYBACK_OWNER_ACTIVE_PREFETCH_READY_WINDOWS = 1_000_000
+        const val PLAYBACK_NOTIFICATION_ID = 1
         const val PROCESS_MATRIX_CYCLE_COUNT = 20
         const val PROCESS_MODEL_SWITCH_COUNT = 20
         const val PROCESS_MATRIX_FIRST_PAUSE_CYCLE = 6
@@ -7781,6 +8165,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val TEST_KEY_PLAYBACK_ENABLED = "source_separation.playback_enabled"
         const val TEST_KEY_REMEMBER_PER_SONG = "source_separation.remember_per_song"
         const val TEST_KEY_GLOBAL_BLEND = "source_separation.global_blend"
+        val PLAYBACK_OWNER_TEST_PREFERENCE_KEYS = setOf(
+            MINIMUM_SONG_DURATION,
+            SOURCE_SEPARATION_AUTO_CACHE_CLEANUP,
+            SOURCE_SEPARATION_AUTO_START,
+            SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+            SOURCE_SEPARATION_WINDOW_DECODE,
+            SOURCE_SEPARATION_TRY_GPU,
+            SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+            TEST_KEY_PLAYBACK_ENABLED,
+            TEST_KEY_REMEMBER_PER_SONG,
+            TEST_KEY_GLOBAL_BLEND,
+        )
         const val SEEK_FROM_END_MS = 1_000L
         const val POLL_INTERVAL_MS = 250L
         const val REMOTE_IDLE_SETTLE_MS = 2_000L

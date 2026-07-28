@@ -17,6 +17,7 @@ param(
         "pause-cleanup",
         "cancel-cleanup",
         "task-removal",
+        "playback-owner-stop",
         "force-stop",
         "reattachment",
         "process-matrix",
@@ -43,7 +44,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v44",
+    [string]$RunnerRevision = "phase7-runner-v45",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -88,6 +89,8 @@ param(
     [switch]$ForceStopBeforeRun,
     [ValidateSet("true", "false")]
     [string]$StopWhenClosedFromRecents = "false",
+    [ValidateSet("playback-demand", "next-song-prefetch")]
+    [string]$PlaybackOwnedRunClass = "playback-demand",
     [ValidateRange(5, 300)]
     [int]$SilentObservationSeconds = 30,
     [switch]$ScreenOffAfterReady,
@@ -105,6 +108,7 @@ $sourceStages = @(
     "pause-cleanup",
     "cancel-cleanup",
     "task-removal",
+    "playback-owner-stop",
     "force-stop",
     "reattachment",
     "process-matrix",
@@ -133,6 +137,7 @@ $testMethod = switch ($Stage) {
     "pause-cleanup" { "validateProductPauseCleanup"; break }
     "cancel-cleanup" { "validateProductCancelCleanup"; break }
     "task-removal" { "validateTaskRemovalLifecycle"; break }
+    "playback-owner-stop" { "validatePlaybackServiceStopPausesOwnedWork"; break }
     "force-stop" { "validateDeviceEvidenceIdentity"; break }
     "reattachment" { "validateIndependentRunReattachment"; break }
     "process-matrix" { "validateProcessSessionMatrix"; break }
@@ -255,6 +260,12 @@ if ($Stage -eq "task-removal" -and
         $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
     throw "task-removal requires the production arm64 independent foreground route without fault injection."
 }
+if ($Stage -eq "playback-owner-stop" -and
+        ($ExecutionHostMode -ne "in-process" -or
+        $ProcessAbi -ne "arm64-v8a" -or
+        $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
+    throw "playback-owner-stop requires the production arm64 in-process playback route without fault injection."
+}
 if ($Stage -eq "force-stop" -and
         ($ExecutionHostMode -ne "independent-foreground" -or
         $ProcessAbi -ne "arm64-v8a" -or
@@ -341,7 +352,14 @@ if (-not [string]::IsNullOrWhiteSpace($SecondaryModelId) -and
 if ($Stage -in @("background", "prefetch") -and $BackendMode -ne "auto") {
     throw "$Stage uses the production service graph and requires BackendMode=auto."
 }
-if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix", "process-cache-race-matrix") -and
+$requiresCurrentFixture = $Stage -in @(
+    "prefetch",
+    "process-matrix",
+    "process-cache-matrix",
+    "process-cache-race-matrix"
+) -or ($Stage -eq "playback-owner-stop" -and
+    $PlaybackOwnedRunClass -eq "next-song-prefetch")
+if ($requiresCurrentFixture -and
         ([string]::IsNullOrWhiteSpace($CurrentSourcePath) -or
         [string]::IsNullOrWhiteSpace($CurrentFixtureId))) {
     throw "$Stage requires CurrentSourcePath and CurrentFixtureId."
@@ -712,7 +730,7 @@ $profileId = if ($BackendMode -eq "auto") {
 }
 $backendName = if ($BackendMode -eq "auto") { "LiteRtAuto" } else { "LiteRtCpu" }
 $fixture = @($fixtures.fixtures) | Where-Object { $_.fixtureId -eq $FixtureId } | Select-Object -First 1
-$currentFixture = if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix", "process-cache-race-matrix")) {
+$currentFixture = if ($requiresCurrentFixture) {
     @($fixtures.fixtures) |
         Where-Object { $_.fixtureId -eq $CurrentFixtureId } |
         Select-Object -First 1
@@ -731,7 +749,7 @@ if ($Stage -in $sourceStages) {
         throw "Source fixture identity does not match $FixtureId."
     }
 }
-if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix", "process-cache-race-matrix")) {
+if ($requiresCurrentFixture) {
     if ($null -eq $currentFixture) {
         throw "Fixture is absent from fixtures-v2.json: $CurrentFixtureId"
     }
@@ -1026,7 +1044,7 @@ try {
                 [string]$fixture.expectedOutputFrameCount
             )
         }
-        if ($Stage -in @("prefetch", "process-matrix", "process-cache-matrix", "process-cache-race-matrix")) {
+        if ($requiresCurrentFixture) {
             $currentSourceLeaf = Split-Path -Leaf $currentSourcePath
             if ($currentSourceLeaf -notmatch '^[A-Za-z0-9._-]+$') {
                 throw "Current source fixture filename contains unsupported characters: $currentSourceLeaf"
@@ -1088,6 +1106,12 @@ try {
             $instrumentArguments += @(
                 "-e", "stopWhenClosedFromRecents",
                 $StopWhenClosedFromRecents
+            )
+        }
+        if ($Stage -eq "playback-owner-stop") {
+            $instrumentArguments += @(
+                "-e", "playbackOwnedRunClass",
+                $PlaybackOwnedRunClass
             )
         }
         if ($Stage -eq "worker" -and $RebindAfterCompletion) {
@@ -1556,6 +1580,9 @@ try {
                 preRunProcessBoundary = $preRunProcessBoundary
                 stopWhenClosedFromRecents = if ($Stage -eq "task-removal") {
                     $StopWhenClosedFromRecents -eq "true"
+                } else { $null }
+                playbackOwnedRunClass = if ($Stage -eq "playback-owner-stop") {
+                    $PlaybackOwnedRunClass
                 } else { $null }
                 silentObservationSeconds = if ($Stage -eq "force-stop") {
                     $SilentObservationSeconds
