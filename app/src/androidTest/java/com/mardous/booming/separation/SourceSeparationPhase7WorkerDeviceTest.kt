@@ -1666,6 +1666,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
             STOP_WHEN_CLOSED_FROM_RECENTS,
             false,
         )
+        val playbackPreferenceWasPresent = preferences.contains(TEST_KEY_PLAYBACK_ENABLED)
+        val previousPlaybackPreference = preferences.getBoolean(
+            TEST_KEY_PLAYBACK_ENABLED,
+            false,
+        )
         var activity: MainActivity? = null
         var mediaUri: Uri? = null
         var playbackProbe: OriginalAudioPlaybackProbe? = null
@@ -1682,6 +1687,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 )
                 .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
                 .putBoolean(STOP_WHEN_CLOSED_FROM_RECENTS, stopWhenClosed)
+                .putBoolean(TEST_KEY_PLAYBACK_ENABLED, false)
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
                 .commit()
             ) { "Could not configure the task-removal test." }
@@ -1795,7 +1801,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
             if (stopWhenClosed) {
                 probe.releaseControllerOnly()
-                playbackProbe = null
             }
 
             val playbackServiceDeadline =
@@ -1938,7 +1943,16 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("error", "${error::class.java.name}: ${error.message}")
             throw error
         } finally {
-            playbackProbe?.close()
+            playbackProbe?.let { probe ->
+                runCatching { report.put("playbackProbe", probe.report()) }
+                    .onFailure { error ->
+                        report.put(
+                            "playbackProbeError",
+                            "${error::class.java.name}: ${error.message}",
+                        )
+                    }
+                probe.close()
+            }
             worker?.cancel()
             activity?.let { current ->
                 runCatching {
@@ -1956,6 +1970,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 )
             } else {
                 preferenceEditor.remove(STOP_WHEN_CLOSED_FROM_RECENTS)
+            }
+            if (playbackPreferenceWasPresent) {
+                preferenceEditor.putBoolean(
+                    TEST_KEY_PLAYBACK_ENABLED,
+                    previousPlaybackPreference,
+                )
+            } else {
+                preferenceEditor.remove(TEST_KEY_PLAYBACK_ENABLED)
             }
             preferenceEditor.commit()
             mediaUri?.let { uri ->
