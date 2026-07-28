@@ -1246,7 +1246,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 assertTrue(type and ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK != 0)
                 assertTrue(type and ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING != 0)
             }
-            val powerBefore = readShellCommand(instrumentation, "dumpsys power")
+            val powerBefore = activeWakeLocks(
+                readShellCommand(instrumentation, "dumpsys power"),
+            )
             assertTrue(
                 "PlaybackService did not hold its processing wake lock before handoff.",
                 powerBefore.contains(playbackWakeLockTag),
@@ -1276,7 +1278,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 assertEquals(0, type and ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING)
             }
 
-            val powerDuring = readShellCommand(instrumentation, "dumpsys power")
+            val powerDuring = activeWakeLocks(
+                readShellCommand(instrumentation, "dumpsys power"),
+            )
             assertFalse(
                 "PlaybackService retained its processing wake lock after takeover.",
                 powerDuring.contains(playbackWakeLockTag),
@@ -1337,7 +1341,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 assertTrue(it.instrumentalFile.isFile)
             }
 
-            val powerAfter = readShellCommand(instrumentation, "dumpsys power")
+            val powerAfter = activeWakeLocks(
+                readShellCommand(instrumentation, "dumpsys power"),
+            )
             assertFalse(powerAfter.contains(playbackWakeLockTag))
             assertFalse(powerAfter.contains(inferenceWakeLockTag))
             report.put("status", "passed")
@@ -4529,6 +4535,16 @@ class SourceSeparationPhase7WorkerDeviceTest {
         command: String,
     ): String = instrumentation.uiAutomation.executeShellCommand(command).use { descriptor ->
         FileInputStream(descriptor.fileDescriptor).bufferedReader().use { it.readText() }
+    }
+
+    private fun activeWakeLocks(powerDump: String): String {
+        val start = Regex("(?m)^Wake Locks: size=\\d+\\s*$")
+            .find(powerDump)
+            ?: error("Power diagnostics do not contain the active wake-lock section.")
+        val end = Regex("(?m)^Suspend Blockers: size=\\d+\\s*$")
+            .find(powerDump, start.range.last + 1)
+            ?: error("Power diagnostics do not terminate the active wake-lock section.")
+        return powerDump.substring(start.range.first, end.range.first)
     }
 
     private fun startOriginalAudioPlayback(
