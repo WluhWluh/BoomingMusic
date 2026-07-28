@@ -29,8 +29,13 @@ internal object SourceSeparationRemoteWarmRetention {
         override fun onNullBinding(name: ComponentName?) = release()
     }
 
-    fun retain(context: Context, diagnostics: SourceSeparationProcessDiagnostics): Boolean {
+    fun retain(
+        context: Context,
+        diagnostics: SourceSeparationProcessDiagnostics,
+        terminalStatus: SourceSeparationIpcStatus?,
+    ): Boolean {
         if (!SourceSeparationResidentProcessValidation.buildEnabled) return false
+        if (!terminalStatus.allowsWarmRetention()) return false
         if (!diagnostics.isWarmRetentionCandidate()) return false
         val applicationContext = context.applicationContext
         synchronized(lock) {
@@ -105,3 +110,6 @@ internal fun SourceSeparationProcessDiagnostics.isWarmRetentionCandidate(): Bool
         session.state == SourceSeparationProcessSessionState.Resident &&
         session.activeLeaseCount == 0 &&
         !session.poisoned
+
+internal fun SourceSeparationIpcStatus?.allowsWarmRetention(): Boolean =
+    this == SourceSeparationIpcStatus.Completed

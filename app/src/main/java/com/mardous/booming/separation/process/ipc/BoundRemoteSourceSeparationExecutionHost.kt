@@ -73,6 +73,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private var activeRequest: SourceSeparationExecutionHostRequest? = null
     private var activePump: RemoteControlPump? = null
     private var adoptedObserver: SourceSeparationReconnectedEventObserver? = null
+    private var lastTerminalStatus: SourceSeparationIpcStatus? = null
     private val controlSequence = AtomicLong(0L)
     private val terminalConnectionFailure = AtomicReference<Throwable?>(null)
     private val callbackFailure = AtomicReference<Throwable?>(null)
@@ -306,6 +307,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             }
             callbackFailure.set(null)
             activeRequest = request
+            lastTerminalStatus = null
             requireNotNull(remoteService)
         }
         try {
@@ -365,32 +367,47 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 ) {
                     "Bound-remote completion diagnostics do not match the admitted run."
                 }
+                recordTerminalStatus(response.status)
                 SourceSeparationExecutionHostStartResult(
                     result = completion.toMdxRangeSeparationResult(request.executionRequest),
                     diagnostics = diagnostics,
                 )
             }
 
-            SourceSeparationIpcStatus.Paused -> throw SourceSeparationPausedException()
-            SourceSeparationIpcStatus.Deferred ->
+            SourceSeparationIpcStatus.Paused -> {
+                recordTerminalStatus(response.status)
+                throw SourceSeparationPausedException()
+            }
+            SourceSeparationIpcStatus.Deferred -> {
+                recordTerminalStatus(response.status)
                 throw SourceSeparationForegroundExecutionDeferredException(
                     reason = requireNotNull(response.deferredReason),
                 )
-            SourceSeparationIpcStatus.Canceled ->
+            }
+            SourceSeparationIpcStatus.Canceled -> {
+                recordTerminalStatus(response.status)
                 throw CancellationException(response.error?.message ?: "Remote run canceled.")
-            SourceSeparationIpcStatus.Busy ->
+            }
+            SourceSeparationIpcStatus.Busy -> {
+                recordTerminalStatus(response.status)
                 throw SourceSeparationRemoteCacheBusyException(request.descriptor.cacheKey)
-            SourceSeparationIpcStatus.AlreadyCompleted ->
+            }
+            SourceSeparationIpcStatus.AlreadyCompleted -> {
+                recordTerminalStatus(response.status)
                 throw SourceSeparationRemoteCacheAlreadyCompletedException(
                     request.descriptor.cacheKey,
                 )
-            else -> throw SourceSeparationRemoteExecutionException(
-                response.error ?: SourceSeparationIpcError(
-                    category = SourceSeparationIpcErrorCategory.Internal,
-                    type = "RemoteStart${response.status}",
-                    message = "Remote start ended with status ${response.status}.",
-                ),
-            )
+            }
+            else -> {
+                recordTerminalStatus(response.status)
+                throw SourceSeparationRemoteExecutionException(
+                    response.error ?: SourceSeparationIpcError(
+                        category = SourceSeparationIpcErrorCategory.Internal,
+                        type = "RemoteStart${response.status}",
+                        message = "Remote start ended with status ${response.status}.",
+                    ),
+                )
+            }
         }
     }
 
@@ -462,8 +479,13 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         } else {
             null
         }
+        val terminalStatus = connectionLock.withLock { lastTerminalStatus }
         retentionDiagnostics?.let { diagnostics ->
-            SourceSeparationRemoteWarmRetention.retain(applicationContext, diagnostics)
+            SourceSeparationRemoteWarmRetention.retain(
+                applicationContext,
+                diagnostics,
+                terminalStatus,
+            )
         }
         val shutdown = connectionLock.withLock {
             if (connectionState == SourceSeparationRemoteConnectionState.Closed) return
@@ -488,6 +510,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             expectedRecycle = null
             activeRequest = null
             adoptedObserver = null
+            lastTerminalStatus = null
             callbackFailure.set(null)
             connectionChanged.signalAll()
             state
@@ -954,6 +977,12 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             value
         }
         pump?.close()
+    }
+
+    private fun recordTerminalStatus(status: SourceSeparationIpcStatus) {
+        connectionLock.withLock {
+            lastTerminalStatus = status
+        }
     }
 
     private fun nextCommandId(prefix: String): String {

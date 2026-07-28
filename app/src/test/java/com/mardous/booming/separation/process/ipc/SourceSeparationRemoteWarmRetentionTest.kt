@@ -25,6 +25,16 @@ class SourceSeparationRemoteWarmRetentionTest {
         )
     }
 
+    @Test
+    fun `only successful completion permits validation warm retention`() {
+        assertTrue(SourceSeparationIpcStatus.Completed.allowsWarmRetention())
+        assertFalse(SourceSeparationIpcStatus.Paused.allowsWarmRetention())
+        assertFalse(SourceSeparationIpcStatus.Canceled.allowsWarmRetention())
+        assertFalse(SourceSeparationIpcStatus.Deferred.allowsWarmRetention())
+        assertFalse(SourceSeparationIpcStatus.Failed.allowsWarmRetention())
+        assertFalse(null.allowsWarmRetention())
+    }
+
     private fun diagnostics(
         activeRunId: String? = null,
         state: SourceSeparationProcessSessionState =
