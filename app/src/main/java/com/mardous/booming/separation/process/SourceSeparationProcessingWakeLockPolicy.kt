@@ -96,9 +96,6 @@ data class SourceSeparationProcessingWakeLockDiagnostics(
         require(lastReleasedLease?.lifecycle !=
             SourceSeparationProcessingWakeLockLifecycle.Held
         ) { "Processing wake-lock diagnostics expose a held lease as released." }
-        require(!platformHeld || activeLease != null) {
-            "The platform processing wake lock has no active owner."
-        }
     }
 }
 

@@ -18,6 +18,7 @@ import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExe
 import com.mardous.booming.separation.process.ipc.SourceSeparationExecutionService
 import com.mardous.booming.separation.process.ipc.SourceSeparationMediaProcessingForegroundController
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -54,6 +55,9 @@ class SourceSeparationForegroundServiceDeviceTest {
             assertEquals(SourceSeparationForegroundLeaseLifecycle.AwaitingRun,
                 firstActive?.lifecycle)
             assertEquals(expectedPlatformPolicy(), firstActive?.platformPolicy)
+            val pendingProcessDiagnostics = host.processDiagnostics()
+            assertNull(pendingProcessDiagnostics.processingWakeLock.activeLease)
+            assertFalse(pendingProcessDiagnostics.processingWakeLock.platformHeld)
 
             val manager = context.getSystemService(NotificationManager::class.java)
             val firstNotification = awaitNotification(manager)
@@ -81,6 +85,7 @@ class SourceSeparationForegroundServiceDeviceTest {
                 SourceSeparationForegroundControlAction.Pause,
                 firstStopped?.controls?.single()?.action,
             )
+            assertFalse(host.processDiagnostics().processingWakeLock.platformHeld)
             awaitNotificationRemoval(manager)
 
             val secondLease = lease(

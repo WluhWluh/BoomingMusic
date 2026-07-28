@@ -83,6 +83,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnosticsCollector
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
+import com.mardous.booming.separation.process.SourceSeparationProcessingWakeLockLeaseRecord
 import com.mardous.booming.separation.process.SourceSeparationProcParser
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
 import com.mardous.booming.separation.process.SourceSeparationArm32ResidentValidation
@@ -5458,6 +5459,69 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 "largestFreeAddressGapBytes",
                 process.memory.largestFreeAddressGapBytes ?: JSONObject.NULL,
             )
+            .put("foregroundService", process.foregroundService.let { foreground ->
+                JSONObject()
+                    .put("activeLease", foreground.activeLease?.let { lease ->
+                        JSONObject()
+                            .put("leaseId", lease.request.leaseId)
+                            .put("runId", lease.request.runId)
+                            .put("processGeneration", lease.request.processGeneration)
+                            .put("lifecycle", lease.lifecycle.name)
+                            .put("notificationId", lease.notificationId)
+                            .put("platformPolicy", lease.platformPolicy.name)
+                            .put("startedAtElapsedRealtimeNanos",
+                                lease.startedAtElapsedRealtimeNanos)
+                            .put("attachedAtElapsedRealtimeNanos",
+                                lease.attachedAtElapsedRealtimeNanos ?: JSONObject.NULL)
+                    } ?: JSONObject.NULL)
+                    .put("lastStoppedLease", foreground.lastStoppedLease?.let { lease ->
+                        JSONObject()
+                            .put("leaseId", lease.request.leaseId)
+                            .put("runId", lease.request.runId)
+                            .put("processGeneration", lease.request.processGeneration)
+                            .put("lifecycle", lease.lifecycle.name)
+                            .put("notificationId", lease.notificationId)
+                            .put("platformPolicy", lease.platformPolicy.name)
+                            .put("startedAtElapsedRealtimeNanos",
+                                lease.startedAtElapsedRealtimeNanos)
+                            .put("attachedAtElapsedRealtimeNanos",
+                                lease.attachedAtElapsedRealtimeNanos ?: JSONObject.NULL)
+                            .put("stoppedAtElapsedRealtimeNanos",
+                                lease.stoppedAtElapsedRealtimeNanos ?: JSONObject.NULL)
+                            .put("stopReason", lease.stopReason ?: JSONObject.NULL)
+                    } ?: JSONObject.NULL)
+            })
+            .put("processingWakeLock", process.processingWakeLock.let { wakeLock ->
+                JSONObject()
+                    .put("platformHeld", wakeLock.platformHeld)
+                    .put("activeLease", wakeLock.activeLease?.let { lease ->
+                        processingWakeLockLeaseJson(lease)
+                    } ?: JSONObject.NULL)
+                    .put("lastReleasedLease", wakeLock.lastReleasedLease?.let { lease ->
+                        processingWakeLockLeaseJson(lease)
+                    } ?: JSONObject.NULL)
+            })
+
+    private fun processingWakeLockLeaseJson(
+        lease: SourceSeparationProcessingWakeLockLeaseRecord,
+    ): JSONObject = JSONObject()
+        .put("leaseId", lease.request.leaseId)
+        .put("runId", lease.request.runId)
+        .put("processGeneration", lease.request.processGeneration)
+        .put("tag", lease.tag)
+        .put("lifecycle", lease.lifecycle.name)
+        .put("acquiredAtElapsedRealtimeNanos", lease.acquiredAtElapsedRealtimeNanos)
+        .put("expiresAtElapsedRealtimeNanos", lease.expiresAtElapsedRealtimeNanos)
+        .put("releasedAtElapsedRealtimeNanos",
+            lease.releasedAtElapsedRealtimeNanos ?: JSONObject.NULL)
+        .put("releaseReason", lease.releaseReason ?: JSONObject.NULL)
+        .put("events", JSONArray(lease.events.map { event ->
+            JSONObject()
+                .put("action", event.action.name)
+                .put("timestampElapsedRealtimeNanos", event.timestampElapsedRealtimeNanos)
+                .put("timeoutMs", event.timeoutMs ?: JSONObject.NULL)
+                .put("reason", event.reason ?: JSONObject.NULL)
+        }))
 
     private fun Debug.MemoryInfo.summaryBytes(key: String, fallbackKb: Int): Long =
         (memoryStats[key]?.toLongOrNull() ?: fallbackKb.toLong()) * 1024L

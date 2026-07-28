@@ -17,6 +17,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostContr
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
 import com.mardous.booming.separation.process.SourceSeparationForegroundControlAction
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseLifecycle
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseOperationResult
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
@@ -25,6 +26,7 @@ import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePo
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionRecycleRequiredException
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionPoisonedException
+import com.mardous.booming.separation.process.SourceSeparationProcessingWakeLockOperationResult
 import com.mardous.booming.separation.process.SourceSeparationRemoteCacheUnavailableException
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLostException
 import com.mardous.booming.separation.process.SourceSeparationRemoteExecutionControl
@@ -50,6 +52,19 @@ internal class SourceSeparationExecutionService : Service() {
     private val retentionBinder = Binder()
     private val foregroundController by lazy {
         SourceSeparationMediaProcessingForegroundController(this)
+    }
+    private val processingWakeLockController by lazy {
+        SourceSeparationProcessingWakeLockController(this) { request, reason ->
+            Log.e(TAG, "Processing wake-lock lease lost: $reason")
+            synchronized(stateLock) {
+                activeRun
+                    ?.takeIf { active ->
+                        active.descriptor.runId == request.runId &&
+                            active.descriptor.processGeneration == request.processGeneration
+                    }
+                    ?.requestPause()
+            }
+        }
     }
 
     override fun onCreate() {
@@ -105,6 +120,7 @@ internal class SourceSeparationExecutionService : Service() {
     }
 
     override fun onDestroy() {
+        processingWakeLockController.releaseActive("service-destroyed")
         foregroundController.stopActive("service-destroyed")
         val acknowledgedRecycle = synchronized(stateLock) {
             activeRun?.close()
@@ -419,6 +435,10 @@ internal class SourceSeparationExecutionService : Service() {
             "The remote execution client is not connected."
         }
         ensureForegroundStarted(command.foregroundLease)
+        val wakeLockDiagnostics = processingWakeLockController.diagnostics()
+        require(wakeLockDiagnostics.activeLease == null &&
+            !wakeLockDiagnostics.platformHeld
+        ) { "A prior processing wake-lock lifetime has not ended." }
         val control = SourceSeparationRemoteExecutionControl(
             initialPlaybackPositionMs = command.descriptor.runtime.initialPlaybackPositionMs,
             initialPlaybackReadyWindowCount =
@@ -479,6 +499,18 @@ internal class SourceSeparationExecutionService : Service() {
         return try {
             active.environment.beginExecution(command.descriptor.runId)
             executionBegan = true
+            command.foregroundLease?.let { lease ->
+                require(foregroundController.diagnostics().activeLease?.let { active ->
+                    active.request == lease &&
+                        active.lifecycle == SourceSeparationForegroundLeaseLifecycle.Active
+                } == true) {
+                    "The processing wake lock requires an attached foreground lease."
+                }
+                val acquired = processingWakeLockController.acquire(lease)
+                require(acquired == SourceSeparationProcessingWakeLockOperationResult.Applied ||
+                    acquired == SourceSeparationProcessingWakeLockOperationResult.AlreadyApplied
+                ) { "The processing wake-lock lease could not be acquired." }
+            }
             val hosted = active.host.start(
                 SourceSeparationExecutionHostRequest(
                     descriptor = command.descriptor,
@@ -498,6 +530,7 @@ internal class SourceSeparationExecutionService : Service() {
                     completion = hosted.result.toExecutionCompletion(active.executionRequest),
                     diagnostics = hosted.diagnostics.copy(
                         foregroundService = foregroundController.diagnostics(),
+                        processingWakeLock = processingWakeLockController.diagnostics(),
                     ),
                 )
             )
@@ -528,16 +561,20 @@ internal class SourceSeparationExecutionService : Service() {
             foregroundStopReason = "failed:${error::class.java.simpleName}"
             terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Failed, error)
         } finally {
-            if (executionBegan) {
-                active.environment.finishExecution(
-                    command.descriptor.runId,
-                    executionFailure,
-                )
+            try {
+                if (executionBegan) {
+                    active.environment.finishExecution(
+                        command.descriptor.runId,
+                        executionFailure,
+                    )
+                }
+            } finally {
+                command.foregroundLease?.let { lease ->
+                    processingWakeLockController.release(lease, foregroundStopReason)
+                    foregroundController.stop(lease, foregroundStopReason)
+                }
+                closeAbandonedRun(active)
             }
-            command.foregroundLease?.let { lease ->
-                foregroundController.stop(lease, foregroundStopReason)
-            }
-            closeAbandonedRun(active)
         }
     }
 
@@ -782,6 +819,7 @@ internal class SourceSeparationExecutionService : Service() {
                 ?: SourceSeparationProcessSessionDiagnostics.empty(),
             validationOverride = environment?.validationOverrideDiagnostics(),
             foregroundService = foregroundController.diagnostics(),
+            processingWakeLock = processingWakeLockController.diagnostics(),
         )
     }
 

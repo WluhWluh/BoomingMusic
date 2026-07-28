@@ -55,6 +55,7 @@ class SourceSeparationProcessingWakeLockTrackerTest {
         assertEquals("completed", released.releaseReason)
         assertEquals(SourceSeparationProcessingWakeLockAction.Release,
             released.events.last().action)
+        assertTrue(tracker.diagnostics(platformHeld = true).platformHeld)
     }
 
     @Test
