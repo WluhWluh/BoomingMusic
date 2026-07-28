@@ -78,6 +78,7 @@ import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportCoordinator
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.ui.screen.equalizer.EqualizerViewModel
 import com.mardous.booming.ui.screen.info.InfoViewModel
 import com.mardous.booming.ui.screen.library.LibraryViewModel
@@ -201,6 +202,11 @@ private val mainModule = module {
     single { SourceSeparationCacheFlacPromoter(store = get(), repository = get()) }
     single { SourceSeparationCacheHydrator(store = get(), repository = get()) }
     single {
+        SourceSeparationProcessingOwnershipHandoff(
+            android.os.SystemClock::elapsedRealtimeNanos,
+        )
+    }
+    single {
         SourceSeparationModelAwareEngine.createProduction(
             context = androidContext(),
             presetRepository = get(),
@@ -219,6 +225,8 @@ private val mainModule = module {
                     context = androidContext(),
                     presetRepository = presetRepository,
                     coordinator = get(),
+                    processingOwnershipLease =
+                        get<SourceSeparationProcessingOwnershipHandoff>().createLease(),
                 )
             },
             cacheRepository = get(),

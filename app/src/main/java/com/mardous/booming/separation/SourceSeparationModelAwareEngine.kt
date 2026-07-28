@@ -36,6 +36,8 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
+import com.mardous.booming.separation.process.SourceSeparationProcessingOwnerToken
+import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.separation.process.toExecutionDescriptor
 import com.mardous.booming.separation.process.toMdxRangePreparation
 import com.mardous.booming.separation.process.toMdxRangeProgress
@@ -59,8 +61,23 @@ internal class SourceSeparationModelAwareEngine(
     private val constructionGate: () -> Boolean,
     private val runIdFactory: () -> String = { UUID.randomUUID().toString() },
     private val executionHostEventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
+    private val processingOwnershipLease: SourceSeparationProcessingOwnershipHandoff
+        .SourceSeparationProcessingOwnershipLease? = null,
 ) : AutoCloseable {
-    override fun close() = executionHost.close()
+    private val closeLock = Any()
+    private var closed = false
+
+    override fun close() {
+        synchronized(closeLock) {
+            if (closed) return
+            closed = true
+        }
+        try {
+            executionHost.close()
+        } finally {
+            processingOwnershipLease?.release("execution-host-closed")
+        }
+    }
 
     fun separate(
         input: SourceSeparationModelAwareSongInput,
@@ -302,6 +319,13 @@ internal class SourceSeparationModelAwareEngine(
                                         "Execution host accepted a different descriptor."
                                     }
                                     hostRunAccepted = true
+                                    processingOwnershipLease?.accepted(
+                                        SourceSeparationProcessingOwnerToken(
+                                            cacheKey = descriptor.cacheKey,
+                                            runId = descriptor.runId,
+                                            processGeneration = descriptor.processGeneration,
+                                        )
+                                    )
                                 }
                                 is SourceSeparationExecutionHostEventPayload.Progress ->
                                     onProgress(payload.progress.toMdxRangeProgress())
@@ -563,6 +587,8 @@ internal class SourceSeparationModelAwareEngine(
             executionBackendPolicy: SourceSeparationExecutionBackendPolicy =
                 SourceSeparationExecutionBackendPolicy.Auto,
             executionHostEventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
+            processingOwnershipLease: SourceSeparationProcessingOwnershipHandoff
+                .SourceSeparationProcessingOwnershipLease? = null,
         ): SourceSeparationModelAwareEngine {
             val appContext = context.applicationContext
             return SourceSeparationModelAwareEngine(
@@ -574,6 +600,7 @@ internal class SourceSeparationModelAwareEngine(
                 executionBackendPolicy = executionBackendPolicy,
                 constructionGate = { true },
                 executionHostEventSink = executionHostEventSink,
+                processingOwnershipLease = processingOwnershipLease,
             )
         }
 
@@ -589,6 +616,8 @@ internal class SourceSeparationModelAwareEngine(
             executionBackendPolicy: SourceSeparationExecutionBackendPolicy =
                 SourceSeparationExecutionBackendPolicy.Auto,
             executionHostEventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
+            processingOwnershipLease: SourceSeparationProcessingOwnershipHandoff
+                .SourceSeparationProcessingOwnershipLease? = null,
         ): SourceSeparationModelAwareEngine = createBoundRemotePrototype(
             context = context,
             presetRepository = presetRepository,
@@ -596,6 +625,7 @@ internal class SourceSeparationModelAwareEngine(
             executionHost = executionHost,
             executionBackendPolicy = executionBackendPolicy,
             executionHostEventSink = executionHostEventSink,
+            processingOwnershipLease = processingOwnershipLease,
         )
 
         fun createProduction(

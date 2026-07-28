@@ -45,6 +45,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostLifecycle
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
+import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostStartResult
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.process.ipc.SourceSeparationExecutionIpcCodec
@@ -59,6 +60,7 @@ import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -708,6 +710,63 @@ class SourceSeparationModelAwareEngineTest {
     }
 
     @Test
+    fun `remote acceptance owns processing until the scoped engine closes`() {
+        val fixture = fixture()
+        val handoff = SourceSeparationProcessingOwnershipHandoff { 10L }
+        val lease = handoff.createLease()
+        var acceptedCacheKey: String? = null
+        val host = object : SourceSeparationExecutionHost {
+            override val mode = SourceSeparationExecutionHostMode.BoundRemote
+            override val processGeneration = 17L
+
+            override fun start(
+                request: SourceSeparationExecutionHostRequest,
+            ): com.mardous.booming.separation.process.SourceSeparationExecutionHostStartResult {
+                acceptedCacheKey = request.descriptor.cacheKey
+                request.onEvent(
+                    SourceSeparationExecutionHostEvent(
+                        runId = request.descriptor.runId,
+                        processGeneration = request.descriptor.processGeneration,
+                        sequence = 1L,
+                        payload = SourceSeparationExecutionHostEventPayload.Accepted(
+                            request.descriptor,
+                        ),
+                    )
+                )
+                throw IllegalStateException("injected post-acceptance failure")
+            }
+
+            override fun snapshot(runId: String, processGeneration: Long) = null
+            override fun pause(runId: String, processGeneration: Long) =
+                SourceSeparationExecutionHostControlResult.NoActiveRun
+            override fun cancel(runId: String, processGeneration: Long) =
+                SourceSeparationExecutionHostControlResult.NoActiveRun
+            override fun closeRun(runId: String, processGeneration: Long) =
+                SourceSeparationExecutionHostControlResult.NoActiveRun
+            override fun close() = Unit
+        }
+        val engine = fixture.engine(
+            executionHost = host,
+            runIdFactory = { "accepted-remote-run" },
+            processingOwnershipLease = lease,
+        )
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            engine.separate(fixture.input)
+        }
+
+        assertEquals("injected post-acceptance failure", error.message)
+        val active = requireNotNull(handoff.stateFlow.value.activeOwner)
+        assertEquals("accepted-remote-run", active.owner.runId)
+        assertEquals(17L, active.owner.processGeneration)
+        assertEquals(acceptedCacheKey, active.owner.cacheKey)
+        engine.close()
+        assertNull(handoff.stateFlow.value.activeOwner)
+        assertEquals("execution-host-closed",
+            handoff.stateFlow.value.lastReleasedOwner?.releaseReason)
+    }
+
+    @Test
     fun `host pause command reaches the admitted run and preserves resumable state`() {
         val fixture = fixture()
         val started = CountDownLatch(1)
@@ -898,6 +957,8 @@ class SourceSeparationModelAwareEngineTest {
                 SourceSeparationExecutionBackendPolicy.Auto,
             runIdFactory: () -> String = { "test-run-${++runIdSequence}" },
             eventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
+            processingOwnershipLease: SourceSeparationProcessingOwnershipHandoff
+                .SourceSeparationProcessingOwnershipLease? = null,
             executor: SourceSeparationModelAwareRangeExecutor = SourceSeparationModelAwareRangeExecutor {
                 request -> complete(request, prepare(request))
             },
@@ -915,6 +976,7 @@ class SourceSeparationModelAwareEngineTest {
             constructionGate = { constructionGate },
             runIdFactory = runIdFactory,
             executionHostEventSink = eventSink,
+            processingOwnershipLease = processingOwnershipLease,
         )
 
         fun resolvedModel(modelId: String): SourceSeparationResolvedCacheModel {
