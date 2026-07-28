@@ -149,10 +149,14 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("journalSequence", journal.latestSequence)
                     .put("committedSegments", journal.committedSegments.size)
                     .put("killBoundary", "segment-running")
+                    .put("killRequester", "debug-main-process")
                     .put("backendMode", request.backendMode)
                     .put("tryGpu", request.tryGpu),
             )
             Log.i(TAG, "Main-death scenario is ready for ${request.runId}.")
+            SystemClock.sleep(MAIN_DEATH_SETTLE_MS)
+            Process.killProcess(Process.myPid())
+            error("The debug main process survived its requested death.")
         } catch (error: Throwable) {
             mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
             scenarioFile.delete()
@@ -283,6 +287,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("remoteProcessGeneration", processGeneration)
                     .put("executionRunId", executionRunId)
                     .put("killBoundary", scenario.getString("killBoundary"))
+                    .put("killRequester", scenario.getString("killRequester"))
                     .put("journalSequenceBeforeDeath", scenario.getLong("journalSequence"))
                     .put("journalSequenceBeforeReattachment", detached.latestSequence)
                     .put("finalJournalSequence", finalJournal.latestSequence)
@@ -606,6 +611,7 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val REATTACH_TIMEOUT_MS = 60_000L
     private const val COMPLETION_TIMEOUT_MS = 30L * 60L * 1_000L
     private const val CALLBACK_TIMEOUT_MS = 10_000L
+    private const val MAIN_DEATH_SETTLE_MS = 100L
     private const val POLL_MS = 100L
     private const val MEDIA_SCAN_RETRIES = 60
     private const val MEDIA_SCAN_POLL_MS = 500L

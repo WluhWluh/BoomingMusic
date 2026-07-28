@@ -1005,14 +1005,10 @@ try {
         if ($oldMainPid -le 0 -or $remotePid -le 0 -or $oldMainPid -eq $remotePid) {
             throw "The debug process-death scenario contains invalid process identities."
         }
-        if ($oldMainPid -notin @(Get-NamedProcessIds $package)) {
-            throw "The debug scenario main PID is no longer the active main process."
-        }
         if ($remotePid -notin @(Get-NamedProcessIds "${package}:source_separation")) {
             throw "The debug scenario remote PID is no longer authoritative."
         }
 
-        Invoke-Adb shell run-as $package kill -9 $oldMainPid
         $deathDeadline = [DateTime]::UtcNow.AddSeconds(30)
         do {
             $oldMainAlive = $oldMainPid -in @(Get-NamedProcessIds $package)
