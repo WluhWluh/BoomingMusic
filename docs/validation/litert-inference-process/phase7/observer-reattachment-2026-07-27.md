@@ -6,6 +6,7 @@ main-process death and remote-process restart remain open
 Product implementation revision:
 
 - `d655eaa72f5d5ea1716920e505609f69d52a6203`
+- `e52adcb04217296338b05b37f4631390d034d1ca` (unobserved deadline)
 
 Device-test runner revision:
 
@@ -38,6 +39,16 @@ key through completion.
 
 This is a deterministic observer-loss test in a retained main process. It does
 not claim that Android killed and recreated the main process.
+
+An independently authoritative run now receives a 5-hour-45-minute deadline
+when its observer detaches. A matching replacement observer or terminal close
+cancels that exact deadline. Expiry requests Pause, retaining partial cache
+work while reusing the normal foreground-service and wake-lock cleanup path.
+This deadline leaves margin below the Android 15 six-hour media-processing
+quota; a platform timeout may still pause the run earlier. Scheduling,
+replacement, stale-identity, single-expiry, and cancellation behavior is
+covered by deterministic unit tests. The full wall-clock duration is not
+replayed in device tests.
 
 ## Frozen inputs
 
@@ -84,10 +95,10 @@ Raw reports and input envelopes remain ignored build artifacts under
 | `phase7-s25-reattach-gpu-v2` | `71e51b9e1818da9ea058ab0a63ec5171cdc2f42df1d01686c37ced7a69d0581a` | `b43a63f2e548f609cbcda95e30827ab9fe65c845c4b856d2ce0f030c5c4c326e` |
 | `phase7-s10-reattach-cpu-v1` | `28dd6a5af0f873c7a2ccdb6b12b7fec160f2ed0c5b41cb5e7ab0dd4c2c32855b` | `8c4934f1c1f11eb7437117a0c0f0111f78c5a745947a93e2a1bf9fd1429572be` |
 | `phase7-s10-reattach-gpu-v1` | `9f709594799b21c6b9cc05322cbb96a4555e15480e23e5e1a6b93463832ee401` | `f386480257611901269ab52eede8635063368fa53450d188a2fc2fa93a7a8524` |
+| `phase7-s25-reattach-deadline-cpu-v1` | `aa165ae597527538be60c27cc7d9452cc1259ff7b28dda74ff80d864cc304efc` | `168a77b7f53c286c29bdaa84177cbb533778eab1517ec44613b63332e43dbd02` |
 
 ## Remaining scope
 
-- Bound the time an eligible run may remain without an observer.
 - Kill and recreate the main process at each Phase 7D boundary.
 - Exercise original playback continuity across actual main-process recreation.
 - Define and validate one bounded remote-process restart mechanism.

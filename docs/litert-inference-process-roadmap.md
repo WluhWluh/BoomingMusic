@@ -5,10 +5,10 @@ and S25 for CPU and bounded GPU; process-death recovery remains open
 
 Updated: 2026-07-27
 
-Current milestone: close the remaining unobserved-lifetime and actual
-main-process-recreation work in Phase 7A/7D, then select the single Phase 7B
-remote-process restart policy. Remaining Phase 5F and Phase 6D full-song,
-fallback, UI, current-API, and long-running platform matrices are
+Current milestone: execute actual main-process recreation at the Phase 7D
+boundaries, then select the single Phase 7B remote-process restart policy.
+Remaining Phase 5F and Phase 6D full-song, fallback, UI, current-API, and
+long-running platform matrices are
 release-qualification work and may remain open while product implementation
 continues.
 
@@ -1407,9 +1407,10 @@ across every app state, and cannot be inferred from CPU-only success.
 - [x] Let a reconnecting main process query and adopt the current snapshot.
 - [x] Do not let callback loss cancel an otherwise valid foreground run, and
   persist the exact observer disconnection before accepting a replacement.
-- [ ] Bound how long an otherwise valid foreground run may continue without an
-  observer. The current implementation relies on its admitted FGS lifetime and
-  has no shorter application deadline.
+- [x] Bound an otherwise valid foreground run to 5 hours 45 minutes after its
+  observer disconnects. Exact reconnection or terminal close cancels the
+  deadline; expiry requests Pause through the existing durable cache and
+  FGS/wake-lock cleanup path. Android may impose an earlier platform timeout.
 - [x] Do not let the inference process admit a new song after completing the
   frozen request without a live main-process decision.
 - [x] Keep playback-demand and prefetch authority in the main/playback process;
