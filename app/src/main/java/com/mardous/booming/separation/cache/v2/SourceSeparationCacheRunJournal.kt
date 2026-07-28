@@ -252,6 +252,30 @@ data class SourceSeparationCacheRunJournal(
                             timestampEpochMs = request.admittedAtEpochMs,
                         )
                     )
+                    previous.latestObserverTransition()
+                        ?.takeIf { transition ->
+                            transition.type ==
+                                SourceSeparationCacheRunTransitionType.ObserverConnected
+                        }
+                        ?.let { observer ->
+                            sequence += 1L
+                            add(
+                                SourceSeparationCacheRunJournalTransition(
+                                    sequence = sequence,
+                                    runId = previous.request.runId,
+                                    processGeneration = previous.request.processGeneration,
+                                    ownerPid = previous.request.ownerPid,
+                                    runClass = previous.request.runClass,
+                                    backgroundPolicy = previous.request.backgroundPolicy,
+                                    observerId = observer.observerId,
+                                    observerProcessName = observer.observerProcessName,
+                                    observerReason = PREVIOUS_OWNER_DIED_OBSERVER_REASON,
+                                    type = SourceSeparationCacheRunTransitionType
+                                        .ObserverDisconnected,
+                                    timestampEpochMs = request.admittedAtEpochMs,
+                                )
+                            )
+                        }
                 }
                 sequence += 1L
                 add(
@@ -276,6 +300,8 @@ data class SourceSeparationCacheRunJournal(
                 updatedAtEpochMs = request.admittedAtEpochMs,
             )
         }
+
+        private const val PREVIOUS_OWNER_DIED_OBSERVER_REASON = "owner-process-died"
     }
 }
 

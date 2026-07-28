@@ -209,9 +209,19 @@ internal object SourceSeparationMainDeathDebugHarness {
             val plannedSegments = requireNotNull(
                 store.readManifest(runtimeSong.cacheKey)?.segmentPlan,
             ).segments.size
+            val connectedObserver = journal.transitions.lastOrNull { transition ->
+                transition.type == SourceSeparationCacheRunTransitionType.ObserverConnected ||
+                    transition.type ==
+                        SourceSeparationCacheRunTransitionType.ObserverDisconnected
+            }?.takeIf { transition ->
+                transition.type == SourceSeparationCacheRunTransitionType.ObserverConnected
+            }
             if (mode == BeginMode.RemoteProcessDeath) {
                 check(plannedSegments == EXPECTED_FULL_SONG_SEGMENTS) {
                     "The remote-death gate requires the 48-segment 9662 fixture."
+                }
+                check(connectedObserver != null) {
+                    "The remote-death gate did not observe the admitted host observer."
                 }
             }
             val remoteProcessStartTicks = SourceSeparationProcParser.parseProcessStartTicks(
@@ -241,6 +251,11 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("plannedSegments", plannedSegments)
                     .put("runClass", journal.request.runClass.name)
                     .put("backgroundPolicy", journal.request.backgroundPolicy.name)
+                    .put("observerId", connectedObserver?.observerId ?: JSONObject.NULL)
+                    .put(
+                        "observerProcessName",
+                        connectedObserver?.observerProcessName ?: JSONObject.NULL,
+                    )
                     .put("admittedGpuRuntime", gpuRuntimeJson(journal))
                     .put(
                         "admittedGpuFallbackLatch",
@@ -305,6 +320,8 @@ internal object SourceSeparationMainDeathDebugHarness {
             val oldRemoteProcessStartTicks = scenario.getLong("remoteProcessStartTicks")
             val oldProcessGeneration = scenario.getLong("remoteProcessGeneration")
             val oldExecutionRunId = scenario.getString("executionRunId")
+            val oldObserverId = scenario.getString("observerId")
+            val oldObserverProcessName = scenario.getString("observerProcessName")
             val originalTryGpu = scenario.getBoolean("tryGpu")
             val plannedSegments = scenario.getInt("plannedSegments")
             check(plannedSegments == EXPECTED_FULL_SONG_SEGMENTS)
@@ -476,8 +493,19 @@ internal object SourceSeparationMainDeathDebugHarness {
             check(previousOwnerDeath.ownerPid == oldRemotePid)
             val resumedAdmission = resumedJournal.transitions.single { transition ->
                 transition.type == SourceSeparationCacheRunTransitionType.Admitted &&
-                    transition.sequence == previousOwnerDeath.sequence + 1L
+                    transition.runId == resumedJournal.request.runId
             }
+            val abandonedObserver = resumedJournal.transitions.single { transition ->
+                transition.type == SourceSeparationCacheRunTransitionType.ObserverDisconnected &&
+                    transition.observerReason == "owner-process-died"
+            }
+            check(abandonedObserver.sequence == previousOwnerDeath.sequence + 1L)
+            check(abandonedObserver.runId == oldExecutionRunId)
+            check(abandonedObserver.processGeneration == oldProcessGeneration)
+            check(abandonedObserver.ownerPid == oldRemotePid)
+            check(abandonedObserver.observerId == oldObserverId)
+            check(abandonedObserver.observerProcessName == oldObserverProcessName)
+            check(resumedAdmission.sequence == abandonedObserver.sequence + 1L)
             check(resumedAdmission.runId == resumedJournal.request.runId)
             check(resumedAdmission.processGeneration ==
                 resumedJournal.request.processGeneration)
@@ -575,6 +603,9 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("finalCommittedSegments", finalJournal.committedSegments.size)
                     .put("plannedSegments", plannedSegments)
                     .put("previousOwnerDied", true)
+                    .put("abandonedObserverId", oldObserverId)
+                    .put("abandonedObserverProcessName", oldObserverProcessName)
+                    .put("abandonedObserverReason", abandonedObserver.observerReason)
                     .put("originalTryGpu", originalTryGpu)
                     .put("persistedTryGpuBeforeResume", persistedTryGpu)
                     .put("resumedTryGpu", resumedJournal.request.tryGpu)

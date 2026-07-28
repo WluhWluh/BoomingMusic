@@ -258,6 +258,55 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `new owner closes the observer abandoned with a dead process`() {
+        val fixture = fixture()
+        val abandoned = fixture.beginReady()
+        fixture.coordinator.observerConnected(
+            abandoned,
+            observerId = "observer-old-owner",
+            observerProcessName = "com.example",
+        )
+        abandoned.close()
+
+        val resumed = (fixture.coordinator.begin(
+            fixture.request.copy(
+                runId = "resumed-run",
+                processGeneration = 2L,
+                ownerPid = 200,
+            )
+        ) as SourceSeparationCacheRunStart.Ready).run
+        val journal = requireNotNull(
+            fixture.store.readRunJournal(resumed.identity.cacheKey)
+        )
+
+        assertEquals(
+            listOf(
+                SourceSeparationCacheRunTransitionType.Admitted,
+                SourceSeparationCacheRunTransitionType.ObserverConnected,
+                SourceSeparationCacheRunTransitionType.PreviousOwnerDied,
+                SourceSeparationCacheRunTransitionType.ObserverDisconnected,
+                SourceSeparationCacheRunTransitionType.Admitted,
+            ),
+            journal.transitions.map { it.type },
+        )
+        val disconnected = journal.transitions[3]
+        assertEquals("observer-old-owner", disconnected.observerId)
+        assertEquals("com.example", disconnected.observerProcessName)
+        assertEquals("owner-process-died", disconnected.observerReason)
+
+        val reconnected = fixture.coordinator.observerConnected(
+            resumed,
+            observerId = "observer-new-owner",
+            observerProcessName = "com.example",
+        )
+        assertEquals(
+            SourceSeparationCacheRunTransitionType.ObserverConnected,
+            reconnected.transitions.last().type,
+        )
+        fixture.coordinator.pause(resumed)
+    }
+
+    @Test
     fun `run class is immutable for a running owner and explicit on paused readmission`() {
         val activeFixture = fixture()
         val prefetchRequest = activeFixture.request.copy(
