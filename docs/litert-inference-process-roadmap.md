@@ -1,12 +1,12 @@
 # LiteRT Inference Process and Background Execution Roadmap
 
-Status: Phase 5 policy selected; bounded-GPU GitHub runtime productionization
-in progress
+Status: Phase 5 policy and bounded-GPU artifact frozen; final GPU inference
+and UI qualification in progress
 
 Updated: 2026-07-27
 
-Current milestone: Phase 5F, freeze the GitHub-only custom LiteRT artifact and
-qualify the `N=1` bounded OpenCL profile before changing background lifetime.
+Current milestone: finish the remaining Phase 5F full-model and UI device
+matrix before changing background lifetime.
 
 This roadmap governs two related but separate experiments:
 
@@ -36,8 +36,9 @@ Maven Central publication, and a fully source-rebuilt ML Drift GPU accelerator
 are not release gates for this roadmap. They may be reconsidered in a separate
 distribution track without blocking the GitHub APK.
 
-The GitHub release candidate will use the already validated MACE-style bounded
-OpenCL queue behavior with `N=1`. This means the exact tested wait boundary is
+The GitHub build uses the pinned `runtime-v2.1.5-bss.2` artifact and its
+validated MACE-style bounded OpenCL queue behavior with `N=1`. This means the
+exact tested wait boundary is
 part of a versioned GPU runtime profile, not a user preference or an adaptive
 hint. The stock unbounded `N=0` runtime remains a diagnostic and rollback
 oracle only. It is not an automatic runtime fallback.
@@ -1127,41 +1128,41 @@ not change the Phase 5 host decision: an admitted arm64 GPU run remains
 `InProcess + SingleUse` until a later background-ownership phase explicitly
 tests another host.
 
-- [ ] Publish an immutable `bss-litert-android` GitHub Release that records the
+- [x] Publish an immutable `bss-litert-android` GitHub Release that records the
   pinned official LiteRT input AAR, deterministic transformation and shim
   revisions, output AAR/Maven-bundle SHA-256, every native component hash,
   per-ABI ELF inventory, notices, SBOM, and build provenance. Reproduce the
   same release candidate on a clean runner before app integration.
-- [ ] Make the Booming SS build fetch or materialize that exact release asset
+- [x] Make the Booming SS build fetch or materialize that exact release asset
   through a checksum-verifying setup step. Pin tag and hash; never use
   `latest`. Fail the build if stock LiteRT is also resolved transitively, if a
   required native component is missing, or if an ABI contains duplicate
   runtime/accelerator libraries.
-- [ ] Introduce the explicit runtime profile
+- [x] Introduce the explicit runtime profile
   `gpu-opencl-bounded-fp32-v1`. It freezes FP32, OpenCL, and the exact tested
   `N=1` wait boundary. If the binary implementation must reuse an otherwise
   unused upstream option internally, contain that detail inside the runtime
   adapter and expose only the bounded-queue name and capability to app code.
-- [ ] Add the persistent `尝试使用 GPU` switch to the source-separation panel's
+- [x] Add the persistent `尝试使用 GPU` switch to the source-separation panel's
   Advanced section. Default a missing key to enabled. Do not expose `N`, a
   forced graphics API, GPU-only mode, process placement, or CPU thread count.
-- [ ] Freeze `tryGpu` at run admission and carry it through the execution
+- [x] Freeze `tryGpu` at run admission and carry it through the execution
   request, protocol, journal, diagnostics, and restart snapshot. A setting
   change during an active or paused run affects only a newly admitted run.
   Bump the protocol and journal schemas rather than interpreting absent fields
   through mutable process preferences.
-- [ ] Add `tryGpu` to the versioned source-separation settings backup allowlist.
+- [x] Add `tryGpu` to the versioned source-separation settings backup allowlist.
   Restore it only when that category and key are present; an upstream or older
   backup without the key must not overwrite the destination value.
-- [ ] Add an early native capability/build-ID check. Missing or mismatched
+- [x] Add an early native capability/build-ID check. Missing or mismatched
   capability must skip GPU and use the known-good CPU path; it must not create
   stock `N=0` GPU and must not rely on a log message as capability proof.
-- [ ] Replace static OEM/device/GPU-driver admission with dynamic eligibility:
+- [x] Replace static OEM/device/GPU-driver admission with dynamic eligibility:
   `tryGpu=true`, GPU-capable packaged ABI, GPU-eligible model profile, exact
   bounded capability, accelerator discovery, successful compile/probe, and
   valid output. A failure is typed and falls back one-way to CPU when cleanup
   is safe; it must not persistently disable the user's setting.
-- [ ] Keep `N=1` unchanged while the app is foregrounded, backgrounded, or
+- [x] Keep `N=1` unchanged while the app is foregrounded, backgrounded, or
   screen-off. Do not rebuild a session merely because Activity visibility
   changed. Retain `N=0` only in internal A/B tests and require a new versioned
   profile plus fresh evidence for any future queue-window value.
@@ -1170,24 +1171,35 @@ tests another host.
   fatal cleanup and process recycle, cancellation, and session close using the
   final release-candidate AAR. Prove that no fallback path silently creates an
   unbounded GPU session.
+  The strict fake-session failure matrix and packaged capability smoke pass;
+  real 9662 invocation and fallback repetitions with the pinned AAR remain
+  open.
 - [ ] Test a clean install, missing-key default, app/process restart,
   source-separation backup and restore of both values, and an upstream backup
   with no key. With the switch off, prove zero GPU discovery, compile, probe,
   graphics-allocation, and event-wait attempts. With it on, prove successful
   bounded GPU and each typed one-way CPU fallback.
+  Missing-key, both stored values, a real process restart, schema-v2 restore,
+  and schema-v1 no-overwrite now pass. A disabled full inference run with
+  native counters and all enabled fallback stages remains open.
 - [ ] Toggle the setting during active, paused, foreground, background, and
   screen-off runs. Prove the admitted request and backend do not change and the
   new value is observed by the next run only.
+  Request, IPC, journal, restart identity, and paused-run immutability pass in
+  unit tests. Foreground/background/screen-off device toggles remain open.
 - [ ] Repeat at least three no-Perfetto full-song pairs and three foreground
   Perfetto swipe intervals per phone with alternating `N=0` oracle/`N=1`
   candidate order. Freeze S10 and S25 responsiveness, throughput, first-ready,
   memory, thermal, and output thresholds before reviewing those final runs.
-- [ ] Attempt bounded GPU by default on every runtime-eligible device; do not
+- [x] Attempt bounded GPU by default on every runtime-eligible device; do not
   ship a Samsung, device-model, GPU-vendor, or driver allowlist. Exercise Mali
   and non-Samsung devices when available to broaden regression coverage, but
   treat missing coverage as a documented evidence limit rather than a reason
   to force otherwise eligible devices to CPU.
-- [ ] Verify GitHub debug, release-like split APKs, and universal APKs use the
+  S10 and S25 pass the exact packaged capability check. No non-Samsung or Mali
+  device was available for this checkpoint, so that coverage limit remains
+  explicit.
+- [x] Verify GitHub debug, release-like split APKs, and universal APKs use the
   identical pinned artifact and profile. Record a build-level rollback that
   returns an affected scope to CPU or a later GitHub build; do not implement a
   live downgrade from bounded to stock GPU.
@@ -1197,12 +1209,13 @@ host policy, concrete host execution, and session-lifetime candidate. Process
 isolation can be accepted or rejected independently of the still-unimplemented
 processing foreground service.
 
-Phase 5E satisfies this policy checkpoint. The overall Phase 5 exit remains
-open for Phase 5D's final bounded-profile host pairs and Phase 5F's immutable
-runtime, fallback, UI, and release-APK qualification. Historical GitHub debug
-unit tests, AndroidTest Kotlin compilation, and release Kotlin compilation pass
-with the Phase 5 observability changes; they must be repeated with the pinned
-bounded runtime.
+Phase 5E satisfies this policy checkpoint. The immutable runtime, ABI
+inventory, exact capability, settings lifecycle, and 260-test GitHub debug
+unit suite pass with the pinned artifact. See
+`docs/validation/litert-inference-process/phase5/bounded-runtime-capability-2026-07-27.md`
+and `gpu-preference-lifecycle-2026-07-27.md`. The overall Phase 5 exit remains
+open for the final bounded-profile real-model/fallback pairs and foreground UI
+matrix.
 
 ## Phase 6: Prototype an Independent Media-Processing Service
 
