@@ -1,16 +1,19 @@
 # Phase 6A run eligibility and fallback checkpoint
 
-Status: implementation complete; independent foreground execution remains
-disabled
+Status: run eligibility complete; later independent foreground integration and
+exact product handoff validated
 
 Final implementation revision tested:
 `1ae10d5fd063026fa44a899527c299768c7d737d`
 
-Production execution mode: `InProcess`
+Subsequent integration revision tested:
+`d5c36fd470078d0aeb4c36fe888ef95a71067302`
 
-Experimental isolated execution mode: `BoundRemote`
+Production manual full-song execution mode: `IndependentForeground`
 
-Execution protocol: 8
+Playback-demand and prefetch execution mode: client-bound
+
+Phase 6A protocol: 8; current integration protocol: 12
 
 Run-journal schema: 5
 
@@ -85,16 +88,18 @@ Focused tests cover:
 
 ## Open validation
 
-This checkpoint does not claim that an independent media-processing foreground
-service exists or that background continuation is enabled. Phase 6B-6D still
-must implement and test notification ownership, foreground-service deadlines,
-wake-lock transfer, screen-off execution, timeout handling, and process death.
+The Phase 6A checkpoint by itself did not claim an independent
+media-processing foreground service. Subsequent Phase 6B-6D work implemented
+that host for eligible manual runs, proved S25 CPU screen-off completion, and
+proved exact S10/S25 CPU/GPU product ownership handoff. See the other reports
+in this directory. Main-process-death continuation remains disabled until
+Phase 7 transfers active-run authority and qualifies reattachment.
 
 Real-device fallback injection with the final bounded AAR, repeated full-song
 S10/S25 pairs, foreground interaction traces, thermal coverage, and a
-vendor-diverse GPU matrix remain release gates. The existing short 9662 S10 and
-S25 smokes prove the admitted bounded runtime can execute but did not trigger
-fallback.
+vendor-diverse GPU matrix remain release gates. The short 9662 S10 and S25
+product runs prove the admitted bounded runtime and exact ownership transfer,
+but did not trigger fallback.
 
 No decoder, source-window strategy, MP3 fallback threshold, overlap
 calibration, join placement, or listening-derived policy changed in Phase 6A.

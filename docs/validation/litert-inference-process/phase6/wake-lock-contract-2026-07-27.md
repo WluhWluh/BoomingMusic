@@ -1,18 +1,19 @@
 # Phase 6C wake-lock contract checkpoint
 
-Status: implementation and S25 CPU completion release proved; renewal and
-ownership-handoff validation remain open
+Status: implementation and exact S10/S25 CPU/GPU product handoff proved;
+renewal and remaining terminal-state validation remain open
 
 Implementation revisions tested:
 
 - `b263a312cf844a782a9b4be649c54f7c5c7b79eb`
 - `577e838cda13940e6e8be09cdface730ed3f8412`
+- `d5c36fd470078d0aeb4c36fe888ef95a71067302`
 
-Production execution mode: `InProcess`
+Production manual full-song execution mode: `IndependentForeground`
 
-Independent prototype: internal and disabled by default
+Playback-demand and prefetch execution mode: client-bound
 
-Execution protocol: 10
+Execution protocol: 12
 
 ## Implemented contract
 
@@ -86,18 +87,20 @@ leaves `platformHeld=false`.
 The later `primary-platform-prototype-2026-07-28.md` report proves an actual
 S25 CPU full-song run acquired the bounded lock after foreground attachment,
 continued while the device was non-interactive, and released it with reason
-`completed`. The following remain open:
+`completed`. Product-path overlap tests additionally prove on S10 and S25, for
+both CPU and bounded GPU, that the playback lock is held before exact remote
+acceptance, is released only after that acceptance while the inference lock is
+held, and that both locks are absent after completion. The following remain
+open:
 
 - active-run Pause, Cancel, failure, cache loss, and service teardown;
 - at least one run long enough to observe renewal, or a test-only shortened
   scheduler using the same controller path;
 - naturally delivered Android 15+ media-processing FGS timeout cleanup after
-  quota exhaustion;
-- simultaneous playback and manual separation, including proof that
-  `PlaybackService` releases any duplicate processing lock after handoff; and
-- S10 and bounded-GPU repetitions after CPU lifecycle behavior passes.
+  quota exhaustion; and
+- long-running bounded-GPU screen-off, fallback, and UI-interaction coverage.
 
-The production path and `PlaybackService` wake-lock implementation remain
-unchanged until these ownership tests pass. No decoder, source-window strategy,
-MP3 fallback threshold, overlap calibration, join placement, or
-listening-derived policy changed in this checkpoint.
+The production path now transfers exact manual-run processing ownership, while
+playback-demand and prefetch policy remain unchanged. No decoder,
+source-window strategy, MP3 fallback threshold, overlap calibration, join
+placement, or listening-derived policy changed in this checkpoint.

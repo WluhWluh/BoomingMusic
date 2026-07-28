@@ -1,18 +1,19 @@
 # Phase 6B foreground ownership checkpoint
 
-Status: pending-lease platform contract complete; attached-run completion
-proved later; active-run handoff remains open
+Status: pending-lease platform contract and exact product handoff complete;
+active-pause and current-highest-API coverage remain open
 
 Implementation revisions tested:
 
 - `252f7ab8c66bd90ab4478ce3719da5d99c9e4d49`
 - `a991da3ff972f7635e6981214d93af95b72ffee3`
+- `d5c36fd470078d0aeb4c36fe888ef95a71067302`
 
-Production execution mode: `InProcess`
+Production manual full-song execution mode: `IndependentForeground`
 
-Independent prototype: internal and disabled by default
+Playback-demand and prefetch execution mode: client-bound
 
-Execution protocol: 9
+Execution protocol: 12
 
 ## Implemented contract
 
@@ -39,10 +40,10 @@ all have explicit stop paths. The latest delivered Android service start ID is
 tracked independently from lease identity so a stale start or control intent
 cannot strand the service or replace the active owner.
 
-The internal `createIndependentForegroundPrototype()` factory enables this
-policy only for `ManualFullSong`. The default bound-remote factory and the
-production Koin graph remain unchanged. `PlaybackDemandWindow` and
-`NextSongPrefetch` therefore do not acquire this foreground lease.
+The independent foreground factory enables this policy only for
+`ManualFullSong`. Production manual actions route through that factory after
+admission; `PlaybackDemandWindow` and `NextSongPrefetch` remain client-bound
+and do not acquire this foreground lease.
 
 ## Automated verification
 
@@ -83,27 +84,27 @@ row remains open rather than being counted as a pass.
 
 ## Open validation
 
-This checkpoint itself does not run an admitted model. The later
-`primary-platform-prototype-2026-07-28.md` report proves an attached S25 CPU
-run continued through HOME and screen-off, then removed its notification and
-foreground state at completion. The combined evidence still does not cover:
+The later `primary-platform-prototype-2026-07-28.md` report proves an attached
+S25 CPU run continued through HOME and screen-off, then removed its notification
+and foreground state at completion. The product handoff report proves CPU and
+bounded-GPU overlap on S10 and S25: playback protection remains active until
+the exact remote owner is accepted, and the playback processing lease then
+ends with `remoteOwnershipChanged`. The combined evidence still does not cover:
 
-- transfer from `PlaybackService` without an unprotected interval or an
-  indefinite duplicate processing claim;
-- startup by tapping the visible user command rather than the validation
-  runner;
+- startup by tapping the visible UI rather than sending the same production
+  MediaSession command from instrumentation;
 - notification and foreground removal after an attached run pauses;
-- combined playback/separation ownership diagnostics during overlap;
+- the complete notification/type/timestamp overlap matrix beyond the exact
+  processing-owner transition;
 - naturally delivered Android 15+ `Service.onTimeout()` behavior after quota
   exhaustion;
-- wake-lock transfer; or
-- bounded-GPU execution and one-way GPU fallback.
+- current-highest-API execution; or
+- bounded-GPU one-way fallback and long-running lifecycle coverage.
 
-`PlaybackService` intentionally retains its existing `mediaProcessing`
-declaration and processing wake lock while the production path still depends
-on them. Removing those before the Phase 6B/6C handoff would regress the current
-product. The independent prototype must remain disabled until these open items
-pass.
+`PlaybackService` retains `mediaProcessing` only for the playback-owned waiting
+interval. It no longer claims processing ownership for the exact cache after
+the remote service accepts that run. Removing the declaration entirely still
+requires later playback-demand and release-policy cleanup.
 
 No decoder, source-window strategy, MP3 fallback threshold, overlap
 calibration, join placement, or listening-derived policy changed in this

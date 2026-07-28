@@ -1,25 +1,27 @@
 # Phase 6D primary platform prototype
 
-Status: S25 CPU lifecycle proof complete; production routing and remaining
-platform/GPU coverage remain open
+Status: S25 CPU screen-off lifecycle and S10/S25 CPU/GPU product routing
+complete; remaining platform and long-running GPU coverage stays open
 
 Implementation revision tested:
 
 - `6e68573327eadffa57b944da1db3fc0c0b6263b5`
+- `d5c36fd470078d0aeb4c36fe888ef95a71067302`
 
 Execution protocol: 12
 
 Run-journal schema: 5
 
-Execution mode: internal `IndependentForeground` prototype
+Execution mode: production `IndependentForeground` for eligible manual runs
 
 ## Scope
 
 The first admitted `ManualFullSong` run was executed by the private
 `:source_separation` process with its own `mediaProcessing` foreground service
-and bounded partial wake lock. The production Koin graph still selects
-`InProcess`; this checkpoint qualifies the lifecycle path before that routing
-change.
+and bounded partial wake lock. That checkpoint qualified the lifecycle path
+before production routing changed. Eligible production manual commands now use
+the same independent foreground host; playback-demand and prefetch work remain
+client-bound.
 
 The run deliberately used CPU FP32, the pinned 9662 model, and the existing WAV
 window decoder. It did not exercise GPU, x86, resident sessions, playback
@@ -101,13 +103,23 @@ Input-envelope SHA-256:
 The repository unit suite and AndroidTest Kotlin compilation passed before the
 device run. The connected instrumentation test passed 1/1 in 353.786 seconds.
 
+## Product ownership handoff
+
+The later product-path matrix used the real `PlaybackService`, made source
+separation playback wait on the exact cache, and sent the production
+`SEPARATE_CURRENT_SONG_OFFLINE` MediaSession command. CPU and bounded GPU both
+passed on S10/API 31 and S25/API 35. Each run completed the exact cache under
+the remote PID, and both the playback and inference processing locks were gone
+at terminal completion. See
+`product-ownership-handoff-2026-07-27.md` for report identities and timings.
+
 ## Remaining gate
 
-This was started through the validation runner, not by tapping the visible app
-command. Production manual-run routing, `PlaybackService` processing-lease
-handoff during overlap, active-run Pause/Cancel/cache-loss device cases, API
-36/current-highest coverage, natural FGS quota timeout, S10 repetition, and the
-bounded-GPU matrix remain open.
+The product-path matrix sent the real MediaSession command from instrumentation
+rather than tapping the visible app UI. Active-run Pause/Cancel/cache-loss
+device cases, API 36/current-highest coverage, natural FGS quota timeout, S10
+long-song screen-off, and the bounded-GPU long-song, fallback, memory, thermal,
+and foreground-UI matrices remain open.
 
 No MP3 fallback threshold, window size, overlap, join placement, or other
 listening-derived decode policy changed.

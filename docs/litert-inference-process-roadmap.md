@@ -1,13 +1,13 @@
 # LiteRT Inference Process and Background Execution Roadmap
 
-Status: Phase 5 policy and bounded-GPU artifact frozen; Phase 6 ownership
-implementation in progress while final release qualification remains open
+Status: Phase 6 exact product ownership handoff proved on S10 and S25 for CPU
+and bounded GPU; remaining lifecycle and release qualification stays open
 
 Updated: 2026-07-27
 
-Current milestone: finish the Phase 6B ownership handoff and the Phase 6C
-actual-run wake-lock proof, then validate the primary Phase 6D lifecycle.
-Remaining Phase 5F full-song, fallback, and UI device matrices are
+Current milestone: advance Phase 7A authority transfer and reattachment from
+the now-proved Phase 6B/6C product handoff. Remaining Phase 5F and Phase 6D
+full-song, fallback, UI, current-API, and long-running platform matrices are
 release-qualification work and may remain open while product implementation
 continues.
 
@@ -1273,7 +1273,7 @@ release gates rather than Phase 6A implementation blockers.
   `foregroundServiceType="mediaProcessing"` where the platform supports that
   type, with explicit legacy behavior for API 26-34.
 - [x] Keep `PlaybackService` responsible for `mediaPlayback`.
-- [ ] Define a handoff that never leaves active inference unprotected and never
+- [x] Define a handoff that never leaves active inference unprotected and never
   has two components claiming the processing lifetime indefinitely.
 - [x] Call `startForeground()` within the platform deadline with a dedicated,
   user-comprehensible processing notification.
@@ -1284,17 +1284,22 @@ release gates rather than Phase 6A implementation blockers.
 - [ ] Record both foreground services, types, notification IDs, start/stop
   timestamps, and ownership handoffs when playback and separation overlap.
 
-The first Phase 6B platform checkpoint is complete at protocol 9. The
-independent manual-run factory remains internal and production routing remains
-unchanged. Manifest and device tests prove the dedicated processing service,
-legacy and timed platform policies, notification identity, pre-admission
-Pause/Cancel, duplicate command handling, stale-action isolation, and
-notification removal on S25/API 35, S10/API 31, and an API 26 x86 AVD. The
-current API 37 x86_64 AVD terminated instrumentation before running any test,
-so current-highest-API coverage remains open. Actual-run handoff from
-`PlaybackService`, no-foreground-after-active-pause, overlap diagnostics, and
-visible-user-command startup remain unchecked. See
-`docs/validation/litert-inference-process/phase6/foreground-ownership-2026-07-27.md`.
+The Phase 6B platform checkpoint began at protocol 9 and the exact product
+handoff is complete at protocol 12. Eligible manual runs now use the production
+MediaSession facade and `IndependentForeground` host. S10/API 31 and S25/API 35
+CPU and bounded-GPU tests prove that `PlaybackService` keeps its processing
+lease until the remote host accepts the same cache key, then drops only its
+processing claim while playback remains active. Stale or unknown ownership
+cannot release a newer or unrelated lease. Manifest and device tests also
+prove the dedicated processing service, legacy and timed platform policies,
+notification identity, pre-admission Pause/Cancel, duplicate command handling,
+stale-action isolation, and notification removal on S25/API 35, S10/API 31,
+and an API 26 x86 AVD. The current API 37 x86_64 AVD terminated
+instrumentation before running any test, so current-highest-API coverage
+remains open. No-foreground-after-active-pause, complete overlap diagnostics,
+and startup by tapping the visible UI remain unchecked. See
+`docs/validation/litert-inference-process/phase6/foreground-ownership-2026-07-27.md`
+and `product-ownership-handoff-2026-07-27.md`.
 
 ### Phase 6C: Wake-lock ownership
 
@@ -1306,19 +1311,24 @@ visible-user-command startup remain unchecked. See
   completion, failure, timeout, cache loss, process teardown, and failed FGS
   promotion.
 - [x] Record every acquire, renewal, and release in validation diagnostics.
-- [ ] Ensure the playback process does not retain a duplicate processing lock
+- [x] Ensure the playback process does not retain a duplicate processing lock
   after a successful ownership handoff.
 
-The Phase 6C implementation checkpoint is complete at protocol 10. An eligible
+The Phase 6C implementation checkpoint began at protocol 10. An eligible
 manual run now acquires a ten-minute, five-minute-renewed partial wake lock in
 the inference process only after remote cache admission and FGS attachment.
 Platform-lock loss requests a durable pause, stale identities cannot release a
 new owner, and an unreleased orphan blocks the next run. Process diagnostics
 and Phase 7 JSON reports retain the complete event history. S25 device smoke
 proves a pending lease does not acquire early and Pause leaves no lock. Actual
-full-song acquisition and completion release now pass on S25; a real renewal,
-Android FGS timeout cleanup, and `PlaybackService` handoff remain unchecked. See
-`docs/validation/litert-inference-process/phase6/wake-lock-contract-2026-07-27.md`.
+full-song acquisition and completion release pass on S25. At protocol 12, exact
+product handoff also passes on S10 and S25 with CPU and bounded GPU: the
+playback lock remains held before remote acceptance, is absent after the exact
+handoff while the inference lock is held, and both are absent after completion.
+A real renewal and naturally delivered Android FGS timeout cleanup remain
+unchecked. See
+`docs/validation/litert-inference-process/phase6/wake-lock-contract-2026-07-27.md`
+and `product-ownership-handoff-2026-07-27.md`.
 
 ### Phase 6D: Primary platform prototype
 
@@ -1366,9 +1376,14 @@ wake lock; both leases ended with `completed`, and the exact completed cache
 was playable. The report also proves `tryGpu=false` admitted CPU directly and
 made no GPU allocation attempt. See
 `docs/validation/litert-inference-process/phase6/primary-platform-prototype-2026-07-28.md`.
-Visible UI-command startup, `PlaybackService` overlap handoff, a naturally
-exhausted Android quota, API 36/current-highest coverage, S10, and bounded GPU
-remain open and are not inferred from this CPU result.
+The production MediaSession route and exact `PlaybackService` overlap handoff
+subsequently passed with the 12-second fixture on S10 and S25 for both CPU and
+the pinned bounded GPU profile. These short product-path tests prove routing,
+exact ownership, cache completion, and terminal lease release; they do not
+substitute for the longer screen-off, fallback, memory, thermal, or UI matrices.
+Visible UI-tap startup, a naturally exhausted Android quota,
+API 36/current-highest coverage, S10 long-song screen-off, and bounded-GPU
+long-song/UI lifecycle coverage remain open.
 
 **Phase 6 exit:** one exact, user-started manual full-song run can remain
 protected on the primary arm64 target with playback stopped and the screen off,
