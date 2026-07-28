@@ -41,7 +41,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v38",
+    [string]$RunnerRevision = "phase7-runner-v39",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -84,6 +84,8 @@ param(
     [switch]$RebindAfterCompletion,
     [switch]$ProbeOriginalPlayback,
     [switch]$ForceStopBeforeRun,
+    [ValidateRange(5, 300)]
+    [int]$SilentObservationSeconds = 30,
     [switch]$ScreenOffAfterReady,
     [switch]$X86ProcessValidation,
     [switch]$Arm32ResidentProcessValidation
@@ -483,6 +485,63 @@ function Get-RemoteJournalSnapshot([string]$Path) {
         runId = [string]$journal.request.runId
         processGeneration = [int64]$journal.request.processGeneration
     }
+}
+
+function Get-RemoteEntrySnapshot([string]$Path) {
+    $fileOutput = & $adb -s $Serial shell run-as $package find $Path -type f -print 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not enumerate remote cache entry: $Path"
+    }
+    $records = @(
+        $fileOutput |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object |
+            ForEach-Object {
+                $filePath = $_
+                if (-not $filePath.StartsWith("$Path/", [System.StringComparison]::Ordinal) -or
+                        $filePath.Contains("..", [System.StringComparison]::Ordinal)) {
+                    throw "Remote cache entry contains an unsafe file path: $filePath"
+                }
+                $sizeText = ((& $adb -s $Serial shell run-as $package stat -c '%s' $filePath `
+                    2>$null) -join "").Trim()
+                if ($LASTEXITCODE -ne 0 -or $sizeText -notmatch '^\d+$') {
+                    throw "Could not measure remote cache file: $filePath"
+                }
+                [ordered]@{
+                    path = $filePath.Substring($Path.Length + 1)
+                    bytes = [int64]$sizeText
+                    sha256 = Get-RemoteFileSha256 $filePath
+                }
+            }
+    )
+    if ($records.Count -eq 0) {
+        throw "Remote cache entry contains no files: $Path"
+    }
+    $canonical = ($records | ForEach-Object {
+        "$($_.path)`t$($_.bytes)`t$($_.sha256)"
+    }) -join "`n"
+    $digestBytes = [System.Security.Cryptography.SHA256]::HashData(
+        [System.Text.Encoding]::UTF8.GetBytes($canonical)
+    )
+    return [ordered]@{
+        sha256 = [Convert]::ToHexString($digestBytes).ToLowerInvariant()
+        fileCount = $records.Count
+        totalBytes = [int64](($records | Measure-Object -Property bytes -Sum).Sum)
+    }
+}
+
+function Get-PackageStoppedState {
+    $packageOutput = & $adb -s $Serial shell dumpsys package $package 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect the package stopped state."
+    }
+    $pattern = "^\s*User ${deviceUserId}: .*\bstopped=(true|false)\b"
+    $line = $packageOutput | Where-Object { [string]$_ -match $pattern } | Select-Object -First 1
+    if ($null -eq $line -or [string]$line -notmatch $pattern) {
+        throw "Package diagnostics do not expose the current user's stopped state."
+    }
+    return $Matches[1] -eq "true"
 }
 
 function Get-TaskLifecycleObservation {
@@ -1129,18 +1188,32 @@ try {
         }
 
         $forceStopBoundary = Stop-AppProcesses
+        $stoppedAfterStop = Get-PackageStoppedState
         $afterStopJournal = Get-RemoteJournalSnapshot $journalPath
+        $entryPath = Split-Path -Parent $journalPath
+        $afterStopEntry = Get-RemoteEntrySnapshot $entryPath
         $afterStop = Get-TaskLifecycleObservation
         $silentStarted = [Diagnostics.Stopwatch]::StartNew()
-        Start-Sleep -Seconds 5
+        $silentProcessSampleCount = 0
+        $unexpectedRelaunchCount = 0
+        do {
+            $silentProcessSampleCount += 1
+            if (@(Get-AppProcessIds).Count -ne 0) {
+                $unexpectedRelaunchCount += 1
+            }
+            Start-Sleep -Milliseconds 250
+        } while ($silentStarted.Elapsed.TotalSeconds -lt $SilentObservationSeconds)
         $silentStarted.Stop()
         $afterSilenceJournal = Get-RemoteJournalSnapshot $journalPath
+        $afterSilenceEntry = Get-RemoteEntrySnapshot $entryPath
         $afterSilence = Get-TaskLifecycleObservation
+        $stoppedAfterSilence = Get-PackageStoppedState
 
         Invoke-Adb shell am start -W --user $deviceUserId -n `
             "$package/com.mardous.booming.activities.MainActivity"
         Start-Sleep -Seconds 5
         $afterRestartJournal = Get-RemoteJournalSnapshot $journalPath
+        $afterRestartEntry = Get-RemoteEntrySnapshot $entryPath
         $afterRestart = Get-TaskLifecycleObservation
 
         $validationArguments = @($debugArguments) + @(
@@ -1148,11 +1221,26 @@ try {
             "--es", "journalSha256AfterStop", $afterStopJournal.sha256,
             "--es", "journalSha256AfterSilence", $afterSilenceJournal.sha256,
             "--es", "journalSha256AfterRestart", $afterRestartJournal.sha256,
+            "--es", "entrySha256AfterStop", $afterStopEntry.sha256,
+            "--es", "entrySha256AfterSilence", $afterSilenceEntry.sha256,
+            "--es", "entrySha256AfterRestart", $afterRestartEntry.sha256,
             "--el", "journalSequenceAfterStop", [string]$afterStopJournal.sequence,
             "--el", "journalSequenceAfterSilence", [string]$afterSilenceJournal.sequence,
             "--el", "journalSequenceAfterRestart", [string]$afterRestartJournal.sequence,
             "--el", "forceStopExitElapsedMs", [string]$forceStopBoundary.exitElapsedMs,
             "--el", "silentObservationMs", [string]$silentStarted.ElapsedMilliseconds,
+            "--el", "silentProcessSampleCount", [string]$silentProcessSampleCount,
+            "--el", "unexpectedRelaunchCount", [string]$unexpectedRelaunchCount,
+            "--el", "entryFileCountAfterStop", [string]$afterStopEntry.fileCount,
+            "--el", "entryFileCountAfterSilence", [string]$afterSilenceEntry.fileCount,
+            "--el", "entryFileCountAfterRestart", [string]$afterRestartEntry.fileCount,
+            "--el", "entryBytesAfterStop", [string]$afterStopEntry.totalBytes,
+            "--el", "entryBytesAfterSilence", [string]$afterSilenceEntry.totalBytes,
+            "--el", "entryBytesAfterRestart", [string]$afterRestartEntry.totalBytes,
+            "--ez", "packageStoppedAfterStop",
+            ($stoppedAfterStop.ToString().ToLowerInvariant()),
+            "--ez", "packageStoppedAfterSilence",
+            ($stoppedAfterSilence.ToString().ToLowerInvariant()),
             "--ez", "allProcessesExitedAfterStop",
             (($forceStopBoundary.allExited -and @($afterStop.processIds).Count -eq 0).ToString().ToLowerInvariant()),
             "--ez", "allProcessesExitedAfterSilence",
@@ -1440,6 +1528,9 @@ try {
                 probeOriginalPlayback = [bool]$ProbeOriginalPlayback
                 coldProcessBoundary = [bool]$ForceStopBeforeRun
                 preRunProcessBoundary = $preRunProcessBoundary
+                silentObservationSeconds = if ($Stage -eq "force-stop") {
+                    $SilentObservationSeconds
+                } else { $null }
                 arm32ResidentProcessValidation =
                     [bool]$Arm32ResidentProcessValidation
                 screenOffAfterReady = [bool]$ScreenOffAfterReady

@@ -382,6 +382,10 @@ internal object SourceSeparationMainDeathDebugHarness {
 
             check(evidence.allProcessesExitedAfterStop)
             check(evidence.allProcessesExitedAfterSilence)
+            check(evidence.packageStoppedAfterStop)
+            check(evidence.packageStoppedAfterSilence)
+            check(evidence.silentProcessSampleCount > 0L)
+            check(evidence.unexpectedRelaunchCount == 0L)
             check(!evidence.notificationAfterStop && !evidence.notificationAfterSilence)
             check(!evidence.processingServiceAfterStop &&
                 !evidence.processingServiceAfterSilence)
@@ -392,6 +396,12 @@ internal object SourceSeparationMainDeathDebugHarness {
             check(evidence.journalSha256AfterStop == evidence.journalSha256AfterRestart)
             check(evidence.journalSequenceAfterStop == evidence.journalSequenceAfterSilence)
             check(evidence.journalSequenceAfterStop == evidence.journalSequenceAfterRestart)
+            check(evidence.entrySha256AfterStop == evidence.entrySha256AfterSilence)
+            check(evidence.entrySha256AfterStop == evidence.entrySha256AfterRestart)
+            check(evidence.entryFileCountAfterStop == evidence.entryFileCountAfterSilence)
+            check(evidence.entryFileCountAfterStop == evidence.entryFileCountAfterRestart)
+            check(evidence.entryBytesAfterStop == evidence.entryBytesAfterSilence)
+            check(evidence.entryBytesAfterStop == evidence.entryBytesAfterRestart)
 
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
             val journal = requireNotNull(store.readRunJournal(cacheKey))
@@ -417,6 +427,7 @@ internal object SourceSeparationMainDeathDebugHarness {
             check(ownership.activeOwner == null)
             val idleHost = BoundRemoteSourceSeparationExecutionHost(context.applicationContext)
             val idleDiagnostics = try {
+                check(idleHost.reconnectableRun() == null)
                 idleHost.processDiagnostics()
             } finally {
                 idleHost.close()
@@ -464,8 +475,21 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("journalSha256AfterStop", evidence.journalSha256AfterStop)
                     .put("journalSha256AfterSilence", evidence.journalSha256AfterSilence)
                     .put("journalSha256AfterRestart", evidence.journalSha256AfterRestart)
+                    .put("entrySha256AfterStop", evidence.entrySha256AfterStop)
+                    .put("entrySha256AfterSilence", evidence.entrySha256AfterSilence)
+                    .put("entrySha256AfterRestart", evidence.entrySha256AfterRestart)
+                    .put("entryFileCountAfterStop", evidence.entryFileCountAfterStop)
+                    .put("entryFileCountAfterSilence", evidence.entryFileCountAfterSilence)
+                    .put("entryFileCountAfterRestart", evidence.entryFileCountAfterRestart)
+                    .put("entryBytesAfterStop", evidence.entryBytesAfterStop)
+                    .put("entryBytesAfterSilence", evidence.entryBytesAfterSilence)
+                    .put("entryBytesAfterRestart", evidence.entryBytesAfterRestart)
                     .put("forceStopExitElapsedMs", evidence.forceStopExitElapsedMs)
                     .put("silentObservationMs", evidence.silentObservationMs)
+                    .put("silentProcessSampleCount", evidence.silentProcessSampleCount)
+                    .put("unexpectedRelaunchCount", evidence.unexpectedRelaunchCount)
+                    .put("packageStoppedAfterStop", true)
+                    .put("packageStoppedAfterSilence", true)
                     .put("allProcessesExitedAfterStop", true)
                     .put("allProcessesExitedAfterSilence", true)
                     .put("notificationAfterStop", false)
@@ -482,15 +506,19 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("wakeLockAfterRestart", false)
                     .put("automaticResumeObserved", false)
                     .put("restartDiscoveryBindingAllowed", true)
+                    .put("reconnectableRunAfterRestart", JSONObject.NULL)
                     .put("idleRemoteActiveRunId", JSONObject.NULL)
                     .put("idleRemoteSessionState", idleDiagnostics.session.state.name)
                     .put("idleRemoteSessionId", JSONObject.NULL)
+                    .put("idleRemotePid", idleDiagnostics.pid)
+                    .put("idleRemoteProcessGeneration", idleDiagnostics.processGeneration)
                     .put(
                         "idleRemoteNativeSessionCreationCount",
                         idleDiagnostics.session.nativeSessionCreationCount,
                     )
                     .put("idleRemoteActiveLeaseCount", idleDiagnostics.session.activeLeaseCount)
                     .put("onDestroyJournalTransitionRequired", false)
+                    .put("sessionOwnership", "SingleUse")
                     .put("staleRunningJournalAccepted", true)
                     .put("staleCacheCleanup", "Completed")
                     .put("tryGpu", journal.request.tryGpu)
@@ -579,6 +607,9 @@ internal object SourceSeparationMainDeathDebugHarness {
         journalSha256AfterStop = intent.requiredString(EXTRA_JOURNAL_SHA_AFTER_STOP),
         journalSha256AfterSilence = intent.requiredString(EXTRA_JOURNAL_SHA_AFTER_SILENCE),
         journalSha256AfterRestart = intent.requiredString(EXTRA_JOURNAL_SHA_AFTER_RESTART),
+        entrySha256AfterStop = intent.requiredString(EXTRA_ENTRY_SHA_AFTER_STOP),
+        entrySha256AfterSilence = intent.requiredString(EXTRA_ENTRY_SHA_AFTER_SILENCE),
+        entrySha256AfterRestart = intent.requiredString(EXTRA_ENTRY_SHA_AFTER_RESTART),
         journalSequenceAfterStop = intent.getLongExtra(EXTRA_JOURNAL_SEQUENCE_AFTER_STOP, -1L)
             .also { require(it >= 0L) },
         journalSequenceAfterSilence =
@@ -591,6 +622,28 @@ internal object SourceSeparationMainDeathDebugHarness {
             .also { require(it >= 0L) },
         silentObservationMs = intent.getLongExtra(EXTRA_SILENT_OBSERVATION_MS, -1L)
             .also { require(it > 0L) },
+        silentProcessSampleCount = intent.getLongExtra(EXTRA_SILENT_PROCESS_SAMPLE_COUNT, -1L)
+            .also { require(it > 0L) },
+        unexpectedRelaunchCount = intent.getLongExtra(EXTRA_UNEXPECTED_RELAUNCH_COUNT, -1L)
+            .also { require(it >= 0L) },
+        entryFileCountAfterStop = intent.getLongExtra(EXTRA_ENTRY_FILE_COUNT_AFTER_STOP, -1L)
+            .also { require(it > 0L) },
+        entryFileCountAfterSilence =
+            intent.getLongExtra(EXTRA_ENTRY_FILE_COUNT_AFTER_SILENCE, -1L)
+                .also { require(it > 0L) },
+        entryFileCountAfterRestart =
+            intent.getLongExtra(EXTRA_ENTRY_FILE_COUNT_AFTER_RESTART, -1L)
+                .also { require(it > 0L) },
+        entryBytesAfterStop = intent.getLongExtra(EXTRA_ENTRY_BYTES_AFTER_STOP, -1L)
+            .also { require(it > 0L) },
+        entryBytesAfterSilence = intent.getLongExtra(EXTRA_ENTRY_BYTES_AFTER_SILENCE, -1L)
+            .also { require(it > 0L) },
+        entryBytesAfterRestart = intent.getLongExtra(EXTRA_ENTRY_BYTES_AFTER_RESTART, -1L)
+            .also { require(it > 0L) },
+        packageStoppedAfterStop =
+            intent.getBooleanExtra(EXTRA_PACKAGE_STOPPED_AFTER_STOP, false),
+        packageStoppedAfterSilence =
+            intent.getBooleanExtra(EXTRA_PACKAGE_STOPPED_AFTER_SILENCE, false),
         allProcessesExitedAfterStop =
             intent.getBooleanExtra(EXTRA_ALL_PROCESSES_EXITED_AFTER_STOP, false),
         allProcessesExitedAfterSilence =
@@ -807,11 +860,24 @@ internal object SourceSeparationMainDeathDebugHarness {
         val journalSha256AfterStop: String,
         val journalSha256AfterSilence: String,
         val journalSha256AfterRestart: String,
+        val entrySha256AfterStop: String,
+        val entrySha256AfterSilence: String,
+        val entrySha256AfterRestart: String,
         val journalSequenceAfterStop: Long,
         val journalSequenceAfterSilence: Long,
         val journalSequenceAfterRestart: Long,
         val forceStopExitElapsedMs: Long,
         val silentObservationMs: Long,
+        val silentProcessSampleCount: Long,
+        val unexpectedRelaunchCount: Long,
+        val entryFileCountAfterStop: Long,
+        val entryFileCountAfterSilence: Long,
+        val entryFileCountAfterRestart: Long,
+        val entryBytesAfterStop: Long,
+        val entryBytesAfterSilence: Long,
+        val entryBytesAfterRestart: Long,
+        val packageStoppedAfterStop: Boolean,
+        val packageStoppedAfterSilence: Boolean,
         val allProcessesExitedAfterStop: Boolean,
         val allProcessesExitedAfterSilence: Boolean,
         val notificationAfterStop: Boolean,
@@ -846,11 +912,24 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val EXTRA_JOURNAL_SHA_AFTER_STOP = "journalSha256AfterStop"
     private const val EXTRA_JOURNAL_SHA_AFTER_SILENCE = "journalSha256AfterSilence"
     private const val EXTRA_JOURNAL_SHA_AFTER_RESTART = "journalSha256AfterRestart"
+    private const val EXTRA_ENTRY_SHA_AFTER_STOP = "entrySha256AfterStop"
+    private const val EXTRA_ENTRY_SHA_AFTER_SILENCE = "entrySha256AfterSilence"
+    private const val EXTRA_ENTRY_SHA_AFTER_RESTART = "entrySha256AfterRestart"
     private const val EXTRA_JOURNAL_SEQUENCE_AFTER_STOP = "journalSequenceAfterStop"
     private const val EXTRA_JOURNAL_SEQUENCE_AFTER_SILENCE = "journalSequenceAfterSilence"
     private const val EXTRA_JOURNAL_SEQUENCE_AFTER_RESTART = "journalSequenceAfterRestart"
     private const val EXTRA_FORCE_STOP_EXIT_MS = "forceStopExitElapsedMs"
     private const val EXTRA_SILENT_OBSERVATION_MS = "silentObservationMs"
+    private const val EXTRA_SILENT_PROCESS_SAMPLE_COUNT = "silentProcessSampleCount"
+    private const val EXTRA_UNEXPECTED_RELAUNCH_COUNT = "unexpectedRelaunchCount"
+    private const val EXTRA_ENTRY_FILE_COUNT_AFTER_STOP = "entryFileCountAfterStop"
+    private const val EXTRA_ENTRY_FILE_COUNT_AFTER_SILENCE = "entryFileCountAfterSilence"
+    private const val EXTRA_ENTRY_FILE_COUNT_AFTER_RESTART = "entryFileCountAfterRestart"
+    private const val EXTRA_ENTRY_BYTES_AFTER_STOP = "entryBytesAfterStop"
+    private const val EXTRA_ENTRY_BYTES_AFTER_SILENCE = "entryBytesAfterSilence"
+    private const val EXTRA_ENTRY_BYTES_AFTER_RESTART = "entryBytesAfterRestart"
+    private const val EXTRA_PACKAGE_STOPPED_AFTER_STOP = "packageStoppedAfterStop"
+    private const val EXTRA_PACKAGE_STOPPED_AFTER_SILENCE = "packageStoppedAfterSilence"
     private const val EXTRA_ALL_PROCESSES_EXITED_AFTER_STOP = "allProcessesExitedAfterStop"
     private const val EXTRA_ALL_PROCESSES_EXITED_AFTER_SILENCE =
         "allProcessesExitedAfterSilence"
