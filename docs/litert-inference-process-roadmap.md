@@ -1,7 +1,7 @@
 # LiteRT Inference Process and Background Execution Roadmap
 
 Status: Phase 7A authority transfer, observer reattachment, product
-main-process recreation at one durable boundary, active-run Pause/Cancel
+main-process recreation at two durable boundaries, active-run Pause/Cancel
 cleanup, recents policy, and playback-owned shutdown are proved on S10 and
 S25; force-stop non-resurrection is proved on both devices for CPU and bounded
 GPU; remote-process death policy remains open
@@ -1500,6 +1500,9 @@ actual Android main-process kill.
 - [x] Recreate the product `MainActivity`, reconnect the worker observer before
   the debug verifier obtains the coordinator, restore protected-cache
   ownership, and publish a valid completed cache after main-process death.
+  This passes both after durable `SegmentRunning` with no committed segment and
+  after segment 0 is durably committed; the latter preserves the exact two
+  stem paths, sizes, and SHA-256 values through completion.
 - [ ] Verify active playback readiness, notification rendering, and cache
   management UI after main-process recreation.
 - [x] Confirm on S10/API 31 and S25/API 35 that Android force-stop terminates an
@@ -1525,16 +1528,19 @@ policy changed in response.
 - [x] Detach the original observer after the first durable progress event,
   adopt the same run from a second observer, and complete without a second
   writer or `start()` on S10 and S25 for CPU and bounded GPU.
-- [ ] Kill and restart the main process before FGS handoff, after first durable
-  window, during native invocation, after final segment publication, and during
-  terminal journal commit.
+- [ ] Kill and restart the main process before FGS handoff, during native
+  invocation, after final segment publication, and during terminal journal
+  commit.
 - [x] Kill the main process after durable `SegmentRunning` and before the first
   committed segment, then let the real `MainActivity` adopt and complete the
   same run on S10 and S25 for CPU and bounded GPU. See
   [Phase 7 main-process reattachment](validation/litert-inference-process/phase7/main-process-reattachment-2026-07-28.md).
-- [ ] Repeat main-process death before FGS handoff, after the first committed
-  segment, during native invocation, after final segment publication, and
-  during terminal journal commit.
+- [x] Kill the main process after the first committed segment, then require the
+  replacement product observer to preserve that segment's exact path, size,
+  and SHA-256 evidence while the original remote run completes all 48 segments.
+  This passes on S10 and S25 for CPU and bounded GPU without a second start.
+- [ ] Repeat main-process death before FGS handoff, during native invocation,
+  after final segment publication, and during terminal journal commit.
 - [ ] Require a reconnecting client to reject stale Binder generations and
   reconstruct UI state from the durable snapshot without seeking or replacing
   original playback.
