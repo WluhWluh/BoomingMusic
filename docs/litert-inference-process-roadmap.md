@@ -5,10 +5,11 @@ implementation in progress while final release qualification remains open
 
 Updated: 2026-07-27
 
-Current milestone: finish the Phase 6B ownership handoff, then transfer the
-active-computation wake lock in Phase 6C. Remaining Phase 5F full-song,
-fallback, and UI device matrices are release-qualification work and may remain
-open while product implementation continues.
+Current milestone: finish the Phase 6B ownership handoff and the Phase 6C
+actual-run wake-lock proof, then validate the primary Phase 6D lifecycle.
+Remaining Phase 5F full-song, fallback, and UI device matrices are
+release-qualification work and may remain open while product implementation
+continues.
 
 This roadmap governs two related but separate experiments:
 
@@ -1297,16 +1298,27 @@ visible-user-command startup remain unchecked. See
 
 ### Phase 6C: Wake-lock ownership
 
-- [ ] Move the active-computation `PARTIAL_WAKE_LOCK` to the process actually
+- [x] Move the active-computation `PARTIAL_WAKE_LOCK` to the process actually
   executing inference.
-- [ ] Acquire it only after exact admission, durable journal creation, and FGS
+- [x] Acquire it only after exact admission, durable journal creation, and FGS
   protection, immediately before heavy setup.
 - [ ] Use bounded acquisition/renewal and release it on pause, cancel,
   completion, failure, timeout, cache loss, process teardown, and failed FGS
   promotion.
-- [ ] Record every acquire, renewal, and release in validation diagnostics.
+- [x] Record every acquire, renewal, and release in validation diagnostics.
 - [ ] Ensure the playback process does not retain a duplicate processing lock
   after a successful ownership handoff.
+
+The Phase 6C implementation checkpoint is complete at protocol 10. An eligible
+manual run now acquires a ten-minute, five-minute-renewed partial wake lock in
+the inference process only after remote cache admission and FGS attachment.
+Platform-lock loss requests a durable pause, stale identities cannot release a
+new owner, and an unreleased orphan blocks the next run. Process diagnostics
+and Phase 7 JSON reports retain the complete event history. S25 device smoke
+proves a pending lease does not acquire early and Pause leaves no lock. Actual
+full-song acquisition/renewal/release, Android FGS timeout cleanup, and
+`PlaybackService` handoff remain unchecked. See
+`docs/validation/litert-inference-process/phase6/wake-lock-contract-2026-07-27.md`.
 
 ### Phase 6D: Primary platform prototype
 
