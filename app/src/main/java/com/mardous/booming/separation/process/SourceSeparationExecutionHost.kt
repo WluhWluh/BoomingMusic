@@ -3,6 +3,7 @@ package com.mardous.booming.separation.process
 import com.mardous.booming.separation.SourceSeparationModelAwareExecutionRequest
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.SourceSeparationAdmittedGpuRuntimeIdentity
@@ -15,7 +16,7 @@ import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 7
+internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 8
 
 internal interface SourceSeparationExecutionHost : AutoCloseable {
     val mode: SourceSeparationExecutionHostMode
@@ -220,6 +221,7 @@ internal data class SourceSeparationExecutionRuntimeIdentity(
     val backendPolicy: SourceSeparationExecutionBackendPolicy,
     val tryGpu: Boolean,
     val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
+    val gpuFallbackLatch: SourceSeparationGpuFallbackLatch?,
     val cpuThreads: Int,
     val useXnnpack: Boolean,
     val windowDecodeEnabled: Boolean,
@@ -234,11 +236,19 @@ internal data class SourceSeparationExecutionRuntimeIdentity(
             "Runtime execution session identity is empty."
         }
         require(cpuThreads > 0) { "Runtime CPU thread count is invalid." }
-        require(tryGpu == (backendPolicy == SourceSeparationExecutionBackendPolicy.Auto)) {
-            "Runtime GPU preference does not match its backend policy."
-        }
         require(tryGpu == (gpuRuntimeIdentity != null)) {
             "Runtime GPU preference and admitted runtime identity disagree."
+        }
+        require(tryGpu || gpuFallbackLatch == null) {
+            "A CPU-only runtime cannot carry a GPU fallback latch."
+        }
+        val expectedBackendPolicy = if (tryGpu && gpuFallbackLatch == null) {
+            SourceSeparationExecutionBackendPolicy.Auto
+        } else {
+            SourceSeparationExecutionBackendPolicy.Cpu
+        }
+        require(backendPolicy == expectedBackendPolicy) {
+            "Runtime backend policy does not match its admitted GPU state."
         }
         require(initialPlaybackPositionMs == null || initialPlaybackPositionMs >= 0L) {
             "Initial playback position is invalid."
@@ -368,6 +378,12 @@ internal sealed class SourceSeparationExecutionHostEventPayload {
     data class SegmentStateChanged(
         val segmentIndex: Int,
         val state: SourceSeparationSegmentState,
+    ) : SourceSeparationExecutionHostEventPayload()
+
+    @Serializable
+    @SerialName("gpu-fallback-latched")
+    data class GpuFallbackLatched(
+        val latch: SourceSeparationGpuFallbackLatch,
     ) : SourceSeparationExecutionHostEventPayload()
 
     @Serializable

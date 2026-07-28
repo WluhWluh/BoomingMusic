@@ -133,6 +133,7 @@ internal class SourceSeparationRemoteExecutionEnvironment(
                 backgroundPolicy = descriptor.runtime.backgroundPolicy,
                 tryGpu = descriptor.runtime.tryGpu,
                 gpuRuntimeIdentity = descriptor.runtime.gpuRuntimeIdentity,
+                gpuFallbackLatch = descriptor.runtime.gpuFallbackLatch,
             )
         )) {
             SourceSeparationCacheRunStart.Busy ->
@@ -160,10 +161,13 @@ internal class SourceSeparationRemoteExecutionEnvironment(
             backendPolicy = descriptor.runtime.backendPolicy,
             runClass = descriptor.runtime.runClass,
             backgroundPolicy = descriptor.runtime.backgroundPolicy,
+            tryGpu = descriptor.runtime.tryGpu,
             gpuRuntimeIdentity = descriptor.runtime.gpuRuntimeIdentity,
+            gpuFallbackLatch = descriptor.runtime.gpuFallbackLatch,
             onProgress = {},
             onPrepared = {},
             onSegmentStateChanged = { _, _ -> },
+            onGpuFallbackLatched = {},
             playbackPositionMsProvider = control::playbackPositionMs,
             playbackReadyWindowCountProvider = control::playbackReadyWindowCount,
             windowDecodeEnabled = descriptor.runtime.windowDecodeEnabled,
@@ -236,6 +240,8 @@ internal class SourceSeparationRemoteAdmittedExecution(
                 )
             is SourceSeparationExecutionHostEventPayload.SegmentStateChanged ->
                 coordinator.updateSegmentState(run, payload.segmentIndex, payload.state)
+            is SourceSeparationExecutionHostEventPayload.GpuFallbackLatched ->
+                coordinator.latchGpuFallback(run, payload.latch)
             is SourceSeparationExecutionHostEventPayload.Completed -> {
                 coordinator.complete(
                     run,

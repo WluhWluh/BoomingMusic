@@ -2,6 +2,7 @@ package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
+import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.MdxInferenceBackend
@@ -338,7 +339,7 @@ class SourceSeparationCacheRunCoordinatorTest {
                 .gpuRuntimeIdentity,
         )
         assertEquals(
-            4,
+            5,
             fixture.store.readRunJournal(gpuRequest.identity.cacheKey)?.journalSchemaVersion,
         )
         fixture.coordinator.pause(first.run)
@@ -375,6 +376,76 @@ class SourceSeparationCacheRunCoordinatorTest {
         assertEquals(
             SourceSeparationCacheAdmittedRuntimePolicy(true, runtimeIdentity),
             fixture.coordinator.inspectAdmittedRuntimePolicy(gpuRequest.identity),
+        )
+        fixture.coordinator.pause(resumed.run)
+    }
+
+    @Test
+    fun `GPU fallback latch is durable idempotent and required on resume`() {
+        val fixture = fixture()
+        val runtimeIdentity = admittedGpuRuntimeIdentity()
+        val request = fixture.request.copy(
+            runId = "gpu-fallback-run",
+            tryGpu = true,
+            gpuRuntimeIdentity = runtimeIdentity,
+        )
+        val first = fixture.coordinator.begin(request)
+            as SourceSeparationCacheRunStart.Ready
+        val latch = SourceSeparationGpuFallbackLatch(
+            stage = "GpuInvocation",
+            reason = "Injected recoverable GPU failure.",
+        )
+
+        val latched = fixture.coordinator.latchGpuFallback(first.run, latch)
+        val duplicate = fixture.coordinator.latchGpuFallback(first.run, latch)
+
+        assertEquals(latch, latched.request.gpuFallbackLatch)
+        assertEquals(latched, duplicate)
+        assertEquals(
+            1,
+            duplicate.transitions.count {
+                it.type == SourceSeparationCacheRunTransitionType.GpuFallbackLatched
+            },
+        )
+        assertEquals(
+            SourceSeparationCacheAdmittedRuntimePolicy(true, runtimeIdentity, latch),
+            fixture.coordinator.inspectAdmittedRuntimePolicy(request.identity),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            fixture.coordinator.latchGpuFallback(
+                first.run,
+                latch.copy(reason = "Conflicting fallback reason."),
+            )
+        }
+        fixture.coordinator.pause(first.run)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            fixture.coordinator.begin(
+                request.copy(
+                    runId = "missing-fallback-run",
+                    processGeneration = 2L,
+                )
+            )
+        }
+        val resumed = fixture.coordinator.begin(
+            request.copy(
+                runId = "resumed-fallback-run",
+                processGeneration = 2L,
+                gpuFallbackLatch = latch,
+            )
+        ) as SourceSeparationCacheRunStart.Ready
+        val resumedJournal = requireNotNull(
+            fixture.store.readRunJournal(request.identity.cacheKey)
+        )
+
+        assertEquals(latch, resumedJournal.request.gpuFallbackLatch)
+        assertEquals(runtimeIdentity, resumedJournal.request.gpuRuntimeIdentity)
+        assertTrue(resumedJournal.request.tryGpu)
+        assertEquals(
+            1,
+            resumedJournal.transitions.count {
+                it.type == SourceSeparationCacheRunTransitionType.GpuFallbackLatched
+            },
         )
         fixture.coordinator.pause(resumed.run)
     }
@@ -470,6 +541,7 @@ class SourceSeparationCacheRunCoordinatorTest {
                     SourceSeparationExecutionRunClass.PlaybackDemandWindow.backgroundPolicy,
                 tryGpu = false,
                 gpuRuntimeIdentity = null,
+                gpuFallbackLatch = null,
             ),
         )
     }

@@ -249,6 +249,21 @@ internal class InProcessSourceSeparationExecutionHost(
                     ),
                 )
             },
+            onGpuFallbackLatched = { latch ->
+                val previous = gpuFallbackLatch
+                if (previous == null) {
+                    gpuFallbackLatch = latch
+                    emit(
+                        active = this,
+                        payload = SourceSeparationExecutionHostEventPayload
+                            .GpuFallbackLatched(latch),
+                    )
+                } else {
+                    require(previous == latch) {
+                        "Execution host received conflicting GPU fallback diagnostics."
+                    }
+                }
+            },
             shouldPause = {
                 pauseRequested.get() || original.shouldPause()
             },
@@ -268,6 +283,7 @@ internal class InProcessSourceSeparationExecutionHost(
         var latestEvent: SourceSeparationExecutionHostEvent? = null
         var backend: String? = null
         var runtimeName: String? = null
+        var gpuFallbackLatch = request.descriptor.runtime.gpuFallbackLatch
 
         fun diagnostics(
             mode: SourceSeparationExecutionHostMode,
@@ -325,6 +341,7 @@ private fun SourceSeparationExecutionHostRequest.requireExactDescriptor(
         descriptor.runtime.backgroundPolicy == execution.backgroundPolicy &&
         descriptor.runtime.tryGpu == execution.tryGpu &&
         descriptor.runtime.gpuRuntimeIdentity == execution.gpuRuntimeIdentity &&
+        descriptor.runtime.gpuFallbackLatch == execution.gpuFallbackLatch &&
         descriptor.runtime.cpuThreads == execution.runtimeSettings.cpuThreads &&
         descriptor.runtime.useXnnpack == execution.runtimeSettings.useXnnpack &&
         descriptor.runtime.windowDecodeEnabled == execution.windowDecodeEnabled
@@ -386,6 +403,7 @@ internal fun SourceSeparationModelAwareExecutionRequest.toExecutionDescriptor(
             backendPolicy = backendPolicy,
             tryGpu = tryGpu,
             gpuRuntimeIdentity = gpuRuntimeIdentity,
+            gpuFallbackLatch = gpuFallbackLatch,
             cpuThreads = runtimeSettings.cpuThreads,
             useXnnpack = runtimeSettings.useXnnpack,
             windowDecodeEnabled = windowDecodeEnabled,

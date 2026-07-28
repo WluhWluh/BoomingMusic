@@ -120,7 +120,9 @@ internal class SourceSeparationModelAwareEngine(
         val identity = model.contract.identity(preflight.identity)
         val admittedRuntimePolicy = coordinator.inspectAdmittedRuntimePolicy(identity)
             ?: executionBackendPolicy.toAdmittedRuntimePolicy()
-        val admittedBackendPolicy = if (admittedRuntimePolicy.tryGpu) {
+        val admittedBackendPolicy = if (admittedRuntimePolicy.tryGpu &&
+            admittedRuntimePolicy.gpuFallbackLatch == null
+        ) {
             SourceSeparationExecutionBackendPolicy.Auto
         } else {
             SourceSeparationExecutionBackendPolicy.Cpu
@@ -144,7 +146,9 @@ internal class SourceSeparationModelAwareEngine(
                 runtimeSettings = runtimeSettings,
                 executionBackendPolicy = admittedBackendPolicy,
                 runClass = runClass,
+                tryGpu = admittedRuntimePolicy.tryGpu,
                 gpuRuntimeIdentity = admittedRuntimePolicy.gpuRuntimeIdentity,
+                gpuFallbackLatch = admittedRuntimePolicy.gpuFallbackLatch,
                 onProgress = onProgress,
                 playbackPositionMsProvider = playbackPositionMsProvider,
                 playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
@@ -168,8 +172,9 @@ internal class SourceSeparationModelAwareEngine(
                 ?.takeIf { it > 0 },
             runClass = runClass,
             backgroundPolicy = runClass.backgroundPolicy,
-            tryGpu = admittedBackendPolicy == SourceSeparationExecutionBackendPolicy.Auto,
+            tryGpu = admittedRuntimePolicy.tryGpu,
             gpuRuntimeIdentity = admittedRuntimePolicy.gpuRuntimeIdentity,
+            gpuFallbackLatch = admittedRuntimePolicy.gpuFallbackLatch,
         )
         return when (val start = coordinator.begin(runRequest)) {
             SourceSeparationCacheRunStart.Busy ->
@@ -189,7 +194,9 @@ internal class SourceSeparationModelAwareEngine(
                 runtimeSettings = runtimeSettings,
                 executionBackendPolicy = admittedBackendPolicy,
                 runClass = runClass,
+                tryGpu = admittedRuntimePolicy.tryGpu,
                 gpuRuntimeIdentity = admittedRuntimePolicy.gpuRuntimeIdentity,
+                gpuFallbackLatch = admittedRuntimePolicy.gpuFallbackLatch,
                 onProgress = onProgress,
                 playbackPositionMsProvider = playbackPositionMsProvider,
                 playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
@@ -211,7 +218,9 @@ internal class SourceSeparationModelAwareEngine(
         runtimeSettings: MdxRuntimeSettings,
         executionBackendPolicy: SourceSeparationExecutionBackendPolicy,
         runClass: SourceSeparationExecutionRunClass,
+        tryGpu: Boolean,
         gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
+        gpuFallbackLatch: SourceSeparationGpuFallbackLatch?,
         onProgress: (MdxRangeProgress) -> Unit,
         playbackPositionMsProvider: () -> Long?,
         playbackReadyWindowCountProvider: () -> Int,
@@ -243,10 +252,13 @@ internal class SourceSeparationModelAwareEngine(
             backendPolicy = executionBackendPolicy,
             runClass = runClass,
             backgroundPolicy = runClass.backgroundPolicy,
+            tryGpu = tryGpu,
             gpuRuntimeIdentity = gpuRuntimeIdentity,
+            gpuFallbackLatch = gpuFallbackLatch,
             onProgress = {},
             onPrepared = {},
             onSegmentStateChanged = { _, _ -> },
+            onGpuFallbackLatched = {},
             playbackPositionMsProvider = playbackPositionMsProvider,
             playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
             windowDecodeEnabled = windowDecodeEnabled,
@@ -296,6 +308,7 @@ internal class SourceSeparationModelAwareEngine(
                                     ) { "Remote cache preparation was not durably published." })
                                 is SourceSeparationExecutionHostEventPayload
                                     .SegmentStateChanged,
+                                is SourceSeparationExecutionHostEventPayload.GpuFallbackLatched,
                                 is SourceSeparationExecutionHostEventPayload.Completed,
                                 is SourceSeparationExecutionHostEventPayload.Paused,
                                 is SourceSeparationExecutionHostEventPayload.Canceled,
@@ -355,7 +368,9 @@ internal class SourceSeparationModelAwareEngine(
         runtimeSettings: MdxRuntimeSettings,
         executionBackendPolicy: SourceSeparationExecutionBackendPolicy,
         runClass: SourceSeparationExecutionRunClass,
+        tryGpu: Boolean,
         gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
+        gpuFallbackLatch: SourceSeparationGpuFallbackLatch?,
         onProgress: (MdxRangeProgress) -> Unit,
         playbackPositionMsProvider: () -> Long?,
         playbackReadyWindowCountProvider: () -> Int,
@@ -387,10 +402,13 @@ internal class SourceSeparationModelAwareEngine(
                 backendPolicy = executionBackendPolicy,
                 runClass = runClass,
                 backgroundPolicy = runClass.backgroundPolicy,
+                tryGpu = tryGpu,
                 gpuRuntimeIdentity = gpuRuntimeIdentity,
+                gpuFallbackLatch = gpuFallbackLatch,
                 onProgress = {},
                 onPrepared = {},
                 onSegmentStateChanged = { _, _ -> },
+                onGpuFallbackLatched = {},
                 playbackPositionMsProvider = playbackPositionMsProvider,
                 playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
                 windowDecodeEnabled = windowDecodeEnabled,
@@ -454,6 +472,10 @@ internal class SourceSeparationModelAwareEngine(
                                         payload.segmentIndex,
                                         payload.state,
                                     )
+
+                                is SourceSeparationExecutionHostEventPayload
+                                    .GpuFallbackLatched ->
+                                    coordinator.latchGpuFallback(run, payload.latch)
 
                                 is SourceSeparationExecutionHostEventPayload.Completed,
                                 is SourceSeparationExecutionHostEventPayload.Paused,
@@ -607,10 +629,13 @@ internal data class SourceSeparationModelAwareExecutionRequest(
     val backendPolicy: SourceSeparationExecutionBackendPolicy,
     val runClass: SourceSeparationExecutionRunClass,
     val backgroundPolicy: SourceSeparationBackgroundPolicy,
+    val tryGpu: Boolean,
     val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
+    val gpuFallbackLatch: SourceSeparationGpuFallbackLatch?,
     val onProgress: (MdxRangeProgress) -> Unit,
     val onPrepared: (com.mardous.booming.separation.model.MdxRangePreparation) -> Unit,
     val onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit,
+    val onGpuFallbackLatched: (SourceSeparationGpuFallbackLatch) -> Unit,
     val playbackPositionMsProvider: () -> Long?,
     val playbackReadyWindowCountProvider: () -> Int,
     val windowDecodeEnabled: Boolean,
@@ -618,15 +643,23 @@ internal data class SourceSeparationModelAwareExecutionRequest(
     val shouldCancel: () -> Boolean,
     val requireWorkspaceAvailable: () -> Unit = {},
 ) {
-    val tryGpu: Boolean
-        get() = backendPolicy == SourceSeparationExecutionBackendPolicy.Auto
-
     init {
         require(tryGpu == (gpuRuntimeIdentity != null)) {
             "Execution GPU preference and admitted runtime identity disagree."
         }
         require(backgroundPolicy == runClass.backgroundPolicy) {
             "Execution background policy does not match its run class."
+        }
+        require(tryGpu || gpuFallbackLatch == null) {
+            "A CPU-only execution cannot carry a GPU fallback latch."
+        }
+        val expectedBackendPolicy = if (tryGpu && gpuFallbackLatch == null) {
+            SourceSeparationExecutionBackendPolicy.Auto
+        } else {
+            SourceSeparationExecutionBackendPolicy.Cpu
+        }
+        require(backendPolicy == expectedBackendPolicy) {
+            "Execution backend policy does not match its admitted GPU state."
         }
         require(!tryGpu || gpuRuntimeIdentity == BOUNDED_GPU_RUNTIME_IDENTITY) {
             "Execution GPU runtime identity is not supported by this build."
@@ -650,11 +683,13 @@ private fun SourceSeparationExecutionBackendPolicy.toAdmittedRuntimePolicy() =
             SourceSeparationCacheAdmittedRuntimePolicy(
                 tryGpu = true,
                 gpuRuntimeIdentity = BOUNDED_GPU_RUNTIME_IDENTITY,
+                gpuFallbackLatch = null,
             )
         SourceSeparationExecutionBackendPolicy.Cpu ->
             SourceSeparationCacheAdmittedRuntimePolicy(
                 tryGpu = false,
                 gpuRuntimeIdentity = null,
+                gpuFallbackLatch = null,
             )
     }
 

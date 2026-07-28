@@ -2,6 +2,7 @@ package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.MdxRangePreparation
@@ -48,6 +49,7 @@ class SourceSeparationCacheRunCoordinator(
             SourceSeparationCacheAdmittedRuntimePolicy(
                 tryGpu = request.tryGpu,
                 gpuRuntimeIdentity = request.gpuRuntimeIdentity,
+                gpuFallbackLatch = request.gpuFallbackLatch,
             )
         }
 
@@ -266,6 +268,13 @@ class SourceSeparationCacheRunCoordinator(
             error = null,
             updatedAtEpochMs = nowEpochMs(),
         ).also(store::writeManifest)
+    }
+
+    fun latchGpuFallback(
+        run: SourceSeparationModelAwareCacheRun,
+        latch: SourceSeparationGpuFallbackLatch,
+    ): SourceSeparationCacheRunJournal = updateJournal(run) { journal, now ->
+        journal.latchGpuFallback(latch, now)
     }
 
     fun updateSegmentState(
@@ -640,6 +649,7 @@ class SourceSeparationCacheRunCoordinator(
         backgroundPolicy = backgroundPolicy,
         tryGpu = tryGpu,
         gpuRuntimeIdentity = gpuRuntimeIdentity,
+        gpuFallbackLatch = gpuFallbackLatch,
         admittedAtEpochMs = admittedAtEpochMs,
     )
 
@@ -708,6 +718,7 @@ data class SourceSeparationCacheRunRequest(
     val backgroundPolicy: SourceSeparationBackgroundPolicy,
     val tryGpu: Boolean,
     val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
+    val gpuFallbackLatch: SourceSeparationGpuFallbackLatch?,
     val runId: String = java.util.UUID.randomUUID().toString(),
     val processGeneration: Long = 1L,
     val ownerPid: Int? = null,
@@ -722,16 +733,23 @@ data class SourceSeparationCacheRunRequest(
         require(tryGpu == (gpuRuntimeIdentity != null)) {
             "Cache run GPU preference and runtime identity disagree."
         }
+        require(tryGpu || gpuFallbackLatch == null) {
+            "A CPU-only cache run cannot carry a GPU fallback latch."
+        }
     }
 }
 
 data class SourceSeparationCacheAdmittedRuntimePolicy(
     val tryGpu: Boolean,
     val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
+    val gpuFallbackLatch: SourceSeparationGpuFallbackLatch? = null,
 ) {
     init {
         require(tryGpu == (gpuRuntimeIdentity != null)) {
             "Admitted GPU preference and runtime identity disagree."
+        }
+        require(tryGpu || gpuFallbackLatch == null) {
+            "A CPU-only admitted policy cannot carry a GPU fallback latch."
         }
     }
 }

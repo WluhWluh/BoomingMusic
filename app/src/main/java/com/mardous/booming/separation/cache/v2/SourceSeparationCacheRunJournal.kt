@@ -2,6 +2,7 @@ package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -37,6 +38,18 @@ data class SourceSeparationCacheRunJournal(
         require(updatedAtEpochMs >= request.admittedAtEpochMs) {
             "Cache run journal update time is invalid."
         }
+        val fallbackTransitions = transitions.filter {
+            it.type == SourceSeparationCacheRunTransitionType.GpuFallbackLatched
+        }
+        if (request.gpuFallbackLatch == null) {
+            require(fallbackTransitions.isEmpty()) {
+                "Cache run journal has a fallback transition without a latch."
+            }
+        } else {
+            require(fallbackTransitions.singleOrNull()?.gpuFallbackLatch ==
+                request.gpuFallbackLatch
+            ) { "Cache run journal fallback history is inconsistent." }
+        }
     }
 
     val latestSequence: Long
@@ -48,11 +61,13 @@ data class SourceSeparationCacheRunJournal(
     fun append(
         type: SourceSeparationCacheRunTransitionType,
         nowEpochMs: Long,
+        request: SourceSeparationCacheRunJournalRequest = this.request,
         segmentIndex: Int? = null,
         error: SourceSeparationCacheError? = null,
         lifecycle: SourceSeparationCacheRunJournalLifecycle = this.lifecycle,
         committedSegment: SourceSeparationCacheCommittedSegment? = null,
         removeCommittedSegmentIndex: Int? = null,
+        gpuFallbackLatch: SourceSeparationGpuFallbackLatch? = null,
     ): SourceSeparationCacheRunJournal {
         var committed = committedSegments
         if (removeCommittedSegmentIndex != null) {
@@ -63,6 +78,7 @@ data class SourceSeparationCacheRunJournal(
                 committedSegment
         }
         return copy(
+            request = request,
             lifecycle = lifecycle,
             transitions = transitions + SourceSeparationCacheRunJournalTransition(
                 sequence = latestSequence + 1L,
@@ -71,6 +87,7 @@ data class SourceSeparationCacheRunJournal(
                 ownerPid = request.ownerPid,
                 runClass = request.runClass,
                 backgroundPolicy = request.backgroundPolicy,
+                gpuFallbackLatch = gpuFallbackLatch,
                 type = type,
                 segmentIndex = segmentIndex,
                 error = error,
@@ -86,8 +103,28 @@ data class SourceSeparationCacheRunJournal(
         )
     }
 
+    fun latchGpuFallback(
+        latch: SourceSeparationGpuFallbackLatch,
+        nowEpochMs: Long,
+    ): SourceSeparationCacheRunJournal {
+        require(lifecycle == SourceSeparationCacheRunJournalLifecycle.Running) {
+            "GPU fallback can only be latched for a running cache run."
+        }
+        require(request.tryGpu) { "A CPU-only cache run cannot latch GPU fallback." }
+        request.gpuFallbackLatch?.let { existing ->
+            require(existing == latch) { "The cache run already latched a different fallback." }
+            return this
+        }
+        return append(
+            type = SourceSeparationCacheRunTransitionType.GpuFallbackLatched,
+            nowEpochMs = nowEpochMs,
+            request = request.copy(gpuFallbackLatch = latch),
+            gpuFallbackLatch = latch,
+        )
+    }
+
     companion object {
-        const val SCHEMA_VERSION = 4
+        const val SCHEMA_VERSION = 5
 
         fun admitted(
             request: SourceSeparationCacheRunJournalRequest,
@@ -121,7 +158,8 @@ data class SourceSeparationCacheRunJournal(
                 previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused
             ) {
                 require(previous.request.tryGpu == request.tryGpu &&
-                    previous.request.gpuRuntimeIdentity == request.gpuRuntimeIdentity
+                    previous.request.gpuRuntimeIdentity == request.gpuRuntimeIdentity &&
+                    previous.request.gpuFallbackLatch == request.gpuFallbackLatch
                 ) {
                     "An active or paused cache run cannot change its admitted GPU runtime."
                 }
@@ -216,6 +254,7 @@ data class SourceSeparationCacheRunJournalRequest(
     val backgroundPolicy: SourceSeparationBackgroundPolicy,
     val tryGpu: Boolean,
     val gpuRuntimeIdentity: SourceSeparationAdmittedGpuRuntimeIdentity?,
+    val gpuFallbackLatch: SourceSeparationGpuFallbackLatch?,
     val admittedAtEpochMs: Long,
 ) {
     init {
@@ -227,6 +266,9 @@ data class SourceSeparationCacheRunJournalRequest(
         }
         require(tryGpu == (gpuRuntimeIdentity != null)) {
             "Cache run GPU preference and runtime identity disagree."
+        }
+        require(tryGpu || gpuFallbackLatch == null) {
+            "A CPU-only cache run cannot carry a GPU fallback latch."
         }
         require(admittedAtEpochMs >= 0L) { "Cache run admission time is invalid." }
         require(contract.identity(
@@ -244,6 +286,7 @@ data class SourceSeparationCacheRunJournalTransition(
     val ownerPid: Int? = null,
     val runClass: SourceSeparationExecutionRunClass,
     val backgroundPolicy: SourceSeparationBackgroundPolicy,
+    val gpuFallbackLatch: SourceSeparationGpuFallbackLatch? = null,
     val type: SourceSeparationCacheRunTransitionType,
     val segmentIndex: Int? = null,
     val error: SourceSeparationCacheError? = null,
@@ -253,12 +296,16 @@ data class SourceSeparationCacheRunJournalTransition(
         require(backgroundPolicy == runClass.backgroundPolicy) {
             "Cache run transition background policy does not match its run class."
         }
+        require((type == SourceSeparationCacheRunTransitionType.GpuFallbackLatched) ==
+            (gpuFallbackLatch != null)
+        ) { "Cache run transition fallback payload is inconsistent." }
     }
 }
 
 @Serializable
 enum class SourceSeparationCacheRunTransitionType {
     Admitted,
+    GpuFallbackLatched,
     PreviousOwnerDied,
     Prepared,
     SegmentRunning,

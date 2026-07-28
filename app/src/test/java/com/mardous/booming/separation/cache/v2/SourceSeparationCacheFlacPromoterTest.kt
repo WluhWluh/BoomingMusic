@@ -251,6 +251,7 @@ class SourceSeparationCacheFlacPromoterTest {
                     SourceSeparationExecutionRunClass.PlaybackDemandWindow.backgroundPolicy,
                 tryGpu = false,
                 gpuRuntimeIdentity = null,
+                gpuFallbackLatch = null,
             )
             val run = (coordinator.begin(request) as SourceSeparationCacheRunStart.Ready).run
             val vocals = File(run.workDirectory, "vocals.wav").apply { writeText("vocals") }

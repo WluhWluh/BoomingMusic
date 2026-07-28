@@ -28,3 +28,14 @@ enum class SourceSeparationBackgroundPolicy {
     @SerialName("client-bound")
     ClientBound,
 }
+
+@Serializable
+data class SourceSeparationGpuFallbackLatch(
+    val stage: String,
+    val reason: String?,
+) {
+    init {
+        require(stage.isNotBlank()) { "GPU fallback stage is empty." }
+        require(reason == null || reason.isNotBlank()) { "GPU fallback reason is empty." }
+    }
+}

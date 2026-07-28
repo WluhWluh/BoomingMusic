@@ -6,6 +6,8 @@ import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.MdxInferenceSessionProvider
 import com.mardous.booming.separation.model.MdxInferenceSessionFactory
 import com.mardous.booming.separation.model.MdxRangeSeparator
+import com.mardous.booming.separation.model.MdxRangeSeparationResult
+import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
 import com.mardous.booming.separation.model.MdxSeparationExecution
 import com.mardous.booming.separation.model.SingleUseMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.withMdxInferenceTiming
@@ -32,32 +34,56 @@ internal class MdxSourceSeparationModelAwareRangeExecutor(
 
     override fun separate(
         request: SourceSeparationModelAwareExecutionRequest,
-    ) = MdxRangeSeparator(
-        context = applicationContext,
-        config = request.model.executionProfile.dspConfig,
-        runtimeSettings = request.runtimeSettings,
-    ).separate(
-        uri = Uri.parse(request.sourceUri),
-        outputDir = request.workspace.workDirectory,
-        segmentOutputDir = request.workspace.segmentsDirectory,
-        displayName = request.displayName,
-        runtimeSettings = request.runtimeSettings,
-        onProgress = request.onProgress,
-        onPrepared = request.onPrepared,
-        onSegmentStateChanged = request.onSegmentStateChanged,
-        playbackPositionMsProvider = request.playbackPositionMsProvider,
-        playbackReadyWindowCountProvider = request.playbackReadyWindowCountProvider,
-        windowDecodeEnabled = request.windowDecodeEnabled,
-        resumeState = request.workspace.resumeState,
-        execution = MdxSeparationExecution(
-            artifact = request.model.artifact,
-            profile = request.model.executionProfile,
-        ),
-        expectedSourceAudioFingerprint = request.workspace.identity.source.audioFingerprint,
-        sessionProvider = sessionProviderFactory(request.backendPolicy),
-        shouldPause = request.shouldPause,
-        shouldCancel = request.shouldCancel,
-        requireWorkspaceAvailable = request.requireWorkspaceAvailable,
+    ): MdxRangeSeparationResult {
+        var observedFallback = request.gpuFallbackLatch
+        return MdxRangeSeparator(
+            context = applicationContext,
+            config = request.model.executionProfile.dspConfig,
+            runtimeSettings = request.runtimeSettings,
+        ).separate(
+            uri = Uri.parse(request.sourceUri),
+            outputDir = request.workspace.workDirectory,
+            segmentOutputDir = request.workspace.segmentsDirectory,
+            displayName = request.displayName,
+            runtimeSettings = request.runtimeSettings,
+            onProgress = request.onProgress,
+            onPrepared = request.onPrepared,
+            onSegmentStateChanged = request.onSegmentStateChanged,
+            playbackPositionMsProvider = request.playbackPositionMsProvider,
+            playbackReadyWindowCountProvider = request.playbackReadyWindowCountProvider,
+            windowDecodeEnabled = request.windowDecodeEnabled,
+            resumeState = request.workspace.resumeState,
+            execution = MdxSeparationExecution(
+                artifact = request.model.artifact,
+                profile = request.model.executionProfile,
+            ),
+            expectedSourceAudioFingerprint = request.workspace.identity.source.audioFingerprint,
+            sessionProvider = sessionProviderFactory(request.backendPolicy),
+            onRuntimeDiagnostics = { diagnostics ->
+                diagnostics.toSourceSeparationGpuFallbackLatch()?.let { latch ->
+                    val previous = observedFallback
+                    if (previous == null) {
+                        observedFallback = latch
+                        request.onGpuFallbackLatched(latch)
+                    } else {
+                        require(previous == latch) {
+                            "Execution reported conflicting GPU fallback diagnostics."
+                        }
+                    }
+                }
+            },
+            shouldPause = request.shouldPause,
+            shouldCancel = request.shouldCancel,
+            requireWorkspaceAvailable = request.requireWorkspaceAvailable,
+        )
+    }
+}
+
+internal fun MdxRuntimeDiagnostics.toSourceSeparationGpuFallbackLatch():
+    SourceSeparationGpuFallbackLatch? = fallbackStage?.let { stage ->
+    SourceSeparationGpuFallbackLatch(
+        stage = stage,
+        reason = fallbackReason?.takeIf(String::isNotBlank),
     )
 }
 

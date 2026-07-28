@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.process.ipc
 
+import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
 import com.mardous.booming.separation.process.SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
@@ -62,15 +63,15 @@ class SourceSeparationExecutionIpcProtocolTest {
                 SourceSeparationExecutionIpcCodec.encodeRecycleCommand(recycle),
             ),
         )
-        assertEquals(7, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
+        assertEquals(8, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":6,"commandId":"connect","clientProcessName":"x"}""",
+                """{"protocolVersion":7,"commandId":"connect","clientProcessName":"x"}""",
             )
         }
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":7,"commandId":"connect","clientProcessName":"x","extra":1}""",
+                """{"protocolVersion":8,"commandId":"connect","clientProcessName":"x","extra":1}""",
             )
         }
     }
@@ -84,6 +85,27 @@ class SourceSeparationExecutionIpcProtocolTest {
         }
         SourceSeparationExecutionIpcCodec.requirePayloadWithinLimit(
             "x".repeat(SOURCE_SEPARATION_IPC_MAX_PAYLOAD_BYTES),
+        )
+    }
+
+    @Test
+    fun `GPU fallback event round trips with its typed latch`() {
+        val event = event(
+            sequence = 4L,
+            label = "gpu-fallback",
+            payload = SourceSeparationExecutionHostEventPayload.GpuFallbackLatched(
+                SourceSeparationGpuFallbackLatch(
+                    stage = "GpuInvocation",
+                    reason = "Injected recoverable GPU failure.",
+                )
+            ),
+        )
+
+        assertEquals(
+            event,
+            SourceSeparationExecutionIpcCodec.decodeEvent(
+                SourceSeparationExecutionIpcCodec.encodeEvent(event),
+            ),
         )
     }
 

@@ -48,6 +48,7 @@ class MdxRangeSeparator(
         execution: MdxSeparationExecution? = null,
         expectedSourceAudioFingerprint: String? = null,
         sessionProvider: MdxInferenceSessionProvider,
+        onRuntimeDiagnostics: (MdxRuntimeDiagnostics) -> Unit = {},
         shouldPause: () -> Boolean = { false },
         shouldCancel: () -> Boolean = { false },
         requireWorkspaceAvailable: () -> Unit = {},
@@ -196,7 +197,10 @@ class MdxRangeSeparator(
                 }
                 sessionLease.use { lease ->
                     val session = lease.session
-                    runtimeDiagnostics = session.diagnostics
+                    session.diagnostics.also { diagnostics ->
+                        runtimeDiagnostics = diagnostics
+                        onRuntimeDiagnostics(diagnostics)
+                    }
                     var processedWindowCount = currentSegmentPlan.segments
                         .count { it.state == SourceSeparationSegmentState.Ready }
                     val processedSegments = mutableSetOf<Int>()
@@ -368,7 +372,10 @@ class MdxRangeSeparator(
                         )
                         // Auto may switch from GPU to CPU during invocation; capture the
                         // post-run diagnostics so the completed cache records the real path.
-                        runtimeDiagnostics = session.diagnostics
+                        session.diagnostics.also { diagnostics ->
+                            runtimeDiagnostics = diagnostics
+                            onRuntimeDiagnostics(diagnostics)
+                        }
                         throwIfCanceled(shouldCancel)
                         val scaledModelOutputWindow = measureElapsed(timing, "Output compensation") {
                             compensateMdxModelOutput(

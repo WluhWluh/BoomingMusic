@@ -10,6 +10,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailab
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRoot
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRootLocation
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunTransitionType
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSongLocator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceIdentity
@@ -468,7 +469,80 @@ class SourceSeparationModelAwareEngineTest {
             identity.commandQueueWindowSize,
         )
         assertEquals(identity, fixture.currentRunJournal().request.gpuRuntimeIdentity)
-        assertEquals(4, fixture.currentRunJournal().journalSchemaVersion)
+        assertEquals(5, fixture.currentRunJournal().journalSchemaVersion)
+    }
+
+    @Test
+    fun `latched GPU fallback resumes on CPU with exact admitted identity`() {
+        val fixture = fixture()
+        val observedPolicies = mutableListOf<SourceSeparationExecutionBackendPolicy>()
+        val observedTryGpu = mutableListOf<Boolean>()
+        val observedRuntimeIdentities = mutableListOf<SourceSeparationAdmittedGpuRuntimeIdentity?>()
+        val observedLatches = mutableListOf<SourceSeparationGpuFallbackLatch?>()
+        val events = mutableListOf<SourceSeparationExecutionHostEvent>()
+        val latch = SourceSeparationGpuFallbackLatch(
+            stage = "GpuInvocation",
+            reason = "Injected recoverable GPU failure.",
+        )
+        var attempt = 0
+        val engine = fixture.engine(
+            eventSink = events::add,
+        ) { request ->
+            attempt += 1
+            observedPolicies += request.backendPolicy
+            observedTryGpu += request.tryGpu
+            observedRuntimeIdentities += request.gpuRuntimeIdentity
+            observedLatches += request.gpuFallbackLatch
+            val preparation = fixture.prepare(request, preserveFiles = attempt > 1)
+            if (attempt == 1) {
+                request.onGpuFallbackLatched(latch)
+                request.onGpuFallbackLatched(latch)
+                request.onPrepared(preparation)
+                throw SourceSeparationPausedException()
+            }
+            fixture.complete(request, preparation)
+        }
+
+        assertThrows(SourceSeparationPausedException::class.java) {
+            engine.separate(fixture.input)
+        }
+        val pausedJournal = fixture.currentRunJournal()
+        val admittedIdentity = requireNotNull(pausedJournal.request.gpuRuntimeIdentity)
+        assertEquals(latch, pausedJournal.request.gpuFallbackLatch)
+        assertTrue(pausedJournal.request.tryGpu)
+        assertEquals(
+            1,
+            pausedJournal.transitions.count {
+                it.type == SourceSeparationCacheRunTransitionType.GpuFallbackLatched
+            },
+        )
+
+        val completed = engine.separate(
+            input = fixture.input,
+            executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Auto,
+        )
+
+        assertTrue(completed is SourceSeparationModelAwareEngineResult.Completed)
+        assertEquals(
+            listOf(
+                SourceSeparationExecutionBackendPolicy.Auto,
+                SourceSeparationExecutionBackendPolicy.Cpu,
+            ),
+            observedPolicies,
+        )
+        assertEquals(listOf(true, true), observedTryGpu)
+        assertEquals(listOf(admittedIdentity, admittedIdentity), observedRuntimeIdentities)
+        assertEquals(listOf(null, latch), observedLatches)
+        assertEquals(
+            1,
+            events.count {
+                it.payload is SourceSeparationExecutionHostEventPayload.GpuFallbackLatched
+            },
+        )
+        val completedJournal = fixture.currentRunJournal()
+        assertEquals(latch, completedJournal.request.gpuFallbackLatch)
+        assertEquals(admittedIdentity, completedJournal.request.gpuRuntimeIdentity)
+        assertTrue(completedJournal.request.tryGpu)
     }
 
     @Test
