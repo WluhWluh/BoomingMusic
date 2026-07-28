@@ -465,7 +465,10 @@ class SourceSeparationEngine(
     }
 }
 
-class SourceSeparationPausedException : RuntimeException("Source separation paused.")
+open class SourceSeparationPausedException(
+    message: String = "Source separation paused.",
+    cause: Throwable? = null,
+) : RuntimeException(message, cause)
 
 sealed class SourceSeparationCacheStatus {
     data object NotStarted : SourceSeparationCacheStatus()

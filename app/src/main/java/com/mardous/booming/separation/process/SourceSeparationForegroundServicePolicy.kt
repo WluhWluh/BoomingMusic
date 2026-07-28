@@ -1,7 +1,53 @@
 package com.mardous.booming.separation.process
 
+import com.mardous.booming.separation.SourceSeparationPausedException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+
+@Serializable
+enum class SourceSeparationForegroundDeferredReason {
+    @SerialName("start-not-allowed")
+    StartNotAllowed,
+
+    @SerialName("promotion-denied")
+    PromotionDenied,
+
+    @SerialName("timed-out")
+    TimedOut,
+}
+
+class SourceSeparationForegroundExecutionDeferredException(
+    val reason: SourceSeparationForegroundDeferredReason,
+    cause: Throwable? = null,
+) : SourceSeparationPausedException(
+    message = "Source separation foreground execution was deferred: ${reason.name}.",
+    cause = cause,
+)
+
+internal enum class SourceSeparationForegroundStartStage {
+    ServiceStart,
+    Promotion,
+}
+
+internal fun Throwable.toForegroundExecutionDeferredException(
+    stage: SourceSeparationForegroundStartStage,
+): SourceSeparationForegroundExecutionDeferredException? {
+    if (this is SourceSeparationForegroundExecutionDeferredException) return this
+    val isPlatformStartDenial = javaClass.name ==
+        "android.app.ForegroundServiceStartNotAllowedException"
+    val reason = when {
+        isPlatformStartDenial -> SourceSeparationForegroundDeferredReason.StartNotAllowed
+        stage == SourceSeparationForegroundStartStage.ServiceStart &&
+            this is IllegalStateException ->
+            SourceSeparationForegroundDeferredReason.StartNotAllowed
+        this is SecurityException -> SourceSeparationForegroundDeferredReason.PromotionDenied
+        stage == SourceSeparationForegroundStartStage.Promotion &&
+            (this is IllegalStateException || this is IllegalArgumentException) ->
+            SourceSeparationForegroundDeferredReason.PromotionDenied
+        else -> return null
+    }
+    return SourceSeparationForegroundExecutionDeferredException(reason, this)
+}
 
 @Serializable
 data class SourceSeparationForegroundLeaseRequest(

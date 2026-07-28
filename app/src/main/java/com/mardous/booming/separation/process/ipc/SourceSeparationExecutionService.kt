@@ -17,6 +17,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostContr
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
 import com.mardous.booming.separation.process.SourceSeparationForegroundControlAction
+import com.mardous.booming.separation.process.SourceSeparationForegroundExecutionDeferredException
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseLifecycle
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseOperationResult
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
@@ -698,9 +699,13 @@ internal class SourceSeparationExecutionService : Service() {
                 is com.mardous.booming.separation.process
                     .SourceSeparationRemoteCacheAlreadyCompletedException ->
                     SourceSeparationIpcStatus.AlreadyCompleted
+                is SourceSeparationForegroundExecutionDeferredException ->
+                    SourceSeparationIpcStatus.Deferred
                 else -> SourceSeparationIpcStatus.Rejected
             },
             error = error.toIpcError(),
+            deferredReason = (error as? SourceSeparationForegroundExecutionDeferredException)
+                ?.reason,
         )
     )
 
@@ -1005,6 +1010,8 @@ private fun Throwable.toIpcError(): SourceSeparationIpcError {
             SourceSeparationIpcErrorCategory.RecycleRequired
         is SourceSeparationProcessSessionPoisonedException ->
             SourceSeparationIpcErrorCategory.RecycleRequired
+        is SourceSeparationForegroundExecutionDeferredException ->
+            SourceSeparationIpcErrorCategory.ForegroundServiceUnavailable
         is IllegalArgumentException -> SourceSeparationIpcErrorCategory.IdentityMismatch
         else -> SourceSeparationIpcErrorCategory.RuntimeFailure
     }

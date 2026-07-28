@@ -18,6 +18,9 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostReque
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostSnapshot
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostStartResult
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
+import com.mardous.booming.separation.process.SourceSeparationForegroundStartStage
+import com.mardous.booming.separation.process.SourceSeparationForegroundExecutionDeferredException
+import com.mardous.booming.separation.process.toForegroundExecutionDeferredException
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
 import com.mardous.booming.separation.process.SourceSeparationProcParser
@@ -267,7 +270,9 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             }
         } catch (error: Throwable) {
             clearActiveRequest()
-            throw error
+            throw error.toForegroundExecutionDeferredException(
+                SourceSeparationForegroundStartStage.ServiceStart,
+            ) ?: error
         }
         val pump = RemoteControlPump(request).also {
             connectionLock.withLock { activePump = it }
@@ -317,6 +322,10 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             }
 
             SourceSeparationIpcStatus.Paused -> throw SourceSeparationPausedException()
+            SourceSeparationIpcStatus.Deferred ->
+                throw SourceSeparationForegroundExecutionDeferredException(
+                    reason = requireNotNull(response.deferredReason),
+                )
             SourceSeparationIpcStatus.Canceled ->
                 throw CancellationException(response.error?.message ?: "Remote run canceled.")
             SourceSeparationIpcStatus.Busy ->
@@ -1122,6 +1131,7 @@ private fun SourceSeparationIpcStatus.toHostControlResult():
     SourceSeparationIpcStatus.Failed,
     SourceSeparationIpcStatus.RecycleRequired,
     SourceSeparationIpcStatus.RecycleAccepted,
+    SourceSeparationIpcStatus.Deferred,
     SourceSeparationIpcStatus.StaleControl,
     SourceSeparationIpcStatus.Rejected,
     -> SourceSeparationExecutionHostControlResult.Terminal

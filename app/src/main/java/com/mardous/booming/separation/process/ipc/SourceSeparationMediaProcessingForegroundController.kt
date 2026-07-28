@@ -14,12 +14,16 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.getSystemService
 import com.mardous.booming.R
 import com.mardous.booming.separation.process.SourceSeparationForegroundControlAction
+import com.mardous.booming.separation.process.SourceSeparationForegroundDeferredReason
+import com.mardous.booming.separation.process.SourceSeparationForegroundExecutionDeferredException
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseLifecycle
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseOperationResult
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseTracker
 import com.mardous.booming.separation.process.SourceSeparationForegroundPlatformPolicy
 import com.mardous.booming.separation.process.SourceSeparationForegroundServiceDiagnostics
+import com.mardous.booming.separation.process.SourceSeparationForegroundStartStage
+import com.mardous.booming.separation.process.toForegroundExecutionDeferredException
 import com.mardous.booming.ui.screen.MainActivity
 
 internal class SourceSeparationMediaProcessingForegroundController(
@@ -30,6 +34,7 @@ internal class SourceSeparationMediaProcessingForegroundController(
 ) {
     private var latestDeliveredStartId = 0
     private var pendingTimeout: Runnable? = null
+    private var lastDeferredStart: DeferredForegroundStart? = null
 
     @Synchronized
     fun observeStartCommand(startId: Int) {
@@ -48,21 +53,37 @@ internal class SourceSeparationMediaProcessingForegroundController(
         )
         observeStartCommand(startId)
         if (result == SourceSeparationForegroundLeaseOperationResult.AlreadyApplied) {
-            if (tracker.diagnostics().activeLease == null) stopStartedLifetime()
+            if (tracker.diagnostics().activeLease == null) {
+                stopStartedLifetime()
+                lastDeferredStart
+                    ?.takeIf { it.request == request }
+                    ?.let { deferred ->
+                        throw SourceSeparationForegroundExecutionDeferredException(
+                            deferred.reason,
+                        )
+                    }
+            }
             return result
         }
+        lastDeferredStart = null
         try {
             createNotificationChannel()
             promote(buildNotification(request))
             schedulePendingTimeout(request)
         } catch (error: Throwable) {
+            val deferred = error.toForegroundExecutionDeferredException(
+                SourceSeparationForegroundStartStage.Promotion,
+            )
             tracker.stop(
                 request,
                 "promotion-failed:${error::class.java.simpleName}",
             )
+            if (deferred != null) {
+                lastDeferredStart = DeferredForegroundStart(request, deferred.reason)
+            }
             stopPlatformForeground()
             stopStartedLifetime()
-            throw error
+            throw deferred ?: error
         }
         return result
     }
@@ -268,4 +289,9 @@ internal class SourceSeparationMediaProcessingForegroundController(
         private const val MEDIA_PROCESSING_FOREGROUND_SERVICE_TYPE = 0x2000
         private const val PENDING_ADMISSION_TIMEOUT_MS = 15_000L
     }
+
+    private data class DeferredForegroundStart(
+        val request: SourceSeparationForegroundLeaseRequest,
+        val reason: SourceSeparationForegroundDeferredReason,
+    )
 }

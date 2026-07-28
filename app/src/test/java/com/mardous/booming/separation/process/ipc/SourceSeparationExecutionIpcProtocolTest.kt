@@ -5,6 +5,7 @@ import com.mardous.booming.separation.process.SOURCE_SEPARATION_EXECUTION_PROTOC
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
 import com.mardous.booming.separation.process.SourceSeparationExecutionProgress
+import com.mardous.booming.separation.process.SourceSeparationForegroundDeferredReason
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -63,16 +64,43 @@ class SourceSeparationExecutionIpcProtocolTest {
                 SourceSeparationExecutionIpcCodec.encodeRecycleCommand(recycle),
             ),
         )
-        assertEquals(10, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
+        assertEquals(11, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":9,"commandId":"connect","clientProcessName":"x"}""",
+                """{"protocolVersion":10,"commandId":"connect","clientProcessName":"x"}""",
             )
         }
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":10,"commandId":"connect","clientProcessName":"x","extra":1}""",
+                """{"protocolVersion":11,"commandId":"connect","clientProcessName":"x","extra":1}""",
             )
+        }
+    }
+
+    @Test
+    fun `foreground deferral round trips with a typed reason`() {
+        val response = SourceSeparationIpcStartResponse(
+            commandId = "start-deferred",
+            status = SourceSeparationIpcStatus.Deferred,
+            error = SourceSeparationIpcError(
+                category = SourceSeparationIpcErrorCategory.ForegroundServiceUnavailable,
+                type = "ForegroundDeferred",
+                message = "Foreground execution is unavailable.",
+            ),
+            deferredReason = SourceSeparationForegroundDeferredReason.PromotionDenied,
+        )
+
+        assertEquals(
+            response,
+            SourceSeparationExecutionIpcCodec.decodeStartResponse(
+                SourceSeparationExecutionIpcCodec.encodeStartResponse(response),
+            ),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            response.copy(deferredReason = null)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            response.copy(status = SourceSeparationIpcStatus.Failed)
         }
     }
 

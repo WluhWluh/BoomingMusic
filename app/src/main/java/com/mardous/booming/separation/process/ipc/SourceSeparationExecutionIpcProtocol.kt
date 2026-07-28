@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.process.ipc
 
 import com.mardous.booming.separation.process.SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION
+import com.mardous.booming.separation.process.SourceSeparationForegroundDeferredReason
 import com.mardous.booming.separation.process.SourceSeparationExecutionCompletion
 import com.mardous.booming.separation.process.SourceSeparationExecutionDescriptor
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostDiagnostics
@@ -186,6 +187,7 @@ internal data class SourceSeparationIpcStartResponse(
     val diagnostics: SourceSeparationExecutionHostDiagnostics? = null,
     val snapshot: SourceSeparationExecutionHostSnapshot? = null,
     val error: SourceSeparationIpcError? = null,
+    val deferredReason: SourceSeparationForegroundDeferredReason? = null,
 ) {
     init {
         requireProtocolVersion(protocolVersion)
@@ -193,6 +195,15 @@ internal data class SourceSeparationIpcStartResponse(
         if (status == SourceSeparationIpcStatus.Completed) {
             require(completion != null && diagnostics != null && error == null) {
                 "Completed IPC start response is incomplete."
+            }
+        }
+        if (status == SourceSeparationIpcStatus.Deferred) {
+            require(deferredReason != null && error != null && completion == null) {
+                "Deferred IPC start response is incomplete."
+            }
+        } else {
+            require(deferredReason == null) {
+                "Non-deferred IPC start response carries a deferred reason."
             }
         }
     }
@@ -282,6 +293,7 @@ internal enum class SourceSeparationIpcStatus {
     Terminal,
     RecycleRequired,
     RecycleAccepted,
+    Deferred,
     Rejected,
     Failed,
 }
@@ -308,6 +320,7 @@ internal enum class SourceSeparationIpcErrorCategory {
     HostDied,
     Timeout,
     RecycleRequired,
+    ForegroundServiceUnavailable,
     Internal,
 }
 
