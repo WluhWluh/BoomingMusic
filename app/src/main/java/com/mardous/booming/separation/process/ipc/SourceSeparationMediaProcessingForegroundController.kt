@@ -23,6 +23,8 @@ import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseTra
 import com.mardous.booming.separation.process.SourceSeparationForegroundPlatformPolicy
 import com.mardous.booming.separation.process.SourceSeparationForegroundServiceDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationForegroundStartStage
+import com.mardous.booming.separation.process.SOURCE_SEPARATION_MEDIA_PROCESSING_FOREGROUND_SERVICE_TYPE
+import com.mardous.booming.separation.process.isSourceSeparationMediaProcessingForegroundServiceType
 import com.mardous.booming.separation.process.toForegroundExecutionDeferredException
 import com.mardous.booming.ui.screen.MainActivity
 
@@ -143,6 +145,28 @@ internal class SourceSeparationMediaProcessingForegroundController(
     }
 
     @Synchronized
+    fun onTimeout(
+        startId: Int,
+        foregroundServiceType: Int,
+    ): SourceSeparationForegroundLeaseRequest? {
+        if (!isSourceSeparationMediaProcessingForegroundServiceType(foregroundServiceType)) {
+            return null
+        }
+        val request = tracker.diagnostics().activeLease?.request
+        if (request != null) {
+            tracker.timedOut(request, startId, foregroundServiceType)
+            lastDeferredStart = DeferredForegroundStart(
+                request,
+                SourceSeparationForegroundDeferredReason.TimedOut,
+            )
+        }
+        clearPendingTimeout()
+        stopPlatformForeground()
+        stopStartedLifetime()
+        return request
+    }
+
+    @Synchronized
     fun diagnostics(): SourceSeparationForegroundServiceDiagnostics = tracker.diagnostics()
 
     @Synchronized
@@ -179,7 +203,7 @@ internal class SourceSeparationMediaProcessingForegroundController(
             service.startForeground(
                 NOTIFICATION_ID,
                 notification,
-                MEDIA_PROCESSING_FOREGROUND_SERVICE_TYPE,
+                SOURCE_SEPARATION_MEDIA_PROCESSING_FOREGROUND_SERVICE_TYPE,
             )
         } else {
             service.startForeground(NOTIFICATION_ID, notification)
@@ -286,7 +310,6 @@ internal class SourceSeparationMediaProcessingForegroundController(
         const val NOTIFICATION_ID = 21_331
         const val CHANNEL_ID = "source_separation_processing"
         private const val CONTENT_REQUEST_CODE = 21_330
-        private const val MEDIA_PROCESSING_FOREGROUND_SERVICE_TYPE = 0x2000
         private const val PENDING_ADMISSION_TIMEOUT_MS = 15_000L
     }
 

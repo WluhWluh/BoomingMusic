@@ -17,6 +17,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostContr
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
 import com.mardous.booming.separation.process.SourceSeparationForegroundControlAction
+import com.mardous.booming.separation.process.SourceSeparationForegroundDeferredReason
 import com.mardous.booming.separation.process.SourceSeparationForegroundExecutionDeferredException
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseLifecycle
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseOperationResult
@@ -37,6 +38,7 @@ import com.mardous.booming.separation.process.SourceSeparationResidentProcessVal
 import com.mardous.booming.separation.process.toExecutionCompletion
 import java.util.LinkedHashSet
 import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicReference
 import org.koin.android.ext.android.inject
 
 internal class SourceSeparationExecutionService : Service() {
@@ -118,6 +120,22 @@ internal class SourceSeparationExecutionService : Service() {
             else -> foregroundController.releaseUnownedStart(startId)
         }
         return START_NOT_STICKY
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        val request = foregroundController.onTimeout(startId, fgsType) ?: return
+        Log.w(TAG, "Media-processing foreground lifetime timed out: ${request.runId}")
+        synchronized(stateLock) {
+            activeRun
+                ?.takeIf { active ->
+                    active.descriptor.runId == request.runId &&
+                        active.descriptor.processGeneration == request.processGeneration
+                }
+                ?.requestForegroundDeferral(
+                    SourceSeparationForegroundDeferredReason.TimedOut,
+                )
+        }
+        processingWakeLockController.release(request, "foreground-timeout")
     }
 
     override fun onDestroy() {
@@ -536,8 +554,19 @@ internal class SourceSeparationExecutionService : Service() {
                 )
             )
         } catch (error: SourceSeparationPausedException) {
-            foregroundStopReason = "paused"
-            terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Paused, error)
+            val deferred = active.foregroundDeferredException(error)
+            if (deferred != null) {
+                foregroundStopReason = "deferred:${deferred.reason.name}"
+                terminalStartResponse(
+                    commandId = command.commandId,
+                    status = SourceSeparationIpcStatus.Deferred,
+                    error = deferred,
+                    deferredReason = deferred.reason,
+                )
+            } else {
+                foregroundStopReason = "paused"
+                terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Paused, error)
+            }
         } catch (error: CancellationException) {
             foregroundStopReason = "canceled"
             terminalStartResponse(command.commandId, SourceSeparationIpcStatus.Canceled, error)
@@ -672,6 +701,7 @@ internal class SourceSeparationExecutionService : Service() {
         commandId: String,
         status: SourceSeparationIpcStatus,
         error: Throwable,
+        deferredReason: SourceSeparationForegroundDeferredReason? = null,
     ): String {
         val sender = synchronized(stateLock) { activeRun?.sender }
         runCatching { sender?.closeAndAwait() }
@@ -680,6 +710,7 @@ internal class SourceSeparationExecutionService : Service() {
                 commandId = commandId,
                 status = status,
                 error = error.toIpcError(),
+                deferredReason = deferredReason,
             )
         )
     }
@@ -854,6 +885,9 @@ internal class SourceSeparationExecutionService : Service() {
         val admittedExecution: com.mardous.booming.separation.process
             .SourceSeparationRemoteAdmittedExecution,
     ) : AutoCloseable {
+        private val foregroundDeferredReason =
+            AtomicReference<SourceSeparationForegroundDeferredReason?>(null)
+
         val executionRequest: com.mardous.booming.separation
             .SourceSeparationModelAwareExecutionRequest
             get() = admittedExecution.executionRequest
@@ -869,6 +903,18 @@ internal class SourceSeparationExecutionService : Service() {
             control.requestCancel()
             host.cancel(descriptor.runId, descriptor.processGeneration)
         }
+
+        fun requestForegroundDeferral(reason: SourceSeparationForegroundDeferredReason) {
+            foregroundDeferredReason.compareAndSet(null, reason)
+            requestPause()
+        }
+
+        fun foregroundDeferredException(
+            cause: SourceSeparationPausedException,
+        ): SourceSeparationForegroundExecutionDeferredException? =
+            foregroundDeferredReason.get()?.let { reason ->
+                SourceSeparationForegroundExecutionDeferredException(reason, cause)
+            }
 
         override fun close() {
             sender.close()

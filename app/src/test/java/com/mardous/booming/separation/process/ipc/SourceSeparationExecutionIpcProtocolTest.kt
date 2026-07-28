@@ -6,6 +6,13 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
 import com.mardous.booming.separation.process.SourceSeparationExecutionProgress
 import com.mardous.booming.separation.process.SourceSeparationForegroundDeferredReason
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseLifecycle
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRecord
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
+import com.mardous.booming.separation.process.SourceSeparationForegroundPlatformPolicy
+import com.mardous.booming.separation.process.SourceSeparationForegroundServiceDiagnostics
+import com.mardous.booming.separation.process.SourceSeparationForegroundTimeoutRecord
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -64,15 +71,15 @@ class SourceSeparationExecutionIpcProtocolTest {
                 SourceSeparationExecutionIpcCodec.encodeRecycleCommand(recycle),
             ),
         )
-        assertEquals(11, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
+        assertEquals(12, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":10,"commandId":"connect","clientProcessName":"x"}""",
+                """{"protocolVersion":11,"commandId":"connect","clientProcessName":"x"}""",
             )
         }
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":11,"commandId":"connect","clientProcessName":"x","extra":1}""",
+                """{"protocolVersion":12,"commandId":"connect","clientProcessName":"x","extra":1}""",
             )
         }
     }
@@ -102,6 +109,46 @@ class SourceSeparationExecutionIpcProtocolTest {
         assertThrows(IllegalArgumentException::class.java) {
             response.copy(status = SourceSeparationIpcStatus.Failed)
         }
+    }
+
+    @Test
+    fun `foreground timeout diagnostics preserve platform identity`() {
+        val timeout = SourceSeparationForegroundTimeoutRecord(
+            startId = 9,
+            foregroundServiceType = 0x2000,
+            timestampElapsedRealtimeNanos = 300L,
+        )
+        val diagnostics = SourceSeparationForegroundServiceDiagnostics(
+            lastStoppedLease = SourceSeparationForegroundLeaseRecord(
+                request = SourceSeparationForegroundLeaseRequest(
+                    leaseId = "foreground-timeout-0001",
+                    runId = "run-timeout",
+                    processGeneration = 7L,
+                    displayName = "Timeout song",
+                ),
+                lifecycle = SourceSeparationForegroundLeaseLifecycle.Stopped,
+                notificationId = 21_331,
+                platformPolicy = SourceSeparationForegroundPlatformPolicy
+                    .TimedMediaProcessing,
+                startedAtElapsedRealtimeNanos = 100L,
+                attachedAtElapsedRealtimeNanos = 200L,
+                stoppedAtElapsedRealtimeNanos = timeout.timestampElapsedRealtimeNanos,
+                stopReason = "media-processing-timeout",
+                timeout = timeout,
+            ),
+        )
+        val json = Json { encodeDefaults = true }
+
+        assertEquals(
+            diagnostics,
+            json.decodeFromString(
+                SourceSeparationForegroundServiceDiagnostics.serializer(),
+                json.encodeToString(
+                    SourceSeparationForegroundServiceDiagnostics.serializer(),
+                    diagnostics,
+                ),
+            ),
+        )
     }
 
     @Test

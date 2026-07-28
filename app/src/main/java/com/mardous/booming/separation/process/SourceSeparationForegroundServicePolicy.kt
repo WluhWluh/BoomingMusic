@@ -4,6 +4,11 @@ import com.mardous.booming.separation.SourceSeparationPausedException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+internal const val SOURCE_SEPARATION_MEDIA_PROCESSING_FOREGROUND_SERVICE_TYPE = 0x2000
+
+internal fun isSourceSeparationMediaProcessingForegroundServiceType(type: Int): Boolean =
+    type == SOURCE_SEPARATION_MEDIA_PROCESSING_FOREGROUND_SERVICE_TYPE
+
 @Serializable
 enum class SourceSeparationForegroundDeferredReason {
     @SerialName("start-not-allowed")
@@ -112,6 +117,23 @@ data class SourceSeparationForegroundControlRecord(
 }
 
 @Serializable
+data class SourceSeparationForegroundTimeoutRecord(
+    val startId: Int,
+    val foregroundServiceType: Int,
+    val timestampElapsedRealtimeNanos: Long,
+) {
+    init {
+        require(startId > 0) { "Foreground timeout start ID is invalid." }
+        require(foregroundServiceType > 0) {
+            "Foreground timeout service type is invalid."
+        }
+        require(timestampElapsedRealtimeNanos > 0L) {
+            "Foreground timeout timestamp is invalid."
+        }
+    }
+}
+
+@Serializable
 data class SourceSeparationForegroundLeaseRecord(
     val request: SourceSeparationForegroundLeaseRequest,
     val lifecycle: SourceSeparationForegroundLeaseLifecycle,
@@ -122,6 +144,7 @@ data class SourceSeparationForegroundLeaseRecord(
     val stoppedAtElapsedRealtimeNanos: Long? = null,
     val stopReason: String? = null,
     val controls: List<SourceSeparationForegroundControlRecord> = emptyList(),
+    val timeout: SourceSeparationForegroundTimeoutRecord? = null,
 ) {
     init {
         require(notificationId > 0) { "Foreground notification ID is invalid." }
@@ -143,6 +166,10 @@ data class SourceSeparationForegroundLeaseRecord(
         require(controls.map { it.commandId }.distinct().size == controls.size) {
             "Foreground lease contains duplicate control commands."
         }
+        require(timeout == null ||
+            (lifecycle == SourceSeparationForegroundLeaseLifecycle.Stopped &&
+                stoppedAtElapsedRealtimeNanos == timeout.timestampElapsedRealtimeNanos)
+        ) { "Foreground timeout record is inconsistent." }
     }
 }
 
@@ -265,6 +292,37 @@ internal class SourceSeparationForegroundLeaseTracker(
             lifecycle = SourceSeparationForegroundLeaseLifecycle.Stopped,
             stoppedAtElapsedRealtimeNanos = now(),
             stopReason = reason,
+        )
+        activeLease = null
+        lastStoppedLease = stopped
+        return SourceSeparationForegroundLeaseOperationResult.Applied
+    }
+
+    @Synchronized
+    fun timedOut(
+        request: SourceSeparationForegroundLeaseRequest,
+        startId: Int,
+        foregroundServiceType: Int,
+    ): SourceSeparationForegroundLeaseOperationResult {
+        val existing = activeLease ?: return lastStoppedLease?.let { stopped ->
+            requireExact(stopped.request, request)
+                ?: if (stopped.timeout != null) {
+                    SourceSeparationForegroundLeaseOperationResult.AlreadyApplied
+                } else {
+                    SourceSeparationForegroundLeaseOperationResult.NoActiveLease
+                }
+        } ?: SourceSeparationForegroundLeaseOperationResult.NoActiveLease
+        requireExact(existing.request, request)?.let { return it }
+        val timeout = SourceSeparationForegroundTimeoutRecord(
+            startId = startId,
+            foregroundServiceType = foregroundServiceType,
+            timestampElapsedRealtimeNanos = now(),
+        )
+        val stopped = existing.copy(
+            lifecycle = SourceSeparationForegroundLeaseLifecycle.Stopped,
+            stoppedAtElapsedRealtimeNanos = timeout.timestampElapsedRealtimeNanos,
+            stopReason = "media-processing-timeout",
+            timeout = timeout,
         )
         activeLease = null
         lastStoppedLease = stopped

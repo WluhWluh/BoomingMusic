@@ -143,6 +143,44 @@ class SourceSeparationForegroundLeaseTrackerTest {
         }
     }
 
+    @Test
+    fun `media processing timeout stops and records one exact lease`() {
+        var now = 20L
+        val tracker = SourceSeparationForegroundLeaseTracker { now++ }
+        val request = request()
+        tracker.started(
+            request,
+            notificationId = 21_331,
+            platformPolicy = SourceSeparationForegroundPlatformPolicy.TimedMediaProcessing,
+        )
+        tracker.attach(request)
+
+        assertEquals(
+            SourceSeparationForegroundLeaseOperationResult.Applied,
+            tracker.timedOut(request, startId = 4, foregroundServiceType = 0x2000),
+        )
+        assertEquals(
+            SourceSeparationForegroundLeaseOperationResult.AlreadyApplied,
+            tracker.timedOut(request, startId = 4, foregroundServiceType = 0x2000),
+        )
+
+        val diagnostics = tracker.diagnostics()
+        assertNull(diagnostics.activeLease)
+        val stopped = requireNotNull(diagnostics.lastStoppedLease)
+        assertEquals("media-processing-timeout", stopped.stopReason)
+        assertEquals(4, stopped.timeout?.startId)
+        assertEquals(0x2000, stopped.timeout?.foregroundServiceType)
+        assertEquals(stopped.stoppedAtElapsedRealtimeNanos,
+            stopped.timeout?.timestampElapsedRealtimeNanos)
+    }
+
+    @Test
+    fun `only the media processing foreground type owns timeout policy`() {
+        assertTrue(isSourceSeparationMediaProcessingForegroundServiceType(0x2000))
+        assertTrue(!isSourceSeparationMediaProcessingForegroundServiceType(0x0001))
+        assertTrue(!isSourceSeparationMediaProcessingForegroundServiceType(0))
+    }
+
     private fun request() = SourceSeparationForegroundLeaseRequest(
         leaseId = "foreground-lease-0001",
         runId = "manual-run",
