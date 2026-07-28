@@ -70,6 +70,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private val performanceStats = SourceSeparationPerformanceStats(preferences)
     private val cancelRequested = AtomicBoolean(false)
     private val pauseRequested = AtomicBoolean(false)
+    private val playbackOwnerActive = AtomicBoolean(true)
     private val debugWindowSamples = ArrayDeque<SourceSeparationDebugWindowSample>()
 
     private var workerJob: Job? = null
@@ -163,7 +164,12 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         ensureWorkerRunningIfActivated()
     }
 
+    fun onPlaybackServiceStarted() {
+        playbackOwnerActive.set(true)
+    }
+
     fun onPlaybackServiceStopped() {
+        playbackOwnerActive.set(false)
         val nowElapsedMs = SystemClock.elapsedRealtime()
         val playback = _playbackStateFlow.value
         _playbackStateFlow.value = playback.copy(
@@ -220,6 +226,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     }
 
     fun requestPlaybackDemandSong(song: Song) {
+        if (!playbackOwnerActive.get()) return
         requestFullSong(song, SourceSeparationPendingStartReason.PlaybackDemand)
     }
 
@@ -282,6 +289,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     }
 
     fun preStartSong(song: Song, readyWindowCount: Int): Boolean {
+        if (!playbackOwnerActive.get()) return false
         if (song == Song.emptySong || readyWindowCount <= 0) return false
         if (runningSongId() == song.id) return false
         if (hasReadyPlaybackStartCache(song, readyWindowCount)) return false
@@ -776,6 +784,14 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 clearPendingStart()
                 activeWorkerRequest = request
                 try {
+                    if (!SourceSeparationPlaybackLifecyclePolicy
+                            .canRunWithPlaybackOwnerState(
+                                request.runClass,
+                                playbackOwnerActive.get(),
+                            )
+                    ) {
+                        continue
+                    }
                     runWorkerSong(request.song, activeJob)
                 } finally {
                     if (activeWorkerRequest === request) {
@@ -860,6 +876,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     }
 
     private fun pauseWorkerIfSongChanged(song: Song) {
+        if (!playbackOwnerActive.get()) return
         if (autoStartSuppressedSongId != null &&
             autoStartSuppressedSongId != song.id
         ) {
@@ -931,7 +948,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 ?.readyWindowCount
                 ?.coerceAtLeast(1)
         var preStartSatisfied = false
-        pauseRequested.set(false)
+        val playbackOwnerLost = {
+            !SourceSeparationPlaybackLifecyclePolicy.canRunWithPlaybackOwnerState(
+                request.runClass,
+                playbackOwnerActive.get(),
+            )
+        }
+        pauseRequested.set(playbackOwnerLost())
         workerSongId = song.id
         var admittedSong: SourceSeparationRuntimeSong? = null
         try {
@@ -1011,7 +1034,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE,
                 ),
                 shouldPause = {
-                    pauseRequested.get() ||
+                    playbackOwnerLost() ||
+                            pauseRequested.get() ||
                             preStartSatisfied ||
                             (preStartReadyWindowCount == null &&
                                     _playbackStateFlow.value.song.id != song.id) ||

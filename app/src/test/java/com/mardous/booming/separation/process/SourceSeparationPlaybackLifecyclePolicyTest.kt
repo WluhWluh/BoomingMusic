@@ -30,6 +30,40 @@ class SourceSeparationPlaybackLifecyclePolicyTest {
     }
 
     @Test
+    fun `owner loss rejects playback work across admission boundaries`() {
+        assertFalse(
+            SourceSeparationPlaybackLifecyclePolicy.canRunWithPlaybackOwnerState(
+                SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+                playbackOwnerActive = false,
+            )
+        )
+        assertFalse(
+            SourceSeparationPlaybackLifecyclePolicy.canRunWithPlaybackOwnerState(
+                SourceSeparationExecutionRunClass.NextSongPrefetch,
+                playbackOwnerActive = false,
+            )
+        )
+        assertTrue(
+            SourceSeparationPlaybackLifecyclePolicy.canRunWithPlaybackOwnerState(
+                SourceSeparationExecutionRunClass.ManualFullSong,
+                playbackOwnerActive = false,
+            )
+        )
+    }
+
+    @Test
+    fun `live owner admits every work class`() {
+        SourceSeparationExecutionRunClass.entries.forEach { runClass ->
+            assertTrue(
+                SourceSeparationPlaybackLifecyclePolicy.canRunWithPlaybackOwnerState(
+                    runClass,
+                    playbackOwnerActive = true,
+                )
+            )
+        }
+    }
+
+    @Test
     fun `idle worker needs no playback shutdown control`() {
         assertFalse(
             SourceSeparationPlaybackLifecyclePolicy.shouldPauseWhenPlaybackStops(null)

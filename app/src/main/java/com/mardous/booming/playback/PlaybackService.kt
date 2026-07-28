@@ -331,6 +331,7 @@ class PlaybackService :
 
     override fun onCreate() {
         super.onCreate()
+        sourceSeparationForegroundWorkerCoordinator.onPlaybackServiceStarted()
         nm = requireNotNull(getSystemService<NotificationManager>())
         createNotificationChannel()
         prepareSourceSeparationPlaybackTrace()
