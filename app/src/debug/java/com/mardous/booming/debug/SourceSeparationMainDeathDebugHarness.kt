@@ -524,14 +524,21 @@ internal object SourceSeparationMainDeathDebugHarness {
                 transition.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
             } == 1)
             validateCommittedSegmentEvidence(committedBeforeDeath, finalJournal)
-            check(waitUntil(REATTACH_TIMEOUT_MS) {
+            val terminalOwnershipReleased = waitUntil(REATTACH_TIMEOUT_MS) {
                 val state = coordinator.workerStateFlow.value
                 state is SourceSeparationUiState.Completed &&
                     state.songId == source.id &&
                     coordinator.runningCacheKey() == null &&
                     coordinator.protectedCacheKeys().isEmpty() &&
                     handoff.stateFlow.value.activeOwner == null
-            }) { "The explicitly resumed run did not release terminal ownership." }
+            }
+            check(terminalOwnershipReleased) {
+                "The explicitly resumed run did not release terminal ownership: " +
+                    "coordinator=${coordinator.debugStatus()} " +
+                    "runningCache=${coordinator.runningCacheKey()} " +
+                    "protectedCaches=${coordinator.protectedCacheKeys()} " +
+                    "ownership=${handoff.stateFlow.value}"
+            }
             val schedulerResidentAfterCompletion = coordinator.isWorkerActive()
 
             val completed = runtime.cacheStatus(runtimeSong) as?
