@@ -1409,6 +1409,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
 
     @Test
     fun validateProductPauseCleanup() {
+        validateProductTerminalCleanup(ProductTerminalCleanupAction.Pause)
+    }
+
+    @Test
+    fun validateProductCancelCleanup() {
+        validateProductTerminalCleanup(ProductTerminalCleanupAction.Cancel)
+    }
+
+    private fun validateProductTerminalCleanup(action: ProductTerminalCleanupAction) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val arguments = InstrumentationRegistry.getArguments()
@@ -1418,10 +1427,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             arguments.getString(ARG_EXECUTION_HOST_MODE),
         )
         require(executionHostMode == Phase7ExecutionHostMode.IndependentForeground) {
-            "Product pause cleanup requires the independent foreground route."
+            "Product ${action.displayName} cleanup requires the independent foreground route."
         }
         val report = baseReport(context, runId, arguments)
-            .put("stage", "pause-cleanup")
+            .put("stage", action.stage)
         var mediaUri: Uri? = null
         var worker: SourceSeparationForegroundWorkerCoordinator? = null
 
@@ -1438,14 +1447,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
                 .commit()
-            ) { "Could not configure the product Pause cleanup test." }
+            ) { "Could not configure the product ${action.displayName} cleanup test." }
 
             val presetRepository = get<SourceSeparationPresetRepository>(
                 SourceSeparationPresetRepository::class.java,
             )
             val active = presetRepository.activeModel() as?
                 SourceSeparationActivePresetState.Reference
-                ?: error("The product Pause cleanup test has no active model.")
+                ?: error("The product ${action.displayName} cleanup test has no active model.")
             assertEquals(arguments.requiredString(ARG_MODEL_ID), active.reference.modelId)
             assertEquals(
                 arguments.requiredString(ARG_ARTIFACT_SHA256),
@@ -1459,12 +1468,17 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 SourceSeparationRuntimeFacade::class.java,
             )
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
+                SourceSeparationModelAwareCacheRepository::class.java,
+            )
             val handoff = get<SourceSeparationProcessingOwnershipHandoff>(
                 SourceSeparationProcessingOwnershipHandoff::class.java,
             )
             val resolution = runtime.resolve(source)
             val runtimeSong = (resolution as? SourceSeparationRuntimeSongResolution.Ready)?.song
-                ?: error("The product Pause source could not be resolved: $resolution")
+                ?: error(
+                    "The product ${action.displayName} source could not be resolved: $resolution",
+                )
             clearExactCacheEntry(runtime, runtimeSong.cacheKey)
 
             fun awaitOwnership(
@@ -1495,7 +1509,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             assertTrue(coordinator.startCurrentSong())
 
-            val activeOwnership = awaitOwnership("the remote Pause target") { snapshot ->
+            val activeOwnership = awaitOwnership(
+                "the remote ${action.displayName} target",
+            ) { snapshot ->
                 snapshot.activeOwner?.owner?.cacheKey == runtimeSong.cacheKey
             }
             val remoteOwner = requireNotNull(activeOwnership.activeOwner)
@@ -1525,24 +1541,52 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     .NOTIFICATION_ID
             })
 
-            val pauseStartedAt = SystemClock.elapsedRealtime()
-            coordinator.pauseCurrentSong(source)
-            waitForPaused(coordinator)
-            val released = awaitOwnership("the terminal Pause release") { snapshot ->
+            val terminalStartedAt = SystemClock.elapsedRealtime()
+            when (action) {
+                ProductTerminalCleanupAction.Pause -> {
+                    coordinator.pauseCurrentSong(source)
+                    waitForPaused(coordinator)
+                }
+                ProductTerminalCleanupAction.Cancel -> {
+                    coordinator.cancel()
+                    waitForInactive(coordinator)
+                }
+            }
+            val released = awaitOwnership(
+                "the terminal ${action.displayName} release",
+            ) { snapshot ->
                 snapshot.activeOwner == null &&
                     snapshot.lastReleasedOwner?.owner == remoteOwner.owner
             }
-            val pauseLatencyMs = SystemClock.elapsedRealtime() - pauseStartedAt
+            val terminalLatencyMs = SystemClock.elapsedRealtime() - terminalStartedAt
             assertEquals("execution-host-closed", released.lastReleasedOwner?.releaseReason)
 
             val journalAfter = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
-            assertEquals(SourceSeparationCacheRunJournalLifecycle.Paused, journalAfter.lifecycle)
-            val cacheStatus = runtime.cacheStatus(runtimeSong)
-            assertTrue(
-                "Pause must leave a resumable or empty entry: $cacheStatus",
-                cacheStatus is SourceSeparationModelAwareCacheStatus.Missing ||
-                    cacheStatus is SourceSeparationModelAwareCacheStatus.Incomplete,
+            assertEquals(action.journalLifecycle, journalAfter.lifecycle)
+            assertEquals(action.transitionType, journalAfter.transitions.last().type)
+            val cacheLeaseReleaseMs = waitForCacheLeaseRelease(
+                repository = cacheRepository,
+                cacheKey = runtimeSong.cacheKey,
             )
+            val cacheStatus = runtime.cacheStatus(runtimeSong)
+            when (action) {
+                ProductTerminalCleanupAction.Pause -> assertTrue(
+                    "Pause must leave a resumable or empty entry: $cacheStatus",
+                    cacheStatus is SourceSeparationModelAwareCacheStatus.Missing ||
+                        cacheStatus is SourceSeparationModelAwareCacheStatus.Incomplete,
+                )
+                ProductTerminalCleanupAction.Cancel -> {
+                    assertTrue(
+                        "Cancel must leave an incomplete canceled entry: $cacheStatus",
+                        cacheStatus is SourceSeparationModelAwareCacheStatus.Incomplete,
+                    )
+                    assertEquals(
+                        SourceSeparationCacheManifestState.Canceled,
+                        (cacheStatus as SourceSeparationModelAwareCacheStatus.Incomplete)
+                            .manifest.state,
+                    )
+                }
+            }
 
             val cleanupDeadline = SystemClock.elapsedRealtime() + OWNERSHIP_HANDOFF_TIMEOUT_MS
             var notificationActive: Boolean
@@ -1563,9 +1607,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 if (!notificationActive && !serviceActive && !wakeLockActive) break
                 SystemClock.sleep(OWNERSHIP_HANDOFF_POLL_MS)
             } while (SystemClock.elapsedRealtime() < cleanupDeadline)
-            assertFalse("The processing notification survived Pause.", notificationActive)
-            assertFalse("The inference foreground service survived Pause.", serviceActive)
-            assertFalse("The inference wake lock survived Pause.", wakeLockActive)
+            assertFalse(
+                "The processing notification survived ${action.displayName}.",
+                notificationActive,
+            )
+            assertFalse(
+                "The inference foreground service survived ${action.displayName}.",
+                serviceActive,
+            )
+            assertFalse(
+                "The inference wake lock survived ${action.displayName}.",
+                wakeLockActive,
+            )
 
             val remoteProcessAfter = readShellCommand(
                 instrumentation,
@@ -1592,16 +1645,23 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     .takeIf { backendMode == BackendMode.Auto },
             )
             report.put("status", "passed")
+            report.put("timing", report.getJSONObject("timing")
+                .put("cancellationLatencyMs",
+                    terminalLatencyMs.takeIf {
+                        action == ProductTerminalCleanupAction.Cancel
+                    } ?: 0L)
+            )
             report.put("cache", report.getJSONObject("cache")
                 .put("cacheKey", runtimeSong.cacheKey)
                 .put("exactIdentity", true)
                 .put("completedPlayable", false)
                 .put("runJournalSequence", journalAfter.latestSequence)
                 .put("runJournalOwnerPid", remotePid)
+                .put("leaseReleaseMs", cacheLeaseReleaseMs)
             )
             report.put("taskLifecycle", JSONObject()
-                .put("action", "pause")
-                .put("pauseLatencyMs", pauseLatencyMs)
+                .put("action", action.reportAction)
+                .put("terminalLatencyMs", terminalLatencyMs)
                 .put("runId", journalAfter.request.runId)
                 .put("processGeneration", journalAfter.request.processGeneration)
                 .put("remotePid", remotePid)
@@ -1637,7 +1697,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             mediaUri?.let { uri ->
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
-            writeReport(context, runId, "pause-cleanup", report)
+            writeReport(context, runId, action.stage, report)
         }
     }
 
@@ -7476,6 +7536,29 @@ class SourceSeparationPhase7WorkerDeviceTest {
             createCount.incrementAndGet()
             return delegate.create(artifact, profile, runtimeSettings)
         }
+    }
+
+    private enum class ProductTerminalCleanupAction(
+        val stage: String,
+        val displayName: String,
+        val reportAction: String,
+        val journalLifecycle: SourceSeparationCacheRunJournalLifecycle,
+        val transitionType: SourceSeparationCacheRunTransitionType,
+    ) {
+        Pause(
+            stage = "pause-cleanup",
+            displayName = "Pause",
+            reportAction = "pause",
+            journalLifecycle = SourceSeparationCacheRunJournalLifecycle.Paused,
+            transitionType = SourceSeparationCacheRunTransitionType.Paused,
+        ),
+        Cancel(
+            stage = "cancel-cleanup",
+            displayName = "Cancel",
+            reportAction = "cancel",
+            journalLifecycle = SourceSeparationCacheRunJournalLifecycle.Canceled,
+            transitionType = SourceSeparationCacheRunTransitionType.UserCanceled,
+        ),
     }
 
     private enum class BackendMode(

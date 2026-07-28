@@ -15,6 +15,7 @@ param(
         "worker",
         "ownership-handoff",
         "pause-cleanup",
+        "cancel-cleanup",
         "task-removal",
         "force-stop",
         "reattachment",
@@ -42,7 +43,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v42",
+    [string]$RunnerRevision = "phase7-runner-v43",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -102,6 +103,7 @@ $sourceStages = @(
     "worker",
     "ownership-handoff",
     "pause-cleanup",
+    "cancel-cleanup",
     "task-removal",
     "force-stop",
     "reattachment",
@@ -129,6 +131,7 @@ $testMethod = switch ($Stage) {
     "worker" { "validateProductionWorker"; break }
     "ownership-handoff" { "validateProductOwnershipHandoff"; break }
     "pause-cleanup" { "validateProductPauseCleanup"; break }
+    "cancel-cleanup" { "validateProductCancelCleanup"; break }
     "task-removal" { "validateTaskRemovalLifecycle"; break }
     "force-stop" { "validateDeviceEvidenceIdentity"; break }
     "reattachment" { "validateIndependentRunReattachment"; break }
@@ -227,7 +230,7 @@ if ($ExecutionHostMode -eq "bound-remote" -and
     throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
 }
 if ($ExecutionHostMode -eq "independent-foreground" -and
-        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "task-removal", "force-stop", "reattachment", "independent-main-death") -or
+        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "cancel-cleanup", "task-removal", "force-stop", "reattachment", "independent-main-death") -or
         $ProcessAbi -ne "arm64-v8a" -or
         $ProcessorCount -gt 0 -or $XnnPackFlags -ge 0 -or
         $AutoFailpoint -ne "none" -or
@@ -240,11 +243,11 @@ if ($Stage -eq "ownership-handoff" -and
         $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
     throw "ownership-handoff requires the production arm64 independent foreground route without fault injection."
 }
-if ($Stage -eq "pause-cleanup" -and
+if ($Stage -in @("pause-cleanup", "cancel-cleanup") -and
         ($ExecutionHostMode -ne "independent-foreground" -or
         $ProcessAbi -ne "arm64-v8a" -or
         $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
-    throw "pause-cleanup requires the production arm64 independent foreground route without fault injection."
+    throw "$Stage requires the production arm64 independent foreground route without fault injection."
 }
 if ($Stage -eq "task-removal" -and
         ($ExecutionHostMode -ne "independent-foreground" -or
