@@ -1,9 +1,9 @@
 # LiteRT Inference Process and Background Execution Roadmap
 
 Status: Phase 7A authority transfer, observer reattachment, product
-main-process recreation at one durable boundary, and active-run Pause cleanup
-proved on S10 and S25 for CPU and bounded GPU; force-stop non-resurrection is
-proved on S25 for CPU and bounded GPU; remote-process death policy remains open
+main-process recreation at one durable boundary, active-run Pause cleanup, and
+recents policy are proved on S10 and S25; force-stop non-resurrection is proved
+on S25 for CPU and bounded GPU; remote-process death policy remains open
 
 Updated: 2026-07-28
 
@@ -1459,8 +1459,10 @@ actual Android main-process kill.
 - [x] Preserve the existing "stop when closed from recents" setting as a
   playback setting. Swiping the task with the setting enabled still stops
   playback; it does not reinterpret an already admitted manual full-song job
-  as playback-owned work. The dynamic setting-on/setting-off device matrix
-  remains below.
+  as playback-owned work. Real task removal passes with the setting enabled and
+  disabled on S10 CPU and S25 CPU/bounded GPU. Playback follows the setting in
+  every row while the already admitted manual run continues and advances its
+  durable journal.
 - [x] Define and unit-test behavior when playback stops while an eligible manual
   full-song run continues. Playback-demand and prefetch work must stop or pause
   with their owning playback intent. `PlaybackService` shutdown now freezes
@@ -1537,10 +1539,14 @@ recorded in
   S25/API 35. Prove continuous no-resurrection evidence, stable journal and
   entry bytes, and an empty discovery-only remote after explicit restart. See
   the same Phase 7 user and task lifecycle report.
-- [ ] Run user Cancel, recents removal with both recents-policy and `tryGpu`
-  values, S10 force-stop, model deletion, and cache clearing against pending
-  restart state. Change `tryGpu` while detached and prove the admitted run still
-  uses its frozen value after reattachment.
+- [x] Run real recents removal with both recents-policy values while playback
+  overlaps an independent manual run. Cover `tryGpu=false` on S10 and S25 and
+  bounded `tryGpu=true` on S25. Require task disappearance, the selected
+  PlaybackService outcome, continued journal progress, and terminal resource
+  cleanup.
+- [ ] Run user Cancel, S10 force-stop, model deletion, and cache clearing
+  against pending restart state. Change `tryGpu` while detached and prove the
+  admitted run still uses its frozen value after reattachment.
 - [ ] Commit compact reports that separate continuation, explicit resume,
   bounded restart, and terminal defer; a single generic "recovered" result is
   insufficient.

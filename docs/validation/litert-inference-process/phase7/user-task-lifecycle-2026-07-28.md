@@ -1,8 +1,9 @@
 # Phase 7 user and task lifecycle policy
 
 Status: product policy implemented and unit-tested; active-run Pause cleanup
-passes on S10 and S25 for CPU and bounded GPU, and force-stop passes on S25 for
-CPU and bounded GPU; recents, Cancel, and S10 force-stop coverage remain open
+passes on S10 and S25 for CPU and bounded GPU, recents removal passes on S10
+and S25, and force-stop passes on S25 for CPU and bounded GPU; Cancel and S10
+force-stop coverage remain open
 
 Implementation revisions:
 
@@ -16,6 +17,9 @@ Implementation revisions:
 - `b7891c38` (drive force-stop from the ADB host)
 - `3cfbcfe3` (continuously sample the silent force-stop interval)
 - `a2d1b86d` (make malformed force-stop evidence reportable)
+- `bc5465a9` (exercise real task removal and both playback policies)
+- `8de14568` (pass the recents policy as an explicit runner string)
+- `a630c91b` (isolate persisted playback mode and retain failure evidence)
 
 ## Playback lifetime
 
@@ -105,6 +109,48 @@ and app APK SHA-256
 All four use runner `phase7-runner-v37` and test APK SHA-256
 `2ee024f5c606504754cb3afc9de2abe2231ab35ce4b85288a45707fca09f47ab`.
 
+### Recents removal
+
+The `task-removal` gate launches the real `MainActivity`, identifies its exact
+`ActivityManager.AppTask`, and calls `finishAndRemoveTask()`. It requires the
+task to disappear both from `appTasks` and `dumpsys activity recents`. Original
+audio is muted but actively decoded through the real MediaSession while a
+manual full-song run owns the independent processing FGS.
+
+The test forces persisted source-separation playback off for its duration and
+restores the previous value afterward. This matters because a late
+`MainActivity` controller connection otherwise reapplies the user's persisted
+blend mode after a test-only MediaSession command disables it. The first S25
+CPU attempt exposed exactly that harness race: the product correctly paused
+for 4.859 seconds while waiting for a first stem window. It was not a recents
+policy failure and is not accepted evidence.
+
+The accepted matrix is:
+
+| Device | Backend | Recents setting | PlaybackService after removal | Maximum playback drift | Report SHA-256 |
+| --- | --- | --- | --- | ---: | --- |
+| Galaxy S10 / API 31 | CPU | keep playing | present | 144 ms | `9e32d1da07441bb2cfd2ef6560e338886bebd3b93844130c400ea4ed840ca444` |
+| Galaxy S10 / API 31 | CPU | stop | absent | expected stop | `43f5b7c92c1ee4874d00cf94589ff55bad9c47f67abd2d528e6b5d90f2ce8640` |
+| Galaxy S25 / API 35 | CPU | keep playing | present | 122 ms | `b7264a925914ec722944d37704e9c2aff8c31a75e719f0d9d22cf684ea16c2ba` |
+| Galaxy S25 / API 35 | CPU | stop | absent | expected stop | `266d8c6d29cae462a43f32a5f8a0999d8ba5790a09c002271314e513c31b33cd` |
+| Galaxy S25 / API 35 | bounded GPU | keep playing | present | 121 ms | `4e5ab1e77770e5c73f9cb551cb828c920ec9b3c2170ed967e6fb03b286539efa` |
+| Galaxy S25 / API 35 | bounded GPU | stop | absent | expected stop | `5579887d7ffc4e2e9fa0a7ed070213ae0f7b5a3a070a89accca4de1d6f277b61` |
+
+Every keep-playing row retained the original media item, repeat-one state,
+`playWhenReady`, and active playback with no unexpected player event or audio
+underrun. Every stop row observed the expected user-request pause and service
+removal. In all six rows, journal sequence advanced after task removal, proving
+that the already admitted manual run continued independently of the playback
+policy. The verifier then explicitly paused that run and found no processing
+notification, inference FGS, wake lock, or active owner.
+
+Both bounded-GPU rows admitted `gpu-opencl-bounded-fp32-v1`; neither silently
+used CPU. All reports use app commit
+`8de145683780b0eb94677e015da6079e12bf9dfb`, app APK SHA-256
+`274ae03cbbbfca33d865521c0f507e9158174fc9d90b3a8ff21ebf466631b7fd`,
+runner `phase7-runner-v42`, and test APK SHA-256
+`5233563f420efe6195557ef15c67b64808b8b7f64ef3aef214b3fa8ea41052a7`.
+
 ### Force-stop
 
 The `force-stop` gate prepares the same product-shaped independent manual run
@@ -144,8 +190,6 @@ runner `phase7-runner-v40`, and test APK SHA-256
 
 The following claims remain deliberately open until device evidence exists:
 
-- recents removal with the setting enabled and disabled while playback and a
-  manual run overlap;
 - active-run Cancel cleanup of notification, foreground service, wake lock,
   process binding, native session, and cache lease;
 - playback-demand and prefetch shutdown through a real `PlaybackService`
