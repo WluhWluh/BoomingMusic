@@ -1458,9 +1458,9 @@ try {
                     $mainPidsAfterKill[0] -ne $oldMainPid) {
                 $mainDisappearanceCount += 1
             }
-            foreach ($pid in $remotePidsAfterKill) {
-                if ($pid -ne $oldRemotePid) {
-                    [void]$unexpectedRemotePids.Add($pid)
+            foreach ($remotePidSample in $remotePidsAfterKill) {
+                if ($remotePidSample -ne $oldRemotePid) {
+                    [void]$unexpectedRemotePids.Add($remotePidSample)
                 }
             }
             if ($mainDisappearanceCount -gt 0) {
@@ -1489,18 +1489,18 @@ try {
             $cleanupRemotePids = @(
                 Get-NamedProcessIds "${package}:source_separation"
             )
-            foreach ($pid in $cleanupRemotePids) {
-                if ($pid -ne $oldRemotePid) {
-                    [void]$unexpectedRemotePids.Add($pid)
+            foreach ($remotePidSample in $cleanupRemotePids) {
+                if ($remotePidSample -ne $oldRemotePid) {
+                    [void]$unexpectedRemotePids.Add($remotePidSample)
                 }
             }
             if ($cleanupRemotePids | Where-Object { $_ -ne $oldRemotePid }) {
                 if ($afterDeath.processingService -or
                         $afterDeath.processingNotification -or
                         $afterDeath.inferenceWakeLock) {
-                    foreach ($pid in $cleanupRemotePids) {
-                        if ($pid -ne $oldRemotePid) {
-                            [void]$activeRemoteRelaunchPids.Add($pid)
+                    foreach ($remotePidSample in $cleanupRemotePids) {
+                        if ($remotePidSample -ne $oldRemotePid) {
+                            [void]$activeRemoteRelaunchPids.Add($remotePidSample)
                         }
                     }
                     $activeRemoteRelaunchPresenceSampleCount += 1
@@ -1538,9 +1538,9 @@ try {
                 throw "The main process changed during remote-death silence."
             }
             $currentRemotePids = @(Get-NamedProcessIds "${package}:source_separation")
-            foreach ($pid in $currentRemotePids) {
-                if ($pid -ne $oldRemotePid) {
-                    [void]$unexpectedRemotePids.Add($pid)
+            foreach ($remotePidSample in $currentRemotePids) {
+                if ($remotePidSample -ne $oldRemotePid) {
+                    [void]$unexpectedRemotePids.Add($remotePidSample)
                 }
             }
             if ($currentRemotePids | Where-Object { $_ -ne $oldRemotePid }) {
@@ -1548,9 +1548,9 @@ try {
                 if ($sample.processingService -or
                         $sample.processingNotification -or
                         $sample.inferenceWakeLock) {
-                    foreach ($pid in $currentRemotePids) {
-                        if ($pid -ne $oldRemotePid) {
-                            [void]$activeRemoteRelaunchPids.Add($pid)
+                    foreach ($remotePidSample in $currentRemotePids) {
+                        if ($remotePidSample -ne $oldRemotePid) {
+                            [void]$activeRemoteRelaunchPids.Add($remotePidSample)
                         }
                     }
                     $activeRemoteRelaunchPresenceSampleCount += 1
