@@ -28,6 +28,8 @@ selection, MP3 handling, output frames, and join placement.
   evidence.
 - `phase5/`: ABI host/session policy, GPU fallback, playback contention, and
   foreground GPU UI attribution and tuning evidence.
+- `phase6/`: run-class eligibility, background-policy, durable GPU-fallback,
+  and independent foreground-service evidence.
 - Later phase directories use
   `<phase>/<yyyy-mm-dd>/<target>/<run-id>.json`.
 
@@ -37,6 +39,9 @@ follow-up [bounded OpenCL queue experiment](phase5/gpu-opencl-queue-window-2026-
 The final packaged capability and real-model checkpoints are recorded in the
 [bounded runtime capability smoke](phase5/bounded-runtime-capability-2026-07-27.md)
 and [bounded 9662 invocation smoke](phase5/bounded-9662-smoke-2026-07-27.md).
+Phase 6 begins with the
+[run eligibility and fallback checkpoint](phase6/eligibility-and-fallback-2026-07-27.md);
+it does not yet enable an independent foreground lifetime.
 
 Large profiler traces, PCM/stem exports, `/proc/<pid>/maps` snapshots,
 and repeated-run logs remain under ignored `build/` output. A

@@ -1237,24 +1237,34 @@ ownership is varied. Any GPU case must also use the Phase 5F-pinned
 
 ### Phase 6A: Freeze run-class eligibility
 
-- [ ] Classify admitted work as manual full-song, playback-demand window, or
+- [x] Classify admitted work as manual full-song, playback-demand window, or
   bounded next-song prefetch in the protocol and journal.
-- [ ] Make only an explicitly user-started manual full-song run eligible for
+- [x] Make only an explicitly user-started manual full-song run eligible for
   independent foreground execution in the first prototype.
-- [ ] Keep playback-demand work under `PlaybackService` ownership so it cannot
+- [x] Keep playback-demand work under `PlaybackService` ownership so it cannot
   outlive the playback intent it serves.
-- [ ] Keep next-song prefetch client-bound initially. Queue replacement,
+- [x] Keep next-song prefetch client-bound initially. Queue replacement,
   playback stop, or loss of a live main-process decision must prevent it from
   becoming an independently continuing job.
-- [ ] Keep model download, activation/deletion, and cache management outside
+- [x] Keep model download, activation/deletion, and cache management outside
   the inference foreground service. Decide FLAC handoff separately rather than
   broadening the run implicitly.
-- [ ] Record the selected run-class/background policy in diagnostics and
+- [x] Record the selected run-class/background policy in diagnostics and
   exclude the internal gate from backup.
-- [ ] Freeze the admitted GPU runtime profile and custom artifact identity in
+- [x] Freeze the admitted GPU runtime profile and custom artifact identity in
   the protocol and durable journal together with `tryGpu` and the one-way
   fallback latch, so reattachment or restart cannot resume a run with stock or
   mismatched GPU code or reinterpret a later preference change.
+
+Phase 6A is complete at protocol 8 and run-journal schema 5. The implementation
+keeps user GPU intent, exact bounded-runtime identity, effective backend, and a
+one-way fallback latch distinct. Unit tests prove that a latched run resumes on
+CPU without losing its admitted identity and that duplicate/conflicting latch
+events are handled strictly. Host and foreground-lifetime selection remains
+internal and absent from backup. See
+`docs/validation/litert-inference-process/phase6/eligibility-and-fallback-2026-07-27.md`.
+Real-device fallback injection and the expensive full-song/UI matrices remain
+release gates rather than Phase 6A implementation blockers.
 
 ### Phase 6B: Foreground-service ownership
 
