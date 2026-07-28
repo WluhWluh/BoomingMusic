@@ -36,7 +36,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v27",
+    [string]$RunnerRevision = "phase7-runner-v28",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -48,7 +48,7 @@ param(
         "gpu-opengl-fp32-v1"
     )]
     [string]$GpuRuntimeProfileId = "",
-    [ValidateSet("in-process", "bound-remote")]
+    [ValidateSet("in-process", "bound-remote", "independent-foreground")]
     [string]$ExecutionHostMode = "in-process",
     [ValidateSet("none", "setup", "probe", "invocation-after-ready")]
     [string]$AutoFailpoint = "none",
@@ -203,6 +203,13 @@ if ($ExecutionHostMode -eq "bound-remote" -and
         ($Stage -notin @("worker", "background", "process-matrix", "process-switch-matrix", "process-fault-matrix", "process-cache-matrix", "process-cache-race-matrix", "process-main-death") -or
         -not $boundRemoteBackendSupported -or $AutoFailpoint -ne "none")) {
     throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
+}
+if ($ExecutionHostMode -eq "independent-foreground" -and
+        ($Stage -ne "worker" -or $ProcessAbi -ne "arm64-v8a" -or
+        $BackendMode -ne "cpu" -or $ProcessorCount -gt 0 -or
+        $XnnPackFlags -ge 0 -or $AutoFailpoint -ne "none" -or
+        $RemoteAutoFailpoint -ne "none" -or $RebindAfterCompletion)) {
+    throw "IndependentForeground currently requires the arm64 CPU worker with default runtime settings and no fault injection or rebind."
 }
 if ($Stage -in @("process-matrix", "process-switch-matrix")) {
     $validX86Resident = $ProcessAbi -eq "x86" -and $X86ProcessValidation

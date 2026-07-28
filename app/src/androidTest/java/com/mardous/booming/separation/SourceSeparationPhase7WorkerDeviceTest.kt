@@ -93,6 +93,7 @@ import com.mardous.booming.separation.process.ipc.SourceSeparationIpcErrorCatego
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteExecutionException
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteConnectionState
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteRecycleTimeoutException
+import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteForegroundPolicy
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCallbacks
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
@@ -562,7 +563,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
             assertTrue("Worker timed out: ${worker.debugStatus()}",
                 finalState is SourceSeparationUiState.Completed)
-            if (executionHostMode == Phase7ExecutionHostMode.BoundRemote) {
+            if (executionHostMode.isRemote) {
                 assertTrue(
                     "The remote writer never exposed a process-owned cache lease.",
                     remoteCacheOwnershipChecked,
@@ -4972,7 +4973,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             SourceSeparationExecutionHostEventPayload.Completed).completion
         val acceptedDescriptor = (events.first().payload as
             SourceSeparationExecutionHostEventPayload.Accepted).descriptor
-        if (mode == Phase7ExecutionHostMode.BoundRemote) {
+        if (mode.isRemote) {
             assertEquals(
                 SourceSeparationRemoteConnectionState.Connected,
                 requireNotNull(diagnostics).state,
@@ -5122,7 +5123,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             SourceSeparationCacheFlacPromoter::class.java,
         )
         val hydrator = get<SourceSeparationCacheHydrator>(SourceSeparationCacheHydrator::class.java)
-        val engine = if (executionHostMode == Phase7ExecutionHostMode.BoundRemote) {
+        val engine = if (executionHostMode.isRemote) {
             require(sessionProviderFactoryOverride == null) {
                 "Bound-remote validation does not support an injected session provider."
             }
@@ -5131,16 +5132,36 @@ class SourceSeparationPhase7WorkerDeviceTest {
             ) {
                 "Bound-remote CPU validation uses the default production thread policy."
             }
-            val host = BoundRemoteSourceSeparationExecutionHost(context.applicationContext)
-                .also(boundRemoteHostSink)
-            SourceSeparationModelAwareEngine.createBoundRemotePrototype(
-                context = context,
-                presetRepository = presetRepository,
-                coordinator = runCoordinator,
-                executionHost = host,
-                executionBackendPolicy = backendMode.executionPolicy,
-                executionHostEventSink = executionHostEventSink,
+            val host = BoundRemoteSourceSeparationExecutionHost(
+                context.applicationContext,
+                foregroundPolicy = if (executionHostMode ==
+                    Phase7ExecutionHostMode.IndependentForeground
+                ) {
+                    SourceSeparationRemoteForegroundPolicy.ManualFullSong
+                } else {
+                    SourceSeparationRemoteForegroundPolicy.Disabled
+                },
             )
+                .also(boundRemoteHostSink)
+            if (executionHostMode == Phase7ExecutionHostMode.IndependentForeground) {
+                SourceSeparationModelAwareEngine.createIndependentForegroundPrototype(
+                    context = context,
+                    presetRepository = presetRepository,
+                    coordinator = runCoordinator,
+                    executionHost = host,
+                    executionBackendPolicy = backendMode.executionPolicy,
+                    executionHostEventSink = executionHostEventSink,
+                )
+            } else {
+                SourceSeparationModelAwareEngine.createBoundRemotePrototype(
+                    context = context,
+                    presetRepository = presetRepository,
+                    coordinator = runCoordinator,
+                    executionHost = host,
+                    executionBackendPolicy = backendMode.executionPolicy,
+                    executionHostEventSink = executionHostEventSink,
+                )
+            }
         } else {
             val sessionProviderFactory: (() -> MdxInferenceSessionProvider)? =
                 sessionProviderFactoryOverride ?: if (backendMode == BackendMode.Cpu) {
@@ -6191,7 +6212,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
     private enum class Phase7ExecutionHostMode(val argumentValue: String) {
         InProcess("in-process"),
         BoundRemote("bound-remote"),
+        IndependentForeground("independent-foreground"),
         ;
+
+        val isRemote: Boolean
+            get() = this != InProcess
 
         companion object {
             fun parse(value: String?): Phase7ExecutionHostMode = values().singleOrNull {

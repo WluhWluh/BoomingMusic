@@ -579,6 +579,11 @@ internal class SourceSeparationModelAwareEngine(
             context: Context,
             presetRepository: SourceSeparationPresetRepository,
             coordinator: SourceSeparationCacheRunCoordinator,
+            executionHost: SourceSeparationExecutionHost =
+                BoundRemoteSourceSeparationExecutionHost(
+                    context.applicationContext,
+                    foregroundPolicy = SourceSeparationRemoteForegroundPolicy.ManualFullSong,
+                ),
             executionBackendPolicy: SourceSeparationExecutionBackendPolicy =
                 SourceSeparationExecutionBackendPolicy.Auto,
             executionHostEventSink: (SourceSeparationExecutionHostEvent) -> Unit = {},
@@ -586,10 +591,7 @@ internal class SourceSeparationModelAwareEngine(
             context = context,
             presetRepository = presetRepository,
             coordinator = coordinator,
-            executionHost = BoundRemoteSourceSeparationExecutionHost(
-                context.applicationContext,
-                foregroundPolicy = SourceSeparationRemoteForegroundPolicy.ManualFullSong,
-            ),
+            executionHost = executionHost,
             executionBackendPolicy = executionBackendPolicy,
             executionHostEventSink = executionHostEventSink,
         )
