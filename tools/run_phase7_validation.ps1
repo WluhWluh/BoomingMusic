@@ -14,6 +14,7 @@ param(
         "acquisition",
         "worker",
         "ownership-handoff",
+        "reattachment",
         "process-matrix",
         "process-switch-matrix",
         "process-fault-matrix",
@@ -37,7 +38,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v31",
+    [string]$RunnerRevision = "phase7-runner-v32",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -92,6 +93,7 @@ $runner = "$package.test/androidx.test.runner.AndroidJUnitRunner"
 $sourceStages = @(
     "worker",
     "ownership-handoff",
+    "reattachment",
     "process-matrix",
     "process-switch-matrix",
     "process-fault-matrix",
@@ -114,6 +116,7 @@ $testMethod = switch ($Stage) {
     "acquisition" { "validatePinnedAcquisition"; break }
     "worker" { "validateProductionWorker"; break }
     "ownership-handoff" { "validateProductOwnershipHandoff"; break }
+    "reattachment" { "validateIndependentRunReattachment"; break }
     "process-matrix" { "validateProcessSessionMatrix"; break }
     "process-switch-matrix" { "validateProcessModelSwitchMatrix"; break }
     "process-fault-matrix" { "validateProcessFaultMatrix"; break }
@@ -208,7 +211,7 @@ if ($ExecutionHostMode -eq "bound-remote" -and
     throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
 }
 if ($ExecutionHostMode -eq "independent-foreground" -and
-        ($Stage -notin @("worker", "ownership-handoff") -or
+        ($Stage -notin @("worker", "ownership-handoff", "reattachment") -or
         $ProcessAbi -ne "arm64-v8a" -or
         $ProcessorCount -gt 0 -or $XnnPackFlags -ge 0 -or
         $AutoFailpoint -ne "none" -or

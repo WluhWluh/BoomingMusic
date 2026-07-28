@@ -39,6 +39,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultStage
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournal
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalRequest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLifecycle
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunTransitionType
@@ -95,6 +96,7 @@ import com.mardous.booming.separation.process.SourceSeparationArm32ResidentValid
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcRecycleReason
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcErrorCategory
+import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecoveryClient
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteExecutionException
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteConnectionState
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteRecycleTimeoutException
@@ -104,6 +106,7 @@ import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoor
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
 import com.mardous.booming.util.IGNORE_AUDIO_FOCUS
 import com.mardous.booming.util.MINIMUM_SONG_DURATION
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
@@ -129,6 +132,7 @@ import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -1395,6 +1399,254 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
             writeReport(context, runId, "ownership-handoff", report)
+        }
+    }
+
+    @Test
+    fun validateIndependentRunReattachment() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
+        val executionHostMode = Phase7ExecutionHostMode.parse(
+            arguments.getString(ARG_EXECUTION_HOST_MODE),
+        )
+        require(executionHostMode == Phase7ExecutionHostMode.IndependentForeground) {
+            "Run reattachment requires the independent foreground route."
+        }
+        val report = baseReport(context, runId, arguments)
+            .put("stage", "reattachment")
+        val hostEvents = Collections.synchronizedList(
+            mutableListOf<SourceSeparationExecutionHostEvent>(),
+        )
+        val detachTriggered = AtomicBoolean(false)
+        val executionFailure = AtomicReference<Throwable?>()
+        val executionFinished = CountDownLatch(1)
+        val executor = Executors.newSingleThreadExecutor()
+        var originalHost: BoundRemoteSourceSeparationExecutionHost? = null
+        var recoveredWorker: SourceSeparationForegroundWorkerCoordinator? = null
+        var mediaUri: Uri? = null
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            check(preferences.edit()
+                .putInt(MINIMUM_SONG_DURATION, 0)
+                .putBoolean(SOURCE_SEPARATION_AUTO_CACHE_CLEANUP, false)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
+                .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, REQUIRED_READY_WINDOWS)
+                .commit()
+            ) { "Could not configure the run-reattachment test." }
+            assertExpectedActivePreset(arguments)
+            mediaUri = registerSourceInMediaStore(context, sourcePath, runId)
+            val source = resolveMediaStoreSong(context, mediaUri, sourcePath)
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val runtime = createCpuRuntimeFacade(
+                context = context,
+                preferences = preferences,
+                presetRepository = presetRepository,
+                backendMode = backendMode,
+                processorCount = null,
+                executionHostMode = executionHostMode,
+                executionHostEventSink = { event ->
+                    hostEvents += event
+                    if (event.payload is SourceSeparationExecutionHostEventPayload.Progress &&
+                        detachTriggered.compareAndSet(false, true)
+                    ) {
+                        throw IllegalStateException(EXPECTED_REATTACHMENT_CALLBACK_FAILURE)
+                    }
+                },
+                boundRemoteHostSink = { originalHost = it },
+            )
+            val runtimeSong = (runtime.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The run-reattachment source could not be resolved.")
+            clearExactCacheEntry(runtime, runtimeSong.cacheKey)
+
+            executor.execute {
+                try {
+                    runtime.separate(
+                        song = runtimeSong,
+                        tryGpu = backendMode == BackendMode.Auto,
+                        runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+                        windowDecodeEnabled = true,
+                    )
+                } catch (error: Throwable) {
+                    executionFailure.set(error)
+                } finally {
+                    executionFinished.countDown()
+                }
+            }
+
+            val detachedDeadline = SystemClock.elapsedRealtime() +
+                REATTACHMENT_OBSERVER_TIMEOUT_MS
+            var detachedJournal: SourceSeparationCacheRunJournal? = null
+            while (SystemClock.elapsedRealtime() < detachedDeadline) {
+                val journal = store.readRunJournal(runtimeSong.cacheKey)
+                if (journal?.transitions?.any { transition ->
+                        transition.type ==
+                            SourceSeparationCacheRunTransitionType.ObserverDisconnected
+                    } == true
+                ) {
+                    detachedJournal = journal
+                    break
+                }
+                journal?.takeIf { it.isTerminal }?.let {
+                    error("The independent run became terminal before observer detachment: $it")
+                }
+                SystemClock.sleep(OWNERSHIP_HANDOFF_POLL_MS)
+            }
+            detachedJournal = requireNotNull(detachedJournal) {
+                "The independent run did not persist observer detachment."
+            }
+            assertTrue(detachTriggered.get())
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Running,
+                detachedJournal.lifecycle)
+            val inferenceWakeLockTag =
+                "${context.packageName}:SourceSeparationInference"
+            assertTrue(
+                "The detached independent run lost its processing wake lock.",
+                activeWakeLocks(readShellCommand(instrumentation, "dumpsys power"))
+                    .contains(inferenceWakeLockTag),
+            )
+
+            val callbacks = RecordingCallbacks()
+            val worker = SourceSeparationForegroundWorkerCoordinator(
+                context = context,
+                preferences = preferences,
+                sourceSeparationRuntime = runtime,
+                independentRunRecovery = SourceSeparationIndependentRunRecoveryClient(
+                    context = context,
+                    store = store,
+                ),
+            ).also { recoveredWorker = it }
+            worker.attachCallbacks(callbacks)
+            worker.updateSong(
+                song = source,
+                positionMs = 0L,
+                durationMs = source.duration,
+                isPlaying = false,
+                sourceSeparationBlend = TEST_BLEND,
+            )
+
+            val adoptedDeadline = SystemClock.elapsedRealtime() +
+                REATTACHMENT_OBSERVER_TIMEOUT_MS
+            while (worker.runningCacheKey() != runtimeSong.cacheKey &&
+                SystemClock.elapsedRealtime() < adoptedDeadline
+            ) {
+                when (val state = worker.workerStateFlow.value) {
+                    is SourceSeparationUiState.Failed,
+                    is SourceSeparationUiState.Canceled,
+                    -> error("The reconnecting worker failed before adoption: $state")
+                    else -> Unit
+                }
+                SystemClock.sleep(OWNERSHIP_HANDOFF_POLL_MS)
+            }
+            assertEquals(runtimeSong.cacheKey, worker.runningCacheKey())
+            assertEquals(source.id, worker.runningSongId())
+            assertEquals(setOf(runtimeSong.cacheKey), worker.protectedCacheKeys())
+            assertNull(worker.pendingSongId())
+
+            waitForCompleted(worker)
+            waitForInactive(worker)
+            assertEquals(runtimeSong.cacheKey, callbacks.completedCacheKey.get())
+            assertTrue(
+                "The detached execution caller did not finish after remote completion.",
+                executionFinished.await(
+                    REATTACHMENT_EXECUTION_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS,
+                ),
+            )
+            val originalFailure = requireNotNull(executionFailure.get()) {
+                "The original observer unexpectedly reported a successful local completion."
+            }
+            assertTrue(
+                "The original caller did not retain the callback-loss cause: $originalFailure",
+                generateSequence(originalFailure) { it.cause }
+                    .any { error ->
+                        error.message?.contains(EXPECTED_REATTACHMENT_CALLBACK_FAILURE) == true ||
+                            error.message?.contains("did not close the terminal run") == true
+                    },
+            )
+
+            val completed = runtime.cacheStatus(runtimeSong) as?
+                SourceSeparationModelAwareCacheStatus.Completed
+                ?: error("The reattached run did not publish a completed cache.")
+            val finalJournal = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Completed,
+                finalJournal.lifecycle)
+            assertEquals(detachedJournal.request.runId, finalJournal.request.runId)
+            assertEquals(
+                detachedJournal.request.processGeneration,
+                finalJournal.request.processGeneration,
+            )
+            assertTrue(finalJournal.transitions.all { transition ->
+                transition.runId == finalJournal.request.runId &&
+                    transition.processGeneration == finalJournal.request.processGeneration
+            })
+            val observerTransitions = finalJournal.transitions.filter { transition ->
+                transition.type == SourceSeparationCacheRunTransitionType.ObserverConnected ||
+                    transition.type == SourceSeparationCacheRunTransitionType.ObserverDisconnected
+            }
+            val disconnectedIndex = observerTransitions.indexOfLast { transition ->
+                transition.type == SourceSeparationCacheRunTransitionType.ObserverDisconnected
+            }
+            assertTrue(disconnectedIndex >= 0)
+            assertTrue(observerTransitions.drop(disconnectedIndex + 1).any { transition ->
+                transition.type == SourceSeparationCacheRunTransitionType.ObserverConnected
+            })
+            val completedPlayback = requireNotNull(
+                runtime.openCompletedCache(runtimeSong.cacheKey),
+            )
+            completedPlayback.close()
+            assertFalse(
+                activeWakeLocks(readShellCommand(instrumentation, "dumpsys power"))
+                    .contains(inferenceWakeLockTag),
+            )
+
+            report.put("status", "passed")
+            report.put("cache", report.getJSONObject("cache")
+                .put("cacheKey", runtimeSong.cacheKey)
+                .put("exactIdentity", true)
+                .put("completedPlayable", true)
+                .put("runJournalSequence", finalJournal.latestSequence)
+            )
+            report.put("reattachment", JSONObject()
+                .put("runId", finalJournal.request.runId)
+                .put("processGeneration", finalJournal.request.processGeneration)
+                .put("detachedJournalSequence", detachedJournal.latestSequence)
+                .put("finalJournalSequence", finalJournal.latestSequence)
+                .put("observerTransitionCount", observerTransitions.size)
+                .put("originalFailure", originalFailure::class.java.name)
+                .put("eventCount", synchronized(hostEvents) { hostEvents.size })
+                .put("secondStartIssued", false)
+            )
+            applyRunAdmissionEvidence(
+                report = report,
+                request = finalJournal.request,
+                backendMode = backendMode,
+                requestedGpuRuntimeProfile = MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1
+                    .takeIf { backendMode == BackendMode.Auto },
+            )
+            applyRuntimeEvidence(report, completed.manifest)
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            recoveredWorker?.cancel()
+            originalHost?.close()
+            executor.shutdownNow()
+            mediaUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            writeReport(context, runId, "reattachment", report)
         }
     }
 
@@ -6829,6 +7081,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val OWNERSHIP_HANDOFF_TIMEOUT_MS = 30_000L
         const val OWNERSHIP_TERMINAL_TIMEOUT_MS = 30_000L
         const val OWNERSHIP_HANDOFF_POLL_MS = 25L
+        const val REATTACHMENT_OBSERVER_TIMEOUT_MS = 30_000L
+        const val REATTACHMENT_EXECUTION_TIMEOUT_SECONDS = 30L
+        const val EXPECTED_REATTACHMENT_CALLBACK_FAILURE =
+            "phase7-expected-observer-detachment"
         const val ORIGINAL_PLAYBACK_START_ATTEMPTS = 2
         const val ORIGINAL_PLAYBACK_RETRY_DELAY_MS = 2_000L
         const val MEDIA_SESSION_SEEK_TOLERANCE_MS = 250L
