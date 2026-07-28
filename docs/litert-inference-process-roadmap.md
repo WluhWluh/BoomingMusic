@@ -1316,25 +1316,26 @@ Platform-lock loss requests a durable pause, stale identities cannot release a
 new owner, and an unreleased orphan blocks the next run. Process diagnostics
 and Phase 7 JSON reports retain the complete event history. S25 device smoke
 proves a pending lease does not acquire early and Pause leaves no lock. Actual
-full-song acquisition/renewal/release, Android FGS timeout cleanup, and
-`PlaybackService` handoff remain unchecked. See
+full-song acquisition and completion release now pass on S25; a real renewal,
+Android FGS timeout cleanup, and `PlaybackService` handoff remain unchecked. See
 `docs/validation/litert-inference-process/phase6/wake-lock-contract-2026-07-27.md`.
 
 ### Phase 6D: Primary platform prototype
 
-- [ ] Implement and validate the first manual full-song prototype on S25
+- [x] Implement and validate the first manual full-song prototype on S25
   arm64 CPU. Keep GPU, x86, and session-residency changes out of this first
   lifecycle proof.
 - [ ] Start from a visible user command, background the UI, stop playback, and
   turn the screen off while requiring journal progress and one bounded wake
   lock.
-- [ ] Handle `ForegroundServiceStartNotAllowedException` and every denied
+- [x] Handle `ForegroundServiceStartNotAllowedException` and every denied
   promotion as a typed paused/deferred outcome, never a retry loop.
-- [ ] Implement and test `Service.onTimeout()` for the Android 15+
-  media-processing time budget, including its approximately six-hour
-  per-24-hour background allowance.
-- [ ] Stop promptly after timeout while preserving the last committed window
-  and releasing notification, foreground state, lock, and native session.
+- [x] Implement and test the injectable `Service.onTimeout()` path for Android
+  15+ `mediaProcessing`; leave natural exhaustion of the approximately six-hour
+  per-24-hour background allowance as a long-running platform test.
+- [x] Stop promptly after an injected timeout while preserving the last
+  committed window and releasing notification, foreground state, lock, and
+  native session.
 - [ ] Test API 35, API 36, and the current highest emulator API before
   expanding to older devices. Record cumulative media-processing FGS budget
   for long and repeated runs.
@@ -1343,7 +1344,7 @@ full-song acquisition/renewal/release, Android FGS timeout cleanup, and
   memory, queue-wait diagnostics, output, one-way CPU fallback, and process
   recycle on fatal cleanup. UI measurements inform runtime fixes and user
   guidance; they must not create a foreground-only CPU policy.
-- [ ] Repeat the lifecycle prototype with `tryGpu=false` and prove that
+- [x] Repeat the lifecycle prototype with `tryGpu=false` and prove that
   foreground-service handoff, backgrounding, and screen-off never cause a GPU
   discovery or allocation attempt.
 - [ ] While bounded GPU runs in the processing service, repeat foreground app
@@ -1355,6 +1356,19 @@ full-song acquisition/renewal/release, Android FGS timeout cleanup, and
 - [ ] During this phase, treat main-process Binder death as a controlled durable
   pause. Continuing without the main process is enabled only after Phase 7
   transfers active-run authority and passes its recovery gates.
+
+The first Phase 6D CPU lifecycle proof passed on S25/API 35 at protocol 12. A
+273.699-second 9662 FP32 run reached its first ready horizon in 7.131 seconds,
+continued after HOME and screen-off, and completed in 241.588 seconds while the
+device remained non-interactive. Host events and journal sequence advanced
+while the screen was off. The remote process alone owned the journal, FGS, and
+wake lock; both leases ended with `completed`, and the exact completed cache
+was playable. The report also proves `tryGpu=false` admitted CPU directly and
+made no GPU allocation attempt. See
+`docs/validation/litert-inference-process/phase6/primary-platform-prototype-2026-07-28.md`.
+Visible UI-command startup, `PlaybackService` overlap handoff, a naturally
+exhausted Android quota, API 36/current-highest coverage, S10, and bounded GPU
+remain open and are not inferred from this CPU result.
 
 **Phase 6 exit:** one exact, user-started manual full-song run can remain
 protected on the primary arm64 target with playback stopped and the screen off,

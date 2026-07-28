@@ -1,7 +1,7 @@
 # Phase 6C wake-lock contract checkpoint
 
-Status: implementation complete; actual-run and ownership-handoff validation
-remain open
+Status: implementation and S25 CPU completion release proved; renewal and
+ownership-handoff validation remain open
 
 Implementation revisions tested:
 
@@ -83,15 +83,16 @@ leaves `platformHeld=false`.
 
 ## Open validation
 
-This checkpoint does not claim an actual model run acquired the platform lock.
-The following remain open:
+The later `primary-platform-prototype-2026-07-28.md` report proves an actual
+S25 CPU full-song run acquired the bounded lock after foreground attachment,
+continued while the device was non-interactive, and released it with reason
+`completed`. The following remain open:
 
-- S25 CPU full-song proof from acquisition through completion;
 - active-run Pause, Cancel, failure, cache loss, and service teardown;
 - at least one run long enough to observe renewal, or a test-only shortened
   scheduler using the same controller path;
-- backgrounding, playback stop, and screen-off progress;
-- Android 15+ media-processing FGS timeout cleanup;
+- naturally delivered Android 15+ media-processing FGS timeout cleanup after
+  quota exhaustion;
 - simultaneous playback and manual separation, including proof that
   `PlaybackService` releases any duplicate processing lock after handoff; and
 - S10 and bounded-GPU repetitions after CPU lifecycle behavior passes.

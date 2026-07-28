@@ -1,7 +1,7 @@
 # Phase 6B foreground ownership checkpoint
 
-Status: pending-lease platform contract complete; active-run handoff remains
-open
+Status: pending-lease platform contract complete; attached-run completion
+proved later; active-run handoff remains open
 
 Implementation revisions tested:
 
@@ -83,18 +83,21 @@ row remains open rather than being counted as a pass.
 
 ## Open validation
 
-This checkpoint does not run an admitted model or prove independent background
-continuation. It does not yet cover:
+This checkpoint itself does not run an admitted model. The later
+`primary-platform-prototype-2026-07-28.md` report proves an attached S25 CPU
+run continued through HOME and screen-off, then removed its notification and
+foreground state at completion. The combined evidence still does not cover:
 
 - transfer from `PlaybackService` without an unprotected interval or an
   indefinite duplicate processing claim;
-- a visible user command followed by UI backgrounding, playback stop, and
-  screen-off execution;
+- startup by tapping the visible user command rather than the validation
+  runner;
 - notification and foreground removal after an attached run pauses;
 - combined playback/separation ownership diagnostics during overlap;
-- Android 15+ `Service.onTimeout()` behavior;
+- naturally delivered Android 15+ `Service.onTimeout()` behavior after quota
+  exhaustion;
 - wake-lock transfer; or
-- full-song CPU/GPU execution and one-way GPU fallback.
+- bounded-GPU execution and one-way GPU fallback.
 
 `PlaybackService` intentionally retains its existing `mediaProcessing`
 declaration and processing wake lock while the production path still depends
