@@ -1,7 +1,8 @@
 # Phase 7 observer reattachment
 
 Status: S10 and S25 CPU and bounded-GPU observer reattachment passed; actual
-main-process death and remote-process restart remain open
+main-process death now passes at one durable boundary, while remote-process
+restart remains open
 
 Product implementation revision:
 
@@ -39,6 +40,9 @@ key through completion.
 
 This is a deterministic observer-loss test in a retained main process. It does
 not claim that Android killed and recreated the main process.
+
+Actual product `MainActivity` recreation is covered separately by
+[Phase 7 main-process reattachment](main-process-reattachment-2026-07-28.md).
 
 An independently authoritative run now receives a 5-hour-45-minute deadline
 when its observer detaches. A matching replacement observer or terminal close
@@ -99,7 +103,7 @@ Raw reports and input envelopes remain ignored build artifacts under
 
 ## Remaining scope
 
-- Kill and recreate the main process at each Phase 7D boundary.
+- Kill and recreate the main process at the remaining Phase 7D boundaries.
 - Exercise original playback continuity across actual main-process recreation.
 - Define and validate one bounded remote-process restart mechanism.
 - Cover stale generation, model/cache removal, recents, force-stop, and FGS
