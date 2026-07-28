@@ -29,6 +29,8 @@ import com.mardous.booming.separation.model.litert.MdxLiteRtGpuRuntimeProfile
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
+import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
+import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationMediaProcessingForegroundController
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
@@ -385,7 +387,6 @@ internal object SourceSeparationMainDeathDebugHarness {
                 !evidence.processingServiceAfterSilence)
             check(!evidence.wakeLockAfterStop && !evidence.wakeLockAfterSilence)
             check(!evidence.notificationAfterRestart)
-            check(!evidence.processingServiceAfterRestart)
             check(!evidence.wakeLockAfterRestart)
             check(evidence.journalSha256AfterStop == evidence.journalSha256AfterSilence)
             check(evidence.journalSha256AfterStop == evidence.journalSha256AfterRestart)
@@ -414,6 +415,20 @@ internal object SourceSeparationMainDeathDebugHarness {
                 SourceSeparationProcessingOwnershipHandoff::class.java,
             ).stateFlow.value
             check(ownership.activeOwner == null)
+            val idleHost = BoundRemoteSourceSeparationExecutionHost(context.applicationContext)
+            val idleDiagnostics = try {
+                idleHost.processDiagnostics()
+            } finally {
+                idleHost.close()
+            }
+            check(idleDiagnostics.activeRunId == null)
+            check(idleDiagnostics.session.state == SourceSeparationProcessSessionState.Empty)
+            check(idleDiagnostics.session.sessionId == null)
+            check(idleDiagnostics.session.nativeSessionCreationCount == 0)
+            check(idleDiagnostics.session.activeLeaseCount == 0)
+            check(idleDiagnostics.foregroundService.activeLease == null)
+            check(idleDiagnostics.processingWakeLock.activeLease == null)
+            check(!idleDiagnostics.processingWakeLock.platformHeld)
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE)
                 as NotificationManager
             check(notificationManager.activeNotifications.none { notification ->
@@ -458,11 +473,23 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("notificationAfterRestart", false)
                     .put("processingServiceAfterStop", false)
                     .put("processingServiceAfterSilence", false)
-                    .put("processingServiceAfterRestart", false)
+                    .put(
+                        "processingServiceAfterRestart",
+                        evidence.processingServiceAfterRestart,
+                    )
                     .put("wakeLockAfterStop", false)
                     .put("wakeLockAfterSilence", false)
                     .put("wakeLockAfterRestart", false)
                     .put("automaticResumeObserved", false)
+                    .put("restartDiscoveryBindingAllowed", true)
+                    .put("idleRemoteActiveRunId", JSONObject.NULL)
+                    .put("idleRemoteSessionState", idleDiagnostics.session.state.name)
+                    .put("idleRemoteSessionId", JSONObject.NULL)
+                    .put(
+                        "idleRemoteNativeSessionCreationCount",
+                        idleDiagnostics.session.nativeSessionCreationCount,
+                    )
+                    .put("idleRemoteActiveLeaseCount", idleDiagnostics.session.activeLeaseCount)
                     .put("onDestroyJournalTransitionRequired", false)
                     .put("staleRunningJournalAccepted", true)
                     .put("staleCacheCleanup", "Completed")
