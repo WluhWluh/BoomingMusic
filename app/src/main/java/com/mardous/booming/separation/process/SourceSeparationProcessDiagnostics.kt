@@ -19,6 +19,8 @@ internal data class SourceSeparationProcessDiagnostics(
     val session: SourceSeparationProcessSessionDiagnostics =
         SourceSeparationProcessSessionDiagnostics.empty(),
     val validationOverride: SourceSeparationProcessValidationOverrideDiagnostics? = null,
+    val foregroundService: SourceSeparationForegroundServiceDiagnostics =
+        SourceSeparationForegroundServiceDiagnostics(),
 ) {
     init {
         require(processGeneration > 0L) { "Process diagnostic generation is invalid." }
@@ -160,6 +162,8 @@ internal object SourceSeparationProcessDiagnosticsCollector {
         session: SourceSeparationProcessSessionDiagnostics =
             SourceSeparationProcessSessionDiagnostics.empty(),
         validationOverride: SourceSeparationProcessValidationOverrideDiagnostics? = null,
+        foregroundService: SourceSeparationForegroundServiceDiagnostics =
+            SourceSeparationForegroundServiceDiagnostics(),
         procRoot: File = File("/proc/self"),
     ): SourceSeparationProcessDiagnostics {
         val status = readText(File(procRoot, "status"))
@@ -208,6 +212,7 @@ internal object SourceSeparationProcessDiagnosticsCollector {
             mappedNativeLibraries = SourceSeparationProcParser.mappedNativeLibraryNames(maps),
             session = session,
             validationOverride = validationOverride,
+            foregroundService = foregroundService,
         )
     }
 

@@ -46,6 +46,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostLifec
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostStartResult
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.process.ipc.SourceSeparationExecutionIpcCodec
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcStartCommand
 import java.io.File
@@ -420,6 +421,64 @@ class SourceSeparationModelAwareEngineTest {
                 it.backgroundPolicy == runClass.backgroundPolicy
             })
         }
+    }
+
+    @Test
+    fun `independent foreground lease accepts only an exact manual run`() {
+        val fixture = fixture()
+        val executor = SourceSeparationModelAwareRangeExecutor { request ->
+            fixture.complete(request, fixture.prepare(request))
+        }
+        val delegate = InProcessSourceSeparationExecutionHost(executor)
+        val observingHost = object : SourceSeparationExecutionHost by delegate {
+            override fun start(
+                request: SourceSeparationExecutionHostRequest,
+            ): SourceSeparationExecutionHostStartResult {
+                val descriptor = request.descriptor
+                val lease = SourceSeparationForegroundLeaseRequest(
+                    leaseId = "foreground-lease-manual-test",
+                    runId = descriptor.runId,
+                    processGeneration = descriptor.processGeneration,
+                    displayName = descriptor.source.displayName,
+                )
+                val command = SourceSeparationIpcStartCommand(
+                    commandId = "start-manual-foreground",
+                    descriptor = descriptor,
+                    foregroundLease = lease,
+                )
+                assertEquals(
+                    command,
+                    SourceSeparationExecutionIpcCodec.decodeStartCommand(
+                        SourceSeparationExecutionIpcCodec.encodeStartCommand(command),
+                    ),
+                )
+                assertThrows(IllegalArgumentException::class.java) {
+                    SourceSeparationIpcStartCommand(
+                        commandId = "start-playback-foreground",
+                        descriptor = descriptor.copy(
+                            runtime = descriptor.runtime.copy(
+                                runClass = SourceSeparationExecutionRunClass
+                                    .PlaybackDemandWindow,
+                                backgroundPolicy = SourceSeparationBackgroundPolicy
+                                    .PlaybackServiceOwned,
+                            )
+                        ),
+                        foregroundLease = lease,
+                    )
+                }
+                return delegate.start(request)
+            }
+        }
+
+        val result = fixture.engine(
+            executionHost = observingHost,
+            executor = executor,
+        ).separate(
+            input = fixture.input,
+            runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+        )
+
+        assertTrue(result is SourceSeparationModelAwareEngineResult.Completed)
     }
 
     @Test

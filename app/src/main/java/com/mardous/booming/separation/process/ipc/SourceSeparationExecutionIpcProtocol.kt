@@ -6,6 +6,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionDescripto
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostSnapshot
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationStrategy
@@ -153,12 +154,25 @@ internal data class SourceSeparationIpcStartCommand(
     val protocolVersion: Int = SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION,
     val commandId: String,
     val descriptor: SourceSeparationExecutionDescriptor,
+    val foregroundLease: SourceSeparationForegroundLeaseRequest? = null,
 ) {
     init {
         requireProtocolVersion(protocolVersion)
         requireCommandId(commandId)
         require(descriptor.protocolVersion == protocolVersion) {
             "IPC start descriptor protocol version is inconsistent."
+        }
+        foregroundLease?.let { lease ->
+            require(lease.runId == descriptor.runId &&
+                lease.processGeneration == descriptor.processGeneration &&
+                lease.displayName == descriptor.source.displayName
+            ) { "IPC foreground lease identity does not match its descriptor." }
+            require(descriptor.runtime.runClass ==
+                com.mardous.booming.separation.SourceSeparationExecutionRunClass.ManualFullSong &&
+                descriptor.runtime.backgroundPolicy ==
+                com.mardous.booming.separation.SourceSeparationBackgroundPolicy
+                    .IndependentForegroundEligible
+            ) { "IPC foreground lease is not eligible for independent execution." }
         }
     }
 }
