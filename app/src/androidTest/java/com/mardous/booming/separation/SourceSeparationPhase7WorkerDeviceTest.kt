@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
@@ -86,6 +87,8 @@ import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
 import com.mardous.booming.separation.process.SourceSeparationProcessingWakeLockLeaseRecord
 import com.mardous.booming.separation.process.SourceSeparationProcessingWakeLockLifecycle
+import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
+import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipSnapshot
 import com.mardous.booming.separation.process.SourceSeparationProcParser
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
 import com.mardous.booming.separation.process.SourceSeparationArm32ResidentValidation
@@ -122,6 +125,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import java.io.File
+import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
@@ -1122,6 +1126,270 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 }
             }
             writeReport(context, runId, report)
+        }
+    }
+
+    @Test
+    fun validateProductOwnershipHandoff() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
+        val executionHostMode = Phase7ExecutionHostMode.parse(
+            arguments.getString(ARG_EXECUTION_HOST_MODE),
+        )
+        require(executionHostMode == Phase7ExecutionHostMode.IndependentForeground) {
+            "Product ownership handoff requires the independent foreground route."
+        }
+        val report = baseReport(context, runId, arguments)
+            .put("stage", "ownership-handoff")
+        var playbackProbe: OriginalAudioPlaybackProbe? = null
+        var mediaUri: Uri? = null
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            val windowDecodeEnabled = arguments.optionalBoolean(
+                ARG_WINDOW_DECODE_ENABLED,
+                true,
+            )
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            check(preferences.edit()
+                .putInt(MINIMUM_SONG_DURATION, 0)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, windowDecodeEnabled)
+                .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, REQUIRED_READY_WINDOWS)
+                .commit()
+            ) { "Could not configure the product ownership handoff test." }
+
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            val active = presetRepository.activeModel() as?
+                SourceSeparationActivePresetState.Reference
+                ?: error("The product ownership handoff test has no active model.")
+            assertEquals(arguments.requiredString(ARG_MODEL_ID), active.reference.modelId)
+            assertEquals(
+                arguments.requiredString(ARG_ARTIFACT_SHA256),
+                active.reference.artifactSha256,
+            )
+
+            val registeredUri = registerSourceInMediaStore(context, sourcePath, runId)
+            mediaUri = registeredUri
+            val source = resolveMediaStoreSong(context, registeredUri, sourcePath)
+            val runtime = get<SourceSeparationRuntimeFacade>(
+                SourceSeparationRuntimeFacade::class.java,
+            )
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val handoff = get<SourceSeparationProcessingOwnershipHandoff>(
+                SourceSeparationProcessingOwnershipHandoff::class.java,
+            )
+            val resolution = runtime.resolve(source)
+            val runtimeSong = (resolution as? SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The product ownership source could not be resolved: $resolution")
+            val playbackWakeLockTag =
+                "${context.packageName}:SourceSeparationProcessing"
+            val inferenceWakeLockTag =
+                "${context.packageName}:SourceSeparationInference"
+            runtime.entries()
+                .filter { it.cacheKey == runtimeSong.cacheKey }
+                .forEach { entry ->
+                    assertEquals(
+                        SourceSeparationCacheMutationResult.Completed,
+                        runtime.delete(entry.cacheKey),
+                    )
+                }
+
+            fun awaitOwnership(
+                operation: String,
+                timeoutMs: Long = OWNERSHIP_HANDOFF_TIMEOUT_MS,
+                predicate: (SourceSeparationProcessingOwnershipSnapshot) -> Boolean,
+            ): SourceSeparationProcessingOwnershipSnapshot {
+                val deadline = SystemClock.elapsedRealtime() + timeoutMs
+                while (SystemClock.elapsedRealtime() < deadline) {
+                    val snapshot = handoff.stateFlow.value
+                    if (predicate(snapshot)) return snapshot
+                    SystemClock.sleep(OWNERSHIP_HANDOFF_POLL_MS)
+                }
+                error(
+                    "Processing ownership did not complete $operation: " +
+                        handoff.stateFlow.value,
+                )
+            }
+
+            val probe = startOriginalAudioPlayback(
+                context = context,
+                source = source,
+                operation = "product ownership handoff",
+            ).also { playbackProbe = it }
+            probe.assertContinuous("before-product-handoff")
+            probe.disarm()
+
+            val enableResult = probe.sendCustomCommand(
+                Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+                Bundle().apply {
+                    putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, true)
+                    putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                    putBoolean(Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING, true)
+                    putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, TEST_BLEND)
+                },
+            ).get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            assertEquals(SessionResult.RESULT_SUCCESS, enableResult.resultCode)
+
+            val localOwner = awaitOwnership("the initial PlaybackService lease") { snapshot ->
+                snapshot.activeOwner == null &&
+                    snapshot.activePlaybackLease?.cacheKey == runtimeSong.cacheKey &&
+                    snapshot.activePlaybackLease.wakeLockHeld
+            }.activePlaybackLease ?: error("The playback processing owner disappeared.")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                val type = requireNotNull(localOwner.foregroundServiceType)
+                assertTrue(type and ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK != 0)
+                assertTrue(type and ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING != 0)
+            }
+            val powerBefore = readShellCommand(instrumentation, "dumpsys power")
+            assertTrue(
+                "PlaybackService did not hold its processing wake lock before handoff.",
+                powerBefore.contains(playbackWakeLockTag),
+            )
+
+            val commandStartedAt = SystemClock.elapsedRealtime()
+            val commandResultFuture = probe.sendCustomCommand(
+                Playback.SEPARATE_CURRENT_SONG_OFFLINE,
+                Bundle.EMPTY,
+            )
+            val handedOff = awaitOwnership("the exact remote takeover") { snapshot ->
+                snapshot.activeOwner?.owner?.cacheKey == runtimeSong.cacheKey &&
+                    snapshot.activePlaybackLease == null &&
+                    snapshot.lastStoppedPlaybackLease?.cacheKey == runtimeSong.cacheKey &&
+                    snapshot.lastStoppedPlaybackLease.wakeLockHeld.not()
+            }
+            val remoteOwner = requireNotNull(handedOff.activeOwner)
+            val stoppedPlaybackOwner = requireNotNull(handedOff.lastStoppedPlaybackLease)
+            assertTrue(
+                stoppedPlaybackOwner.stoppedAtElapsedRealtimeNanos!! >=
+                    remoteOwner.acceptedAtElapsedRealtimeNanos,
+            )
+            assertEquals("remoteOwnershipChanged", stoppedPlaybackOwner.stopReason)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                val type = requireNotNull(stoppedPlaybackOwner.foregroundServiceType)
+                assertTrue(type and ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK != 0)
+                assertEquals(0, type and ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING)
+            }
+
+            val powerDuring = readShellCommand(instrumentation, "dumpsys power")
+            assertFalse(
+                "PlaybackService retained its processing wake lock after takeover.",
+                powerDuring.contains(playbackWakeLockTag),
+            )
+            assertTrue(
+                "The inference process did not hold its processing wake lock after takeover.",
+                powerDuring.contains(inferenceWakeLockTag),
+            )
+            val servicesDuring = readShellCommand(
+                instrumentation,
+                "dumpsys activity services ${context.packageName}",
+            )
+            assertTrue(
+                "The independent inference service was absent during the accepted run.",
+                servicesDuring.contains("SourceSeparationExecutionService"),
+            )
+
+            val commandResult = commandResultFuture.get(
+                OWNERSHIP_COMMAND_TIMEOUT_SECONDS,
+                TimeUnit.SECONDS,
+            )
+            assertEquals(SessionResult.RESULT_SUCCESS, commandResult.resultCode)
+            val released = awaitOwnership(
+                operation = "terminal remote release",
+                timeoutMs = OWNERSHIP_TERMINAL_TIMEOUT_MS,
+            ) { snapshot ->
+                snapshot.activeOwner == null && snapshot.activePlaybackLease == null &&
+                    snapshot.lastReleasedOwner?.owner == remoteOwner.owner
+            }
+            assertEquals(
+                "execution-host-closed",
+                released.lastReleasedOwner?.releaseReason,
+            )
+
+            val manifest = requireNotNull(store.readManifest(runtimeSong.cacheKey)) {
+                "The product manual command did not publish its completed cache."
+            }
+            assertEquals(SourceSeparationCacheManifestState.Completed, manifest.state)
+            val journal = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Completed, journal.lifecycle)
+            assertEquals(SourceSeparationExecutionRunClass.ManualFullSong, journal.request.runClass)
+            assertEquals(remoteOwner.owner.runId, journal.request.runId)
+            assertEquals(remoteOwner.owner.processGeneration, journal.request.processGeneration)
+            assertNotEquals(Process.myPid(), journal.request.ownerPid)
+            applyRunAdmissionEvidence(
+                report = report,
+                request = journal.request,
+                backendMode = backendMode,
+                requestedGpuRuntimeProfile = MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1
+                    .takeIf { backendMode == BackendMode.Auto },
+            )
+            applyRuntimeEvidence(report, manifest)
+            val completedPlayback = requireNotNull(
+                runtime.openCompletedCache(runtimeSong.cacheKey),
+            )
+            completedPlayback.use {
+                assertTrue(it.vocalsFile.isFile)
+                assertTrue(it.instrumentalFile.isFile)
+            }
+
+            val powerAfter = readShellCommand(instrumentation, "dumpsys power")
+            assertFalse(powerAfter.contains(playbackWakeLockTag))
+            assertFalse(powerAfter.contains(inferenceWakeLockTag))
+            report.put("status", "passed")
+            report.put("timing", report.getJSONObject("timing")
+                .put("fullSongMs", SystemClock.elapsedRealtime() - commandStartedAt)
+            )
+            report.put("cache", report.getJSONObject("cache")
+                .put("cacheKey", runtimeSong.cacheKey)
+                .put("exactIdentity", true)
+                .put("completedPlayable", true)
+                .put("runJournalSequence", journal.latestSequence)
+                .put("runJournalOwnerPid", journal.request.ownerPid ?: JSONObject.NULL)
+            )
+            report.put("ownershipHandoff", JSONObject()
+                .put("remoteCacheKey", remoteOwner.owner.cacheKey)
+                .put("remoteRunId", remoteOwner.owner.runId)
+                .put("remoteProcessGeneration", remoteOwner.owner.processGeneration)
+                .put("remoteAcceptedAtElapsedRealtimeNanos",
+                    remoteOwner.acceptedAtElapsedRealtimeNanos)
+                .put("playbackLeaseStartedAtElapsedRealtimeNanos",
+                    localOwner.startedAtElapsedRealtimeNanos)
+                .put("playbackLeaseStoppedAtElapsedRealtimeNanos",
+                    stoppedPlaybackOwner.stoppedAtElapsedRealtimeNanos)
+                .put("playbackStopReason", stoppedPlaybackOwner.stopReason)
+                .put("playbackWakeLockBefore", true)
+                .put("playbackWakeLockDuring", false)
+                .put("inferenceWakeLockDuring", true)
+                .put("bothWakeLocksReleasedAfter", true)
+                .put("inferenceServiceObserved", true)
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            playbackProbe?.let { probe ->
+                runCatching {
+                    probe.sendCustomCommand(
+                        Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+                        Bundle().apply {
+                            putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, false)
+                            putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                        },
+                    ).get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                }
+                probe.close()
+            }
+            mediaUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            writeReport(context, runId, "ownership-handoff", report)
         }
     }
 
@@ -4257,6 +4525,13 @@ class SourceSeparationPhase7WorkerDeviceTest {
         error("MediaController did not complete $operation in time.")
     }
 
+    private fun readShellCommand(
+        instrumentation: android.app.Instrumentation,
+        command: String,
+    ): String = instrumentation.uiAutomation.executeShellCommand(command).use { descriptor ->
+        FileInputStream(descriptor.fileDescriptor).bufferedReader().use { it.readText() }
+    }
+
     private fun startOriginalAudioPlayback(
         context: Context,
         source: Song,
@@ -4558,6 +4833,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
         fun arm() {
             armed.set(true)
         }
+
+        fun disarm() {
+            armed.set(false)
+        }
+
+        fun sendCustomCommand(action: String, arguments: Bundle) =
+            onMediaControllerThread(controller) {
+                controller.sendCustomCommand(SessionCommand(action, Bundle.EMPTY), arguments)
+            }
 
         fun assertContinuous(label: String): JSONObject {
             try {
@@ -6526,6 +6810,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val LIFECYCLE_TIMEOUT_MS = 5 * 60 * 1000L
         const val MEDIA_SESSION_TIMEOUT_SECONDS = 30L
         const val MEDIA_SESSION_TIMEOUT_MS = 30_000L
+        const val OWNERSHIP_COMMAND_TIMEOUT_SECONDS = 3L * 60L
+        const val OWNERSHIP_HANDOFF_TIMEOUT_MS = 30_000L
+        const val OWNERSHIP_TERMINAL_TIMEOUT_MS = 30_000L
+        const val OWNERSHIP_HANDOFF_POLL_MS = 25L
         const val ORIGINAL_PLAYBACK_START_ATTEMPTS = 2
         const val ORIGINAL_PLAYBACK_RETRY_DELAY_MS = 2_000L
         const val MEDIA_SESSION_SEEK_TOLERANCE_MS = 250L
