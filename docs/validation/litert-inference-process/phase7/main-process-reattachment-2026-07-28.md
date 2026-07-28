@@ -134,8 +134,9 @@ First committed-segment evidence:
   commit.
 - Exercise active original-playback continuity, Pause, Cancel, recents removal,
   force-stop, model deletion, and cache clearing around main-process death.
-- Select the inference-process death policy before testing remote death at the
-  same boundaries. No automatic remote restart is proved by this matrix.
+- The inference-process death policy is selected and validated separately in
+  [Phase 7 remote-process death and explicit retry](remote-process-death-2026-07-28.md).
+  This main-process matrix itself does not prove remote-process recovery.
 - Add process-incarnation start ticks, notification lifetime, and wake-lock
   snapshots to the committed evidence bundle during release qualification.
 

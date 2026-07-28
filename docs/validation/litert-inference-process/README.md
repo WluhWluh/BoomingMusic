@@ -30,6 +30,8 @@ selection, MP3 handling, output frames, and join placement.
   foreground GPU UI attribution and tuning evidence.
 - `phase6/`: run-class eligibility, background-policy, durable GPU-fallback,
   and independent foreground-service evidence.
+- `phase7/`: observer and product reattachment, user/task lifecycle, and the
+  selected remote-process death and explicit-retry policy.
 - Later phase directories use
   `<phase>/<yyyy-mm-dd>/<target>/<run-id>.json`.
 
@@ -42,6 +44,9 @@ and [bounded 9662 invocation smoke](phase5/bounded-9662-smoke-2026-07-27.md).
 Phase 6 begins with the
 [run eligibility and fallback checkpoint](phase6/eligibility-and-fallback-2026-07-27.md);
 it does not yet enable an independent foreground lifetime.
+The selected zero-automatic-retry policy and its S10/S25 CPU and bounded-GPU
+matrix are recorded in the
+[Phase 7 remote-process death report](phase7/remote-process-death-2026-07-28.md).
 
 Large profiler traces, PCM/stem exports, `/proc/<pid>/maps` snapshots,
 and repeated-run logs remain under ignored `build/` output. A

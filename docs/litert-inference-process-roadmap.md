@@ -1,16 +1,16 @@
 # LiteRT Inference Process and Background Execution Roadmap
 
-Status: Phase 7A authority transfer, observer reattachment, product
-main-process recreation at two durable boundaries, active-run Pause/Cancel
-cleanup, recents policy, and playback-owned shutdown are proved on S10 and
-S25; force-stop non-resurrection is proved on both devices for CPU and bounded
-GPU; remote-process death policy remains open
+Status: Phase 7A authority transfer and the Phase 7B zero-automatic-retry
+remote-death policy are implemented; observer and product reattachment,
+explicit retry after inference-process death, active-run Pause/Cancel cleanup,
+recents policy, playback-owned shutdown, and force-stop non-resurrection are
+proved on S10 and S25 for CPU and bounded GPU
 
 Updated: 2026-07-28
 
-Current milestone: validate the frozen Phase 7C policy on devices, cover the
-remaining highest-value Phase 7D main-process boundaries, then select one
-conservative Phase 7B remote-process death policy.
+Current milestone: cover the remaining highest-value Phase 7D main- and
+inference-process boundaries, pending-retry invalidation races, and
+playback/cache-management recreation checks without changing source decoding.
 Remaining Phase 5F and Phase 6D full-song, fallback, UI, current-API, and
 long-running platform matrices are
 release-qualification work and may remain open while product implementation
@@ -1432,28 +1432,35 @@ actual Android main-process kill.
 
 ### Phase 7B: Bounded restart policy
 
-- [ ] Compare sticky restart, redelivered intent, and explicit
-  durable-journal restart, then select at most one mechanism. Do not combine
-  Android restart modes with a second application retry loop.
-- [ ] Gate restart on a matching nonterminal journal, intact model/cache,
-  released old kernel lock, exact bounded-runtime artifact/capability when GPU
-  was admitted, available FGS permission/quota, and retry budget.
-- [ ] Distinguish system/LMKD death, native fatal state, FGS timeout, and
-  protocol incompatibility. Each class needs an explicit retry or terminal
-  policy rather than a generic service restart.
-- [ ] Apply bounded backoff and stop after repeated death or allocation
-  failure. Record every attempt and never create two process generations for
-  one retry slot.
-- [ ] Never restart work canceled or paused by the user, stopped by FGS
-  timeout, invalidated by cache clearing, or made incompatible by model loss.
-- [ ] Treat an app update or artifact mismatch as a typed re-admission/deferred
-  outcome. Do not resume the old journal with stock `N=0`. After safe
-  re-admission, preserve its frozen `tryGpu` value: recreate only the exact
-  bounded profile when no CPU fallback was previously latched, or remain on
-  CPU when the run had already fallen back. If the required capability is no
-  longer available, take the typed one-way CPU path or defer according to the
-  cleanup and memory gates.
-- [ ] Surface a stable terminal/deferred state after the retry budget ends.
+- [x] Compare sticky restart, redelivered intent, and explicit durable-journal
+  re-admission. Select `START_NOT_STICKY`, an automatic retry budget of zero,
+  and explicit user retry as the only recovery mechanism. Do not combine an
+  Android restart mode with an application retry loop.
+- [x] After unexpected inference-process loss, keep the remote owner's
+  nonterminal `Running` journal and partial cache unchanged. Surface a stable,
+  localized `Failed` UI state, release confirmed-dead foreground resources,
+  and never relaunch the process automatically.
+- [x] Treat explicit retry as a new process/execution generation. Require the
+  old process incarnation to be dead, release its kernel lock, reacquire the
+  exact cache entry, and append typed old-owner death/disconnection plus new
+  admission transitions before writing another segment.
+- [x] Use the same no-automatic-retry outcome for system/LMKD loss, native
+  fatal state, and otherwise unexpected Binder death. User Pause/Cancel,
+  force-stop, FGS timeout, protocol incompatibility, model loss, and cache
+  invalidation retain their existing typed terminal or re-admission behavior;
+  none authorizes process resurrection.
+- [x] Preserve the original admitted `tryGpu` value across explicit retry.
+  Recreate only the exact bounded profile when GPU was admitted, or remain on
+  CPU when CPU was admitted or the durable CPU fallback latch was already set.
+  Never substitute stock `N=0` GPU.
+- [ ] Verify app-update/artifact mismatch, model loss, cache invalidation, and
+  an already-latched GPU-to-CPU fallback at the pending explicit-retry
+  boundary. These cases must reject, defer, or resume through their typed
+  policy without weakening the zero-retry rule.
+
+The selected policy and the first-committed-segment S10/S25 matrix are recorded
+in
+[Phase 7 remote-process death and explicit retry](validation/litert-inference-process/phase7/remote-process-death-2026-07-28.md).
 
 ### Phase 7C: User and task lifecycle
 
@@ -1545,8 +1552,14 @@ policy changed in response.
   reconstruct UI state from the durable snapshot without seeking or replacing
   original playback.
 - [ ] Kill the inference process at the same boundaries and verify the selected
-  bounded-restart policy never duplicates a writer, segment, notification,
+  no-automatic-retry policy never duplicates a writer, segment, notification,
   wake lock, or native session.
+- [x] Kill the inference process after the first committed segment on S10 and
+  S25 for CPU and bounded GPU. Require 30 seconds without automatic relaunch,
+  an unchanged `Running` journal and cache digest, a stable failed UI state,
+  released old resources, and explicit user retry into a new generation that
+  preserves segment 0 and completes all 48 segments. See
+  [Phase 7 remote-process death and explicit retry](validation/litert-inference-process/phase7/remote-process-death-2026-07-28.md).
 - [ ] For GPU, include death during an `N=1` event wait, after the final queued
   command, during output read, and during bounded-session close. Require the
   next generation to prove the custom capability before any GPU recreation.
@@ -1572,12 +1585,14 @@ policy changed in response.
   work on S10 and S25 with CPU and bounded GPU. Require durable Pause,
   incomplete-cache retention, complete owner/resource release, rejection of
   stale playback admission, and no independent inference FGS.
-- [ ] Run model deletion and cache clearing against pending restart state.
-  Change `tryGpu` while detached and prove the admitted run still uses its
-  frozen value after reattachment.
-- [ ] Commit compact reports that separate continuation, explicit resume,
-  bounded restart, and terminal defer; a single generic "recovered" result is
-  insufficient.
+- [ ] Run model deletion and cache clearing against pending explicit-retry
+  state and require typed rejection without automatic resurrection.
+- [x] Change `tryGpu` after inference-process death and prove explicit retry
+  still uses the original admitted value. This passes with false-to-true CPU
+  and true-to-false bounded GPU changes on both S10 and S25.
+- [x] Commit compact reports that separate independent continuation,
+  no-automatic-restart failure, and explicit user retry; a single generic
+  "recovered" result is insufficient.
 
 **Phase 7 exit:** an admitted run may survive main-process death, or the feature
 is rejected with a documented reason. Only the explicitly selected run classes
@@ -1924,7 +1939,9 @@ These process and lifecycle decisions remain subject to their phase gates:
 - Whether a later public-source LiteRT release can replace the deterministic
   binary transformation without changing the bounded profile's behavior. This
   is a maintenance opportunity, not a GitHub release gate.
-- Which bounded restart mechanism is reliable across API 26 through target 36.
+- How app update, runtime mismatch, model/cache invalidation, and a latched CPU
+  fallback should be presented at explicit-retry time across API 26 through
+  target 36. The zero-automatic-retry policy itself is frozen.
 - Whether FLAC promotion belongs in the independently running process.
 - Whether a separate processing notification can be grouped without obscuring
   playback controls.

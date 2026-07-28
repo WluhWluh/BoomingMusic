@@ -1,8 +1,8 @@
 # Phase 7 observer reattachment
 
 Status: S10 and S25 CPU and bounded-GPU observer reattachment passed; actual
-main-process death now passes at one durable boundary, while remote-process
-restart remains open
+main-process death passes at one durable boundary, and the later
+remote-process matrix selected zero automatic retry plus explicit user retry
 
 Product implementation revision:
 
@@ -105,7 +105,8 @@ Raw reports and input envelopes remain ignored build artifacts under
 
 - Kill and recreate the main process at the remaining Phase 7D boundaries.
 - Exercise original playback continuity across actual main-process recreation.
-- Define and validate one bounded remote-process restart mechanism.
+- The remote-process death policy is now selected and validated separately in
+  [Phase 7 remote-process death and explicit retry](remote-process-death-2026-07-28.md).
 - Cover stale generation, model/cache removal, recents, force-stop, and FGS
   timeout races through the product coordinator.
 - Repeat long-song, thermal, UI-frame, and current-highest-API qualification.
