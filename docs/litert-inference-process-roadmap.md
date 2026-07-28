@@ -3,8 +3,8 @@
 Status: Phase 7A authority transfer, observer reattachment, product
 main-process recreation at one durable boundary, active-run Pause/Cancel
 cleanup, recents policy, and playback-owned shutdown are proved on S10 and
-S25; force-stop non-resurrection is proved on S25 for CPU and bounded GPU;
-remote-process death policy remains open
+S25; force-stop non-resurrection is proved on both devices for CPU and bounded
+GPU; remote-process death policy remains open
 
 Updated: 2026-07-28
 
@@ -1502,14 +1502,14 @@ actual Android main-process kill.
   ownership, and publish a valid completed cache after main-process death.
 - [ ] Verify active playback readiness, notification rendering, and cache
   management UI after main-process recreation.
-- [x] Confirm on S25/API 35 that Android force-stop terminates an active manual
-  CPU or bounded-GPU run without automatic resurrection. Accept a stale
+- [x] Confirm on S10/API 31 and S25/API 35 that Android force-stop terminates an
+  active manual CPU or bounded-GPU run without automatic resurrection. Accept a stale
   `Running` journal, but require every process to exit, package `stopped=true`,
   no processing service/notification/wake lock, a stable journal and complete
   entry digest throughout 30 seconds, and no reconnectable run after explicit
   restart.
-- [ ] Repeat the force-stop gate on S10/API 31 and the eventual highest-API
-  release device. Do not generalize the S25 result into an all-platform claim.
+- [ ] Repeat the force-stop gate on the eventual highest-API release device.
+  Do not generalize the Samsung results into an all-platform claim.
 
 The selected Phase 7C product policy and its remaining device-only gates are
 recorded in
@@ -1550,10 +1550,10 @@ policy changed in response.
   ownership, and no retained notification, FGS, wake lock, binding, or native
   session. See
   [Phase 7 user and task lifecycle](validation/litert-inference-process/phase7/user-task-lifecycle-2026-07-28.md).
-- [x] Run force-stop against active manual CPU and bounded-GPU work on
-  S25/API 35. Prove continuous no-resurrection evidence, stable journal and
-  entry bytes, and an empty discovery-only remote after explicit restart. See
-  the same Phase 7 user and task lifecycle report.
+- [x] Run force-stop against active manual CPU and bounded-GPU work on S10/API
+  31 and S25/API 35. Prove continuous no-resurrection evidence, stable journal
+  and entry bytes, and an empty discovery-only remote after explicit restart.
+  See the same Phase 7 user and task lifecycle report.
 - [x] Run real recents removal with both recents-policy values while playback
   overlaps an independent manual run. Cover `tryGpu=false` on S10 and S25 and
   bounded `tryGpu=true` on S25. Require task disappearance, the selected
@@ -1566,9 +1566,9 @@ policy changed in response.
   work on S10 and S25 with CPU and bounded GPU. Require durable Pause,
   incomplete-cache retention, complete owner/resource release, rejection of
   stale playback admission, and no independent inference FGS.
-- [ ] Run S10 force-stop, model deletion, and cache clearing against pending
-  restart state. Change `tryGpu` while detached and prove the admitted run still
-  uses its frozen value after reattachment.
+- [ ] Run model deletion and cache clearing against pending restart state.
+  Change `tryGpu` while detached and prove the admitted run still uses its
+  frozen value after reattachment.
 - [ ] Commit compact reports that separate continuation, explicit resume,
   bounded restart, and terminal defer; a single generic "recovered" result is
   insufficient.

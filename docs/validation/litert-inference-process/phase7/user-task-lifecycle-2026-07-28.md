@@ -4,7 +4,8 @@ Status: product policy implemented and unit-tested; active-run Pause and Cancel
 cleanup pass on S10 and S25 for CPU and bounded GPU, recents removal passes on
 S10 and S25, real PlaybackService owner teardown passes on S10 and S25 for
 playback demand and prefetch with CPU and bounded GPU, and force-stop passes on
-S25 for CPU and bounded GPU; S10 force-stop coverage remains open
+S10 and S25 for CPU and bounded GPU; current-highest-API force-stop coverage
+remains open
 
 Implementation revisions:
 
@@ -257,14 +258,16 @@ not expect `onDestroy()` to run or invent a terminal journal transition.
 Instead, a nonterminal journal may remain durably `Running` while its old PID
 and process generation are treated as stale ownership evidence.
 
-The accepted S25/API 35 matrix is:
+The accepted matrix is:
 
-| Backend | Run | Process exit | Silent PID samples | Report SHA-256 |
-| --- | --- | ---: | ---: | --- |
-| CPU | `phase7-s25-force-stop-cpu-v6` | 269 ms | 54 | `746dbda86199732779effbdc3cd3ffe6e49c2c3b1b166cf508593dc1b4e486ad` |
-| bounded GPU | `phase7-s25-force-stop-gpu-v2` | 390 ms | 57 | `17e6324b12922c9b39006372c9633927bae642c76edd96efb9627d14499f022f` |
+| Device | Backend | Run | Process exit | Silent PID samples | Report SHA-256 |
+| --- | --- | --- | ---: | ---: | --- |
+| Galaxy S10 / API 31 | CPU | `phase7-s10-force-stop-cpu-v1` | 511 ms | 49 | `e92d885c7a0578d329a61d66f048ea4ddb52057431bc8a3ea7ada19ba0d26e02` |
+| Galaxy S10 / API 31 | bounded GPU | `phase7-s10-force-stop-gpu-v1` | 505 ms | 46 | `5f0c13eaff96e1c512ebe7bb881650197477b04755b6c3888ee451e2220e4354` |
+| Galaxy S25 / API 35 | CPU | `phase7-s25-force-stop-cpu-v6` | 269 ms | 54 | `746dbda86199732779effbdc3cd3ffe6e49c2c3b1b166cf508593dc1b4e486ad` |
+| Galaxy S25 / API 35 | bounded GPU | `phase7-s25-force-stop-gpu-v2` | 390 ms | 57 | `17e6324b12922c9b39006372c9633927bae642c76edd96efb9627d14499f022f` |
 
-Both rows observed every package process exit, kept the package
+All four rows observed every package process exit, kept the package
 `stopped=true`, and found zero process relaunches throughout a 30-second silent
 interval. No processing service, notification, or wake lock remained. The
 journal sequence and SHA-256, plus the complete cache-entry file count, byte
@@ -272,22 +275,30 @@ count, and content digest, were identical immediately after force-stop, after
 the silent interval, and after an explicit app restart.
 
 The explicit restart is allowed to create an empty inference-service process
-while discovery asks whether the stale journal has a matching live run. Both
+while discovery asks whether the stale journal has a matching live run. All
 rows returned no reconnectable run and reported an `Empty` session with no
 session ID, zero native-session creations, zero active leases, no foreground
 lease, and no wake lock. The stale entry was then removed through the normal
 cache API. This proves no automatic resurrection; the mere presence of an idle
 service record after explicit restart is not execution.
 
-Both reports use app commit `3cfbcfe3073d628ceb35f9303a10c7f8dca52b67`,
+The S25 reports use app commit
+`3cfbcfe3073d628ceb35f9303a10c7f8dca52b67`,
 app APK SHA-256
 `9d80b148da5e760b041aa911b8da07c836f6dee3aca1592d7c77be241b413046`,
 runner `phase7-runner-v40`, and test APK SHA-256
 `2ee024f5c606504754cb3afc9de2abe2231ab35ce4b85288a45707fca09f47ab`.
+The S10 reports use app commit
+`a44fc6399f8be02e7d35e88a171fc580d4cb469d`, app APK SHA-256
+`274ae03cbbbfca33d865521c0f507e9158174fc9d90b3a8ff21ebf466631b7fd`,
+runner `phase7-runner-v46`, and test APK SHA-256
+`4d4c39855d0600627f3015ce8dd3be88b41c9ae42884db426f5d4e03b5ec1d29`.
+The S10 GPU row admitted `gpu-opencl-bounded-fp32-v1` with both queue bounds
+equal to one and no fallback.
 
 The following claims remain deliberately open until device evidence exists:
 
-- force-stop repetition on S10/API 31 and later current-API coverage; and
+- force-stop repetition on a later current-highest-API release device; and
 - deferred FLAC promotion after actual main-process recreation.
 
 No source decoder, MP3 fallback boundary, window size, overlap, join placement,
