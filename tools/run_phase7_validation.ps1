@@ -85,7 +85,8 @@ param(
     [switch]$RebindAfterCompletion,
     [switch]$ProbeOriginalPlayback,
     [switch]$ForceStopBeforeRun,
-    [bool]$StopWhenClosedFromRecents = $false,
+    [ValidateSet("true", "false")]
+    [string]$StopWhenClosedFromRecents = "false",
     [ValidateRange(5, 300)]
     [int]$SilentObservationSeconds = 30,
     [switch]$ScreenOffAfterReady,
@@ -1083,7 +1084,7 @@ try {
         if ($Stage -eq "task-removal") {
             $instrumentArguments += @(
                 "-e", "stopWhenClosedFromRecents",
-                $StopWhenClosedFromRecents.ToString().ToLowerInvariant()
+                $StopWhenClosedFromRecents
             )
         }
         if ($Stage -eq "worker" -and $RebindAfterCompletion) {
@@ -1551,7 +1552,7 @@ try {
                 coldProcessBoundary = [bool]$ForceStopBeforeRun
                 preRunProcessBoundary = $preRunProcessBoundary
                 stopWhenClosedFromRecents = if ($Stage -eq "task-removal") {
-                    $StopWhenClosedFromRecents
+                    $StopWhenClosedFromRecents -eq "true"
                 } else { $null }
                 silentObservationSeconds = if ($Stage -eq "force-stop") {
                     $SilentObservationSeconds
