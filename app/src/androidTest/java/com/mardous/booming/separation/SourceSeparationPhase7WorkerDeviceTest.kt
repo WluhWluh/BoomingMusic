@@ -1612,7 +1612,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("wakeLockDuring", true)
                 .put("wakeLockAfter", wakeLockActive)
                 .put("remoteProcessAfter", remoteProcessAfter)
-                .put("idleProcess", processResourceJson(idleDiagnostics))
+                .put("idleProcess", processResourceJson(idleDiagnostics)
+                    .put("session", JSONObject()
+                        .put("state", idleDiagnostics.session.state.name)
+                        .put("sessionId",
+                            idleDiagnostics.session.sessionId ?: JSONObject.NULL)
+                        .put("nativeSessionCreationCount",
+                            idleDiagnostics.session.nativeSessionCreationCount)
+                        .put("activeLeaseCount",
+                            idleDiagnostics.session.activeLeaseCount)
+                        .put("invocationCount", idleDiagnostics.session.invocationCount)
+                    )
+                )
             )
         } catch (error: Throwable) {
             report.put("status", "failed")
