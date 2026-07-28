@@ -38,6 +38,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultStage
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalRequest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLifecycle
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunTransitionType
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
@@ -67,6 +68,7 @@ import com.mardous.booming.separation.model.ReusableMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.SingleUseMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.litert.MdxLiteRtCpuInferenceSessionFactory
+import com.mardous.booming.separation.model.litert.MdxLiteRtBoundedGpuContract
 import com.mardous.booming.separation.model.litert.MdxLiteRtGpuRuntimeProfile
 import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFailpoint
 import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFaultEvidence
@@ -98,6 +100,7 @@ import com.mardous.booming.util.MINIMUM_SONG_DURATION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import org.json.JSONArray
 import org.json.JSONObject
@@ -212,6 +215,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val preferencesEditor = preferences.edit()
                 .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, windowDecodeEnabled)
                 .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putBoolean(
+                    SOURCE_SEPARATION_TRY_GPU,
+                    backendMode == BackendMode.Auto,
+                )
                 .putInt(
                     SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
                     REQUIRED_READY_WINDOWS,
@@ -771,6 +778,12 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertEquals(
                 SourceSeparationCacheRunTransitionType.Completed,
                 runJournal.transitions.last().type,
+            )
+            applyRunAdmissionEvidence(
+                report = report,
+                request = runJournal.request,
+                backendMode = backendMode,
+                requestedGpuRuntimeProfile = gpuRuntimeProfile,
             )
             applyRuntimeEvidence(report, promotedManifest)
             val artifactExport = if (exportCacheAudio) {
@@ -5548,6 +5561,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val artifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
         val contractId = arguments.requiredString(ARG_CONTRACT_ID)
         val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
+        val qualificationProfileId = arguments.getString(ARG_PROFILE_ID)
+            ?: "cpu-default-fp32-v1"
+        val requestedGpuRuntimeProfileId = if (backendMode == BackendMode.Auto) {
+            arguments.getString(ARG_GPU_RUNTIME_PROFILE_ID)
+                ?: MdxLiteRtBoundedGpuContract.PROFILE_ID
+        } else {
+            null
+        }
         val x86ProcessValidation = arguments.optionalBoolean(
             ARG_X86_PROCESS_VALIDATION,
             false,
@@ -5576,9 +5597,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("contractSchemaVersion", arguments.requiredInt(ARG_CONTRACT_SCHEMA_VERSION))
                 .put("abi", abi)
                 .put("backend", backendMode.reportBackend)
+                .put("profileId", requestedGpuRuntimeProfileId ?: qualificationProfileId)
+                .put("qualificationProfileId", qualificationProfileId)
                 .put(
-                    "profileId",
-                    arguments.getString(ARG_PROFILE_ID) ?: "cpu-default-fp32-v1",
+                    "requestedGpuRuntimeProfileId",
+                    requestedGpuRuntimeProfileId ?: JSONObject.NULL,
                 )
                 .put("precision", "Float32")
             )
@@ -5759,6 +5782,63 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("completedPlayable", false)
                 .put("clearRecoveryPassed", false)
             )
+    }
+
+    private fun applyRunAdmissionEvidence(
+        report: JSONObject,
+        request: SourceSeparationCacheRunJournalRequest,
+        backendMode: BackendMode,
+        requestedGpuRuntimeProfile: MdxLiteRtGpuRuntimeProfile?,
+    ) {
+        val expectedTryGpu = backendMode == BackendMode.Auto
+        assertEquals(expectedTryGpu, request.tryGpu)
+        val identity = request.gpuRuntimeIdentity
+        assertEquals(expectedTryGpu, identity != null)
+
+        val boundedRuntimeRequested = expectedTryGpu &&
+            (requestedGpuRuntimeProfile == null ||
+                requestedGpuRuntimeProfile == MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1)
+        if (boundedRuntimeRequested) {
+            val admitted = requireNotNull(identity)
+            assertEquals(MdxLiteRtBoundedGpuContract.PROFILE_ID, admitted.profileId)
+            assertEquals(MdxLiteRtBoundedGpuContract.ARTIFACT_VERSION, admitted.artifactVersion)
+            assertEquals(
+                MdxLiteRtBoundedGpuContract.CAPABILITY_SCHEMA_VERSION,
+                admitted.capabilitySchemaVersion,
+            )
+            assertEquals(MdxLiteRtBoundedGpuContract.BACKEND, admitted.backend)
+            assertEquals(MdxLiteRtBoundedGpuContract.PRECISION, admitted.precision)
+            assertEquals(MdxLiteRtBoundedGpuContract.KERNEL_BATCH_SIZE, admitted.kernelBatchSize)
+            assertEquals(
+                MdxLiteRtBoundedGpuContract.COMMAND_QUEUE_WINDOW_SIZE,
+                admitted.commandQueueWindowSize,
+            )
+        }
+
+        report.put("runAdmission", JSONObject()
+            .put("tryGpu", request.tryGpu)
+            .put(
+                "requestedGpuRuntimeProfileId",
+                requestedGpuRuntimeProfile?.profileId
+                    ?: MdxLiteRtBoundedGpuContract.PROFILE_ID.takeIf { expectedTryGpu }
+                    ?: JSONObject.NULL,
+            )
+            .put(
+                "admittedGpuRuntime",
+                identity?.let { admitted ->
+                    JSONObject()
+                        .put("profileId", admitted.profileId)
+                        .put("artifactVersion", admitted.artifactVersion)
+                        .put("capabilitySchemaVersion", admitted.capabilitySchemaVersion)
+                        .put("backend", admitted.backend)
+                        .put("precision", admitted.precision)
+                        .put("kernelBatchSize", admitted.kernelBatchSize)
+                        .put("commandQueueWindowSize", admitted.commandQueueWindowSize)
+                } ?: JSONObject.NULL,
+            )
+        )
+        report.getJSONObject("matrixKey")
+            .put("admittedGpuRuntimeProfileId", identity?.profileId ?: JSONObject.NULL)
     }
 
     private fun applyRuntimeEvidence(
