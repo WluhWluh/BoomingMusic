@@ -1188,8 +1188,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val resolution = runtime.resolve(source)
             val runtimeSong = (resolution as? SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The product ownership source could not be resolved: $resolution")
-            val playbackWakeLockTag =
-                "${context.packageName}:SourceSeparationProcessing"
+            val playbackWakeLockTag = "com.mardous.booming:SourceSeparationProcessing"
             val inferenceWakeLockTag =
                 "${context.packageName}:SourceSeparationInference"
             runtime.entries()
