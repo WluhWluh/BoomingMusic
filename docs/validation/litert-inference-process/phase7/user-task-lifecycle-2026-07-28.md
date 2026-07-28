@@ -1,9 +1,9 @@
 # Phase 7 user and task lifecycle policy
 
-Status: product policy implemented and unit-tested; active-run Pause cleanup
-passes on S10 and S25 for CPU and bounded GPU, recents removal passes on S10
-and S25, and force-stop passes on S25 for CPU and bounded GPU; Cancel and S10
-force-stop coverage remain open
+Status: product policy implemented and unit-tested; active-run Pause and Cancel
+cleanup pass on S10 and S25 for CPU and bounded GPU, recents removal passes on
+S10 and S25, and force-stop passes on S25 for CPU and bounded GPU; S10
+force-stop coverage remains open
 
 Implementation revisions:
 
@@ -20,6 +20,8 @@ Implementation revisions:
 - `bc5465a9` (exercise real task removal and both playback policies)
 - `8de14568` (pass the recents policy as an explicit runner string)
 - `a630c91b` (isolate persisted playback mode and retain failure evidence)
+- `8da0c45e` (validate active-run Cancel cleanup through the product path)
+- `3b243650` (prove cross-process kernel cache-lock release)
 
 ## Playback lifetime
 
@@ -109,6 +111,39 @@ and app APK SHA-256
 All four use runner `phase7-runner-v37` and test APK SHA-256
 `2ee024f5c606504754cb3afc9de2abe2231ab35ce4b85288a45707fca09f47ab`.
 
+### Cancel cleanup
+
+The `cancel-cleanup` gate shares the product-shaped setup and terminal resource
+checks used by the Pause gate, but sends `SourceSeparationForegroundWorkerCoordinator.cancel()`
+after the first ready window. It additionally requires the last journal
+transition to be `UserCanceled`, journal lifecycle `Canceled`, cache manifest
+state `Canceled`, a non-completed model-aware cache, and an immediately
+reacquirable exact-entry kernel lease.
+
+The accepted matrix is:
+
+| Device | Backend | Cancel latency | Report SHA-256 |
+| --- | --- | ---: | --- |
+| Galaxy S10 / API 31 | CPU | 536 ms | `e3a6df7d02aa5bdf0a4b60f6fa1866b93bc2aa738c8cf0988cede9613f3ccdde` |
+| Galaxy S10 / API 31 | bounded GPU | 643 ms | `22b4284b9c5fe6f326ee520905908998b7282a9f7ab2200c95268de50dcd909c` |
+| Galaxy S25 / API 35 | CPU | 277 ms | `c78f702964e3e68070c2da66202a145d16a58b18975741d5fff279a67ca5efe3` |
+| Galaxy S25 / API 35 | bounded GPU | 479 ms | `1c645ff716a6532e711de9ba1677e968c7510accaef97b4b3a3585d99edf4e4a` |
+
+Every row released run ownership, cache lease, processing notification,
+inference FGS, wake lock, binding, and active native session. A discovery-only
+rebind found no active run, an `Empty` session, no session ID, zero native
+creations, and zero active leases. The canceled cache remained `Incomplete`
+and could not be mistaken for completed output. The main-process lease table
+was clear immediately, and the exact cross-process kernel lock was reacquired
+within 2-10 ms.
+
+Both GPU rows admitted `gpu-opencl-bounded-fp32-v1`; neither silently used CPU.
+All reports use app commit `8da0c45e37a90a2cda87b348174fddd583b940c7`,
+app APK SHA-256
+`274ae03cbbbfca33d865521c0f507e9158174fc9d90b3a8ff21ebf466631b7fd`,
+runner `phase7-runner-v44`, and test APK SHA-256
+`23e49077edcee1d9436ccc051c83d63c2462ad3595afcee78ab6bb1169cfe67c`.
+
 ### Recents removal
 
 The `task-removal` gate launches the real `MainActivity`, identifies its exact
@@ -190,8 +225,6 @@ runner `phase7-runner-v40`, and test APK SHA-256
 
 The following claims remain deliberately open until device evidence exists:
 
-- active-run Cancel cleanup of notification, foreground service, wake lock,
-  process binding, native session, and cache lease;
 - playback-demand and prefetch shutdown through a real `PlaybackService`
   teardown;
 - force-stop repetition on S10/API 31 and later current-API coverage; and

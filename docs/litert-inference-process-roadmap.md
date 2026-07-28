@@ -1,9 +1,10 @@
 # LiteRT Inference Process and Background Execution Roadmap
 
 Status: Phase 7A authority transfer, observer reattachment, product
-main-process recreation at one durable boundary, active-run Pause cleanup, and
-recents policy are proved on S10 and S25; force-stop non-resurrection is proved
-on S25 for CPU and bounded GPU; remote-process death policy remains open
+main-process recreation at one durable boundary, active-run Pause/Cancel
+cleanup, and recents policy are proved on S10 and S25; force-stop
+non-resurrection is proved on S25 for CPU and bounded GPU; remote-process death
+policy remains open
 
 Updated: 2026-07-28
 
@@ -1476,6 +1477,10 @@ actual Android main-process kill.
   S10 and S25 for CPU and bounded GPU: ownership, notification, FGS, wake lock,
   binding, and native session are all released while the cache remains
   durably `Incomplete`.
+- [x] Active-run user Cancel passes on S10 and S25 for CPU and bounded GPU.
+  Require a final `UserCanceled` journal transition, `Canceled` journal and
+  manifest state, a non-completed cache, released exact-entry lease, and no
+  retained owner, notification, FGS, wake lock, binding, or native session.
 - [x] An expired idle-retention deadline merely releases the private binding;
   idle memory pressure is left to Android. Do not add automatic self-recycle,
   sticky service lifetime, or a second restart mechanism. Explicit
@@ -1544,9 +1549,12 @@ recorded in
   bounded `tryGpu=true` on S25. Require task disappearance, the selected
   PlaybackService outcome, continued journal progress, and terminal resource
   cleanup.
-- [ ] Run user Cancel, S10 force-stop, model deletion, and cache clearing
-  against pending restart state. Change `tryGpu` while detached and prove the
-  admitted run still uses its frozen value after reattachment.
+- [x] Run user Cancel against active manual CPU and bounded-GPU work on S10 and
+  S25. Prove durable canceled identity and complete release of processing and
+  cache resources. See the same Phase 7 user and task lifecycle report.
+- [ ] Run S10 force-stop, model deletion, and cache clearing against pending
+  restart state. Change `tryGpu` while detached and prove the admitted run still
+  uses its frozen value after reattachment.
 - [ ] Commit compact reports that separate continuation, explicit resume,
   bounded restart, and terminal defer; a single generic "recovered" result is
   insufficient.
