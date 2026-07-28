@@ -586,8 +586,15 @@ function Get-RemoteEntrySnapshot([string]$Path) {
 }
 
 function Get-PackageStoppedState {
-    $packageOutput = & $adb -s $Serial shell dumpsys package $package 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    $packageOutput = $null
+    $packageExitCode = 1
+    foreach ($attempt in 1..3) {
+        $packageOutput = & $adb -s $Serial shell dumpsys package $package 2>$null
+        $packageExitCode = $LASTEXITCODE
+        if ($packageExitCode -eq 0) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    if ($packageExitCode -ne 0) {
         throw "Could not inspect the package stopped state."
     }
     $pattern = "^\s*User ${deviceUserId}: .*\bstopped=(true|false)\b"
