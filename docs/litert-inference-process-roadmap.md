@@ -2,9 +2,9 @@
 
 Status: Phase 7A authority transfer, observer reattachment, product
 main-process recreation at one durable boundary, active-run Pause/Cancel
-cleanup, and recents policy are proved on S10 and S25; force-stop
-non-resurrection is proved on S25 for CPU and bounded GPU; remote-process death
-policy remains open
+cleanup, recents policy, and playback-owned shutdown are proved on S10 and
+S25; force-stop non-resurrection is proved on S25 for CPU and bounded GPU;
+remote-process death policy remains open
 
 Updated: 2026-07-28
 
@@ -1468,7 +1468,12 @@ actual Android main-process kill.
   full-song run continues. Playback-demand and prefetch work must stop or pause
   with their owning playback intent. `PlaybackService` shutdown now freezes
   the playback clock, clears queued work, and pauses only those two classes;
-  the worker exits after an independently admitted manual run completes.
+  the worker exits after an independently admitted manual run completes. Real
+  service teardown passes for playback demand and next-song prefetch on S10
+  and S25 with CPU and bounded GPU. Every row reaches durable `Paused`, leaves
+  an incomplete cache, releases its cache/kernel ownership and playback
+  resources, rejects stale admission, and never creates the independent
+  inference FGS.
 - [x] A manually paused production session retains no private warm binding.
   The terminal path releases the processing FGS and wake lock, and normal
   builds use `SingleUse` native sessions. The resident x86/arm32 validation
@@ -1509,6 +1514,11 @@ actual Android main-process kill.
 The selected Phase 7C product policy and its remaining device-only gates are
 recorded in
 [Phase 7 user and task lifecycle](validation/litert-inference-process/phase7/user-task-lifecycle-2026-07-28.md).
+One S10 bounded-GPU prefetch attempt stalled before its first committed segment
+while a 12-second repeat-one playback fixture churned; two cold repetitions and
+a long-current-song control passed. The gate now retains full failure state.
+No source decode, MP3 fallback, window, overlap, join, or product scheduler
+policy changed in response.
 
 ### Phase 7D: Recovery and reattachment matrix
 
@@ -1552,6 +1562,10 @@ recorded in
 - [x] Run user Cancel against active manual CPU and bounded-GPU work on S10 and
   S25. Prove durable canceled identity and complete release of processing and
   cache resources. See the same Phase 7 user and task lifecycle report.
+- [x] Stop the real PlaybackService while it owns playback-demand or prefetch
+  work on S10 and S25 with CPU and bounded GPU. Require durable Pause,
+  incomplete-cache retention, complete owner/resource release, rejection of
+  stale playback admission, and no independent inference FGS.
 - [ ] Run S10 force-stop, model deletion, and cache clearing against pending
   restart state. Change `tryGpu` while detached and prove the admitted run still
   uses its frozen value after reattachment.
