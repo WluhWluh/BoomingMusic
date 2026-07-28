@@ -14,6 +14,7 @@ param(
         "acquisition",
         "worker",
         "ownership-handoff",
+        "pause-cleanup",
         "reattachment",
         "process-matrix",
         "process-switch-matrix",
@@ -39,7 +40,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v34",
+    [string]$RunnerRevision = "phase7-runner-v35",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -94,6 +95,7 @@ $runner = "$package.test/androidx.test.runner.AndroidJUnitRunner"
 $sourceStages = @(
     "worker",
     "ownership-handoff",
+    "pause-cleanup",
     "reattachment",
     "process-matrix",
     "process-switch-matrix",
@@ -118,6 +120,7 @@ $testMethod = switch ($Stage) {
     "acquisition" { "validatePinnedAcquisition"; break }
     "worker" { "validateProductionWorker"; break }
     "ownership-handoff" { "validateProductOwnershipHandoff"; break }
+    "pause-cleanup" { "validateProductPauseCleanup"; break }
     "reattachment" { "validateIndependentRunReattachment"; break }
     "process-matrix" { "validateProcessSessionMatrix"; break }
     "process-switch-matrix" { "validateProcessModelSwitchMatrix"; break }
@@ -214,7 +217,7 @@ if ($ExecutionHostMode -eq "bound-remote" -and
     throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
 }
 if ($ExecutionHostMode -eq "independent-foreground" -and
-        ($Stage -notin @("worker", "ownership-handoff", "reattachment", "independent-main-death") -or
+        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "reattachment", "independent-main-death") -or
         $ProcessAbi -ne "arm64-v8a" -or
         $ProcessorCount -gt 0 -or $XnnPackFlags -ge 0 -or
         $AutoFailpoint -ne "none" -or
@@ -226,6 +229,12 @@ if ($Stage -eq "ownership-handoff" -and
         $ProcessAbi -ne "arm64-v8a" -or
         $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
     throw "ownership-handoff requires the production arm64 independent foreground route without fault injection."
+}
+if ($Stage -eq "pause-cleanup" -and
+        ($ExecutionHostMode -ne "independent-foreground" -or
+        $ProcessAbi -ne "arm64-v8a" -or
+        $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
+    throw "pause-cleanup requires the production arm64 independent foreground route without fault injection."
 }
 if ($Stage -in @("process-matrix", "process-switch-matrix")) {
     $validX86Resident = $ProcessAbi -eq "x86" -and $X86ProcessValidation

@@ -2,6 +2,7 @@ package com.mardous.booming.separation
 
 import android.app.ActivityManager
 import android.app.Application
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
@@ -97,6 +98,7 @@ import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExe
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcRecycleReason
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcErrorCategory
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecoveryClient
+import com.mardous.booming.separation.process.ipc.SourceSeparationMediaProcessingForegroundController
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteExecutionException
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteConnectionState
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteRecycleTimeoutException
@@ -1399,6 +1401,215 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
             writeReport(context, runId, "ownership-handoff", report)
+        }
+    }
+
+    @Test
+    fun validateProductPauseCleanup() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
+        val executionHostMode = Phase7ExecutionHostMode.parse(
+            arguments.getString(ARG_EXECUTION_HOST_MODE),
+        )
+        require(executionHostMode == Phase7ExecutionHostMode.IndependentForeground) {
+            "Product pause cleanup requires the independent foreground route."
+        }
+        val report = baseReport(context, runId, arguments)
+            .put("stage", "pause-cleanup")
+        var mediaUri: Uri? = null
+        var worker: SourceSeparationForegroundWorkerCoordinator? = null
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+            check(preferences.edit()
+                .putBoolean(SOURCE_SEPARATION_AUTO_START, false)
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putBoolean(
+                    SOURCE_SEPARATION_WINDOW_DECODE,
+                    arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true),
+                )
+                .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
+                .commit()
+            ) { "Could not configure the product Pause cleanup test." }
+
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            val active = presetRepository.activeModel() as?
+                SourceSeparationActivePresetState.Reference
+                ?: error("The product Pause cleanup test has no active model.")
+            assertEquals(arguments.requiredString(ARG_MODEL_ID), active.reference.modelId)
+            assertEquals(
+                arguments.requiredString(ARG_ARTIFACT_SHA256),
+                active.reference.artifactSha256,
+            )
+
+            val registeredUri = registerSourceInMediaStore(context, sourcePath, runId)
+            mediaUri = registeredUri
+            val source = resolveMediaStoreSong(context, registeredUri, sourcePath)
+            val runtime = get<SourceSeparationRuntimeFacade>(
+                SourceSeparationRuntimeFacade::class.java,
+            )
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val handoff = get<SourceSeparationProcessingOwnershipHandoff>(
+                SourceSeparationProcessingOwnershipHandoff::class.java,
+            )
+            val resolution = runtime.resolve(source)
+            val runtimeSong = (resolution as? SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The product Pause source could not be resolved: $resolution")
+            clearExactCacheEntry(runtime, runtimeSong.cacheKey)
+
+            fun awaitOwnership(
+                operation: String,
+                predicate: (SourceSeparationProcessingOwnershipSnapshot) -> Boolean,
+            ): SourceSeparationProcessingOwnershipSnapshot {
+                val deadline = SystemClock.elapsedRealtime() + OWNERSHIP_HANDOFF_TIMEOUT_MS
+                while (SystemClock.elapsedRealtime() < deadline) {
+                    val snapshot = handoff.stateFlow.value
+                    if (predicate(snapshot)) return snapshot
+                    SystemClock.sleep(OWNERSHIP_HANDOFF_POLL_MS)
+                }
+                error("Processing ownership did not complete $operation: ${handoff.stateFlow.value}")
+            }
+
+            val coordinator = SourceSeparationForegroundWorkerCoordinator(
+                context = context,
+                preferences = preferences,
+                sourceSeparationRuntime = runtime,
+            ).also { worker = it }
+            coordinator.attachCallbacks(RecordingCallbacks())
+            coordinator.updateSong(
+                song = source,
+                positionMs = 0L,
+                durationMs = source.duration,
+                isPlaying = false,
+                sourceSeparationBlend = TEST_BLEND,
+            )
+            assertTrue(coordinator.startCurrentSong())
+
+            val activeOwnership = awaitOwnership("the remote Pause target") { snapshot ->
+                snapshot.activeOwner?.owner?.cacheKey == runtimeSong.cacheKey
+            }
+            val remoteOwner = requireNotNull(activeOwnership.activeOwner)
+            waitForReady(coordinator, minimumReadyWindows = 1)
+
+            val journalDuring = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Running, journalDuring.lifecycle)
+            assertEquals(SourceSeparationExecutionRunClass.ManualFullSong,
+                journalDuring.request.runClass)
+            assertEquals(remoteOwner.owner.runId, journalDuring.request.runId)
+            val remotePid = requireNotNull(journalDuring.request.ownerPid)
+            assertNotEquals(Process.myPid(), remotePid)
+            val inferenceWakeLockTag = "${context.packageName}:SourceSeparationInference"
+            val wakeLocksDuring = activeWakeLocks(
+                readShellCommand(instrumentation, "dumpsys power"),
+            )
+            assertTrue(wakeLocksDuring.contains(inferenceWakeLockTag))
+            val servicesDuring = readShellCommand(
+                instrumentation,
+                "dumpsys activity services ${context.packageName}",
+            )
+            assertTrue(servicesDuring.contains("SourceSeparationExecutionService"))
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                as NotificationManager
+            assertTrue(notificationManager.activeNotifications.any { notification ->
+                notification.id == SourceSeparationMediaProcessingForegroundController
+                    .NOTIFICATION_ID
+            })
+
+            val pauseStartedAt = SystemClock.elapsedRealtime()
+            coordinator.pauseCurrentSong(source)
+            waitForPaused(coordinator)
+            val released = awaitOwnership("the terminal Pause release") { snapshot ->
+                snapshot.activeOwner == null &&
+                    snapshot.lastReleasedOwner?.owner == remoteOwner.owner
+            }
+            val pauseLatencyMs = SystemClock.elapsedRealtime() - pauseStartedAt
+            assertEquals("execution-host-closed", released.lastReleasedOwner?.releaseReason)
+
+            val journalAfter = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Paused, journalAfter.lifecycle)
+            val cacheStatus = runtime.cacheStatus(runtimeSong)
+            assertTrue(
+                "Pause must leave a resumable or empty entry: $cacheStatus",
+                cacheStatus is SourceSeparationModelAwareCacheStatus.Missing ||
+                    cacheStatus is SourceSeparationModelAwareCacheStatus.Incomplete,
+            )
+
+            val cleanupDeadline = SystemClock.elapsedRealtime() + OWNERSHIP_HANDOFF_TIMEOUT_MS
+            var notificationActive: Boolean
+            var serviceActive: Boolean
+            var wakeLockActive: Boolean
+            do {
+                notificationActive = notificationManager.activeNotifications.any { notification ->
+                    notification.id == SourceSeparationMediaProcessingForegroundController
+                        .NOTIFICATION_ID
+                }
+                serviceActive = readShellCommand(
+                    instrumentation,
+                    "dumpsys activity services ${context.packageName}",
+                ).contains("SourceSeparationExecutionService")
+                wakeLockActive = activeWakeLocks(
+                    readShellCommand(instrumentation, "dumpsys power"),
+                ).contains(inferenceWakeLockTag)
+                if (!notificationActive && !serviceActive && !wakeLockActive) break
+                SystemClock.sleep(OWNERSHIP_HANDOFF_POLL_MS)
+            } while (SystemClock.elapsedRealtime() < cleanupDeadline)
+            assertFalse("The processing notification survived Pause.", notificationActive)
+            assertFalse("The inference foreground service survived Pause.", serviceActive)
+            assertFalse("The inference wake lock survived Pause.", wakeLockActive)
+
+            val remoteProcessAfter = readShellCommand(
+                instrumentation,
+                "pidof ${context.packageName}:source_separation",
+            ).trim()
+            applyRunAdmissionEvidence(
+                report = report,
+                request = journalAfter.request,
+                backendMode = backendMode,
+                requestedGpuRuntimeProfile = MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1
+                    .takeIf { backendMode == BackendMode.Auto },
+            )
+            report.put("status", "passed")
+            report.put("cache", report.getJSONObject("cache")
+                .put("cacheKey", runtimeSong.cacheKey)
+                .put("exactIdentity", true)
+                .put("completedPlayable", false)
+                .put("runJournalSequence", journalAfter.latestSequence)
+                .put("runJournalOwnerPid", remotePid)
+            )
+            report.put("taskLifecycle", JSONObject()
+                .put("action", "pause")
+                .put("pauseLatencyMs", pauseLatencyMs)
+                .put("runId", journalAfter.request.runId)
+                .put("processGeneration", journalAfter.request.processGeneration)
+                .put("remotePid", remotePid)
+                .put("journalLifecycle", journalAfter.lifecycle.name)
+                .put("cacheStatus", cacheStatus::class.java.simpleName)
+                .put("ownershipReleased", true)
+                .put("notificationDuring", true)
+                .put("notificationAfter", notificationActive)
+                .put("serviceDuring", true)
+                .put("serviceAfter", serviceActive)
+                .put("wakeLockDuring", true)
+                .put("wakeLockAfter", wakeLockActive)
+                .put("remoteProcessAfter", remoteProcessAfter)
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
+        } finally {
+            worker?.cancel()
+            mediaUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            writeReport(context, runId, "pause-cleanup", report)
         }
     }
 
