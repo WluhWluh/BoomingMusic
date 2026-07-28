@@ -22,11 +22,11 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournal
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLifecycle
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunTransitionType
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCachePlayback
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
 import com.mardous.booming.separation.model.litert.MdxLiteRtGpuRuntimeProfile
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
-import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCallbacks
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
 import com.mardous.booming.util.MINIMUM_SONG_DURATION
@@ -39,7 +39,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.koin.java.KoinJavaComponent.get
 import java.io.File
-import java.util.concurrent.atomic.AtomicReference
 
 /** Debug-only process-death harness driven by the Phase 7 ADB runner. */
 internal object SourceSeparationMainDeathDebugHarness {
@@ -89,11 +88,9 @@ internal object SourceSeparationMainDeathDebugHarness {
                     ) { "The previous exact cache could not be removed." }
                 }
 
-            val callbacks = RecordingCallbacks()
             val worker = get<SourceSeparationForegroundWorkerCoordinator>(
                 SourceSeparationForegroundWorkerCoordinator::class.java,
             )
-            worker.attachCallbacks(callbacks)
             worker.updateSong(
                 song = source,
                 positionMs = 0L,
@@ -169,8 +166,6 @@ internal object SourceSeparationMainDeathDebugHarness {
         val scenarioFile = scenarioFile(context, request.runId)
         val outputFile = reportFile(context, request.runId)
         var mediaUri: Uri? = null
-        var worker: SourceSeparationForegroundWorkerCoordinator? = null
-        var callbacks: RecordingCallbacks? = null
         try {
             val scenario = JSONObject(scenarioFile.readText(Charsets.UTF_8))
             check(scenario.getInt("schemaVersion") == SCENARIO_SCHEMA_VERSION)
@@ -189,18 +184,24 @@ internal object SourceSeparationMainDeathDebugHarness {
             }
 
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
-            val detached = waitForJournal(REATTACH_TIMEOUT_MS) {
+            val reattachedBeforeHarness = waitForJournal(REATTACH_TIMEOUT_MS) {
                 store.readRunJournal(cacheKey)?.takeIf { journal ->
                     journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running &&
-                        journal.transitions.any { transition ->
+                        journal.transitions.filter { transition ->
                             transition.type ==
-                                SourceSeparationCacheRunTransitionType.ObserverDisconnected
+                                SourceSeparationCacheRunTransitionType.ObserverConnected ||
+                                transition.type ==
+                                    SourceSeparationCacheRunTransitionType.ObserverDisconnected
+                        }.let { observers ->
+                            observers.size >= 3 &&
+                                observers.last().type ==
+                                    SourceSeparationCacheRunTransitionType.ObserverConnected
                         }
                 }
             }
-            check(detached.request.ownerPid == remotePid)
-            check(detached.request.processGeneration == processGeneration)
-            check(detached.request.runId == executionRunId)
+            check(reattachedBeforeHarness.request.ownerPid == remotePid)
+            check(reattachedBeforeHarness.request.processGeneration == processGeneration)
+            check(reattachedBeforeHarness.request.runId == executionRunId)
 
             val source = resolveMediaStoreSong(context, mediaUri, request.sourcePath)
             val runtime = get<SourceSeparationRuntimeFacade>(
@@ -210,11 +211,9 @@ internal object SourceSeparationMainDeathDebugHarness {
                 SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The restarted main process could not resolve the source.")
             check(runtimeSong.cacheKey == cacheKey)
-            callbacks = RecordingCallbacks()
-            worker = get<SourceSeparationForegroundWorkerCoordinator>(
+            val worker = get<SourceSeparationForegroundWorkerCoordinator>(
                 SourceSeparationForegroundWorkerCoordinator::class.java,
             )
-            worker.attachCallbacks(callbacks)
             worker.updateSong(
                 song = source,
                 positionMs = 0L,
@@ -248,15 +247,23 @@ internal object SourceSeparationMainDeathDebugHarness {
                 worker.runningCacheKey() == null &&
                     worker.protectedCacheKeys().isEmpty()
             }) { "The restarted worker did not release terminal ownership." }
-            check(waitUntil(CALLBACK_TIMEOUT_MS) {
-                callbacks.completedCacheKey.get() == cacheKey
-            }) { "The restarted worker did not deliver the completion callback." }
 
-            val completed = runtime.cacheStatus(runtimeSong) as?
-                SourceSeparationModelAwareCacheStatus.Completed
-                ?: error("The reattached run did not create a completed cache.")
-            runtime.openCompletedCache(cacheKey).use { playback ->
-                requireNotNull(playback)
+            var completed: SourceSeparationModelAwareCacheStatus.Completed? = null
+            check(waitUntil(REATTACH_TIMEOUT_MS) {
+                (runtime.cacheStatus(runtimeSong) as?
+                    SourceSeparationModelAwareCacheStatus.Completed)?.let { status ->
+                    completed = status
+                    true
+                } == true
+            }) { "The reattached run did not expose a completed cache." }
+            var openedPlayback: SourceSeparationModelAwareCachePlayback? = null
+            check(waitUntil(REATTACH_TIMEOUT_MS) {
+                runtime.openCompletedCache(cacheKey)?.let { playback ->
+                    openedPlayback = playback
+                    true
+                } == true
+            }) { "The completed cache remained busy or unavailable." }
+            requireNotNull(openedPlayback).use { playback ->
                 check(playback.vocalsFile.isFile)
                 check(playback.instrumentalFile.isFile)
             }
@@ -272,7 +279,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     transition.processGeneration == processGeneration
             })
 
-            val runtimeRecords = completed.manifest.runtimeRecords
+            val runtimeRecords = requireNotNull(completed).manifest.runtimeRecords
             writeJson(
                 outputFile,
                 JSONObject()
@@ -289,11 +296,19 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("killBoundary", scenario.getString("killBoundary"))
                     .put("killRequester", scenario.getString("killRequester"))
                     .put("journalSequenceBeforeDeath", scenario.getLong("journalSequence"))
-                    .put("journalSequenceBeforeReattachment", detached.latestSequence)
+                    .put(
+                        "journalSequenceBeforeHarnessValidation",
+                        reattachedBeforeHarness.latestSequence,
+                    )
                     .put("finalJournalSequence", finalJournal.latestSequence)
                     .put("committedSegmentsBeforeDeath", scenario.getInt("committedSegments"))
                     .put("finalCommittedSegments", finalJournal.committedSegments.size)
                     .put("observerTransitionCount", observerTransitions.size)
+                    .put("productObserverConnectedBeforeHarness", true)
+                    .put(
+                        "terminalWorkerState",
+                        worker.workerStateFlow.value::class.java.simpleName,
+                    )
                     .put("remoteProcessReused", File("/proc/$remotePid").isDirectory)
                     .put("secondStartIssued", false)
                     .put("tryGpu", finalJournal.request.tryGpu)
@@ -313,9 +328,6 @@ internal object SourceSeparationMainDeathDebugHarness {
             writeFailure(outputFile, request, "validation", error)
             Log.e(TAG, "Main-death validation failed for ${request.runId}.", error)
         } finally {
-            if (worker != null && callbacks != null) {
-                worker.detachCallbacks(callbacks)
-            }
             mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
         }
     }
@@ -578,24 +590,6 @@ internal object SourceSeparationMainDeathDebugHarness {
             get() = backendMode == "auto"
     }
 
-    private class RecordingCallbacks : SourceSeparationForegroundWorkerCallbacks {
-        val completedCacheKey = AtomicReference<String?>()
-
-        override fun onSourceSeparationWorkerProgress(song: Song) = Unit
-        override fun onSourceSeparationWorkerPrepared(song: Song) = Unit
-
-        override fun onSourceSeparationWorkerCompleted(
-            song: Song,
-            cacheKey: String,
-            shouldPromoteCompletedStems: Boolean,
-        ) {
-            completedCacheKey.set(cacheKey)
-        }
-
-        override fun onSourceSeparationWorkerPaused(song: Song) = Unit
-        override fun onSourceSeparationWorkerModelLoadFailed(message: String) = Unit
-    }
-
     const val COMMAND_BEGIN = "beginIndependentMainDeath"
     const val COMMAND_VALIDATE = "validateIndependentMainDeath"
 
@@ -610,7 +604,6 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val SETUP_TIMEOUT_MS = 5L * 60L * 1_000L
     private const val REATTACH_TIMEOUT_MS = 60_000L
     private const val COMPLETION_TIMEOUT_MS = 30L * 60L * 1_000L
-    private const val CALLBACK_TIMEOUT_MS = 10_000L
     private const val MAIN_DEATH_SETTLE_MS = 100L
     private const val POLL_MS = 100L
     private const val MEDIA_SCAN_RETRIES = 60

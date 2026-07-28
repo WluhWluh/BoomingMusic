@@ -979,8 +979,8 @@ try {
         & $adb -s $Serial shell run-as $package rm -f -- `
             $scenarioRelativePath $debugReportRelativePath 2>$null | Out-Null
 
-        Invoke-Adb shell am start --user $deviceUserId -n `
-            "$package/com.mardous.booming.debug.SourceSeparationProcessValidationActivity"
+        Invoke-Adb shell am start -W --user $deviceUserId -n `
+            "$package/com.mardous.booming.activities.MainActivity"
         $debugReceiver =
             "$package/com.mardous.booming.debug.SourceSeparationDebugReceiver"
         $debugAction = "com.mardous.booming.debug.SOURCE_SEPARATION"
@@ -1025,8 +1025,8 @@ try {
             throw "The authoritative inference process died with the main process."
         }
 
-        Invoke-Adb shell am start --user $deviceUserId -n `
-            "$package/com.mardous.booming.debug.SourceSeparationProcessValidationActivity"
+        Invoke-Adb shell am start -W --user $deviceUserId -n `
+            "$package/com.mardous.booming.activities.MainActivity"
         $restartDeadline = [DateTime]::UtcNow.AddSeconds(30)
         do {
             $newMainPids = @(Get-NamedProcessIds $package) |
@@ -1037,6 +1037,7 @@ try {
         if ($newMainPids.Count -ne 1) {
             throw "The debug main process did not restart with one fresh PID."
         }
+        Start-Sleep -Seconds 1
         Invoke-Adb @debugArguments --es command validateIndependentMainDeath
         $reportText = Wait-RemoteJsonFile `
             -RelativePath $debugReportRelativePath `

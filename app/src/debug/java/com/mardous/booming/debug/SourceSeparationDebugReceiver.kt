@@ -32,6 +32,10 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         val appContext = context.applicationContext
         val command = intent.getStringExtra(EXTRA_COMMAND).orEmpty()
+        if (SourceSeparationMainDeathDebugHarness.handle(appContext, command, intent)) {
+            pendingResult.finish()
+            return
+        }
         writeStatus(appContext, command, "received")
         Log.i(TAG, "Received source separation debug command: $command")
         if (handleBridgeOnlyCommand(appContext, command, intent)) {
@@ -93,10 +97,6 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
         command: String,
         intent: Intent,
     ): Boolean {
-        if (SourceSeparationMainDeathDebugHarness.handle(context, command, intent)) {
-            writeStatus(context, command, "launched")
-            return true
-        }
         return when (command) {
             COMMAND_CONFIGURE_WORKER -> {
                 val configured = SourceSeparationForegroundWorkerDebugBridge.configure(
