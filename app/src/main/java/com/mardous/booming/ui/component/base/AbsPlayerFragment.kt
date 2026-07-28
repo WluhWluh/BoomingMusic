@@ -760,10 +760,13 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
                 sourceSeparationSnackbar?.dismiss()
                 sourceSeparationSnackbar = null
                 if (playerViewModel.sourceSeparationShowSnackbarProgressFlow.value) {
-                    Snackbar.make(view, R.string.source_separation_failed, Snackbar.LENGTH_SHORT)
+                    Snackbar.make(
+                        view,
+                        state.message ?: getString(R.string.source_separation_failed),
+                        Snackbar.LENGTH_LONG,
+                    )
                         .show()
                 }
-                playerViewModel.clearSourceSeparationStatus()
             }
         }
     }

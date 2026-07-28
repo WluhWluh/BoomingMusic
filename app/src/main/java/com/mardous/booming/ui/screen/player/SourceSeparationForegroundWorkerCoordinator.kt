@@ -581,6 +581,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     message = remoteProcessStoppedMessage(),
                 )
             }
+            workerActivated = false
+            clearPendingStart()
+            cancelRequested.set(true)
         } catch (error: Throwable) {
             val song = reconnectedSong
             if (song != null && error !is CancellationException) {
@@ -1111,6 +1114,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 songTitle = song.title,
                 message = remoteProcessStoppedMessage(),
             )
+            workerActivated = false
+            clearPendingStart()
             cancelRequested.set(true)
         } catch (error: Throwable) {
             _workerStateFlow.value = SourceSeparationUiState.Failed(
