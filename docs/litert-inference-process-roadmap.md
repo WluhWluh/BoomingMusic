@@ -1,12 +1,14 @@
 # LiteRT Inference Process and Background Execution Roadmap
 
-Status: Phase 5 policy and bounded-GPU artifact frozen; final GPU inference
-and UI qualification in progress
+Status: Phase 5 policy and bounded-GPU artifact frozen; Phase 6 ownership
+implementation in progress while final release qualification remains open
 
 Updated: 2026-07-27
 
-Current milestone: finish the remaining Phase 5F full-model and UI device
-matrix before changing background lifetime.
+Current milestone: implement Phase 6 run-class and background-ownership
+contracts. Remaining Phase 5F full-song, fallback, and UI device matrices are
+release-qualification work and may remain open while product implementation
+continues.
 
 This roadmap governs two related but separate experiments:
 
@@ -1172,8 +1174,8 @@ tests another host.
   final release-candidate AAR. Prove that no fallback path silently creates an
   unbounded GPU session.
   The strict fake-session failure matrix and packaged capability smoke pass;
-  real 9662 invocation and fallback repetitions with the pinned AAR remain
-  open.
+  one real 9662 bounded invocation now passes on both S10 and S25 with the
+  pinned AAR. Repetitions and real fallback stages remain open.
 - [ ] Test a clean install, missing-key default, app/process restart,
   source-separation backup and restore of both values, and an upstream backup
   with no key. With the switch off, prove zero GPU discovery, compile, probe,
@@ -1213,20 +1215,24 @@ Phase 5E satisfies this policy checkpoint. The immutable runtime, ABI
 inventory, exact capability, settings lifecycle, and 260-test GitHub debug
 unit suite pass with the pinned artifact. See
 `docs/validation/litert-inference-process/phase5/bounded-runtime-capability-2026-07-27.md`
-and `gpu-preference-lifecycle-2026-07-27.md`. The overall Phase 5 exit remains
-open for the final bounded-profile real-model/fallback pairs and foreground UI
-matrix.
+and `bounded-9662-smoke-2026-07-27.md`, plus
+`gpu-preference-lifecycle-2026-07-27.md`. The overall Phase 5 release
+qualification remains open for repeated bounded-profile real-model/fallback
+pairs and the foreground UI matrix. Those expensive matrices do not block
+Phase 6 protocol and ownership implementation; they still block a final
+release decision for the affected GPU scope.
 
 ## Phase 6: Prototype an Independent Media-Processing Service
 
 This phase changes background ownership. It must remain behind a separate
-internal gate from `BoundRemote`. Because an independent inference foreground
-service requires the dedicated process, Phase 6 may start only after the exact
+internal gate from `BoundRemote`. Protocol, journal, and service ownership
+implementation may proceed after exact identity and short real-model smokes
+pass. Enabling an independent production host still requires the exact
 `BoundRemote + SingleUse` CPU candidate, and separately the bounded-GPU
-candidate where tested, has passed the corresponding Phase 5 host matrix. The
-production host remains unchanged until this phase passes. Within each Phase 6
-comparison, host and session policy are fixed while background ownership is
-varied. Any GPU case must also use the Phase 5F-pinned
+candidate where tested, to pass the corresponding host and lifecycle matrix.
+The production host remains unchanged until this phase passes. Within each
+Phase 6 comparison, host and session policy are fixed while background
+ownership is varied. Any GPU case must also use the Phase 5F-pinned
 `gpu-opencl-bounded-fp32-v1` runtime; stock `N=0` is not a background candidate.
 
 ### Phase 6A: Freeze run-class eligibility

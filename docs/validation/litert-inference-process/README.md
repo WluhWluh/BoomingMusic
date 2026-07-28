@@ -34,6 +34,9 @@ selection, MP3 handling, output frames, and join placement.
 The Phase 5 GPU records include the stock-runtime
 [UI contention attribution](phase5/gpu-ui-contention-2026-07-26.md) and the
 follow-up [bounded OpenCL queue experiment](phase5/gpu-opencl-queue-window-2026-07-26.md).
+The final packaged capability and real-model checkpoints are recorded in the
+[bounded runtime capability smoke](phase5/bounded-runtime-capability-2026-07-27.md)
+and [bounded 9662 invocation smoke](phase5/bounded-9662-smoke-2026-07-27.md).
 
 Large profiler traces, PCM/stem exports, `/proc/<pid>/maps` snapshots,
 and repeated-run logs remain under ignored `build/` output. A
