@@ -5,10 +5,10 @@ implementation in progress while final release qualification remains open
 
 Updated: 2026-07-27
 
-Current milestone: implement Phase 6 run-class and background-ownership
-contracts. Remaining Phase 5F full-song, fallback, and UI device matrices are
-release-qualification work and may remain open while product implementation
-continues.
+Current milestone: finish the Phase 6B ownership handoff, then transfer the
+active-computation wake lock in Phase 6C. Remaining Phase 5F full-song,
+fallback, and UI device matrices are release-qualification work and may remain
+open while product implementation continues.
 
 This roadmap governs two related but separate experiments:
 
@@ -1268,20 +1268,32 @@ release gates rather than Phase 6A implementation blockers.
 
 ### Phase 6B: Foreground-service ownership
 
-- [ ] Let the inference service declare only
+- [x] Let the inference service declare only
   `foregroundServiceType="mediaProcessing"` where the platform supports that
   type, with explicit legacy behavior for API 26-34.
-- [ ] Keep `PlaybackService` responsible for `mediaPlayback`.
+- [x] Keep `PlaybackService` responsible for `mediaPlayback`.
 - [ ] Define a handoff that never leaves active inference unprotected and never
   has two components claiming the processing lifetime indefinitely.
-- [ ] Call `startForeground()` within the platform deadline with a dedicated,
+- [x] Call `startForeground()` within the platform deadline with a dedicated,
   user-comprehensible processing notification.
-- [ ] Provide Pause and Cancel notification actions with idempotent command
+- [x] Provide Pause and Cancel notification actions with idempotent command
   IDs and exact run identity.
 - [ ] Do not keep an idle or manually paused process in foreground solely to
   retain a model session.
 - [ ] Record both foreground services, types, notification IDs, start/stop
   timestamps, and ownership handoffs when playback and separation overlap.
+
+The first Phase 6B platform checkpoint is complete at protocol 9. The
+independent manual-run factory remains internal and production routing remains
+unchanged. Manifest and device tests prove the dedicated processing service,
+legacy and timed platform policies, notification identity, pre-admission
+Pause/Cancel, duplicate command handling, stale-action isolation, and
+notification removal on S25/API 35, S10/API 31, and an API 26 x86 AVD. The
+current API 37 x86_64 AVD terminated instrumentation before running any test,
+so current-highest-API coverage remains open. Actual-run handoff from
+`PlaybackService`, no-foreground-after-active-pause, overlap diagnostics, and
+visible-user-command startup remain unchecked. See
+`docs/validation/litert-inference-process/phase6/foreground-ownership-2026-07-27.md`.
 
 ### Phase 6C: Wake-lock ownership
 
