@@ -45,23 +45,16 @@ import com.mardous.booming.util.backup.BackupSettingsPolicy
 import com.mardous.booming.util.backup.BackupSettingsRestoreDecoder
 import com.mardous.booming.util.backup.CommonSettingsSnapshotV1
 import com.mardous.booming.util.backup.PortableActiveModelReference
-import com.mardous.booming.util.backup.PortablePreferenceDefinition
-import com.mardous.booming.util.backup.PortablePreferenceType
 import com.mardous.booming.util.backup.SourceSeparationSettingsSnapshotV1
 import com.mardous.booming.util.backup.StagedBackupArchive
+import com.mardous.booming.util.backup.putPortablePreferences
 import com.mardous.booming.util.m3u.M3UConstants
 import com.mardous.booming.util.m3u.M3UWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.float
-import kotlinx.serialization.json.int
-import kotlinx.serialization.json.long
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.io.File
@@ -450,26 +443,6 @@ object BackupHelper : KoinComponent {
             editor.putPortablePreferences(snapshot.preferences, definitions)
         }
         if (!editor.commit()) throw IOException("Unable to commit restored preferences.")
-    }
-
-    private fun SharedPreferences.Editor.putPortablePreferences(
-        values: Map<String, JsonElement>,
-        definitions: Map<String, PortablePreferenceDefinition>,
-    ) {
-        BackupContractValidator.validatePreferenceMap(values, definitions)
-        values.forEach { (key, value) ->
-            when (requireNotNull(definitions[key]).type) {
-                PortablePreferenceType.Boolean -> putBoolean(key, (value as JsonPrimitive).boolean)
-                PortablePreferenceType.Integer -> putInt(key, (value as JsonPrimitive).int)
-                PortablePreferenceType.Long -> putLong(key, (value as JsonPrimitive).long)
-                PortablePreferenceType.Float -> putFloat(key, (value as JsonPrimitive).float)
-                PortablePreferenceType.String -> putString(key, (value as JsonPrimitive).content)
-                PortablePreferenceType.StringSet -> putStringSet(
-                    key,
-                    (value as JsonArray).map { (it as JsonPrimitive).content }.toSet(),
-                )
-            }
-        }
     }
 
     private fun restoreArtistImages(context: Context, images: List<File>) {
