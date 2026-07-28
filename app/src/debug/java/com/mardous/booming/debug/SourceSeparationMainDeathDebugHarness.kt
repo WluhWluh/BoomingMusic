@@ -121,6 +121,10 @@ internal object SourceSeparationMainDeathDebugHarness {
             worker.requestManualSong(source)
 
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val killBoundary = when (mode) {
+                BeginMode.MainProcessDeath -> request.mainDeathBoundary
+                BeginMode.ForceStop -> MainDeathBoundary.SegmentRunning
+            }
             val journal = waitForJournal(SETUP_TIMEOUT_MS) {
                 val cacheKey = worker.runningCacheKey() ?: return@waitForJournal null
                 val candidate = store.readRunJournal(cacheKey) ?: return@waitForJournal null
@@ -128,10 +132,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     current.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running &&
                         current.request.runClass ==
                             SourceSeparationExecutionRunClass.ManualFullSong &&
-                        current.transitions.any { transition ->
-                            transition.type ==
-                                SourceSeparationCacheRunTransitionType.SegmentRunning
-                        }
+                        killBoundary.reached(current)
                 }
             }
             check(journal.request.cacheKey == runtimeSong.cacheKey)
@@ -173,7 +174,8 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("journalPath", journalFile.absolutePath)
                     .put("journalSha256", journalFile.sha256())
                     .put("committedSegments", journal.committedSegments.size)
-                    .put("killBoundary", "segment-running")
+                    .put("committedSegmentEvidence", committedSegmentEvidence(journal))
+                    .put("killBoundary", killBoundary.argumentValue)
                     .put("killRequester", mode.killRequester)
                     .put("backendMode", request.backendMode)
                     .put("tryGpu", request.tryGpu),
@@ -201,6 +203,8 @@ internal object SourceSeparationMainDeathDebugHarness {
             check(scenario.getInt("schemaVersion") == SCENARIO_SCHEMA_VERSION)
             check(scenario.getString("runId") == request.runId)
             check(scenario.getString("backendMode") == request.backendMode)
+            check(scenario.getString("killBoundary") ==
+                request.mainDeathBoundary.argumentValue)
             val cacheKey = scenario.getString("cacheKey")
             val oldMainPid = scenario.getInt("mainPid")
             val remotePid = scenario.getInt("remotePid")
@@ -308,6 +312,9 @@ internal object SourceSeparationMainDeathDebugHarness {
                 transition.runId == executionRunId &&
                     transition.processGeneration == processGeneration
             })
+            val committedBeforeDeath = scenario.getJSONArray("committedSegmentEvidence")
+            check(committedBeforeDeath.length() == scenario.getInt("committedSegments"))
+            validateCommittedSegmentEvidence(committedBeforeDeath, finalJournal)
 
             val runtimeRecords = requireNotNull(completed).manifest.runtimeRecords
             writeJson(
@@ -332,6 +339,13 @@ internal object SourceSeparationMainDeathDebugHarness {
                     )
                     .put("finalJournalSequence", finalJournal.latestSequence)
                     .put("committedSegmentsBeforeDeath", scenario.getInt("committedSegments"))
+                    .put(
+                        "committedSegmentIndicesBeforeDeath",
+                        JSONArray((0 until committedBeforeDeath.length()).map { index ->
+                            committedBeforeDeath.getJSONObject(index).getInt("segmentIndex")
+                        }),
+                    )
+                    .put("committedSegmentsPreserved", true)
                     .put("finalCommittedSegments", finalJournal.committedSegments.size)
                     .put("observerTransitionCount", observerTransitions.size)
                     .put("productObserverConnectedBeforeHarness", true)
@@ -588,6 +602,41 @@ internal object SourceSeparationMainDeathDebugHarness {
             .put("commandQueueWindowSize", identity.commandQueueWindowSize)
     }
 
+    private fun committedSegmentEvidence(
+        journal: SourceSeparationCacheRunJournal,
+    ): JSONArray = JSONArray(journal.committedSegments.map { segment ->
+        JSONObject()
+            .put("segmentIndex", segment.segmentIndex)
+            .put("vocalsPath", segment.vocalsPath)
+            .put("vocalsByteSize", segment.vocalsIntegrity.byteSize)
+            .put("vocalsSha256", segment.vocalsIntegrity.sha256)
+            .put("instrumentalPath", segment.instrumentalPath)
+            .put("instrumentalByteSize", segment.instrumentalIntegrity.byteSize)
+            .put("instrumentalSha256", segment.instrumentalIntegrity.sha256)
+    })
+
+    private fun validateCommittedSegmentEvidence(
+        evidence: JSONArray,
+        finalJournal: SourceSeparationCacheRunJournal,
+    ) {
+        val finalByIndex = finalJournal.committedSegments.associateBy { it.segmentIndex }
+        check(finalByIndex.size == finalJournal.committedSegments.size)
+        repeat(evidence.length()) { index ->
+            val expected = evidence.getJSONObject(index)
+            val segment = requireNotNull(finalByIndex[expected.getInt("segmentIndex")]) {
+                "A segment committed before main-process death disappeared."
+            }
+            check(segment.vocalsPath == expected.getString("vocalsPath"))
+            check(segment.vocalsIntegrity.byteSize == expected.getLong("vocalsByteSize"))
+            check(segment.vocalsIntegrity.sha256 == expected.getString("vocalsSha256"))
+            check(segment.instrumentalPath == expected.getString("instrumentalPath"))
+            check(segment.instrumentalIntegrity.byteSize ==
+                expected.getLong("instrumentalByteSize"))
+            check(segment.instrumentalIntegrity.sha256 ==
+                expected.getString("instrumentalSha256"))
+        }
+    }
+
     private fun request(intent: Intent): Request {
         val runId = intent.requiredString(EXTRA_RUN_ID)
         require(SAFE_NAME.matches(runId)) { "Unsafe main-death run ID." }
@@ -600,6 +649,9 @@ internal object SourceSeparationMainDeathDebugHarness {
             modelId = intent.requiredString(EXTRA_MODEL_ID),
             artifactSha256 = intent.requiredString(EXTRA_ARTIFACT_SHA256),
             backendMode = backendMode,
+            mainDeathBoundary = MainDeathBoundary.parse(
+                intent.getStringExtra(EXTRA_KILL_BOUNDARY),
+            ),
         )
     }
 
@@ -851,6 +903,7 @@ internal object SourceSeparationMainDeathDebugHarness {
         val modelId: String,
         val artifactSha256: String,
         val backendMode: String,
+        val mainDeathBoundary: MainDeathBoundary,
     ) {
         val tryGpu: Boolean
             get() = backendMode == "auto"
@@ -899,6 +952,30 @@ internal object SourceSeparationMainDeathDebugHarness {
         ForceStop(STAGE_FORCE_STOP, "adb-am-force-stop"),
     }
 
+    private enum class MainDeathBoundary(val argumentValue: String) {
+        SegmentRunning("segment-running"),
+        AfterFirstCommittedSegment("after-first-committed-segment"),
+        ;
+
+        fun reached(journal: SourceSeparationCacheRunJournal): Boolean = when (this) {
+            SegmentRunning -> journal.committedSegments.isEmpty() &&
+                journal.transitions.any { transition ->
+                    transition.type == SourceSeparationCacheRunTransitionType.SegmentRunning
+                }
+            AfterFirstCommittedSegment -> journal.committedSegments.isNotEmpty()
+        }
+
+        companion object {
+            fun parse(value: String?): MainDeathBoundary = entries.firstOrNull {
+                it.argumentValue == value
+            } ?: if (value.isNullOrBlank()) {
+                SegmentRunning
+            } else {
+                error("Unsupported main-process death boundary: $value")
+            }
+        }
+    }
+
     const val COMMAND_BEGIN = "beginIndependentMainDeath"
     const val COMMAND_VALIDATE = "validateIndependentMainDeath"
     const val COMMAND_BEGIN_FORCE_STOP = "beginIndependentForceStop"
@@ -909,6 +986,7 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val EXTRA_MODEL_ID = "modelId"
     private const val EXTRA_ARTIFACT_SHA256 = "artifactSha256"
     private const val EXTRA_BACKEND_MODE = "backendMode"
+    private const val EXTRA_KILL_BOUNDARY = "killBoundary"
     private const val EXTRA_JOURNAL_SHA_AFTER_STOP = "journalSha256AfterStop"
     private const val EXTRA_JOURNAL_SHA_AFTER_SILENCE = "journalSha256AfterSilence"
     private const val EXTRA_JOURNAL_SHA_AFTER_RESTART = "journalSha256AfterRestart"
@@ -943,7 +1021,7 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val EXTRA_WAKE_LOCK_AFTER_SILENCE = "wakeLockAfterSilence"
     private const val EXTRA_WAKE_LOCK_AFTER_RESTART = "wakeLockAfterRestart"
     private const val OUTPUT_DIRECTORY = "phase7-debug-main-death"
-    private const val SCENARIO_SCHEMA_VERSION = 1
+    private const val SCENARIO_SCHEMA_VERSION = 2
     private const val REPORT_SCHEMA_VERSION = 1
     private const val FORCE_STOP_REPORT_SCHEMA_VERSION = "phase7-task-lifecycle-report-v1"
     private const val STAGE_MAIN_DEATH = "independent-main-death"

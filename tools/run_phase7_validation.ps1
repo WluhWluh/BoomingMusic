@@ -44,7 +44,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v46",
+    [string]$RunnerRevision = "phase7-runner-v47",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -91,6 +91,8 @@ param(
     [string]$StopWhenClosedFromRecents = "false",
     [ValidateSet("playback-demand", "next-song-prefetch")]
     [string]$PlaybackOwnedRunClass = "playback-demand",
+    [ValidateSet("segment-running", "after-first-committed-segment")]
+    [string]$MainDeathBoundary = "segment-running",
     [ValidateRange(5, 300)]
     [int]$SilentObservationSeconds = 30,
     [switch]$ScreenOffAfterReady,
@@ -271,6 +273,10 @@ if ($Stage -eq "force-stop" -and
         $ProcessAbi -ne "arm64-v8a" -or
         $AutoFailpoint -ne "none" -or $RemoteAutoFailpoint -ne "none")) {
     throw "force-stop requires the production arm64 independent foreground route without fault injection."
+}
+if ($Stage -ne "independent-main-death" -and
+        $MainDeathBoundary -ne "segment-running") {
+    throw "MainDeathBoundary applies only to independent-main-death."
 }
 if ($Stage -in @("process-matrix", "process-switch-matrix")) {
     $validX86Resident = $ProcessAbi -eq "x86" -and $X86ProcessValidation
@@ -1180,7 +1186,8 @@ try {
             "--es", "sourcePath", $remoteSourcePath,
             "--es", "modelId", $ModelId,
             "--es", "artifactSha256", $artifact.sha256,
-            "--es", "backendMode", $BackendMode
+            "--es", "backendMode", $BackendMode,
+            "--es", "killBoundary", $MainDeathBoundary
         )
         Invoke-Adb @debugArguments --es command beginIndependentForceStop
         $scenarioText = Wait-RemoteJsonFile `
@@ -1346,7 +1353,8 @@ try {
             "--es", "sourcePath", $remoteSourcePath,
             "--es", "modelId", $ModelId,
             "--es", "artifactSha256", $artifact.sha256,
-            "--es", "backendMode", $BackendMode
+            "--es", "backendMode", $BackendMode,
+            "--es", "killBoundary", $MainDeathBoundary
         )
         Invoke-Adb @debugArguments --es command beginIndependentMainDeath
         $scenarioText = Wait-RemoteJsonFile `
@@ -1583,6 +1591,9 @@ try {
                 } else { $null }
                 playbackOwnedRunClass = if ($Stage -eq "playback-owner-stop") {
                     $PlaybackOwnedRunClass
+                } else { $null }
+                mainDeathBoundary = if ($Stage -eq "independent-main-death") {
+                    $MainDeathBoundary
                 } else { $null }
                 silentObservationSeconds = if ($Stage -eq "force-stop") {
                     $SilentObservationSeconds
