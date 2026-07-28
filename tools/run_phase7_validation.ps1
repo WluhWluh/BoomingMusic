@@ -1442,7 +1442,8 @@ try {
         $deathStarted = [Diagnostics.Stopwatch]::StartNew()
         $deathDeadline = [DateTime]::UtcNow.AddSeconds(30)
         $unexpectedRemotePids = [System.Collections.Generic.HashSet[int]]::new()
-        $unexpectedRemotePresenceSampleCount = 0
+        $activeRemoteRelaunchPids = [System.Collections.Generic.HashSet[int]]::new()
+        $activeRemoteRelaunchPresenceSampleCount = 0
         $remoteProcessSampleCount = 0
         $mainProcessSampleCount = 0
         $mainDisappearanceCount = 0
@@ -1460,16 +1461,15 @@ try {
             foreach ($pid in $remotePidsAfterKill) {
                 if ($pid -ne $oldRemotePid) {
                     [void]$unexpectedRemotePids.Add($pid)
-                    $unexpectedRemotePresenceSampleCount += 1
                 }
             }
             if ($mainDisappearanceCount -gt 0) {
                 throw "The main process did not survive inference-process death."
             }
-            if ($remotePidsAfterKill.Count -eq 0) { break }
+            if ($oldRemotePid -notin $remotePidsAfterKill) { break }
             Start-Sleep -Milliseconds 50
         } while ([DateTime]::UtcNow -lt $deathDeadline)
-        if ($remotePidsAfterKill.Count -ne 0) {
+        if ($oldRemotePid -in $remotePidsAfterKill) {
             throw "The killed inference process did not exit within 30 seconds."
         }
         $deathStarted.Stop()
@@ -1492,7 +1492,19 @@ try {
             foreach ($pid in $cleanupRemotePids) {
                 if ($pid -ne $oldRemotePid) {
                     [void]$unexpectedRemotePids.Add($pid)
-                    $unexpectedRemotePresenceSampleCount += 1
+                }
+            }
+            if ($cleanupRemotePids | Where-Object { $_ -ne $oldRemotePid }) {
+                if ($afterDeath.processingService -or
+                        $afterDeath.processingNotification -or
+                        $afterDeath.inferenceWakeLock) {
+                    foreach ($pid in $cleanupRemotePids) {
+                        if ($pid -ne $oldRemotePid) {
+                            [void]$activeRemoteRelaunchPids.Add($pid)
+                        }
+                    }
+                    $activeRemoteRelaunchPresenceSampleCount += 1
+                    throw "An active inference process reappeared after remote death."
                 }
             }
             if (-not $afterDeath.processingService -and
@@ -1525,10 +1537,24 @@ try {
                     $currentMainPids[0] -ne $oldMainPid) {
                 throw "The main process changed during remote-death silence."
             }
-            foreach ($pid in @(Get-NamedProcessIds "${package}:source_separation")) {
+            $currentRemotePids = @(Get-NamedProcessIds "${package}:source_separation")
+            foreach ($pid in $currentRemotePids) {
                 if ($pid -ne $oldRemotePid) {
                     [void]$unexpectedRemotePids.Add($pid)
-                    $unexpectedRemotePresenceSampleCount += 1
+                }
+            }
+            if ($currentRemotePids | Where-Object { $_ -ne $oldRemotePid }) {
+                $sample = Get-TaskLifecycleObservation
+                if ($sample.processingService -or
+                        $sample.processingNotification -or
+                        $sample.inferenceWakeLock) {
+                    foreach ($pid in $currentRemotePids) {
+                        if ($pid -ne $oldRemotePid) {
+                            [void]$activeRemoteRelaunchPids.Add($pid)
+                        }
+                    }
+                    $activeRemoteRelaunchPresenceSampleCount += 1
+                    throw "An active inference process reappeared during remote-death silence."
                 }
             }
             Start-Sleep -Milliseconds 250
@@ -1553,9 +1579,9 @@ try {
             "--el", "silentObservationMs", [string]$silentStarted.ElapsedMilliseconds,
             "--el", "silentProcessSampleCount", [string]$silentProcessSampleCount,
             "--el", "unexpectedRemoteRelaunchCount",
-            [string]$unexpectedRemotePids.Count,
+            [string]$activeRemoteRelaunchPids.Count,
             "--el", "unexpectedRemotePresenceSampleCount",
-            [string]$unexpectedRemotePresenceSampleCount,
+            [string]$activeRemoteRelaunchPresenceSampleCount,
             "--el", "remoteProcessSampleCount", [string]$remoteProcessSampleCount,
             "--el", "mainProcessSampleCount", [string]$mainProcessSampleCount,
             "--el", "mainDisappearanceCount", [string]$mainDisappearanceCount,
@@ -1598,6 +1624,8 @@ try {
             -TimeoutSeconds 1800
         $debugReport = $reportText | ConvertFrom-Json
         if ([string]$debugReport.status -eq "passed") {
+            $debugReport | Add-Member -NotePropertyName residentRemoteProcessPids `
+                -NotePropertyValue @($unexpectedRemotePids | Sort-Object) -Force
             $terminalDeadline = [DateTime]::UtcNow.AddSeconds(30)
             do {
                 $terminalObservation = Get-TaskLifecycleObservation
