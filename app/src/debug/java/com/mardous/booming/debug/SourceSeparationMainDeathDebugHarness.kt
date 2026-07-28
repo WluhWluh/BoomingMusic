@@ -539,16 +539,29 @@ internal object SourceSeparationMainDeathDebugHarness {
             val schedulerResidentAfterCompletion = coordinator.isWorkerActive()
             val coordinatorStatusAfterCompletion = coordinator.debugStatus()
 
-            val completed = runtime.cacheStatus(runtimeSong) as?
-                SourceSeparationModelAwareCacheStatus.Completed
-                ?: error("The explicitly resumed cache did not complete.")
-            check(store.validateCompletedEntry(completed.manifest) ==
+            var completed: SourceSeparationModelAwareCacheStatus.Completed? = null
+            check(waitUntil(REATTACH_TIMEOUT_MS) {
+                (runtime.cacheStatus(runtimeSong) as?
+                    SourceSeparationModelAwareCacheStatus.Completed)?.let { status ->
+                    completed = status
+                    true
+                } == true
+            }) { "The explicitly resumed cache did not become readable." }
+            val completedCache = requireNotNull(completed)
+            check(store.validateCompletedEntry(completedCache.manifest) ==
                 SourceSeparationCacheValidationResult.Valid)
-            requireNotNull(runtime.openCompletedCache(cacheKey)).use { playback ->
+            var openedPlayback: SourceSeparationModelAwareCachePlayback? = null
+            check(waitUntil(REATTACH_TIMEOUT_MS) {
+                runtime.openCompletedCache(cacheKey)?.let { playback ->
+                    openedPlayback = playback
+                    true
+                } == true
+            }) { "The explicitly resumed cache remained busy or unavailable." }
+            requireNotNull(openedPlayback).use { playback ->
                 check(playback.vocalsFile.isFile)
                 check(playback.instrumentalFile.isFile)
             }
-            val runtimeRecords = completed.manifest.runtimeRecords
+            val runtimeRecords = completedCache.manifest.runtimeRecords
             check(runtimeRecords.isNotEmpty())
             if (originalTryGpu) {
                 check(runtimeRecords.any { record -> record.backend == "LiteRtGpu" })
