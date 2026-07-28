@@ -2086,6 +2086,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         var currentUri: Uri? = null
         var playbackProbe: OriginalAudioPlaybackProbe? = null
         var worker: SourceSeparationForegroundWorkerCoordinator? = null
+        var diagnosticStore: SourceSeparationCacheStore? = null
+        var diagnosticCacheKey: String? = null
 
         try {
             check(preferences.edit()
@@ -2138,7 +2140,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val runtime = get<SourceSeparationRuntimeFacade>(
                 SourceSeparationRuntimeFacade::class.java,
             )
-            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            val store = get<SourceSeparationCacheStore>(
+                SourceSeparationCacheStore::class.java,
+            ).also { diagnosticStore = it }
             val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
                 SourceSeparationModelAwareCacheRepository::class.java,
             )
@@ -2148,6 +2152,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val runtimeSong = (runtime.resolve(targetSource) as?
                 SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The playback-owned target source could not be resolved.")
+            diagnosticCacheKey = runtimeSong.cacheKey
             clearExactCacheEntry(runtime, runtimeSong.cacheKey)
 
             val probe = startOriginalAudioPlayback(
@@ -2362,6 +2367,17 @@ class SourceSeparationPhase7WorkerDeviceTest {
         } catch (error: Throwable) {
             report.put("status", "failed")
             report.put("error", "${error::class.java.name}: ${error.message}")
+            report.put(
+                "failureDiagnostics",
+                playbackOwnerFailureDiagnostics(
+                    instrumentation = instrumentation,
+                    context = context,
+                    worker = worker,
+                    store = diagnosticStore,
+                    cacheKey = diagnosticCacheKey,
+                    playbackProbe = playbackProbe,
+                ),
+            )
             throw error
         } finally {
             playbackProbe?.let { probe ->
@@ -6211,6 +6227,23 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("snapshots", JSONArray(snapshotCopy))
         }
 
+        fun currentState(): JSONObject = onMediaControllerThread(controller) {
+            JSONObject()
+                .put("sampledAtElapsedRealtimeMs", SystemClock.elapsedRealtime())
+                .put("mediaId", controller.currentMediaItem?.mediaId)
+                .put("mediaItemIndex", controller.currentMediaItemIndex)
+                .put("positionMs", controller.currentPosition)
+                .put("bufferedPositionMs", controller.bufferedPosition)
+                .put("durationMs", controller.duration)
+                .put("playWhenReady", controller.playWhenReady)
+                .put("isPlaying", controller.isPlaying)
+                .put("playbackState", controller.playbackState)
+                .put("repeatMode", controller.repeatMode)
+                .put("playerError", controller.playerError?.let { playbackError ->
+                    "${playbackError.errorCodeName}: ${playbackError.message}"
+                } ?: JSONObject.NULL)
+        }
+
         fun awaitStopped(label: String): JSONObject {
             waitForMediaController(controller, label) {
                 !controller.playWhenReady || !controller.isPlaying
@@ -6355,6 +6388,124 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
         error("Kernel cache lock was not released for $cacheKey.")
     }
+
+    private fun playbackOwnerFailureDiagnostics(
+        instrumentation: android.app.Instrumentation,
+        context: Context,
+        worker: SourceSeparationForegroundWorkerCoordinator?,
+        store: SourceSeparationCacheStore?,
+        cacheKey: String?,
+        playbackProbe: OriginalAudioPlaybackProbe?,
+    ): JSONObject {
+        val diagnostics = JSONObject()
+            .put("sampledAtElapsedRealtimeMs", SystemClock.elapsedRealtime())
+            .put("cacheKey", cacheKey ?: JSONObject.NULL)
+
+        worker?.let { coordinator ->
+            diagnostics.put("coordinator", JSONObject()
+                .put("debugStatus", runCatching { coordinator.debugStatus() }
+                    .getOrElse(::diagnosticError))
+                .put("windowSamples", runCatching { coordinator.windowSamples() }
+                    .getOrElse(::diagnosticError))
+                .put("workerState", coordinator.workerStateFlow.value.toString())
+                .put("workerActive", coordinator.isWorkerActive())
+                .put("runningSongId", coordinator.runningSongId() ?: JSONObject.NULL)
+                .put("pendingSongId", coordinator.pendingSongId() ?: JSONObject.NULL)
+            )
+        }
+
+        playbackProbe?.let { probe ->
+            diagnostics.put(
+                "playbackProbe",
+                runCatching { probe.report() }.getOrElse { diagnosticError(it) },
+            )
+            diagnostics.put(
+                "playbackState",
+                runCatching { probe.currentState() }.getOrElse { diagnosticError(it) },
+            )
+        }
+
+        if (store != null && cacheKey != null) {
+            diagnostics.put(
+                "runJournal",
+                runCatching { store.readRunJournal(cacheKey) }
+                    .fold(
+                        onSuccess = { journal -> journal?.let(::runJournalDiagnostic)
+                            ?: JSONObject.NULL },
+                        onFailure = { diagnosticError(it) },
+                    ),
+            )
+            diagnostics.put(
+                "manifest",
+                runCatching { store.readManifest(cacheKey) }
+                    .fold(
+                        onSuccess = { manifest -> manifest?.let(::manifestDiagnostic)
+                            ?: JSONObject.NULL },
+                        onFailure = { diagnosticError(it) },
+                    ),
+            )
+        }
+
+        diagnostics.put(
+            "ownershipHandoff",
+            runCatching {
+                get<SourceSeparationProcessingOwnershipHandoff>(
+                    SourceSeparationProcessingOwnershipHandoff::class.java,
+                ).stateFlow.value.toString()
+            }.getOrElse(::diagnosticError),
+        )
+        diagnostics.put(
+            "serviceDump",
+            runCatching {
+                readShellCommand(
+                    instrumentation,
+                    "dumpsys activity services ${context.packageName}",
+                )
+            }.getOrElse(::diagnosticError),
+        )
+        return diagnostics
+    }
+
+    private fun runJournalDiagnostic(journal: SourceSeparationCacheRunJournal): JSONObject =
+        JSONObject()
+            .put("lifecycle", journal.lifecycle.name)
+            .put("latestSequence", journal.latestSequence)
+            .put("updatedAtEpochMs", journal.updatedAtEpochMs)
+            .put("runId", journal.request.runId)
+            .put("runClass", journal.request.runClass.name)
+            .put("ownerPid", journal.request.ownerPid ?: JSONObject.NULL)
+            .put("tryGpu", journal.request.tryGpu)
+            .put("gpuFallbackLatch", journal.request.gpuFallbackLatch?.toString()
+                ?: JSONObject.NULL)
+            .put(
+                "committedSegments",
+                JSONArray(journal.committedSegments.map { it.segmentIndex }),
+            )
+            .put(
+                "transitions",
+                JSONArray(journal.transitions.map { transition ->
+                    JSONObject()
+                        .put("sequence", transition.sequence)
+                        .put("type", transition.type.name)
+                        .put("segmentIndex", transition.segmentIndex ?: JSONObject.NULL)
+                        .put("ownerPid", transition.ownerPid ?: JSONObject.NULL)
+                        .put("timestampEpochMs", transition.timestampEpochMs)
+                        .put("error", transition.error?.toString() ?: JSONObject.NULL)
+                }),
+            )
+
+    private fun manifestDiagnostic(manifest: SourceSeparationCacheManifest): JSONObject =
+        JSONObject()
+            .put("state", manifest.state.name)
+            .put("updatedAtEpochMs", manifest.updatedAtEpochMs)
+            .put("segmentCount", manifest.segmentPlan?.segments?.size ?: 0)
+            .put("outputWindowCount", manifest.output?.windowCount ?: JSONObject.NULL)
+            .put("runtimeRecordCount", manifest.runtimeRecords.size)
+            .put("cleanup", manifest.cleanup?.toString() ?: JSONObject.NULL)
+            .put("error", manifest.error?.toString() ?: JSONObject.NULL)
+
+    private fun diagnosticError(error: Throwable): String =
+        "unavailable: ${error::class.java.name}: ${error.message}"
 
     private fun waitForReady(
         worker: SourceSeparationForegroundWorkerCoordinator,
