@@ -8,6 +8,7 @@ import androidx.core.content.edit
 import com.mardous.booming.R
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
+import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPerformanceStats
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
@@ -162,25 +163,41 @@ class SourceSeparationForegroundWorkerCoordinator(
             )
             return false
         }
-        requestSong(song)
+        requestManualSong(song)
         return true
     }
 
-    fun requestSong(song: Song) {
+    fun requestManualSong(song: Song) {
+        requestFullSong(song, SourceSeparationPendingStartReason.Manual)
+    }
+
+    fun requestPlaybackDemandSong(song: Song) {
+        requestFullSong(song, SourceSeparationPendingStartReason.PlaybackDemand)
+    }
+
+    private fun requestFullSong(
+        song: Song,
+        reason: SourceSeparationPendingStartReason,
+    ) {
         if (song == Song.emptySong) return
         workerActivated = true
         autoStartSuppressedSongId = null
         if (workerJob?.isActive == true) {
             if (workerSongId == song.id) {
+                val incoming = SourceSeparationWorkerRequest.Full(song, reason)
+                val active = activeWorkerRequest
+                if (active != null && incoming.priority > active.priority) {
+                    setPendingStart(incoming)
+                    pauseRequested.set(true)
+                    return
+                }
+                if (active != null && incoming.priority < active.priority) {
+                    return
+                }
                 pauseRequested.set(false)
                 val workerState = _workerStateFlow.value
                 if (workerState !is SourceSeparationUiState.Running) {
-                    setPendingStart(
-                        SourceSeparationWorkerRequest.Full(
-                            song = song,
-                            reason = SourceSeparationPendingStartReason.Manual,
-                        )
-                    )
+                    setPendingStart(incoming)
                 }
                 if (workerState is SourceSeparationUiState.Paused ||
                     workerState is SourceSeparationUiState.Idle
@@ -193,16 +210,13 @@ class SourceSeparationForegroundWorkerCoordinator(
                 return
             }
             if (pendingStartRequest?.song?.id == song.id) {
-                pendingStartRequest = SourceSeparationWorkerRequest.Full(
-                    song = song,
-                    reason = SourceSeparationPendingStartReason.Manual,
-                )
+                setPendingStart(SourceSeparationWorkerRequest.Full(song, reason))
                 return
             }
             setPendingStart(
                 SourceSeparationWorkerRequest.Full(
                     song = song,
-                    reason = SourceSeparationPendingStartReason.Manual,
+                    reason = reason,
                 )
             )
             if (workerSongId != null) {
@@ -216,7 +230,7 @@ class SourceSeparationForegroundWorkerCoordinator(
         setPendingStart(
             SourceSeparationWorkerRequest.Full(
                 song = song,
-                reason = SourceSeparationPendingStartReason.Manual,
+                reason = reason,
             )
         )
         workerJob = workerScope.launch {
@@ -235,7 +249,7 @@ class SourceSeparationForegroundWorkerCoordinator(
             readyWindowCount = readyWindowCount,
         )
         if (pendingStartRequest?.song?.id == song.id) {
-            pendingStartRequest = request
+            setPendingStart(request)
             return true
         }
         if (workerJob?.isActive == true) {
@@ -481,7 +495,7 @@ class SourceSeparationForegroundWorkerCoordinator(
         return nextFullWorkerRequest(
             SourceSeparationWorkerRequest.Full(
                 song = song,
-                reason = SourceSeparationPendingStartReason.AutoHandoff,
+                reason = SourceSeparationPendingStartReason.PlaybackDemand,
             )
         )
     }
@@ -545,7 +559,7 @@ class SourceSeparationForegroundWorkerCoordinator(
                     setPendingStart(
                         SourceSeparationWorkerRequest.Full(
                             song = it,
-                            reason = SourceSeparationPendingStartReason.AutoHandoff,
+                            reason = SourceSeparationPendingStartReason.PlaybackDemand,
                         )
                     )
                 }
@@ -560,7 +574,14 @@ class SourceSeparationForegroundWorkerCoordinator(
     }
 
     private fun setPendingStart(request: SourceSeparationWorkerRequest) {
-        pendingStartRequest = request
+        val current = pendingStartRequest
+        pendingStartRequest = if (current?.song?.id == request.song.id &&
+            current.priority > request.priority
+        ) {
+            current
+        } else {
+            request
+        }
     }
 
     private fun clearPendingStart() {
@@ -583,7 +604,7 @@ class SourceSeparationForegroundWorkerCoordinator(
         val request = activeWorkerRequest
             ?: SourceSeparationWorkerRequest.Full(
                 song = song,
-                reason = SourceSeparationPendingStartReason.AutoHandoff,
+                reason = SourceSeparationPendingStartReason.PlaybackDemand,
             )
         val preStartReadyWindowCount =
             (request as? SourceSeparationWorkerRequest.StartWindowPreStart)
@@ -630,6 +651,7 @@ class SourceSeparationForegroundWorkerCoordinator(
             val result = sourceSeparationRuntime.separate(
                 song = resolved,
                 tryGpu = tryGpu,
+                runClass = request.runClass,
                 onProgress = { progress ->
                     val averageWindowMs = progress.completedWindowElapsedMs
                         ?.let(performanceStats::recordWindowElapsed)
@@ -1028,18 +1050,30 @@ class SourceSeparationForegroundWorkerCoordinator(
 
 private enum class SourceSeparationPendingStartReason {
     Manual,
-    AutoHandoff,
+    PlaybackDemand,
 }
 
 private sealed interface SourceSeparationWorkerRequest {
     val song: Song
     val debugReason: String
+    val runClass: SourceSeparationExecutionRunClass
+    val priority: Int
 
     data class Full(
         override val song: Song,
         val reason: SourceSeparationPendingStartReason,
     ) : SourceSeparationWorkerRequest {
         override val debugReason: String = reason.name
+        override val runClass: SourceSeparationExecutionRunClass = when (reason) {
+            SourceSeparationPendingStartReason.Manual ->
+                SourceSeparationExecutionRunClass.ManualFullSong
+            SourceSeparationPendingStartReason.PlaybackDemand ->
+                SourceSeparationExecutionRunClass.PlaybackDemandWindow
+        }
+        override val priority: Int = when (reason) {
+            SourceSeparationPendingStartReason.Manual -> 2
+            SourceSeparationPendingStartReason.PlaybackDemand -> 1
+        }
     }
 
     data class StartWindowPreStart(
@@ -1047,6 +1081,8 @@ private sealed interface SourceSeparationWorkerRequest {
         val readyWindowCount: Int,
     ) : SourceSeparationWorkerRequest {
         override val debugReason: String = "PreStart($readyWindowCount)"
+        override val runClass = SourceSeparationExecutionRunClass.NextSongPrefetch
+        override val priority: Int = 0
     }
 }
 

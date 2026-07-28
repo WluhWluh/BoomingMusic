@@ -713,7 +713,7 @@ class PlayerViewModel(
         }
         val song = currentSong
         clearSourceSeparationPausePendingAction(song)
-        sourceSeparationForegroundWorkerCoordinator.requestSong(song)
+        sourceSeparationForegroundWorkerCoordinator.requestManualSong(song)
     }
 
     private fun clearSourceSeparationPausePendingAction(song: Song = currentSong) {
@@ -1510,7 +1510,8 @@ class PlayerViewModel(
             val autoStartDecision =
                 sourceSeparationForegroundWorkerCoordinator.autoStartDecision(song, blend)
             if (autoStartDecision.shouldStart && currentSong.id == song.id) {
-                startSourceSeparationForCurrentSong()
+                sourceSeparationForegroundWorkerCoordinator
+                    .requestPlaybackDemandSong(song)
             }
             if ((autoStartDecision.shouldStart ||
                         autoStartDecision.shouldWaitForProcessingCache) &&
@@ -1581,7 +1582,8 @@ class PlayerViewModel(
                     .shouldStart &&
                 currentSong.id == song.id
             ) {
-                startSourceSeparationForCurrentSong()
+                sourceSeparationForegroundWorkerCoordinator
+                    .requestPlaybackDemandSong(song)
             }
         }
     }

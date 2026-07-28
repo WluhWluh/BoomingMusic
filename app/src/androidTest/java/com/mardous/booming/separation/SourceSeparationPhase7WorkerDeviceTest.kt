@@ -3732,7 +3732,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 isPlaying = false,
                 sourceSeparationBlend = TEST_BLEND,
             )
-            coordinator.requestSong(nextSource)
+            coordinator.requestPlaybackDemandSong(nextSource)
             waitForCompleted(coordinator)
             val transitioned = runtimeFacade.cacheStatus(nextRuntimeSong) as?
                 SourceSeparationModelAwareCacheStatus.Completed

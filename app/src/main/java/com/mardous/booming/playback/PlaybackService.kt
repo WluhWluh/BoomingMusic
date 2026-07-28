@@ -104,6 +104,7 @@ import com.mardous.booming.playback.renderer.AlacWorkaroundCodecSelector
 import com.mardous.booming.playback.renderer.BoomingMusicRenderersFactory
 import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
+import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
@@ -124,6 +125,7 @@ import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoor
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_TRY_GPU
 import com.mardous.booming.util.CLEAR_QUEUE_ON_COMPLETION
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
@@ -147,6 +149,7 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.STOP_WHEN_CLOSED_FROM_RECENTS
 import com.mardous.booming.util.SongPlayCountHelper
@@ -868,6 +871,11 @@ class PlaybackService :
                     }
                     val result = sourceSeparationRuntime.separate(
                         song = resolved,
+                        tryGpu = preferences.getBoolean(
+                            SOURCE_SEPARATION_TRY_GPU,
+                            DEFAULT_SOURCE_SEPARATION_TRY_GPU,
+                        ),
+                        runClass = SourceSeparationExecutionRunClass.ManualFullSong,
                         playbackReadyWindowCountProvider = {
                             sourceSeparationPlaybackReadyWindowCount
                         },
@@ -1348,7 +1356,7 @@ class PlaybackService :
         val autoStartDecision =
             sourceSeparationForegroundWorkerCoordinator.autoStartDecision(song, normalizedBlend)
         if (autoStartDecision.shouldStart && player.currentMediaItem?.mediaId == mediaItem.mediaId) {
-            sourceSeparationForegroundWorkerCoordinator.requestSong(song)
+            sourceSeparationForegroundWorkerCoordinator.requestPlaybackDemandSong(song)
         }
         val expectProcessing = autoStartDecision.shouldStart ||
                 autoStartDecision.shouldWaitForProcessingCache
