@@ -601,6 +601,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                         evidence.unexpectedRemoteRelaunchCount)
                     .put("unexpectedRemotePresenceSampleCount",
                         evidence.unexpectedRemotePresenceSampleCount)
+                    .put("deathRequester", evidence.deathRequester)
                     .put("killExitElapsedMs", evidence.killExitElapsedMs)
                     .put("silentObservationMs", evidence.silentObservationMs)
                     .put("silentProcessSampleCount", evidence.silentProcessSampleCount)
@@ -1243,6 +1244,10 @@ internal object SourceSeparationMainDeathDebugHarness {
             EXTRA_UNEXPECTED_REMOTE_PRESENCE_SAMPLE_COUNT,
             -1L,
         ).also { require(it >= 0L) },
+        deathRequester = intent.requiredString(EXTRA_DEATH_REQUESTER).also { requester ->
+            require(requester == "adb-run-as-kill-9" ||
+                requester == "adb-am-crash-pid")
+        },
         killExitElapsedMs = intent.getLongExtra(EXTRA_KILL_EXIT_ELAPSED_MS, -1L)
             .also { require(it >= 0L) },
         mainProcessSampleCount = intent.getLongExtra(EXTRA_MAIN_PROCESS_SAMPLE_COUNT, -1L)
@@ -1531,6 +1536,7 @@ internal object SourceSeparationMainDeathDebugHarness {
         val silentProcessSampleCount: Long,
         val unexpectedRemoteRelaunchCount: Long,
         val unexpectedRemotePresenceSampleCount: Long,
+        val deathRequester: String,
         val killExitElapsedMs: Long,
         val mainProcessSampleCount: Long,
         val remoteProcessSampleCount: Long,
@@ -1562,7 +1568,7 @@ internal object SourceSeparationMainDeathDebugHarness {
     ) {
         MainProcessDeath(STAGE_MAIN_DEATH, "debug-main-process"),
         ForceStop(STAGE_FORCE_STOP, "adb-am-force-stop"),
-        RemoteProcessDeath(STAGE_REMOTE_DEATH, "adb-run-as-kill-9"),
+        RemoteProcessDeath(STAGE_REMOTE_DEATH, "adb-external-process-death"),
     }
 
     private enum class MainDeathBoundary(val argumentValue: String) {
@@ -1645,6 +1651,7 @@ internal object SourceSeparationMainDeathDebugHarness {
         "unexpectedRemoteRelaunchCount"
     private const val EXTRA_UNEXPECTED_REMOTE_PRESENCE_SAMPLE_COUNT =
         "unexpectedRemotePresenceSampleCount"
+    private const val EXTRA_DEATH_REQUESTER = "deathRequester"
     private const val EXTRA_KILL_EXIT_ELAPSED_MS = "killExitElapsedMs"
     private const val EXTRA_MAIN_PROCESS_SAMPLE_COUNT = "mainProcessSampleCount"
     private const val EXTRA_REMOTE_PROCESS_SAMPLE_COUNT = "remoteProcessSampleCount"

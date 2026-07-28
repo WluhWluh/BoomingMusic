@@ -45,7 +45,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v53",
+    [string]$RunnerRevision = "phase7-runner-v54",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -1448,7 +1448,20 @@ try {
             throw "The remote-death run unexpectedly had a stopped package state before kill."
         }
 
-        Invoke-Adb shell run-as $package kill -9 $oldRemotePid
+        $deathRequester = "adb-run-as-kill-9"
+        & $adb -s $Serial shell run-as $package kill -9 $oldRemotePid `
+            2>$null | Out-Null
+        $runAsKillExitCode = $LASTEXITCODE
+        if ($runAsKillExitCode -ne 0) {
+            $remotePidsBeforeFallback = @(
+                Get-NamedProcessIds "${package}:source_separation"
+            )
+            if ($oldRemotePid -notin $remotePidsBeforeFallback) {
+                throw "The inference process disappeared before a successful external death request."
+            }
+            Invoke-Adb shell am crash --user $deviceUserId $oldRemotePid
+            $deathRequester = "adb-am-crash-pid"
+        }
         $deathStarted = [Diagnostics.Stopwatch]::StartNew()
         $deathDeadline = [DateTime]::UtcNow.AddSeconds(30)
         $unexpectedRemotePids = [System.Collections.Generic.HashSet[int]]::new()
@@ -1599,6 +1612,7 @@ try {
             "--el", "mainProcessSampleCount", [string]$mainProcessSampleCount,
             "--el", "mainDisappearanceCount", [string]$mainDisappearanceCount,
             "--el", "killExitElapsedMs", [string]$killExitElapsedMs,
+            "--es", "deathRequester", $deathRequester,
             "--el", "entryFileCountBeforeKill", [string]$beforeKillEntry.fileCount,
             "--el", "entryFileCountAfterDeath", [string]$afterDeathEntry.fileCount,
             "--el", "entryFileCountAfterSilence", [string]$afterSilenceEntry.fileCount,
