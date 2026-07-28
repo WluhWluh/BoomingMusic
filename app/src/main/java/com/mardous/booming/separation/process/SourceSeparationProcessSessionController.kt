@@ -16,7 +16,6 @@ import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoFailureStage
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoInferenceException
-import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteEventDeliveryException
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
@@ -66,7 +65,6 @@ internal class SourceSeparationProcessSessionController(
             failure != null && execution.nativeStateTouched &&
             failure !is CancellationException &&
             failure !is SourceSeparationPausedException &&
-            failure !is SourceSeparationRemoteEventDeliveryException &&
             failure !is SourceSeparationCacheLostException &&
             failure !is SourceSeparationProcessSessionRecycleRequiredException
         ) {

@@ -228,6 +228,22 @@ internal class SourceSeparationRemoteAdmittedExecution(
     private var terminal = false
 
     @Synchronized
+    fun observerConnected(observerId: String, observerProcessName: String) {
+        if (terminal) return
+        coordinator.observerConnected(run, observerId, observerProcessName)
+    }
+
+    @Synchronized
+    fun observerDisconnected(
+        observerId: String,
+        observerProcessName: String,
+        reason: String,
+    ) {
+        if (terminal) return
+        coordinator.observerDisconnected(run, observerId, observerProcessName, reason)
+    }
+
+    @Synchronized
     fun persist(event: SourceSeparationExecutionHostEvent) {
         check(!terminal) { "Remote cache run already reached a terminal transition." }
         when (val payload = event.payload) {

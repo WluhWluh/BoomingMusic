@@ -9,6 +9,8 @@ import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import com.mardous.booming.AppProcessResolver
+import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
+import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.v2.SourceSeparationExactCacheModelException
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
@@ -22,6 +24,8 @@ import com.mardous.booming.separation.process.SourceSeparationForegroundExecutio
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseLifecycle
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseOperationResult
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
+import com.mardous.booming.separation.process.SourceSeparationIndependentRunAuthorityEvidence
+import com.mardous.booming.separation.process.SourceSeparationIndependentRunAuthorityPolicy
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnosticsCollector
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
@@ -48,8 +52,7 @@ internal class SourceSeparationExecutionService : Service() {
     private val processGeneration by lazy(::createProcessGeneration)
     private val commandLedger = SourceSeparationIpcCommandLedger()
     private var executionEnvironment: SourceSeparationRemoteExecutionEnvironment? = null
-    private var clientCallback: ISourceSeparationExecutionCallback? = null
-    private var clientDeathRecipient: IBinder.DeathRecipient? = null
+    private var client: ConnectedClient? = null
     private var activeRun: ActiveRemoteRun? = null
     private var recycleAcknowledgement: SourceSeparationIpcRecycleAcknowledgement? = null
     private val retentionBinder = Binder()
@@ -98,7 +101,7 @@ internal class SourceSeparationExecutionService : Service() {
     override fun onUnbind(intent: Intent?): Boolean {
         if (intent?.action != ACTION_BIND) return false
         synchronized(stateLock) {
-            abandonClientLocked()
+            handleClientLossLocked("service-unbound")
         }
         return false
     }
@@ -145,7 +148,7 @@ internal class SourceSeparationExecutionService : Service() {
             activeRun?.close()
             activeRun = null
             unlinkClientDeathLocked()
-            clientCallback = null
+            client = null
             recycleAcknowledgement != null
         }
         if (!acknowledgedRecycle) {
@@ -164,18 +167,37 @@ internal class SourceSeparationExecutionService : Service() {
         ): String {
             requireSameUidCaller()
             val request = SourceSeparationExecutionIpcCodec.decodeConnectRequest(requestJson)
-            synchronized(stateLock) {
+            val activeState = synchronized(stateLock) {
                 require(commandLedger.record(request.commandId)) {
                     "Duplicate IPC connect command."
                 }
-                check(activeRun == null) {
-                    "The IPC callback cannot be replaced during an active run."
+                val active = activeRun
+                if (active != null) {
+                    check(client == null && hasIndependentAuthorityLocked(active)) {
+                        "The IPC observer cannot replace an active client-bound owner."
+                    }
                 }
                 unlinkClientDeathLocked()
-                clientCallback = callback
                 val deathRecipient = IBinder.DeathRecipient(::handleClientDeath)
                 callback.asBinder().linkToDeath(deathRecipient, 0)
-                clientDeathRecipient = deathRecipient
+                val connected = ConnectedClient(
+                    state = SourceSeparationIpcObserverState(
+                        observerId = request.observerId,
+                        clientProcessName = request.clientProcessName,
+                        connectedAtElapsedRealtimeNanos = nowElapsedRealtimeNanos(),
+                    ),
+                    callback = callback,
+                    deathRecipient = deathRecipient,
+                )
+                client = connected
+                try {
+                    active?.attachObserver(connected)
+                } catch (error: Throwable) {
+                    unlinkClientDeathLocked()
+                    client = null
+                    throw error
+                }
+                active?.ipcState()
             }
             val process = AppProcessResolver.resolve(this@SourceSeparationExecutionService)
             val diagnostics = captureProcessDiagnostics(process.processName)
@@ -187,6 +209,7 @@ internal class SourceSeparationExecutionService : Service() {
                     pid = Process.myPid(),
                     idlePssBytes = diagnostics.memory.pssBytes,
                     diagnostics = diagnostics,
+                    activeRun = activeState,
                 )
             )
         }
@@ -450,7 +473,7 @@ internal class SourceSeparationExecutionService : Service() {
         }
         if (activeRun != null) throw SourceSeparationIpcBusyException()
         if (recycleAcknowledgement != null) throw SourceSeparationIpcRecyclingException()
-        val callback = requireNotNull(clientCallback) {
+        val connectedClient = requireNotNull(client) {
             "The remote execution client is not connected."
         }
         ensureForegroundStarted(command.foregroundLease)
@@ -463,15 +486,11 @@ internal class SourceSeparationExecutionService : Service() {
             initialPlaybackReadyWindowCount =
                 command.descriptor.runtime.initialPlaybackReadyWindowCount,
         )
-        val sender = SourceSeparationRemoteEventSender(callback) {
-            control.requestPause()
-            synchronized(stateLock) {
-                if (clientCallback?.asBinder() === callback.asBinder()) {
-                    unlinkClientDeathLocked()
-                    clientCallback = null
-                }
-            }
-        }
+        val sender = SourceSeparationRemoteEventSender(
+            initialObserverId = connectedClient.state.observerId,
+            initialDelivery = connectedClient.callback::onEvent,
+            onDeliveryFailure = ::handleObserverDeliveryFailure,
+        )
         val environment = executionEnvironment()
         val admittedExecution = try {
             environment.prepare(command.descriptor, control)
@@ -480,6 +499,10 @@ internal class SourceSeparationExecutionService : Service() {
             throw error
         }
         try {
+            admittedExecution.observerConnected(
+                observerId = connectedClient.state.observerId,
+                observerProcessName = connectedClient.state.clientProcessName,
+            )
             val host = InProcessSourceSeparationExecutionHost(
                 rangeExecutor = environment.rangeExecutor,
                 processGeneration = processGeneration,
@@ -492,6 +515,7 @@ internal class SourceSeparationExecutionService : Service() {
                 host = host,
                 environment = environment,
                 admittedExecution = admittedExecution,
+                observerState = connectedClient.state,
             )
             command.foregroundLease?.let { lease ->
                 val attached = foregroundController.attach(lease)
@@ -788,12 +812,29 @@ internal class SourceSeparationExecutionService : Service() {
 
     private fun handleClientDeath() {
         synchronized(stateLock) {
-            abandonClientLocked()
+            handleClientLossLocked("callback-binder-died")
         }
     }
 
-    private fun abandonClientLocked() {
+    private fun handleObserverDeliveryFailure(observerId: String, error: Throwable) {
+        Log.w(TAG, "Source-separation observer delivery failed: $observerId", error)
+        synchronized(stateLock) {
+            if (client?.state?.observerId != observerId) return
+            handleClientLossLocked("callback-delivery-failed")
+        }
+    }
+
+    private fun handleClientLossLocked(reason: String) {
         val active = activeRun
+        val connected = client
+        if (active != null && connected != null && hasIndependentAuthorityLocked(active)) {
+            if (active.detachObserver(connected.state.observerId, reason)) {
+                unlinkClientDeathLocked()
+                client = null
+                return
+            }
+        }
+        if (active != null && connected == null && hasIndependentAuthorityLocked(active)) return
         active?.requestPause()
         val closeResult = active?.host?.closeRun(
             active.descriptor.runId,
@@ -804,12 +845,12 @@ internal class SourceSeparationExecutionService : Service() {
             activeRun = null
         }
         unlinkClientDeathLocked()
-        clientCallback = null
+        client = null
     }
 
     private fun closeAbandonedRun(active: ActiveRemoteRun) {
         synchronized(stateLock) {
-            if (clientCallback != null || activeRun !== active) return
+            if (client != null || activeRun !== active) return
             active.host.closeRun(
                 active.descriptor.runId,
                 active.descriptor.processGeneration,
@@ -820,12 +861,32 @@ internal class SourceSeparationExecutionService : Service() {
     }
 
     private fun unlinkClientDeathLocked() {
-        val callback = clientCallback
-        val recipient = clientDeathRecipient
-        if (callback != null && recipient != null) {
-            runCatching { callback.asBinder().unlinkToDeath(recipient, 0) }
+        client?.let { connected ->
+            runCatching {
+                connected.callback.asBinder().unlinkToDeath(connected.deathRecipient, 0)
+            }
         }
-        clientDeathRecipient = null
+    }
+
+    private fun hasIndependentAuthorityLocked(active: ActiveRemoteRun): Boolean {
+        val hostSnapshotAvailable = active.host.snapshot(
+            active.descriptor.runId,
+            active.descriptor.processGeneration,
+        ) != null
+        val wakeLock = processingWakeLockController.diagnostics()
+        return SourceSeparationIndependentRunAuthorityPolicy.isEstablished(
+            SourceSeparationIndependentRunAuthorityEvidence(
+                runId = active.descriptor.runId,
+                processGeneration = active.descriptor.processGeneration,
+                displayName = active.descriptor.source.displayName,
+                runClass = active.descriptor.runtime.runClass,
+                backgroundPolicy = active.descriptor.runtime.backgroundPolicy,
+                hostSnapshotAvailable = hostSnapshotAvailable,
+                foregroundLease = foregroundController.diagnostics().activeLease,
+                wakeLockLease = wakeLock.activeLease,
+                platformWakeLockHeld = wakeLock.platformHeld,
+            )
+        )
     }
 
     private fun requireSameUidCaller() {
@@ -875,6 +936,12 @@ internal class SourceSeparationExecutionService : Service() {
         return (value and Long.MAX_VALUE).coerceAtLeast(1L)
     }
 
+    private data class ConnectedClient(
+        val state: SourceSeparationIpcObserverState,
+        val callback: ISourceSeparationExecutionCallback,
+        val deathRecipient: IBinder.DeathRecipient,
+    )
+
     private class ActiveRemoteRun(
         val descriptor: com.mardous.booming.separation.process
             .SourceSeparationExecutionDescriptor,
@@ -884,15 +951,66 @@ internal class SourceSeparationExecutionService : Service() {
         val environment: SourceSeparationRemoteExecutionEnvironment,
         val admittedExecution: com.mardous.booming.separation.process
             .SourceSeparationRemoteAdmittedExecution,
+        observerState: SourceSeparationIpcObserverState,
     ) : AutoCloseable {
         private val foregroundDeferredReason =
             AtomicReference<SourceSeparationForegroundDeferredReason?>(null)
+        private var observerState = observerState
+
+        val independentAuthorityEligible: Boolean
+            get() = descriptor.runtime.runClass == SourceSeparationExecutionRunClass.ManualFullSong &&
+                descriptor.runtime.backgroundPolicy ==
+                SourceSeparationBackgroundPolicy.IndependentForegroundEligible
 
         val executionRequest: com.mardous.booming.separation
             .SourceSeparationModelAwareExecutionRequest
             get() = admittedExecution.executionRequest
 
         var highestControlSequence: Long = 0L
+
+        fun ipcState() = SourceSeparationIpcActiveRunState(
+            descriptor = descriptor,
+            authority = if (independentAuthorityEligible) {
+                SourceSeparationIpcRunAuthority.IndependentForeground
+            } else {
+                SourceSeparationIpcRunAuthority.ClientBound
+            },
+            snapshot = host.snapshot(descriptor.runId, descriptor.processGeneration),
+            observer = observerState,
+        )
+
+        fun attachObserver(connected: ConnectedClient) {
+            check(independentAuthorityEligible) {
+                "A client-bound run cannot replace its observer."
+            }
+            admittedExecution.observerConnected(
+                connected.state.observerId,
+                connected.state.clientProcessName,
+            )
+            observerState = connected.state
+            sender.attach(connected.state.observerId, connected.callback::onEvent)
+        }
+
+        fun detachObserver(observerId: String, reason: String): Boolean {
+            val current = observerState
+            if (!current.connected || current.observerId != observerId) return false
+            return try {
+                admittedExecution.observerDisconnected(
+                    observerId,
+                    current.clientProcessName,
+                    reason,
+                )
+                observerState = current.copy(
+                    disconnectedAtElapsedRealtimeNanos = nowElapsedRealtimeNanos(),
+                    disconnectReason = reason,
+                )
+                sender.detach(observerId)
+                true
+            } catch (error: Throwable) {
+                Log.e(TAG, "Unable to persist source-separation observer loss", error)
+                false
+            }
+        }
 
         fun requestPause() {
             control.requestPause()
@@ -1009,6 +1127,9 @@ private class SourceSeparationIpcCommandLedger(
     }
 }
 
+private fun nowElapsedRealtimeNanos(): Long =
+    SystemClock.elapsedRealtimeNanos().coerceAtLeast(1L)
+
 private class SourceSeparationIpcDuplicateCommandException(
     commandId: String,
 ) : IllegalArgumentException("Duplicate IPC command: $commandId")
@@ -1050,8 +1171,6 @@ private fun Throwable.toIpcError(): SourceSeparationIpcError {
             SourceSeparationIpcErrorCategory.CacheUnavailable
         is SourceSeparationCacheLostException ->
             SourceSeparationIpcErrorCategory.CacheUnavailable
-        is SourceSeparationRemoteEventDeliveryException ->
-            SourceSeparationIpcErrorCategory.HostDied
         is SourceSeparationProcessSessionRecycleRequiredException ->
             SourceSeparationIpcErrorCategory.RecycleRequired
         is SourceSeparationProcessSessionPoisonedException ->

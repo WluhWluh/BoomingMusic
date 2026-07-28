@@ -75,6 +75,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private val controlSequence = AtomicLong(0L)
     private val terminalConnectionFailure = AtomicReference<Throwable?>(null)
     private val callbackFailure = AtomicReference<Throwable?>(null)
+    private val reconnectEvents = SourceSeparationRemoteEventQueue()
 
     override val processGeneration: Long
         get() = ensureConnected().processGeneration
@@ -98,6 +99,11 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 failure = terminalConnectionFailure.get()?.message,
             )
         }
+
+    fun reconnectableRun(): SourceSeparationIpcActiveRunState? {
+        ensureConnected()
+        return connectionLock.withLock { connectResponse?.activeRun }
+    }
 
     fun processDiagnostics(): SourceSeparationProcessDiagnostics {
         val connection = ensureConnected()
@@ -443,6 +449,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             state
         }
         shutdown.pump?.close()
+        reconnectEvents.close()
         if (shutdown.request != null && shutdown.service != null) {
             runCatching { sendShutdownCancel(shutdown.service, shutdown.request) }
         }
@@ -653,9 +660,11 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         override fun onEvent(eventJson: String) {
             val event = SourceSeparationExecutionIpcCodec.decodeEvent(eventJson)
             val request = connectionLock.withLock {
-                activeRequest ?: throw IllegalStateException(
-                    "Bound-remote event arrived without an active request.",
-                )
+                activeRequest
+            }
+            if (request == null) {
+                reconnectEvents.offer(event)
+                return
             }
             require(event.runId == request.descriptor.runId &&
                 event.processGeneration == request.descriptor.processGeneration

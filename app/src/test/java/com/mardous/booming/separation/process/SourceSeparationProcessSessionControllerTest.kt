@@ -16,7 +16,6 @@ import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoFailureStage
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoInferenceException
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLostException
-import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteEventDeliveryException
 import java.nio.file.Files
 import java.util.concurrent.CancellationException
 import org.junit.Assert.assertEquals
@@ -255,28 +254,6 @@ class SourceSeparationProcessSessionControllerTest {
         second.close()
         controller.finishExecution("run-2", null)
         assertEquals(1, factory.createCount)
-    }
-
-    @Test
-    fun `remote callback delivery failure leaves resident state reusable`() {
-        val controller = residentController(FakeFactory())
-        controller.beginExecution("run-1")
-        controller.acquire(artifact, profile, settings).close()
-        controller.finishExecution(
-            "run-1",
-            SourceSeparationRemoteEventDeliveryException(
-                IllegalStateException("callback died"),
-            ),
-        )
-
-        assertEquals(
-            SourceSeparationProcessSessionState.Resident,
-            controller.diagnostics().state,
-        )
-        controller.beginExecution("run-2")
-        controller.acquire(artifact, profile, settings).close()
-        controller.finishExecution("run-2", null)
-        assertEquals(1, controller.diagnostics().nativeSessionCreationCount)
     }
 
     @Test

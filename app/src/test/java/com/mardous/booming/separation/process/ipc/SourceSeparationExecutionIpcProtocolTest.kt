@@ -13,6 +13,8 @@ import com.mardous.booming.separation.process.SourceSeparationForegroundPlatform
 import com.mardous.booming.separation.process.SourceSeparationForegroundServiceDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationForegroundTimeoutRecord
 import kotlinx.serialization.json.Json
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -231,6 +233,48 @@ class SourceSeparationExecutionIpcProtocolTest {
             )
         }
         assertTrue(queue.snapshot().hasPendingProgress)
+    }
+
+    @Test
+    fun `event sender detaches a failed observer and resumes with a replacement`() {
+        val failed = CountDownLatch(1)
+        val delivered = CountDownLatch(1)
+        val received = mutableListOf<Long>()
+        val sender = SourceSeparationRemoteEventSender(
+            initialObserverId = "observer-1",
+            initialDelivery = { throw IllegalStateException("observer died") },
+            onDeliveryFailure = { observerId, _ ->
+                assertEquals("observer-1", observerId)
+                failed.countDown()
+            },
+        )
+
+        sender.offer(progressEvent(1L, 1))
+        assertTrue(failed.await(5L, TimeUnit.SECONDS))
+        sender.offer(progressEvent(2L, 2))
+        sender.attach("observer-2") { payload ->
+            received += SourceSeparationExecutionIpcCodec.decodeEvent(payload).sequence
+            delivered.countDown()
+        }
+
+        assertTrue(delivered.await(5L, TimeUnit.SECONDS))
+        sender.closeAndAwait()
+        assertEquals(listOf(2L), received)
+    }
+
+    @Test
+    fun `event sender closes promptly while detached`() {
+        val failed = CountDownLatch(1)
+        val sender = SourceSeparationRemoteEventSender(
+            initialObserverId = "observer-1",
+            initialDelivery = { throw IllegalStateException("observer died") },
+            onDeliveryFailure = { _, _ -> failed.countDown() },
+        )
+
+        sender.offer(progressEvent(1L, 1))
+        assertTrue(failed.await(5L, TimeUnit.SECONDS))
+        sender.offer(progressEvent(2L, 2))
+        sender.closeAndAwait()
     }
 
     private fun progressEvent(
