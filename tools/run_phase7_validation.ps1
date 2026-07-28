@@ -36,7 +36,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v29",
+    [string]$RunnerRevision = "phase7-runner-v30",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -206,10 +206,10 @@ if ($ExecutionHostMode -eq "bound-remote" -and
 }
 if ($ExecutionHostMode -eq "independent-foreground" -and
         ($Stage -ne "worker" -or $ProcessAbi -ne "arm64-v8a" -or
-        $BackendMode -ne "cpu" -or $ProcessorCount -gt 0 -or
-        $XnnPackFlags -ge 0 -or $AutoFailpoint -ne "none" -or
+        $ProcessorCount -gt 0 -or $XnnPackFlags -ge 0 -or
+        $AutoFailpoint -ne "none" -or
         $RemoteAutoFailpoint -ne "none" -or $RebindAfterCompletion)) {
-    throw "IndependentForeground currently requires the arm64 CPU worker with default runtime settings and no fault injection or rebind."
+    throw "IndependentForeground requires an arm64 CPU or Auto worker with default runtime settings and no fault injection or rebind."
 }
 if ($Stage -in @("process-matrix", "process-switch-matrix")) {
     $validX86Resident = $ProcessAbi -eq "x86" -and $X86ProcessValidation
