@@ -1348,6 +1348,9 @@ try {
         }
     } elseif ($Stage -eq "independent-remote-death") {
         Invoke-Adb shell am force-stop --user $deviceUserId $package
+        Invoke-Adb shell run-as $package rm -rf -- `
+            cache/source-separation `
+            "/storage/emulated/$deviceUserId/Android/data/$package/cache/source-separation"
         $debugDirectory = "files/phase7-debug-main-death"
         $scenarioRelativePath = "$debugDirectory/$RunId-scenario.json"
         $debugReportRelativePath = "$debugDirectory/$RunId-report.json"
