@@ -1,5 +1,6 @@
 package com.mardous.booming.debug
 
+import android.app.ActivityManager
 import android.app.NotificationManager
 import android.content.ContentValues
 import android.content.Context
@@ -19,6 +20,7 @@ import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
+import com.mardous.booming.separation.SourceSeparationRuntimeUnavailableReason
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultAction
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultControl
@@ -313,6 +315,7 @@ internal object SourceSeparationMainDeathDebugHarness {
         var worker: SourceSeparationForegroundWorkerCoordinator? = null
         var presetRepository: SourceSeparationPresetRepository? = null
         var primaryModelBackup: File? = null
+        var primaryModelDestination: File? = null
         var primaryModelRestored = false
         var originalTryGpuForRestore: Boolean? = null
         try {
@@ -514,7 +517,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     check(store.readRunJournal(cacheKey) == mismatchedJournal) {
                         "Runtime mismatch rejection mutated the abandoned journal."
                     }
-                    repeat(RUNTIME_MISMATCH_POSITION_UPDATE_COUNT) { index ->
+                    repeat(REJECTED_RETRY_POSITION_UPDATE_COUNT) { index ->
                         coordinator.updatePosition(
                             positionMs = (index + 1L) * 1_000L,
                             durationMs = source.duration,
@@ -522,7 +525,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                             sourceSeparationBlend = TEST_BLEND,
                         )
                     }
-                    SystemClock.sleep(RUNTIME_MISMATCH_POSITION_SETTLE_MS)
+                    SystemClock.sleep(REJECTED_RETRY_POSITION_SETTLE_MS)
                     check(!coordinator.isWorkerActive() &&
                         coordinator.debugStatus().contains("activated=false") &&
                         store.readRunJournal(cacheKey) == mismatchedJournal
@@ -578,7 +581,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                         .put("admittedTryGpu", originalTryGpu)
                         .put("backendPolicyPreserved", true)
                         .put("positionUpdatesAfterRejection",
-                            RUNTIME_MISMATCH_POSITION_UPDATE_COUNT)
+                            REJECTED_RETRY_POSITION_UPDATE_COUNT)
                         .put("positionUpdatesRestartedWorker", false)
                         .put("typedFailureMessage", mismatchMessage)
                         .put("cacheWriteLockReleased", cacheLockReleased)
@@ -586,6 +589,316 @@ internal object SourceSeparationMainDeathDebugHarness {
                         .put("terminalNotification", false),
                 )
                 Log.i(TAG, "Remote-death artifact mismatch passed for ${request.runId}.")
+                return
+            }
+            if (request.remoteDeathRecoveryAction ==
+                RemoteDeathRecoveryAction.RejectModelLoss
+            ) {
+                val repository = get<SourceSeparationPresetRepository>(
+                    SourceSeparationPresetRepository::class.java,
+                ).also { presetRepository = it }
+                val primaryInstalled = repository.requireInstalledPreset(
+                    request.artifactSha256,
+                )
+                val backupDirectory = File(
+                    File(context.filesDir, MODEL_BACKUP_DIRECTORY),
+                    request.runId,
+                ).apply {
+                    check(isDirectory || mkdirs()) {
+                        "Could not create the missing-model backup directory."
+                    }
+                }
+                val backup = File(backupDirectory, "${request.artifactSha256}.tflite")
+                val destination = primaryInstalled.file
+                primaryModelBackup = backup
+                primaryModelDestination = destination
+                check(!backup.exists() || backup.delete()) {
+                    "Could not replace the stale missing-model backup."
+                }
+                if (!destination.renameTo(backup)) {
+                    destination.copyTo(backup, overwrite = false)
+                    check(backup.length() == primaryInstalled.byteSize)
+                    check(backup.sha256().equals(
+                        request.artifactSha256,
+                        ignoreCase = true,
+                    ))
+                    check(destination.delete()) {
+                        "Could not hide the active model after copying its backup."
+                    }
+                }
+                check(!destination.exists())
+                check(backup.length() == primaryInstalled.byteSize)
+                check(backup.sha256().equals(request.artifactSha256, ignoreCase = true))
+                check(repository.installedModel(request.artifactSha256) == null)
+                val missingActive = repository.activeModel()
+                    as? SourceSeparationActivePresetState.Reference
+                    ?: error("The missing model lost its active reference.")
+                check(missingActive.reference.artifactSha256.equals(
+                    request.artifactSha256,
+                    ignoreCase = true,
+                ))
+                check(missingActive.installedModel == null)
+
+                val missingResolution = runtime.resolve(source)
+                    as? SourceSeparationRuntimeSongResolution.Unavailable
+                    ?: error("The absent model still resolved as runnable.")
+                check(missingResolution.reason ==
+                    SourceSeparationRuntimeUnavailableReason.ModelNotInstalled)
+                check(missingResolution.reference?.artifactSha256?.equals(
+                    request.artifactSha256,
+                    ignoreCase = true,
+                ) == true)
+                val missingEntry = runtime.entries().single { entry ->
+                    entry.cacheKey == cacheKey
+                }
+                check(missingEntry.state == SourceSeparationModelAwareCacheEntryState.Stale)
+                check(missingEntry.modelAvailability ==
+                    SourceSeparationCacheModelAvailability.ModelNotInstalled)
+                check(missingEntry.readySegments == committedBeforeDeath.length())
+                check(store.readRunJournal(cacheKey) == journalAfterDeath)
+                validateCommittedSegmentEvidence(
+                    committedBeforeDeath,
+                    requireNotNull(store.readRunJournal(cacheKey)),
+                )
+
+                val missingMessage = context.getString(
+                    R.string.source_separation_model_missing,
+                )
+                val remoteProcessPidsDuringMissingBoundary = linkedSetOf<Int>()
+                fun sampleMissingBoundaryProcesses() {
+                    remoteProcessPidsDuringMissingBoundary.addAll(
+                        inferenceProcessIds(context),
+                    )
+                }
+                sampleMissingBoundaryProcesses()
+                check(remoteProcessPidsDuringMissingBoundary.isEmpty()) {
+                    "An inference process existed before the missing-model retry."
+                }
+                coordinator.clearStatusIfNotRunning()
+                check(coordinator.workerStateFlow.value == SourceSeparationUiState.Idle)
+                coordinator.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = source.duration,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+                check(coordinator.startCurrentSong())
+                check(waitUntil(REATTACH_TIMEOUT_MS) {
+                    sampleMissingBoundaryProcesses()
+                    val state = coordinator.workerStateFlow.value
+                    state is SourceSeparationUiState.Failed &&
+                        state.songId == source.id &&
+                        state.message == missingMessage &&
+                        !coordinator.isWorkerActive() &&
+                        coordinator.runningCacheKey() == null &&
+                        coordinator.protectedCacheKeys().isEmpty() &&
+                        coordinator.pendingSongId() == null
+                }) { "The missing model did not settle in its typed failure state." }
+                repeat(REJECTED_RETRY_POSITION_UPDATE_COUNT) { index ->
+                    coordinator.updatePosition(
+                        positionMs = (index + 1L) * 1_000L,
+                        durationMs = source.duration,
+                        isPlaying = true,
+                        sourceSeparationBlend = TEST_BLEND,
+                    )
+                    sampleMissingBoundaryProcesses()
+                }
+                SystemClock.sleep(REJECTED_RETRY_POSITION_SETTLE_MS)
+                sampleMissingBoundaryProcesses()
+                check(remoteProcessPidsDuringMissingBoundary.isEmpty()) {
+                    "The missing-model retry started an inference process."
+                }
+                check(!coordinator.isWorkerActive() &&
+                    coordinator.debugStatus().contains("activated=false") &&
+                    store.readRunJournal(cacheKey) == journalAfterDeath
+                ) { "Playback updates restarted missing-model work." }
+                check(handoff.stateFlow.value.activeOwner == null)
+                check(notificationManager.activeNotifications.none { notification ->
+                    notification.id == SourceSeparationMediaProcessingForegroundController
+                        .NOTIFICATION_ID
+                })
+
+                restoreMovedPrimaryModel(
+                    repository = repository,
+                    request = request,
+                    backup = backup,
+                    destination = destination,
+                )
+                primaryModelRestored = true
+                val restoredSong = (runtime.resolve(source) as?
+                    SourceSeparationRuntimeSongResolution.Ready)?.song
+                    ?: error("The restored model did not resolve as runnable.")
+                check(restoredSong.identity == runtimeSong.identity)
+                check(restoredSong.cacheKey == cacheKey)
+                val restoredEntry = runtime.entries().single { entry ->
+                    entry.cacheKey == cacheKey
+                }
+                check(restoredEntry.modelAvailability ==
+                    SourceSeparationCacheModelAvailability.InstalledExact)
+                repeat(REJECTED_RETRY_POSITION_UPDATE_COUNT) { index ->
+                    coordinator.updatePosition(
+                        positionMs = (index + 6L) * 1_000L,
+                        durationMs = source.duration,
+                        isPlaying = true,
+                        sourceSeparationBlend = TEST_BLEND,
+                    )
+                    sampleMissingBoundaryProcesses()
+                }
+                SystemClock.sleep(REJECTED_RETRY_POSITION_SETTLE_MS)
+                sampleMissingBoundaryProcesses()
+                check(remoteProcessPidsDuringMissingBoundary.isEmpty()) {
+                    "Restoring the model automatically started inference."
+                }
+                check(!coordinator.isWorkerActive())
+                check(store.readRunJournal(cacheKey) == journalAfterDeath)
+
+                coordinator.clearStatusIfNotRunning()
+                check(coordinator.workerStateFlow.value == SourceSeparationUiState.Idle)
+                val root = store.root().directory
+                val resumeFaultToken = "remote-model-restore-${request.runId}"
+                    .take(MAX_FAULT_TOKEN_LENGTH)
+                SourceSeparationCacheFaultInjection.arm(
+                    root,
+                    SourceSeparationCacheFaultControl(
+                        token = resumeFaultToken,
+                        stage = SourceSeparationCacheFaultStage.NativeInvocation,
+                        action = SourceSeparationCacheFaultAction.Barrier,
+                        timeoutMs = REMOTE_DEATH_BARRIER_TIMEOUT_MS,
+                    ),
+                )
+                coordinator.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = source.duration,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+                check(coordinator.startCurrentSong())
+                val resumeFaultHit = waitForCacheFaultHit(root, resumeFaultToken)
+                val resumedJournal = waitForJournal(SETUP_TIMEOUT_MS) {
+                    store.readRunJournal(cacheKey)?.takeIf { journal ->
+                        journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running &&
+                            journal.request.runId != oldExecutionRunId &&
+                            journal.request.processGeneration != oldProcessGeneration &&
+                            journal.request.ownerPid != oldRemotePid
+                    }
+                }
+                val resumedRemotePid = requireNotNull(resumedJournal.request.ownerPid)
+                check(resumeFaultHit.pid == resumedRemotePid)
+                check(resumedJournal.request.identity == runtimeSong.identity)
+                check(resumedJournal.request.tryGpu == originalTryGpu)
+                check(resumedJournal.request.gpuRuntimeIdentity ==
+                    journalAfterDeath.request.gpuRuntimeIdentity)
+                check(resumedJournal.request.gpuFallbackLatch ==
+                    journalAfterDeath.request.gpuFallbackLatch)
+                validateCommittedSegmentEvidence(committedBeforeDeath, resumedJournal)
+                val previousOwnerDeath = resumedJournal.transitions.single { transition ->
+                    transition.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+                }
+                check(previousOwnerDeath.runId == oldExecutionRunId)
+                check(previousOwnerDeath.processGeneration == oldProcessGeneration)
+                check(previousOwnerDeath.ownerPid == oldRemotePid)
+                val resumedRemoteProcessStartTicks = SourceSeparationProcParser
+                    .parseProcessStartTicks(File("/proc/$resumedRemotePid/stat").readText())
+                    ?: error("Could not read the restored-model process start ticks.")
+                check(resumedRemoteProcessStartTicks != oldRemoteProcessStartTicks)
+
+                coordinator.pauseCurrentSong(source)
+                SourceSeparationCacheFaultInjection.release(root, resumeFaultToken)
+                val pausedJournal = waitForJournal(COMPLETION_TIMEOUT_MS) {
+                    store.readRunJournal(cacheKey)?.takeIf { journal ->
+                        journal.request.runId == resumedJournal.request.runId &&
+                            journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused
+                    }
+                }
+                check(pausedJournal.committedSegments.size <=
+                    committedBeforeDeath.length() + 1)
+                check(waitUntil(REATTACH_TIMEOUT_MS) {
+                    coordinator.runningCacheKey() == null &&
+                        coordinator.protectedCacheKeys().isEmpty() &&
+                        handoff.stateFlow.value.activeOwner == null &&
+                        notificationManager.activeNotifications.none { notification ->
+                            notification.id == SourceSeparationMediaProcessingForegroundController
+                                .NOTIFICATION_ID
+                        }
+                }) { "The restored-model retry did not release after Pause." }
+                check(preferences.edit()
+                    .putBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu)
+                    .commit()
+                ) { "Could not restore the GPU preference after model-loss validation." }
+                originalTryGpuForRestore = null
+
+                writeJson(
+                    outputFile,
+                    JSONObject()
+                        .put("schemaVersion", REMOTE_DEATH_MODEL_LOSS_REPORT_SCHEMA_VERSION)
+                        .put("status", "passed")
+                        .put("stage", STAGE_REMOTE_DEATH)
+                        .put("recoveryAction", request.remoteDeathRecoveryAction.argumentValue)
+                        .put("runId", request.runId)
+                        .put("cacheKey", cacheKey)
+                        .put("mainPid", Process.myPid())
+                        .put("oldRemotePid", oldRemotePid)
+                        .put("resumedRemotePid", resumedRemotePid)
+                        .put("oldRemoteProcessStartTicks", oldRemoteProcessStartTicks)
+                        .put("resumedRemoteProcessStartTicks",
+                            resumedRemoteProcessStartTicks)
+                        .put("oldProcessGeneration", oldProcessGeneration)
+                        .put("resumedProcessGeneration",
+                            resumedJournal.request.processGeneration)
+                        .put("oldExecutionRunId", oldExecutionRunId)
+                        .put("resumedExecutionRunId", resumedJournal.request.runId)
+                        .put("automaticRetryBudget", 0)
+                        .put("automaticRemoteRelaunchCount",
+                            evidence.unexpectedRemoteRelaunchCount)
+                        .put("unexpectedRemotePresenceSampleCount",
+                            evidence.unexpectedRemotePresenceSampleCount)
+                        .put("silentObservationMs", evidence.silentObservationMs)
+                        .put("journalSequenceBeforeKill",
+                            evidence.journalSequenceBeforeKill)
+                        .put("journalSequenceAfterSilence",
+                            evidence.journalSequenceAfterSilence)
+                        .put("committedSegmentsPreserved",
+                            committedBeforeDeath.length())
+                        .put("missingResolutionReason", missingResolution.reason.name)
+                        .put("missingCacheState", missingEntry.state.name)
+                        .put("missingCacheModelAvailability",
+                            missingEntry.modelAvailability.name)
+                        .put("typedFailureMessage", missingMessage)
+                        .put("missingRetryJournalUnchanged", true)
+                        .put("remoteProcessPidsDuringMissingBoundary",
+                            JSONArray(remoteProcessPidsDuringMissingBoundary.sorted()))
+                        .put("positionUpdatesWhileMissing",
+                            REJECTED_RETRY_POSITION_UPDATE_COUNT)
+                        .put("positionUpdatesAfterRestore",
+                            REJECTED_RETRY_POSITION_UPDATE_COUNT)
+                        .put("modelArtifactRestored", primaryModelRestored)
+                        .put("restoredCacheModelAvailability",
+                            restoredEntry.modelAvailability.name)
+                        .put("restoreTriggeredAutomaticResume", false)
+                        .put("secondExplicitStartRequired", true)
+                        .put("persistedTryGpuBeforeRetry", persistedTryGpu)
+                        .put("admittedTryGpu", originalTryGpu)
+                        .put("resumedTryGpu", resumedJournal.request.tryGpu)
+                        .put("resumedGpuRuntime", gpuRuntimeJson(resumedJournal))
+                        .put("backendPolicyPreserved", true)
+                        .put("resumedPreviousOwnerDeathCount",
+                            resumedJournal.transitions.count { transition ->
+                                transition.type ==
+                                    SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+                            })
+                        .put("resumedCommittedSegmentsAtBarrier",
+                            resumedJournal.committedSegments.size)
+                        .put("resumeNativeInvocationBarrierReached", true)
+                        .put("resumedLifecycleAfterPause", pausedJournal.lifecycle.name)
+                        .put("resumedCommittedSegmentsAfterPause",
+                            pausedJournal.committedSegments.size)
+                        .put("cacheWriteLockReleased", cacheLockReleased)
+                        .put("cacheLockReleaseMs", cacheLockReleaseMs)
+                        .put("terminalNotification", false),
+                )
+                Log.i(TAG, "Remote-death model-loss validation passed for ${request.runId}.")
                 return
             }
             if (request.remoteDeathRecoveryAction ==
@@ -1280,11 +1593,22 @@ internal object SourceSeparationMainDeathDebugHarness {
             worker?.cancel()
             if (!primaryModelRestored && presetRepository != null) {
                 runCatching {
-                    restorePrimaryModel(
-                        repository = requireNotNull(presetRepository),
-                        request = request,
-                        backup = primaryModelBackup,
-                    )
+                    if (request.remoteDeathRecoveryAction ==
+                        RemoteDeathRecoveryAction.RejectModelLoss
+                    ) {
+                        restoreMovedPrimaryModel(
+                            repository = requireNotNull(presetRepository),
+                            request = request,
+                            backup = primaryModelBackup,
+                            destination = primaryModelDestination,
+                        )
+                    } else {
+                        restorePrimaryModel(
+                            repository = requireNotNull(presetRepository),
+                            request = request,
+                            backup = primaryModelBackup,
+                        )
+                    }
                     primaryModelRestored = true
                 }.onFailure { error ->
                     Log.e(TAG, "Could not restore the primary model after validation.", error)
@@ -1292,7 +1616,13 @@ internal object SourceSeparationMainDeathDebugHarness {
                         JSONObject(outputFile.readText(Charsets.UTF_8))
                     }.getOrElse { JSONObject() }
                     failure
-                        .put("schemaVersion", REMOTE_DEATH_MODEL_SWITCH_REPORT_SCHEMA_VERSION)
+                        .put("schemaVersion", if (request.remoteDeathRecoveryAction ==
+                            RemoteDeathRecoveryAction.RejectModelLoss
+                        ) {
+                            REMOTE_DEATH_MODEL_LOSS_REPORT_SCHEMA_VERSION
+                        } else {
+                            REMOTE_DEATH_MODEL_SWITCH_REPORT_SCHEMA_VERSION
+                        })
                         .put("status", "failed")
                         .put("stage", STAGE_REMOTE_DEATH)
                         .put("phase", "primary-model-restoration")
@@ -1309,7 +1639,9 @@ internal object SourceSeparationMainDeathDebugHarness {
             if (request.remoteDeathRecoveryAction ==
                     RemoteDeathRecoveryAction.SwitchModelThenStart ||
                 request.remoteDeathRecoveryAction ==
-                    RemoteDeathRecoveryAction.RejectArtifactMismatch
+                    RemoteDeathRecoveryAction.RejectArtifactMismatch ||
+                request.remoteDeathRecoveryAction ==
+                    RemoteDeathRecoveryAction.RejectModelLoss
             ) {
                 originalTryGpuForRestore?.let { originalTryGpu ->
                     runCatching {
@@ -1731,6 +2063,43 @@ internal object SourceSeparationMainDeathDebugHarness {
         )
         check(restored.modelId == request.modelId)
         check(restored.artifactSha256.equals(request.artifactSha256, ignoreCase = true))
+    }
+
+    private fun restoreMovedPrimaryModel(
+        repository: SourceSeparationPresetRepository,
+        request: Request,
+        backup: File?,
+        destination: File?,
+    ) {
+        val source = requireNotNull(backup?.takeIf(File::isFile)) {
+            "The moved primary model backup is unavailable."
+        }
+        val target = requireNotNull(destination) {
+            "The primary model destination is unavailable."
+        }
+        check(source.sha256().equals(request.artifactSha256, ignoreCase = true)) {
+            "The moved primary model hash changed."
+        }
+        check(!target.exists()) { "The missing model destination was unexpectedly replaced." }
+        if (!source.renameTo(target)) {
+            source.copyTo(target, overwrite = false)
+            check(source.delete()) { "Could not remove the restored model backup." }
+        }
+        val restored = repository.requireInstalledPreset(request.artifactSha256)
+        check(restored.modelId == request.modelId)
+        check(restored.file.canonicalFile == target.canonicalFile)
+        check(restored.file.sha256().equals(request.artifactSha256, ignoreCase = true))
+    }
+
+    private fun inferenceProcessIds(context: Context): Set<Int> {
+        val expectedName = "${context.packageName}:source_separation"
+        return context.getSystemService(ActivityManager::class.java)
+            .runningAppProcesses
+            .orEmpty()
+            .asSequence()
+            .filter { process -> process.processName == expectedName }
+            .map { process -> process.pid }
+            .toSet()
     }
 
     private fun configurePreferences(request: Request) {
@@ -2316,6 +2685,7 @@ internal object SourceSeparationMainDeathDebugHarness {
         ClearCacheThenStart("clear-cache"),
         SwitchModelThenStart("switch-model"),
         RejectArtifactMismatch("artifact-mismatch"),
+        RejectModelLoss("model-loss"),
         ;
 
         companion object {
@@ -2417,6 +2787,8 @@ internal object SourceSeparationMainDeathDebugHarness {
         "phase7-remote-death-model-switch-report-v1"
     private const val REMOTE_DEATH_RUNTIME_POLICY_REPORT_SCHEMA_VERSION =
         "phase7-remote-death-runtime-policy-report-v1"
+    private const val REMOTE_DEATH_MODEL_LOSS_REPORT_SCHEMA_VERSION =
+        "phase7-remote-death-model-loss-report-v1"
     private const val STAGE_MAIN_DEATH = "independent-main-death"
     private const val STAGE_FORCE_STOP = "force-stop"
     private const val STAGE_REMOTE_DEATH = "independent-remote-death"
@@ -2425,8 +2797,8 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val COMPLETION_TIMEOUT_MS = 30L * 60L * 1_000L
     private const val MAIN_DEATH_SETTLE_MS = 100L
     private const val REMOTE_DEATH_BARRIER_TIMEOUT_MS = 120_000L
-    private const val RUNTIME_MISMATCH_POSITION_UPDATE_COUNT = 5
-    private const val RUNTIME_MISMATCH_POSITION_SETTLE_MS = 500L
+    private const val REJECTED_RETRY_POSITION_UPDATE_COUNT = 5
+    private const val REJECTED_RETRY_POSITION_SETTLE_MS = 500L
     private const val MAX_FAULT_TOKEN_LENGTH = 120
     private const val POLL_MS = 100L
     private const val MEDIA_SCAN_RETRIES = 60

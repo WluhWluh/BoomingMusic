@@ -94,7 +94,13 @@ param(
     [string]$PlaybackOwnedRunClass = "playback-demand",
     [ValidateSet("segment-running", "after-first-committed-segment")]
     [string]$MainDeathBoundary = "segment-running",
-    [ValidateSet("resume", "clear-cache", "switch-model", "artifact-mismatch")]
+    [ValidateSet(
+        "resume",
+        "clear-cache",
+        "switch-model",
+        "artifact-mismatch",
+        "model-loss"
+    )]
     [string]$RemoteDeathRecoveryAction = "resume",
     [ValidateRange(5, 300)]
     [int]$SilentObservationSeconds = 30,
