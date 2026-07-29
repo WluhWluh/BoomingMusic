@@ -1936,10 +1936,15 @@ internal object SourceSeparationMainDeathDebugHarness {
             }
             val terminalCommitBoundary = request.mainDeathBoundary ==
                 MainDeathBoundary.TerminalCommit
-            val journalBeforeHarnessValidation = waitForJournal(REATTACH_TIMEOUT_MS) {
-                store.readRunJournal(cacheKey)?.takeIf { journal ->
-                    journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running &&
-                        (terminalCommitBoundary || journal.transitions
+            val journalSequenceBeforeHarnessValidation = if (terminalCommitBoundary) {
+                check(scenario.getInt("committedSegments") == EXPECTED_FULL_SONG_SEGMENTS)
+                check(File(scenario.getString("journalPath")).isFile)
+                scenario.getLong("journalSequence")
+            } else {
+                val reattached = waitForJournal(REATTACH_TIMEOUT_MS) {
+                    store.readRunJournal(cacheKey)?.takeIf { journal ->
+                        journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running &&
+                            journal.transitions
                             .filter { transition ->
                                 transition.type ==
                                     SourceSeparationCacheRunTransitionType.ObserverConnected ||
@@ -1950,12 +1955,14 @@ internal object SourceSeparationMainDeathDebugHarness {
                                 observers.size >= 3 &&
                                     observers.last().type ==
                                         SourceSeparationCacheRunTransitionType.ObserverConnected
-                            })
+                            }
+                    }
                 }
+                check(reattached.request.ownerPid == remotePid)
+                check(reattached.request.processGeneration == processGeneration)
+                check(reattached.request.runId == executionRunId)
+                reattached.latestSequence
             }
-            check(journalBeforeHarnessValidation.request.ownerPid == remotePid)
-            check(journalBeforeHarnessValidation.request.processGeneration == processGeneration)
-            check(journalBeforeHarnessValidation.request.runId == executionRunId)
 
             val source = resolveMediaStoreSong(context, mediaUri, request.sourcePath)
             val runtime = get<SourceSeparationRuntimeFacade>(
@@ -2164,7 +2171,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("journalSequenceBeforeDeath", scenario.getLong("journalSequence"))
                     .put(
                         "journalSequenceBeforeHarnessValidation",
-                        journalBeforeHarnessValidation.latestSequence,
+                        journalSequenceBeforeHarnessValidation,
                     )
                     .put("finalJournalSequence", finalJournal.latestSequence)
                     .put("committedSegmentsBeforeDeath", scenario.getInt("committedSegments"))
