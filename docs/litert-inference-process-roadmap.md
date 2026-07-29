@@ -1553,8 +1553,10 @@ in
   [Phase 7 main-process product state](validation/litert-inference-process/phase7/main-process-product-state-2026-07-29.md).
   S10 Compose instrumentation also renders the exact partial-cache metadata,
   routes its Delete action by cache key, and routes an installed preset's Use
-  action by model ID. Navigation from the recreated product surface and real
-  repository mutations remain open, so this item is not yet complete.
+  action by model ID. Separate live S10 transactions now perform real preset
+  download/activation and exact cache deletion through the production
+  ViewModels. Navigation from the recreated product surface and active
+  original-audio continuity remain open, so this item is not yet complete.
 - [x] Confirm on S10/API 31 and S25/API 35 that Android force-stop terminates an
   active manual CPU or bounded-GPU run without automatic resurrection. Accept a stale
   `Running` journal, but require every process to exit, package `stopped=true`,
@@ -1579,8 +1581,14 @@ policy changed in response.
   adopt the same run from a second observer, and complete without a second
   writer or `start()` on S10 and S25 for CPU and bounded GPU.
 - [ ] Kill and restart the main process before FGS handoff, during native
-  invocation, after final segment publication, and during terminal journal
-  commit.
+  invocation, and after final segment publication.
+- [x] Kill the main process during terminal journal commit, after the completed
+  manifest and all 48 segment pairs are durable but before the journal changes
+  from sequence 99 `Running` to sequence 100 `Completed`. S10 CPU and bounded
+  GPU retain the original remote PID/generation/run, issue no second start,
+  recreate no terminal processing notification, and expose an idle worker and
+  playable `Completed 48/48` cache. See
+  [Phase 7 terminal-commit main-process death](validation/litert-inference-process/phase7/main-process-terminal-commit-2026-07-29.md).
 - [x] Kill the main process after durable `SegmentRunning` and before the first
   committed segment, then let the real `MainActivity` adopt and complete the
   same run on S10 and S25 for CPU and bounded GPU. See
@@ -1590,7 +1598,8 @@ policy changed in response.
   and SHA-256 evidence while the original remote run completes all 48 segments.
   This passes on S10 and S25 for CPU and bounded GPU without a second start.
 - [ ] Repeat main-process death before FGS handoff, during native invocation,
-  after final segment publication, and during terminal journal commit.
+  and after final segment publication. The terminal journal boundary is
+  qualified separately above.
 - [x] Require a reconnecting client to reject stale Binder generations and
   reconstruct UI state from the durable snapshot without seeking or replacing
   original playback. Each binding now owns a distinct callback and reconnect
