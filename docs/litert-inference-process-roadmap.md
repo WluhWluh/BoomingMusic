@@ -13,9 +13,9 @@ S10; a retired bounded-runtime identity is rejected on explicit retry without
 automatic rescheduling on S10; missing and exactly restored TFLite weights
 remain terminal until a second explicit start on S10; a durable GPU fallback
 latch resumes directly on CPU while retaining its bounded-GPU identity on S10;
-after real S10 main-process recreation, the CPU run retains its processing
-notification, exposes a playable partial-cache window, and reconstructs the
-exact active entry for cache-management state
+after real S10 main-process recreation, CPU and bounded GPU runs retain their
+processing notification, expose a playable partial-cache window, and
+reconstruct the exact active entry for cache-management state
 
 Updated: 2026-07-29
 
@@ -1545,14 +1545,14 @@ in
   stem paths, sizes, and SHA-256 values through completion.
 - [ ] Verify active playback readiness, notification rendering, and cache
   management UI after main-process recreation.
-  The S10 CPU product-state projection now passes after the first committed
-  segment: the processing notification retains its localized content and
-  Pause/Cancel actions, position zero is playable with one ready window, and
-  cache-management state exposes the exact 9662 entry as `Partial` with its
-  installed model identity. See
+  The S10 CPU and bounded-GPU product-state projections now pass after the
+  first committed segment: the processing notification retains its localized
+  content and Pause/Cancel actions, position zero is playable with one ready
+  window, and cache-management state exposes the exact 9662 entry as `Partial`
+  with its installed model identity. See
   [Phase 7 main-process product state](validation/litert-inference-process/phase7/main-process-product-state-2026-07-29.md).
-  Visible Compose navigation/actions and bounded-GPU repetition remain open,
-  so this item is not yet complete.
+  Visible Compose navigation/actions remain open, so this item is not yet
+  complete.
 - [x] Confirm on S10/API 31 and S25/API 35 that Android force-stop terminates an
   active manual CPU or bounded-GPU run without automatic resurrection. Accept a stale
   `Running` journal, but require every process to exit, package `stopped=true`,
