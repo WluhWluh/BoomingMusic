@@ -34,6 +34,21 @@ class SourceSeparationDeadForegroundResourceCleanerTest {
     }
 
     @Test
+    fun `confirmed binder death cleans before proc entry is reaped`() {
+        val fixture = fixture(currentStartTicks = 200L)
+
+        assertTrue(
+            fixture.cleaner.cleanupIfProcessDied(
+                SourceSeparationRemoteForegroundPolicy.ManualFullSong,
+                pid = 100,
+                expectedProcessStartTicks = 200L,
+                processDeathConfirmed = true,
+            )
+        )
+        fixture.assertCleaned(expectedProcessChecks = 0)
+    }
+
+    @Test
     fun `missing process incarnation releases orphaned foreground resources`() {
         val fixture = fixture(currentStartTicks = null)
 
@@ -111,8 +126,8 @@ class SourceSeparationDeadForegroundResourceCleanerTest {
             check(notificationCancellations == 0)
         }
 
-        fun assertCleaned() {
-            check(processChecks == 1)
+        fun assertCleaned(expectedProcessChecks: Int = 1) {
+            check(processChecks == expectedProcessChecks)
             check(serviceStops == 1)
             check(notificationCancellations == 1)
         }

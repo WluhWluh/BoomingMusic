@@ -669,6 +669,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                     DeadObjectException("Source-separation service binder died."),
                     bindingGeneration,
                     binder,
+                    processDeathConfirmed = true,
                 )
             }
             deathRecipient = recipient
@@ -780,6 +781,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 markConnectionDead(
                     RemoteException("Source-separation service disconnected."),
                     bindingGeneration,
+                    processDeathConfirmed = true,
                 )
             }
 
@@ -802,6 +804,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         error: Throwable,
         bindingGeneration: Long? = null,
         binder: IBinder? = null,
+        processDeathConfirmed: Boolean = false,
     ) {
         val disconnected = connectionLock.withLock {
             if (connectionState == SourceSeparationRemoteConnectionState.Closed) return
@@ -867,7 +870,17 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             foregroundPolicy = foregroundPolicy,
             pid = disconnected.processPid,
             expectedProcessStartTicks = disconnected.processStartTicks,
+            processDeathConfirmed = processDeathConfirmed || error.isDeadObjectFailure(),
         )
+    }
+
+    private fun Throwable.isDeadObjectFailure(): Boolean {
+        var current: Throwable? = this
+        while (current != null) {
+            if (current is DeadObjectException) return true
+            current = current.cause.takeUnless { it === current }
+        }
+        return false
     }
 
     private fun waitForProcessIncarnationExit(

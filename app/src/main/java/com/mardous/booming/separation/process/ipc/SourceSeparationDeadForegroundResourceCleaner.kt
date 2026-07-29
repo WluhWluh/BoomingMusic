@@ -15,11 +15,12 @@ internal class SourceSeparationDeadForegroundResourceCleaner(
         foregroundPolicy: SourceSeparationRemoteForegroundPolicy,
         pid: Int?,
         expectedProcessStartTicks: Long?,
+        processDeathConfirmed: Boolean = false,
     ): Boolean {
         if (foregroundPolicy != SourceSeparationRemoteForegroundPolicy.ManualFullSong ||
             pid == null ||
             expectedProcessStartTicks == null ||
-            processStartTicks(pid) == expectedProcessStartTicks
+            (!processDeathConfirmed && processStartTicks(pid) == expectedProcessStartTicks)
         ) {
             return false
         }
