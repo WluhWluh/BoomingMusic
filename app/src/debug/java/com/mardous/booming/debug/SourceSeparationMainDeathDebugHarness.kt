@@ -1,6 +1,7 @@
 package com.mardous.booming.debug
 
 import android.app.ActivityManager
+import android.app.Notification
 import android.app.NotificationManager
 import android.content.ContentValues
 import android.content.Context
@@ -39,6 +40,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailab
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCachePlayback
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.MdxInferenceBackend
@@ -55,6 +57,7 @@ import com.mardous.booming.separation.process.SourceSeparationProcessSessionStat
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationMediaProcessingForegroundController
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
+import com.mardous.booming.ui.screen.player.SourceSeparationModelAwareCacheManagementUiState
 import com.mardous.booming.ui.screen.player.SourceSeparationUiState
 import com.mardous.booming.util.MINIMUM_SONG_DURATION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
@@ -239,6 +242,13 @@ internal object SourceSeparationMainDeathDebugHarness {
             val remoteProcessStartTicks = SourceSeparationProcParser.parseProcessStartTicks(
                 File("/proc/$remotePid/stat").readText(),
             ) ?: error("Could not read the authoritative remote process start ticks.")
+            val processingNotification = processingNotificationSnapshot(context).also { snapshot ->
+                validateProcessingNotification(
+                    context = context,
+                    snapshot = snapshot,
+                    displayName = source.fileName,
+                )
+            }
 
             writeJson(
                 scenarioFile,
@@ -270,6 +280,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                         "observerProcessName",
                         connectedObserver?.observerProcessName ?: JSONObject.NULL,
                     )
+                    .put("processingNotificationBeforeMainDeath", processingNotification)
                     .put("admittedGpuRuntime", gpuRuntimeJson(journal))
                     .put(
                         "admittedGpuFallbackLatch",
@@ -1936,6 +1947,60 @@ internal object SourceSeparationMainDeathDebugHarness {
             check(worker.protectedCacheKeys() == setOf(cacheKey))
             check(worker.pendingSongId() == null)
 
+            val processingNotificationAfterReattachment =
+                processingNotificationSnapshot(context).also { snapshot ->
+                    validateProcessingNotification(
+                        context = context,
+                        snapshot = snapshot,
+                        displayName = source.fileName,
+                    )
+                }
+            val processingNotificationBeforeDeath =
+                scenario.getJSONObject("processingNotificationBeforeMainDeath")
+            check(
+                processingNotificationBeforeDeath.getString("title") ==
+                    processingNotificationAfterReattachment.getString("title") &&
+                    processingNotificationBeforeDeath.getString("text") ==
+                    processingNotificationAfterReattachment.getString("text") &&
+                    processingNotificationBeforeDeath.getJSONArray("actions").toString() ==
+                    processingNotificationAfterReattachment.getJSONArray("actions").toString()
+            ) { "The processing notification changed across main-process recreation." }
+
+            var activePlaybackManifestUpdatedAtEpochMs = 0L
+            check(waitUntil(SETUP_TIMEOUT_MS) {
+                when (val status = runtime.playableStatus(
+                    song = runtimeSong,
+                    playbackPositionMs = 0L,
+                    readyWindowCount = 1,
+                )) {
+                    is SourceSeparationModelAwarePlayableStatus.Ready -> {
+                        status.playback.use { playback ->
+                            check(playback.vocalsFile.isFile)
+                            check(playback.instrumentalFile.isFile)
+                            activePlaybackManifestUpdatedAtEpochMs =
+                                playback.manifest.updatedAtEpochMs
+                        }
+                        true
+                    }
+                    SourceSeparationModelAwarePlayableStatus.Processing -> false
+                    SourceSeparationModelAwarePlayableStatus.Unavailable ->
+                        error("The reattached running cache became unavailable for playback.")
+                }
+            }) { "The reattached running cache did not expose a playable first window." }
+
+            val cacheManagementState = SourceSeparationModelAwareCacheManagementUiState(
+                items = runtime.entries(),
+            )
+            val activeCacheItem = cacheManagementState.incompleteItems.singleOrNull { entry ->
+                entry.cacheKey == cacheKey
+            } ?: error("Cache management did not expose the reattached running entry.")
+            check(activeCacheItem.state == SourceSeparationModelAwareCacheEntryState.Partial)
+            check(activeCacheItem.modelAvailability ==
+                SourceSeparationCacheModelAvailability.InstalledExact)
+            check((activeCacheItem.readySegments ?: 0) >= 1)
+            check(activeCacheItem.totalSegments == EXPECTED_FULL_SONG_SEGMENTS)
+            check(activeCacheItem.modelId == request.modelId)
+
             val finalJournal = waitForJournal(COMPLETION_TIMEOUT_MS) {
                 store.readRunJournal(cacheKey)?.takeIf { journal ->
                     journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Completed
@@ -2014,6 +2079,43 @@ internal object SourceSeparationMainDeathDebugHarness {
                     )
                     .put("committedSegmentsPreserved", true)
                     .put("finalCommittedSegments", finalJournal.committedSegments.size)
+                    .put(
+                        "processingNotificationBeforeMainDeath",
+                        processingNotificationBeforeDeath,
+                    )
+                    .put(
+                        "processingNotificationAfterReattachment",
+                        processingNotificationAfterReattachment,
+                    )
+                    .put(
+                        "playbackReadinessAfterReattachment",
+                        JSONObject()
+                            .put("status", "Ready")
+                            .put("playbackPositionMs", 0)
+                            .put("readyWindowCount", 1)
+                            .put(
+                                "manifestUpdatedAtEpochMs",
+                                activePlaybackManifestUpdatedAtEpochMs,
+                            ),
+                    )
+                    .put(
+                        "cacheManagementAfterReattachment",
+                        JSONObject()
+                            .put("cacheKey", activeCacheItem.cacheKey)
+                            .put("state", activeCacheItem.state.name)
+                            .put("modelId", activeCacheItem.modelId)
+                            .put("modelAvailability", activeCacheItem.modelAvailability.name)
+                            .put("readySegments", activeCacheItem.readySegments)
+                            .put("totalSegments", activeCacheItem.totalSegments)
+                            .put(
+                                "incompleteSectionCount",
+                                cacheManagementState.incompleteItems.size,
+                            )
+                            .put(
+                                "completedSectionCount",
+                                cacheManagementState.completedItems.size,
+                            ),
+                    )
                     .put("observerTransitionCount", observerTransitions.size)
                     .put("productObserverConnectedBeforeHarness", true)
                     .put(
@@ -2355,6 +2457,51 @@ internal object SourceSeparationMainDeathDebugHarness {
             SystemClock.sleep(POLL_MS)
         }
         return predicate()
+    }
+
+    private fun processingNotificationSnapshot(context: Context): JSONObject {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val statusBarNotification = manager.activeNotifications.singleOrNull { notification ->
+            notification.id == SourceSeparationMediaProcessingForegroundController.NOTIFICATION_ID
+        } ?: error("The source-separation processing notification is not active.")
+        val notification = statusBarNotification.notification
+        val extras = notification.extras
+        return JSONObject()
+            .put("id", statusBarNotification.id)
+            .put("channelId", notification.channelId)
+            .put("category", notification.category ?: JSONObject.NULL)
+            .put("title", extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty())
+            .put("text", extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty())
+            .put("ongoing", notification.flags and Notification.FLAG_ONGOING_EVENT != 0)
+            .put(
+                "progressIndeterminate",
+                extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false),
+            )
+            .put("actions", JSONArray(notification.actions.orEmpty().map { action ->
+                action.title?.toString().orEmpty()
+            }))
+    }
+
+    private fun validateProcessingNotification(
+        context: Context,
+        snapshot: JSONObject,
+        displayName: String,
+    ) {
+        check(snapshot.getInt("id") ==
+            SourceSeparationMediaProcessingForegroundController.NOTIFICATION_ID)
+        check(snapshot.getString("channelId") ==
+            SourceSeparationMediaProcessingForegroundController.CHANNEL_ID)
+        check(snapshot.getString("category") == Notification.CATEGORY_PROGRESS)
+        check(snapshot.getString("title") ==
+            context.getString(R.string.source_separation_processing_windows))
+        check(snapshot.getString("text") == displayName)
+        check(snapshot.getBoolean("ongoing"))
+        check(snapshot.getBoolean("progressIndeterminate"))
+        val actions = snapshot.getJSONArray("actions")
+        check((0 until actions.length()).map(actions::getString) == listOf(
+            context.getString(R.string.action_pause),
+            context.getString(R.string.action_cancel),
+        ))
     }
 
     private fun gpuRuntimeJson(journal: SourceSeparationCacheRunJournal): Any {
@@ -2989,8 +3136,8 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val EXTRA_PACKAGE_STOPPED_BEFORE_KILL = "packageStoppedBeforeKill"
     private const val EXTRA_PACKAGE_STOPPED_AFTER_DEATH = "packageStoppedAfterDeath"
     private const val OUTPUT_DIRECTORY = "phase7-debug-main-death"
-    private const val SCENARIO_SCHEMA_VERSION = 2
-    private const val REPORT_SCHEMA_VERSION = 1
+    private const val SCENARIO_SCHEMA_VERSION = 3
+    private const val REPORT_SCHEMA_VERSION = 2
     private const val FORCE_STOP_REPORT_SCHEMA_VERSION = "phase7-task-lifecycle-report-v1"
     private const val REMOTE_DEATH_REPORT_SCHEMA_VERSION = "phase7-remote-death-report-v1"
     private const val REMOTE_DEATH_CACHE_CLEAR_REPORT_SCHEMA_VERSION =
