@@ -99,7 +99,8 @@ param(
         "clear-cache",
         "switch-model",
         "artifact-mismatch",
-        "model-loss"
+        "model-loss",
+        "latched-fallback"
     )]
     [string]$RemoteDeathRecoveryAction = "resume",
     [ValidateRange(5, 300)]
@@ -304,9 +305,9 @@ if ($Stage -eq "independent-remote-death" -and
         $FixtureId -ne "coast_town_full_mp3")) {
     throw "independent-remote-death is pinned to the 9662 coast_town MP3 full-song fixture."
 }
-if ($RemoteDeathRecoveryAction -eq "artifact-mismatch" -and
+if ($RemoteDeathRecoveryAction -in @("artifact-mismatch", "latched-fallback") -and
         $BackendMode -ne "auto") {
-    throw "artifact-mismatch recovery requires BackendMode=auto."
+    throw "$RemoteDeathRecoveryAction recovery requires BackendMode=auto."
 }
 if ($Stage -in @("process-matrix", "process-switch-matrix")) {
     $validX86Resident = $ProcessAbi -eq "x86" -and $X86ProcessValidation

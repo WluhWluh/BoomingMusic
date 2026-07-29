@@ -18,6 +18,7 @@ import android.webkit.MimeTypeMap
 import com.mardous.booming.R
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
 import com.mardous.booming.separation.SourceSeparationRuntimeUnavailableReason
@@ -902,6 +903,211 @@ internal object SourceSeparationMainDeathDebugHarness {
                 return
             }
             if (request.remoteDeathRecoveryAction ==
+                RemoteDeathRecoveryAction.ResumeLatchedCpuFallback
+            ) {
+                check(originalTryGpu) {
+                    "Latched fallback recovery requires an admitted GPU run."
+                }
+                val admittedRuntime = requireNotNull(
+                    journalAfterDeath.request.gpuRuntimeIdentity,
+                )
+                check(journalAfterDeath.request.gpuFallbackLatch == null)
+                val manifestBeforeLatch = requireNotNull(store.readManifest(cacheKey))
+                val runtimeRecordsBeforeLatch = manifestBeforeLatch.runtimeRecords
+                val latch = SourceSeparationGpuFallbackLatch(
+                    stage = "GpuInvocation",
+                    reason = "Phase 7 persisted fallback fixture.",
+                )
+                val latchedJournal = journalAfterDeath.latchGpuFallback(
+                    latch = latch,
+                    nowEpochMs = System.currentTimeMillis(),
+                )
+                check(latchedJournal.latestSequence == journalAfterDeath.latestSequence + 1L)
+                check(latchedJournal.transitions.count { transition ->
+                    transition.type ==
+                        SourceSeparationCacheRunTransitionType.GpuFallbackLatched
+                } == 1)
+                store.writeRunJournal(latchedJournal)
+                check(store.readRunJournal(cacheKey) == latchedJournal)
+                validateCommittedSegmentEvidence(committedBeforeDeath, latchedJournal)
+
+                coordinator.clearStatusIfNotRunning()
+                check(coordinator.workerStateFlow.value == SourceSeparationUiState.Idle)
+                val root = store.root().directory
+                val resumeFaultToken = "remote-latched-cpu-${request.runId}"
+                    .take(MAX_FAULT_TOKEN_LENGTH)
+                SourceSeparationCacheFaultInjection.arm(
+                    root,
+                    SourceSeparationCacheFaultControl(
+                        token = resumeFaultToken,
+                        stage = SourceSeparationCacheFaultStage.NativeInvocation,
+                        action = SourceSeparationCacheFaultAction.Barrier,
+                        timeoutMs = REMOTE_DEATH_BARRIER_TIMEOUT_MS,
+                    ),
+                )
+                coordinator.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = source.duration,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+                check(coordinator.startCurrentSong())
+                val resumeFaultHit = waitForCacheFaultHit(root, resumeFaultToken)
+                val resumedJournal = waitForJournal(SETUP_TIMEOUT_MS) {
+                    store.readRunJournal(cacheKey)?.takeIf { journal ->
+                        journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running &&
+                            journal.request.runId != oldExecutionRunId &&
+                            journal.request.processGeneration != oldProcessGeneration &&
+                            journal.request.ownerPid != oldRemotePid
+                    }
+                }
+                val resumedRemotePid = requireNotNull(resumedJournal.request.ownerPid)
+                check(resumeFaultHit.pid == resumedRemotePid)
+                check(resumedJournal.request.identity == runtimeSong.identity)
+                check(resumedJournal.request.tryGpu)
+                check(resumedJournal.request.gpuRuntimeIdentity == admittedRuntime)
+                check(resumedJournal.request.gpuFallbackLatch == latch)
+                check(resumedJournal.transitions.count { transition ->
+                    transition.type ==
+                        SourceSeparationCacheRunTransitionType.GpuFallbackLatched
+                } == 1)
+                val previousOwnerDeath = resumedJournal.transitions.single { transition ->
+                    transition.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+                }
+                check(previousOwnerDeath.runId == oldExecutionRunId)
+                check(previousOwnerDeath.processGeneration == oldProcessGeneration)
+                check(previousOwnerDeath.ownerPid == oldRemotePid)
+                validateCommittedSegmentEvidence(committedBeforeDeath, resumedJournal)
+                val resumedRemoteProcessStartTicks = SourceSeparationProcParser
+                    .parseProcessStartTicks(File("/proc/$resumedRemotePid/stat").readText())
+                    ?: error("Could not read the latched-CPU process start ticks.")
+                check(resumedRemoteProcessStartTicks != oldRemoteProcessStartTicks)
+
+                coordinator.pauseCurrentSong(source)
+                SourceSeparationCacheFaultInjection.release(root, resumeFaultToken)
+                val pausedJournal = waitForJournal(COMPLETION_TIMEOUT_MS) {
+                    store.readRunJournal(cacheKey)?.takeIf { journal ->
+                        journal.request.runId == resumedJournal.request.runId &&
+                            journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused
+                    }
+                }
+                check(pausedJournal.request.tryGpu)
+                check(pausedJournal.request.gpuRuntimeIdentity == admittedRuntime)
+                check(pausedJournal.request.gpuFallbackLatch == latch)
+                check(pausedJournal.transitions.count { transition ->
+                    transition.type ==
+                        SourceSeparationCacheRunTransitionType.GpuFallbackLatched
+                } == 1)
+                check(pausedJournal.committedSegments.size <=
+                    committedBeforeDeath.length() + 1)
+                val pausedManifest = requireNotNull(store.readManifest(cacheKey))
+                check(pausedManifest.runtimeRecords.size > runtimeRecordsBeforeLatch.size) {
+                    "The latched CPU retry produced no runtime record."
+                }
+                val resumedRuntimeRecords = pausedManifest.runtimeRecords
+                    .drop(runtimeRecordsBeforeLatch.size)
+                check(resumedRuntimeRecords.isNotEmpty())
+                check(resumedRuntimeRecords.all { record ->
+                    record.backend == "LiteRtCpu" &&
+                        record.fallbackStage == null &&
+                        record.fallbackReason == null
+                }) { "The latched retry did not enter CPU directly." }
+                check(waitUntil(REATTACH_TIMEOUT_MS) {
+                    coordinator.runningCacheKey() == null &&
+                        coordinator.protectedCacheKeys().isEmpty() &&
+                        handoff.stateFlow.value.activeOwner == null &&
+                        notificationManager.activeNotifications.none { notification ->
+                            notification.id == SourceSeparationMediaProcessingForegroundController
+                                .NOTIFICATION_ID
+                        }
+                }) { "The latched CPU retry did not release after Pause." }
+                check(preferences.edit()
+                    .putBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu)
+                    .commit()
+                ) { "Could not restore the GPU preference after latch validation." }
+                originalTryGpuForRestore = null
+
+                writeJson(
+                    outputFile,
+                    JSONObject()
+                        .put("schemaVersion",
+                            REMOTE_DEATH_LATCHED_FALLBACK_REPORT_SCHEMA_VERSION)
+                        .put("status", "passed")
+                        .put("stage", STAGE_REMOTE_DEATH)
+                        .put("recoveryAction", request.remoteDeathRecoveryAction.argumentValue)
+                        .put("runId", request.runId)
+                        .put("cacheKey", cacheKey)
+                        .put("mainPid", Process.myPid())
+                        .put("oldRemotePid", oldRemotePid)
+                        .put("resumedRemotePid", resumedRemotePid)
+                        .put("oldRemoteProcessStartTicks", oldRemoteProcessStartTicks)
+                        .put("resumedRemoteProcessStartTicks",
+                            resumedRemoteProcessStartTicks)
+                        .put("oldProcessGeneration", oldProcessGeneration)
+                        .put("resumedProcessGeneration",
+                            resumedJournal.request.processGeneration)
+                        .put("oldExecutionRunId", oldExecutionRunId)
+                        .put("resumedExecutionRunId", resumedJournal.request.runId)
+                        .put("automaticRetryBudget", 0)
+                        .put("automaticRemoteRelaunchCount",
+                            evidence.unexpectedRemoteRelaunchCount)
+                        .put("unexpectedRemotePresenceSampleCount",
+                            evidence.unexpectedRemotePresenceSampleCount)
+                        .put("silentObservationMs", evidence.silentObservationMs)
+                        .put("journalSequenceBeforeKill",
+                            evidence.journalSequenceBeforeKill)
+                        .put("journalSequenceAfterSilence",
+                            evidence.journalSequenceAfterSilence)
+                        .put("latchedJournalSequence", latchedJournal.latestSequence)
+                        .put("committedSegmentsPreserved",
+                            committedBeforeDeath.length())
+                        .put("fallbackLatchStage", latch.stage)
+                        .put("fallbackLatchReason", latch.reason)
+                        .put("fallbackTransitionCount",
+                            pausedJournal.transitions.count { transition ->
+                                transition.type ==
+                                    SourceSeparationCacheRunTransitionType.GpuFallbackLatched
+                            })
+                        .put("persistedTryGpuBeforeRetry", persistedTryGpu)
+                        .put("admittedTryGpu", originalTryGpu)
+                        .put("resumedTryGpu", resumedJournal.request.tryGpu)
+                        .put("admittedGpuRuntime", gpuRuntimeJson(journalAfterDeath))
+                        .put("resumedGpuRuntime", gpuRuntimeJson(resumedJournal))
+                        .put("gpuRuntimeIdentityPreserved", true)
+                        .put("resumedPreviousOwnerDeathCount",
+                            resumedJournal.transitions.count { transition ->
+                                transition.type ==
+                                    SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+                            })
+                        .put("runtimeRecordCountBeforeLatch",
+                            runtimeRecordsBeforeLatch.size)
+                        .put("resumedRuntimeRecords", JSONArray(
+                            resumedRuntimeRecords.map { record ->
+                                JSONObject()
+                                    .put("backend", record.backend)
+                                    .put("runtimeProfileId", record.runtimeProfileId)
+                                    .put("precision", record.precision)
+                                    .put("fallbackStage",
+                                        record.fallbackStage ?: JSONObject.NULL)
+                                    .put("fallbackReason",
+                                        record.fallbackReason ?: JSONObject.NULL)
+                            },
+                        ))
+                        .put("directCpuResume", true)
+                        .put("newGpuFallbackAttempt", false)
+                        .put("resumeNativeInvocationBarrierReached", true)
+                        .put("resumedLifecycleAfterPause", pausedJournal.lifecycle.name)
+                        .put("resumedCommittedSegmentsAfterPause",
+                            pausedJournal.committedSegments.size)
+                        .put("cacheWriteLockReleased", cacheLockReleased)
+                        .put("cacheLockReleaseMs", cacheLockReleaseMs)
+                        .put("terminalNotification", false),
+                )
+                Log.i(TAG, "Remote-death latched CPU validation passed for ${request.runId}.")
+                return
+            }
+            if (request.remoteDeathRecoveryAction ==
                 RemoteDeathRecoveryAction.SwitchModelThenStart
             ) {
                 val secondaryModelId = requireNotNull(request.secondaryModelId)
@@ -1641,7 +1847,9 @@ internal object SourceSeparationMainDeathDebugHarness {
                 request.remoteDeathRecoveryAction ==
                     RemoteDeathRecoveryAction.RejectArtifactMismatch ||
                 request.remoteDeathRecoveryAction ==
-                    RemoteDeathRecoveryAction.RejectModelLoss
+                    RemoteDeathRecoveryAction.RejectModelLoss ||
+                request.remoteDeathRecoveryAction ==
+                    RemoteDeathRecoveryAction.ResumeLatchedCpuFallback
             ) {
                 originalTryGpuForRestore?.let { originalTryGpu ->
                     runCatching {
@@ -2686,6 +2894,7 @@ internal object SourceSeparationMainDeathDebugHarness {
         SwitchModelThenStart("switch-model"),
         RejectArtifactMismatch("artifact-mismatch"),
         RejectModelLoss("model-loss"),
+        ResumeLatchedCpuFallback("latched-fallback"),
         ;
 
         companion object {
@@ -2789,6 +2998,8 @@ internal object SourceSeparationMainDeathDebugHarness {
         "phase7-remote-death-runtime-policy-report-v1"
     private const val REMOTE_DEATH_MODEL_LOSS_REPORT_SCHEMA_VERSION =
         "phase7-remote-death-model-loss-report-v1"
+    private const val REMOTE_DEATH_LATCHED_FALLBACK_REPORT_SCHEMA_VERSION =
+        "phase7-remote-death-latched-fallback-report-v1"
     private const val STAGE_MAIN_DEATH = "independent-main-death"
     private const val STAGE_FORCE_STOP = "force-stop"
     private const val STAGE_REMOTE_DEATH = "independent-remote-death"
