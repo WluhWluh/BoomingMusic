@@ -1934,24 +1934,28 @@ internal object SourceSeparationMainDeathDebugHarness {
                 (request.mainDeathBoundary.faultStage != null)) {
                 "The main-death fault barrier does not match the requested boundary."
             }
-            val reattachedBeforeHarness = waitForJournal(REATTACH_TIMEOUT_MS) {
+            val terminalCommitBoundary = request.mainDeathBoundary ==
+                MainDeathBoundary.TerminalCommit
+            val journalBeforeHarnessValidation = waitForJournal(REATTACH_TIMEOUT_MS) {
                 store.readRunJournal(cacheKey)?.takeIf { journal ->
                     journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running &&
-                        journal.transitions.filter { transition ->
-                            transition.type ==
-                                SourceSeparationCacheRunTransitionType.ObserverConnected ||
+                        (terminalCommitBoundary || journal.transitions
+                            .filter { transition ->
                                 transition.type ==
-                                    SourceSeparationCacheRunTransitionType.ObserverDisconnected
-                        }.let { observers ->
-                            observers.size >= 3 &&
-                                observers.last().type ==
-                                    SourceSeparationCacheRunTransitionType.ObserverConnected
-                        }
+                                    SourceSeparationCacheRunTransitionType.ObserverConnected ||
+                                    transition.type ==
+                                        SourceSeparationCacheRunTransitionType.ObserverDisconnected
+                            }
+                            .let { observers ->
+                                observers.size >= 3 &&
+                                    observers.last().type ==
+                                        SourceSeparationCacheRunTransitionType.ObserverConnected
+                            })
                 }
             }
-            check(reattachedBeforeHarness.request.ownerPid == remotePid)
-            check(reattachedBeforeHarness.request.processGeneration == processGeneration)
-            check(reattachedBeforeHarness.request.runId == executionRunId)
+            check(journalBeforeHarnessValidation.request.ownerPid == remotePid)
+            check(journalBeforeHarnessValidation.request.processGeneration == processGeneration)
+            check(journalBeforeHarnessValidation.request.runId == executionRunId)
 
             val source = resolveMediaStoreSong(context, mediaUri, request.sourcePath)
             val runtime = get<SourceSeparationRuntimeFacade>(
@@ -1972,18 +1976,24 @@ internal object SourceSeparationMainDeathDebugHarness {
                 sourceSeparationBlend = TEST_BLEND,
             )
 
-            val adopted = waitUntil(REATTACH_TIMEOUT_MS) {
-                when (val state = worker.workerStateFlow.value) {
-                    is SourceSeparationUiState.Failed,
-                    is SourceSeparationUiState.Canceled,
-                    -> error("Main-process reattachment failed: $state")
-                    else -> Unit
+            if (terminalCommitBoundary) {
+                check(worker.runningCacheKey() == null)
+                check(worker.protectedCacheKeys().isEmpty())
+                check(worker.pendingSongId() == null)
+            } else {
+                val adopted = waitUntil(REATTACH_TIMEOUT_MS) {
+                    when (val state = worker.workerStateFlow.value) {
+                        is SourceSeparationUiState.Failed,
+                        is SourceSeparationUiState.Canceled,
+                        -> error("Main-process reattachment failed: $state")
+                        else -> Unit
+                    }
+                    worker.runningCacheKey() == cacheKey
                 }
-                worker.runningCacheKey() == cacheKey
+                check(adopted) { "The restarted worker did not adopt the remote run." }
+                check(worker.protectedCacheKeys() == setOf(cacheKey))
+                check(worker.pendingSongId() == null)
             }
-            check(adopted) { "The restarted worker did not adopt the remote run." }
-            check(worker.protectedCacheKeys() == setOf(cacheKey))
-            check(worker.pendingSongId() == null)
 
             val processingNotificationAfterReattachment =
                 processingNotificationSnapshot(context).also { snapshot ->
@@ -2007,8 +2017,6 @@ internal object SourceSeparationMainDeathDebugHarness {
             val cacheManagementState = SourceSeparationModelAwareCacheManagementUiState(
                 items = runtime.entries(),
             )
-            val terminalCommitBoundary = request.mainDeathBoundary ==
-                MainDeathBoundary.TerminalCommit
             val activeCacheItem = if (terminalCommitBoundary) {
                 cacheManagementState.completedItems.singleOrNull { entry ->
                     entry.cacheKey == cacheKey
@@ -2111,9 +2119,15 @@ internal object SourceSeparationMainDeathDebugHarness {
                 transition.type == SourceSeparationCacheRunTransitionType.ObserverConnected ||
                     transition.type == SourceSeparationCacheRunTransitionType.ObserverDisconnected
             }
-            check(observerTransitions.size >= 3)
-            check(observerTransitions.last().type ==
-                SourceSeparationCacheRunTransitionType.ObserverConnected)
+            if (terminalCommitBoundary) {
+                check(observerTransitions.isNotEmpty())
+                check(observerTransitions.last().type ==
+                    SourceSeparationCacheRunTransitionType.ObserverDisconnected)
+            } else {
+                check(observerTransitions.size >= 3)
+                check(observerTransitions.last().type ==
+                    SourceSeparationCacheRunTransitionType.ObserverConnected)
+            }
             check(finalJournal.transitions.all { transition ->
                 transition.runId == executionRunId &&
                     transition.processGeneration == processGeneration
@@ -2150,7 +2164,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("journalSequenceBeforeDeath", scenario.getLong("journalSequence"))
                     .put(
                         "journalSequenceBeforeHarnessValidation",
-                        reattachedBeforeHarness.latestSequence,
+                        journalBeforeHarnessValidation.latestSequence,
                     )
                     .put("finalJournalSequence", finalJournal.latestSequence)
                     .put("committedSegmentsBeforeDeath", scenario.getInt("committedSegments"))
@@ -2200,7 +2214,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                             ),
                     )
                     .put("observerTransitionCount", observerTransitions.size)
-                    .put("productObserverConnectedBeforeHarness", true)
+                    .put("productObserverConnectedBeforeHarness", !terminalCommitBoundary)
                     .put(
                         "terminalWorkerState",
                         worker.workerStateFlow.value::class.java.simpleName,
