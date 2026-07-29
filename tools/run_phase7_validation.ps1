@@ -45,7 +45,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v55",
+    [string]$RunnerRevision = "phase7-runner-v56",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -94,7 +94,7 @@ param(
     [string]$PlaybackOwnedRunClass = "playback-demand",
     [ValidateSet("segment-running", "after-first-committed-segment")]
     [string]$MainDeathBoundary = "segment-running",
-    [ValidateSet("resume", "clear-cache")]
+    [ValidateSet("resume", "clear-cache", "switch-model")]
     [string]$RemoteDeathRecoveryAction = "resume",
     [ValidateRange(5, 300)]
     [int]$SilentObservationSeconds = 30,
@@ -367,9 +367,15 @@ if ($BackendMode -eq "auto" -and $Stage -eq "lifecycle" -and
 if ($Stage -eq "playback" -and $CacheKey -notmatch '^[0-9a-f]{64}$') {
     throw "Playback stage requires a 64-character lowercase cache key."
 }
-if ($Stage -in @("switching", "process-switch-matrix", "process-cache-race-matrix") -and
+$requiresSecondaryModel = $Stage -in @(
+    "switching",
+    "process-switch-matrix",
+    "process-cache-race-matrix"
+) -or ($Stage -eq "independent-remote-death" -and
+    $RemoteDeathRecoveryAction -eq "switch-model")
+if ($requiresSecondaryModel -and
         [string]::IsNullOrWhiteSpace($SecondaryModelId)) {
-    throw "$Stage requires SecondaryModelId."
+    throw "$Stage/$RemoteDeathRecoveryAction requires SecondaryModelId."
 }
 if (-not [string]::IsNullOrWhiteSpace($SecondaryModelId) -and
         $SecondaryModelId -eq $ModelId) {
@@ -1387,6 +1393,13 @@ try {
             "--es", "killBoundary", "after-first-committed-segment",
             "--es", "remoteDeathRecoveryAction", $RemoteDeathRecoveryAction
         )
+        if ($null -ne $secondaryModel) {
+            $debugArguments += @(
+                "--es", "secondaryModelId", $SecondaryModelId,
+                "--es", "secondaryArtifactSha256",
+                $secondaryModel.Artifact.tflite.sha256
+            )
+        }
         Invoke-Adb @debugArguments --es command beginIndependentRemoteDeath
         $scenarioText = Wait-RemoteJsonFile `
             -RelativePath $scenarioRelativePath `

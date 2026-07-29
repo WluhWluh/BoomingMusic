@@ -32,11 +32,20 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLockOwner
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLockPurpose
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheValidationResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCachePlayback
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
+import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
+import com.mardous.booming.separation.model.MdxCompatibilityPolicy
+import com.mardous.booming.separation.model.MdxInferenceBackend
+import com.mardous.booming.separation.model.MdxLiteRtCompatibilityResolver
+import com.mardous.booming.separation.model.MdxRuntimePrecision
 import com.mardous.booming.separation.model.litert.MdxLiteRtGpuRuntimeProfile
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetDeletionException
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.separation.process.SourceSeparationProcParser
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
@@ -302,6 +311,10 @@ internal object SourceSeparationMainDeathDebugHarness {
         val outputFile = reportFile(context, request.runId)
         var mediaUri: Uri? = null
         var worker: SourceSeparationForegroundWorkerCoordinator? = null
+        var presetRepository: SourceSeparationPresetRepository? = null
+        var primaryModelBackup: File? = null
+        var primaryModelRestored = false
+        var originalTryGpuForRestore: Boolean? = null
         try {
             val evidence = remoteDeathEvidence(intent)
             val scenario = JSONObject(scenarioFile.readText(Charsets.UTF_8))
@@ -327,6 +340,7 @@ internal object SourceSeparationMainDeathDebugHarness {
             val oldObserverId = scenario.getString("observerId")
             val oldObserverProcessName = scenario.getString("observerProcessName")
             val originalTryGpu = scenario.getBoolean("tryGpu")
+                .also { originalTryGpuForRestore = it }
             val plannedSegments = scenario.getInt("plannedSegments")
             check(plannedSegments == EXPECTED_FULL_SONG_SEGMENTS)
             mediaUri = Uri.parse(scenario.getString("sourceMediaUri"))
@@ -442,13 +456,326 @@ internal object SourceSeparationMainDeathDebugHarness {
 
             SourceSeparationCacheFaultInjection.clear(store.root().directory)
             val preferences = get<SharedPreferences>(SharedPreferences::class.java)
-            val persistedTryGpu = !originalTryGpu
+            val persistedTryGpu = if (request.remoteDeathRecoveryAction ==
+                RemoteDeathRecoveryAction.SwitchModelThenStart
+            ) {
+                true
+            } else {
+                !originalTryGpu
+            }
             check(preferences.edit()
                 .putBoolean(SOURCE_SEPARATION_TRY_GPU, persistedTryGpu)
                 .commit()
             ) { "Could not toggle the GPU preference before explicit resume." }
             check(preferences.getBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu) ==
                 persistedTryGpu)
+            if (request.remoteDeathRecoveryAction ==
+                RemoteDeathRecoveryAction.SwitchModelThenStart
+            ) {
+                val secondaryModelId = requireNotNull(request.secondaryModelId)
+                val secondaryArtifactSha256 = requireNotNull(
+                    request.secondaryArtifactSha256,
+                )
+                val repository = get<SourceSeparationPresetRepository>(
+                    SourceSeparationPresetRepository::class.java,
+                ).also { presetRepository = it }
+                val primaryInstalled = repository.requireInstalledPreset(
+                    request.artifactSha256,
+                )
+                val secondaryInstalled = repository.requireInstalledPreset(
+                    secondaryArtifactSha256,
+                )
+                check(secondaryInstalled.modelId == secondaryModelId)
+                val backupDirectory = File(
+                    File(context.filesDir, MODEL_BACKUP_DIRECTORY),
+                    request.runId,
+                ).apply {
+                    check(isDirectory || mkdirs()) {
+                        "Could not create the primary model backup directory."
+                    }
+                }
+                val backup = File(backupDirectory, "${request.artifactSha256}.tflite")
+                primaryModelBackup = backup
+                primaryInstalled.file.copyTo(backup, overwrite = true)
+                check(backup.length() == primaryInstalled.byteSize)
+                check(backup.sha256().equals(request.artifactSha256, ignoreCase = true))
+
+                val activeDeleteBlocked = try {
+                    repository.delete(request.artifactSha256)
+                    false
+                } catch (_: SourceSeparationPresetDeletionException) {
+                    true
+                }
+                check(activeDeleteBlocked) { "The active primary model was deletable." }
+                check(repository.installedModel(request.artifactSha256) != null)
+
+                val selectedSecondary = repository.activate(
+                    sha256 = secondaryArtifactSha256,
+                    platform = AndroidMdxRuntimePlatformProvider.current(),
+                    scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                    experimentalConfirmed = true,
+                )
+                check(selectedSecondary.modelId == secondaryModelId)
+                check(selectedSecondary.artifactSha256.equals(
+                    secondaryArtifactSha256,
+                    ignoreCase = true,
+                ))
+                check(repository.delete(request.artifactSha256))
+                check(repository.installedModel(request.artifactSha256) == null)
+
+                val oldEntryAfterDeletion = runtime.entries().single { entry ->
+                    entry.cacheKey == cacheKey
+                }
+                check(oldEntryAfterDeletion.modelId == request.modelId)
+                check(oldEntryAfterDeletion.artifactSha256.equals(
+                    request.artifactSha256,
+                    ignoreCase = true,
+                ))
+                check(oldEntryAfterDeletion.state ==
+                    SourceSeparationModelAwareCacheEntryState.Stale)
+                check(oldEntryAfterDeletion.modelAvailability ==
+                    SourceSeparationCacheModelAvailability.ModelNotInstalled)
+                check(oldEntryAfterDeletion.readySegments == committedBeforeDeath.length())
+                val oldJournalAfterDeletion = requireNotNull(store.readRunJournal(cacheKey))
+                check(oldJournalAfterDeletion == journalAfterDeath)
+                check(oldJournalAfterDeletion.lifecycle ==
+                    SourceSeparationCacheRunJournalLifecycle.Running)
+                validateCommittedSegmentEvidence(committedBeforeDeath, oldJournalAfterDeletion)
+                val oldJournalFile = File(
+                    store.entryDirectory(cacheKey),
+                    SourceSeparationCacheStore.RUN_JOURNAL_FILE_NAME,
+                )
+                check(oldJournalFile.sha256() == evidence.journalSha256AfterSilence)
+
+                val secondaryRuntimeSong = (runtime.resolve(source) as?
+                    SourceSeparationRuntimeSongResolution.Ready)?.song
+                    ?: error("The secondary model could not resolve the same source.")
+                check(secondaryRuntimeSong.modelId == secondaryModelId)
+                check(secondaryRuntimeSong.artifactSha256.equals(
+                    secondaryArtifactSha256,
+                    ignoreCase = true,
+                ))
+                check(secondaryRuntimeSong.cacheKey != cacheKey)
+                check(store.readManifest(secondaryRuntimeSong.cacheKey) == null)
+                check(store.readRunJournal(secondaryRuntimeSong.cacheKey) == null)
+                check(runtime.cacheStatus(secondaryRuntimeSong) ==
+                    SourceSeparationModelAwareCacheStatus.Missing)
+
+                val platform = AndroidMdxRuntimePlatformProvider.current()
+                val secondaryProfile = secondaryRuntimeSong.model.executionProfile
+                val cpuCompatibility = MdxLiteRtCompatibilityResolver.resolve(
+                    profile = secondaryProfile,
+                    backend = MdxInferenceBackend.LiteRtCpu,
+                    platform = platform,
+                    policy = MdxCompatibilityPolicy.KnownGoodOnly,
+                )
+                val boundedGpuProfile = MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1
+                val gpuCompatibility = MdxLiteRtCompatibilityResolver.resolve(
+                    profile = secondaryProfile,
+                    backend = MdxInferenceBackend.LiteRtGpu,
+                    platform = platform,
+                    policy = MdxCompatibilityPolicy.AllowUntestedInternal,
+                    profileId = boundedGpuProfile.qualificationProfileId,
+                    precision = MdxRuntimePrecision.Fp32,
+                )
+                check(cpuCompatibility.isAllowed)
+                check(!gpuCompatibility.isAllowed) {
+                    "The secondary model unexpectedly became GPU eligible."
+                }
+
+                coordinator.clearStatusIfNotRunning()
+                check(coordinator.workerStateFlow.value == SourceSeparationUiState.Idle)
+                val root = store.root().directory
+                val freshFaultToken = "remote-switch-${request.runId}"
+                    .take(MAX_FAULT_TOKEN_LENGTH)
+                SourceSeparationCacheFaultInjection.arm(
+                    root,
+                    SourceSeparationCacheFaultControl(
+                        token = freshFaultToken,
+                        stage = SourceSeparationCacheFaultStage.NativeInvocation,
+                        action = SourceSeparationCacheFaultAction.Barrier,
+                        timeoutMs = REMOTE_DEATH_BARRIER_TIMEOUT_MS,
+                    ),
+                )
+                coordinator.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = source.duration,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+                check(coordinator.startCurrentSong())
+                val freshFaultHit = waitForCacheFaultHit(root, freshFaultToken)
+                val freshJournal = waitForJournal(SETUP_TIMEOUT_MS) {
+                    store.readRunJournal(secondaryRuntimeSong.cacheKey)?.takeIf { journal ->
+                        journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running &&
+                            journal.request.runId != oldExecutionRunId &&
+                            journal.request.processGeneration != oldProcessGeneration &&
+                            journal.request.ownerPid != oldRemotePid
+                    }
+                }
+                val freshRemotePid = requireNotNull(freshJournal.request.ownerPid)
+                check(freshFaultHit.pid == freshRemotePid)
+                check(freshJournal.request.identity == secondaryRuntimeSong.identity)
+                check(freshJournal.request.runClass ==
+                    SourceSeparationExecutionRunClass.ManualFullSong)
+                check(freshJournal.request.backgroundPolicy ==
+                    SourceSeparationExecutionRunClass.ManualFullSong.backgroundPolicy)
+                check(freshJournal.request.tryGpu == persistedTryGpu)
+                check(freshJournal.request.gpuFallbackLatch == null)
+                if (persistedTryGpu) {
+                    val admittedGpu = requireNotNull(freshJournal.request.gpuRuntimeIdentity)
+                    check(admittedGpu.profileId == boundedGpuProfile.profileId)
+                    check(admittedGpu.kernelBatchSize == 1)
+                    check(admittedGpu.commandQueueWindowSize == 1)
+                } else {
+                    check(freshJournal.request.gpuRuntimeIdentity == null)
+                }
+                check(freshJournal.committedSegments.isEmpty())
+                check(freshJournal.transitions.first().let { transition ->
+                    transition.sequence == 1L &&
+                        transition.type == SourceSeparationCacheRunTransitionType.Admitted &&
+                        transition.runId == freshJournal.request.runId
+                })
+                check(freshJournal.transitions.none { transition ->
+                    transition.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+                })
+                val secondaryManifestAtBarrier = requireNotNull(
+                    store.readManifest(secondaryRuntimeSong.cacheKey),
+                )
+                check(secondaryManifestAtBarrier.identity == secondaryRuntimeSong.identity)
+                check(secondaryManifestAtBarrier.runtimeRecords.isEmpty())
+                check(store.readRunJournal(cacheKey) == oldJournalAfterDeletion)
+                check(oldJournalFile.sha256() == evidence.journalSha256AfterSilence)
+
+                val freshRemoteProcessStartTicks = SourceSeparationProcParser
+                    .parseProcessStartTicks(File("/proc/$freshRemotePid/stat").readText())
+                    ?: error("Could not read the switched remote process start ticks.")
+                check(freshRemoteProcessStartTicks != oldRemoteProcessStartTicks)
+
+                coordinator.pauseCurrentSong(source)
+                SourceSeparationCacheFaultInjection.release(root, freshFaultToken)
+                val pausedFreshJournal = waitForJournal(COMPLETION_TIMEOUT_MS) {
+                    store.readRunJournal(secondaryRuntimeSong.cacheKey)?.takeIf { journal ->
+                        journal.request.runId == freshJournal.request.runId &&
+                            journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused
+                    }
+                }
+                check(pausedFreshJournal.committedSegments.size <= 1) {
+                    "The switched-model run advanced beyond the released native invocation."
+                }
+                check(waitUntil(REATTACH_TIMEOUT_MS) {
+                    coordinator.runningCacheKey() == null &&
+                        coordinator.protectedCacheKeys().isEmpty() &&
+                        handoff.stateFlow.value.activeOwner == null &&
+                        notificationManager.activeNotifications.none { notification ->
+                            notification.id == SourceSeparationMediaProcessingForegroundController
+                                .NOTIFICATION_ID
+                        }
+                }) { "The switched-model run did not release after Pause." }
+
+                val oldEntryBeforeRestore = runtime.entries().single { entry ->
+                    entry.cacheKey == cacheKey
+                }
+                val newEntryBeforeRestore = runtime.entries().single { entry ->
+                    entry.cacheKey == secondaryRuntimeSong.cacheKey
+                }
+                check(oldEntryBeforeRestore.state ==
+                    SourceSeparationModelAwareCacheEntryState.Stale)
+                check(oldEntryBeforeRestore.modelAvailability ==
+                    SourceSeparationCacheModelAvailability.ModelNotInstalled)
+                check(newEntryBeforeRestore.state ==
+                    SourceSeparationModelAwareCacheEntryState.Partial)
+                check(newEntryBeforeRestore.modelAvailability ==
+                    SourceSeparationCacheModelAvailability.InstalledExact)
+                check(store.readRunJournal(cacheKey) == oldJournalAfterDeletion)
+                validateCommittedSegmentEvidence(
+                    committedBeforeDeath,
+                    requireNotNull(store.readRunJournal(cacheKey)),
+                )
+
+                restorePrimaryModel(repository, request, backup)
+                primaryModelRestored = true
+                check((repository.activeModel() as? SourceSeparationActivePresetState.Reference)
+                    ?.reference
+                    ?.artifactSha256
+                    ?.equals(request.artifactSha256, ignoreCase = true) == true)
+                val oldEntryAfterRestore = runtime.entries().single { entry ->
+                    entry.cacheKey == cacheKey
+                }
+                check(oldEntryAfterRestore.modelAvailability ==
+                    SourceSeparationCacheModelAvailability.InstalledExact)
+
+                writeJson(
+                    outputFile,
+                    JSONObject()
+                        .put("schemaVersion", REMOTE_DEATH_MODEL_SWITCH_REPORT_SCHEMA_VERSION)
+                        .put("status", "passed")
+                        .put("stage", STAGE_REMOTE_DEATH)
+                        .put("recoveryAction", request.remoteDeathRecoveryAction.argumentValue)
+                        .put("runId", request.runId)
+                        .put("mainPid", Process.myPid())
+                        .put("oldCacheKey", cacheKey)
+                        .put("newCacheKey", secondaryRuntimeSong.cacheKey)
+                        .put("oldModelId", request.modelId)
+                        .put("oldArtifactSha256", request.artifactSha256)
+                        .put("newModelId", secondaryModelId)
+                        .put("newArtifactSha256", secondaryArtifactSha256)
+                        .put("activeModelDeletionBlocked", activeDeleteBlocked)
+                        .put("oldModelDeletedAfterSwitch", true)
+                        .put("oldCacheStateAfterDeletion", oldEntryBeforeRestore.state.name)
+                        .put("oldCacheModelAvailabilityAfterDeletion",
+                            oldEntryBeforeRestore.modelAvailability.name)
+                        .put("newCacheStateAtPause", newEntryBeforeRestore.state.name)
+                        .put("newCacheModelAvailabilityAtPause",
+                            newEntryBeforeRestore.modelAvailability.name)
+                        .put("oldExecutionRunId", oldExecutionRunId)
+                        .put("newExecutionRunId", freshJournal.request.runId)
+                        .put("oldProcessGeneration", oldProcessGeneration)
+                        .put("newProcessGeneration", freshJournal.request.processGeneration)
+                        .put("oldRemotePid", oldRemotePid)
+                        .put("newRemotePid", freshRemotePid)
+                        .put("oldRemoteProcessStartTicks", oldRemoteProcessStartTicks)
+                        .put("newRemoteProcessStartTicks", freshRemoteProcessStartTicks)
+                        .put("automaticRetryBudget", 0)
+                        .put("automaticRemoteRelaunchCount",
+                            evidence.unexpectedRemoteRelaunchCount)
+                        .put("unexpectedRemotePresenceSampleCount",
+                            evidence.unexpectedRemotePresenceSampleCount)
+                        .put("silentObservationMs", evidence.silentObservationMs)
+                        .put("oldCommittedSegmentsPreserved", committedBeforeDeath.length())
+                        .put("newCommittedSegmentsAtBarrier",
+                            freshJournal.committedSegments.size)
+                        .put("newAdmissionSequence",
+                            freshJournal.transitions.first().sequence)
+                        .put("newPreviousOwnerDeathCount", freshJournal.transitions.count {
+                            transition -> transition.type ==
+                                SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+                        })
+                        .put("newLifecycleAfterPause", pausedFreshJournal.lifecycle.name)
+                        .put("newCommittedSegmentsAfterPause",
+                            pausedFreshJournal.committedSegments.size)
+                        .put("originalTryGpu", originalTryGpu)
+                        .put("persistedTryGpuBeforeNewStart", persistedTryGpu)
+                        .put("newTryGpu", freshJournal.request.tryGpu)
+                        .put("newAdmittedGpuRuntime", gpuRuntimeJson(freshJournal))
+                        .put("newCpuCompatibilityOutcome", cpuCompatibility.outcome.name)
+                        .put("newGpuCompatibilityOutcome", gpuCompatibility.outcome.name)
+                        .put("newGpuCompatibilityReason", gpuCompatibility.reason)
+                        .put("newRuntimeRecordsAtBarrier",
+                            secondaryManifestAtBarrier.runtimeRecords.size)
+                        .put("nativeInvocationBarrierReached", true)
+                        .put("oldJournalUnchangedThroughNewAdmission", true)
+                        .put("cacheWriteLockReleased", cacheLockReleased)
+                        .put("cacheLockReleaseMs", cacheLockReleaseMs)
+                        .put("primaryModelRestored", primaryModelRestored)
+                        .put("oldCacheModelAvailabilityAfterRestore",
+                            oldEntryAfterRestore.modelAvailability.name)
+                        .put("terminalNotification", false),
+                )
+                Log.i(TAG, "Remote-death model-switch validation passed for ${request.runId}.")
+                return
+            }
             if (request.remoteDeathRecoveryAction ==
                 RemoteDeathRecoveryAction.ClearCacheThenStart
             ) {
@@ -832,6 +1159,49 @@ internal object SourceSeparationMainDeathDebugHarness {
                 )
             }
             worker?.cancel()
+            if (!primaryModelRestored && presetRepository != null) {
+                runCatching {
+                    restorePrimaryModel(
+                        repository = requireNotNull(presetRepository),
+                        request = request,
+                        backup = primaryModelBackup,
+                    )
+                    primaryModelRestored = true
+                }.onFailure { error ->
+                    Log.e(TAG, "Could not restore the primary model after validation.", error)
+                    val failure = runCatching {
+                        JSONObject(outputFile.readText(Charsets.UTF_8))
+                    }.getOrElse { JSONObject() }
+                    failure
+                        .put("schemaVersion", REMOTE_DEATH_MODEL_SWITCH_REPORT_SCHEMA_VERSION)
+                        .put("status", "failed")
+                        .put("stage", STAGE_REMOTE_DEATH)
+                        .put("phase", "primary-model-restoration")
+                        .put("runId", request.runId)
+                        .put("restorationErrorType", error::class.java.name)
+                        .put("restorationError", error.message ?: JSONObject.NULL)
+                    writeJson(outputFile, failure)
+                }
+            }
+            if (primaryModelRestored) {
+                primaryModelBackup?.delete()
+                primaryModelBackup?.parentFile?.delete()
+            }
+            if (request.remoteDeathRecoveryAction ==
+                RemoteDeathRecoveryAction.SwitchModelThenStart
+            ) {
+                originalTryGpuForRestore?.let { originalTryGpu ->
+                    runCatching {
+                        check(get<SharedPreferences>(SharedPreferences::class.java)
+                            .edit()
+                            .putBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu)
+                            .commit()
+                        ) { "Could not commit the restored GPU preference." }
+                    }.onFailure { error ->
+                        Log.e(TAG, "Could not restore the GPU preference after validation.", error)
+                    }
+                }
+            }
             mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
         }
     }
@@ -1190,12 +1560,56 @@ internal object SourceSeparationMainDeathDebugHarness {
     }
 
     private fun verifyActiveModel(request: Request) {
-        val active = get<SourceSeparationPresetRepository>(
+        val repository = get<SourceSeparationPresetRepository>(
             SourceSeparationPresetRepository::class.java,
-        ).activeModel() as? SourceSeparationActivePresetState.Reference
+        )
+        var active = repository.activeModel() as? SourceSeparationActivePresetState.Reference
+        val activeMatchesRequest = active?.reference?.let { reference ->
+            reference.modelId == request.modelId &&
+                reference.artifactSha256.equals(request.artifactSha256, true)
+        } == true
+        if (request.remoteDeathRecoveryAction ==
+            RemoteDeathRecoveryAction.SwitchModelThenStart &&
+            !activeMatchesRequest
+        ) {
+            repository.activate(
+                sha256 = request.artifactSha256,
+                platform = AndroidMdxRuntimePlatformProvider.current(),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                experimentalConfirmed = true,
+            )
+            active = repository.activeModel() as? SourceSeparationActivePresetState.Reference
+        }
+        active = active
             ?: error("No preset model is active.")
         check(active.reference.modelId == request.modelId)
         check(active.reference.artifactSha256.equals(request.artifactSha256, true))
+    }
+
+    private fun restorePrimaryModel(
+        repository: SourceSeparationPresetRepository,
+        request: Request,
+        backup: File?,
+    ) {
+        if (repository.installedModel(request.artifactSha256) == null) {
+            val source = requireNotNull(backup?.takeIf(File::isFile)) {
+                "The primary model backup is unavailable."
+            }
+            check(source.sha256().equals(request.artifactSha256, ignoreCase = true)) {
+                "The primary model backup hash changed."
+            }
+            source.inputStream().use { input ->
+                repository.installOfficial(request.modelId, input)
+            }
+        }
+        val restored = repository.activate(
+            sha256 = request.artifactSha256,
+            platform = AndroidMdxRuntimePlatformProvider.current(),
+            scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            experimentalConfirmed = true,
+        )
+        check(restored.modelId == request.modelId)
+        check(restored.artifactSha256.equals(request.artifactSha256, ignoreCase = true))
     }
 
     private fun configurePreferences(request: Request) {
@@ -1304,6 +1718,22 @@ internal object SourceSeparationMainDeathDebugHarness {
         val sourcePath = intent.requiredString(EXTRA_SOURCE_PATH)
         val backendMode = intent.requiredString(EXTRA_BACKEND_MODE)
         require(backendMode == "cpu" || backendMode == "auto")
+        val recoveryAction = RemoteDeathRecoveryAction.parse(
+            intent.getStringExtra(EXTRA_REMOTE_DEATH_RECOVERY_ACTION),
+        )
+        val secondaryModelId = intent.getStringExtra(EXTRA_SECONDARY_MODEL_ID)
+            ?.takeIf(String::isNotBlank)
+        val secondaryArtifactSha256 =
+            intent.getStringExtra(EXTRA_SECONDARY_ARTIFACT_SHA256)
+                ?.takeIf(String::isNotBlank)
+        require((secondaryModelId == null) == (secondaryArtifactSha256 == null)) {
+            "The secondary model identity is incomplete."
+        }
+        if (recoveryAction == RemoteDeathRecoveryAction.SwitchModelThenStart) {
+            require(secondaryModelId != null && secondaryArtifactSha256 != null) {
+                "Model-switch recovery requires a secondary model identity."
+            }
+        }
         return Request(
             runId = runId,
             sourcePath = sourcePath,
@@ -1313,9 +1743,9 @@ internal object SourceSeparationMainDeathDebugHarness {
             mainDeathBoundary = MainDeathBoundary.parse(
                 intent.getStringExtra(EXTRA_KILL_BOUNDARY),
             ),
-            remoteDeathRecoveryAction = RemoteDeathRecoveryAction.parse(
-                intent.getStringExtra(EXTRA_REMOTE_DEATH_RECOVERY_ACTION),
-            ),
+            remoteDeathRecoveryAction = recoveryAction,
+            secondaryModelId = secondaryModelId,
+            secondaryArtifactSha256 = secondaryArtifactSha256,
         )
     }
 
@@ -1645,6 +2075,8 @@ internal object SourceSeparationMainDeathDebugHarness {
         val backendMode: String,
         val mainDeathBoundary: MainDeathBoundary,
         val remoteDeathRecoveryAction: RemoteDeathRecoveryAction,
+        val secondaryModelId: String?,
+        val secondaryArtifactSha256: String?,
     ) {
         val tryGpu: Boolean
             get() = backendMode == "auto"
@@ -1761,6 +2193,7 @@ internal object SourceSeparationMainDeathDebugHarness {
     private enum class RemoteDeathRecoveryAction(val argumentValue: String) {
         Resume("resume"),
         ClearCacheThenStart("clear-cache"),
+        SwitchModelThenStart("switch-model"),
         ;
 
         companion object {
@@ -1788,6 +2221,8 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val EXTRA_BACKEND_MODE = "backendMode"
     private const val EXTRA_KILL_BOUNDARY = "killBoundary"
     private const val EXTRA_REMOTE_DEATH_RECOVERY_ACTION = "remoteDeathRecoveryAction"
+    private const val EXTRA_SECONDARY_MODEL_ID = "secondaryModelId"
+    private const val EXTRA_SECONDARY_ARTIFACT_SHA256 = "secondaryArtifactSha256"
     private const val EXTRA_JOURNAL_SHA_AFTER_STOP = "journalSha256AfterStop"
     private const val EXTRA_JOURNAL_SHA_AFTER_SILENCE = "journalSha256AfterSilence"
     private const val EXTRA_JOURNAL_SHA_AFTER_RESTART = "journalSha256AfterRestart"
@@ -1856,6 +2291,8 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val REMOTE_DEATH_REPORT_SCHEMA_VERSION = "phase7-remote-death-report-v1"
     private const val REMOTE_DEATH_CACHE_CLEAR_REPORT_SCHEMA_VERSION =
         "phase7-remote-death-cache-clear-report-v1"
+    private const val REMOTE_DEATH_MODEL_SWITCH_REPORT_SCHEMA_VERSION =
+        "phase7-remote-death-model-switch-report-v1"
     private const val STAGE_MAIN_DEATH = "independent-main-death"
     private const val STAGE_FORCE_STOP = "force-stop"
     private const val STAGE_REMOTE_DEATH = "independent-remote-death"
@@ -1871,6 +2308,7 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val TEST_BLEND = 0.23f
     private const val EXPECTED_FULL_SONG_MODEL_ID = "uvr_mdxnet_3_9662"
     private const val EXPECTED_FULL_SONG_SEGMENTS = 48
+    private const val MODEL_BACKUP_DIRECTORY = "phase7-model-backups"
     private const val TAG = "SrcSepMainDeath"
     private val SAFE_NAME = Regex("^[A-Za-z0-9._-]{1,120}$")
     private val SAFE_EXTENSION = Regex("^[a-z0-9]{1,8}$")
