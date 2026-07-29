@@ -470,6 +470,109 @@ internal object SourceSeparationMainDeathDebugHarness {
             check(preferences.getBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu) ==
                 persistedTryGpu)
             if (request.remoteDeathRecoveryAction ==
+                RemoteDeathRecoveryAction.RejectArtifactMismatch
+            ) {
+                check(originalTryGpu) {
+                    "Artifact-mismatch recovery requires an admitted GPU run."
+                }
+                val admittedRuntime = requireNotNull(
+                    journalAfterDeath.request.gpuRuntimeIdentity,
+                )
+                val retiredRuntime = admittedRuntime.copy(
+                    artifactVersion = "${admittedRuntime.artifactVersion}-retired",
+                )
+                val mismatchedJournal = journalAfterDeath.copy(
+                    request = journalAfterDeath.request.copy(
+                        gpuRuntimeIdentity = retiredRuntime,
+                    ),
+                )
+                val mismatchMessage = context.getString(
+                    R.string.source_separation_model_load_failed,
+                )
+                store.writeRunJournal(mismatchedJournal)
+                try {
+                    coordinator.clearStatusIfNotRunning()
+                    check(coordinator.workerStateFlow.value == SourceSeparationUiState.Idle)
+                    coordinator.updateSong(
+                        song = source,
+                        positionMs = 0L,
+                        durationMs = source.duration,
+                        isPlaying = false,
+                        sourceSeparationBlend = TEST_BLEND,
+                    )
+                    check(coordinator.startCurrentSong())
+                    check(waitUntil(REATTACH_TIMEOUT_MS) {
+                        val state = coordinator.workerStateFlow.value
+                        state is SourceSeparationUiState.Failed &&
+                            state.songId == source.id &&
+                            state.message == mismatchMessage &&
+                            !coordinator.isWorkerActive() &&
+                            coordinator.runningCacheKey() == null &&
+                            coordinator.protectedCacheKeys().isEmpty() &&
+                            coordinator.pendingSongId() == null
+                    }) { "The retired runtime did not settle in its typed failure state." }
+                    check(store.readRunJournal(cacheKey) == mismatchedJournal) {
+                        "Runtime mismatch rejection mutated the abandoned journal."
+                    }
+                    check(handoff.stateFlow.value.activeOwner == null)
+                    check(notificationManager.activeNotifications.none { notification ->
+                        notification.id == SourceSeparationMediaProcessingForegroundController
+                            .NOTIFICATION_ID
+                    })
+                } finally {
+                    store.writeRunJournal(journalAfterDeath)
+                }
+                check(store.readRunJournal(cacheKey) == journalAfterDeath)
+                check(preferences.edit()
+                    .putBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu)
+                    .commit()
+                ) { "Could not restore the GPU preference after mismatch validation." }
+                originalTryGpuForRestore = null
+
+                writeJson(
+                    outputFile,
+                    JSONObject()
+                        .put("schemaVersion",
+                            REMOTE_DEATH_RUNTIME_POLICY_REPORT_SCHEMA_VERSION)
+                        .put("status", "passed")
+                        .put("stage", STAGE_REMOTE_DEATH)
+                        .put("recoveryAction",
+                            request.remoteDeathRecoveryAction.argumentValue)
+                        .put("runId", request.runId)
+                        .put("cacheKey", cacheKey)
+                        .put("mainPid", Process.myPid())
+                        .put("oldRemotePid", oldRemotePid)
+                        .put("oldProcessGeneration", oldProcessGeneration)
+                        .put("oldExecutionRunId", oldExecutionRunId)
+                        .put("automaticRetryBudget", 0)
+                        .put("automaticRemoteRelaunchCount",
+                            evidence.unexpectedRemoteRelaunchCount)
+                        .put("unexpectedRemotePresenceSampleCount",
+                            evidence.unexpectedRemotePresenceSampleCount)
+                        .put("silentObservationMs", evidence.silentObservationMs)
+                        .put("journalSequenceBeforeKill",
+                            evidence.journalSequenceBeforeKill)
+                        .put("journalSequenceAfterSilence",
+                            evidence.journalSequenceAfterSilence)
+                        .put("committedSegmentsPreserved",
+                            committedBeforeDeath.length())
+                        .put("admittedArtifactVersion",
+                            admittedRuntime.artifactVersion)
+                        .put("retiredArtifactVersion", retiredRuntime.artifactVersion)
+                        .put("mismatchJournalUnchanged", true)
+                        .put("originalJournalRestored", true)
+                        .put("persistedTryGpuBeforeRetry", persistedTryGpu)
+                        .put("admittedTryGpu", originalTryGpu)
+                        .put("backendPolicyPreserved", true)
+                        .put("typedFailureMessage", mismatchMessage)
+                        .put("cacheWriteLockReleased", cacheLockReleased)
+                        .put("cacheLockReleaseMs", cacheLockReleaseMs)
+                        .put("terminalNotification", false),
+                )
+                Log.i(TAG, "Remote-death artifact mismatch passed for ${request.runId}.")
+                return
+            }
+            if (request.remoteDeathRecoveryAction ==
                 RemoteDeathRecoveryAction.SwitchModelThenStart
             ) {
                 val secondaryModelId = requireNotNull(request.secondaryModelId)
@@ -1188,7 +1291,9 @@ internal object SourceSeparationMainDeathDebugHarness {
                 primaryModelBackup?.parentFile?.delete()
             }
             if (request.remoteDeathRecoveryAction ==
-                RemoteDeathRecoveryAction.SwitchModelThenStart
+                    RemoteDeathRecoveryAction.SwitchModelThenStart ||
+                request.remoteDeathRecoveryAction ==
+                    RemoteDeathRecoveryAction.RejectArtifactMismatch
             ) {
                 originalTryGpuForRestore?.let { originalTryGpu ->
                     runCatching {
@@ -2194,6 +2299,7 @@ internal object SourceSeparationMainDeathDebugHarness {
         Resume("resume"),
         ClearCacheThenStart("clear-cache"),
         SwitchModelThenStart("switch-model"),
+        RejectArtifactMismatch("artifact-mismatch"),
         ;
 
         companion object {
@@ -2293,6 +2399,8 @@ internal object SourceSeparationMainDeathDebugHarness {
         "phase7-remote-death-cache-clear-report-v1"
     private const val REMOTE_DEATH_MODEL_SWITCH_REPORT_SCHEMA_VERSION =
         "phase7-remote-death-model-switch-report-v1"
+    private const val REMOTE_DEATH_RUNTIME_POLICY_REPORT_SCHEMA_VERSION =
+        "phase7-remote-death-runtime-policy-report-v1"
     private const val STAGE_MAIN_DEATH = "independent-main-death"
     private const val STAGE_FORCE_STOP = "force-stop"
     private const val STAGE_REMOTE_DEATH = "independent-remote-death"

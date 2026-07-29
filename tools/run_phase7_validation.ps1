@@ -45,7 +45,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v56",
+    [string]$RunnerRevision = "phase7-runner-v57",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -94,7 +94,7 @@ param(
     [string]$PlaybackOwnedRunClass = "playback-demand",
     [ValidateSet("segment-running", "after-first-committed-segment")]
     [string]$MainDeathBoundary = "segment-running",
-    [ValidateSet("resume", "clear-cache", "switch-model")]
+    [ValidateSet("resume", "clear-cache", "switch-model", "artifact-mismatch")]
     [string]$RemoteDeathRecoveryAction = "resume",
     [ValidateRange(5, 300)]
     [int]$SilentObservationSeconds = 30,
@@ -297,6 +297,10 @@ if ($Stage -eq "independent-remote-death" -and
         ($ModelId -ne "uvr_mdxnet_3_9662" -or
         $FixtureId -ne "coast_town_full_mp3")) {
     throw "independent-remote-death is pinned to the 9662 coast_town MP3 full-song fixture."
+}
+if ($RemoteDeathRecoveryAction -eq "artifact-mismatch" -and
+        $BackendMode -ne "auto") {
+    throw "artifact-mismatch recovery requires BackendMode=auto."
 }
 if ($Stage -in @("process-matrix", "process-switch-matrix")) {
     $validX86Resident = $ProcessAbi -eq "x86" -and $X86ProcessValidation
