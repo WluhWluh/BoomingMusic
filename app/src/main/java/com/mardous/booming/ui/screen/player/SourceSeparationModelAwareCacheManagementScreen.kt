@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -64,7 +65,9 @@ internal fun SourceSeparationModelAwareCacheManagementPage(
     val completedItems = state.completedItems.sortedByDescending { it.lastAccessedAtEpochMs }
 
     LazyColumn(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("source-separation-cache-management"),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
     ) {
@@ -258,13 +261,16 @@ private fun SourceSeparationModelAwareCacheRow(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("source-separation-cache-entry:${item.cacheKey}"),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
+                .testTag("source-separation-cache-toggle:${item.cacheKey}")
                 .clickable { expanded = !expanded }
                 .padding(16.dp),
         ) {
@@ -297,7 +303,9 @@ private fun SourceSeparationModelAwareCacheRow(
             IconButton(
                 onClick = onDelete,
                 enabled = !deleting,
-                modifier = Modifier.size(36.dp),
+                modifier = Modifier
+                    .size(36.dp)
+                    .testTag("source-separation-cache-delete:${item.cacheKey}"),
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_delete_24dp),

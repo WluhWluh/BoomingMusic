@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.rememberNestedScrollInteropConnection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -574,7 +575,9 @@ private fun PresetModelCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("source-separation-preset:${model.modelId}"),
     ) {
         Column(
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -732,7 +735,9 @@ private fun PresetModelCard(
                             OutlinedButton(
                                 onClick = { onUse(model.modelId) },
                                 enabled = model.canUseForValidation && !model.active,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("source-separation-preset-use:${model.modelId}"),
                             ) {
                                 Icon(
                                     painter = painterResource(R.drawable.ic_play_24dp),
