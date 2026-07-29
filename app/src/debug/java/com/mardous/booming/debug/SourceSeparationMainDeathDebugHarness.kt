@@ -514,6 +514,19 @@ internal object SourceSeparationMainDeathDebugHarness {
                     check(store.readRunJournal(cacheKey) == mismatchedJournal) {
                         "Runtime mismatch rejection mutated the abandoned journal."
                     }
+                    repeat(RUNTIME_MISMATCH_POSITION_UPDATE_COUNT) { index ->
+                        coordinator.updatePosition(
+                            positionMs = (index + 1L) * 1_000L,
+                            durationMs = source.duration,
+                            isPlaying = true,
+                            sourceSeparationBlend = TEST_BLEND,
+                        )
+                    }
+                    SystemClock.sleep(RUNTIME_MISMATCH_POSITION_SETTLE_MS)
+                    check(!coordinator.isWorkerActive() &&
+                        coordinator.debugStatus().contains("activated=false") &&
+                        store.readRunJournal(cacheKey) == mismatchedJournal
+                    ) { "Playback updates restarted rejected runtime work." }
                     check(handoff.stateFlow.value.activeOwner == null)
                     check(notificationManager.activeNotifications.none { notification ->
                         notification.id == SourceSeparationMediaProcessingForegroundController
@@ -564,6 +577,9 @@ internal object SourceSeparationMainDeathDebugHarness {
                         .put("persistedTryGpuBeforeRetry", persistedTryGpu)
                         .put("admittedTryGpu", originalTryGpu)
                         .put("backendPolicyPreserved", true)
+                        .put("positionUpdatesAfterRejection",
+                            RUNTIME_MISMATCH_POSITION_UPDATE_COUNT)
+                        .put("positionUpdatesRestartedWorker", false)
                         .put("typedFailureMessage", mismatchMessage)
                         .put("cacheWriteLockReleased", cacheLockReleased)
                         .put("cacheLockReleaseMs", cacheLockReleaseMs)
@@ -2409,6 +2425,8 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val COMPLETION_TIMEOUT_MS = 30L * 60L * 1_000L
     private const val MAIN_DEATH_SETTLE_MS = 100L
     private const val REMOTE_DEATH_BARRIER_TIMEOUT_MS = 120_000L
+    private const val RUNTIME_MISMATCH_POSITION_UPDATE_COUNT = 5
+    private const val RUNTIME_MISMATCH_POSITION_SETTLE_MS = 500L
     private const val MAX_FAULT_TOKEN_LENGTH = 120
     private const val POLL_MS = 100L
     private const val MEDIA_SCAN_RETRIES = 60

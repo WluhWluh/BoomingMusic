@@ -5,9 +5,11 @@ import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.data.model.Song
+import com.mardous.booming.separation.SourceSeparationAdmittedGpuRuntimeMismatchException
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
+import com.mardous.booming.separation.cache.v2.SourceSeparationAdmittedGpuRuntimeIdentity
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournal
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLifecycle
@@ -18,6 +20,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSongLocator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceIdentity
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
+import com.mardous.booming.separation.model.litert.MdxLiteRtBoundedGpuContract
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
@@ -174,6 +177,77 @@ class SourceSeparationForegroundWorkerRecoveryTest {
         assertEquals(4_321L, coordinator.playbackStateFlow.value.positionMs)
         assertEquals(1, session.closeTerminalCount.get())
         assertEquals(1, session.closeCount.get())
+        preferences.edit().clear().commit()
+    }
+
+    @Test
+    fun runtimeMismatchStaysTerminalUntilExplicitRetry() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val preferences = context.getSharedPreferences(
+            "source-separation-runtime-mismatch-test",
+            Context.MODE_PRIVATE,
+        )
+        preferences.edit().clear().commit()
+        val resolveCalls = AtomicInteger(0)
+        val currentIdentity = SourceSeparationAdmittedGpuRuntimeIdentity(
+            profileId = MdxLiteRtBoundedGpuContract.PROFILE_ID,
+            artifactVersion = MdxLiteRtBoundedGpuContract.ARTIFACT_VERSION,
+            capabilitySchemaVersion = MdxLiteRtBoundedGpuContract
+                .CAPABILITY_SCHEMA_VERSION,
+            backend = MdxLiteRtBoundedGpuContract.BACKEND,
+            precision = MdxLiteRtBoundedGpuContract.PRECISION,
+            kernelBatchSize = MdxLiteRtBoundedGpuContract.KERNEL_BATCH_SIZE,
+            commandQueueWindowSize = MdxLiteRtBoundedGpuContract
+                .COMMAND_QUEUE_WINDOW_SIZE,
+        )
+        val mismatch = SourceSeparationAdmittedGpuRuntimeMismatchException(
+            admitted = currentIdentity.copy(artifactVersion = "retired-runtime"),
+            supported = currentIdentity,
+        )
+        val runtime = Proxy.newProxyInstance(
+            SourceSeparationRuntimeFacade::class.java.classLoader,
+            arrayOf(SourceSeparationRuntimeFacade::class.java),
+        ) { _, method, _ ->
+            if (method.name == "resolve") {
+                resolveCalls.incrementAndGet()
+                throw mismatch
+            }
+            throw AssertionError("Unexpected runtime call: ${method.name}")
+        } as SourceSeparationRuntimeFacade
+        val coordinator = SourceSeparationForegroundWorkerCoordinator(
+            context = context,
+            preferences = preferences,
+            sourceSeparationRuntime = runtime,
+        )
+        val song = recoveredSong(journal(context))
+        coordinator.updateSong(
+            song = song,
+            positionMs = 0L,
+            durationMs = song.duration,
+            isPlaying = true,
+            sourceSeparationBlend = 0.5f,
+        )
+
+        assertTrue(coordinator.startCurrentSong())
+        awaitCondition { resolveCalls.get() == 1 && !coordinator.isWorkerActive() }
+        assertTrue(coordinator.workerStateFlow.value is SourceSeparationUiState.Failed)
+
+        repeat(5) { index ->
+            coordinator.updatePosition(
+                positionMs = (index + 1L) * 1_000L,
+                durationMs = song.duration,
+                isPlaying = true,
+                sourceSeparationBlend = 0.5f,
+            )
+        }
+        SystemClock.sleep(250L)
+        assertEquals(1, resolveCalls.get())
+        assertFalse(coordinator.isWorkerActive())
+        assertEquals(null, coordinator.pendingSongId())
+
+        assertTrue(coordinator.startCurrentSong())
+        awaitCondition { resolveCalls.get() == 2 && !coordinator.isWorkerActive() }
+        assertEquals(2, resolveCalls.get())
         preferences.edit().clear().commit()
     }
 

@@ -1117,6 +1117,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 message = message,
             )
             callbacks?.onSourceSeparationWorkerModelLoadFailed(message)
+            workerActivated = false
+            clearPendingStart()
             cancelRequested.set(true)
         } catch (_: SourceSeparationRemoteHostDiedException) {
             _workerStateFlow.value = SourceSeparationUiState.Failed(
