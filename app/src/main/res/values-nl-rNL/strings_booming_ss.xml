@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Het geïmporteerde modelbestand is leeg.</string>
     <string name="source_separation_model_replace_failed">Kon het bestaande modelbestand niet vervangen.</string>
     <string name="source_separation_model_metadata_replace_failed">Kon de modelmetadata niet vervangen.</string>
-    <string name="source_separation_model_load_failed">Het geïnstalleerde bronscheidingsmodel kon niet worden geladen. Importeer of download een geldig ONNX-model en probeer het opnieuw.</string>
+    <string name="source_separation_model_load_failed">Het geïnstalleerde bronscheidingsmodel kon niet worden geladen. Importeer of download een geldig TFLite-model en probeer het opnieuw.</string>
     <string name="source_separation_model_file_label">Bestand</string>
     <string name="source_separation_model_source_label">Bron</string>
     <string name="source_separation_model_hash_title">Hashcontrole</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Fork met bronscheiding</string>
     <string name="about_booming_ss_summary">Booming SS is een onofficiële versie op basis van Booming Music met bronscheiding. De oorspronkelijke lokale muziekspelerervaring blijft behouden, met extra gescheiden afspelen, sporenmixbediening, mixgeheugen per nummer en beheer van gescheiden caches.</string>
     <string name="about_booming_ss_model_title">Modelbestanden</string>
-    <string name="about_booming_ss_model_summary">Bronscheidingsmodellen worden niet met de app meegeleverd. Je kunt een vooraf ingesteld model downloaden, een aangepaste URL gebruiken of een lokaal ONNX-bestand importeren. Hashcontroles worden alleen als richtlijn getoond en blokkeren het gebruik niet.</string>
+    <string name="about_booming_ss_model_summary">Bronscheidingsmodellen worden niet met de app meegeleverd. Je kunt een vooraf ingesteld model downloaden, een aangepaste URL gebruiken of een lokaal TFLite-bestand importeren. Hashcontroles worden alleen als richtlijn getoond en blokkeren het gebruik niet.</string>
     <string name="about_booming_ss_fork_title">Broncode van Booming SS</string>
     <string name="about_booming_ss_fork_summary">Open deze fork op GitHub voor wijzigingen rond bronscheiding, releases en probleemmeldingen. Als hetzelfde probleem ook optreedt in de oorspronkelijke Booming Music-app, meld het dan bij de upstream-repository.</string>
     <string name="about_booming_ss_upstream_title">Oorspronkelijke Booming Music</string>

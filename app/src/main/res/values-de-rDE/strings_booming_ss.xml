@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Importierte Modelldatei ist leer.</string>
     <string name="source_separation_model_replace_failed">Vorhandene Modelldatei konnte nicht ersetzt werden.</string>
     <string name="source_separation_model_metadata_replace_failed">Modellmetadaten konnten nicht ersetzt werden.</string>
-    <string name="source_separation_model_load_failed">Das installierte Quellentrennungsmodell konnte nicht geladen werden. Importiere oder lade ein gültiges ONNX-Modell herunter und versuche es erneut.</string>
+    <string name="source_separation_model_load_failed">Das installierte Quellentrennungsmodell konnte nicht geladen werden. Importiere oder lade ein gültiges TFLite-Modell herunter und versuche es erneut.</string>
     <string name="source_separation_model_file_label">Datei</string>
     <string name="source_separation_model_source_label">Quelle</string>
     <string name="source_separation_model_hash_title">Hash-Prüfung</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Fork mit Quellentrennung</string>
     <string name="about_booming_ss_summary">Booming SS ist eine inoffizielle Version mit Quellentrennung auf Basis von Booming Music. Sie behält das ursprüngliche Erlebnis eines lokalen Musikplayers bei und ergänzt Wiedergabe getrennter Spuren, Spurmischungsregler, Mischungen pro Titel und Cache-Verwaltung für getrennte Spuren.</string>
     <string name="about_booming_ss_model_title">Modelldateien</string>
-    <string name="about_booming_ss_model_summary">Quellentrennungsmodelle werden nicht mit der App gebündelt. Du kannst ein vorgegebenes Modell herunterladen, eine eigene URL verwenden oder eine lokale ONNX-Datei importieren. Hash-Prüfungen dienen nur als Orientierung und blockieren die Nutzung nicht.</string>
+    <string name="about_booming_ss_model_summary">Quellentrennungsmodelle werden nicht mit der App gebündelt. Du kannst ein vorgegebenes Modell herunterladen, eine eigene URL verwenden oder eine lokale TFLite-Datei importieren. Hash-Prüfungen dienen nur als Orientierung und blockieren die Nutzung nicht.</string>
     <string name="about_booming_ss_fork_title">Booming-SS-Quellcode</string>
     <string name="about_booming_ss_fork_summary">Öffne diesen Fork auf GitHub, um Änderungen zur Quellentrennung, Veröffentlichungen und Fehlerberichte zu sehen. Wenn dasselbe Problem auch in der originalen Booming-Music-App auftritt, melde es bitte im Upstream-Repository.</string>
     <string name="about_booming_ss_upstream_title">Originales Booming Music</string>

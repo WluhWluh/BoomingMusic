@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">فایل مدل واردشده خالی است.</string>
     <string name="source_separation_model_replace_failed">فایل مدل موجود جایگزین نشد.</string>
     <string name="source_separation_model_metadata_replace_failed">فراداده مدل جایگزین نشد.</string>
-    <string name="source_separation_model_load_failed">مدل نصب‌شده جداسازی منابع صوتی بارگیری نشد. یک مدل معتبر ONNX وارد یا دانلود کنید و دوباره امتحان کنید.</string>
+    <string name="source_separation_model_load_failed">مدل نصب‌شده جداسازی منابع صوتی بارگیری نشد. یک مدل معتبر TFLite وارد یا دانلود کنید و دوباره امتحان کنید.</string>
     <string name="source_separation_model_file_label">فایل</string>
     <string name="source_separation_model_source_label">منبع</string>
     <string name="source_separation_model_hash_title">بررسی هش</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">فورک جداسازی منابع صوتی</string>
     <string name="about_booming_ss_summary">Booming SS یک نسخه غیررسمی مبتنی بر Booming Music با قابلیت جداسازی منابع صوتی است. تجربه اصلی پخش‌کننده موسیقی محلی را حفظ می‌کند و پخش جداشده، کنترل‌های میکس استم، حافظه میکس برای هر آهنگ و مدیریت کش جداسازی را اضافه می‌کند.</string>
     <string name="about_booming_ss_model_title">فایل‌های مدل</string>
-    <string name="about_booming_ss_model_summary">مدل‌های جداسازی منابع صوتی همراه برنامه ارائه نمی‌شوند. می‌توانید یک مدل از پیش تنظیم‌شده دانلود کنید، از URL سفارشی استفاده کنید یا یک فایل محلی ONNX وارد کنید. بررسی‌های هش فقط برای راهنمایی نمایش داده می‌شوند و جلوی استفاده را نمی‌گیرند.</string>
+    <string name="about_booming_ss_model_summary">مدل‌های جداسازی منابع صوتی همراه برنامه ارائه نمی‌شوند. می‌توانید یک مدل از پیش تنظیم‌شده دانلود کنید، از URL سفارشی استفاده کنید یا یک فایل محلی TFLite وارد کنید. بررسی‌های هش فقط برای راهنمایی نمایش داده می‌شوند و جلوی استفاده را نمی‌گیرند.</string>
     <string name="about_booming_ss_fork_title">کد منبع Booming SS</string>
     <string name="about_booming_ss_fork_summary">برای تغییرات جداسازی منابع صوتی، انتشارها و گزارش مشکلات، این فورک را در GitHub باز کنید. اگر همین مشکل در برنامه اصلی Booming Music هم رخ می‌دهد، لطفاً آن را در مخزن بالادستی گزارش کنید.</string>
     <string name="about_booming_ss_upstream_title">Booming Music اصلی</string>

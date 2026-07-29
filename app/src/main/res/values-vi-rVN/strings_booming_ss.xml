@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Tệp mô hình đã nhập bị trống.</string>
     <string name="source_separation_model_replace_failed">Không thể thay thế tệp mô hình hiện có.</string>
     <string name="source_separation_model_metadata_replace_failed">Không thể thay thế siêu dữ liệu mô hình.</string>
-    <string name="source_separation_model_load_failed">Không thể tải mô hình tách nguồn âm thanh đã cài đặt. Hãy nhập hoặc tải xuống mô hình ONNX hợp lệ rồi thử lại.</string>
+    <string name="source_separation_model_load_failed">Không thể tải mô hình tách nguồn âm thanh đã cài đặt. Hãy nhập hoặc tải xuống mô hình TFLite hợp lệ rồi thử lại.</string>
     <string name="source_separation_model_file_label">Tệp</string>
     <string name="source_separation_model_source_label">Nguồn</string>
     <string name="source_separation_model_hash_title">Kiểm tra hash</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Nhánh tách nguồn âm thanh</string>
     <string name="about_booming_ss_summary">Booming SS là bản dựng tách nguồn âm thanh không chính thức dựa trên Booming Music. Ứng dụng giữ trải nghiệm nghe nhạc ngoại tuyến gốc và thêm phát tách nguồn, điều khiển trộn stem, ghi nhớ mức trộn theo bài hát và quản lý bộ nhớ đệm đã tách.</string>
     <string name="about_booming_ss_model_title">Tệp mô hình</string>
-    <string name="about_booming_ss_model_summary">Mô hình tách nguồn âm thanh không đi kèm ứng dụng. Bạn có thể tải mô hình đặt sẵn, dùng URL tùy chỉnh hoặc nhập tệp ONNX cục bộ. Kiểm tra hash chỉ được hiển thị để tham khảo và không chặn việc sử dụng.</string>
+    <string name="about_booming_ss_model_summary">Mô hình tách nguồn âm thanh không đi kèm ứng dụng. Bạn có thể tải mô hình đặt sẵn, dùng URL tùy chỉnh hoặc nhập tệp TFLite cục bộ. Kiểm tra hash chỉ được hiển thị để tham khảo và không chặn việc sử dụng.</string>
     <string name="about_booming_ss_fork_title">Mã nguồn Booming SS</string>
     <string name="about_booming_ss_fork_summary">Mở nhánh này trên GitHub để xem thay đổi tách nguồn âm thanh, bản phát hành và báo cáo sự cố. Nếu cùng sự cố cũng xảy ra trong ứng dụng Booming Music gốc, vui lòng báo cáo cho kho thượng nguồn.</string>
     <string name="about_booming_ss_upstream_title">Booming Music gốc</string>

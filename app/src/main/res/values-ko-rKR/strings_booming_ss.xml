@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">가져온 모델 파일이 비어 있습니다.</string>
     <string name="source_separation_model_replace_failed">기존 모델 파일을 교체할 수 없습니다.</string>
     <string name="source_separation_model_metadata_replace_failed">모델 메타데이터를 교체할 수 없습니다.</string>
-    <string name="source_separation_model_load_failed">설치된 음원 분리 모델을 불러올 수 없습니다. 올바른 ONNX 모델을 가져오거나 다운로드한 뒤 다시 시도해 주세요.</string>
+    <string name="source_separation_model_load_failed">설치된 음원 분리 모델을 불러올 수 없습니다. 올바른 TFLite 모델을 가져오거나 다운로드한 뒤 다시 시도해 주세요.</string>
     <string name="source_separation_model_file_label">파일</string>
     <string name="source_separation_model_source_label">출처</string>
     <string name="source_separation_model_hash_title">해시 확인</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">음원 분리 포크</string>
     <string name="about_booming_ss_summary">Booming SS는 Booming Music을 기반으로 한 비공식 음원 분리 빌드입니다. 기존 로컬 음악 플레이어 경험을 유지하면서 분리 재생, 스템 믹스 조절, 곡별 믹스 기억, 분리 캐시 관리를 추가합니다.</string>
     <string name="about_booming_ss_model_title">모델 파일</string>
-    <string name="about_booming_ss_model_summary">음원 분리 모델은 앱에 포함되어 있지 않습니다. 사전 설정 모델을 다운로드하거나, 사용자 지정 URL을 사용하거나, 로컬 ONNX 파일을 가져올 수 있습니다. 해시 확인은 참고용으로만 표시되며 사용을 막지 않습니다.</string>
+    <string name="about_booming_ss_model_summary">음원 분리 모델은 앱에 포함되어 있지 않습니다. 사전 설정 모델을 다운로드하거나, 사용자 지정 URL을 사용하거나, 로컬 TFLite 파일을 가져올 수 있습니다. 해시 확인은 참고용으로만 표시되며 사용을 막지 않습니다.</string>
     <string name="about_booming_ss_fork_title">Booming SS 소스 코드</string>
     <string name="about_booming_ss_fork_summary">음원 분리 변경사항, 릴리스, 문제 보고를 확인하려면 GitHub에서 이 포크를 여세요. 같은 문제가 원본 Booming Music 앱에서도 발생한다면 업스트림 저장소에 보고해 주세요.</string>
     <string name="about_booming_ss_upstream_title">원본 Booming Music</string>

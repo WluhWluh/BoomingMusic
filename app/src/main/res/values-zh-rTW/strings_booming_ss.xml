@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">匯入的模型檔案為空。</string>
     <string name="source_separation_model_replace_failed">無法取代現有模型檔案。</string>
     <string name="source_separation_model_metadata_replace_failed">無法取代模型中繼資料。</string>
-    <string name="source_separation_model_load_failed">已安裝的音源分離模型無法載入。請匯入或下載有效的 ONNX 模型，然後再試一次。</string>
+    <string name="source_separation_model_load_failed">已安裝的音源分離模型無法載入。請匯入或下載有效的 TFLite 模型，然後再試一次。</string>
     <string name="source_separation_model_file_label">檔案</string>
     <string name="source_separation_model_source_label">來源</string>
     <string name="source_separation_model_hash_title">雜湊檢查</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">音源分離分支</string>
     <string name="about_booming_ss_summary">Booming SS 是基於 Booming Music 的非官方音源分離版本。它保留原本的本地音樂播放器體驗，並加入分軌播放、分軌混音控制、單曲混音記憶和分離快取管理。</string>
     <string name="about_booming_ss_model_title">模型檔案</string>
-    <string name="about_booming_ss_model_summary">音源分離模型不會隨應用程式打包。你可以下載預設模型、使用自訂 URL，或匯入本機 ONNX 檔案。雜湊檢查僅作為參考顯示，不會阻止使用。</string>
+    <string name="about_booming_ss_model_summary">音源分離模型不會隨應用程式打包。你可以下載預設模型、使用自訂 URL，或匯入本機 TFLite 檔案。雜湊檢查僅作為參考顯示，不會阻止使用。</string>
     <string name="about_booming_ss_fork_title">Booming SS 原始碼</string>
     <string name="about_booming_ss_fork_summary">在 GitHub 上開啟此分支，以查看音源分離改動、版本發布和問題報告。如果同樣的問題也出現在原版 Booming Music 中，請向上游倉庫報告。</string>
     <string name="about_booming_ss_upstream_title">原版 Booming Music</string>

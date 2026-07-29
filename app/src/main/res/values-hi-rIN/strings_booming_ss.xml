@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">आयात की गई मॉडल फ़ाइल खाली है।</string>
     <string name="source_separation_model_replace_failed">मौजूदा मॉडल फ़ाइल बदली नहीं जा सकी।</string>
     <string name="source_separation_model_metadata_replace_failed">मॉडल मेटाडेटा बदला नहीं जा सका।</string>
-    <string name="source_separation_model_load_failed">इंस्टॉल किया गया स्रोत पृथक्करण मॉडल लोड नहीं हो सका। मान्य ONNX मॉडल आयात या डाउनलोड करें, फिर दोबारा कोशिश करें।</string>
+    <string name="source_separation_model_load_failed">इंस्टॉल किया गया स्रोत पृथक्करण मॉडल लोड नहीं हो सका। मान्य TFLite मॉडल आयात या डाउनलोड करें, फिर दोबारा कोशिश करें।</string>
     <string name="source_separation_model_file_label">फ़ाइल</string>
     <string name="source_separation_model_source_label">स्रोत</string>
     <string name="source_separation_model_hash_title">हैश जाँच</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">स्रोत पृथक्करण फोर्क</string>
     <string name="about_booming_ss_summary">Booming SS, Booming Music पर आधारित अनौपचारिक स्रोत पृथक्करण बिल्ड है। यह मूल लोकल म्यूज़िक प्लेयर अनुभव बनाए रखता है और अलग किया गया प्लेबैक, स्टेम मिक्स कंट्रोल, हर गाने की मिक्स मेमोरी और पृथक्करण कैश प्रबंधन जोड़ता है।</string>
     <string name="about_booming_ss_model_title">मॉडल फ़ाइलें</string>
-    <string name="about_booming_ss_model_summary">स्रोत पृथक्करण मॉडल ऐप के साथ शामिल नहीं हैं। आप प्रीसेट मॉडल डाउनलोड कर सकते हैं, कस्टम URL इस्तेमाल कर सकते हैं या लोकल ONNX फ़ाइल आयात कर सकते हैं। हैश जाँच केवल मार्गदर्शन के लिए दिखाई जाती है और उपयोग को रोकती नहीं है।</string>
+    <string name="about_booming_ss_model_summary">स्रोत पृथक्करण मॉडल ऐप के साथ शामिल नहीं हैं। आप प्रीसेट मॉडल डाउनलोड कर सकते हैं, कस्टम URL इस्तेमाल कर सकते हैं या लोकल TFLite फ़ाइल आयात कर सकते हैं। हैश जाँच केवल मार्गदर्शन के लिए दिखाई जाती है और उपयोग को रोकती नहीं है।</string>
     <string name="about_booming_ss_fork_title">Booming SS स्रोत कोड</string>
     <string name="about_booming_ss_fork_summary">स्रोत पृथक्करण बदलाव, रिलीज़ और समस्या रिपोर्ट देखने के लिए इस फोर्क को GitHub पर खोलें। यदि वही समस्या मूल Booming Music ऐप में भी होती है, तो कृपया उसे अपस्ट्रीम रिपॉज़िटरी में रिपोर्ट करें।</string>
     <string name="about_booming_ss_upstream_title">मूल Booming Music</string>

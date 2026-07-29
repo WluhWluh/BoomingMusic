@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Imporditud mudelifail on tühi.</string>
     <string name="source_separation_model_replace_failed">Olemasolevat mudelifaili ei saanud asendada.</string>
     <string name="source_separation_model_metadata_replace_failed">Mudeli metaandmeid ei saanud asendada.</string>
-    <string name="source_separation_model_load_failed">Installitud heliallikate eraldamise mudelit ei saanud laadida. Impordi või laadi alla kehtiv ONNX-mudel ja proovi uuesti.</string>
+    <string name="source_separation_model_load_failed">Installitud heliallikate eraldamise mudelit ei saanud laadida. Impordi või laadi alla kehtiv TFLite-mudel ja proovi uuesti.</string>
     <string name="source_separation_model_file_label">Fail</string>
     <string name="source_separation_model_source_label">Allikas</string>
     <string name="source_separation_model_hash_title">Räsikontroll</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Heliallikate eraldamise haru</string>
     <string name="about_booming_ss_summary">Booming SS on Booming Musicul põhinev mitteametlik heliallikate eraldamise versioon. See säilitab algse kohaliku muusikamängija kogemuse ning lisab eraldatud taasesituse, radade miksi juhtimise, loo kaupa miksi mälu ja eraldamise vahemälude halduse.</string>
     <string name="about_booming_ss_model_title">Mudelifailid</string>
-    <string name="about_booming_ss_model_summary">Heliallikate eraldamise mudelid ei ole rakendusega kaasas. Saad alla laadida eelseadistatud mudeli, kasutada kohandatud URL-i või importida kohaliku ONNX-faili. Räsi kontrolle näidatakse ainult juhisena ja need ei takista kasutamist.</string>
+    <string name="about_booming_ss_model_summary">Heliallikate eraldamise mudelid ei ole rakendusega kaasas. Saad alla laadida eelseadistatud mudeli, kasutada kohandatud URL-i või importida kohaliku TFLite-faili. Räsi kontrolle näidatakse ainult juhisena ja need ei takista kasutamist.</string>
     <string name="about_booming_ss_fork_title">Booming SS-i lähtekood</string>
     <string name="about_booming_ss_fork_summary">Ava see haru GitHubis, et näha heliallikate eraldamise muudatusi, väljalaskeid ja probleemide aruandeid. Kui sama probleem esineb ka algses Booming Musicu rakenduses, teata sellest palun algprojekti hoidlasse.</string>
     <string name="about_booming_ss_upstream_title">Algne Booming Music</string>

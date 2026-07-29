@@ -200,7 +200,7 @@
     <string name="source_separation_model_import_empty">Imported model file is empty.</string>
     <string name="source_separation_model_replace_failed">Could not replace existing model file.</string>
     <string name="source_separation_model_metadata_replace_failed">Could not replace model metadata.</string>
-    <string name="source_separation_model_load_failed">The installed source separation model could not be loaded. Import or download a valid ONNX model, then try again.</string>
+    <string name="source_separation_model_load_failed">The installed source separation model could not be loaded. Import or download a valid TFLite model, then try again.</string>
     <string name="source_separation_model_file_label">File</string>
     <string name="source_separation_model_source_label">Source</string>
     <string name="source_separation_model_hash_title">Hash check</string>
@@ -291,7 +291,7 @@
     <string name="about_booming_ss_summary_title">Source separation fork</string>
     <string name="about_booming_ss_summary">Booming SS is an unofficial source-separation build based on Booming Music. It keeps the original local music player experience and adds separated playback, stem blend controls, per-song blend memory, and separated cache management.</string>
     <string name="about_booming_ss_model_title">Model files</string>
-    <string name="about_booming_ss_model_summary">Source separation models are not bundled with the app. You can download a preset model, use a custom URL, or import a local ONNX file. Hash checks are shown as guidance and do not block use.</string>
+    <string name="about_booming_ss_model_summary">Source separation models are not bundled with the app. You can download a preset model, use a custom URL, or import a local TFLite file. Hash checks are shown as guidance and do not block use.</string>
     <string name="about_booming_ss_fork_title">Booming SS source code</string>
     <string name="about_booming_ss_fork_summary">Open this fork on GitHub for source-separation changes, releases, and issue reports. If the same issue also happens in the original Booming Music app, please report it to the upstream repository.</string>
     <string name="about_booming_ss_upstream_title">Original Booming Music</string>

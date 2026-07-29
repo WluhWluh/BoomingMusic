@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Fișierul modelului importat este gol.</string>
     <string name="source_separation_model_replace_failed">Nu s-a putut înlocui fișierul modelului existent.</string>
     <string name="source_separation_model_metadata_replace_failed">Nu s-au putut înlocui metadatele modelului.</string>
-    <string name="source_separation_model_load_failed">Modelul instalat pentru separarea surselor nu a putut fi încărcat. Importă sau descarcă un model ONNX valid, apoi încearcă din nou.</string>
+    <string name="source_separation_model_load_failed">Modelul instalat pentru separarea surselor nu a putut fi încărcat. Importă sau descarcă un model TFLite valid, apoi încearcă din nou.</string>
     <string name="source_separation_model_file_label">Fișier</string>
     <string name="source_separation_model_source_label">Sursă</string>
     <string name="source_separation_model_hash_title">Verificare hash</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Ramură cu separarea surselor</string>
     <string name="about_booming_ss_summary">Booming SS este o versiune neoficială bazată pe Booming Music cu separarea surselor. Păstrează experiența originală de player muzical local și adaugă redare separată, controale pentru mixajul pistelor, memorarea mixajului pentru fiecare melodie și gestionarea cache-urilor de separare.</string>
     <string name="about_booming_ss_model_title">Fișiere de model</string>
-    <string name="about_booming_ss_model_summary">Modelele de separare a surselor nu sunt incluse în aplicație. Poți descărca un model presetat, folosi un URL personalizat sau importa un fișier ONNX local. Verificările hash sunt afișate doar ca îndrumare și nu blochează utilizarea.</string>
+    <string name="about_booming_ss_model_summary">Modelele de separare a surselor nu sunt incluse în aplicație. Poți descărca un model presetat, folosi un URL personalizat sau importa un fișier TFLite local. Verificările hash sunt afișate doar ca îndrumare și nu blochează utilizarea.</string>
     <string name="about_booming_ss_fork_title">Codul sursă Booming SS</string>
     <string name="about_booming_ss_fork_summary">Deschide această ramură pe GitHub pentru modificările separării surselor, versiuni și raportări de probleme. Dacă aceeași problemă apare și în aplicația originală Booming Music, raportează-o în depozitul proiectului original.</string>
     <string name="about_booming_ss_upstream_title">Booming Music original</string>

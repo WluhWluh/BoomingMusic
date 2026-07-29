@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Імпортований файл моделі порожній.</string>
     <string name="source_separation_model_replace_failed">Не вдалося замінити наявний файл моделі.</string>
     <string name="source_separation_model_metadata_replace_failed">Не вдалося замінити метадані моделі.</string>
-    <string name="source_separation_model_load_failed">Не вдалося завантажити встановлену модель розділення джерел звуку. Імпортуйте або завантажте дійсну модель ONNX і спробуйте ще раз.</string>
+    <string name="source_separation_model_load_failed">Не вдалося завантажити встановлену модель розділення джерел звуку. Імпортуйте або завантажте дійсну модель TFLite і спробуйте ще раз.</string>
     <string name="source_separation_model_file_label">Файл</string>
     <string name="source_separation_model_source_label">Джерело</string>
     <string name="source_separation_model_hash_title">Перевірка хешу</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Форк із розділенням джерел звуку</string>
     <string name="about_booming_ss_summary">Booming SS — неофіційна збірка на основі Booming Music із розділенням джерел звуку. Вона зберігає початковий досвід локального музичного програвача та додає роздільне відтворення, керування міксом доріжок, пам’ять міксу для кожної пісні й керування кешем розділення.</string>
     <string name="about_booming_ss_model_title">Файли моделі</string>
-    <string name="about_booming_ss_model_summary">Моделі розділення джерел звуку не входять до застосунку. Ви можете завантажити попередньо задану модель, використати власний URL або імпортувати локальний файл ONNX. Перевірки хешу показуються для довідки й не блокують використання.</string>
+    <string name="about_booming_ss_model_summary">Моделі розділення джерел звуку не входять до застосунку. Ви можете завантажити попередньо задану модель, використати власний URL або імпортувати локальний файл TFLite. Перевірки хешу показуються для довідки й не блокують використання.</string>
     <string name="about_booming_ss_fork_title">Вихідний код Booming SS</string>
     <string name="about_booming_ss_fork_summary">Відкрийте цей форк на GitHub, щоб переглянути зміни розділення джерел звуку, випуски й звіти про проблеми. Якщо та сама проблема виникає і в оригінальному застосунку Booming Music, повідомте про неї в репозиторій оригінального проєкту.</string>
     <string name="about_booming_ss_upstream_title">Оригінальний Booming Music</string>

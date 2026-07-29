@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">O arquivo de modelo importado está vazio.</string>
     <string name="source_separation_model_replace_failed">Não foi possível substituir o arquivo de modelo existente.</string>
     <string name="source_separation_model_metadata_replace_failed">Não foi possível substituir os metadados do modelo.</string>
-    <string name="source_separation_model_load_failed">Não foi possível carregar o modelo de separação de fontes instalado. Importe ou baixe um modelo ONNX válido e tente novamente.</string>
+    <string name="source_separation_model_load_failed">Não foi possível carregar o modelo de separação de fontes instalado. Importe ou baixe um modelo TFLite válido e tente novamente.</string>
     <string name="source_separation_model_file_label">Arquivo</string>
     <string name="source_separation_model_source_label">Origem</string>
     <string name="source_separation_model_hash_title">Verificação de hash</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Fork com separação de fontes</string>
     <string name="about_booming_ss_summary">O Booming SS é uma versão não oficial com separação de fontes baseada no Booming Music. Ele mantém a experiência original de reprodutor de músicas locais e adiciona reprodução separada, controles de mixagem de faixas, memória de mixagem por música e gerenciamento de caches separados.</string>
     <string name="about_booming_ss_model_title">Arquivos de modelo</string>
-    <string name="about_booming_ss_model_summary">Os modelos de separação de fontes não são incluídos no aplicativo. Você pode baixar um modelo predefinido, usar uma URL personalizada ou importar um arquivo ONNX local. As verificações de hash são exibidas apenas como orientação e não bloqueiam o uso.</string>
+    <string name="about_booming_ss_model_summary">Os modelos de separação de fontes não são incluídos no aplicativo. Você pode baixar um modelo predefinido, usar uma URL personalizada ou importar um arquivo TFLite local. As verificações de hash são exibidas apenas como orientação e não bloqueiam o uso.</string>
     <string name="about_booming_ss_fork_title">Código-fonte do Booming SS</string>
     <string name="about_booming_ss_fork_summary">Abra este fork no GitHub para ver mudanças de separação de fontes, lançamentos e relatórios de problemas. Se o mesmo problema também acontecer no aplicativo Booming Music original, reporte-o ao repositório upstream.</string>
     <string name="about_booming_ss_upstream_title">Booming Music original</string>

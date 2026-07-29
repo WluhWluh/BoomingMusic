@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Uvezena datoteka modela je prazna.</string>
     <string name="source_separation_model_replace_failed">Nije moguće zamijeniti postojeću datoteku modela.</string>
     <string name="source_separation_model_metadata_replace_failed">Nije moguće zamijeniti metapodatke modela.</string>
-    <string name="source_separation_model_load_failed">Instalirani model za razdvajanje izvora nije moguće učitati. Uvezi ili preuzmi valjan ONNX model i pokušaj ponovno.</string>
+    <string name="source_separation_model_load_failed">Instalirani model za razdvajanje izvora nije moguće učitati. Uvezi ili preuzmi valjan TFLite model i pokušaj ponovno.</string>
     <string name="source_separation_model_file_label">Datoteka</string>
     <string name="source_separation_model_source_label">Izvor</string>
     <string name="source_separation_model_hash_title">Provjera hasha</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Ogranak s razdvajanjem izvora</string>
     <string name="about_booming_ss_summary">Booming SS je neslužbena verzija temeljena na Booming Musicu s razdvajanjem izvora. Zadržava izvorno iskustvo lokalnog glazbenog reproduktora i dodaje odvojenu reprodukciju, kontrole miksa kanala, pamćenje miksa po pjesmi i upravljanje predmemorijama razdvajanja.</string>
     <string name="about_booming_ss_model_title">Datoteke modela</string>
-    <string name="about_booming_ss_model_summary">Modeli za razdvajanje izvora nisu uključeni u aplikaciju. Možeš preuzeti unaprijed postavljeni model, upotrijebiti prilagođeni URL ili uvesti lokalnu ONNX datoteku. Provjere hasha prikazuju se samo kao smjernica i ne sprječavaju korištenje.</string>
+    <string name="about_booming_ss_model_summary">Modeli za razdvajanje izvora nisu uključeni u aplikaciju. Možeš preuzeti unaprijed postavljeni model, upotrijebiti prilagođeni URL ili uvesti lokalnu TFLite datoteku. Provjere hasha prikazuju se samo kao smjernica i ne sprječavaju korištenje.</string>
     <string name="about_booming_ss_fork_title">Izvorni kod Booming SS-a</string>
     <string name="about_booming_ss_fork_summary">Otvori ovaj ogranak na GitHubu za promjene razdvajanja izvora, izdanja i prijave problema. Ako se isti problem pojavljuje i u izvornoj aplikaciji Booming Music, prijavi ga u repozitorij izvornog projekta.</string>
     <string name="about_booming_ss_upstream_title">Izvorni Booming Music</string>

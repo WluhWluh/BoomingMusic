@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Importovaný soubor modelu je prázdný.</string>
     <string name="source_separation_model_replace_failed">Nepodařilo se nahradit stávající soubor modelu.</string>
     <string name="source_separation_model_metadata_replace_failed">Nepodařilo se nahradit metadata modelu.</string>
-    <string name="source_separation_model_load_failed">Nainstalovaný model oddělení zdrojů se nepodařilo načíst. Importujte nebo stáhněte platný model ONNX a zkuste to znovu.</string>
+    <string name="source_separation_model_load_failed">Nainstalovaný model oddělení zdrojů se nepodařilo načíst. Importujte nebo stáhněte platný model TFLite a zkuste to znovu.</string>
     <string name="source_separation_model_file_label">Soubor</string>
     <string name="source_separation_model_source_label">Zdroj</string>
     <string name="source_separation_model_hash_title">Kontrola hashe</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Větev s oddělením zdrojů</string>
     <string name="about_booming_ss_summary">Booming SS je neoficiální verze založená na Booming Music s oddělením zvukových zdrojů. Zachovává původní zážitek místního hudebního přehrávače a přidává oddělené přehrávání, ovládání mixu stop, paměť mixu pro každou skladbu a správu mezipamětí oddělení.</string>
     <string name="about_booming_ss_model_title">Soubory modelů</string>
-    <string name="about_booming_ss_model_summary">Modely pro oddělení zdrojů nejsou součástí aplikace. Můžete stáhnout přednastavený model, použít vlastní adresu URL nebo importovat místní soubor ONNX. Kontroly hashe se zobrazují pouze jako vodítko a nebrání použití.</string>
+    <string name="about_booming_ss_model_summary">Modely pro oddělení zdrojů nejsou součástí aplikace. Můžete stáhnout přednastavený model, použít vlastní adresu URL nebo importovat místní soubor TFLite. Kontroly hashe se zobrazují pouze jako vodítko a nebrání použití.</string>
     <string name="about_booming_ss_fork_title">Zdrojový kód Booming SS</string>
     <string name="about_booming_ss_fork_summary">Otevřete tuto větev na GitHubu pro změny oddělení zdrojů, vydání a hlášení problémů. Pokud se stejný problém objevuje i v původní aplikaci Booming Music, nahlaste ho prosím do repozitáře původního projektu.</string>
     <string name="about_booming_ss_upstream_title">Původní Booming Music</string>

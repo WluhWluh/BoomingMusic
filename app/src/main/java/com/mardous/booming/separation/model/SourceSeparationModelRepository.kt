@@ -495,7 +495,7 @@ class SourceSeparationModelLoadException(
     cause: Throwable,
 ) : IllegalStateException(
     "The installed source separation model could not be loaded. " +
-            "Import or download a valid ONNX model, then try again.",
+            "Import or download a valid TFLite model, then try again.",
     cause,
 )
 

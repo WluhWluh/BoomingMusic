@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">ملف النموذج المستورد فارغ.</string>
     <string name="source_separation_model_replace_failed">تعذر استبدال ملف النموذج الحالي.</string>
     <string name="source_separation_model_metadata_replace_failed">تعذر استبدال بيانات تعريف النموذج.</string>
-    <string name="source_separation_model_load_failed">تعذر تحميل نموذج فصل الصوت المثبت. استورد نموذج ONNX صالحًا أو نزّله، ثم أعد المحاولة.</string>
+    <string name="source_separation_model_load_failed">تعذر تحميل نموذج فصل الصوت المثبت. استورد نموذج TFLite صالحًا أو نزّله، ثم أعد المحاولة.</string>
     <string name="source_separation_model_file_label">الملف</string>
     <string name="source_separation_model_source_label">المصدر</string>
     <string name="source_separation_model_hash_title">فحص التجزئة</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">فرع لفصل الصوت</string>
     <string name="about_booming_ss_summary">Booming SS هو إصدار غير رسمي مبني على Booming Music مع فصل مصادر الصوت. يحافظ على تجربة مشغل الموسيقى المحلي الأصلية ويضيف تشغيل المسارات المفصولة، والتحكم في مزج المسارات، وتذكّر المزج لكل أغنية، وإدارة ذواكر الفصل المؤقتة.</string>
     <string name="about_booming_ss_model_title">ملفات النموذج</string>
-    <string name="about_booming_ss_model_summary">نماذج فصل مصادر الصوت غير مرفقة مع التطبيق. يمكنك تنزيل نموذج مسبق، أو استخدام عنوان URL مخصص، أو استيراد ملف ONNX محلي. تُعرض فحوصات التجزئة للإرشاد فقط ولا تمنع الاستخدام.</string>
+    <string name="about_booming_ss_model_summary">نماذج فصل مصادر الصوت غير مرفقة مع التطبيق. يمكنك تنزيل نموذج مسبق، أو استخدام عنوان URL مخصص، أو استيراد ملف TFLite محلي. تُعرض فحوصات التجزئة للإرشاد فقط ولا تمنع الاستخدام.</string>
     <string name="about_booming_ss_fork_title">الشفرة المصدرية لـ Booming SS</string>
     <string name="about_booming_ss_fork_summary">افتح هذا الفرع على GitHub للاطلاع على تغييرات فصل مصادر الصوت والإصدارات وتقارير المشكلات. إذا كانت المشكلة نفسها تحدث أيضًا في تطبيق Booming Music الأصلي، فأبلغ عنها في مستودع المشروع الأصلي.</string>
     <string name="about_booming_ss_upstream_title">Booming Music الأصلي</string>

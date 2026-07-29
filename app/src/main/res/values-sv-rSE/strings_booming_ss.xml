@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Den importerade modellfilen är tom.</string>
     <string name="source_separation_model_replace_failed">Kunde inte ersätta den befintliga modellfilen.</string>
     <string name="source_separation_model_metadata_replace_failed">Kunde inte ersätta modellmetadata.</string>
-    <string name="source_separation_model_load_failed">Den installerade källseparationsmodellen kunde inte läsas in. Importera eller hämta en giltig ONNX-modell och försök igen.</string>
+    <string name="source_separation_model_load_failed">Den installerade källseparationsmodellen kunde inte läsas in. Importera eller hämta en giltig TFLite-modell och försök igen.</string>
     <string name="source_separation_model_file_label">Fil</string>
     <string name="source_separation_model_source_label">Källa</string>
     <string name="source_separation_model_hash_title">Hashkontroll</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Fork med källseparation</string>
     <string name="about_booming_ss_summary">Booming SS är en inofficiell version baserad på Booming Music med källseparation. Den behåller den ursprungliga lokala musikspelarupplevelsen och lägger till separerad uppspelning, kontroller för spårmixning, mixminne per låt och hantering av separerade cacher.</string>
     <string name="about_booming_ss_model_title">Modellfiler</string>
-    <string name="about_booming_ss_model_summary">Källseparationsmodeller följer inte med appen. Du kan hämta en förinställd modell, använda en anpassad URL eller importera en lokal ONNX-fil. Hashkontroller visas endast som vägledning och blockerar inte användning.</string>
+    <string name="about_booming_ss_model_summary">Källseparationsmodeller följer inte med appen. Du kan hämta en förinställd modell, använda en anpassad URL eller importera en lokal TFLite-fil. Hashkontroller visas endast som vägledning och blockerar inte användning.</string>
     <string name="about_booming_ss_fork_title">Booming SS-källkod</string>
     <string name="about_booming_ss_fork_summary">Öppna denna fork på GitHub för källseparationsändringar, versioner och felrapporter. Om samma problem också uppstår i den ursprungliga Booming Music-appen, rapportera det till upstream-repositoriet.</string>
     <string name="about_booming_ss_upstream_title">Ursprungliga Booming Music</string>

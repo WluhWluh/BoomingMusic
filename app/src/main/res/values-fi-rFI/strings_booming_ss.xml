@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Tuotu mallitiedosto on tyhjä.</string>
     <string name="source_separation_model_replace_failed">Olemassa olevaa mallitiedostoa ei voitu korvata.</string>
     <string name="source_separation_model_metadata_replace_failed">Mallin metatietoja ei voitu korvata.</string>
-    <string name="source_separation_model_load_failed">Asennettua lähteiden erottelun mallia ei voitu ladata. Tuo tai lataa kelvollinen ONNX-malli ja yritä uudelleen.</string>
+    <string name="source_separation_model_load_failed">Asennettua lähteiden erottelun mallia ei voitu ladata. Tuo tai lataa kelvollinen TFLite-malli ja yritä uudelleen.</string>
     <string name="source_separation_model_file_label">Tiedosto</string>
     <string name="source_separation_model_source_label">Lähde</string>
     <string name="source_separation_model_hash_title">Tiivisteen tarkistus</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Lähteiden erottelun fork</string>
     <string name="about_booming_ss_summary">Booming SS on Booming Musiciin perustuva epävirallinen lähteiden erottelun versio. Se säilyttää alkuperäisen paikallisen musiikkisoittimen kokemuksen ja lisää erotellun toiston, raitamiksausohjaimet, kappalekohtaisen miksauksen muistin ja erotteluvälimuistien hallinnan.</string>
     <string name="about_booming_ss_model_title">Mallitiedostot</string>
-    <string name="about_booming_ss_model_summary">Lähteiden erottelun malleja ei toimiteta sovelluksen mukana. Voit ladata esiasetetun mallin, käyttää mukautettua URL-osoitetta tai tuoda paikallisen ONNX-tiedoston. Tiivistetarkistukset näytetään vain ohjeena eivätkä estä käyttöä.</string>
+    <string name="about_booming_ss_model_summary">Lähteiden erottelun malleja ei toimiteta sovelluksen mukana. Voit ladata esiasetetun mallin, käyttää mukautettua URL-osoitetta tai tuoda paikallisen TFLite-tiedoston. Tiivistetarkistukset näytetään vain ohjeena eivätkä estä käyttöä.</string>
     <string name="about_booming_ss_fork_title">Booming SS:n lähdekoodi</string>
     <string name="about_booming_ss_fork_summary">Avaa tämä fork GitHubissa nähdäksesi lähteiden erottelun muutokset, julkaisut ja ongelmaraportit. Jos sama ongelma esiintyy myös alkuperäisessä Booming Music -sovelluksessa, ilmoita siitä upstream-tietovarastoon.</string>
     <string name="about_booming_ss_upstream_title">Alkuperäinen Booming Music</string>

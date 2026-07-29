@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">İçe aktarılan model dosyası boş.</string>
     <string name="source_separation_model_replace_failed">Mevcut model dosyası değiştirilemedi.</string>
     <string name="source_separation_model_metadata_replace_failed">Model meta verileri değiştirilemedi.</string>
-    <string name="source_separation_model_load_failed">Yüklü ses kaynağı ayırma modeli yüklenemedi. Geçerli bir ONNX modeli içe aktar veya indir, ardından tekrar dene.</string>
+    <string name="source_separation_model_load_failed">Yüklü ses kaynağı ayırma modeli yüklenemedi. Geçerli bir TFLite modeli içe aktar veya indir, ardından tekrar dene.</string>
     <string name="source_separation_model_file_label">Dosya</string>
     <string name="source_separation_model_source_label">Kaynak</string>
     <string name="source_separation_model_hash_title">Hash denetimi</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Ses kaynağı ayırma fork\'u</string>
     <string name="about_booming_ss_summary">Booming SS, Booming Music tabanlı resmi olmayan bir ses kaynağı ayırma sürümüdür. Özgün yerel müzik çalar deneyimini korur; ayrılmış çalma, parça karışımı denetimleri, şarkıya göre karışım belleği ve ayrılmış önbellek yönetimi ekler.</string>
     <string name="about_booming_ss_model_title">Model dosyaları</string>
-    <string name="about_booming_ss_model_summary">Ses kaynağı ayırma modelleri uygulamayla birlikte gelmez. Ön ayarlı bir model indirebilir, özel bir URL kullanabilir veya yerel bir ONNX dosyasını içe aktarabilirsin. Hash denetimleri yalnızca yol gösterici olarak gösterilir ve kullanımı engellemez.</string>
+    <string name="about_booming_ss_model_summary">Ses kaynağı ayırma modelleri uygulamayla birlikte gelmez. Ön ayarlı bir model indirebilir, özel bir URL kullanabilir veya yerel bir TFLite dosyasını içe aktarabilirsin. Hash denetimleri yalnızca yol gösterici olarak gösterilir ve kullanımı engellemez.</string>
     <string name="about_booming_ss_fork_title">Booming SS kaynak kodu</string>
     <string name="about_booming_ss_fork_summary">Ses kaynağı ayırma değişiklikleri, sürümler ve sorun bildirimleri için bu fork\'u GitHub\'da aç. Aynı sorun özgün Booming Music uygulamasında da oluyorsa lütfen yukarı akış deposuna bildir.</string>
     <string name="about_booming_ss_upstream_title">Özgün Booming Music</string>

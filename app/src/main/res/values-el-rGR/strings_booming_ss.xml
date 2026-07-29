@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Το εισαγμένο αρχείο μοντέλου είναι κενό.</string>
     <string name="source_separation_model_replace_failed">Δεν ήταν δυνατή η αντικατάσταση του υπάρχοντος αρχείου μοντέλου.</string>
     <string name="source_separation_model_metadata_replace_failed">Δεν ήταν δυνατή η αντικατάσταση των μεταδεδομένων μοντέλου.</string>
-    <string name="source_separation_model_load_failed">Δεν ήταν δυνατή η φόρτωση του εγκατεστημένου μοντέλου διαχωρισμού πηγών ήχου. Εισαγάγετε ή κατεβάστε ένα έγκυρο μοντέλο ONNX και δοκιμάστε ξανά.</string>
+    <string name="source_separation_model_load_failed">Δεν ήταν δυνατή η φόρτωση του εγκατεστημένου μοντέλου διαχωρισμού πηγών ήχου. Εισαγάγετε ή κατεβάστε ένα έγκυρο μοντέλο TFLite και δοκιμάστε ξανά.</string>
     <string name="source_separation_model_file_label">Αρχείο</string>
     <string name="source_separation_model_source_label">Πηγή</string>
     <string name="source_separation_model_hash_title">Έλεγχος hash</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Έκδοση με διαχωρισμό πηγών ήχου</string>
     <string name="about_booming_ss_summary">Το Booming SS είναι μια ανεπίσημη έκδοση βασισμένη στο Booming Music με διαχωρισμό πηγών ήχου. Διατηρεί την αρχική εμπειρία τοπικού προγράμματος αναπαραγωγής μουσικής και προσθέτει διαχωρισμένη αναπαραγωγή, χειριστήρια μίξης διαχωρισμένων μερών, μνήμη μίξης ανά τραγούδι και διαχείριση κρυφής μνήμης διαχωρισμού.</string>
     <string name="about_booming_ss_model_title">Αρχεία μοντέλου</string>
-    <string name="about_booming_ss_model_summary">Τα μοντέλα διαχωρισμού πηγών ήχου δεν περιλαμβάνονται στην εφαρμογή. Μπορείτε να κατεβάσετε ένα προεπιλεγμένο μοντέλο, να χρησιμοποιήσετε προσαρμοσμένο URL ή να εισαγάγετε τοπικό αρχείο ONNX. Οι έλεγχοι hash εμφανίζονται ως καθοδήγηση και δεν εμποδίζουν τη χρήση.</string>
+    <string name="about_booming_ss_model_summary">Τα μοντέλα διαχωρισμού πηγών ήχου δεν περιλαμβάνονται στην εφαρμογή. Μπορείτε να κατεβάσετε ένα προεπιλεγμένο μοντέλο, να χρησιμοποιήσετε προσαρμοσμένο URL ή να εισαγάγετε τοπικό αρχείο TFLite. Οι έλεγχοι hash εμφανίζονται ως καθοδήγηση και δεν εμποδίζουν τη χρήση.</string>
     <string name="about_booming_ss_fork_title">Πηγαίος κώδικας Booming SS</string>
     <string name="about_booming_ss_fork_summary">Ανοίξτε αυτήν την έκδοση στο GitHub για αλλαγές διαχωρισμού πηγών ήχου, εκδόσεις και αναφορές προβλημάτων. Αν το ίδιο πρόβλημα συμβαίνει και στην αρχική εφαρμογή Booming Music, αναφέρετέ το στο αποθετήριο του αρχικού έργου.</string>
     <string name="about_booming_ss_upstream_title">Αρχικό Booming Music</string>

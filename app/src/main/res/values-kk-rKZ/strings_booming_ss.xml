@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Импортталған модель файлы бос.</string>
     <string name="source_separation_model_replace_failed">Бар модель файлын ауыстыру мүмкін болмады.</string>
     <string name="source_separation_model_metadata_replace_failed">Модель метадеректерін ауыстыру мүмкін болмады.</string>
-    <string name="source_separation_model_load_failed">Орнатылған дыбыс көздерін бөлу моделін жүктеу мүмкін болмады. Жарамды ONNX моделін импорттаңыз немесе жүктеп алып, қайталап көріңіз.</string>
+    <string name="source_separation_model_load_failed">Орнатылған дыбыс көздерін бөлу моделін жүктеу мүмкін болмады. Жарамды TFLite моделін импорттаңыз немесе жүктеп алып, қайталап көріңіз.</string>
     <string name="source_separation_model_file_label">Файл</string>
     <string name="source_separation_model_source_label">Көз</string>
     <string name="source_separation_model_hash_title">Хэш тексеруі</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Дыбыс көздерін бөлу тармағы</string>
     <string name="about_booming_ss_summary">Booming SS - Booming Music негізіндегі бейресми дыбыс көздерін бөлу нұсқасы. Ол бастапқы жергілікті музыка ойнатқышы тәжірибесін сақтап, бөлінген ойнатуды, жолдар миксін басқаруды, әр әнге арналған микс жадын және бөлу кэштерін басқаруды қосады.</string>
     <string name="about_booming_ss_model_title">Модель файлдары</string>
-    <string name="about_booming_ss_model_summary">Дыбыс көздерін бөлу модельдері қолданбамен бірге берілмейді. Алдын ала берілген модельді жүктеп алуға, өз URL қолдануға немесе жергілікті ONNX файлын импорттауға болады. Хэш тексерулері тек анықтама ретінде көрсетіледі және пайдалануға кедергі жасамайды.</string>
+    <string name="about_booming_ss_model_summary">Дыбыс көздерін бөлу модельдері қолданбамен бірге берілмейді. Алдын ала берілген модельді жүктеп алуға, өз URL қолдануға немесе жергілікті TFLite файлын импорттауға болады. Хэш тексерулері тек анықтама ретінде көрсетіледі және пайдалануға кедергі жасамайды.</string>
     <string name="about_booming_ss_fork_title">Booming SS бастапқы коды</string>
     <string name="about_booming_ss_fork_summary">Дыбыс көздерін бөлу өзгерістерін, шығарылымдарды және мәселе есептерін көру үшін бұл тармақты GitHub-та ашыңыз. Егер дәл сол мәселе бастапқы Booming Music қолданбасында да болса, оны бастапқы репозиторийге хабарлаңыз.</string>
     <string name="about_booming_ss_upstream_title">Бастапқы Booming Music</string>

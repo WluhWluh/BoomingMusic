@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">El fitxer de model importat és buit.</string>
     <string name="source_separation_model_replace_failed">No s\'ha pogut substituir el fitxer de model existent.</string>
     <string name="source_separation_model_metadata_replace_failed">No s\'han pogut substituir les metadades del model.</string>
-    <string name="source_separation_model_load_failed">No s\'ha pogut carregar el model de separació de fonts instal·lat. Importa o descarrega un model ONNX vàlid i torna-ho a intentar.</string>
+    <string name="source_separation_model_load_failed">No s\'ha pogut carregar el model de separació de fonts instal·lat. Importa o descarrega un model TFLite vàlid i torna-ho a intentar.</string>
     <string name="source_separation_model_file_label">Fitxer</string>
     <string name="source_separation_model_source_label">Origen</string>
     <string name="source_separation_model_hash_title">Comprovació de hash</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Versió derivada amb separació de fonts</string>
     <string name="about_booming_ss_summary">Booming SS és una versió no oficial basada en Booming Music amb separació de fonts. Manté l\'experiència original de reproductor de música local i hi afegeix reproducció separada, controls de mescla de pistes, memòria de mescla per cançó i gestió de memòries cau separades.</string>
     <string name="about_booming_ss_model_title">Fitxers de model</string>
-    <string name="about_booming_ss_model_summary">Els models de separació de fonts no s\'inclouen amb l\'aplicació. Pots descarregar un model predefinit, fer servir un URL personalitzat o importar un fitxer ONNX local. Les comprovacions de hash només es mostren com a orientació i no en bloquegen l\'ús.</string>
+    <string name="about_booming_ss_model_summary">Els models de separació de fonts no s\'inclouen amb l\'aplicació. Pots descarregar un model predefinit, fer servir un URL personalitzat o importar un fitxer TFLite local. Les comprovacions de hash només es mostren com a orientació i no en bloquegen l\'ús.</string>
     <string name="about_booming_ss_fork_title">Codi font de Booming SS</string>
     <string name="about_booming_ss_fork_summary">Obre aquesta versió derivada a GitHub per consultar els canvis de separació de fonts, les versions i els informes de problemes. Si el mateix problema també passa a l\'aplicació Booming Music original, informa\'n al repositori principal.</string>
     <string name="about_booming_ss_upstream_title">Booming Music original</string>

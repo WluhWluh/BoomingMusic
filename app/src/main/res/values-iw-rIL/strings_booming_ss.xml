@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">קובץ המודל שיובא ריק.</string>
     <string name="source_separation_model_replace_failed">לא ניתן היה להחליף את קובץ המודל הקיים.</string>
     <string name="source_separation_model_metadata_replace_failed">לא ניתן היה להחליף את המטא־נתונים של המודל.</string>
-    <string name="source_separation_model_load_failed">לא ניתן היה לטעון את מודל הפרדת מקורות השמע המותקן. יש לייבא או להוריד מודל ONNX תקין ואז לנסות שוב.</string>
+    <string name="source_separation_model_load_failed">לא ניתן היה לטעון את מודל הפרדת מקורות השמע המותקן. יש לייבא או להוריד מודל TFLite תקין ואז לנסות שוב.</string>
     <string name="source_separation_model_file_label">קובץ</string>
     <string name="source_separation_model_source_label">מקור</string>
     <string name="source_separation_model_hash_title">בדיקת גיבוב</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">פורק להפרדת מקורות שמע</string>
     <string name="about_booming_ss_summary">Booming SS הוא גרסה לא רשמית המבוססת על Booming Music עם הפרדת מקורות שמע. הוא שומר על חוויית נגן המוזיקה המקומית המקורית ומוסיף השמעה מופרדת, בקרות מיקס סטמים, זיכרון מיקס לכל שיר וניהול מטמוני הפרדה.</string>
     <string name="about_booming_ss_model_title">קובצי מודל</string>
-    <string name="about_booming_ss_model_summary">מודלי הפרדת מקורות שמע אינם כלולים באפליקציה. אפשר להוריד מודל קבוע מראש, להשתמש בכתובת URL מותאמת אישית או לייבא קובץ ONNX מקומי. בדיקות גיבוב מוצגות כהנחיה בלבד ואינן חוסמות שימוש.</string>
+    <string name="about_booming_ss_model_summary">מודלי הפרדת מקורות שמע אינם כלולים באפליקציה. אפשר להוריד מודל קבוע מראש, להשתמש בכתובת URL מותאמת אישית או לייבא קובץ TFLite מקומי. בדיקות גיבוב מוצגות כהנחיה בלבד ואינן חוסמות שימוש.</string>
     <string name="about_booming_ss_fork_title">קוד המקור של Booming SS</string>
     <string name="about_booming_ss_fork_summary">פתח את הפורק הזה ב-GitHub כדי לראות שינויים בהפרדת מקורות שמע, גרסאות ודיווחי בעיות. אם אותה בעיה מתרחשת גם באפליקציית Booming Music המקורית, נא לדווח עליה למאגר של הפרויקט המקורי.</string>
     <string name="about_booming_ss_upstream_title">Booming Music המקורי</string>

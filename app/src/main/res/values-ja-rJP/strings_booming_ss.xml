@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">インポートしたモデルファイルが空です。</string>
     <string name="source_separation_model_replace_failed">既存のモデルファイルを置き換えられませんでした。</string>
     <string name="source_separation_model_metadata_replace_failed">モデルのメタデータを置き換えられませんでした。</string>
-    <string name="source_separation_model_load_failed">インストール済みの音源分離モデルを読み込めませんでした。有効な ONNX モデルをインポートまたはダウンロードしてから、もう一度お試しください。</string>
+    <string name="source_separation_model_load_failed">インストール済みの音源分離モデルを読み込めませんでした。有効な TFLite モデルをインポートまたはダウンロードしてから、もう一度お試しください。</string>
     <string name="source_separation_model_file_label">ファイル</string>
     <string name="source_separation_model_source_label">入手元</string>
     <string name="source_separation_model_hash_title">ハッシュチェック</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">音源分離フォーク</string>
     <string name="about_booming_ss_summary">Booming SS は Booming Music をベースにした非公式の音源分離ビルドです。元のローカル音楽プレーヤー体験を保ちながら、分離再生、ステムミックス操作、曲ごとのミックス記憶、分離キャッシュ管理を追加しています。</string>
     <string name="about_booming_ss_model_title">モデルファイル</string>
-    <string name="about_booming_ss_model_summary">音源分離モデルはアプリに同梱されていません。プリセットモデルをダウンロードするか、カスタム URL を使用するか、ローカルの ONNX ファイルをインポートできます。ハッシュチェックは参考として表示され、使用をブロックしません。</string>
+    <string name="about_booming_ss_model_summary">音源分離モデルはアプリに同梱されていません。プリセットモデルをダウンロードするか、カスタム URL を使用するか、ローカルの TFLite ファイルをインポートできます。ハッシュチェックは参考として表示され、使用をブロックしません。</string>
     <string name="about_booming_ss_fork_title">Booming SS のソースコード</string>
     <string name="about_booming_ss_fork_summary">音源分離の変更、リリース、問題報告を確認するには、このフォークを GitHub で開いてください。同じ問題が元の Booming Music アプリでも発生する場合は、上流リポジトリに報告してください。</string>
     <string name="about_booming_ss_upstream_title">元の Booming Music</string>

@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">File model yang diimpor kosong.</string>
     <string name="source_separation_model_replace_failed">Tidak dapat mengganti file model yang ada.</string>
     <string name="source_separation_model_metadata_replace_failed">Tidak dapat mengganti metadata model.</string>
-    <string name="source_separation_model_load_failed">Model pemisahan sumber yang terpasang tidak dapat dimuat. Impor atau unduh model ONNX yang valid, lalu coba lagi.</string>
+    <string name="source_separation_model_load_failed">Model pemisahan sumber yang terpasang tidak dapat dimuat. Impor atau unduh model TFLite yang valid, lalu coba lagi.</string>
     <string name="source_separation_model_file_label">File</string>
     <string name="source_separation_model_source_label">Sumber</string>
     <string name="source_separation_model_hash_title">Pemeriksaan hash</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Fork pemisahan sumber</string>
     <string name="about_booming_ss_summary">Booming SS adalah build pemisahan sumber tidak resmi berbasis Booming Music. Aplikasi ini mempertahankan pengalaman pemutar musik lokal asli dan menambahkan pemutaran terpisah, kontrol campuran stem, memori campuran per lagu, serta pengelolaan cache terpisah.</string>
     <string name="about_booming_ss_model_title">File model</string>
-    <string name="about_booming_ss_model_summary">Model pemisahan sumber tidak disertakan dalam aplikasi. Anda dapat mengunduh model preset, menggunakan URL kustom, atau mengimpor file ONNX lokal. Pemeriksaan hash hanya ditampilkan sebagai panduan dan tidak memblokir penggunaan.</string>
+    <string name="about_booming_ss_model_summary">Model pemisahan sumber tidak disertakan dalam aplikasi. Anda dapat mengunduh model preset, menggunakan URL kustom, atau mengimpor file TFLite lokal. Pemeriksaan hash hanya ditampilkan sebagai panduan dan tidak memblokir penggunaan.</string>
     <string name="about_booming_ss_fork_title">Kode sumber Booming SS</string>
     <string name="about_booming_ss_fork_summary">Buka fork ini di GitHub untuk melihat perubahan pemisahan sumber, rilis, dan laporan masalah. Jika masalah yang sama juga terjadi di aplikasi Booming Music asli, laporkan ke repositori hulu.</string>
     <string name="about_booming_ss_upstream_title">Booming Music asli</string>

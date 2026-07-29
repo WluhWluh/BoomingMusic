@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Zaimportowany plik modelu jest pusty.</string>
     <string name="source_separation_model_replace_failed">Nie udało się zastąpić istniejącego pliku modelu.</string>
     <string name="source_separation_model_metadata_replace_failed">Nie udało się zastąpić metadanych modelu.</string>
-    <string name="source_separation_model_load_failed">Nie udało się wczytać zainstalowanego modelu separacji źródeł. Zaimportuj albo pobierz prawidłowy model ONNX i spróbuj ponownie.</string>
+    <string name="source_separation_model_load_failed">Nie udało się wczytać zainstalowanego modelu separacji źródeł. Zaimportuj albo pobierz prawidłowy model TFLite i spróbuj ponownie.</string>
     <string name="source_separation_model_file_label">Plik</string>
     <string name="source_separation_model_source_label">Źródło</string>
     <string name="source_separation_model_hash_title">Sprawdzanie hasha</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Fork z separacją źródeł</string>
     <string name="about_booming_ss_summary">Booming SS to nieoficjalna wersja oparta na Booming Music z funkcją separacji źródeł. Zachowuje doświadczenie oryginalnego lokalnego odtwarzacza muzyki i dodaje odtwarzanie z rozdzielonymi ścieżkami, sterowanie miksem ścieżek, pamięć miksu dla utworów oraz zarządzanie pamięciami podręcznymi separacji.</string>
     <string name="about_booming_ss_model_title">Pliki modelu</string>
-    <string name="about_booming_ss_model_summary">Modele separacji źródeł nie są dołączane do aplikacji. Możesz pobrać model domyślny, użyć niestandardowego adresu URL albo zaimportować lokalny plik ONNX. Sprawdzenia hasha są wyświetlane tylko jako wskazówka i nie blokują użycia.</string>
+    <string name="about_booming_ss_model_summary">Modele separacji źródeł nie są dołączane do aplikacji. Możesz pobrać model domyślny, użyć niestandardowego adresu URL albo zaimportować lokalny plik TFLite. Sprawdzenia hasha są wyświetlane tylko jako wskazówka i nie blokują użycia.</string>
     <string name="about_booming_ss_fork_title">Kod źródłowy Booming SS</string>
     <string name="about_booming_ss_fork_summary">Otwórz ten fork w GitHubie, aby zobaczyć zmiany separacji źródeł, wydania i zgłoszenia problemów. Jeśli ten sam problem występuje także w oryginalnej aplikacji Booming Music, zgłoś go w repozytorium projektu źródłowego.</string>
     <string name="about_booming_ss_upstream_title">Oryginalny Booming Music</string>

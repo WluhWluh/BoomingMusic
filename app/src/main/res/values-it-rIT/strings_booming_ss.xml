@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Il file del modello importato è vuoto.</string>
     <string name="source_separation_model_replace_failed">Impossibile sostituire il file del modello esistente.</string>
     <string name="source_separation_model_metadata_replace_failed">Impossibile sostituire i metadati del modello.</string>
-    <string name="source_separation_model_load_failed">Impossibile caricare il modello di separazione delle sorgenti installato. Importa o scarica un modello ONNX valido, quindi riprova.</string>
+    <string name="source_separation_model_load_failed">Impossibile caricare il modello di separazione delle sorgenti installato. Importa o scarica un modello TFLite valido, quindi riprova.</string>
     <string name="source_separation_model_file_label">File</string>
     <string name="source_separation_model_source_label">Origine</string>
     <string name="source_separation_model_hash_title">Controllo hash</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Fork con separazione delle sorgenti</string>
     <string name="about_booming_ss_summary">Booming SS è una versione non ufficiale basata su Booming Music con separazione delle sorgenti. Mantiene l\'esperienza originale del lettore di musica locale e aggiunge riproduzione separata, controlli del mix delle tracce, memoria del mix per brano e gestione delle cache separate.</string>
     <string name="about_booming_ss_model_title">File modello</string>
-    <string name="about_booming_ss_model_summary">I modelli di separazione delle sorgenti non sono inclusi nell\'app. Puoi scaricare un modello predefinito, usare un URL personalizzato o importare un file ONNX locale. I controlli hash sono mostrati come riferimento e non bloccano l\'uso.</string>
+    <string name="about_booming_ss_model_summary">I modelli di separazione delle sorgenti non sono inclusi nell\'app. Puoi scaricare un modello predefinito, usare un URL personalizzato o importare un file TFLite locale. I controlli hash sono mostrati come riferimento e non bloccano l\'uso.</string>
     <string name="about_booming_ss_fork_title">Codice sorgente di Booming SS</string>
     <string name="about_booming_ss_fork_summary">Apri questo fork su GitHub per vedere modifiche della separazione delle sorgenti, rilasci e segnalazioni di problemi. Se lo stesso problema si verifica anche nell\'app originale Booming Music, segnalalo al repository upstream.</string>
     <string name="about_booming_ss_upstream_title">Booming Music originale</string>

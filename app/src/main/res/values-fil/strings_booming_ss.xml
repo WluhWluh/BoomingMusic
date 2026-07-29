@@ -94,7 +94,7 @@
     <string name="source_separation_model_import_empty">Walang laman ang na-import na model file.</string>
     <string name="source_separation_model_replace_failed">Hindi mapalitan ang kasalukuyang model file.</string>
     <string name="source_separation_model_metadata_replace_failed">Hindi mapalitan ang metadata ng modelo.</string>
-    <string name="source_separation_model_load_failed">Hindi ma-load ang naka-install na modelo para sa paghihiwalay ng audio source. Mag-import o mag-download ng valid na ONNX model, pagkatapos ay subukang muli.</string>
+    <string name="source_separation_model_load_failed">Hindi ma-load ang naka-install na modelo para sa paghihiwalay ng audio source. Mag-import o mag-download ng valid na TFLite model, pagkatapos ay subukang muli.</string>
     <string name="source_separation_model_file_label">File</string>
     <string name="source_separation_model_source_label">Pinagmulan</string>
     <string name="source_separation_model_hash_title">Pagsuri ng hash</string>
@@ -160,7 +160,7 @@
     <string name="about_booming_ss_summary_title">Fork para sa paghihiwalay ng audio source</string>
     <string name="about_booming_ss_summary">Ang Booming SS ay hindi opisyal na build na batay sa Booming Music na may paghihiwalay ng audio source. Pinapanatili nito ang orihinal na karanasan ng lokal na music player at nagdadagdag ng hiwalay na playback, mga kontrol ng stem mix, memorya ng mix kada kanta, at pamamahala ng separation cache.</string>
     <string name="about_booming_ss_model_title">Mga model file</string>
-    <string name="about_booming_ss_model_summary">Hindi kasama sa app ang mga modelo para sa paghihiwalay ng audio source. Maaari kang mag-download ng preset model, gumamit ng custom URL, o mag-import ng lokal na ONNX file. Ipinapakita ang mga hash check bilang gabay lamang at hindi nito hinaharangan ang paggamit.</string>
+    <string name="about_booming_ss_model_summary">Hindi kasama sa app ang mga modelo para sa paghihiwalay ng audio source. Maaari kang mag-download ng preset model, gumamit ng custom URL, o mag-import ng lokal na TFLite file. Ipinapakita ang mga hash check bilang gabay lamang at hindi nito hinaharangan ang paggamit.</string>
     <string name="about_booming_ss_fork_title">Source code ng Booming SS</string>
     <string name="about_booming_ss_fork_summary">Buksan ang fork na ito sa GitHub para sa mga pagbabago sa paghihiwalay ng audio source, mga release, at ulat ng isyu. Kung nangyayari rin ang parehong problema sa orihinal na Booming Music app, pakiulat ito sa upstream repository.</string>
     <string name="about_booming_ss_upstream_title">Orihinal na Booming Music</string>
