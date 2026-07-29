@@ -1940,10 +1940,12 @@ internal object SourceSeparationMainDeathDebugHarness {
                 "The authoritative inference process did not survive main-process death."
             }
             if (terminalCommitBoundary) {
-                SourceSeparationCacheFaultInjection.release(
-                    requireNotNull(armedFaultRoot),
-                    requireNotNull(armedFaultToken),
-                )
+                check(
+                    File(
+                        requireNotNull(armedFaultRoot),
+                        "phase4-fault-injection/release",
+                    ).readText(Charsets.UTF_8) == requireNotNull(armedFaultToken)
+                ) { "The host did not release the terminal barrier before product restart." }
             }
 
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)

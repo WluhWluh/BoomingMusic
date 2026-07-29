@@ -1784,6 +1784,42 @@ try {
             throw "The authoritative inference process died with the main process."
         }
 
+        if ($MainDeathBoundary -eq "terminal-commit") {
+            $faultToken = [string]$scenario.faultToken
+            $cacheRootPath = [string]$scenario.cacheRootPath
+            $allowedInternalCacheRoot = "$appDataRoot/cache/source-separation"
+            $allowedExternalCacheRoot =
+                "/storage/emulated/$deviceUserId/Android/data/$package/cache/source-separation"
+            if ($faultToken -notmatch '^[A-Za-z0-9._-]{1,120}$' -or
+                    ($cacheRootPath -ne $allowedInternalCacheRoot -and
+                    $cacheRootPath -ne $allowedExternalCacheRoot)) {
+                throw "The terminal main-death scenario contains an unsafe fault barrier."
+            }
+            $releasePath = "$cacheRootPath/phase4-fault-injection/release"
+            $releaseStagingPath = "/data/local/tmp/bss-phase7-$RunId-release"
+            $localReleasePath = Join-Path ([IO.Path]::GetTempPath()) (
+                "bss-phase7-{0}-release-{1}" -f $RunId, [Guid]::NewGuid().ToString("N")
+            )
+            try {
+                [IO.File]::WriteAllText(
+                    $localReleasePath,
+                    $faultToken,
+                    [Text.UTF8Encoding]::new($false)
+                )
+                Invoke-Adb push $localReleasePath $releaseStagingPath
+                Invoke-Adb shell run-as $package cp -- $releaseStagingPath $releasePath
+                $writtenToken = (
+                    & $adb -s $Serial shell run-as $package cat $releasePath
+                ) -join "`n"
+                if ($writtenToken -cne $faultToken) {
+                    throw "The terminal main-death release token was not written exactly."
+                }
+            } finally {
+                Remove-Item -LiteralPath $localReleasePath -Force -ErrorAction SilentlyContinue
+                & $adb -s $Serial shell rm -f -- $releaseStagingPath 2>$null | Out-Null
+            }
+        }
+
         Invoke-Adb shell am start -W --user $deviceUserId -n `
             "$package/com.mardous.booming.activities.MainActivity"
         $restartDeadline = [DateTime]::UtcNow.AddSeconds(30)
