@@ -285,6 +285,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("tryGpu", request.tryGpu)
                     .put("faultToken", faultToken ?: JSONObject.NULL)
                     .put("faultHitPid", faultHit?.pid ?: JSONObject.NULL)
+                    .put("faultHitRuntime", faultRuntimeJson(faultHit))
                     .put(
                         "faultHitElapsedRealtimeNanos",
                         faultHit?.reachedAtElapsedRealtimeNanos ?: JSONObject.NULL,
@@ -912,6 +913,11 @@ internal object SourceSeparationMainDeathDebugHarness {
                     journalAfterDeath.request.gpuRuntimeIdentity,
                 )
                 check(journalAfterDeath.request.gpuFallbackLatch == null)
+                val initialRuntime = scenario.getJSONObject("faultHitRuntime")
+                check(initialRuntime.getString("runtimeName") == "LiteRT 2.1.5 Auto")
+                check(initialRuntime.getString("backend") == "LiteRtGpu")
+                check(initialRuntime.isNull("fallbackStage"))
+                check(initialRuntime.isNull("fallbackReason"))
                 val latch = SourceSeparationGpuFallbackLatch(
                     stage = "GpuInvocation",
                     reason = "Phase 7 persisted fallback fixture.",
@@ -970,13 +976,13 @@ internal object SourceSeparationMainDeathDebugHarness {
                     transition.type ==
                         SourceSeparationCacheRunTransitionType.GpuFallbackLatched
                 } == 1)
-                val mappedNativeLibrariesAtBarrier = SourceSeparationProcParser
-                    .mappedNativeLibraryNames(
-                        File("/proc/$resumedRemotePid/maps").readLines(),
-                    )
-                check(GPU_ACCELERATOR_LIBRARY !in mappedNativeLibrariesAtBarrier) {
-                    "The latched CPU process mapped the GPU accelerator."
+                val resumedRuntime = requireNotNull(resumeFaultHit.runtime) {
+                    "The latched CPU fault hit did not capture runtime diagnostics."
                 }
+                check(resumedRuntime.runtimeName == "LiteRT 2.1.5")
+                check(resumedRuntime.backend == "LiteRtCpu")
+                check(resumedRuntime.fallbackStage == null)
+                check(resumedRuntime.fallbackReason == null)
                 val previousOwnerDeath = resumedJournal.transitions.single { transition ->
                     transition.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
                 }
@@ -1055,6 +1061,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                         .put("latchedJournalSequence", latchedJournal.latestSequence)
                         .put("committedSegmentsPreserved",
                             committedBeforeDeath.length())
+                        .put("runtimeBeforeDeath", initialRuntime)
                         .put("fallbackLatchStage", latch.stage)
                         .put("fallbackLatchReason", latch.reason)
                         .put("fallbackTransitionCount",
@@ -1074,12 +1081,13 @@ internal object SourceSeparationMainDeathDebugHarness {
                                     SourceSeparationCacheRunTransitionType.PreviousOwnerDied
                             })
                         .put("resumeMode", "LatchedCpuFallback")
-                        .put("mappedLiteRtLibrariesAtBarrier", JSONArray(
-                            mappedNativeLibrariesAtBarrier
-                                .filter { library -> "LiteRt" in library }
-                                .sorted(),
-                        ))
-                        .put("gpuAcceleratorMappedAtBarrier", false)
+                        .put("resumedRuntime", JSONObject()
+                            .put("runtimeName", resumedRuntime.runtimeName)
+                            .put("backend", resumedRuntime.backend)
+                            .put("fallbackStage",
+                                resumedRuntime.fallbackStage ?: JSONObject.NULL)
+                            .put("fallbackReason",
+                                resumedRuntime.fallbackReason ?: JSONObject.NULL))
                         .put("directCpuResume", true)
                         .put("newGpuFallbackAttempt", false)
                         .put("resumeNativeInvocationBarrierReached", true)
@@ -2361,6 +2369,15 @@ internal object SourceSeparationMainDeathDebugHarness {
             .put("commandQueueWindowSize", identity.commandQueueWindowSize)
     }
 
+    private fun faultRuntimeJson(hit: SourceSeparationCacheFaultHit?): Any {
+        val runtime = hit?.runtime ?: return JSONObject.NULL
+        return JSONObject()
+            .put("runtimeName", runtime.runtimeName)
+            .put("backend", runtime.backend)
+            .put("fallbackStage", runtime.fallbackStage ?: JSONObject.NULL)
+            .put("fallbackReason", runtime.fallbackReason ?: JSONObject.NULL)
+    }
+
     private fun committedSegmentEvidence(
         journal: SourceSeparationCacheRunJournal,
     ): JSONArray = JSONArray(journal.committedSegments.map { segment ->
@@ -3003,7 +3020,6 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val TEST_BLEND = 0.23f
     private const val EXPECTED_FULL_SONG_MODEL_ID = "uvr_mdxnet_3_9662"
     private const val EXPECTED_FULL_SONG_SEGMENTS = 48
-    private const val GPU_ACCELERATOR_LIBRARY = "libLiteRtClGlAccelerator.so"
     private const val MODEL_BACKUP_DIRECTORY = "phase7-model-backups"
     private const val TAG = "SrcSepMainDeath"
     private val SAFE_NAME = Regex("^[A-Za-z0-9._-]{1,120}$")

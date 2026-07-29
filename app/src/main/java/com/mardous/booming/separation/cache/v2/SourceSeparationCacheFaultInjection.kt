@@ -66,6 +66,7 @@ internal object SourceSeparationCacheFaultInjection {
     fun reach(
         stage: SourceSeparationCacheFaultStage,
         root: File? = initializedRoot,
+        runtime: SourceSeparationCacheFaultRuntimeDiagnostics? = null,
     ) {
         if (!BuildConfig.DEBUG) return
         val selectedRoot = root ?: return
@@ -91,6 +92,7 @@ internal object SourceSeparationCacheFaultInjection {
                     occurrence = occurrence,
                     pid = android.os.Process.myPid(),
                     reachedAtElapsedRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos(),
+                    runtime = runtime,
                 )
             ).toByteArray(Charsets.UTF_8),
         )
@@ -170,7 +172,27 @@ internal data class SourceSeparationCacheFaultHit(
     val occurrence: Int,
     val pid: Int,
     val reachedAtElapsedRealtimeNanos: Long,
+    val runtime: SourceSeparationCacheFaultRuntimeDiagnostics? = null,
 )
+
+@Serializable
+internal data class SourceSeparationCacheFaultRuntimeDiagnostics(
+    val runtimeName: String,
+    val backend: String,
+    val fallbackStage: String? = null,
+    val fallbackReason: String? = null,
+) {
+    init {
+        require(runtimeName.isNotBlank()) { "Fault runtime name is empty." }
+        require(backend.isNotBlank()) { "Fault runtime backend is empty." }
+        require(fallbackStage == null || fallbackStage.isNotBlank()) {
+            "Fault runtime fallback stage is empty."
+        }
+        require(fallbackReason == null || fallbackReason.isNotBlank()) {
+            "Fault runtime fallback reason is empty."
+        }
+    }
+}
 
 @Serializable
 internal enum class SourceSeparationCacheFaultAction {

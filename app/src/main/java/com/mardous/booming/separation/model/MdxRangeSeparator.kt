@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
+import com.mardous.booming.BuildConfig
 import com.mardous.booming.separation.audio.WavFileWriter
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.SourceSeparationSegmentScheduler
@@ -12,6 +13,7 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentPriority
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultInjection
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultRuntimeDiagnostics
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultStage
 import java.io.File
 import java.util.LinkedHashMap
@@ -640,8 +642,17 @@ class MdxRangeSeparator(
             spectrogram.waveformToTensor(mixWindow)
         }
         val modelOutput = measureElapsed(timing, "Model inference") {
+            val runtimeDiagnostics = if (BuildConfig.DEBUG) session.diagnostics else null
             SourceSeparationCacheFaultInjection.reach(
                 SourceSeparationCacheFaultStage.NativeInvocation,
+                runtime = runtimeDiagnostics?.let { diagnostics ->
+                    SourceSeparationCacheFaultRuntimeDiagnostics(
+                        runtimeName = diagnostics.runtimeName,
+                        backend = diagnostics.backend.name,
+                        fallbackStage = diagnostics.fallbackStage,
+                        fallbackReason = diagnostics.fallbackReason,
+                    )
+                },
             )
             requireWorkspaceAvailable()
             session.run(modelInput, shouldCancel)
