@@ -93,6 +93,27 @@ identical pre-commit worktree content:
 before compilation because `ui-backhandler-android:1.9.1` was absent from the
 local cache; online resolution then completed the release compilation.
 
+Two opt-in S10 instrumentation transactions then exercised the same visible
+controls with production ViewModels and repositories:
+
+- `livePresetDownloadAndActivationUseProductionViewModel` downloaded KARA
+  through the production downloader, selected its visible Use action,
+  confirmed its experimental status, and verified the exact active model
+  reference. Its `finally` cleanup restored 9662 while leaving KARA installed
+  but inactive.
+- `liveCacheDeleteUsesProductionViewModel` waited for startup recovery to
+  settle, required an idle foreground-worker coordinator, clicked Delete for
+  cache key `43a1ad5f8ef63f4cd674c1843b4b07519d9d3bdbf981af87e639a31ebb8bfe9e`,
+  and verified that both the screen state and runtime repository removed the
+  exact entry. No inference process remained resident.
+
+The live preset transaction used AndroidTest APK SHA-256
+`32f2beab0e9c8026ab2b6a2cd66cb6270371ea960d32dae5d3d4676f81ca1853`.
+The cache-delete transaction used AndroidTest APK SHA-256
+`e7ef4b6113e22ce14090e335c2c9785c740a5e07ec674c97b202d2d27d3ddb9c`.
+Both used the arm64 debug app APK SHA-256
+`4ebc8498b1a3b1f4c82e937cb27228344a4a25793cf026037b11f3c2068a3d21`.
+
 ## Evidence
 
 Raw JSON remains ignored under
@@ -106,9 +127,11 @@ Raw JSON remains ignored under
 ## Limits
 
 The real process-death scenario validates the state consumed by the player and
-cache-management surfaces. The Compose tests separately validate rendering and
-callback identity; they do not navigate from the recreated `MainActivity` or
-perform real repository deletion/activation. This checkpoint also does not
-claim active original-audio continuity across main-process death. The retained
-app data contained another incomplete cache entry; selection of the exact
-tested cache key prevented that unrelated entry from satisfying the gate.
+cache-management surfaces. Compose coverage validates both deterministic
+rendering/callback identity and separate live repository deletion/activation.
+It does not yet navigate from the recreated `MainActivity` into those pages or
+perform the live transaction in the same instrumentation method as process
+death. This checkpoint also does not claim active original-audio continuity
+across main-process death. The retained app data contained another incomplete
+cache entry; selection of the exact tested cache key prevented that unrelated
+entry from satisfying the gate.

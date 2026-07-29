@@ -1647,9 +1647,14 @@ policy changed in response.
   transition. Pause releases the new run, and exact 9662 restoration does not
   resume the abandoned generation. See
   [Phase 7 remote-death model switching](validation/litert-inference-process/phase7/remote-process-death-model-switch-2026-07-29.md).
-- [ ] Repeat the focused cache-clear and model-switch paths on S10 and through
-  the visible preset- and cache-management actions. None of these operations
-  may resurrect an old generation.
+- [x] Repeat the focused cache-clear and model-switch paths on S10 and exercise
+  the visible preset- and cache-management actions through their production
+  ViewModels. Neither path resurrects an old generation. Navigation from a
+  recreated `MainActivity` remains part of the broader main-process boundary
+  matrix. See
+  [Phase 7 main-process product state](validation/litert-inference-process/phase7/main-process-product-state-2026-07-29.md),
+  [cache invalidation](validation/litert-inference-process/phase7/remote-process-death-cache-clear-2026-07-29.md),
+  and [model switching](validation/litert-inference-process/phase7/remote-process-death-model-switch-2026-07-29.md).
 - [x] Change `tryGpu` after inference-process death and prove explicit retry
   still uses the original admitted value. This passes with false-to-true CPU
   and true-to-false bounded GPU changes on both S10 and S25.

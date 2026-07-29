@@ -1,7 +1,8 @@
 # Phase 7 remote-death model switching
 
-Status: S25 passed; switching away from a dead run's model isolates later work
-under a new model identity and cache key without reviving the abandoned run
+Status: S25 and S10 passed; switching away from a dead run's model isolates
+later work under a new model identity and cache key without reviving the
+abandoned run
 
 Product foreground-resource fix:
 
@@ -10,6 +11,7 @@ Product foreground-resource fix:
 Product and test-harness revision:
 
 - `591ff7b97e1e1092d4cc1766cbb5f488e9e5226e`
+- S10 extension: `2eed0c0954c7ff5044fbc7c6e01022573246ccb6`
 
 Device-test runner: `phase7-runner-v56`
 
@@ -54,6 +56,11 @@ the normal safe-window boundary, after which the new journal is durably
 exact backed-up 9662 artifact, selects it again, restores the original GPU
 preference, and removes the temporary backup even when validation fails.
 
+A separate S10 Compose instrumentation transaction uses the production preset
+ViewModel and visible Download, Use, and experimental-confirmation actions to
+install and activate KARA, then restores 9662 in cleanup. See
+[main-process product state](main-process-product-state-2026-07-29.md).
+
 ## Cleanup race found
 
 The first full device attempt exposed a race in orphaned foreground-resource
@@ -72,7 +79,8 @@ death is confirmed while the old start ticks remain visible.
 
 ## Frozen inputs
 
-- Device: Samsung S25 (`SM-S9310`), API 35, `arm64-v8a`
+- Devices: Samsung S25 (`SM-S9310`), API 35, and Samsung S10 (`SM-G9730`),
+  API 31; both `arm64-v8a`
 - Primary model: `uvr_mdxnet_3_9662@2`
 - Primary SHA-256:
   `f74eee1ac06845a7cf277416138b19a6203f34316a3a74b2bde19acbfb2f8378`
@@ -108,6 +116,12 @@ death is confirmed while the old start ticks remain visible.
 | Terminal resources | No service, notification, wake lock, cache owner, or processing owner |
 | Final model state | Exact 9662 weights installed and active; KARA remains installed |
 
+The same checks passed on S10. It observed 30,071 ms with no relaunch, rejected
+active-model deletion, retained the old cache as `Stale/ModelNotInstalled`,
+admitted KARA under cache key `a28d1df3...` at sequence 1 with zero previous
+owner transitions, paused after one segment, and restored exact 9662 without
+resuming the abandoned generation.
+
 The old 9662 journal remained byte-for-byte unchanged through KARA admission
 and Pause. Reinstalling 9662 changed only its availability from
 `ModelNotInstalled` back to `InstalledExact`; it did not resume the old run.
@@ -120,13 +134,13 @@ Raw reports and input envelopes remain ignored build artifacts under
 | Run | Report SHA-256 | Input envelope SHA-256 |
 | --- | --- | --- |
 | `phase7-s25-remote-death-model-switch-v3` | `42a6a9e2f29314b9ccf553feef14d25fc230968e7fcf342b9c756d37ef33730c` | `7a62389a36923971a3d8621553723e10a5e9aafb0bea8b66ec1f5ca94d92f247` |
+| `phase7-s10-remote-death-model-switch-v1` | `66712aa85ddd382925283a4a7c35ee8c7218dfe74b8f7eaee2a60002e2f2216c` | `67e3201ee223bb2879a7b18869ee659f263590bad00055cdf1adfe535df58491` |
 
 ## Remaining scope
 
-- Repeat the focused cache-clear and model-switch gates on S10 after a second
-  model is installed there.
-- Exercise the visible preset-management and cache-management actions instead
-  of their production repositories directly.
+- Navigate to the visible preset-management action from a recreated
+  `MainActivity`; the Download, Use, and experimental-confirmation actions
+  themselves have passed through the production ViewModel on S10.
 - Verify app/runtime mismatch and an already-latched GPU-to-CPU fallback at
   explicit-retry time.
 
