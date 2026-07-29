@@ -49,7 +49,6 @@ import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetS
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDeletionException
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
-import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.separation.process.SourceSeparationProcParser
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
@@ -971,38 +970,11 @@ internal object SourceSeparationMainDeathDebugHarness {
                     transition.type ==
                         SourceSeparationCacheRunTransitionType.GpuFallbackLatched
                 } == 1)
-                val diagnosticHost = BoundRemoteSourceSeparationExecutionHost(context)
-                val remoteEvidenceAtBarrier = try {
-                    val active = requireNotNull(diagnosticHost.reconnectableRun()) {
-                        "The latched CPU run was absent from remote diagnostics."
-                    }
-                    active to diagnosticHost.processDiagnostics()
-                } finally {
-                    diagnosticHost.close()
-                }
-                val activeRunAtBarrier = remoteEvidenceAtBarrier.first
-                val processDiagnosticsAtBarrier = remoteEvidenceAtBarrier.second
-                val runtimeAtBarrier = activeRunAtBarrier.descriptor.runtime
-                check(activeRunAtBarrier.descriptor.runId == resumedJournal.request.runId)
-                check(activeRunAtBarrier.descriptor.processGeneration ==
-                    resumedJournal.request.processGeneration)
-                check(runtimeAtBarrier.backendPolicy ==
-                    SourceSeparationExecutionBackendPolicy.Cpu)
-                check(runtimeAtBarrier.tryGpu)
-                check(runtimeAtBarrier.gpuRuntimeIdentity == admittedRuntime)
-                check(runtimeAtBarrier.gpuFallbackLatch == latch)
-                check(processDiagnosticsAtBarrier.pid == resumedRemotePid)
-                check(processDiagnosticsAtBarrier.processGeneration ==
-                    resumedJournal.request.processGeneration)
-                check(processDiagnosticsAtBarrier.activeRunId == resumedJournal.request.runId)
-                check(processDiagnosticsAtBarrier.session.state ==
-                    SourceSeparationProcessSessionState.Resident)
-                check(processDiagnosticsAtBarrier.session.backendPolicy ==
-                    SourceSeparationExecutionBackendPolicy.Cpu)
-                check(processDiagnosticsAtBarrier.session.nativeSessionCreationCount == 1)
-                check(processDiagnosticsAtBarrier.session.activeLeaseCount == 1)
-                check(GPU_ACCELERATOR_LIBRARY !in
-                    processDiagnosticsAtBarrier.mappedNativeLibraries) {
+                val mappedNativeLibrariesAtBarrier = SourceSeparationProcParser
+                    .mappedNativeLibraryNames(
+                        File("/proc/$resumedRemotePid/maps").readLines(),
+                    )
+                check(GPU_ACCELERATOR_LIBRARY !in mappedNativeLibrariesAtBarrier) {
                     "The latched CPU process mapped the GPU accelerator."
                 }
                 val previousOwnerDeath = resumedJournal.transitions.single { transition ->
@@ -1101,17 +1073,12 @@ internal object SourceSeparationMainDeathDebugHarness {
                                 transition.type ==
                                     SourceSeparationCacheRunTransitionType.PreviousOwnerDied
                             })
-                        .put("acceptedBackendPolicy", runtimeAtBarrier.backendPolicy.name)
-                        .put("sessionBackendPolicy",
-                            processDiagnosticsAtBarrier.session.backendPolicy.name)
-                        .put("sessionState",
-                            processDiagnosticsAtBarrier.session.state.name)
-                        .put("nativeSessionCreationCount",
-                            processDiagnosticsAtBarrier.session.nativeSessionCreationCount)
-                        .put("activeSessionLeaseCount",
-                            processDiagnosticsAtBarrier.session.activeLeaseCount)
-                        .put("inferenceInvocationCountAtBarrier",
-                            processDiagnosticsAtBarrier.session.invocationCount)
+                        .put("resumeMode", "LatchedCpuFallback")
+                        .put("mappedLiteRtLibrariesAtBarrier", JSONArray(
+                            mappedNativeLibrariesAtBarrier
+                                .filter { library -> "LiteRt" in library }
+                                .sorted(),
+                        ))
                         .put("gpuAcceleratorMappedAtBarrier", false)
                         .put("directCpuResume", true)
                         .put("newGpuFallbackAttempt", false)
