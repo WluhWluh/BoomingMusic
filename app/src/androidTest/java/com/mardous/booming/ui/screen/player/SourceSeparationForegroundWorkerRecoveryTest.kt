@@ -105,6 +105,78 @@ class SourceSeparationForegroundWorkerRecoveryTest {
         preferences.edit().clear().commit()
     }
 
+    @Test
+    fun reconnectedSnapshotRestoresWorkerWithoutReplacingPlaybackState() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val preferences = context.getSharedPreferences(
+            "source-separation-recovery-playback-test",
+            Context.MODE_PRIVATE,
+        )
+        preferences.edit()
+            .clear()
+            .putBoolean(SOURCE_SEPARATION_AUTO_CACHE_CLEANUP, false)
+            .commit()
+        val journal = journal(context)
+        val session = FakeReconnectedSession(journal)
+        val recovery = BlockingRecovery(session)
+        val runtimeCalls = AtomicInteger(0)
+        val runtime = Proxy.newProxyInstance(
+            SourceSeparationRuntimeFacade::class.java.classLoader,
+            arrayOf(SourceSeparationRuntimeFacade::class.java),
+        ) { _, method, _ ->
+            runtimeCalls.incrementAndGet()
+            throw AssertionError("Unexpected runtime call: ${method.name}")
+        } as SourceSeparationRuntimeFacade
+        val coordinator = SourceSeparationForegroundWorkerCoordinator(
+            context = context,
+            preferences = preferences,
+            sourceSeparationRuntime = runtime,
+            independentRunRecovery = recovery,
+        )
+
+        assertTrue(recovery.entered.await(5L, TimeUnit.SECONDS))
+        val currentSong = recoveredSong(
+            journal = journal,
+            songId = 84L,
+            filePath = "/music/current.wav",
+            title = "Current song",
+        )
+        coordinator.updateSong(
+            song = currentSong,
+            positionMs = 4_321L,
+            durationMs = 12_345L,
+            isPlaying = true,
+            sourceSeparationBlend = 0.25f,
+        )
+        recovery.release.countDown()
+
+        awaitCondition {
+            (coordinator.workerStateFlow.value as? SourceSeparationUiState.Running)
+                ?.completedWindows == 2
+        }
+        val playback = coordinator.playbackStateFlow.value
+        assertEquals(currentSong, playback.song)
+        assertEquals(4_321L, playback.positionMs)
+        assertEquals(12_345L, playback.durationMs)
+        assertTrue(playback.isPlaying)
+        assertEquals(0.25f, playback.sourceSeparationBlend)
+        assertEquals(journal.request.song.songId, coordinator.runningSongId())
+        assertEquals(journal.request.cacheKey, coordinator.runningCacheKey())
+        assertEquals(setOf(journal.request.cacheKey), coordinator.protectedCacheKeys())
+        assertEquals(0, runtimeCalls.get())
+
+        recovery.emit(
+            SourceSeparationExecutionHostEventPayload.Paused("test-cleanup"),
+            sequence = 3L,
+        )
+        awaitCondition { !coordinator.isWorkerActive() }
+        assertEquals(currentSong, coordinator.playbackStateFlow.value.song)
+        assertEquals(4_321L, coordinator.playbackStateFlow.value.positionMs)
+        assertEquals(1, session.closeTerminalCount.get())
+        assertEquals(1, session.closeCount.get())
+        preferences.edit().clear().commit()
+    }
+
     private fun journal(context: Context): SourceSeparationCacheRunJournal {
         val catalog = SourceSeparationModelMetadata.loadBundledCatalog(context)
         val contract = SourceSeparationCacheContractSnapshot.fromOfficial(
@@ -169,13 +241,18 @@ class SourceSeparationForegroundWorkerRecoveryTest {
         )
     }
 
-    private fun recoveredSong(journal: SourceSeparationCacheRunJournal): Song {
+    private fun recoveredSong(
+        journal: SourceSeparationCacheRunJournal,
+        songId: Long = journal.request.song.songId,
+        filePath: String = journal.request.song.filePath,
+        title: String = journal.request.song.title,
+    ): Song {
         val locator = journal.request.song
         val diagnostics = journal.request.sourceDiagnostics
         return Song(
-            id = locator.songId,
-            data = locator.filePath,
-            title = locator.title,
+            id = songId,
+            data = filePath,
+            title = title,
             trackNumber = 0,
             year = 0,
             size = diagnostics.fileSize,
