@@ -49,6 +49,7 @@ import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetS
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDeletionException
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
+import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.separation.process.SourceSeparationProcParser
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
@@ -912,8 +913,6 @@ internal object SourceSeparationMainDeathDebugHarness {
                     journalAfterDeath.request.gpuRuntimeIdentity,
                 )
                 check(journalAfterDeath.request.gpuFallbackLatch == null)
-                val manifestBeforeLatch = requireNotNull(store.readManifest(cacheKey))
-                val runtimeRecordsBeforeLatch = manifestBeforeLatch.runtimeRecords
                 val latch = SourceSeparationGpuFallbackLatch(
                     stage = "GpuInvocation",
                     reason = "Phase 7 persisted fallback fixture.",
@@ -972,6 +971,40 @@ internal object SourceSeparationMainDeathDebugHarness {
                     transition.type ==
                         SourceSeparationCacheRunTransitionType.GpuFallbackLatched
                 } == 1)
+                val diagnosticHost = BoundRemoteSourceSeparationExecutionHost(context)
+                val remoteEvidenceAtBarrier = try {
+                    val active = requireNotNull(diagnosticHost.reconnectableRun()) {
+                        "The latched CPU run was absent from remote diagnostics."
+                    }
+                    active to diagnosticHost.processDiagnostics()
+                } finally {
+                    diagnosticHost.close()
+                }
+                val activeRunAtBarrier = remoteEvidenceAtBarrier.first
+                val processDiagnosticsAtBarrier = remoteEvidenceAtBarrier.second
+                val runtimeAtBarrier = activeRunAtBarrier.descriptor.runtime
+                check(activeRunAtBarrier.descriptor.runId == resumedJournal.request.runId)
+                check(activeRunAtBarrier.descriptor.processGeneration ==
+                    resumedJournal.request.processGeneration)
+                check(runtimeAtBarrier.backendPolicy ==
+                    SourceSeparationExecutionBackendPolicy.Cpu)
+                check(runtimeAtBarrier.tryGpu)
+                check(runtimeAtBarrier.gpuRuntimeIdentity == admittedRuntime)
+                check(runtimeAtBarrier.gpuFallbackLatch == latch)
+                check(processDiagnosticsAtBarrier.pid == resumedRemotePid)
+                check(processDiagnosticsAtBarrier.processGeneration ==
+                    resumedJournal.request.processGeneration)
+                check(processDiagnosticsAtBarrier.activeRunId == resumedJournal.request.runId)
+                check(processDiagnosticsAtBarrier.session.state ==
+                    SourceSeparationProcessSessionState.Resident)
+                check(processDiagnosticsAtBarrier.session.backendPolicy ==
+                    SourceSeparationExecutionBackendPolicy.Cpu)
+                check(processDiagnosticsAtBarrier.session.nativeSessionCreationCount == 1)
+                check(processDiagnosticsAtBarrier.session.activeLeaseCount == 1)
+                check(GPU_ACCELERATOR_LIBRARY !in
+                    processDiagnosticsAtBarrier.mappedNativeLibraries) {
+                    "The latched CPU process mapped the GPU accelerator."
+                }
                 val previousOwnerDeath = resumedJournal.transitions.single { transition ->
                     transition.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
                 }
@@ -1001,18 +1034,6 @@ internal object SourceSeparationMainDeathDebugHarness {
                 } == 1)
                 check(pausedJournal.committedSegments.size <=
                     committedBeforeDeath.length() + 1)
-                val pausedManifest = requireNotNull(store.readManifest(cacheKey))
-                check(pausedManifest.runtimeRecords.size > runtimeRecordsBeforeLatch.size) {
-                    "The latched CPU retry produced no runtime record."
-                }
-                val resumedRuntimeRecords = pausedManifest.runtimeRecords
-                    .drop(runtimeRecordsBeforeLatch.size)
-                check(resumedRuntimeRecords.isNotEmpty())
-                check(resumedRuntimeRecords.all { record ->
-                    record.backend == "LiteRtCpu" &&
-                        record.fallbackStage == null &&
-                        record.fallbackReason == null
-                }) { "The latched retry did not enter CPU directly." }
                 check(waitUntil(REATTACH_TIMEOUT_MS) {
                     coordinator.runningCacheKey() == null &&
                         coordinator.protectedCacheKeys().isEmpty() &&
@@ -1080,20 +1101,18 @@ internal object SourceSeparationMainDeathDebugHarness {
                                 transition.type ==
                                     SourceSeparationCacheRunTransitionType.PreviousOwnerDied
                             })
-                        .put("runtimeRecordCountBeforeLatch",
-                            runtimeRecordsBeforeLatch.size)
-                        .put("resumedRuntimeRecords", JSONArray(
-                            resumedRuntimeRecords.map { record ->
-                                JSONObject()
-                                    .put("backend", record.backend)
-                                    .put("runtimeProfileId", record.runtimeProfileId)
-                                    .put("precision", record.precision)
-                                    .put("fallbackStage",
-                                        record.fallbackStage ?: JSONObject.NULL)
-                                    .put("fallbackReason",
-                                        record.fallbackReason ?: JSONObject.NULL)
-                            },
-                        ))
+                        .put("acceptedBackendPolicy", runtimeAtBarrier.backendPolicy.name)
+                        .put("sessionBackendPolicy",
+                            processDiagnosticsAtBarrier.session.backendPolicy.name)
+                        .put("sessionState",
+                            processDiagnosticsAtBarrier.session.state.name)
+                        .put("nativeSessionCreationCount",
+                            processDiagnosticsAtBarrier.session.nativeSessionCreationCount)
+                        .put("activeSessionLeaseCount",
+                            processDiagnosticsAtBarrier.session.activeLeaseCount)
+                        .put("inferenceInvocationCountAtBarrier",
+                            processDiagnosticsAtBarrier.session.invocationCount)
+                        .put("gpuAcceleratorMappedAtBarrier", false)
                         .put("directCpuResume", true)
                         .put("newGpuFallbackAttempt", false)
                         .put("resumeNativeInvocationBarrierReached", true)
@@ -3017,6 +3036,7 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val TEST_BLEND = 0.23f
     private const val EXPECTED_FULL_SONG_MODEL_ID = "uvr_mdxnet_3_9662"
     private const val EXPECTED_FULL_SONG_SEGMENTS = 48
+    private const val GPU_ACCELERATOR_LIBRARY = "libLiteRtClGlAccelerator.so"
     private const val MODEL_BACKUP_DIRECTORY = "phase7-model-backups"
     private const val TAG = "SrcSepMainDeath"
     private val SAFE_NAME = Regex("^[A-Za-z0-9._-]{1,120}$")
