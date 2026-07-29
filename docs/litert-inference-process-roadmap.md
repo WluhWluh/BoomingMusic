@@ -10,7 +10,8 @@ old-weight deletion, cache isolation, and exact primary-model restoration are
 proved on S25; stale client-binding callbacks are isolated and durable
 separation-state reconstruction without playback replacement is proved on
 S10; a retired bounded-runtime identity is rejected on explicit retry without
-automatic rescheduling on S10
+automatic rescheduling on S10; missing and exactly restored TFLite weights
+remain terminal until a second explicit start on S10
 
 Updated: 2026-07-29
 
@@ -1475,10 +1476,11 @@ actual Android main-process kill.
   durable run with the old APK, use `adb install -r` to install the new APK
   without clearing data, and then perform the explicit retry. The deterministic
   retired-identity test does not claim this Android package-update boundary.
-- [ ] Verify model loss at explicit retry. Temporarily remove the exact active
-  TFLite artifact, require typed `ModelNotInstalled` without a remote-process
-  start or cache mutation, restore the identical weight without auto-resume,
-  and require another explicit user start.
+- [x] Verify model loss at explicit retry. S10 reports typed
+  `ModelNotInstalled` without a remote-process start or cache mutation,
+  restores the identical TFLite weight without auto-resume, and resumes the
+  preserved cache only after another explicit user start. See
+  [Phase 7 explicit retry after model loss](validation/litert-inference-process/phase7/explicit-retry-model-loss-2026-07-29.md).
 - [ ] Verify an already-latched GPU-to-CPU fallback at explicit retry. The new
   generation must resume directly on CPU while preserving the original
   admitted `tryGpu=true` and bounded-GPU identity, with no new GPU allocation
@@ -1985,9 +1987,10 @@ These process and lifecycle decisions remain subject to their phase gates:
 - Whether a later public-source LiteRT release can replace the deterministic
   binary transformation without changing the bounded profile's behavior. This
   is a maintenance opportunity, not a GitHub release gate.
-- How app update, runtime mismatch, model loss, and a latched CPU
-  fallback should be presented at explicit-retry time across API 26 through
-  target 36. The zero-automatic-retry policy itself is frozen.
+- How a real app update and an already-latched CPU fallback should be
+  presented at explicit-retry time across API 26 through target 36. The
+  zero-automatic-retry policy itself is frozen; deterministic runtime mismatch
+  and missing-model behavior are implemented and covered on S10.
 - Whether FLAC promotion belongs in the independently running process.
 - Whether a separate processing notification can be grouped without obscuring
   playback controls.
