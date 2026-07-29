@@ -1551,8 +1551,10 @@ in
   window, and cache-management state exposes the exact 9662 entry as `Partial`
   with its installed model identity. See
   [Phase 7 main-process product state](validation/litert-inference-process/phase7/main-process-product-state-2026-07-29.md).
-  Visible Compose navigation/actions remain open, so this item is not yet
-  complete.
+  S10 Compose instrumentation also renders the exact partial-cache metadata,
+  routes its Delete action by cache key, and routes an installed preset's Use
+  action by model ID. Navigation from the recreated product surface and real
+  repository mutations remain open, so this item is not yet complete.
 - [x] Confirm on S10/API 31 and S25/API 35 that Android force-stop terminates an
   active manual CPU or bounded-GPU run without automatic resurrection. Accept a stale
   `Running` journal, but require every process to exit, package `stopped=true`,

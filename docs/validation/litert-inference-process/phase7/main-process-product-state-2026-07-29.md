@@ -68,6 +68,31 @@ was `LiteRtCpu`, FP32. The GPU run retained
 `kernelBatchSize=1`, and `commandQueueWindowSize=1`; its final runtime record
 was `LiteRtGpu`. Neither run fell back.
 
+## Visible management actions
+
+S10 Compose instrumentation rendered the product cache-management and preset
+management pages from deterministic states. Both tests passed:
+
+- a `Partial` 9662 cache entry expanded to show readiness `3/48` and its exact
+  model ID, then its visible Delete action delivered the full 64-character
+  cache key; and
+- an installed, inactive KARA preset scrolled into view, exposed an enabled
+  Use action, and delivered `uvr_mdxnet_kara` as the selected model ID.
+
+The test source is commit
+`5ad9881a9d74ba8d17909db55bfe69068dfa3dd4`. The APKs were built from the
+identical pre-commit worktree content:
+
+- universal debug app APK SHA-256:
+  `3b4828491cf9fe65b37ff0153249bb7f0ec79a2997ffca5db414c600fec45fcb`;
+- AndroidTest APK SHA-256:
+  `5014238284f8850957efcc622bfc5a38462d0560c6bea7770d784f98f0115a5b`.
+
+`compileGithubDebugAndroidTestKotlin`, both S10 tests, and
+`compileGithubReleaseKotlin` passed. The first offline release attempt stopped
+before compilation because `ui-backhandler-android:1.9.1` was absent from the
+local cache; online resolution then completed the release compilation.
+
 ## Evidence
 
 Raw JSON remains ignored under
@@ -80,10 +105,10 @@ Raw JSON remains ignored under
 
 ## Limits
 
-This run validates the state consumed by the player and cache-management
-surfaces, but it does not drive the visible Compose screen or its gestures.
-It also does not claim active original-audio continuity across main-process
-death. Visible cache actions and visible preset/model switching remain
-separate checks. The retained app data contained another
-incomplete cache entry; selection of the exact tested cache key prevented that
-unrelated entry from satisfying the gate.
+The real process-death scenario validates the state consumed by the player and
+cache-management surfaces. The Compose tests separately validate rendering and
+callback identity; they do not navigate from the recreated `MainActivity` or
+perform real repository deletion/activation. This checkpoint also does not
+claim active original-audio continuity across main-process death. The retained
+app data contained another incomplete cache entry; selection of the exact
+tested cache key prevented that unrelated entry from satisfying the gate.
