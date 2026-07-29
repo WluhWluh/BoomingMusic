@@ -1923,22 +1923,32 @@ internal object SourceSeparationMainDeathDebugHarness {
             val processGeneration = scenario.getLong("remoteProcessGeneration")
             val executionRunId = scenario.getString("executionRunId")
             mediaUri = Uri.parse(scenario.getString("sourceMediaUri"))
+            val terminalCommitBoundary = request.mainDeathBoundary ==
+                MainDeathBoundary.TerminalCommit
+            armedFaultToken = scenario.takeUnless { it.isNull("faultToken") }
+                ?.getString("faultToken")
+            armedFaultRoot = armedFaultToken?.let {
+                File(scenario.getString("cacheRootPath"))
+            }
+            check((armedFaultToken != null) ==
+                (request.mainDeathBoundary.faultStage != null)) {
+                "The main-death fault barrier does not match the requested boundary."
+            }
             check(oldMainPid != Process.myPid())
             check(!File("/proc/$oldMainPid").exists())
             check(File("/proc/$remotePid").isDirectory) {
                 "The authoritative inference process did not survive main-process death."
             }
+            if (terminalCommitBoundary) {
+                SourceSeparationCacheFaultInjection.release(
+                    requireNotNull(armedFaultRoot),
+                    requireNotNull(armedFaultToken),
+                )
+            }
 
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
-            armedFaultToken = scenario.takeUnless { it.isNull("faultToken") }
-                ?.getString("faultToken")
-            armedFaultRoot = armedFaultToken?.let { store.root().directory }
-            check((armedFaultToken != null) ==
-                (request.mainDeathBoundary.faultStage != null)) {
-                "The main-death fault barrier does not match the requested boundary."
-            }
-            val terminalCommitBoundary = request.mainDeathBoundary ==
-                MainDeathBoundary.TerminalCommit
+            check(store.root().directory.canonicalFile ==
+                File(scenario.getString("cacheRootPath")).canonicalFile)
             val expectedSegmentCount = scenario.getInt("plannedSegments")
             val journalSequenceBeforeHarnessValidation = if (terminalCommitBoundary) {
                 check(scenario.getInt("committedSegments") == expectedSegmentCount)
@@ -2062,26 +2072,6 @@ internal object SourceSeparationMainDeathDebugHarness {
             check(activeCacheItem.totalSegments == expectedSegmentCount)
             check(activeCacheItem.modelId == request.modelId)
 
-            val playbackStatusBeforeBarrierRelease = if (terminalCommitBoundary) {
-                runtime.playableStatus(
-                    song = runtimeSong,
-                    playbackPositionMs = 0L,
-                    readyWindowCount = 1,
-                ).also { status ->
-                    check(status != SourceSeparationModelAwarePlayableStatus.Unavailable) {
-                        "The terminal-commit cache became unavailable before barrier release."
-                    }
-                }::class.java.simpleName
-            } else {
-                null
-            }
-            if (terminalCommitBoundary) {
-                SourceSeparationCacheFaultInjection.release(
-                    requireNotNull(armedFaultRoot),
-                    requireNotNull(armedFaultToken),
-                )
-            }
-
             var activePlaybackManifestUpdatedAtEpochMs = 0L
             check(waitUntil(SETUP_TIMEOUT_MS) {
                 when (val status = runtime.playableStatus(
@@ -2142,8 +2132,6 @@ internal object SourceSeparationMainDeathDebugHarness {
             }
             if (terminalCommitBoundary) {
                 check(observerTransitions.isNotEmpty())
-                check(observerTransitions.last().type ==
-                    SourceSeparationCacheRunTransitionType.ObserverDisconnected)
             } else {
                 check(observerTransitions.size >= 3)
                 check(observerTransitions.last().type ==
@@ -2177,11 +2165,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                         "faultStage",
                         request.mainDeathBoundary.faultStage?.name ?: JSONObject.NULL,
                     )
-                    .put("barrierReleasedAfterReattachment", terminalCommitBoundary)
-                    .put(
-                        "playbackStatusBeforeBarrierRelease",
-                        playbackStatusBeforeBarrierRelease ?: JSONObject.NULL,
-                    )
+                    .put("barrierReleasedBeforeProductProjection", terminalCommitBoundary)
                     .put("journalSequenceBeforeDeath", scenario.getLong("journalSequence"))
                     .put(
                         "journalSequenceBeforeHarnessValidation",
@@ -2235,7 +2219,14 @@ internal object SourceSeparationMainDeathDebugHarness {
                             ),
                     )
                     .put("observerTransitionCount", observerTransitions.size)
-                    .put("productObserverConnectedBeforeHarness", !terminalCommitBoundary)
+                    .put(
+                        "productObserverConnectedBeforeHarness",
+                        observerTransitions.any { transition ->
+                            transition.sequence > scenario.getLong("journalSequence") &&
+                                transition.type ==
+                                    SourceSeparationCacheRunTransitionType.ObserverConnected
+                        },
+                    )
                     .put(
                         "terminalWorkerState",
                         worker.workerStateFlow.value::class.java.simpleName,
