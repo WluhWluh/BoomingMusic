@@ -4,9 +4,10 @@ Status: Phase 7A authority transfer and the Phase 7B zero-automatic-retry
 remote-death policy are implemented; observer and product reattachment,
 explicit retry after inference-process death, active-run Pause/Cancel cleanup,
 recents policy, playback-owned shutdown, and force-stop non-resurrection are
-proved on S10 and S25 for CPU and bounded GPU
+proved on S10 and S25 for CPU and bounded GPU; post-death cache invalidation is
+proved in both backend-policy directions on S25
 
-Updated: 2026-07-28
+Updated: 2026-07-29
 
 Current milestone: cover the remaining highest-value Phase 7D main- and
 inference-process boundaries, pending-retry invalidation races, and
@@ -1453,10 +1454,15 @@ actual Android main-process kill.
   Recreate only the exact bounded profile when GPU was admitted, or remain on
   CPU when CPU was admitted or the durable CPU fallback latch was already set.
   Never substitute stock `N=0` GPU.
-- [ ] Verify app-update/artifact mismatch, model loss, cache invalidation, and
-  an already-latched GPU-to-CPU fallback at the pending explicit-retry
-  boundary. These cases must reject, defer, or resume through their typed
-  policy without weakening the zero-retry rule.
+- [x] Define cache invalidation as deletion of the abandoned manifest, journal,
+  committed segments, and frozen backend policy. Only a later explicit user
+  start may create a fresh sequence-1 run from zero with the then-current
+  `tryGpu` value. The coordinator contract is unit-tested, and both
+  GPU-to-CPU and CPU-to-bounded-GPU directions pass on S25.
+- [ ] Verify app-update/artifact mismatch, model loss, and an already-latched
+  GPU-to-CPU fallback at the pending explicit-retry boundary. These cases must
+  reject, defer, or resume through their typed policy without weakening the
+  zero-retry rule.
 
 The selected policy and the first-committed-segment S10/S25 matrix are recorded
 in
@@ -1585,14 +1591,17 @@ policy changed in response.
   work on S10 and S25 with CPU and bounded GPU. Require durable Pause,
   incomplete-cache retention, complete owner/resource release, rejection of
   stale playback admission, and no independent inference FGS.
-- [ ] Run model deletion and cache clearing against pending explicit-retry
-  state. Deleting the still-active model remains blocked. After an explicit
-  model switch and old-model deletion, a later start must use the new model
-  identity and cache key. Clearing the old cache must remove its journal and
-  frozen backend policy; only another explicit user start may create a fresh
-  sequence-1 admission from zero with the then-current `tryGpu` value. The
-  coordinator-level cache-clear contract is unit-tested; product/device paths
-  remain open. None of these operations may resurrect the old generation.
+- [x] Clear the cache against pending explicit-retry state on S25 in both
+  backend-policy directions. Require removal of the old journal and frozen
+  policy, no automatic resurrection, and a later explicit sequence-1 start
+  from zero with the current `tryGpu`. See
+  [Phase 7 remote-death cache invalidation](validation/litert-inference-process/phase7/remote-process-death-cache-clear-2026-07-29.md).
+- [ ] Run model switching and deletion against pending explicit-retry state.
+  Deleting the still-active model remains blocked. After an explicit switch
+  and old-model deletion, a later start must use the new model identity and
+  cache key. Repeat the focused cache-clear path on S10 and through the visible
+  management actions. None of these operations may resurrect the old
+  generation.
 - [x] Change `tryGpu` after inference-process death and prove explicit retry
   still uses the original admitted value. This passes with false-to-true CPU
   and true-to-false bounded GPU changes on both S10 and S25.
@@ -1945,7 +1954,7 @@ These process and lifecycle decisions remain subject to their phase gates:
 - Whether a later public-source LiteRT release can replace the deterministic
   binary transformation without changing the bounded profile's behavior. This
   is a maintenance opportunity, not a GitHub release gate.
-- How app update, runtime mismatch, model/cache invalidation, and a latched CPU
+- How app update, runtime mismatch, model loss, and a latched CPU
   fallback should be presented at explicit-retry time across API 26 through
   target 36. The zero-automatic-retry policy itself is frozen.
 - Whether FLAC promotion belongs in the independently running process.

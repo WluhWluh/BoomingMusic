@@ -47,6 +47,9 @@ it does not yet enable an independent foreground lifetime.
 The selected zero-automatic-retry policy and its S10/S25 CPU and bounded-GPU
 matrix are recorded in the
 [Phase 7 remote-process death report](phase7/remote-process-death-2026-07-28.md).
+The focused S25 proof that cache deletion discards the old journal and backend
+policy is recorded in the
+[Phase 7 remote-death cache invalidation report](phase7/remote-process-death-cache-clear-2026-07-29.md).
 
 Large profiler traces, PCM/stem exports, `/proc/<pid>/maps` snapshots,
 and repeated-run logs remain under ignored `build/` output. A

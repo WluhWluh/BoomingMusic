@@ -125,7 +125,9 @@ Raw reports and input envelopes remain ignored build artifacts under
   journal commit.
 - Exercise bounded-GPU death during an N=1 event wait, output read, and
   session close, including a journal whose CPU fallback latch is already set.
-- Race model deletion and cache clearing against the pending explicit retry.
+- Cache clearing now has a focused two-direction S25 result in
+  [Phase 7 remote-death cache invalidation](remote-process-death-cache-clear-2026-07-29.md).
+  Model switching/deletion and S10 cache-clear coverage remain open.
 - Verify active original-playback continuity and cache-management UI around
   remote-process death and explicit retry.
 - Repeat the no-resurrection gate on the eventual highest-API release target.
