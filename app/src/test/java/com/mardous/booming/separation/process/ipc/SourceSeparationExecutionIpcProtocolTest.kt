@@ -270,6 +270,32 @@ class SourceSeparationExecutionIpcProtocolTest {
     }
 
     @Test
+    fun `binding event state drops old callbacks and resets reconnect identity`() {
+        val state = SourceSeparationRemoteBindingEventState()
+        state.activate(1L)
+        assertTrue(state.acceptsCallback(1L))
+        assertTrue(state.bufferReconnectEvent(1L, progressEvent(1L, 1)))
+        assertEquals(listOf(1L), state.drainReconnectEvents(1L).map { it.sequence })
+
+        state.deactivate(1L)
+        state.activate(2L)
+        assertFalse(state.acceptsCallback(1L))
+        assertFalse(state.bufferReconnectEvent(1L, progressEvent(2L, 2)))
+        val current = progressEvent(1L, 1).copy(
+            runId = "run-2",
+            processGeneration = 8L,
+        )
+        assertTrue(state.acceptsCallback(2L))
+        assertTrue(state.bufferReconnectEvent(2L, current))
+        assertEquals(listOf(current), state.drainReconnectEvents(2L))
+        assertEquals(1, state.staleCallbackDropCount())
+
+        state.close()
+        assertFalse(state.acceptsCallback(2L))
+        assertEquals(2, state.staleCallbackDropCount())
+    }
+
+    @Test
     fun `event sender detaches a failed observer and resumes with a replacement`() {
         val failed = CountDownLatch(1)
         val delivered = CountDownLatch(1)

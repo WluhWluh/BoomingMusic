@@ -80,7 +80,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private val controlSequence = AtomicLong(0L)
     private val terminalConnectionFailure = AtomicReference<Throwable?>(null)
     private val callbackFailure = AtomicReference<Throwable?>(null)
-    private val reconnectEvents = SourceSeparationRemoteEventQueue()
+    private val bindingEvents = SourceSeparationRemoteBindingEventState()
 
     override val processGeneration: Long
         get() = ensureConnected().processGeneration
@@ -100,6 +100,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 lastBinderDeath = lastBinderDeath,
                 expectedBinderDeathCount = expectedBinderDeathCount,
                 unexpectedBinderDeathCount = unexpectedBinderDeathCount,
+                staleCallbackDropCount = bindingEvents.staleCallbackDropCount(),
                 bindToConnectedMs = lastBindToConnectedMs,
                 failure = terminalConnectionFailure.get()?.message,
             )
@@ -139,7 +140,8 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             require(current.descriptor == descriptor) {
                 "The reconnectable run changed before adoption."
             }
-            reconnectEvents.drain().forEach(observer::offer)
+            bindingEvents.drainReconnectEvents(activeBindingGeneration)
+                .forEach(observer::offer)
             adoptedObserver = observer
         }
         onSnapshot(snapshot)
@@ -515,11 +517,11 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             adoptedObserver = null
             lastTerminalStatus = null
             callbackFailure.set(null)
+            bindingEvents.close()
             connectionChanged.signalAll()
             state
         }
         shutdown.pump?.close()
-        reconnectEvents.close()
         if (shutdown.request != null && shutdown.service != null) {
             runCatching { sendShutdownCancel(shutdown.service, shutdown.request) }
         }
@@ -573,6 +575,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                     bindingSequence += 1L
                     val generation = bindingSequence.coerceAtLeast(1L)
                     val serviceConnection = createServiceConnection(generation)
+                    bindingEvents.activate(generation)
                     activeBindingGeneration = generation
                     activeServiceConnection = serviceConnection
                     BindingAttempt(generation, serviceConnection)
@@ -606,6 +609,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                     !didBind &&
                     connectionState == SourceSeparationRemoteConnectionState.Binding
                 ) {
+                    bindingEvents.deactivate(bindingAttempt.generation)
                     activeBindingGeneration = 0L
                     activeServiceConnection = null
                     connectionState = SourceSeparationRemoteConnectionState.Dead
@@ -683,7 +687,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             val response = SourceSeparationExecutionIpcCodec.decodeConnectResponse(
                 service.connect(
                     SourceSeparationExecutionIpcCodec.encodeConnectRequest(request),
-                    callback,
+                    createCallback(bindingGeneration),
                 )
             )
             require(response.commandId == request.commandId &&
@@ -727,39 +731,49 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         }
     }
 
-    private val callback = object : ISourceSeparationExecutionCallback.Stub() {
-        override fun onEvent(eventJson: String) {
-            val event = SourceSeparationExecutionIpcCodec.decodeEvent(eventJson)
-            val target = connectionLock.withLock {
-                activeRequest?.let { return@withLock EventTarget.Request(it) }
-                adoptedObserver?.let { return@withLock EventTarget.Observer(it) }
-                reconnectEvents.offer(event)
-                null
+    private fun createCallback(bindingGeneration: Long) =
+        object : ISourceSeparationExecutionCallback.Stub() {
+            override fun onEvent(eventJson: String) {
+                if (!bindingEvents.acceptsCallback(bindingGeneration)) return
+                val event = SourceSeparationExecutionIpcCodec.decodeEvent(eventJson)
+                val target = connectionLock.withLock {
+                    if (bindingGeneration != activeBindingGeneration ||
+                        connectionState == SourceSeparationRemoteConnectionState.Dead ||
+                        connectionState == SourceSeparationRemoteConnectionState.Closed
+                    ) {
+                        return@withLock null
+                    }
+                    activeRequest?.let { return@withLock EventTarget.Request(it) }
+                    adoptedObserver?.let { return@withLock EventTarget.Observer(it) }
+                    check(bindingEvents.bufferReconnectEvent(bindingGeneration, event)) {
+                        "Reconnect event targets a stale binding generation."
+                    }
+                    null
+                }
+                when (target) {
+                    is EventTarget.Request -> deliverToRequest(target.request, event)
+                    is EventTarget.Observer -> target.observer.offer(event)
+                    null -> Unit
+                }
             }
-            when (target) {
-                is EventTarget.Request -> deliverToRequest(target.request, event)
-                is EventTarget.Observer -> target.observer.offer(event)
-                null -> Unit
-            }
-        }
 
-        private fun deliverToRequest(
-            request: SourceSeparationExecutionHostRequest,
-            event: com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent,
-        ) {
-            require(event.runId == request.descriptor.runId &&
-                event.processGeneration == request.descriptor.processGeneration
+            private fun deliverToRequest(
+                request: SourceSeparationExecutionHostRequest,
+                event: com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent,
             ) {
-                "Bound-remote event targets a stale run or process generation."
-            }
-            try {
-                request.onEvent(event)
-            } catch (error: Throwable) {
-                callbackFailure.compareAndSet(null, error)
-                throw error
+                require(event.runId == request.descriptor.runId &&
+                    event.processGeneration == request.descriptor.processGeneration
+                ) {
+                    "Bound-remote event targets a stale run or process generation."
+                }
+                try {
+                    request.onEvent(event)
+                } catch (error: Throwable) {
+                    callbackFailure.compareAndSet(null, error)
+                    throw error
+                }
             }
         }
-    }
 
     private sealed interface EventTarget {
         data class Request(
@@ -845,6 +859,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 processPid = deadProcess?.pid,
                 processStartTicks = deadProcess?.processStartTicks,
             )
+            bindingEvents.deactivate(activeBindingGeneration)
             connectionState = SourceSeparationRemoteConnectionState.Dead
             bound = false
             activeBindingGeneration = 0L
@@ -1230,6 +1245,7 @@ internal data class SourceSeparationRemoteConnectionDiagnostics(
     val lastBinderDeath: SourceSeparationRemoteBinderDeathDiagnostics?,
     val expectedBinderDeathCount: Int,
     val unexpectedBinderDeathCount: Int,
+    val staleCallbackDropCount: Int,
     val bindToConnectedMs: Long?,
     val failure: String?,
 )
