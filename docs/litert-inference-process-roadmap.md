@@ -5,12 +5,14 @@ remote-death policy are implemented; observer and product reattachment,
 explicit retry after inference-process death, active-run Pause/Cancel cleanup,
 recents policy, playback-owned shutdown, and force-stop non-resurrection are
 proved on S10 and S25 for CPU and bounded GPU; post-death cache invalidation is
-proved in both backend-policy directions on S25
+proved in both backend-policy directions on S25; post-death model switching,
+old-weight deletion, cache isolation, and exact primary-model restoration are
+proved on S25
 
 Updated: 2026-07-29
 
 Current milestone: cover the remaining highest-value Phase 7D main- and
-inference-process boundaries, pending-retry invalidation races, and
+inference-process boundaries, S10 and visible-UI invalidation checks, and
 playback/cache-management recreation checks without changing source decoding.
 Remaining Phase 5F and Phase 6D full-song, fallback, UI, current-API, and
 long-running platform matrices are
@@ -1596,12 +1598,17 @@ policy changed in response.
   policy, no automatic resurrection, and a later explicit sequence-1 start
   from zero with the current `tryGpu`. See
   [Phase 7 remote-death cache invalidation](validation/litert-inference-process/phase7/remote-process-death-cache-clear-2026-07-29.md).
-- [ ] Run model switching and deletion against pending explicit-retry state.
-  Deleting the still-active model remains blocked. After an explicit switch
-  and old-model deletion, a later start must use the new model identity and
-  cache key. Repeat the focused cache-clear path on S10 and through the visible
-  management actions. None of these operations may resurrect the old
-  generation.
+- [x] Run model switching and deletion against pending explicit-retry state on
+  S25. Deleting active 9662 remains blocked. After selecting KARA and deleting
+  the inactive 9662 weights, the old partial cache becomes
+  `Stale/ModelNotInstalled`; a later explicit start uses KARA's exact identity,
+  a different cache key, and a sequence-1 journal without an old-owner
+  transition. Pause releases the new run, and exact 9662 restoration does not
+  resume the abandoned generation. See
+  [Phase 7 remote-death model switching](validation/litert-inference-process/phase7/remote-process-death-model-switch-2026-07-29.md).
+- [ ] Repeat the focused cache-clear and model-switch paths on S10 and through
+  the visible preset- and cache-management actions. None of these operations
+  may resurrect an old generation.
 - [x] Change `tryGpu` after inference-process death and prove explicit retry
   still uses the original admitted value. This passes with false-to-true CPU
   and true-to-false bounded GPU changes on both S10 and S25.

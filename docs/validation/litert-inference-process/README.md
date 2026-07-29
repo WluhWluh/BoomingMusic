@@ -50,6 +50,10 @@ matrix are recorded in the
 The focused S25 proof that cache deletion discards the old journal and backend
 policy is recorded in the
 [Phase 7 remote-death cache invalidation report](phase7/remote-process-death-cache-clear-2026-07-29.md).
+The corresponding proof that switching models and deleting the old weights
+creates a distinct cache admission without reviving the dead run is recorded
+in the
+[Phase 7 remote-death model-switch report](phase7/remote-process-death-model-switch-2026-07-29.md).
 
 Large profiler traces, PCM/stem exports, `/proc/<pid>/maps` snapshots,
 and repeated-run logs remain under ignored `build/` output. A
