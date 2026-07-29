@@ -7,7 +7,8 @@ recents policy, playback-owned shutdown, and force-stop non-resurrection are
 proved on S10 and S25 for CPU and bounded GPU; post-death cache invalidation is
 proved in both backend-policy directions on S25; post-death model switching,
 old-weight deletion, cache isolation, and exact primary-model restoration are
-proved on S25
+proved on S25; stale client-binding callbacks are isolated and durable
+separation-state reconstruction without playback replacement is proved on S10
 
 Updated: 2026-07-29
 
@@ -1556,9 +1557,15 @@ policy changed in response.
   This passes on S10 and S25 for CPU and bounded GPU without a second start.
 - [ ] Repeat main-process death before FGS handoff, during native invocation,
   after final segment publication, and during terminal journal commit.
-- [ ] Require a reconnecting client to reject stale Binder generations and
+- [x] Require a reconnecting client to reject stale Binder generations and
   reconstruct UI state from the durable snapshot without seeking or replacing
-  original playback.
+  original playback. Each binding now owns a distinct callback and reconnect
+  buffer; deterministic tests reject retired callbacks before decoding or
+  delivery and reset event identity for the replacement generation. S10
+  instrumentation restores a different song's separation state while keeping
+  the current playback song, position, duration, playing state, and blend
+  unchanged, with no second runtime start. See
+  [Phase 7 binding generation and UI reconstruction](validation/litert-inference-process/phase7/binding-generation-ui-reconstruction-2026-07-29.md).
 - [ ] Kill the inference process at the same boundaries and verify the selected
   no-automatic-retry policy never duplicates a writer, segment, notification,
   wake lock, or native session.
