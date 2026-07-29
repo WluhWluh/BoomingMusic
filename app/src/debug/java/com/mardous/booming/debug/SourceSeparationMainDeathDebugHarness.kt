@@ -2006,7 +2006,14 @@ internal object SourceSeparationMainDeathDebugHarness {
                 check(worker.pendingSongId() == null)
             }
 
-            val processingNotificationAfterReattachment =
+            val processingNotificationAfterReattachment = if (terminalCommitBoundary) {
+                val notificationManager = context.getSystemService(NotificationManager::class.java)
+                check(notificationManager.activeNotifications.none { notification ->
+                    notification.id ==
+                        SourceSeparationMediaProcessingForegroundController.NOTIFICATION_ID
+                }) { "The processing notification was recreated after terminal publication." }
+                null
+            } else {
                 processingNotificationSnapshot(context).also { snapshot ->
                     validateProcessingNotification(
                         context = context,
@@ -2014,16 +2021,19 @@ internal object SourceSeparationMainDeathDebugHarness {
                         displayName = source.fileName,
                     )
                 }
+            }
             val processingNotificationBeforeDeath =
                 scenario.getJSONObject("processingNotificationBeforeMainDeath")
-            check(
-                processingNotificationBeforeDeath.getString("title") ==
-                    processingNotificationAfterReattachment.getString("title") &&
-                    processingNotificationBeforeDeath.getString("text") ==
-                    processingNotificationAfterReattachment.getString("text") &&
-                    processingNotificationBeforeDeath.getJSONArray("actions").toString() ==
-                    processingNotificationAfterReattachment.getJSONArray("actions").toString()
-            ) { "The processing notification changed across main-process recreation." }
+            if (processingNotificationAfterReattachment != null) {
+                check(
+                    processingNotificationBeforeDeath.getString("title") ==
+                        processingNotificationAfterReattachment.getString("title") &&
+                        processingNotificationBeforeDeath.getString("text") ==
+                        processingNotificationAfterReattachment.getString("text") &&
+                        processingNotificationBeforeDeath.getJSONArray("actions").toString() ==
+                        processingNotificationAfterReattachment.getJSONArray("actions").toString()
+                ) { "The processing notification changed across main-process recreation." }
+            }
 
             val cacheManagementState = SourceSeparationModelAwareCacheManagementUiState(
                 items = runtime.entries(),
@@ -2193,7 +2203,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     )
                     .put(
                         "processingNotificationAfterReattachment",
-                        processingNotificationAfterReattachment,
+                        processingNotificationAfterReattachment ?: JSONObject.NULL,
                     )
                     .put(
                         "playbackReadinessAfterReattachment",
