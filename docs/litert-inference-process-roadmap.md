@@ -8,13 +8,16 @@ proved on S10 and S25 for CPU and bounded GPU; post-death cache invalidation is
 proved in both backend-policy directions on S25; post-death model switching,
 old-weight deletion, cache isolation, and exact primary-model restoration are
 proved on S25; stale client-binding callbacks are isolated and durable
-separation-state reconstruction without playback replacement is proved on S10
+separation-state reconstruction without playback replacement is proved on
+S10; a retired bounded-runtime identity is rejected on explicit retry without
+automatic rescheduling on S10
 
 Updated: 2026-07-29
 
-Current milestone: cover the remaining highest-value Phase 7D main- and
-inference-process boundaries, S10 and visible-UI invalidation checks, and
-playback/cache-management recreation checks without changing source decoding.
+Current milestone: cover the remaining highest-value Phase 7B explicit-retry
+and Phase 7D main- and inference-process boundaries, S10 and visible-UI
+invalidation checks, and playback/cache-management recreation checks without
+changing source decoding.
 Remaining Phase 5F and Phase 6D full-song, fallback, UI, current-API, and
 long-running platform matrices are
 release-qualification work and may remain open while product implementation
@@ -1462,10 +1465,24 @@ actual Android main-process kill.
   start may create a fresh sequence-1 run from zero with the then-current
   `tryGpu` value. The coordinator contract is unit-tested, and both
   GPU-to-CPU and CPU-to-bounded-GPU directions pass on S25.
-- [ ] Verify app-update/artifact mismatch, model loss, and an already-latched
-  GPU-to-CPU fallback at the pending explicit-retry boundary. These cases must
-  reject, defer, or resume through their typed policy without weakening the
-  zero-retry rule.
+- [x] Verify a retired bounded-runtime artifact identity at the pending
+  explicit-retry boundary. S10 rejects it before launching a new inference
+  process, preserves the abandoned journal and frozen `tryGpu`, localizes the
+  TFLite load failure, and remains terminal across ordinary playback position
+  updates. See
+  [Phase 7 explicit-retry runtime policy](validation/litert-inference-process/phase7/explicit-retry-runtime-policy-2026-07-29.md).
+- [ ] Repeat the artifact-mismatch case as a real two-APK update: create the
+  durable run with the old APK, use `adb install -r` to install the new APK
+  without clearing data, and then perform the explicit retry. The deterministic
+  retired-identity test does not claim this Android package-update boundary.
+- [ ] Verify model loss at explicit retry. Temporarily remove the exact active
+  TFLite artifact, require typed `ModelNotInstalled` without a remote-process
+  start or cache mutation, restore the identical weight without auto-resume,
+  and require another explicit user start.
+- [ ] Verify an already-latched GPU-to-CPU fallback at explicit retry. The new
+  generation must resume directly on CPU while preserving the original
+  admitted `tryGpu=true` and bounded-GPU identity, with no new GPU allocation
+  attempt and no weakening of the zero-retry rule.
 
 The selected policy and the first-committed-segment S10/S25 matrix are recorded
 in
