@@ -3,6 +3,7 @@ package com.mardous.booming.separation
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.SourceSeparationAdmittedGpuRuntimeIdentity
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheAdmittedRuntimePolicy
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
@@ -10,6 +11,8 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailab
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRoot
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRootLocation
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunRequest
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunStart
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunTransitionType
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSongLocator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
@@ -607,6 +610,124 @@ class SourceSeparationModelAwareEngineTest {
     }
 
     @Test
+    fun `mismatched unlatched GPU runtime rejects before remote process creation`() {
+        val fixture = fixture()
+        val abandoned = fixture.abandonRun(
+            SourceSeparationCacheAdmittedRuntimePolicy(
+                tryGpu = true,
+                gpuRuntimeIdentity = boundedGpuRuntimeIdentity(),
+            )
+        )
+        val mismatchedIdentity = boundedGpuRuntimeIdentity().copy(
+            artifactVersion = "retired-runtime",
+        )
+        val mismatchedJournal = abandoned.journal.copy(
+            request = abandoned.journal.request.copy(
+                gpuRuntimeIdentity = mismatchedIdentity,
+            ),
+        ).also(fixture.store::writeRunJournal)
+        val host = UnstartedRemoteHost()
+
+        val error = assertThrows(
+            SourceSeparationAdmittedGpuRuntimeMismatchException::class.java,
+        ) {
+            fixture.engine(executionHost = host).separate(
+                input = fixture.input,
+                runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+            )
+        }
+
+        assertEquals(mismatchedIdentity, error.admitted)
+        assertEquals(MdxLiteRtBoundedGpuContract.ARTIFACT_VERSION,
+            error.supported.artifactVersion)
+        assertEquals(0, host.processGenerationReadCount)
+        assertEquals(0, host.startCount)
+        assertEquals(mismatchedJournal,
+            fixture.store.readRunJournal(abandoned.identity.cacheKey))
+        assertFalse(fixture.repository.isLeased(abandoned.identity.cacheKey))
+    }
+
+    @Test
+    fun `latched fallback survives runtime artifact change and resumes on CPU`() {
+        val fixture = fixture()
+        val latch = SourceSeparationGpuFallbackLatch(
+            stage = "GpuInvocation",
+            reason = "Injected recoverable GPU failure.",
+        )
+        val abandoned = fixture.abandonRun(
+            policy = SourceSeparationCacheAdmittedRuntimePolicy(
+                tryGpu = true,
+                gpuRuntimeIdentity = boundedGpuRuntimeIdentity(),
+                gpuFallbackLatch = latch,
+            ),
+        )
+        val retiredIdentity = boundedGpuRuntimeIdentity().copy(
+            artifactVersion = "retired-runtime",
+        )
+        fixture.store.writeRunJournal(
+            abandoned.journal.copy(
+                request = abandoned.journal.request.copy(
+                    gpuRuntimeIdentity = retiredIdentity,
+                ),
+            )
+        )
+        var observedPolicy: SourceSeparationExecutionBackendPolicy? = null
+        var observedIdentity: SourceSeparationAdmittedGpuRuntimeIdentity? = null
+        var observedLatch: SourceSeparationGpuFallbackLatch? = null
+        val engine = fixture.engine { request ->
+            observedPolicy = request.backendPolicy
+            observedIdentity = request.gpuRuntimeIdentity
+            observedLatch = request.gpuFallbackLatch
+            fixture.complete(request, fixture.prepare(request, preserveFiles = true))
+        }
+
+        val result = engine.separate(
+            input = fixture.input,
+            runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+        )
+
+        assertTrue(result is SourceSeparationModelAwareEngineResult.Completed)
+        assertEquals(SourceSeparationExecutionBackendPolicy.Cpu, observedPolicy)
+        assertEquals(retiredIdentity, observedIdentity)
+        assertEquals(latch, observedLatch)
+        val completedJournal = fixture.currentRunJournal()
+        assertEquals(retiredIdentity, completedJournal.request.gpuRuntimeIdentity)
+        assertEquals(latch, completedJournal.request.gpuFallbackLatch)
+        assertEquals(1, completedJournal.transitions.count {
+            it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+        })
+        assertEquals(1, completedJournal.transitions.count {
+            it.type == SourceSeparationCacheRunTransitionType.GpuFallbackLatched
+        })
+    }
+
+    @Test
+    fun `missing model leaves an abandoned journal unchanged without remote creation`() {
+        val fixture = fixture()
+        val abandoned = fixture.abandonRun(
+            SourceSeparationCacheAdmittedRuntimePolicy(
+                tryGpu = false,
+                gpuRuntimeIdentity = null,
+            )
+        )
+        fixture.activeModel = null
+        val host = UnstartedRemoteHost()
+
+        assertEquals(
+            SourceSeparationModelAwareEngineResult.ActiveModelUnavailable,
+            fixture.engine(executionHost = host).separate(
+                input = fixture.input,
+                runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+            ),
+        )
+        assertEquals(0, host.processGenerationReadCount)
+        assertEquals(0, host.startCount)
+        assertEquals(abandoned.journal,
+            fixture.store.readRunJournal(abandoned.identity.cacheKey))
+        assertFalse(fixture.repository.isLeased(abandoned.identity.cacheKey))
+    }
+
+    @Test
     fun `paused run keeps its admitted GPU policy when the next call changes`() {
         val fixture = fixture()
         val observedPolicies = mutableListOf<SourceSeparationExecutionBackendPolicy>()
@@ -922,6 +1043,48 @@ class SourceSeparationModelAwareEngineTest {
         return fixture
     }
 
+    private fun boundedGpuRuntimeIdentity() = SourceSeparationAdmittedGpuRuntimeIdentity(
+        profileId = MdxLiteRtBoundedGpuContract.PROFILE_ID,
+        artifactVersion = MdxLiteRtBoundedGpuContract.ARTIFACT_VERSION,
+        capabilitySchemaVersion = MdxLiteRtBoundedGpuContract.CAPABILITY_SCHEMA_VERSION,
+        backend = MdxLiteRtBoundedGpuContract.BACKEND,
+        precision = MdxLiteRtBoundedGpuContract.PRECISION,
+        kernelBatchSize = MdxLiteRtBoundedGpuContract.KERNEL_BATCH_SIZE,
+        commandQueueWindowSize = MdxLiteRtBoundedGpuContract.COMMAND_QUEUE_WINDOW_SIZE,
+    )
+
+    private class UnstartedRemoteHost : SourceSeparationExecutionHost {
+        var processGenerationReadCount = 0
+        var startCount = 0
+
+        override val mode = SourceSeparationExecutionHostMode.BoundRemote
+        override val processGeneration: Long
+            get() {
+                processGenerationReadCount += 1
+                return 99L
+            }
+
+        override fun start(
+            request: SourceSeparationExecutionHostRequest,
+        ): SourceSeparationExecutionHostStartResult {
+            startCount += 1
+            error("The remote host must not start.")
+        }
+
+        override fun snapshot(runId: String, processGeneration: Long) = null
+
+        override fun pause(runId: String, processGeneration: Long) =
+            SourceSeparationExecutionHostControlResult.NoActiveRun
+
+        override fun cancel(runId: String, processGeneration: Long) =
+            SourceSeparationExecutionHostControlResult.NoActiveRun
+
+        override fun closeRun(runId: String, processGeneration: Long) =
+            SourceSeparationExecutionHostControlResult.NoActiveRun
+
+        override fun close() = Unit
+    }
+
     private class EngineFixture(
         val root: File,
         val store: SourceSeparationCacheStore,
@@ -1012,6 +1175,38 @@ class SourceSeparationModelAwareEngineTest {
         fun currentRunJournal() = requireNotNull(
             store.readRunJournal(store.listManifests().single().cacheKey)
         )
+
+        fun abandonRun(
+            policy: SourceSeparationCacheAdmittedRuntimePolicy,
+        ): AbandonedRun {
+            val model = requireNotNull(activeModel)
+            val identity = model.contract.identity(sourceIdentity())
+            val started = coordinator.begin(
+                SourceSeparationCacheRunRequest(
+                    identity = identity,
+                    contract = model.contract,
+                    song = input.song,
+                    sourceDiagnostics = input.sourceDiagnostics,
+                    runId = "abandoned-run",
+                    processGeneration = 7L,
+                    ownerPid = 700,
+                    runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+                    backgroundPolicy = SourceSeparationExecutionRunClass.ManualFullSong
+                        .backgroundPolicy,
+                    tryGpu = policy.tryGpu,
+                    gpuRuntimeIdentity = policy.gpuRuntimeIdentity,
+                    gpuFallbackLatch = null,
+                )
+            ) as SourceSeparationCacheRunStart.Ready
+            policy.gpuFallbackLatch?.let { latch ->
+                coordinator.latchGpuFallback(started.run, latch)
+            }
+            started.run.close()
+            return AbandonedRun(
+                identity = identity,
+                journal = requireNotNull(store.readRunJournal(identity.cacheKey)),
+            )
+        }
 
         fun prepare(
             request: SourceSeparationModelAwareExecutionRequest,
@@ -1135,6 +1330,11 @@ class SourceSeparationModelAwareEngineTest {
             sourceDurationUs = 2_000_000L,
         )
     }
+
+    private data class AbandonedRun(
+        val identity: com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity,
+        val journal: com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournal,
+    )
 
     companion object {
         private lateinit var catalog: SourceSeparationModelCatalog

@@ -140,6 +140,7 @@ internal class SourceSeparationModelAwareEngine(
         val identity = model.contract.identity(preflight.identity)
         val admittedRuntimePolicy = coordinator.inspectAdmittedRuntimePolicy(identity)
             ?: executionBackendPolicy.toAdmittedRuntimePolicy()
+        admittedRuntimePolicy.requireSupportedByCurrentBuild()
         val admittedBackendPolicy = if (admittedRuntimePolicy.tryGpu &&
             admittedRuntimePolicy.gpuFallbackLatch == null
         ) {
@@ -715,11 +716,39 @@ internal data class SourceSeparationModelAwareExecutionRequest(
         require(backendPolicy == expectedBackendPolicy) {
             "Execution backend policy does not match its admitted GPU state."
         }
-        require(!tryGpu || gpuRuntimeIdentity == BOUNDED_GPU_RUNTIME_IDENTITY) {
+        require(!tryGpu || gpuFallbackLatch != null ||
+            gpuRuntimeIdentity == BOUNDED_GPU_RUNTIME_IDENTITY
+        ) {
             "Execution GPU runtime identity is not supported by this build."
         }
     }
 }
+
+internal enum class SourceSeparationAdmittedRuntimeResumeMode {
+    CpuOnly,
+    BoundedGpu,
+    LatchedCpuFallback,
+}
+
+internal fun SourceSeparationCacheAdmittedRuntimePolicy.requireSupportedByCurrentBuild():
+        SourceSeparationAdmittedRuntimeResumeMode = when {
+    !tryGpu -> SourceSeparationAdmittedRuntimeResumeMode.CpuOnly
+    gpuFallbackLatch != null ->
+        SourceSeparationAdmittedRuntimeResumeMode.LatchedCpuFallback
+    gpuRuntimeIdentity == BOUNDED_GPU_RUNTIME_IDENTITY ->
+        SourceSeparationAdmittedRuntimeResumeMode.BoundedGpu
+    else -> throw SourceSeparationAdmittedGpuRuntimeMismatchException(
+        admitted = requireNotNull(gpuRuntimeIdentity),
+        supported = BOUNDED_GPU_RUNTIME_IDENTITY,
+    )
+}
+
+internal class SourceSeparationAdmittedGpuRuntimeMismatchException(
+    val admitted: SourceSeparationAdmittedGpuRuntimeIdentity,
+    val supported: SourceSeparationAdmittedGpuRuntimeIdentity,
+) : IllegalStateException(
+    "The admitted GPU runtime does not match this build.",
+)
 
 private val BOUNDED_GPU_RUNTIME_IDENTITY = SourceSeparationAdmittedGpuRuntimeIdentity(
     profileId = MdxLiteRtBoundedGpuContract.PROFILE_ID,

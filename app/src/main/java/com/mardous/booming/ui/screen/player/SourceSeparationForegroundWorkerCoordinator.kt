@@ -7,8 +7,9 @@ import androidx.media3.common.C
 import androidx.core.content.edit
 import com.mardous.booming.R
 import com.mardous.booming.data.model.Song
-import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
+import com.mardous.booming.separation.SourceSeparationAdmittedGpuRuntimeMismatchException
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPerformanceStats
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
@@ -1100,6 +1101,15 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             )
             cancelRequested.set(true)
         } catch (_: SourceSeparationModelLoadException) {
+            val message = context.getString(R.string.source_separation_model_load_failed)
+            _workerStateFlow.value = SourceSeparationUiState.Failed(
+                songId = song.id,
+                songTitle = song.title,
+                message = message,
+            )
+            callbacks?.onSourceSeparationWorkerModelLoadFailed(message)
+            cancelRequested.set(true)
+        } catch (_: SourceSeparationAdmittedGpuRuntimeMismatchException) {
             val message = context.getString(R.string.source_separation_model_load_failed)
             _workerStateFlow.value = SourceSeparationUiState.Failed(
                 songId = song.id,
