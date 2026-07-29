@@ -1,5 +1,6 @@
 package com.mardous.booming.ui.screen.player
 
+import android.os.SystemClock
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -13,6 +14,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.R
+import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntry
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
@@ -286,7 +288,69 @@ class SourceSeparationManagementScreenTest {
         }
     }
 
+    @Test
+    fun liveCacheDeleteUsesProductionViewModel() {
+        val arguments = InstrumentationRegistry.getArguments()
+        assumeTrue(arguments.getString("liveCacheDeleteFlow").equals("true", ignoreCase = true))
+        val cacheKey = arguments.getString("liveCacheKey")
+            ?.takeIf { it.matches(Regex("^[0-9a-f]{64}$")) }
+            ?: error("The live cache-delete flow requires a lowercase cache key.")
+        val runtime = get<SourceSeparationRuntimeFacade>(SourceSeparationRuntimeFacade::class.java)
+        val worker = get<SourceSeparationForegroundWorkerCoordinator>(
+            SourceSeparationForegroundWorkerCoordinator::class.java,
+        )
+        val idleDeadline = SystemClock.elapsedRealtime() + LIVE_CACHE_TIMEOUT_MS
+        while (worker.isWorkerActive() && SystemClock.elapsedRealtime() < idleDeadline) {
+            SystemClock.sleep(100L)
+        }
+        check(!worker.isWorkerActive()) { "The live cache-delete flow requires an idle worker." }
+        check(runtime.entries().any { it.cacheKey == cacheKey }) {
+            "The requested live cache entry is not present."
+        }
+        val viewModel = SourceSeparationModelAwareCacheManagementViewModel(runtime)
+
+        compose.setContent {
+            val state by viewModel.state.collectAsState()
+            MaterialTheme {
+                SourceSeparationModelAwareCacheManagementPage(
+                    state = state,
+                    autoCleanupEnabled = true,
+                    partialLimit = 3,
+                    completedLimit = 2,
+                    onBack = {},
+                    onRefresh = viewModel::refresh,
+                    onDeleteAll = viewModel::deleteAll,
+                    onDelete = viewModel::delete,
+                    onPlay = {},
+                    onDismissFailure = viewModel::clearFailure,
+                    onAutoCleanupChange = {},
+                    onPartialLimitChange = {},
+                    onCompletedLimitChange = {},
+                )
+            }
+        }
+
+        compose.waitUntil(timeoutMillis = LIVE_CACHE_TIMEOUT_MS) {
+            val state = viewModel.state.value
+            !state.loading && state.items.any { it.cacheKey == cacheKey }
+        }
+        compose.onNodeWithTag("source-separation-cache-delete:$cacheKey")
+            .performScrollTo()
+            .assertIsEnabled()
+            .performClick()
+        compose.waitUntil(timeoutMillis = LIVE_CACHE_TIMEOUT_MS) {
+            val state = viewModel.state.value
+            !state.loading &&
+                cacheKey !in state.deletingCacheKeys &&
+                state.items.none { it.cacheKey == cacheKey }
+        }
+
+        assertTrue(runtime.entries().none { it.cacheKey == cacheKey })
+        assertTrue(!worker.isWorkerActive())
+    }
+
     private companion object {
         const val LIVE_PRESET_TIMEOUT_MS = 10L * 60L * 1_000L
+        const val LIVE_CACHE_TIMEOUT_MS = 60_000L
     }
 }
