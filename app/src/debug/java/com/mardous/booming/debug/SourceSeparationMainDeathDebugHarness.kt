@@ -220,9 +220,12 @@ internal object SourceSeparationMainDeathDebugHarness {
                 }
                 journal = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
                 check(journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running)
-                check(journal.committedSegments.size == EXPECTED_FULL_SONG_SEGMENTS)
-                check(store.readManifest(runtimeSong.cacheKey)?.state ==
-                    SourceSeparationCacheManifestState.Completed)
+                val terminalManifest = requireNotNull(
+                    store.readManifest(runtimeSong.cacheKey),
+                )
+                check(terminalManifest.state == SourceSeparationCacheManifestState.Completed)
+                check(journal.committedSegments.size ==
+                    terminalManifest.segmentPlan?.segmentCount)
             }
             if (mode == BeginMode.RemoteProcessDeath) {
                 val root = store.root().directory.also { armedFaultRoot = it }
@@ -1936,8 +1939,9 @@ internal object SourceSeparationMainDeathDebugHarness {
             }
             val terminalCommitBoundary = request.mainDeathBoundary ==
                 MainDeathBoundary.TerminalCommit
+            val expectedSegmentCount = scenario.getInt("plannedSegments")
             val journalSequenceBeforeHarnessValidation = if (terminalCommitBoundary) {
-                check(scenario.getInt("committedSegments") == EXPECTED_FULL_SONG_SEGMENTS)
+                check(scenario.getInt("committedSegments") == expectedSegmentCount)
                 check(File(scenario.getString("journalPath")).isFile)
                 scenario.getLong("journalSequence")
             } else {
@@ -2041,11 +2045,11 @@ internal object SourceSeparationMainDeathDebugHarness {
             check(activeCacheItem.modelAvailability ==
                 SourceSeparationCacheModelAvailability.InstalledExact)
             if (terminalCommitBoundary) {
-                check(activeCacheItem.readySegments == EXPECTED_FULL_SONG_SEGMENTS)
+                check(activeCacheItem.readySegments == expectedSegmentCount)
             } else {
                 check((activeCacheItem.readySegments ?: 0) >= 1)
             }
-            check(activeCacheItem.totalSegments == EXPECTED_FULL_SONG_SEGMENTS)
+            check(activeCacheItem.totalSegments == expectedSegmentCount)
             check(activeCacheItem.modelId == request.modelId)
 
             val playbackStatusBeforeBarrierRelease = if (terminalCommitBoundary) {
