@@ -92,7 +92,11 @@ param(
     [string]$StopWhenClosedFromRecents = "false",
     [ValidateSet("playback-demand", "next-song-prefetch")]
     [string]$PlaybackOwnedRunClass = "playback-demand",
-    [ValidateSet("segment-running", "after-first-committed-segment")]
+    [ValidateSet(
+        "segment-running",
+        "after-first-committed-segment",
+        "terminal-commit"
+    )]
     [string]$MainDeathBoundary = "segment-running",
     [ValidateSet(
         "resume",
@@ -1745,9 +1749,14 @@ try {
             "--es", "killBoundary", $MainDeathBoundary
         )
         Invoke-Adb @debugArguments --es command beginIndependentMainDeath
+        $mainDeathSetupTimeoutSeconds = if ($MainDeathBoundary -eq "terminal-commit") {
+            1800
+        } else {
+            300
+        }
         $scenarioText = Wait-RemoteJsonFile `
             -RelativePath $scenarioRelativePath `
-            -TimeoutSeconds 300 `
+            -TimeoutSeconds $mainDeathSetupTimeoutSeconds `
             -FailurePath $debugReportRelativePath
         $scenario = $scenarioText | ConvertFrom-Json
         $oldMainPid = [int]$scenario.mainPid

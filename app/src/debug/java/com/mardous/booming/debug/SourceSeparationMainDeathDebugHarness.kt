@@ -24,6 +24,7 @@ import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
 import com.mardous.booming.separation.SourceSeparationRuntimeUnavailableReason
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultAction
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultControl
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultHit
@@ -195,6 +196,34 @@ internal object SourceSeparationMainDeathDebugHarness {
             check(File("/proc/$remotePid").isDirectory)
             var faultHit: SourceSeparationCacheFaultHit? = null
             var faultToken: String? = null
+            if (mode == BeginMode.MainProcessDeath && killBoundary.faultStage != null) {
+                val root = store.root().directory.also { armedFaultRoot = it }
+                val token = "main-death-${request.runId}".take(MAX_FAULT_TOKEN_LENGTH)
+                faultToken = token
+                SourceSeparationCacheFaultInjection.arm(
+                    root,
+                    SourceSeparationCacheFaultControl(
+                        token = token,
+                        stage = killBoundary.faultStage,
+                        action = SourceSeparationCacheFaultAction.Barrier,
+                        timeoutMs = REMOTE_DEATH_BARRIER_TIMEOUT_MS,
+                    ),
+                )
+                faultHit = waitForCacheFaultHit(
+                    root = root,
+                    token = token,
+                    expectedStage = killBoundary.faultStage,
+                    timeoutMs = COMPLETION_TIMEOUT_MS,
+                )
+                check(faultHit.pid == remotePid) {
+                    "The main-death barrier was reached by another process."
+                }
+                journal = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+                check(journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running)
+                check(journal.committedSegments.size == EXPECTED_FULL_SONG_SEGMENTS)
+                check(store.readManifest(runtimeSong.cacheKey)?.state ==
+                    SourceSeparationCacheManifestState.Completed)
+            }
             if (mode == BeginMode.RemoteProcessDeath) {
                 val root = store.root().directory.also { armedFaultRoot = it }
                 val token = "remote-death-${request.runId}".take(MAX_FAULT_TOKEN_LENGTH)
@@ -1876,6 +1905,8 @@ internal object SourceSeparationMainDeathDebugHarness {
         val scenarioFile = scenarioFile(context, request.runId)
         val outputFile = reportFile(context, request.runId)
         var mediaUri: Uri? = null
+        var armedFaultRoot: File? = null
+        var armedFaultToken: String? = null
         try {
             val scenario = JSONObject(scenarioFile.readText(Charsets.UTF_8))
             check(scenario.getInt("schemaVersion") == SCENARIO_SCHEMA_VERSION)
@@ -1896,6 +1927,13 @@ internal object SourceSeparationMainDeathDebugHarness {
             }
 
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
+            armedFaultToken = scenario.takeUnless { it.isNull("faultToken") }
+                ?.getString("faultToken")
+            armedFaultRoot = armedFaultToken?.let { store.root().directory }
+            check((armedFaultToken != null) ==
+                (request.mainDeathBoundary.faultStage != null)) {
+                "The main-death fault barrier does not match the requested boundary."
+            }
             val reattachedBeforeHarness = waitForJournal(REATTACH_TIMEOUT_MS) {
                 store.readRunJournal(cacheKey)?.takeIf { journal ->
                     journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running &&
@@ -1966,6 +2004,55 @@ internal object SourceSeparationMainDeathDebugHarness {
                     processingNotificationAfterReattachment.getJSONArray("actions").toString()
             ) { "The processing notification changed across main-process recreation." }
 
+            val cacheManagementState = SourceSeparationModelAwareCacheManagementUiState(
+                items = runtime.entries(),
+            )
+            val terminalCommitBoundary = request.mainDeathBoundary ==
+                MainDeathBoundary.TerminalCommit
+            val activeCacheItem = if (terminalCommitBoundary) {
+                cacheManagementState.completedItems.singleOrNull { entry ->
+                    entry.cacheKey == cacheKey
+                }
+            } else {
+                cacheManagementState.incompleteItems.singleOrNull { entry ->
+                    entry.cacheKey == cacheKey
+                }
+            } ?: error("Cache management did not expose the reattached active entry.")
+            check(activeCacheItem.state == if (terminalCommitBoundary) {
+                SourceSeparationModelAwareCacheEntryState.Completed
+            } else {
+                SourceSeparationModelAwareCacheEntryState.Partial
+            })
+            check(activeCacheItem.modelAvailability ==
+                SourceSeparationCacheModelAvailability.InstalledExact)
+            if (terminalCommitBoundary) {
+                check(activeCacheItem.readySegments == EXPECTED_FULL_SONG_SEGMENTS)
+            } else {
+                check((activeCacheItem.readySegments ?: 0) >= 1)
+            }
+            check(activeCacheItem.totalSegments == EXPECTED_FULL_SONG_SEGMENTS)
+            check(activeCacheItem.modelId == request.modelId)
+
+            val playbackStatusBeforeBarrierRelease = if (terminalCommitBoundary) {
+                runtime.playableStatus(
+                    song = runtimeSong,
+                    playbackPositionMs = 0L,
+                    readyWindowCount = 1,
+                ).also { status ->
+                    check(status != SourceSeparationModelAwarePlayableStatus.Unavailable) {
+                        "The terminal-commit cache became unavailable before barrier release."
+                    }
+                }::class.java.simpleName
+            } else {
+                null
+            }
+            if (terminalCommitBoundary) {
+                SourceSeparationCacheFaultInjection.release(
+                    requireNotNull(armedFaultRoot),
+                    requireNotNull(armedFaultToken),
+                )
+            }
+
             var activePlaybackManifestUpdatedAtEpochMs = 0L
             check(waitUntil(SETUP_TIMEOUT_MS) {
                 when (val status = runtime.playableStatus(
@@ -1984,22 +2071,9 @@ internal object SourceSeparationMainDeathDebugHarness {
                     }
                     SourceSeparationModelAwarePlayableStatus.Processing -> false
                     SourceSeparationModelAwarePlayableStatus.Unavailable ->
-                        error("The reattached running cache became unavailable for playback.")
+                        error("The reattached cache became unavailable for playback.")
                 }
-            }) { "The reattached running cache did not expose a playable first window." }
-
-            val cacheManagementState = SourceSeparationModelAwareCacheManagementUiState(
-                items = runtime.entries(),
-            )
-            val activeCacheItem = cacheManagementState.incompleteItems.singleOrNull { entry ->
-                entry.cacheKey == cacheKey
-            } ?: error("Cache management did not expose the reattached running entry.")
-            check(activeCacheItem.state == SourceSeparationModelAwareCacheEntryState.Partial)
-            check(activeCacheItem.modelAvailability ==
-                SourceSeparationCacheModelAvailability.InstalledExact)
-            check((activeCacheItem.readySegments ?: 0) >= 1)
-            check(activeCacheItem.totalSegments == EXPECTED_FULL_SONG_SEGMENTS)
-            check(activeCacheItem.modelId == request.modelId)
+            }) { "The reattached cache did not expose playable audio." }
 
             val finalJournal = waitForJournal(COMPLETION_TIMEOUT_MS) {
                 store.readRunJournal(cacheKey)?.takeIf { journal ->
@@ -2064,6 +2138,15 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("executionRunId", executionRunId)
                     .put("killBoundary", scenario.getString("killBoundary"))
                     .put("killRequester", scenario.getString("killRequester"))
+                    .put(
+                        "faultStage",
+                        request.mainDeathBoundary.faultStage?.name ?: JSONObject.NULL,
+                    )
+                    .put("barrierReleasedAfterReattachment", terminalCommitBoundary)
+                    .put(
+                        "playbackStatusBeforeBarrierRelease",
+                        playbackStatusBeforeBarrierRelease ?: JSONObject.NULL,
+                    )
                     .put("journalSequenceBeforeDeath", scenario.getLong("journalSequence"))
                     .put(
                         "journalSequenceBeforeHarnessValidation",
@@ -2141,6 +2224,7 @@ internal object SourceSeparationMainDeathDebugHarness {
             writeFailure(outputFile, request, STAGE_MAIN_DEATH, "validation", error)
             Log.e(TAG, "Main-death validation failed for ${request.runId}.", error)
         } finally {
+            armedFaultRoot?.let(SourceSeparationCacheFaultInjection::clear)
             mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
         }
     }
@@ -2435,19 +2519,22 @@ internal object SourceSeparationMainDeathDebugHarness {
     private fun waitForCacheFaultHit(
         root: File,
         token: String,
+        expectedStage: SourceSeparationCacheFaultStage =
+            SourceSeparationCacheFaultStage.NativeInvocation,
+        timeoutMs: Long = REMOTE_DEATH_BARRIER_TIMEOUT_MS,
     ): SourceSeparationCacheFaultHit {
-        val deadline = SystemClock.elapsedRealtime() + REMOTE_DEATH_BARRIER_TIMEOUT_MS
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
         while (SystemClock.elapsedRealtime() < deadline) {
             SourceSeparationCacheFaultInjection.readHit(root)?.let { hit ->
                 if (hit.token == token &&
-                    hit.stage == SourceSeparationCacheFaultStage.NativeInvocation
+                    hit.stage == expectedStage
                 ) {
                     return hit
                 }
             }
             SystemClock.sleep(POLL_MS)
         }
-        error("Timed out waiting for the remote-death native-invocation barrier.")
+        error("Timed out waiting for the $expectedStage cache fault barrier.")
     }
 
     private fun waitUntil(timeoutMs: Long, predicate: () -> Boolean): Boolean {
@@ -3014,9 +3101,16 @@ internal object SourceSeparationMainDeathDebugHarness {
         RemoteProcessDeath(STAGE_REMOTE_DEATH, "adb-external-process-death"),
     }
 
-    private enum class MainDeathBoundary(val argumentValue: String) {
+    private enum class MainDeathBoundary(
+        val argumentValue: String,
+        val faultStage: SourceSeparationCacheFaultStage? = null,
+    ) {
         SegmentRunning("segment-running"),
         AfterFirstCommittedSegment("after-first-committed-segment"),
+        TerminalCommit(
+            argumentValue = "terminal-commit",
+            faultStage = SourceSeparationCacheFaultStage.TerminalCommit,
+        ),
         ;
 
         fun reached(journal: SourceSeparationCacheRunJournal): Boolean = when (this) {
@@ -3025,6 +3119,10 @@ internal object SourceSeparationMainDeathDebugHarness {
                     transition.type == SourceSeparationCacheRunTransitionType.SegmentRunning
                 }
             AfterFirstCommittedSegment -> journal.committedSegments.isNotEmpty()
+            TerminalCommit -> journal.committedSegments.isEmpty() &&
+                journal.transitions.any { transition ->
+                    transition.type == SourceSeparationCacheRunTransitionType.SegmentRunning
+                }
         }
 
         companion object {
