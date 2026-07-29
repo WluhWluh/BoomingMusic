@@ -1597,9 +1597,6 @@ policy changed in response.
   replacement product observer to preserve that segment's exact path, size,
   and SHA-256 evidence while the original remote run completes all 48 segments.
   This passes on S10 and S25 for CPU and bounded GPU without a second start.
-- [ ] Repeat main-process death before FGS handoff, during native invocation,
-  and after final segment publication. The terminal journal boundary is
-  qualified separately above.
 - [x] Require a reconnecting client to reject stale Binder generations and
   reconstruct UI state from the durable snapshot without seeking or replacing
   original playback. Each binding now owns a distinct callback and reconnect
