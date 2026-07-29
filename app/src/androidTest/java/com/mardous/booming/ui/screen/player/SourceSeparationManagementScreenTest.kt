@@ -1,6 +1,8 @@
 package com.mardous.booming.ui.screen.player
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -15,16 +17,25 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailab
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntry
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheFormat
+import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.contract.CatalogActivationPolicy
 import com.mardous.booming.separation.model.contract.CatalogReleaseMaturity
 import com.mardous.booming.separation.model.contract.CatalogSupportLevel
+import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPresetOrigin
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportCoordinator
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.koin.java.KoinJavaComponent.get
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 
@@ -176,5 +187,106 @@ class SourceSeparationManagementScreenTest {
             .assertIsEnabled()
             .performClick()
         compose.runOnIdle { assertEquals(modelId, selectedModelId.get()) }
+    }
+
+    @Test
+    fun livePresetDownloadAndActivationUseProductionViewModel() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val arguments = InstrumentationRegistry.getArguments()
+        assumeTrue(arguments.getString("livePresetFlow").equals("true", ignoreCase = true))
+        val modelId = arguments.getString("livePresetModelId")
+            ?.takeIf(String::isNotBlank)
+            ?: "uvr_mdxnet_kara"
+        val context = instrumentation.targetContext
+        val repository = get<SourceSeparationPresetRepository>(
+            SourceSeparationPresetRepository::class.java,
+        )
+        val original = repository.activeModel() as? SourceSeparationActivePresetState.Reference
+            ?: error("The live preset flow requires an active model to restore.")
+        val viewModel = SourceSeparationPresetManagementViewModel(
+            contentResolver = context.contentResolver,
+            repository = repository,
+            downloader = get(SourceSeparationPresetDownloader::class.java),
+            importCoordinator = get(SourceSeparationPresetImportCoordinator::class.java),
+        )
+
+        try {
+            compose.setContent {
+                val state by viewModel.state.collectAsState()
+                MaterialTheme {
+                    SourceSeparationPresetManagementSheet(
+                        state = state,
+                        onDownload = viewModel::download,
+                        onCancelDownload = viewModel::cancelDownload,
+                        onUse = viewModel::requestUse,
+                        onDelete = viewModel::delete,
+                        onConfirmExperimental = viewModel::confirmExperimentalUse,
+                        onDismissExperimental = viewModel::dismissExperimentalUse,
+                        onClearError = viewModel::clearError,
+                        onClearRestoredModelTarget = viewModel::clearRestoredModelTarget,
+                        onRefresh = viewModel::refresh,
+                        onImportModel = {},
+                        onImportSidecar = {},
+                        onStartManualProfile = viewModel::startManualProfile,
+                        onSaveManualProfile = viewModel::saveManualProfile,
+                        onCancelManualProfile = viewModel::cancelManualProfile,
+                        onRetryImport = viewModel::retryImport,
+                        onDiscardImport = viewModel::discardImport,
+                        onDismissImportSuccess = viewModel::dismissImportSuccess,
+                        onUseImported = viewModel::requestUseImported,
+                        onDeleteImported = viewModel::deleteImported,
+                        onShowCatalogDetails = viewModel::showCatalogDetails,
+                        onShowImportedDetails = viewModel::showImportedDetails,
+                        onDismissModelDetails = viewModel::dismissModelDetails,
+                        onEditCustomProfile = viewModel::editCustomProfile,
+                        onSaveCustomProfileRevision = viewModel::saveCustomProfileRevision,
+                        onCancelCustomProfileEdit = viewModel::cancelCustomProfileEdit,
+                        onUseCustomProfile = viewModel::useCustomProfile,
+                        onExportCustomProfile = {},
+                        onDeleteCustomProfile = viewModel::deleteCustomProfile,
+                    )
+                }
+            }
+
+            if (viewModel.state.value.entries.single { it.modelId == modelId }.installed == null) {
+                compose.onNodeWithTag("source-separation-preset-download:$modelId")
+                    .performScrollTo()
+                    .assertIsEnabled()
+                    .performClick()
+                compose.waitUntil(timeoutMillis = LIVE_PRESET_TIMEOUT_MS) {
+                    viewModel.state.value.entries.single { it.modelId == modelId }
+                        .let { item -> item.installed != null && item.transferState == null }
+                }
+            }
+
+            compose.onNodeWithTag("source-separation-preset-use:$modelId")
+                .performScrollTo()
+                .assertIsEnabled()
+                .performClick()
+            compose.waitUntil(timeoutMillis = LIVE_PRESET_TIMEOUT_MS) {
+                viewModel.state.value.confirmationModelId == modelId
+            }
+            compose.onNodeWithTag("source-separation-preset-confirm-experimental")
+                .assertIsDisplayed()
+                .performClick()
+            compose.waitUntil(timeoutMillis = LIVE_PRESET_TIMEOUT_MS) {
+                viewModel.state.value.entries.single { it.modelId == modelId }.active
+            }
+
+            val active = repository.activeModel() as SourceSeparationActivePresetState.Reference
+            assertEquals(modelId, active.reference.modelId)
+            assertTrue(repository.installedModels().any { it.modelId == modelId })
+        } finally {
+            repository.activate(
+                sha256 = original.reference.artifactSha256,
+                platform = AndroidMdxRuntimePlatformProvider.current(),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                experimentalConfirmed = true,
+            )
+        }
+    }
+
+    private companion object {
+        const val LIVE_PRESET_TIMEOUT_MS = 10L * 60L * 1_000L
     }
 }

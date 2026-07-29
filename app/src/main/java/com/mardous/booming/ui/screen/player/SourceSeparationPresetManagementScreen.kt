@@ -244,7 +244,12 @@ internal fun SourceSeparationPresetManagementSheet(
                 )
             },
             confirmButton = {
-                Button(onClick = onConfirmExperimental) {
+                Button(
+                    onClick = onConfirmExperimental,
+                    modifier = Modifier.testTag(
+                        "source-separation-preset-confirm-experimental",
+                    ),
+                ) {
                     Text(stringResource(R.string.source_separation_preset_use_for_validation))
                 }
             },
@@ -718,7 +723,11 @@ private fun PresetModelCard(
                     if (model.installed == null) {
                         Button(
                             onClick = { onDownload(model.modelId) },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag(
+                                    "source-separation-preset-download:${model.modelId}",
+                                ),
                         ) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_download_24dp),
