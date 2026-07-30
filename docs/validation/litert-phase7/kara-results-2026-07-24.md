@@ -4,6 +4,12 @@ These results qualify the objective CPU behavior of KARA FP32 before the final
 Phase 7 promotion commit. They do not complete the representative listening or
 gesture-level UI review, and they do not change the bundled catalog tier.
 
+The later bounded-GPU requalification is recorded in
+[`kara-gpu-requalification-2026-07-30.md`](kara-gpu-requalification-2026-07-30.md).
+It found no full-song audio defect on the Galaxy S10 or S25, but retains the
+catalog policy pending listening, lifecycle/UI, and performance-admission
+evidence.
+
 The compact machine-readable record is
 [`kara-objective-results-2026-07-24.json`](kara-objective-results-2026-07-24.json).
 

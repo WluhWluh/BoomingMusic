@@ -1,0 +1,188 @@
+{
+  "schemaVersion": "kara-gpu-requalification-v1",
+  "decision": "retain-cpu-only-pending-listening-and-broader-validation",
+  "identity": {
+    "appCommit": "a931081f35d6ce7b77856fe97897dc6e1b9f74dc",
+    "appApkSha256": "042f54a4722365b4314bc5c9e0687d6e5aab5f8f7b11635bdcb3d6b44c93098c",
+    "androidTestApkSha256": "fb2487450841bd47439e52051bc4a8f642685c3a5ef9ffc79987e10aeb441e74",
+    "catalogSha256": "a553f227588313578321c07c73ff99654eff7795727d825d16b191aa0f879e1f",
+    "runnerRevision": "phase7-runner-v58",
+    "model": {
+      "modelId": "uvr_mdxnet_kara",
+      "contractId": "uvr_mdxnet_kara@2",
+      "contractSchemaVersion": 2,
+      "artifactFileName": "UVR_MDXNET_KARA_static_float32.tflite",
+      "artifactBytes": 29700460,
+      "artifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64"
+    },
+    "fixture": {
+      "fixtureId": "coast_town_full_wav",
+      "durationUs": 273699093,
+      "sampleRate": 44100,
+      "channels": 2,
+      "frames": 12070130,
+      "sha256": "e845e52aeeeb69be702d3a28d756eaf7a3137dbe5338ea50fb0ac3d8c4f9bd89"
+    },
+    "device": {
+      "manufacturer": "samsung",
+      "model": "SM-S9310",
+      "androidApi": 35,
+      "abi": "arm64-v8a"
+    },
+    "additionalDevice": {
+      "manufacturer": "samsung",
+      "model": "SM-G9730",
+      "androidApi": 31,
+      "abi": "arm64-v8a"
+    },
+    "runtime": {
+      "runtimeId": "litert",
+      "runtimeVersion": "2.1.5",
+      "artifactVersion": "2.1.5-bss.2",
+      "backend": "OpenCL",
+      "precision": "fp32",
+      "profileId": "gpu-opencl-bounded-fp32-v1",
+      "qualificationProfileId": "gpu-auto-fp32-v1",
+      "kernelBatchSize": 1,
+      "commandQueueWindowSize": 1
+    }
+  },
+  "qualificationOverride": {
+    "scope": "androidTest-only",
+    "catalogStatus": "rejected",
+    "effectiveStatus": "candidate",
+    "productionCatalogChanged": false
+  },
+  "runs": [
+    {
+      "runId": "kara-s25-bounded-gpu-full-v1",
+      "backend": "LiteRtGpu",
+      "provenance": "binary-identical-precommit-repeat",
+      "reportedAppCommit": "8f1cc0efaf801cd681b3ec30b7c42ea69460cbc4",
+      "elapsedMs": 40645,
+      "firstReadyMs": 3994,
+      "peakPssBytes": 658008064,
+      "peakPssDeltaBytes": 526530560,
+      "thermalStart": 0,
+      "thermalPeak": 0,
+      "thermalEnd": 0,
+      "fallbackStage": null,
+      "status": "passed"
+    },
+    {
+      "runId": "kara-s25-cpu-control-full-v1",
+      "backend": "LiteRtCpu",
+      "provenance": "binary-identical-precommit-control",
+      "reportedAppCommit": "8f1cc0efaf801cd681b3ec30b7c42ea69460cbc4",
+      "elapsedMs": 88392,
+      "firstReadyMs": 4654,
+      "peakPssBytes": 912770048,
+      "peakPssDeltaBytes": 778266624,
+      "thermalStart": 0,
+      "thermalPeak": 0,
+      "thermalEnd": 0,
+      "fallbackStage": null,
+      "status": "passed"
+    },
+    {
+      "runId": "kara-s25-bounded-gpu-full-v2",
+      "backend": "LiteRtGpu",
+      "provenance": "final",
+      "reportedAppCommit": "a931081f35d6ce7b77856fe97897dc6e1b9f74dc",
+      "elapsedMs": 40737,
+      "firstReadyMs": 3683,
+      "peakPssBytes": 660454400,
+      "peakPssDeltaBytes": 529559552,
+      "peakJavaPssBytes": 94023680,
+      "peakNativePssBytes": 112762880,
+      "peakGraphicsPssBytes": 295936000,
+      "thermalStart": 0,
+      "thermalPeak": 0,
+      "thermalEnd": 0,
+      "inferenceInvocationCount": 48,
+      "fallbackStage": null,
+      "status": "passed",
+      "reportSha256": "85bec962730e729a98c63f6aef3ff7ad47367db3a67b136ccac946d1a91a6c57"
+    },
+    {
+      "runId": "kara-s25-cpu-control-full-v2",
+      "backend": "LiteRtCpu",
+      "provenance": "final-thermally-throttled-control",
+      "reportedAppCommit": "a931081f35d6ce7b77856fe97897dc6e1b9f74dc",
+      "elapsedMs": 113272,
+      "firstReadyMs": 10194,
+      "peakPssBytes": 914392064,
+      "peakPssDeltaBytes": 775158784,
+      "peakJavaPssBytes": 95649792,
+      "peakNativePssBytes": 675938304,
+      "peakGraphicsPssBytes": 0,
+      "thermalStart": 3,
+      "thermalPeak": 3,
+      "thermalEnd": 2,
+      "fallbackStage": null,
+      "status": "passed",
+      "speedBaselineEligible": false,
+      "reportSha256": "49212695b1244ed5457fd16bf6d2de2d0df440ec0cbc2f9144af0fd0510e61b9"
+    },
+    {
+      "runId": "kara-s10-bounded-gpu-full-v1",
+      "backend": "LiteRtGpu",
+      "provenance": "final",
+      "reportedAppCommit": "a931081f35d6ce7b77856fe97897dc6e1b9f74dc",
+      "elapsedMs": 237819,
+      "firstReadyMs": 14706,
+      "peakPssBytes": 599713792,
+      "peakPssDeltaBytes": 474302464,
+      "peakJavaPssBytes": 85663744,
+      "peakNativePssBytes": 128831488,
+      "peakGraphicsPssBytes": 278716416,
+      "thermalStart": 0,
+      "thermalPeak": 0,
+      "thermalEnd": 0,
+      "inferenceInvocationCount": 48,
+      "fallbackStage": null,
+      "status": "passed",
+      "audioByteIdenticalToS25Gpu": true,
+      "historicalCpuRangeMs": [174900, 189800],
+      "gpuPerformanceOutcome": "slower-than-cpu",
+      "reportSha256": "ab8b6e51816824e3b4142efb91c64c5abaf2032bce8d3d44e6d4550ff8aabe91"
+    }
+  ],
+  "audio": {
+    "framesExact": true,
+    "finite": true,
+    "gpuRepeatByteIdentical": true,
+    "gpu": {
+      "vocalsSha256": "36418547d3a79022ddfed7d595e790498532fb49b1ce747ccbea0e91e03ae4da",
+      "instrumentalSha256": "897b3e1705a219c558034609be5ba134875a85727b1e7baf0fbd671c2ec49ff0"
+    },
+    "cpu": {
+      "vocalsSha256": "3c685dfd8c57451c430e34414f3a0c7e6157e473f057b4af14f43cb8ec58b2d6",
+      "instrumentalSha256": "8b7b02655c81e8833a3bb35442b3fba57b87c9452977947d83e704537bce8e07"
+    },
+    "gpuVsOrt": {
+      "vocalsSnrDb": 66.98542329759762,
+      "instrumentalSnrDb": 81.2254878766329,
+      "maximumPcm16Delta": 1,
+      "maximumJoinDelta": 0.00006103515625
+    },
+    "gpuVsCpu": {
+      "vocalsSnrDb": 95.21020231744512,
+      "instrumentalSnrDb": 109.44687892033488,
+      "maximumPcm16Delta": 1,
+      "maximumJoinDelta": 0.000030517578125,
+      "maximumReconstructionErrorDelta": 0.000030517578125
+    }
+  },
+  "openGates": [
+    "blind-listening",
+    "repeated-session-allocation",
+    "cancellation-and-fallback",
+    "foreground-gesture-frame-times",
+    "model-specific-performance-admission"
+  ],
+  "excluded": [
+    "kara-fp16",
+    "production-catalog-promotion"
+  ]
+}

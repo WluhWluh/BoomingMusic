@@ -24,6 +24,10 @@ precision. A successful short-window probe is not a Phase 7 promotion result.
   record KARA CPU resources, cancellation, full worker/MediaSession playback,
   and full-track desktop-reference equivalence. Listening and gesture-level UI
   review remain open.
+- `kara-gpu-requalification-2026-07-30.md` and its machine-readable summary
+  record the Galaxy S10/S25 bounded OpenCL FP32 full-song requalification. The
+  numerical result passes, while listening, lifecycle, UI, and device-specific
+  performance gates keep KARA CPU-only in the catalog.
 - `candidate-catalog-2026-07-24/` contains the 27-row immutable download-only
   candidate audit: online Release acquisition, catalog/sidecar reconciliation,
   Android LiteRT structural compile, activation rejection, and cleanup.
