@@ -45,7 +45,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v57",
+    [string]$RunnerRevision = "phase7-runner-v58",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -85,6 +85,7 @@ param(
     [switch]$CleanInstallScenario,
     [switch]$PreserveMediaStoreSource,
     [switch]$ExportCacheAudio,
+    [switch]$KaraGpuRequalification,
     [switch]$RebindAfterCompletion,
     [switch]$ProbeOriginalPlayback,
     [switch]$ForceStopBeforeRun,
@@ -244,6 +245,17 @@ if ([string]::IsNullOrWhiteSpace($GpuRuntimeProfileId) -and
         $ExecutionHostMode -eq "in-process" -and $AutoFailpoint -eq "none" -and
         $RemoteAutoFailpoint -eq "none") {
     $GpuRuntimeProfileId = "gpu-opencl-bounded-fp32-v1"
+}
+if ($KaraGpuRequalification -and
+        ($Stage -ne "worker" -or
+        $ModelId -ne "uvr_mdxnet_kara" -or
+        $ProcessAbi -ne "arm64-v8a" -or
+        $BackendMode -ne "auto" -or
+        $GpuRuntimeProfileId -ne "gpu-opencl-bounded-fp32-v1" -or
+        $ExecutionHostMode -ne "in-process" -or
+        $AutoFailpoint -ne "none" -or
+        $RemoteAutoFailpoint -ne "none")) {
+    throw "KaraGpuRequalification requires the in-process arm64 KARA worker with bounded FP32 GPU and no fault injection."
 }
 $boundRemoteBackendSupported = $BackendMode -eq "auto" -or
     ($Stage -eq "worker" -and $BackendMode -eq "cpu" -and -not $X86ProcessValidation)
@@ -1005,6 +1017,7 @@ try {
         "-e", "arm32ResidentProcessValidation",
         $Arm32ResidentProcessValidation.ToString().ToLowerInvariant(),
         "-e", "probeOriginalPlayback", $ProbeOriginalPlayback.ToString().ToLowerInvariant(),
+        "-e", "karaGpuRequalification", $KaraGpuRequalification.ToString().ToLowerInvariant(),
         "-e", "coldProcessBoundary", $ForceStopBeforeRun.ToString().ToLowerInvariant(),
         "-e", "preRunProcessExitMs", [string]$preRunProcessBoundary.exitElapsedMs
     )
@@ -2020,6 +2033,7 @@ try {
                 installSkipped = $SkipInstall
                 backendMode = $BackendMode
                 executionHostMode = $ExecutionHostMode
+                karaGpuRequalification = [bool]$KaraGpuRequalification
                 probeOriginalPlayback = [bool]$ProbeOriginalPlayback
                 coldProcessBoundary = [bool]$ForceStopBeforeRun
                 preRunProcessBoundary = $preRunProcessBoundary

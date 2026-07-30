@@ -66,7 +66,10 @@ import com.mardous.booming.separation.model.MdxInferenceSession
 import com.mardous.booming.separation.model.MdxInferenceSessionFactory
 import com.mardous.booming.separation.model.MdxInferenceSessionProvider
 import com.mardous.booming.separation.model.MdxModelArtifact
+import com.mardous.booming.separation.model.MdxRuntimeAbi
+import com.mardous.booming.separation.model.MdxRuntimePrecision
 import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.model.ReusableMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.SingleUseMdxInferenceSessionProvider
@@ -173,6 +176,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
         )
         val remoteFaultToken = arguments.getString(ARG_REMOTE_FAULT_TOKEN)
             ?: "$runId-remote-gpu"
+        val karaGpuRequalification = arguments.optionalBoolean(
+            ARG_KARA_GPU_REQUALIFICATION,
+            false,
+        )
         require(autoFailpoint == Phase7AutoFailpoint.None || backendMode == BackendMode.Auto) {
             "Phase 7 Auto fault injection requires BackendMode=auto."
         }
@@ -191,11 +198,38 @@ class SourceSeparationPhase7WorkerDeviceTest {
         ) {
             "Remote Auto fault injection requires BoundRemote Auto without a local failpoint."
         }
+        require(!karaGpuRequalification ||
+            (backendMode == BackendMode.Auto &&
+                executionHostMode == Phase7ExecutionHostMode.InProcess &&
+                autoFailpoint == Phase7AutoFailpoint.None &&
+                remoteAutoFailpoint == MdxLiteRtRemoteFailpoint.None &&
+                gpuRuntimeProfile == MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1 &&
+                arguments.requiredString(ARG_PROCESS_ABI) == "arm64-v8a" &&
+                arguments.requiredString(ARG_MODEL_ID) == KARA_MODEL_ID &&
+                arguments.requiredString(ARG_ARTIFACT_SHA256) == KARA_ARTIFACT_SHA256 &&
+                arguments.requiredString(ARG_CONTRACT_ID) == KARA_CONTRACT_ID)
+        ) {
+            "KARA GPU requalification requires the pinned arm64 bounded-FP32 worker."
+        }
         val report = baseReport(context, runId, arguments)
         if (autoFailpoint != Phase7AutoFailpoint.None ||
-            remoteAutoFailpoint != MdxLiteRtRemoteFailpoint.None
+            remoteAutoFailpoint != MdxLiteRtRemoteFailpoint.None ||
+            karaGpuRequalification
         ) {
             report.put("diagnosticOnly", true)
+        }
+        if (karaGpuRequalification) {
+            report.put(
+                "qualificationOverride",
+                JSONObject()
+                    .put("modelId", KARA_MODEL_ID)
+                    .put("contractId", KARA_CONTRACT_ID)
+                    .put("artifactSha256", KARA_ARTIFACT_SHA256)
+                    .put("profileId", MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1.profileId)
+                    .put("catalogStatus", "rejected")
+                    .put("effectiveStatus", "candidate")
+                    .put("scope", "androidTest-only"),
+            )
         }
         val preserveMediaStoreSource = arguments.optionalBoolean(
             ARG_PRESERVE_MEDIA_STORE_SOURCE,
@@ -294,7 +328,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     autoFaultController != null ->
                         autoFaultController.createSessionProviderFactory(context)
                     gpuRuntimeProfile != null -> ({
-                        createAutoLiteRtSessionProvider(context, gpuRuntimeProfile)
+                        if (karaGpuRequalification) {
+                            createKaraGpuRequalificationSessionProvider(
+                                context,
+                                gpuRuntimeProfile,
+                            )
+                        } else {
+                            createAutoLiteRtSessionProvider(context, gpuRuntimeProfile)
+                        }
                     })
                     else -> null
                 },
@@ -7092,6 +7133,49 @@ class SourceSeparationPhase7WorkerDeviceTest {
         )
     }
 
+    private fun createKaraGpuRequalificationSessionProvider(
+        context: Context,
+        gpuRuntimeProfile: MdxLiteRtGpuRuntimeProfile,
+    ): MdxInferenceSessionProvider {
+        require(gpuRuntimeProfile == MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1)
+        val delegate = createAutoLiteRtSessionFactory(context, gpuRuntimeProfile)
+        val diagnosticFactory = object : MdxInferenceSessionFactory {
+            override val factoryId = "${delegate.factoryId}-kara-requalification"
+            override val backend = delegate.backend
+
+            override fun create(
+                artifact: MdxModelArtifact,
+                profile: MdxExecutionProfile,
+                runtimeSettings: MdxRuntimeSettings,
+            ): MdxInferenceSession {
+                require(artifact.sha256 == KARA_ARTIFACT_SHA256)
+                require(profile.profileId == KARA_CONTRACT_ID)
+                val matchingRecords = profile.runtimeCompatibility.filter { record ->
+                    record.abi == MdxRuntimeAbi.Arm64V8a &&
+                        record.backend == MdxInferenceBackend.LiteRtGpu &&
+                        record.profileId == gpuRuntimeProfile.qualificationProfileId &&
+                        record.precision == MdxRuntimePrecision.Fp32
+                }
+                require(matchingRecords.size == 1)
+                require(matchingRecords.single().status == MdxRuntimeSupportStatus.Rejected)
+                val diagnosticProfile = profile.copy(
+                    runtimeCompatibility = profile.runtimeCompatibility.map { record ->
+                        if (record == matchingRecords.single()) {
+                            record.copy(
+                                status = MdxRuntimeSupportStatus.Candidate,
+                                evidence = "AndroidTest-only KARA FP32 GPU requalification.",
+                            )
+                        } else {
+                            record
+                        }
+                    },
+                )
+                return delegate.create(artifact, diagnosticProfile, runtimeSettings)
+            }
+        }
+        return SingleUseMdxInferenceSessionProvider(diagnosticFactory)
+    }
+
     private fun registerSourceInMediaStore(context: Context, path: String, runId: String): Uri {
         val resolver = context.contentResolver
         val extension = File(path).extension
@@ -8225,6 +8309,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_CURRENT_SOURCE_PATH = "currentSourcePath"
         const val ARG_BACKEND_MODE = "backendMode"
         const val ARG_GPU_RUNTIME_PROFILE_ID = "gpuRuntimeProfileId"
+        const val ARG_KARA_GPU_REQUALIFICATION = "karaGpuRequalification"
         const val ARG_EXECUTION_HOST_MODE = "executionHostMode"
         const val ARG_SCREEN_OFF_AFTER_READY = "screenOffAfterReady"
         const val ARG_AUTO_FAILPOINT = "autoFailpoint"
@@ -8313,6 +8398,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val THERMAL_SAMPLE_INTERVAL_MS = 2_000L
         const val REQUIRED_READY_WINDOWS = 2
         const val TEST_BLEND = 0.23f
+        const val KARA_MODEL_ID = "uvr_mdxnet_kara"
+        const val KARA_CONTRACT_ID = "uvr_mdxnet_kara@2"
+        const val KARA_ARTIFACT_SHA256 =
+            "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64"
         const val TEST_KEY_PLAYBACK_ENABLED = "source_separation.playback_enabled"
         const val TEST_KEY_REMEMBER_PER_SONG = "source_separation.remember_per_song"
         const val TEST_KEY_GLOBAL_BLEND = "source_separation.global_blend"
