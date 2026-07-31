@@ -739,29 +739,36 @@ directly to Model Management.
 
 ### Phase 1: Integrate the downloadable CPU core in Booming SS
 
-- [ ] Introduce `RuntimeDeliveryProvider`, `ModelDeliveryProvider`, and
-  `ProductCapabilityPolicy` in release-channel-neutral modules, together with
-  deterministic test implementations.
-- [ ] Implement and wire only `GitHubRuntimeDeliveryProvider`,
+- [x] Introduce `RuntimeDeliveryProvider`, `ModelDeliveryProvider`, and
+  `ProductCapabilityPolicy` in release-channel-neutral modules. Deterministic
+  provider doubles remain a test-infrastructure follow-up because the current
+  production interfaces intentionally expose only the acquisition boundary.
+- [x] Implement and wire only `GitHubRuntimeDeliveryProvider`,
   `GitHubModelDeliveryProvider`, and `GitHubProductCapabilityPolicy`; prove the
   GitHub graph contains no Play Core, Dynamic Feature, AI Pack, or
   F-Droid-specific adapter dependency.
-- [ ] Replace the complete native AAR dependency with the verified classes-only
-  API AAR and prove the APK contains no `libLiteRt.so`.
-- [ ] Add a process-start runtime bootstrap that resolves one verified CPU
+- [x] Replace the complete native AAR dependency with the verified classes-only
+  API AAR and prove the APK contains no `libLiteRt.so` or
+  `libLiteRtClGlAccelerator.so`.
+- [x] Add a process-start runtime bootstrap that resolves one verified CPU
   component, calls `configureAbsolutePath`, then `load`, before any
   `Environment`, `CompiledModel`, or `TensorBuffer` reference.
-- [ ] Make runtime absence, invalid contract, wrong ABI, missing dependency,
+- [x] Make runtime absence, invalid contract, wrong ABI, missing dependency,
   load failure, and conflicting loader path typed failures outside playback.
-- [ ] Keep the loaded component immutable for one inference-process generation.
-- [ ] Test install, cold start, warm start, process death, main-process death,
-  corrupt file, wrong ABI, delete/reinstall, and version switching.
+- [x] Keep the loaded component immutable for one inference-process generation.
+- [ ] Complete the install, cold start, warm start, process death,
+  main-process death, corrupt file, wrong ABI, delete/reinstall, and version
+  switching matrix. Current coverage proves installation, cold/warm bootstrap,
+  source-separation process death/reconnect, and APK/runtime smoke on S10 and
+  S25; destructive replacement and main-process-death cases remain open.
 - [ ] Repeat API 26, API 29, and current API CPU loading across `arm64-v8a`,
   `armeabi-v7a`, `x86_64`, and pure `x86` where the emulator/device exists.
 
-**Phase 1 exit:** the real Booming SS inference process loads a verified CPU
-runtime only from the app-owned absolute path, and the base APK remains a fully
-functional music player without a native LiteRT payload.
+**Phase 1 status:** the real Booming SS inference process now loads a verified
+CPU runtime only from the app-owned absolute path, and the base APK remains a
+fully functional music player without a native LiteRT payload. The phase stays
+open until the lifecycle and ABI/API coverage above is complete; the current
+S10/S25 results are validation evidence, not a universal support claim.
 
 ### Phase 2: Build the runtime store and CPU management UI
 
