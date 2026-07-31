@@ -1,18 +1,16 @@
-# Third-party notices
+# LiteRT provenance and third-party notices
 
-The release binaries in this repository are unofficial supplemental Android
-x86 builds of Google LiteRT. They are built from LiteRT `2.1.5`, commit
-`9d26e89d88ef8785b6a1e54ec41ac8add215a125`.
+The APK uses the classes-only LiteRT API AAR from the fixed
+`downloadable-runtime-v2.1.5-bss.2-exp.2` GitHub Release. It contains no
+LiteRT native library. CPU and accelerator components are delivered separately
+and must be verified before the source-separation process loads them.
 
-LiteRT is licensed under the Apache License 2.0. The build statically links
-components fetched by LiteRT's Bazel dependency graph, including TensorFlow
-Lite and XNNPACK. Each Release includes:
+The API artifact is built from LiteRT `2.1.5` commit
+`9d26e89d88ef8785b6a1e54ec41ac8add215a125`. The exact API source lock,
+release contract, patch series, and output hashes are recorded in the
+`bss-litert-android` repository and in `build-manifest.json` beside this file.
 
-- `LICENSE-LiteRT.txt`, copied from the pinned LiteRT source tree.
-- `THIRD_PARTY_LICENSES.txt`, generated from license and notice files in the
-  resolved Bazel external repositories.
-- `build-manifest.json`, recording the source and toolchain versions.
-
-Model weights are not part of this repository or its releases. This project is
-not affiliated with or endorsed by Google, the LiteRT project, UVR, or the
-authors of any source-separation model.
+`LICENSE-LiteRT.txt` contains the LiteRT Apache License 2.0 text.
+`THIRD_PARTY_LICENSES.txt` contains the third-party notices collected for the
+same pinned LiteRT build. Model weights are not part of the APK or these
+provenance assets.

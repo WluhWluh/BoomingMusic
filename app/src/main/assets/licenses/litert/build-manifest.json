@@ -1,43 +1,53 @@
 {
-  "artifactVersion": "2.1.5-bss.1",
-  "build": {
-    "abi": "x86",
-    "buildInclude": "cpu_only",
-    "disabledXnnpackMicrokernels": [
-      "avxvnni",
-      "avxvnniint8",
-      "avx512fp16",
-      "avx512amx"
-    ],
-    "target": "//litert/kotlin:LiteRt"
+  "schemaVersion": 1,
+  "artifactKind": "classes-only-api-aar",
+  "release": {
+    "version": "2.1.5-bss.2-exp.2",
+    "tag": "downloadable-runtime-v2.1.5-bss.2-exp.2",
+    "repository": "https://github.com/WluhWluh/bss-litert-android",
+    "contractFile": "downloadable-runtime-contract.json",
+    "contractSha256": "8ef393d5aa72ac03b77dc116531f6923bc826f2413e90f88eaf56128607c863a"
   },
-  "expectedDynamicDependencies": [
-    "libandroid.so",
-    "libc.so",
-    "libdl.so",
-    "liblog.so",
-    "libm.so"
-  ],
   "litert": {
+    "repository": "https://github.com/google-ai-edge/LiteRT.git",
     "commit": "9d26e89d88ef8785b6a1e54ec41ac8add215a125",
-    "repository": "https://github.com/google-ai-edge/LiteRT",
     "version": "2.1.5"
   },
-  "outputs": {
-    "libLiteRt-2.1.5-bss.1-android-x86.so": {
-      "bytes": 7482132,
-      "sha256": "02b6556ec235926c11eb0c067eb16e459adcddb1568a42eefe0c40f4cc4b59af"
-    },
-    "litert-2.1.5-bss.1-android-x86.aar": {
-      "bytes": 2972957,
-      "sha256": "eefa25926c72c85cd506d5591869c1a72b1de1a7a091ab9ccbfb5cb102146f47"
-    }
+  "apiAar": {
+    "fileName": "litert-api-2.1.5-bss.2-downloadable-loader.aar",
+    "byteSize": 86013,
+    "sha256": "a68b51546f268b6db0b64bec3d1d95389ba44a48c59beaa1769794682c94b4f9",
+    "sourceLockFile": "downloadable-api-source-lock.json",
+    "sourceLockSha256": "f9a08269daa63e11525c94d30a581e1d09f54a0c35a83180c7765e3f73867fca",
+    "baseAarByteSize": 83190,
+    "baseAarSha256": "93728bd6560938bab098e2f362817c3b4469ad710a39a77e8018407dc4e9fa88",
+    "nativePayloadEntries": false
   },
-  "schemaVersion": 1,
+  "explicitLoader": {
+    "className": "com.google.ai.edge.litert.LiteRtNativeLibraryLoader",
+    "configureMethod": "configureAbsolutePath(java.lang.String)",
+    "loadMethod": "load()",
+    "routedClasses": [
+      "com.google.ai.edge.litert.Environment",
+      "com.google.ai.edge.litert.CompiledModel",
+      "com.google.ai.edge.litert.TensorBuffer"
+    ]
+  },
+  "nativePayload": {
+    "delivery": "downloaded-separately",
+    "releaseContract": "bss-litert-downloadable-runtime-v2",
+    "cpuComponents": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "x86_64",
+      "x86"
+    ],
+    "gpuComponents": ["arm64-v8a"]
+  },
   "toolchain": {
-    "androidApiLevel": 23,
-    "androidNdk": "25.1.8937393",
     "bazel": "7.7.0",
-    "rulesAndroidNdk": "0.1.3"
+    "androidApiLevel": 35,
+    "androidBuildToolsVersion": "35.0.0",
+    "hermeticPythonVersion": "3.11"
   }
 }
