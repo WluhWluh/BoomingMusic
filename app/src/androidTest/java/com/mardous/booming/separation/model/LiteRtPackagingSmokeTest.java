@@ -2,6 +2,7 @@ package com.mardous.booming.separation.model;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -13,25 +14,55 @@ import com.google.ai.edge.litert.Accelerator;
 import com.google.ai.edge.litert.CompiledModel;
 import com.google.ai.edge.litert.Environment;
 import com.google.ai.edge.litert.TensorBuffer;
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap;
+import dalvik.system.BaseDexClassLoader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.zip.ZipFile;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 @RunWith(AndroidJUnit4.class)
 public final class LiteRtPackagingSmokeTest {
     @Test
-    public void appPackagedCpuRuntimeRunsSmallModel() throws Exception {
+    public void appDoesNotPackageLiteRtNativePayload() throws Exception {
+        Context targetContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        List<String> apkPaths = new java.util.ArrayList<>();
+        apkPaths.add(targetContext.getApplicationInfo().sourceDir);
+        if (targetContext.getApplicationInfo().splitSourceDirs != null) {
+            apkPaths.addAll(Arrays.asList(targetContext.getApplicationInfo().splitSourceDirs));
+        }
+        for (String path : apkPaths) {
+            try (ZipFile apk = new ZipFile(path)) {
+                apk.stream()
+                        .map(entry -> entry.getName())
+                        .filter(name -> name.matches("lib/[^/]+/libLiteRt(?:ClGlAccelerator)?\\.so"))
+                        .findAny()
+                        .ifPresent(name -> {
+                            throw new AssertionError("APK contains LiteRT native payload: " + name);
+                        });
+            }
+        }
+        assertNull(((BaseDexClassLoader) targetContext.getClassLoader()).findLibrary("LiteRt"));
+        assertNull(
+                ((BaseDexClassLoader) targetContext.getClassLoader())
+                        .findLibrary("LiteRtClGlAccelerator")
+        );
+    }
+
+    @Test
+    public void installedCpuRuntimeRunsSmallModel() throws Exception {
         if ("x86".equals(Build.SUPPORTED_ABIS[0])) {
             assertFalse("The pure x86 process must be 32-bit", Process.is64Bit());
         }
 
         Context testContext = InstrumentationRegistry.getInstrumentation().getContext();
         Context targetContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        SourceSeparationRuntimeBootstrap.INSTANCE.ensureLoaded(targetContext);
         File modelFile = new File(targetContext.getCacheDir(), "simple_add_dynamic_shape.tflite");
         try (InputStream input = testContext.getAssets().open(modelFile.getName());
                 FileOutputStream output = new FileOutputStream(modelFile)) {

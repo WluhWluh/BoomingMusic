@@ -11,7 +11,6 @@ import dalvik.system.BaseDexClassLoader
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeFalse
 import org.junit.Assume.assumeTrue
@@ -21,7 +20,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class MdxLiteRtBoundedGpuCapabilityDeviceTest {
     @Test
-    fun arm64PackageExposesExactBoundedGpuCapability() {
+    fun arm64WithoutGpuComponentReportsUnavailableCapability() {
         val platform = AndroidMdxRuntimePlatformProvider.current()
         assumeTrue(platform.runtimeAbi == MdxRuntimeAbi.Arm64V8a)
 
@@ -31,15 +30,13 @@ class MdxLiteRtBoundedGpuCapabilityDeviceTest {
         val acceleratorPath = (context.classLoader as BaseDexClassLoader)
             .findLibrary(GPU_ACCELERATOR_LIBRARY)
 
-        assertTrue(decision.detail, decision.isExact)
-        assertEquals(MdxLiteRtBoundedGpuContract.ARTIFACT_VERSION, capability.artifactVersion)
-        assertEquals(MdxLiteRtBoundedGpuContract.PROFILE_ID, capability.profileId)
-        assertEquals(MdxLiteRtBoundedGpuContract.KERNEL_BATCH_SIZE, capability.kernelBatchSize)
-        assertEquals(
-            MdxLiteRtBoundedGpuContract.COMMAND_QUEUE_WINDOW_SIZE,
-            capability.commandQueueWindowSize,
-        )
-        assertNotNull(acceleratorPath)
+        assertFalse(decision.detail, decision.isExact)
+        assertFalse(capability.available)
+        assertEquals("uninstalled", capability.artifactVersion)
+        assertEquals("uninstalled", capability.profileId)
+        assertEquals(0, capability.kernelBatchSize)
+        assertEquals(0, capability.commandQueueWindowSize)
+        assertTrue(acceleratorPath == null)
     }
 
     @Test

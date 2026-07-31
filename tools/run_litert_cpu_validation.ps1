@@ -35,7 +35,9 @@ param(
     [switch]$AllowUnsupportedResourceProbe,
     [switch]$PreflightOnly,
     [switch]$SkipBuild,
-    [switch]$SkipInstall
+    [switch]$SkipInstall,
+    [switch]$SkipRuntimeInstall,
+    [string]$RuntimeReleaseTag = "downloadable-runtime-v2.1.5-bss.2-exp.2"
 )
 
 $ErrorActionPreference = "Stop"
@@ -225,6 +227,16 @@ try {
     } else {
         Invoke-Adb install -r -t $appApk.FullName
         Invoke-Adb install -r -t $testApk.FullName
+    }
+    if (-not $SkipRuntimeInstall) {
+        & (Join-Path $PSScriptRoot "install_litert_cpu_runtime.ps1") `
+            -Serial $Serial `
+            -Package $package `
+            -ProcessAbi $ProcessAbi `
+            -ReleaseTag $RuntimeReleaseTag
+        if ($LASTEXITCODE -ne 0) {
+            throw "LiteRT CPU runtime provisioning failed."
+        }
     }
     Invoke-Adb shell am force-stop $package
     if (-not $PreflightOnly) {

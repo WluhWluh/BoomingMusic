@@ -14,6 +14,7 @@ import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetS
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -25,7 +26,6 @@ import org.koin.java.KoinJavaComponent.get
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
 import java.security.MessageDigest
-import java.util.zip.ZipFile
 
 /** Freezes the device-side identity portion of a Phase 7 evidence row. */
 @RunWith(AndroidJUnit4::class)
@@ -288,13 +288,9 @@ class SourceSeparationPhase7DeviceTest {
     }
 
     private fun runtimeAbiFromNativeDirectory(context: android.content.Context): MdxRuntimeAbi {
-        val directory = context.applicationInfo.nativeLibraryDir.lowercase()
-        return when {
-            "arm64" in directory -> MdxRuntimeAbi.Arm64V8a
-            "armeabi" in directory || "arm" in directory -> MdxRuntimeAbi.ArmeabiV7a
-            "x86_64" in directory -> MdxRuntimeAbi.X86_64
-            "x86" in directory -> MdxRuntimeAbi.X86
-            else -> error("Could not infer process ABI from native library directory: $directory")
+        val abi = SourceSeparationRuntimeBootstrap.ensureLoaded(context).manifest.abi
+        return requireNotNull(MdxRuntimeAbi.entries.singleOrNull { it.androidName == abi }) {
+            "The downloaded LiteRT runtime has an unsupported ABI: $abi."
         }
     }
 
@@ -302,37 +298,14 @@ class SourceSeparationPhase7DeviceTest {
         context: android.content.Context,
         abi: MdxRuntimeAbi,
     ): NativeLibraryEvidence {
-        val extracted = File(context.applicationInfo.nativeLibraryDir, LITERT_LIBRARY)
-        if (extracted.isFile) {
-            return NativeLibraryEvidence(
-                path = extracted.absolutePath,
-                bytes = extracted.length(),
-                sha256 = extracted.sha256(),
-            )
-        }
-        val entryName = "lib/${abi.androidName}/$LITERT_LIBRARY"
-        ZipFile(context.applicationInfo.sourceDir).use { apk ->
-            val entry = requireNotNull(apk.getEntry(entryName)) {
-                "LiteRT native library entry is missing: $entryName"
-            }
-            val digest = MessageDigest.getInstance("SHA-256")
-            apk.getInputStream(entry).use { input ->
-                val buffer = ByteArray(DEFAULT_COPY_BUFFER_SIZE)
-                var total = 0L
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    if (read == 0) continue
-                    digest.update(buffer, 0, read)
-                    total += read
-                }
-                return NativeLibraryEvidence(
-                    path = "${context.applicationInfo.sourceDir}!/$entryName",
-                    bytes = total,
-                    sha256 = digest.digest().toHexString(),
-                )
-            }
-        }
+        val installation = SourceSeparationRuntimeBootstrap.ensureLoaded(context)
+        assertEquals(abi.androidName, installation.manifest.abi)
+        val runtime = installation.libraryFile
+        return NativeLibraryEvidence(
+            path = runtime.absolutePath,
+            bytes = runtime.length(),
+            sha256 = runtime.sha256(),
+        )
     }
 
     private fun writeReport(
@@ -418,8 +391,6 @@ class SourceSeparationPhase7DeviceTest {
         const val ARG_CPU_THREADS = "cpuThreads"
         const val ARG_CLEAN_INSTALL = "cleanInstallScenario"
         const val CATALOG_ASSET = "source-separation/model-catalog-v2.json"
-        const val LITERT_LIBRARY = "libLiteRt.so"
-        const val DEFAULT_COPY_BUFFER_SIZE = 64 * 1024
         const val REPORT_DIRECTORY = "phase7-validation-reports"
         const val ZERO_SHA256 = "0000000000000000000000000000000000000000000000000000000000000000"
         val SAFE_NAME = Regex("^[A-Za-z0-9._-]{1,120}$")

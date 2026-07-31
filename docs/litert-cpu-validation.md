@@ -1,6 +1,8 @@
 # LiteRT internal validation
 
-Phase 2 validates LiteRT CPU inference and Phase 3 extends the same
+The downloadable-runtime experiment validates LiteRT CPU inference from an
+app-owned runtime. Phase 2 of the older process roadmap validated the original
+packaged runtime; Phase 3 extends the same
 AndroidTest-only runner with versioned GPU profiles and one-way Auto fallback.
 The runner is not reachable from release UI, model acquisition, workers,
 playback, settings, or production source-separation caches.
@@ -13,15 +15,26 @@ references from the matching original ONNX hashes with
 [`generate_ort_tensor_reference.py`](https://github.com/WluhWluh/MusicSourceSeparation/blob/main/tools/generate_ort_tensor_reference.py).
 Do not add UVR weights or full tensor fixtures to this repository.
 
-The runner verifies the bundled contract, model filename, byte size and
-SHA-256 before creating LiteRT. It also verifies host-provided hashes for the
-input and ORT reference. Host-staged files are read only from the app-private
+The runner verifies the downloaded CPU component manifest, ABI, library size
+and SHA-256 before creating LiteRT. It also verifies the model contract,
+filename, byte size and SHA-256, plus host-provided hashes for the input and
+ORT reference. Host-staged files are read only from the app-private
 `files/litert-validation-staging/<run-id>/` directory. The host first pushes
 each file to a temporary shell-owned directory and then copies it with
 `run-as`, so Android 37 and earlier releases expose the same app-owned files
 to instrumentation. Staged inputs are removed after each run. Reports are
 written below the internal cache root at
 `cache/litert-validation/<run-id>/report.json`.
+
+The validation script automatically downloads the pinned ABI-specific CPU ZIP
+from the experimental
+[`bss-litert-android`](https://github.com/WluhWluh/bss-litert-android/releases/tag/downloadable-runtime-v2.1.5-bss.2-exp.2)
+Release, checks its ZIP and manifest hashes, and installs `libLiteRt.so` and
+`manifest.json` under
+`no_backup/source-separation/runtimes/cpu/<abi>/current/`. Use
+`-SkipRuntimeInstall` only when that exact app-private component has already
+been provisioned by another test harness. This is test provisioning; it does
+not represent the production Runtime Management implementation.
 
 ## Run a CPU case
 

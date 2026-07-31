@@ -26,6 +26,7 @@ import com.mardous.booming.separation.model.contract.SourceSeparationModelContra
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractValidator
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
 import dalvik.system.BaseDexClassLoader
 import org.json.JSONArray
 import org.json.JSONObject
@@ -870,8 +871,9 @@ class MdxLiteRtCpuValidationTest {
                 it.contains("libLiteRtClGlAccelerator", ignoreCase = true)
             } + apkBackedAcceleratorMaps
             ).distinct()
-        val extractedRuntime = File(applicationInfo.nativeLibraryDir, "libLiteRt.so")
-            .takeIf(File::isFile)
+        val downloadedRuntime = runCatching {
+            SourceSeparationRuntimeBootstrap.ensureLoaded(context).libraryFile
+        }.getOrNull()
         val classLoaderRuntime = (context.classLoader as? BaseDexClassLoader)
             ?.findLibrary("LiteRt")
         val classLoaderAccelerator = (context.classLoader as? BaseDexClassLoader)
@@ -884,8 +886,8 @@ class MdxLiteRtCpuValidationTest {
             .put("selectedLiteRtRuntimeAbi", runtimeAbi)
             .put("nativeLibraryDir", applicationInfo.nativeLibraryDir)
             .put(
-                "extractedRuntime",
-                extractedRuntime?.let { runtime ->
+                "downloadedRuntime",
+                downloadedRuntime?.let { runtime ->
                     JSONObject()
                         .put("path", runtime.absolutePath)
                         .put("byteSize", runtime.length())
@@ -1039,23 +1041,10 @@ class MdxLiteRtCpuValidationTest {
     )
 
     private fun installedLiteRtRuntimeAbi(context: Context): MdxRuntimeAbi {
-        val applicationInfo = context.applicationInfo
-        val apkPaths = listOfNotNull(applicationInfo.sourceDir) +
-            applicationInfo.splitSourceDirs.orEmpty()
-        val runtimeAbis = apkPaths.flatMap { path ->
-            ZipFile(path).use { archive ->
-                archive.entries().asSequence()
-                    .map { it.name }
-                    .filter { it.matches(Regex("^lib/[^/]+/libLiteRt\\.so$")) }
-                    .map { entry -> entry.substringAfter("lib/").substringBefore('/') }
-                    .mapNotNull { name -> MdxRuntimeAbi.entries.singleOrNull { it.androidName == name } }
-                    .toList()
-            }
-        }.toSet()
-        require(runtimeAbis.size == 1) {
-            "Validation requires one app-packaged LiteRT ABI, got $runtimeAbis."
+        val abi = SourceSeparationRuntimeBootstrap.ensureLoaded(context).manifest.abi
+        return requireNotNull(MdxRuntimeAbi.entries.singleOrNull { it.androidName == abi }) {
+            "The downloaded LiteRT runtime has an unsupported ABI: $abi."
         }
-        return runtimeAbis.single()
     }
 
     private fun memorySnapshot(): JSONObject {
