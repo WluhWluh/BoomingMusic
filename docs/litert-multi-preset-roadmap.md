@@ -1,8 +1,9 @@
 # LiteRT and Multi-Preset Roadmap
 
-Status: active plan for `feature/litert-multi-model-presets`
+Status: active product plan. Implementation continues on
+`experiment/litert-inference-process` and its successor branches.
 
-Updated: 2026-07-24
+Updated: 2026-07-31
 
 Current milestone: the Phase 6 production cutover is implemented and accepted
 on the development branch. Phase 7 is the next stage: full-song playback,
@@ -2433,10 +2434,15 @@ exists.
   representative listening checks on the ABIs for which it may be selectable.
   Objective arm64, arm32, and diagnostic x86_64 rows now pass and are recorded
   in `kara-results-2026-07-24.md`; representative listening and gesture-level
-  UI review remain open. Its rejected GPU profiles remain rejected. It can
-  become a warned CPU-only experimental model only after that human review and
-  the exact decision-build rerun; otherwise keep it download-only or restrict
-  activation to the qualified ABI set.
+  UI review remain open. The later
+  `kara-gpu-requalification-2026-07-30.md` diagnostic found bounded FP32 GPU
+  output numerically and structurally correct on S10 and S25, but the S10 GPU
+  path was materially slower than CPU. This removes the earlier FP32 numerical
+  rejection without admitting GPU to the product catalog: KARA remains a
+  CPU-only experimental candidate, and FP16 remains rejected. It can become a
+  warned CPU-only experimental model only after the human review and exact
+  decision-build rerun; otherwise keep it download-only or restrict activation
+  to the qualified ABI set.
 - [x] Keep HQ4 download-only for the current artifact. Use compatibility and
   preflight tests to confirm rejection without model allocation, including the
   expanded x86 AVD; do not repeat the known-disqualified full-song allocation
