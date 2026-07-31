@@ -1,6 +1,11 @@
 # LiteRT Inference Process and Background Execution Roadmap
 
-Status: Phase 7A authority transfer and the Phase 7B zero-automatic-retry
+Status: frozen historical process and background-execution plan. No new
+product, runtime-acquisition, resource-management, or backend-settings work is
+planned in this document.
+
+Last recorded implementation state: Phase 7A authority transfer and the Phase
+7B zero-automatic-retry
 remote-death policy are implemented; observer and product reattachment,
 explicit retry after inference-process death, active-run Pause/Cancel cleanup,
 recents policy, playback-owned shutdown, and force-stop non-resurrection are
@@ -17,16 +22,15 @@ after real S10 main-process recreation, CPU and bounded GPU runs retain their
 processing notification, expose a playable partial-cache window, and
 reconstruct the exact active entry for cache-management state
 
-Updated: 2026-07-29
+Updated: 2026-07-31
 
-Current milestone: cover the remaining highest-value Phase 7B explicit-retry
-and Phase 7D main- and inference-process boundaries, S10 and visible-UI
-invalidation checks, and playback/cache-management recreation checks without
-changing source decoding.
-Remaining Phase 5F and Phase 6D full-song, fallback, UI, current-API, and
-long-running platform matrices are
-release-qualification work and may remain open while product implementation
-continues.
+The unchecked tasks below are retained as the evidence gaps and release gates
+that existed when this experiment was frozen. They are not an active product
+backlog and will not be extended here. Runtime downloading, Quick Setup,
+Runtime Management, GPU/NPU preference ownership, AOT, and QNN JIT are governed
+by the
+[Downloadable Runtime, Quick Setup, and Local Resource Management Roadmap](litert-runtime-setup-roadmap.md).
+Completed validation artifacts and their legacy field names remain immutable.
 
 This roadmap governs two related but separate experiments:
 
@@ -40,16 +44,15 @@ reclamation, and the unsafe pure-x86 session lifecycle. The second changes
 Android service, wake-lock, notification, and process-death behavior. Passing
 the first experiment does not authorize the second.
 
-This is a companion to the
+This is a historical companion to the
 [LiteRT and Multi-Preset Roadmap](litert-multi-preset-roadmap.md). The main
-roadmap remains authoritative for model contracts, runtime compatibility,
-cache identity, playback, model management, and release qualification. This
-document is authoritative for process placement and background execution. Its
-post-Phase-3 fixed bounded-GPU and `tryGpu` decisions supersede the main
-roadmap's earlier generic `Auto` and device-eligibility wording until Phase 9
-synchronizes both documents.
+roadmap remains authoritative for model contracts, cache identity, playback,
+model management, and model release qualification. This document records the
+process-placement and background-execution experiment. The dedicated runtime
+setup roadmap now supersedes every user-facing `tryGpu`, packaged-runtime,
+runtime-acquisition, and backend-management decision in this document.
 
-## Current Release and GPU Runtime Decision
+## Frozen Release and GPU Runtime Baseline
 
 The near-term product is distributed through GitHub only. F-Droid acceptance,
 Maven Central publication, and a fully source-rebuilt ML Drift GPU accelerator
@@ -63,21 +66,26 @@ part of a versioned GPU runtime profile, not a user preference or an adaptive
 hint. The stock unbounded `N=0` runtime remains a diagnostic and rollback
 oracle only. It is not an automatic runtime fallback.
 
-Every device that can run the admitted model through the packaged bounded GPU
-runtime should attempt GPU by default. The source-separation panel therefore
-exposes one persistent switch under Advanced settings: `尝试使用 GPU` (`Try to
-use GPU`). It defaults to enabled. Enabled means that each newly admitted run
-attempts `gpu-opencl-bounded-fp32-v1` when runtime and model eligibility pass;
-a recoverable setup, probe, invocation, or output failure may fall back once to
-CPU only after GPU cleanup is confirmed. Uncertain cleanup, native death, or
-unsafe memory pressure poisons the process generation and must recycle or end
-without allocating CPU beside it. Disabled means CPU-only execution and no GPU
-environment, accelerator, probe, or session allocation attempt.
+The completed process experiments used one persistent `tryGpu` Boolean, exposed
+at that time under Advanced settings, to compare CPU-only and bounded-GPU
+admission. That location and field name are historical test interfaces, not
+the current product contract. Runtime Management now owns persistent
+`gpuEnabled` and `npuEnabled` intent, and Quick Setup owns recommended defaults.
+Each newly admitted run still freezes one versioned backend-policy snapshot.
 
-The switch is frozen when a run is admitted. Changing it affects later runs
-only. Foreground, background, Activity visibility, and screen state never
-change the frozen choice or cause a GPU/CPU session transition. GPU capability
-is determined at runtime from the packaged bounded capability, ABI and model
+For the completed GPU evidence, enabled meant that the run attempted
+`gpu-opencl-bounded-fp32-v1` when runtime and model eligibility passed. A
+recoverable setup, probe, invocation, or output failure could fall back once to
+CPU only after GPU cleanup was confirmed. Uncertain cleanup, native death, or
+unsafe memory pressure poisoned the process generation and required recycle or
+termination without allocating CPU beside it. Disabled meant CPU-only
+execution and no GPU environment, accelerator, probe, or session allocation.
+
+The admitted policy is frozen for each run. Changing persistent intent affects
+later runs only. Foreground, background, Activity visibility, and screen state
+never change the frozen choice or cause a GPU/CPU session transition. The
+historical experiment resolved capability from the packaged bounded artifact;
+the product resolves it from the verified installed component, ABI and model
 profile eligibility, accelerator discovery, successful setup/probe, and valid
 output. It is not determined by an OEM, device-model, or GPU-driver allowlist.
 
@@ -161,10 +169,14 @@ be folded into any phase in this document.
 
 - Exact model artifact SHA-256, contract revision, execution profile, backend
   profile, and runtime settings are frozen when a run is admitted.
-- The admitted request freezes the persistent `tryGpu` value. A value of
-  `false` selects CPU before any GPU allocation attempt. A value of `true`
-  selects the bounded GPU attempt whenever the ABI, model profile, packaged
-  capability, and runtime accelerator checks permit it.
+- The admitted request freezes a versioned backend-policy snapshot. Completed
+  protocol versions represented GPU intent as `tryGpu`; the product contract
+  represents optional backend intent through `gpuEnabled` and `npuEnabled` in
+  Runtime Management.
+- A GPU-disabled admitted policy selects CPU before any GPU allocation attempt.
+  A GPU-enabled policy selects the bounded GPU attempt whenever its higher
+  priority eligible NPU path has not been selected and the ABI, model profile,
+  installed capability, and runtime accelerator checks permit it.
 - A bounded GPU run additionally freezes the custom LiteRT artifact identity,
   bounded-queue capability version, forced OpenCL FP32 profile, and queue
   window `N=1`. A process that cannot attest to that exact capability must not
@@ -175,9 +187,9 @@ be folded into any phase in this document.
   must never fall back to stock `N=0` GPU in the same release.
 - Cancellation is not a fallback.
 - A model switch affects only work admitted afterward.
-- A `tryGpu` setting change affects only work admitted afterward. App
-  foreground/background transitions and screen state never rewrite it or
-  trigger backend recreation.
+- A persistent backend-policy change affects only work admitted afterward. App
+  foreground/background transitions and screen state never rewrite the
+  admitted snapshot or trigger backend recreation.
 - Unknown or unsupported ABI/model/backend combinations continue to fail
   before native allocation.
 - HQ4 retains its current compatibility and resource gates.
@@ -188,26 +200,26 @@ pinned x86 9662 and KARA artifacts. Every such report must retain the original
 Normal debug, CI, and release graphs must continue to reject those records
 before native allocation until a later explicit compatibility decision.
 
-### GPU preference and capability policy
+### Legacy GPU preference and capability evidence
 
-- `尝试使用 GPU` is a stable Booming SS setting in the source-separation
-  panel's Advanced section, not a debug backend selector.
-- A clean install and a missing preference key resolve to enabled. Both enabled
-  and disabled values survive process and app restarts.
-- The setting belongs to the source-separation backup allowlist. It is restored
-  only when that category is selected and the versioned payload contains the
-  key. An upstream Booming Music backup or older payload without the key leaves
-  the destination value unchanged; on a clean install that remains enabled.
-- Enabling the setting never promises that GPU will produce the accepted
-  output. It requests one bounded attempt for every newly admitted,
-  GPU-eligible model run. Typed ineligibility or failure uses the known-good
-  CPU path when fallback is safe.
-- Disabling the setting is strict CPU-only policy: no GPU accelerator
-  discovery, model compilation, deterministic probe, command submission, or
-  graphics allocation may occur for the admitted run.
-- A run records the requested setting, eligibility result, concrete backend,
-  and fallback reason. Runtime failure must not silently mutate the persistent
-  setting or create a per-device blacklist.
+- Completed phases used `tryGpu` as the stable Boolean test input. Existing
+  journals, Binder payloads, fixtures, and validation reports retain that name.
+- `tryGpu` and its former Advanced-section location are not the product UI or
+  persistence contract. Runtime Management owns the canonical `gpuEnabled` and
+  `npuEnabled` settings defined by the dedicated runtime setup roadmap.
+- Recommended setup enables a release-qualified selected GPU component. Both
+  enabled and disabled user intent survive process and app restarts and belong
+  to the versioned source-separation backup allowlist.
+- Enabling GPU never promises that it will produce the accepted output. It
+  requests one bounded attempt for each newly admitted eligible run after any
+  higher-priority exact NPU path is resolved. Typed ineligibility or failure
+  uses the known-good CPU path when fallback is safe.
+- Disabling GPU is strict for the admitted run: no GPU accelerator discovery,
+  model compilation, deterministic probe, command submission, or graphics
+  allocation may occur.
+- A run records requested intent, eligibility, concrete backend, runtime
+  identity, and fallback reason. Runtime failure must not silently mutate the
+  persistent settings or create a per-device blacklist.
 - `N`, OpenCL/OpenGL choice, CPU thread count, process placement, GPU-only mode,
   and fallback internals remain unavailable as user settings.
 
@@ -1702,8 +1714,9 @@ independent host:
 - thermal throttling;
 - sustained foreground interaction while an admitted bounded-GPU run executes
   in each candidate host;
-- foreground/background/screen transitions and a live `tryGpu` toggle while
-  both a GPU-admitted run and a CPU-only admitted run are active;
+- foreground/background/screen transitions and a live Runtime Management
+  backend-preference change while both a GPU-admitted run and a CPU-only
+  admitted run are active;
 - model switch and x86 process recycle; and
 - media-processing foreground-service timeout.
 
@@ -1741,10 +1754,10 @@ prefetch may outlive playback.
   duration, longest wait, app FrameTimeline distribution, GPU-completion fence
   overlap, and proof of the pinned custom accelerator. Use stock `N=0` only as
   an internal paired oracle.
-- [ ] Record the persisted and admitted `tryGpu` values, each dynamic
-  eligibility stage, actual backend, fallback latch/reason, and app/screen-state
-  transitions. Prove no transition changes backend and no runtime failure
-  rewrites the preference.
+- [ ] Record persisted GPU/NPU intent, the admitted backend-policy snapshot,
+  each dynamic eligibility stage, actual backend, fallback latch/reason, and
+  app/screen-state transitions. Prove no transition changes the admitted
+  backend and no runtime failure rewrites user intent.
 - [ ] Compare main, remote, instrumentation, and summed memory plus
   graphics/native allocation, total available system memory, LMKD events,
   `oom_score_adj`, and memory returned after process exit.
@@ -1816,6 +1829,11 @@ limitations rather than selecting devices through a static list.
 
 ### Phase 9B: Production cleanup
 
+User-facing runtime delivery, Quick Setup, Runtime Management, and backend
+preferences were transferred to the dedicated runtime setup roadmap when this
+document was frozen. This historical phase retains only process/background
+cleanup concerns.
+
 - [ ] Remove duplicate worker, foreground-service, wake-lock, and cache-lease
   ownership from the nonselected path.
 - [ ] Keep a test oracle for in-process correctness if production becomes
@@ -1823,38 +1841,34 @@ limitations rather than selecting devices through a static list.
 - [ ] Remove internal process-mode controls from release UI. User-visible
   labels may describe experimental support or resource rejection, but users do
   not select an unsafe host/session combination manually.
-- [ ] Keep `尝试使用 GPU` as the sole user-facing backend policy in the
-  source-separation panel's Advanced section. Verify that it remains distinct
-  from internal host/session controls and is included only in the versioned
-  source-separation settings backup category.
+- [ ] Keep internal host/session controls out of release UI. Verify that the
+  Runtime Management backend preferences remain distinct from process-host
+  policy and that an admitted run snapshots them rather than observing live UI
+  changes.
 - [ ] Update compatibility catalog evidence only after device reports are
   committed.
-- [ ] Update the main LiteRT roadmap, runtime documentation, release notes, and
-  user-visible unsupported-device messages.
-- [ ] Replace the diagnostic local-repository/binary-injection controls with
-  the pinned release-candidate dependency path. Keep explicit internal stock
-  and `N=0` oracles for tests, but ensure no production variant resolves them.
-- [ ] Verify ABI split APK and universal APK service/native-library inventory.
-- [ ] Pin the bounded LiteRT GitHub release tag, input/output AAR hashes,
-  accelerator and shim identities, transformation manifest, capability
-  version, and CI smoke in the application release record.
-- [ ] Pin the x86 LiteRT release URL/version, ELF identity, SHA-256, build
-  provenance, and CI smoke in the application release record whenever x86 is
-  not `Unsupported`.
+- [ ] Update process/background documentation, release notes, and user-visible
+  unsupported-process-policy messages without duplicating runtime setup UI.
+- [ ] Keep explicit internal stock and `N=0` oracles for tests, but ensure no
+  production admission path resolves them.
+- [ ] Verify ABI split APK and universal APK service inventory. Native runtime
+  delivery and inventory are release gates in the dedicated runtime setup
+  roadmap.
 
 ### Phase 9C: Release gate
 
-- [ ] Repeat clean-install model acquisition, selection, separation, playback,
-  cache management, backup/restore, and clear-cache recovery. Verify default-on
-  `tryGpu`, persistence of both values, selective-category restore, and older
-  or upstream backup behavior.
+- [ ] Repeat clean-install runtime/model acquisition, selection, separation,
+  playback, cache management, backup/restore, and clear-cache recovery through
+  the dedicated runtime setup contract. Verify persisted GPU/NPU intent,
+  selective-category restore, and older or upstream backup behavior.
 - [ ] Repeat full-song and every enabled run-class/background smoke on each
   production-enabled ABI/backend/model scope, including the minimum tested
   memory configuration for a resource-limited tier.
-- [ ] With `tryGpu=true`, repeat foreground UI interaction for every
-  GPU-eligible ABI/model test row and prove the release APK reports `N=1`; a
-  mismatched capability must take the CPU path and must never run stock GPU.
-  With `tryGpu=false`, prove there is no GPU allocation attempt.
+- [ ] With admitted GPU intent enabled, repeat foreground UI interaction for
+  every GPU-eligible ABI/model test row and prove the selected component reports
+  `N=1`; a mismatched capability must take the CPU path and must never run stock
+  GPU. With admitted GPU intent disabled, prove there is no GPU allocation
+  attempt.
 - [ ] Verify no service, binder callback, session, file lock, notification, or
   wake lock remains after completion or cancellation.
 - [ ] Record the final app commit, protocol version, process policy, model
@@ -1862,9 +1876,9 @@ limitations rather than selecting devices through a static list.
   `N=1`, x86 runtime artifact where applicable, support tier, and device/API
   evidence coverage.
 - [ ] Build and install the final GitHub split and universal APKs from a clean
-  runner using only pinned GitHub assets, verify their checksums, and repeat a
-  clean-device acquisition/separation smoke without a developer-local Maven
-  repository.
+  runner, verify their checksums and process/service inventory, and repeat a
+  clean-device acquisition/separation smoke using only runtime assets admitted
+  by the dedicated runtime setup roadmap.
 - [ ] Verify unsupported ABI/model combinations fail before native allocation,
   and runtime-ineligible GPU attempts take the typed CPU path without changing
   the persistent setting or loading stock GPU.
@@ -1939,7 +1953,7 @@ Every report should identify:
 | Source output changes during migration | frozen decode routes and Phase 7 fixture parity |
 | Debug host mode leaks into backup | internal-only setting excluded from backup |
 
-## Fixed Product Decisions
+## Frozen Process and GPU Execution Decisions
 
 Qualification may reject an artifact or delay release, but implementation must
 not replace these decisions with a device allowlist, visibility heuristic, or
@@ -1947,20 +1961,23 @@ stock GPU fallback:
 
 - Ship the near-term product through GitHub only; do not block this roadmap on
   F-Droid, Maven Central, or public ML Drift source availability.
-- Consume one immutable, checksum-pinned `bss-litert-android` GitHub artifact
-  produced by the audited deterministic transformation workflow.
+- Admit only immutable, checksum-pinned `bss-litert-android` component
+  identities produced by the audited workflow. Whether a component is packaged
+  or downloaded is governed by the dedicated runtime setup roadmap.
 - Use `gpu-opencl-bounded-fp32-v1` with `N=1` as the only production-candidate
   GPU profile. Keep stock `N=0` as an internal oracle only.
 - Keep `N=1` fixed across foreground, background, and screen-off execution.
   Do not add visibility-driven GPU session recreation.
-- Expose `尝试使用 GPU` in the source-separation panel's Advanced section,
-  default it to enabled, persist it, and include it in the versioned
-  source-separation backup allowlist.
-- Freeze `tryGpu` when a run is admitted. Enabled attempts bounded GPU on every
-  dynamically eligible device; disabled performs no GPU allocation attempt.
-- Determine eligibility at runtime from the packaged capability, ABI/model
-  profile, accelerator setup/probe, and valid output. Do not ship an OEM,
-  device-model, GPU-vendor, or driver allowlist.
+- Runtime Management owns persistent GPU/NPU user intent, and recommended Quick
+  Setup defaults qualified GPU components to enabled. The source-separation
+  Advanced section does not duplicate these controls.
+- Freeze the versioned backend-policy snapshot when a run is admitted. Enabled
+  GPU intent attempts bounded GPU when no higher-priority exact NPU path is
+  selected and dynamic eligibility passes; disabled GPU intent performs no GPU
+  allocation attempt.
+- Determine eligibility at runtime from the verified installed capability,
+  ABI/model profile, accelerator setup/probe, and valid output. Do not ship an
+  OEM, device-model, GPU-vendor, or driver allowlist for the generic GPU path.
 - If the bounded capability is absent or mismatched, select the known-good CPU
   path; never silently run unbounded GPU.
 
@@ -2001,12 +2018,12 @@ These process and lifecycle decisions remain subject to their phase gates:
   `Experimental` or `Supported`, given emulator-only device evidence.
 - Whether unknown imported models may be activated on x86 and, if so, what
   explicit unverified-resource flow contains their failure.
-- Whether `TryGpu` with `gpu-opencl-bounded-fp32-v1` remains stable in the
-  processing service on S10, S25, and available non-Samsung/Mali coverage after
-  final AAR integration.
+- Whether enabled GPU intent with `gpu-opencl-bounded-fp32-v1` remains stable in
+  the processing service on S10, S25, and available non-Samsung/Mali coverage
+  after final downloadable-component integration.
 - Which conservative memory floor and probe cadence best contain repeated
   driver failures without creating a persistent blacklist or changing the
-  default-on preference.
+  recommended default.
 - Whether repeated final-AAR S10 traces justify further bounded-runtime work or
   user-facing performance guidance. They must not create CPU-while-visible or
   foreground/background backend switching.
@@ -2045,9 +2062,10 @@ This roadmap is complete only when:
 8. the final support tier, release host policy, concrete host execution,
    session/background policy, model/resource scope, and evidence limitations
    are reflected in catalog and release documentation; and
-9. `尝试使用 GPU` defaults on, persists and restores correctly, and is frozen
-   per admitted run; every dynamically eligible device then uses the
-   checksum-pinned GitHub bounded runtime and attests `N=1`, while disabled or
+9. Runtime Management GPU intent persists and restores correctly, recommended
+   setup enables a qualified component, and the admitted backend-policy
+   snapshot remains frozen; every dynamically eligible GPU run then uses the
+   checksum-pinned bounded component and attests `N=1`, while disabled or
    ineligible runs allocate no GPU or route one-way to CPU rather than stock
    GPU; and
 10. no foreground, background, Activity-visibility, or screen-state transition

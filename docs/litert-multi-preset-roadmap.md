@@ -1,7 +1,8 @@
 # LiteRT and Multi-Preset Roadmap
 
-Status: active product plan. Implementation continues on
-`experiment/litert-inference-process` and its successor branches.
+Status: active model, cache, playback, and release-qualification plan.
+Downloadable runtime and setup work continues under its dedicated roadmap on
+successor branches.
 
 Updated: 2026-07-31
 
@@ -17,12 +18,15 @@ plan, but keeps the playback, cache, and UI behavior already implemented by
 Booming SS unless a phase below explicitly changes it.
 
 Inference process placement and independent Android background execution are
-governed by the separate
+recorded by the now-frozen
 [LiteRT Inference Process and Background Execution Roadmap](litert-inference-process-roadmap.md).
-That companion plan first isolates the runtime under the current background
-semantics, then evaluates an independently foregrounded inference service as a
-separate experiment. It does not authorize changes to the established
-window-decode or MP3 fallback policy.
+Runtime downloading, Quick Setup, Runtime Management, backend preferences,
+vendor NPU AOT, and QNN JIT are governed by the active
+[Downloadable Runtime, Quick Setup, and Local Resource Management Roadmap](litert-runtime-setup-roadmap.md).
+Neither companion authorizes changes to the established window-decode or MP3
+fallback policy. Completed packaged-runtime and `tryGpu` text later in this
+document is historical implementation evidence when it conflicts with the
+dedicated runtime setup contract.
 
 ## Direction
 
@@ -52,8 +56,12 @@ The LiteRT transition is intended to reduce installed native runtime size and
 improve arm64 phone performance, while preserving the existing two-stem
 playback, blend, cache, and background-processing behavior.
 
-The app will not provide a Play Store release path. GitHub and F-Droid remain
-the release targets currently maintained by this fork.
+The current product does not provide a Play Store or F-Droid release path. It
+ships through GitHub only. Runtime and model acquisition must still cross the
+`RuntimeDeliveryProvider`, `ModelDeliveryProvider`, and
+`ProductCapabilityPolicy` boundaries defined by the dedicated runtime setup
+roadmap. This preserves a later reduced-capability store variant without adding
+store dependencies or making store publication a gate for the GitHub product.
 
 ## Compatibility Boundary
 
@@ -129,10 +137,9 @@ profiles are rejected for numerical parity and are not official presets.
 
 - LiteRT 2.1.5 inference for MDX two-stem models.
 - CPU execution on supported Android devices.
-- Packaging and validation of pure-x86 CPU execution through the separately
-  built and audited supplemental LiteRT runtime. User-visible x86 support,
-  model/resource scope, and minimum tested memory remain gated by the
-  inference-process roadmap.
+- Distribution and validation of pure-x86 CPU execution through the separately
+  built and audited downloadable LiteRT runtime. User-visible x86 support,
+  model/resource scope, and minimum tested memory remain evidence-gated.
 - GPU execution when the LiteRT GPU backend initializes and runs successfully.
 - Automatic GPU-to-CPU fallback for a single separation session.
 - Multiple official TFLite presets installed side by side.
@@ -140,11 +147,13 @@ profiles are rejected for numerical parity and are not official presets.
 - A broad candidate catalog with recommended, experimental, and download-only
   entries whose compatibility state is explicit.
 - Independent download, activation, and manual deletion operations.
+- Release-channel-neutral runtime/model delivery interfaces and an immutable
+  product capability policy, with GitHub implementations only in this stage.
 - User-imported TFLite files with structural validation and visible hash data.
 - Versioned preset metadata that describes DSP and stem semantics.
 - Model-aware cache identity without an old-version cache compatibility path.
 - Removal of ONNX Runtime, ONNX model download, and ONNX import paths.
-- GitHub/F-Droid builds only.
+- GitHub builds only for the near-term product.
 
 ### Out of scope
 
@@ -154,7 +163,10 @@ profiles are rejected for numerical parity and are not official presets.
 - Treating a hash mismatch as proof that a user file is unusable.
 - Reintroducing `tensorflow-lite:2.16.1` as an x86 fallback.
 - Building LiteRT from source in every ordinary Booming SS CI or release job.
-- Play Store or AAB publishing.
+- Play Store, F-Droid, or AAB publishing in the current product stage.
+- Implementing store delivery adapters before a separate reduced-capability
+  store roadmap is accepted.
+- Treating F-Droid compatibility as a current GitHub release gate.
 - Automatic model updates from a mutable `latest` URL.
 - Redistributing arbitrary user-imported weights.
 
@@ -555,15 +567,16 @@ artifact/runtime review and explicit memory validation.
 Arm64 devices equivalent to the tested S10 and S25 remain the primary
 performance and GPU targets. Pure x86 now has a validated runtime and exact
 9662/KARA numerical evidence, but that is not yet a product support promise.
-The companion inference-process roadmap must decide whether x86 remains
-`Unsupported` or becomes a narrowly scoped `Experimental`/`Supported`
-`RemoteRequired` tier after cache-safety, memory-configuration, process-recycle,
-binary-provenance, and release qualification.
+The final catalog and downloadable-runtime qualification must decide whether
+x86 remains `Unsupported` or becomes a narrowly scoped
+`Experimental`/`Supported` `RemoteRequired` tier after cache-safety,
+memory-configuration, process-recycle, binary-provenance, and release
+qualification.
 
 ### Provisional resource budgets
 
 Resource budgets use binary MiB (`1 MiB = 1,048,576 bytes`) and keep model
-storage, packaged runtime size, and live inference memory separate:
+storage, downloaded runtime installed size, and live inference memory separate:
 
 - HQ4 installed model target: at most 64 MiB. The current 59,057,268-byte
   artifact is about 56.3 MiB and fits this budget.
@@ -1091,6 +1104,26 @@ identity or teach the v2 store to read or migrate the current cache.
 The current settings sheet and cache-management screens should evolve rather
 than be replaced wholesale.
 
+Runtime and setup ownership is frozen in the
+[Downloadable Runtime, Quick Setup, and Local Resource Management Roadmap](litert-runtime-setup-roadmap.md).
+The source-separation settings surface exposes Quick Setup, Runtime Management,
+Model Management, and Cache Management as peer entries. The Advanced section
+does not own GPU or NPU controls.
+
+### Initial setup and runtime management
+
+- Replace the model-only automatic management opening with structured
+  end-to-end readiness and Quick Setup when no runnable local path exists.
+- Keep Quick Setup focused on one recommended CPU/model configuration plus
+  release-qualified optional accelerators; do not expose the full preset
+  catalog there.
+- Keep runtime install/remove, GPU/NPU enablement, QNN JIT, runtime versions,
+  storage, and diagnostics in Runtime Management.
+- A missing optional accelerator must not block an otherwise valid CPU and
+  active-model path.
+- An exact NPU AOT variant is model-owned and appears under its base model;
+  shared vendor runtime files remain runtime-owned.
+
 ### Model management
 
 - Add an installed preset list with role, size, hash state, and active marker.
@@ -1131,6 +1164,9 @@ than be replaced wholesale.
 - Show a clear unsupported-ABI/runtime state instead of a generic model error.
 - Keep normal users focused on playback, blend, readiness, and cache actions.
 - Keep detailed tensor/profile fields behind an advanced or diagnostic view.
+- Do not expose GPU/NPU enablement, runtime installation, or process-host
+  controls in Advanced. A read-only effective-backend summary may open Runtime
+  Management.
 - Remove ONNX terminology from user-facing strings after the LiteRT transition is
   complete.
 
@@ -2541,9 +2577,9 @@ longer needed once every release-selectable row has equivalent LiteRT evidence.
   selection, full worker/playback flow, model switch, cancellation, cache
   clear, and APK/native-inventory audit after each removal stage.
 - [ ] Build ABI splits and the universal APK in standalone invocations, verify
-  the final LiteRT inventory and x86 hash, and measure final APK and installed
-  runtime size against the 10/16 MiB LiteRT-runtime budget. Do not count model
-  weights or separation cache in the runtime budget.
+  that no downloadable native LiteRT component remains in the base APK, and
+  measure APK size separately from each downloaded/installed runtime component.
+  Do not count model weights or separation cache in the runtime budget.
 
 Acceptance criteria:
 
@@ -2554,10 +2590,12 @@ Acceptance criteria:
 - Every release-selectable model/backend/ABI combination passed its Phase 7
   tier gate; an untested combination cannot become active merely because its
   native library is present.
-- Every ABI APK contains the expected LiteRT inventory, and the x86 APK
-  contains exactly the pinned supplemental `libLiteRt.so`.
-- A clean install can download, inspect, explicitly select, and use a TFLite
-  preset without any ONNX file, legacy model directory, or legacy cache path.
+- Every ABI APK contains the classes-only API surface and no downloadable
+  `libLiteRt.so`, GPU accelerator, QNN, or vendor NPU payload. Runtime inventory
+  is installed and verified through the dedicated runtime setup contract.
+- A clean install can use Quick Setup to install the compatible CPU runtime and
+  recommended model, inspect and explicitly select TFLite presets, and run
+  without any ONNX file, legacy model directory, or legacy cache path.
 
 ### Phase 9: Beta readiness
 
@@ -2566,16 +2604,15 @@ Acceptance criteria:
 - [ ] Add all newly supported upstream language directories to the fork
   localization set, including `bqi` and `ta` introduced by the rebase.
 - [ ] Review every LiteRT-specific string for terminology consistency.
-- [ ] Build GitHub and F-Droid release variants only.
+- [ ] Build the GitHub release variants only for this product stage.
 - [ ] Keep the Play Store variant out of Booming SS CI, release artifacts, and
-  publication. Do not use a Play Store/AAB build as evidence for the GitHub or
-  F-Droid product.
-- [ ] Include the supplemental runtime source link, Release tag, checksum,
-  LiteRT license, third-party notices, and provenance verification guidance in
-  release documentation.
-- [ ] Confirm whether the F-Droid build policy accepts the pinned vendored x86
-  binary; if it requires a source build, reproduce the same pinned producer
-  inputs in the F-Droid recipe rather than introducing a fallback runtime.
+  publication. Do not use a Play Store/AAB build as evidence for the GitHub
+  product.
+- [ ] Include every downloadable runtime source link, Release tag, checksum,
+  LiteRT/vendor license, third-party notices, and provenance verification
+  guidance in release documentation.
+- [ ] Keep any future F-Droid feasibility work in a separate distribution
+  track; it must not alter or delay the qualified GitHub runtime contract.
 - [ ] Emit canonical backup JSON plus both filtered compatibility XML
   projections in every Beta backup, with tests enforcing canonical priority.
 - [ ] Test backup format v1 and both settings schema v1 payloads with the
@@ -2626,7 +2663,7 @@ Every runtime or model change should run the narrowest applicable checks:
 | Device | Galaxy S10/S25 arm64 9662 CPU and eligible GPU evidence, CPU-only KARA promotion evidence, S10 armeabi-v7a CPU, official x86_64 CPU/runtime evidence without GPU promotion, API 26 pure-x86 9662/KARA validation plus an explicit process support tier and emulator-only limitation, actual process-ABI evidence, and explicit HQ4 resource rejection |
 | Resource budgets | Model/runtime install size, peak and summed PSS, graphics/native memory, 32-bit VA gap, tested device/AVD memory scope, thermal behavior, and target/hard-limit decisions |
 | Native supply chain | Pinned source/toolchain, Release hash, ELF/JNI audit, checksums, notices, and GitHub provenance |
-| Packaging | Four ABI splits plus universal APK built separately from AndroidTest, one runtime per ABI, native inventory, and APK/install size |
+| Packaging | Four ABI splits plus universal APK built separately from AndroidTest, classes-only LiteRT API, no downloadable native payload in the APK, downloaded runtime inventory, and separate APK/download/install size |
 | Localization | Fork string completeness and terminology review |
 
 The most important correctness test is an end-to-end full-song comparison. A
@@ -2641,7 +2678,8 @@ Prefer small, buildable commits in this order:
 
 1. model contract and preset catalog;
 2. runtime-neutral interface and behavior-preserving ORT adapter;
-3. LiteRT dependency, pinned x86 runtime, provenance, and packaging checks;
+3. LiteRT classes-only API, downloadable runtime provenance, and packaging
+   checks;
 4. LiteRT CPU session, internal integration, and parity tests;
 5. LiteRT GPU backend and fallback;
 6. multi-preset repository and download UI;
@@ -2654,8 +2692,10 @@ Prefer small, buildable commits in this order:
 13. playback, management, MediaSession, and gated-UI cutover;
 14. ORT oracle isolation, dependency-graph audit, and fault injection;
 15. full-device validation and model-tier promotion;
-16. ONNX removal and packaging cleanup; and
-17. beta backup interoperability, documentation, localization, and release
+16. ONNX removal and packaging cleanup;
+17. downloadable runtime setup and resource-management work under its dedicated
+    roadmap; and
+18. beta backup interoperability, documentation, localization, and release
     validation.
 
 Before starting a new LiteRT milestone:
@@ -2835,12 +2875,14 @@ both outcomes.
 
 ### GPU eligibility and CPU threads
 
-Use `Auto` as the development graph's only accelerated mode, but keep it
-internal until Phase 7 decides whether the release graph should retain it. The
-current controller is GPU-first whenever eligibility passes; it is not a
-CPU-first policy. If its Phase 7 profile fails promotion, bind the release graph
-directly to LiteRT CPU and keep `Auto` debug/internal rather than adding a
-misleading user mode. The pinned LiteRT 2.1.5 API can report available
+Use `Auto` as the development graph's accelerated execution request. The
+product does not expose that raw mode: Runtime Management stores GPU/NPU user
+intent and run admission resolves a concrete path under the dedicated runtime
+setup contract. The current controller is GPU-first whenever eligibility
+passes and no higher-priority exact NPU path is selected; it is not a CPU-first
+policy. If a GPU profile fails promotion, keep that component unavailable
+rather than adding a misleading user mode. The pinned LiteRT 2.1.5 API can
+report available
 accelerators and can create a GPU-only compiled model; it cannot report
 delegated operator coverage or the OpenCL/OpenGL backend chosen by `AUTOMATIC`.
 Eligibility therefore combines ABI/library preflight, exact runtime records, a
@@ -2893,17 +2935,18 @@ failure. Exceeding a hard memory limit keeps the model download-only or
 disabled on that device class. Phase 7 may tighten targets, but raising a hard
 limit requires an explicit roadmap revision backed by repeated measurements.
 
-### F-Droid x86 packaging
+### Deferred F-Droid distribution
 
-The GitHub build vendors the pinned supplemental x86 `.so`. Before Beta,
-confirm whether F-Droid accepts that reviewed binary. If policy requires source
-construction, reproduce the exact pinned LiteRT commit, patch, Bazel, NDK,
-rules, API level, ELF/JNI checks, and output hash in the F-Droid recipe. Do not
-introduce ONNX Runtime or `tensorflow-lite:2.16.1` as a packaging workaround.
+The GitHub product installs the pinned x86 runtime through the downloadable
+runtime contract rather than vendoring it in the APK. F-Droid source and
+dynamic-code policy review is deferred to a separate distribution roadmap. If
+that work resumes, it must reproduce the exact pinned LiteRT commit, patch,
+Bazel, NDK, rules, API level, ELF/JNI checks, and output hash rather than
+introducing ONNX Runtime or `tensorflow-lite:2.16.1` as a workaround.
 
-This remains an external-policy validation gate, not an inference-design
-choice. Failure to satisfy the source policy blocks the F-Droid x86 artifact,
-not the verified GitHub x86 build or the other ABI builds.
+F-Droid feasibility is not an inference-design choice or a Beta gate for the
+GitHub product. A later distribution decision must not silently change the
+verified GitHub x86 or other-ABI runtime contracts.
 
 ### Backup format and allowlists
 
