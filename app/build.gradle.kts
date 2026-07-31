@@ -98,10 +98,10 @@ val arm32ResidentProcessValidationRequested =
 require(!x86ProcessValidationRequested || !arm32ResidentProcessValidationRequested) {
     "x86 and arm32 resident process validation cannot be enabled together"
 }
-val boundedLiteRtAar = file(
+val liteRtApiAar = file(
     requireNotNull(
-        gradle.extensions.extraProperties.get("boomingSsBoundedLiteRtAar") as? String
-    ) { "The checksum-verified Booming SS LiteRT runtime was not materialized." }
+        gradle.extensions.extraProperties.get("boomingSsLiteRtApiAar") as? String
+    ) { "The checksum-verified Booming SS LiteRT API AAR was not materialized." }
 )
 
 configurations.configureEach {
@@ -381,7 +381,7 @@ dependencies {
     implementation(libs.commons.text)
     implementation(libs.juniversalchardet)
     implementation(libs.onnxruntime.android)
-    implementation(files(boundedLiteRtAar))
+    implementation(files(liteRtApiAar))
     implementation(libs.jtransforms)
 
     testImplementation(libs.junit)

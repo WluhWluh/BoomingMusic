@@ -1,7 +1,5 @@
 package com.mardous.booming.separation.model.litert
 
-import io.github.wluhwluh.bss.litert.BssLiteRtRuntime
-
 internal data class MdxLiteRtBoundedGpuCapability(
     val available: Boolean,
     val schemaVersion: Int,
@@ -76,14 +74,13 @@ internal object MdxLiteRtBoundedGpuContract {
 internal object MdxLiteRtNativeBoundedGpuCapabilityProvider :
     MdxLiteRtBoundedGpuCapabilityProvider {
     override fun query(): MdxLiteRtBoundedGpuCapability {
-        val capability = BssLiteRtRuntime.queryCapability()
         return MdxLiteRtBoundedGpuCapability(
-            available = capability.isAvailable,
-            schemaVersion = capability.schemaVersion,
-            artifactVersion = capability.artifactVersion,
-            profileId = capability.profileId,
-            kernelBatchSize = capability.kernelBatchSize,
-            commandQueueWindowSize = capability.commandQueueWindowSize,
+            available = false,
+            schemaVersion = 0,
+            artifactVersion = "uninstalled",
+            profileId = "uninstalled",
+            kernelBatchSize = 0,
+            commandQueueWindowSize = 0,
         )
     }
 }
@@ -103,19 +100,19 @@ internal object MdxLiteRtBoundedGpuRuntime {
     }
 
     fun resetInferenceCounters() {
-        BssLiteRtRuntime.resetInferenceCounters()
+        // The bounded GPU component is delivered separately in a later phase.
     }
 
     fun beginInference() {
-        BssLiteRtRuntime.beginInference()
+        // The bounded GPU component is delivered separately in a later phase.
     }
 
     fun endInference() {
-        BssLiteRtRuntime.endInference()
+        // The bounded GPU component is delivered separately in a later phase.
     }
 
     fun statistics() = MdxLiteRtBoundedGpuStatistics(
-        dispatchCount = BssLiteRtRuntime.getDispatchCount(),
-        eventWaitCount = BssLiteRtRuntime.getEventWaitCount(),
+        dispatchCount = 0L,
+        eventWaitCount = 0L,
     )
 }

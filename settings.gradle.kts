@@ -6,12 +6,13 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
-private val BOUNDED_LITERT_VERSION = "2.1.5-bss.2"
-private val BOUNDED_LITERT_AAR_SHA256 =
-    "88cd2f7eaf1443d1c570085b1c24f239db87eb24c788a590adf5158e17443d0e"
-private val BOUNDED_LITERT_AAR_URL =
+private val LITERT_API_VERSION = "2.1.5-bss.2-downloadable-loader"
+private val LITERT_API_AAR_SHA256 =
+    "a68b51546f268b6db0b64bec3d1d95389ba44a48c59beaa1769794682c94b4f9"
+private val LITERT_API_AAR_URL =
     "https://github.com/WluhWluh/bss-litert-android/releases/download/" +
-        "runtime-v2.1.5-bss.2/litert-android-2.1.5-bss.2.aar"
+        "downloadable-runtime-v2.1.5-bss.2-exp.2/" +
+        "litert-api-2.1.5-bss.2-downloadable-loader.aar"
 
 private fun File.sha256(): String {
     val digest = MessageDigest.getInstance("SHA-256")
@@ -26,24 +27,24 @@ private fun File.sha256(): String {
     return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
 }
 
-private fun materializeBoundedLiteRt(
+private fun materializeLiteRtApi(
     gradleUserHome: File,
     offline: Boolean,
 ): File {
     val cacheDirectory = File(
         gradleUserHome,
-        "caches/booming-ss/litert/$BOUNDED_LITERT_VERSION",
+        "caches/booming-ss/litert/api/$LITERT_API_VERSION",
     )
     val artifact = File(
         cacheDirectory,
-        "litert-android-$BOUNDED_LITERT_VERSION.aar",
+        "litert-api-$LITERT_API_VERSION.aar",
     )
-    if (artifact.isFile && artifact.sha256() == BOUNDED_LITERT_AAR_SHA256) {
+    if (artifact.isFile && artifact.sha256() == LITERT_API_AAR_SHA256) {
         return artifact
     }
     if (offline) {
         error(
-            "The checksum-verified Booming SS LiteRT runtime is not cached. " +
+            "The checksum-verified Booming SS LiteRT API AAR is not cached. " +
                 "Run Gradle once without --offline."
         )
     }
@@ -53,12 +54,12 @@ private fun materializeBoundedLiteRt(
     val lockFile = File(cacheDirectory, "materialize.lock")
     RandomAccessFile(lockFile, "rw").channel.use { channel ->
         channel.lock().use {
-            if (artifact.isFile && artifact.sha256() == BOUNDED_LITERT_AAR_SHA256) {
+            if (artifact.isFile && artifact.sha256() == LITERT_API_AAR_SHA256) {
                 return artifact
             }
             val temporary = File(cacheDirectory, "${artifact.name}.part")
             try {
-                val connection = URI(BOUNDED_LITERT_AAR_URL).toURL().openConnection().apply {
+                val connection = URI(LITERT_API_AAR_URL).toURL().openConnection().apply {
                     connectTimeout = 30_000
                     readTimeout = 120_000
                     setRequestProperty("User-Agent", "Booming-SS-Gradle")
@@ -67,8 +68,8 @@ private fun materializeBoundedLiteRt(
                     temporary.outputStream().buffered().use(input::copyTo)
                 }
                 val actualSha256 = temporary.sha256()
-                check(actualSha256 == BOUNDED_LITERT_AAR_SHA256) {
-                    "Booming SS LiteRT SHA-256 mismatch: $actualSha256"
+                check(actualSha256 == LITERT_API_AAR_SHA256) {
+                    "Booming SS LiteRT API AAR SHA-256 mismatch: $actualSha256"
                 }
                 try {
                     Files.move(
@@ -89,19 +90,19 @@ private fun materializeBoundedLiteRt(
             }
         }
     }
-    check(artifact.isFile && artifact.sha256() == BOUNDED_LITERT_AAR_SHA256) {
-        "Unable to materialize the checksum-verified Booming SS LiteRT runtime."
+    check(artifact.isFile && artifact.sha256() == LITERT_API_AAR_SHA256) {
+        "Unable to materialize the checksum-verified Booming SS LiteRT API AAR."
     }
     return artifact
 }
 
-val boundedLiteRtAar = materializeBoundedLiteRt(
+val liteRtApiAar = materializeLiteRtApi(
     gradle.gradleUserHomeDir,
     gradle.startParameter.isOffline,
 )
 gradle.extensions.extraProperties.set(
-    "boomingSsBoundedLiteRtAar",
-    boundedLiteRtAar.absolutePath,
+    "boomingSsLiteRtApiAar",
+    liteRtApiAar.absolutePath,
 )
 
 pluginManagement {
