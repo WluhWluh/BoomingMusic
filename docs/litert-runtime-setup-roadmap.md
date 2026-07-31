@@ -772,18 +772,28 @@ S10/S25 results are validation evidence, not a universal support claim.
 
 ### Phase 2: Build the runtime store and CPU management UI
 
-- [ ] Add the bundled immutable runtime catalog snapshot and strict parser.
-- [ ] Implement cross-process install locks, staging, verification, atomic
+- [x] Add the bundled immutable runtime catalog snapshot and strict parser.
+- [x] Implement cross-process install locks, staging, verification, atomic
   publish, inventory rebuild, leases, pending activation, and pending deletion.
-- [ ] Keep the runtime store provider-neutral and implement resumable HTTP only
+- [x] Keep the runtime store provider-neutral and implement resumable HTTP only
   inside the GitHub runtime provider without treating a partial file as an
   installed component.
-- [ ] Add free-space preflight for compressed download, staging, and installed
+- [x] Add free-space preflight for compressed download, staging, and installed
   bytes.
-- [ ] Add Runtime Management with device details, CPU install/repair/update/
+- [x] Add Runtime Management with device details, CPU install/repair/update/
   uninstall, hashes, provenance, size, and diagnostics.
-- [ ] Test interrupted download, hash mismatch, ZIP traversal, duplicate
-  installer, low disk, canceled repair, app update, and orphan staging cleanup.
+- [x] Test resumable/interrupted download, hash mismatch, ZIP traversal,
+  repeated-install idempotence, low disk, and lease-deferred deletion.
+- [ ] Test canceled repair, app update, duplicate installer handling, orphan
+  staging cleanup, and Runtime Management UI/device lifecycle behavior.
+
+**Phase 2 implementation status (2026-07-31):** the CPU runtime catalog, store,
+GitHub delivery path, and Runtime Management page are implemented. The page
+shows every catalog ABI but only permits operations for the process ABI; runtime
+operations do not modify model selection or separation caches. The current
+GitHub Debug variant compiles, assembles, and passes the complete JVM unit-test
+suite. Phase 2 remains open only for the destructive-operation edge cases and
+device/UI lifecycle coverage listed above.
 
 **Phase 2 exit:** CPU runtime state is derived from verified disk records and is
 fully manageable without model or cache side effects.
