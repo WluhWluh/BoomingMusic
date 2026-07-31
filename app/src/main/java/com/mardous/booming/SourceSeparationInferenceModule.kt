@@ -17,4 +17,7 @@ private val sourceSeparationInferenceModule = module {
     }
 }
 
-val sourceSeparationInferenceModules = listOf(sourceSeparationInferenceModule)
+val sourceSeparationInferenceModules = listOf(
+    sourceSeparationDeliveryModule,
+    sourceSeparationInferenceModule,
+)

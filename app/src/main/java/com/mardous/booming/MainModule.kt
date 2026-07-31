@@ -480,4 +480,11 @@ private val viewModule = module {
     }
 }
 
-val appModules = listOf(networkModule, mainModule, roomModule, dataModule, viewModule)
+val appModules = listOf(
+    networkModule,
+    sourceSeparationDeliveryModule,
+    mainModule,
+    roomModule,
+    dataModule,
+    viewModule,
+)
