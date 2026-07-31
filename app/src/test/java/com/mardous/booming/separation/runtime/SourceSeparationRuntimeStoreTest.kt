@@ -1,10 +1,12 @@
 package com.mardous.booming.separation.runtime
 
 import com.mardous.booming.separation.delivery.RuntimeDeliveryProvider
+import com.mardous.booming.separation.delivery.ResumableRuntimeDeliveryProvider
 import com.mardous.booming.separation.delivery.SourceSeparationDeliveryCapabilities
 import com.mardous.booming.separation.delivery.SourceSeparationDeliveryOperation
 import com.mardous.booming.separation.delivery.SourceSeparationDeliveryPayload
 import com.mardous.booming.separation.delivery.SourceSeparationDeliveryReference
+import com.mardous.booming.separation.delivery.SourceSeparationResumableDeliveryPayload
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -129,6 +131,31 @@ class SourceSeparationRuntimeStoreTest {
 
         val removed = store.remove(fixture.entry.componentId)
         assertEquals(SourceSeparationRuntimeState.Missing, removed.state)
+    }
+
+    @Test
+    fun `resumable provider continues a known partial ZIP`() {
+        val fixture = RuntimeFixture.create(temporary.root)
+        val partialBytes = fixture.zipBytes.size / 2
+        val partialDirectory = temporary.root.resolve(
+            ".staging/${fixture.entry.componentId}",
+        ).apply { mkdirs() }
+        partialDirectory.resolve("payload.zip.part").writeBytes(
+            fixture.zipBytes.copyOf(partialBytes),
+        )
+        val provider = ResumableTestRuntimeProvider(fixture.zipBytes)
+        val store = SourceSeparationRuntimeStore(
+            root = temporary.root,
+            catalog = fixture.catalog,
+            provider = provider,
+            androidApi = 35,
+            usableSpace = { Long.MAX_VALUE },
+        )
+
+        val installed = store.install(fixture.entry.componentId)
+
+        assertEquals(SourceSeparationRuntimeState.Installed, installed.state)
+        assertEquals(partialBytes.toLong(), provider.resumedFrom)
     }
 
     private class RuntimeFixture private constructor(
@@ -264,6 +291,40 @@ class SourceSeparationRuntimeStoreTest {
                 override val reference = reference
                 override val byteSize: Long = bytes.size.toLong()
                 override fun openStream(): InputStream = ByteArrayInputStream(bytes)
+                override fun close() = Unit
+            }
+        }
+    }
+
+    private class ResumableTestRuntimeProvider(
+        private val bytes: ByteArray,
+    ) : ResumableRuntimeDeliveryProvider {
+        var resumedFrom: Long? = null
+
+        override val providerId: String = "github"
+        override val capabilities = SourceSeparationDeliveryCapabilities(
+            operations = setOf(SourceSeparationDeliveryOperation.Acquire),
+            supportsPlatformManagedPayloads = false,
+        )
+
+        override fun supports(reference: SourceSeparationDeliveryReference): Boolean =
+            reference.providerId == providerId
+
+        override fun acquire(reference: SourceSeparationDeliveryReference): SourceSeparationDeliveryPayload =
+            error("The resumable test provider should not restart a full transfer.")
+
+        override fun acquireResumable(
+            reference: SourceSeparationDeliveryReference,
+            existingBytes: Long,
+        ): SourceSeparationResumableDeliveryPayload {
+            resumedFrom = existingBytes
+            return object : SourceSeparationResumableDeliveryPayload {
+                override val reference = reference
+                override val resumedOffset = existingBytes
+                override val totalByteSize = bytes.size.toLong()
+                override fun openStream(): InputStream = ByteArrayInputStream(
+                    bytes.copyOfRange(existingBytes.toInt(), bytes.size),
+                )
                 override fun close() = Unit
             }
         }

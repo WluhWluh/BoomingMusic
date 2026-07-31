@@ -90,6 +90,25 @@ interface RuntimeDeliveryProvider {
     fun acquire(reference: SourceSeparationDeliveryReference): SourceSeparationDeliveryPayload
 }
 
+/**
+ * Optional runtime-only extension. HTTP range semantics stay inside the
+ * provider; the common runtime store only sees an offset and total size.
+ */
+interface ResumableRuntimeDeliveryProvider : RuntimeDeliveryProvider {
+    fun acquireResumable(
+        reference: SourceSeparationDeliveryReference,
+        existingBytes: Long,
+    ): SourceSeparationResumableDeliveryPayload
+}
+
+interface SourceSeparationResumableDeliveryPayload : AutoCloseable {
+    val reference: SourceSeparationDeliveryReference
+    val resumedOffset: Long
+    val totalByteSize: Long?
+
+    fun openStream(): InputStream
+}
+
 interface ModelDeliveryProvider {
     val providerId: String
     val capabilities: SourceSeparationDeliveryCapabilities
@@ -107,7 +126,7 @@ interface ProductCapabilityPolicy {
     fun supportsDeliveryProvider(providerId: String): Boolean
 }
 
-class GitHubRuntimeDeliveryProvider : RuntimeDeliveryProvider {
+class GitHubRuntimeDeliveryProvider : ResumableRuntimeDeliveryProvider {
     override val providerId: String = GITHUB_PROVIDER_ID
 
     override val capabilities = SourceSeparationDeliveryCapabilities(
@@ -123,6 +142,17 @@ class GitHubRuntimeDeliveryProvider : RuntimeDeliveryProvider {
             "The GitHub runtime provider cannot acquire this delivery reference."
         }
         return openGitHubPayload(reference)
+    }
+
+    override fun acquireResumable(
+        reference: SourceSeparationDeliveryReference,
+        existingBytes: Long,
+    ): SourceSeparationResumableDeliveryPayload {
+        require(supports(reference)) {
+            "The GitHub runtime provider cannot acquire this delivery reference."
+        }
+        require(existingBytes >= 0L) { "Existing runtime bytes cannot be negative." }
+        return openGitHubResumablePayload(reference, existingBytes)
     }
 }
 
@@ -190,6 +220,24 @@ private class HttpSourceSeparationDeliveryPayload(
     }
 }
 
+private class HttpSourceSeparationResumableDeliveryPayload(
+    override val reference: SourceSeparationDeliveryReference,
+    private val connection: HttpURLConnection,
+    override val resumedOffset: Long,
+    override val totalByteSize: Long?,
+) : SourceSeparationResumableDeliveryPayload {
+    override fun openStream(): InputStream {
+        check(connection.responseCode in 200..299) {
+            "GitHub delivery failed with HTTP ${connection.responseCode}."
+        }
+        return connection.inputStream
+    }
+
+    override fun close() {
+        connection.disconnect()
+    }
+}
+
 private fun openGitHubPayload(
     reference: SourceSeparationDeliveryReference,
 ): SourceSeparationDeliveryPayload {
@@ -201,6 +249,41 @@ private fun openGitHubPayload(
     connection.requestMethod = "GET"
     connection.setRequestProperty("Accept-Encoding", "identity")
     return HttpSourceSeparationDeliveryPayload(reference, connection)
+}
+
+private fun openGitHubResumablePayload(
+    reference: SourceSeparationDeliveryReference,
+    existingBytes: Long,
+): SourceSeparationResumableDeliveryPayload {
+    val connection = URL(reference.locator).openConnection() as? HttpURLConnection
+        ?: error("GitHub delivery requires an HTTP connection.")
+    connection.connectTimeout = CONNECT_TIMEOUT_MS
+    connection.readTimeout = READ_TIMEOUT_MS
+    connection.instanceFollowRedirects = true
+    connection.requestMethod = "GET"
+    connection.setRequestProperty("Accept-Encoding", "identity")
+    if (existingBytes > 0L) {
+        connection.setRequestProperty("Range", "bytes=$existingBytes-")
+    }
+    val responseCode = connection.responseCode
+    if (responseCode !in 200..299) {
+        connection.disconnect()
+        error("GitHub delivery failed with HTTP $responseCode.")
+    }
+    val resumed = existingBytes > 0L && responseCode == HttpURLConnection.HTTP_PARTIAL
+    val offset = if (resumed) existingBytes else 0L
+    val remaining = connection.contentLengthLong.takeIf { it >= 0L }
+    val total = remaining?.let { it + offset }
+    if (total != null && total <= 0L) {
+        connection.disconnect()
+        error("GitHub delivery returned an invalid content length.")
+    }
+    return HttpSourceSeparationResumableDeliveryPayload(
+        reference = reference,
+        connection = connection,
+        resumedOffset = offset,
+        totalByteSize = total,
+    )
 }
 
 private fun isGitHubReleaseLocator(locator: String): Boolean {

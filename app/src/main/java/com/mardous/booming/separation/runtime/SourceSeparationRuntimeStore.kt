@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.runtime
 
 import com.mardous.booming.separation.delivery.RuntimeDeliveryProvider
+import com.mardous.booming.separation.delivery.ResumableRuntimeDeliveryProvider
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -11,7 +12,6 @@ import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import java.nio.channels.OverlappingFileLockException
 import java.security.MessageDigest
-import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
 import java.util.zip.ZipFile
 import kotlin.concurrent.withLock
@@ -115,22 +115,60 @@ internal class SourceSeparationRuntimeStore(
         }
 
         cleanupOrphanStagingLocked()
-        val stagingRoot = File(stagingDirectory(), UUID.randomUUID().toString()).apply { mkdirs() }
+        val stagingRoot = File(stagingDirectory(), entry.componentId).apply { mkdirs() }
         val payloadFile = File(stagingRoot, PAYLOAD_PART_FILE_NAME)
+        var keepStaging = true
         try {
             val reference = entry.deliveryReference()
-            provider.acquire(reference).use { payload ->
-                payload.byteSize?.let { actual ->
-                    require(actual == entry.delivery.expectedByteSize) {
-                        "Runtime delivery size does not match the catalog."
+            val completePartIsValid = payloadFile.length() == entry.delivery.expectedByteSize &&
+                runCatching { verifyPayloadFile(payloadFile, entry) }.isSuccess
+            if (!completePartIsValid) {
+                if (payloadFile.length() > entry.delivery.expectedByteSize) {
+                    payloadFile.delete()
+                }
+                val existingBytes = payloadFile.length()
+                val resumableProvider = provider as? ResumableRuntimeDeliveryProvider
+                if (resumableProvider != null) {
+                    resumableProvider.acquireResumable(reference, existingBytes).use { payload ->
+                        payload.totalByteSize?.let { actual ->
+                            require(actual == entry.delivery.expectedByteSize) {
+                                "Resumable runtime delivery size does not match the catalog."
+                            }
+                        }
+                        val offset = payload.resumedOffset
+                        require(offset in 0..entry.delivery.expectedByteSize) {
+                            "Resumable runtime delivery returned an invalid offset."
+                        }
+                        copyPayload(
+                            input = payload.openStream(),
+                            destination = payloadFile,
+                            expectedBytes = entry.delivery.expectedByteSize,
+                            initialBytes = offset,
+                            append = offset > 0L,
+                            onProgress = onProgress,
+                        )
+                    }
+                } else {
+                    payloadFile.delete()
+                    provider.acquire(reference).use { payload ->
+                        payload.byteSize?.let { actual ->
+                            require(actual == entry.delivery.expectedByteSize) {
+                                "Runtime delivery size does not match the catalog."
+                            }
+                        }
+                        copyPayload(
+                            input = payload.openStream(),
+                            destination = payloadFile,
+                            expectedBytes = entry.delivery.expectedByteSize,
+                            initialBytes = 0L,
+                            append = false,
+                            onProgress = onProgress,
+                        )
                     }
                 }
-                copyPayload(
-                    input = payload.openStream(),
-                    destination = payloadFile,
-                    expectedBytes = entry.delivery.expectedByteSize,
-                    onProgress = onProgress,
-                )
+                keepStaging = false
+            } else {
+                keepStaging = false
             }
             verifyPayloadFile(payloadFile, entry)
             val stagedCurrent = extractAndVerify(payloadFile, stagingRoot, entry)
@@ -145,6 +183,7 @@ internal class SourceSeparationRuntimeStore(
                 )
             } == true
             if (sameCurrent && currentInspection.state == SourceSeparationRuntimeState.Installed) {
+                keepStaging = false
                 return@withInstallLock currentInspection
             }
 
@@ -172,7 +211,7 @@ internal class SourceSeparationRuntimeStore(
                 error,
             )
         } finally {
-            stagingRoot.deleteRecursively()
+            if (!keepStaging) stagingRoot.deleteRecursively()
         }
     }
 
@@ -469,12 +508,15 @@ internal class SourceSeparationRuntimeStore(
         input: InputStream,
         destination: File,
         expectedBytes: Long,
+        initialBytes: Long,
+        append: Boolean,
         onProgress: (Long, Long) -> Unit,
     ) {
-        var copied = 0L
-        val digest = MessageDigest.getInstance("SHA-256")
+        var copied = initialBytes
+        require(copied in 0..expectedBytes) { "Initial runtime payload size is invalid." }
+        onProgress(copied, expectedBytes)
         input.use { source ->
-            FileOutputStream(destination).use { output ->
+            FileOutputStream(destination, append).use { output ->
                 val buffer = ByteArray(COPY_BUFFER_BYTES)
                 while (true) {
                     val count = source.read(buffer)
@@ -482,7 +524,6 @@ internal class SourceSeparationRuntimeStore(
                     if (count == 0) continue
                     copied += count
                     require(copied <= expectedBytes) { "The runtime ZIP is larger than the catalog." }
-                    digest.update(buffer, 0, count)
                     output.write(buffer, 0, count)
                     onProgress(copied, expectedBytes)
                 }
@@ -519,7 +560,14 @@ internal class SourceSeparationRuntimeStore(
     private fun stagingDirectory() = File(root, STAGING_DIRECTORY)
 
     private fun cleanupOrphanStagingLocked() {
-        stagingDirectory().listFiles()?.forEach { it.deleteRecursively() }
+        val knownComponents = catalog.entries.mapTo(mutableSetOf()) {
+            it.componentId
+        }
+        stagingDirectory().listFiles()?.forEach { child ->
+            if (!child.isDirectory || child.name !in knownComponents) {
+                child.deleteRecursively()
+            }
+        }
     }
 
     private fun versionsRoot(entry: SourceSeparationRuntimeCatalogEntry) = File(
