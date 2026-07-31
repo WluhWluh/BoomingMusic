@@ -90,6 +90,8 @@ class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
     private val viewModel: PlayerViewModel by activityViewModel()
     private val modelAwareCacheViewModel:
         SourceSeparationModelAwareCacheManagementViewModel by viewModel()
+    private val runtimeManagementViewModel:
+        SourceSeparationRuntimeManagementViewModel by viewModel()
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val dialog = super.onCreateDialog(savedInstanceState)
@@ -113,6 +115,7 @@ class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
                     SourceSeparationSettingsSheet(
                         viewModel = viewModel,
                         modelAwareCacheViewModel = modelAwareCacheViewModel,
+                        runtimeManagementViewModel = runtimeManagementViewModel,
                     )
                 }
             }
@@ -123,6 +126,7 @@ class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
 private enum class SourceSeparationSettingsPage {
     Main,
     CacheManagement,
+    RuntimeManagement,
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -130,6 +134,7 @@ private enum class SourceSeparationSettingsPage {
 private fun SourceSeparationSettingsSheet(
     viewModel: PlayerViewModel,
     modelAwareCacheViewModel: SourceSeparationModelAwareCacheManagementViewModel,
+    runtimeManagementViewModel: SourceSeparationRuntimeManagementViewModel,
 ) {
     val hapticFeedback = LocalHapticFeedback.current
     val context = LocalContext.current
@@ -179,9 +184,6 @@ private fun SourceSeparationSettingsSheet(
     val autoStartSeparation by viewModel
         .sourceSeparationAutoStartFlow
         .collectAsState()
-    val tryGpu by viewModel
-        .sourceSeparationTryGpuFlow
-        .collectAsState()
     val windowDecode by viewModel
         .sourceSeparationWindowDecodeFlow
         .collectAsState()
@@ -195,6 +197,7 @@ private fun SourceSeparationSettingsSheet(
         .sourceSeparationAutoCacheCleanupCompletedLimitFlow
         .collectAsState()
     val modelAwareCacheState by modelAwareCacheViewModel.state.collectAsState()
+    val runtimeManagementState by runtimeManagementViewModel.state.collectAsState()
     var page by remember {
         mutableStateOf(SourceSeparationSettingsPage.Main)
     }
@@ -263,6 +266,19 @@ private fun SourceSeparationSettingsSheet(
                         viewModel::setSourceSeparationAutoCacheCleanupPartialLimit,
                     onCompletedLimitChange =
                         viewModel::setSourceSeparationAutoCacheCleanupCompletedLimit,
+                )
+                return@Column
+            }
+            if (page == SourceSeparationSettingsPage.RuntimeManagement) {
+                SourceSeparationRuntimeManagementPage(
+                    state = runtimeManagementState,
+                    onBack = { page = SourceSeparationSettingsPage.Main },
+                    onRefresh = runtimeManagementViewModel::refresh,
+                    onInstall = runtimeManagementViewModel::install,
+                    onRepair = runtimeManagementViewModel::repair,
+                    onActivatePending = runtimeManagementViewModel::activatePending,
+                    onRemove = runtimeManagementViewModel::remove,
+                    onDismissError = runtimeManagementViewModel::dismissError,
                 )
                 return@Column
             }
@@ -557,18 +573,6 @@ private fun SourceSeparationSettingsSheet(
                             modifier = Modifier.padding(cardContentPadding)
                         ) {
                             LabeledSwitch(
-                                checked = tryGpu,
-                                title = stringResource(
-                                    R.string.source_separation_try_gpu_title
-                                ),
-                                description = stringResource(
-                                    R.string.source_separation_try_gpu_description
-                                )
-                            ) { checked ->
-                                viewModel.setSourceSeparationTryGpu(checked)
-                            }
-
-                            LabeledSwitch(
                                 checked = autoStartSeparation,
                                 title = stringResource(
                                     R.string.source_separation_auto_start_title
@@ -685,6 +689,30 @@ private fun SourceSeparationSettingsSheet(
                                 Text(
                                     text = stringResource(
                                         R.string.source_separation_manage_model
+                                    ),
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    hapticFeedback.performHapticFeedback(
+                                        HapticFeedbackType.Confirm
+                                    )
+                                    page = SourceSeparationSettingsPage.RuntimeManagement
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_settings_applications_24dp),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = stringResource(
+                                        R.string.source_separation_manage_runtime
                                     ),
                                     modifier = Modifier.padding(start = 8.dp)
                                 )

@@ -17,6 +17,7 @@
 
 package com.mardous.booming
 
+import android.os.Build
 import androidx.preference.PreferenceManager
 import androidx.room.Room
 import com.mardous.booming.coil.CustomArtistImageManager
@@ -78,6 +79,9 @@ import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportCoordinator
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeCatalogLoader
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeLayout
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecoveryClient
@@ -96,6 +100,7 @@ import com.mardous.booming.ui.screen.player.PlayerViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.player.SourceSeparationModelAwareCacheManagementViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationPresetManagementViewModel
+import com.mardous.booming.ui.screen.player.SourceSeparationRuntimeManagementViewModel
 import com.mardous.booming.ui.screen.sleeptimer.SleepTimerViewModel
 import com.mardous.booming.ui.screen.tageditor.TagEditorViewModel
 import com.mardous.booming.ui.screen.update.UpdateViewModel
@@ -135,6 +140,17 @@ private val mainModule = module {
     }
     single {
         PreferenceManager.getDefaultSharedPreferences(androidContext())
+    }
+    single {
+        SourceSeparationRuntimeCatalogLoader.load(androidContext())
+    }
+    single {
+        SourceSeparationRuntimeStore(
+            root = SourceSeparationRuntimeLayout.runtimeRoot(androidContext()),
+            catalog = get(),
+            provider = get(),
+            androidApi = Build.VERSION.SDK_INT,
+        )
     }
     single {
         SleepTimer(context = androidContext())
@@ -404,6 +420,10 @@ private val viewModule = module {
 
     viewModel {
         SourceSeparationModelAwareCacheManagementViewModel(runtime = get())
+    }
+
+    viewModel {
+        SourceSeparationRuntimeManagementViewModel(store = get())
     }
 
     viewModel {
