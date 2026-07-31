@@ -240,6 +240,7 @@ internal class SourceSeparationRuntimeLocator(
 internal object SourceSeparationRuntimeBootstrap {
     private val lock = Any()
     private var loadedInstallation: SourceSeparationCpuRuntimeInstallation? = null
+    private var activeLease: SourceSeparationRuntimeProcessLease? = null
 
     fun ensureLoaded(context: Context): SourceSeparationCpuRuntimeInstallation =
         ensureLoaded(
@@ -276,6 +277,14 @@ internal object SourceSeparationRuntimeBootstrap {
                 message = "LiteRT is already configured for another native library path.",
             )
         }
+        val lease = SourceSeparationRuntimeProcessLease.tryAcquire(
+            root = installation.directory.parentFile?.parentFile?.parentFile ?:
+                error("The LiteRT runtime directory has no runtime root."),
+            abi = installation.manifest.abi,
+        ) ?: throw SourceSeparationRuntimeLoadException(
+            reason = SourceSeparationRuntimeFailureReason.ConflictingLoaderPath,
+            message = "The LiteRT runtime is already leased by another process.",
+        )
         try {
             LiteRtNativeLibraryLoader.configureAbsolutePath(libraryPath)
             LiteRtNativeLibraryLoader.load()
@@ -283,14 +292,17 @@ internal object SourceSeparationRuntimeBootstrap {
                 "LiteRT native loader did not report a loaded runtime."
             }
         } catch (error: SourceSeparationRuntimeLoadException) {
+            lease.close()
             throw error
         } catch (error: Throwable) {
+            lease.close()
             throw SourceSeparationRuntimeLoadException(
                 reason = classifyLoadFailure(error),
                 message = "Unable to load the verified LiteRT CPU runtime.",
                 cause = error,
             )
         }
+        activeLease = lease
         loadedInstallation = installation
         installation
     }
