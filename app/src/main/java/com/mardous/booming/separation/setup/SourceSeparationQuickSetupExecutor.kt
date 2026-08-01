@@ -1,11 +1,15 @@
 package com.mardous.booming.separation.setup
 
+import android.content.SharedPreferences
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeState
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeStore
+import com.mardous.booming.util.writeSourceSeparationGpuEnabled
 import java.util.concurrent.CancellationException
 
 internal enum class SourceSeparationQuickSetupTerminalStatus {
@@ -45,8 +49,10 @@ internal class SourceSeparationQuickSetupStalePlanException : IllegalStateExcept
 
 internal class SourceSeparationQuickSetupExecutor(
     private val runtimeStore: SourceSeparationRuntimeStore,
+    private val gpuRuntimeStore: SourceSeparationGpuRuntimeStore,
     private val presetRepository: SourceSeparationPresetRepository,
     private val modelInstaller: SourceSeparationQuickSetupModelInstaller,
+    private val preferences: SharedPreferences,
     private val readinessEvaluator: () -> LocalSeparationReadiness,
     private val platformProvider: () -> MdxRuntimePlatform = {
         AndroidMdxRuntimePlatformProvider.current()
@@ -167,6 +173,8 @@ internal class SourceSeparationQuickSetupExecutor(
                     .ifBlank { "The installed resources did not produce a runnable path." },
             )
         }
+        commitGpuPreference(plan, selectedItemIds)
+        val committedReadiness = readinessEvaluator()
         return finish(
             plan = plan,
             resultItems = resultItems,
@@ -175,7 +183,7 @@ internal class SourceSeparationQuickSetupExecutor(
             } else {
                 SourceSeparationQuickSetupTerminalStatus.Completed
             },
-            readiness = finalReadiness,
+            readiness = committedReadiness,
         )
     }
 
@@ -233,6 +241,54 @@ internal class SourceSeparationQuickSetupExecutor(
                 }
             }
 
+            SourceSeparationQuickSetupAction.InstallGpuRuntime -> {
+                val componentId = requireNotNull(item.componentId)
+                val result = gpuRuntimeStore.install(componentId) { downloaded, total ->
+                    onProgress(
+                        SourceSeparationQuickSetupProgress(
+                            itemId = item.itemId,
+                            itemIndex = itemIndex,
+                            itemCount = itemCount,
+                            state = SourceSeparationQuickSetupItemState.Running,
+                            downloadedBytes = downloaded,
+                            totalBytes = total,
+                        ),
+                    )
+                }
+                require(result.state == SourceSeparationGpuRuntimeState.Installed) {
+                    result.reason ?: "The GPU runtime is waiting for activation."
+                }
+            }
+
+            SourceSeparationQuickSetupAction.RepairGpuRuntime -> {
+                val componentId = requireNotNull(item.componentId)
+                val result = gpuRuntimeStore.repair(componentId) { downloaded, total ->
+                    onProgress(
+                        SourceSeparationQuickSetupProgress(
+                            itemId = item.itemId,
+                            itemIndex = itemIndex,
+                            itemCount = itemCount,
+                            state = SourceSeparationQuickSetupItemState.Running,
+                            downloadedBytes = downloaded,
+                            totalBytes = total,
+                        ),
+                    )
+                }
+                require(result.state == SourceSeparationGpuRuntimeState.Installed) {
+                    result.reason ?: "The repaired GPU runtime is waiting for activation."
+                }
+            }
+
+            SourceSeparationQuickSetupAction.ActivatePendingGpuRuntime -> {
+                val componentId = requireNotNull(item.componentId)
+                val result = gpuRuntimeStore.activatePending(componentId)
+                require(result.state == SourceSeparationGpuRuntimeState.Installed) {
+                    result.reason ?: "The pending GPU runtime could not be activated."
+                }
+            }
+
+            SourceSeparationQuickSetupAction.ConfigureGpuRuntime -> Unit
+
             SourceSeparationQuickSetupAction.InstallModel -> {
                 val modelId = requireNotNull(item.modelId)
                 modelInstaller.install(
@@ -279,6 +335,21 @@ internal class SourceSeparationQuickSetupExecutor(
             SourceSeparationQuickSetupAction.OpenModelManagement,
             -> throw IllegalStateException("This setup item requires user action.")
         }
+    }
+
+    private fun commitGpuPreference(
+        plan: SourceSeparationQuickSetupPlan,
+        selectedItemIds: Set<String>,
+    ) {
+        if (plan.proposedGpuEnabled == null) return
+        val gpuItem = plan.items.singleOrNull { item ->
+            item.action == SourceSeparationQuickSetupAction.InstallGpuRuntime ||
+                item.action == SourceSeparationQuickSetupAction.RepairGpuRuntime ||
+                item.action == SourceSeparationQuickSetupAction.ActivatePendingGpuRuntime ||
+                item.action == SourceSeparationQuickSetupAction.ConfigureGpuRuntime
+        }
+        val enabled = plan.proposedGpuEnabled && gpuItem?.itemId in selectedItemIds
+        preferences.writeSourceSeparationGpuEnabled(enabled)
     }
 
     private fun validateSelection(

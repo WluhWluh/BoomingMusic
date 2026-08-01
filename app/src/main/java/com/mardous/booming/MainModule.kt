@@ -219,14 +219,18 @@ private val mainModule = module {
     single {
         LocalSeparationReadinessEvaluator(
             runtimeStore = get(),
+            gpuRuntimeStore = get(),
             presetRepository = get(),
+            preferences = get(),
         )
     }
     single {
         SourceSeparationQuickSetupExecutor(
             runtimeStore = get(),
+            gpuRuntimeStore = get(),
             presetRepository = get(),
             modelInstaller = get(),
+            preferences = get(),
             readinessEvaluator = { get<LocalSeparationReadinessEvaluator>().evaluate() },
         )
     }

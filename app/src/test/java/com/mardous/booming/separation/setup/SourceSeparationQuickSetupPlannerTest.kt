@@ -5,12 +5,100 @@ import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SourceSeparationQuickSetupPlannerTest {
+    @Test
+    fun `recommended GPU is optional and never becomes a model dependency`() {
+        val plan = SourceSeparationQuickSetupPlanner.create(
+            readiness(
+                activeModel = null,
+                activeReference = null,
+                gpuRuntime = gpuRuntime(SourceSeparationGpuRuntimeState.Missing),
+                repairCandidates = listOf(
+                    LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.InstallCpuRuntime,
+                        reason = "Install CPU runtime.",
+                        required = true,
+                        componentId = "cpu-arm64",
+                    ),
+                    LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.InstallGpuRuntime,
+                        reason = "Install GPU runtime.",
+                        required = false,
+                        componentId = "gpu-arm64",
+                    ),
+                    LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.InstallRecommendedModel,
+                        reason = "Install model.",
+                        required = true,
+                        modelId = "recommended-model",
+                    ),
+                ),
+            ),
+            SourceSeparationQuickSetupMode.BootstrapRecommended,
+        )
+
+        assertEquals(
+            listOf(
+                SourceSeparationQuickSetupAction.InstallRuntime,
+                SourceSeparationQuickSetupAction.InstallGpuRuntime,
+                SourceSeparationQuickSetupAction.InstallModel,
+                SourceSeparationQuickSetupAction.SelectModel,
+            ),
+            plan.items.map(SourceSeparationQuickSetupPlanItem::action),
+        )
+        assertTrue(plan.items[1].selected)
+        assertEquals(listOf("runtime:cpu-arm64"), plan.items[1].dependencyIds)
+        assertEquals(listOf("runtime:cpu-arm64"), plan.items[2].dependencyIds)
+        assertEquals(
+            listOf("runtime:cpu-arm64", "model:recommended-model"),
+            plan.items[3].dependencyIds,
+        )
+        assertTrue(plan.proposedGpuEnabled == true)
+    }
+
+    @Test
+    fun `installed recommended GPU is offered as a preference reset`() {
+        val currentReference = SourceSeparationActiveModelReference(
+            modelId = "current-model",
+            artifactSha256 = "b".repeat(64),
+            contractSchemaVersion = 2,
+        )
+        val plan = SourceSeparationQuickSetupPlanner.create(
+            readiness(
+                activeModel = model(
+                    modelId = currentReference.modelId,
+                    sha256 = currentReference.artifactSha256,
+                    installed = true,
+                    active = true,
+                ),
+                activeReference = currentReference,
+                gpuRuntime = gpuRuntime(SourceSeparationGpuRuntimeState.Installed),
+                gpuEnabled = false,
+                repairCandidates = listOf(
+                    LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.ConfigureGpuRuntime,
+                        reason = "Enable GPU.",
+                        required = false,
+                        componentId = "gpu-arm64",
+                    ),
+                ),
+            ),
+            SourceSeparationQuickSetupMode.RepairCurrent,
+        )
+
+        assertEquals(
+            listOf(SourceSeparationQuickSetupAction.ConfigureGpuRuntime),
+            plan.items.map(SourceSeparationQuickSetupPlanItem::action),
+        )
+        assertTrue(plan.proposedGpuEnabled == true)
+    }
+
     @Test
     fun `bootstrap orders CPU runtime model installation and final selection`() {
         val readiness = readiness(
@@ -180,6 +268,8 @@ class SourceSeparationQuickSetupPlannerTest {
         ),
         blockers: List<LocalSeparationIssue> = emptyList(),
         repairCandidates: List<LocalSeparationRepairCandidate> = emptyList(),
+        gpuRuntime: LocalSeparationGpuRuntimeSnapshot? = null,
+        gpuEnabled: Boolean = true,
     ) = LocalSeparationReadiness(
         schemaVersion = LocalSeparationReadinessContract.SCHEMA_VERSION,
         fingerprint = "f".repeat(64),
@@ -194,6 +284,8 @@ class SourceSeparationQuickSetupPlannerTest {
         blockers = blockers,
         degradations = emptyList(),
         repairCandidates = repairCandidates,
+        gpuRuntime = gpuRuntime,
+        gpuEnabled = gpuEnabled,
     )
 
     private fun runtime(
@@ -234,4 +326,27 @@ class SourceSeparationQuickSetupPlannerTest {
         active = active,
         official = true,
     )
+
+    private fun gpuRuntime(state: SourceSeparationGpuRuntimeState) =
+        LocalSeparationGpuRuntimeSnapshot(
+            componentId = "gpu-arm64",
+            abi = "arm64-v8a",
+            androidMinApi = 26,
+            runtimeArtifactVersion = "gpu-runtime-1",
+            producerReleaseVersion = "gpu-release-1",
+            downloadBytes = 10L,
+            installedBytes = 20L,
+            state = state,
+            reason = null,
+            delivery = SourceSeparationDeliveryReference(
+                providerId = "github",
+                artifactId = "gpu-arm64",
+                locator = "https://github.com/test/repo/releases/download/v1/gpu.zip",
+                expectedSha256 = "e".repeat(64),
+                expectedByteSize = 10L,
+            ),
+            isRunnable = state == SourceSeparationGpuRuntimeState.Installed,
+            maturity = "recommended",
+            profileId = "gpu-opencl-bounded-fp32-v1",
+        )
 }

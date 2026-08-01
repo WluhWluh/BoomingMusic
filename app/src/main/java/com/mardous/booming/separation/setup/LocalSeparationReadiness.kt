@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.setup
 
+import android.content.SharedPreferences
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelResolution
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelUnavailableReason
 import com.mardous.booming.separation.cache.v2.resolveActiveCacheModelResolution
@@ -18,11 +19,15 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetBinding
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeInventoryItem
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeInventoryItem
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeState
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeStore
+import com.mardous.booming.util.readSourceSeparationGpuEnabled
 import java.security.MessageDigest
 
 internal object LocalSeparationReadinessContract {
-    const val SCHEMA_VERSION = 1
-    const val PLAN_SCHEMA_VERSION = 1
+    const val SCHEMA_VERSION = 2
+    const val PLAN_SCHEMA_VERSION = 2
 }
 
 internal enum class LocalSeparationReadinessState {
@@ -41,6 +46,10 @@ internal enum class LocalSeparationBlockerCode {
     InvalidCpuRuntime,
     PendingCpuRuntimeActivation,
     PendingCpuRuntimeDeletion,
+    MissingGpuRuntime,
+    InvalidGpuRuntime,
+    PendingGpuRuntimeActivation,
+    PendingGpuRuntimeDeletion,
     NoActiveModel,
     PendingActiveModel,
     ActiveModelNotInstalled,
@@ -54,12 +63,20 @@ internal enum class LocalSeparationBlockerCode {
 internal enum class LocalSeparationDegradationCode {
     RuntimeActivationPending,
     RuntimeDeletionPending,
+    GpuRuntimeMissing,
+    GpuRuntimeActivationPending,
+    GpuRuntimeDeletionPending,
+    GpuInventoryUnavailable,
 }
 
 internal enum class LocalSeparationRepairCandidateKind {
     InstallCpuRuntime,
     RepairCpuRuntime,
     ActivatePendingCpuRuntime,
+    InstallGpuRuntime,
+    RepairGpuRuntime,
+    ActivatePendingGpuRuntime,
+    ConfigureGpuRuntime,
     InstallActiveModel,
     InstallRecommendedModel,
     OpenRuntimeManagement,
@@ -93,6 +110,22 @@ internal data class LocalSeparationRuntimeSnapshot(
     val isRunnable: Boolean,
 )
 
+internal data class LocalSeparationGpuRuntimeSnapshot(
+    val componentId: String,
+    val abi: String,
+    val androidMinApi: Int,
+    val runtimeArtifactVersion: String,
+    val producerReleaseVersion: String,
+    val downloadBytes: Long,
+    val installedBytes: Long,
+    val state: SourceSeparationGpuRuntimeState,
+    val reason: String?,
+    val delivery: SourceSeparationDeliveryReference,
+    val isRunnable: Boolean,
+    val maturity: String,
+    val profileId: String,
+)
+
 internal data class LocalSeparationModelSnapshot(
     val modelId: String,
     val displayName: String,
@@ -120,6 +153,8 @@ internal data class LocalSeparationReadiness(
     val degradations: List<LocalSeparationIssue>,
     val repairCandidates: List<LocalSeparationRepairCandidate>,
     val processGeneration: Long? = null,
+    val gpuRuntime: LocalSeparationGpuRuntimeSnapshot? = null,
+    val gpuEnabled: Boolean = true,
 ) {
     val isRunnable: Boolean
         get() = runnablePaths.isNotEmpty()
@@ -134,7 +169,9 @@ internal data class LocalSeparationRunnablePath(
 
 internal class LocalSeparationReadinessEvaluator(
     private val runtimeStore: SourceSeparationRuntimeStore,
+    private val gpuRuntimeStore: SourceSeparationGpuRuntimeStore,
     private val presetRepository: SourceSeparationPresetRepository,
+    private val preferences: SharedPreferences,
     private val platformProvider: () -> MdxRuntimePlatform = {
         AndroidMdxRuntimePlatformProvider.current()
     },
@@ -150,6 +187,13 @@ internal class LocalSeparationReadinessEvaluator(
             runtimeInventory.singleOrNull { it.catalogEntry.abi == current.runtimeAbi.androidName }
         }
         val runtimeSnapshot = runtimeItem?.toSnapshot()
+        val gpuInventoryResult = runCatching { gpuRuntimeStore.inventory() }
+        val gpuInventory = gpuInventoryResult.getOrNull().orEmpty()
+        val gpuItem = platform?.let { current ->
+            gpuInventory.singleOrNull { it.catalogEntry.abi == current.runtimeAbi.androidName }
+        }
+        val gpuSnapshot = gpuItem?.toSnapshot()
+        val gpuEnabled = preferences.readSourceSeparationGpuEnabled()
         val activeState = presetRepository.activeModel()
         val activeReference = when (activeState) {
             is SourceSeparationActivePresetState.Reference -> activeState.reference
@@ -276,6 +320,90 @@ internal class LocalSeparationReadinessEvaluator(
             }
         }
 
+        if (gpuInventoryResult.isFailure) {
+            degradations += LocalSeparationIssue(
+                LocalSeparationDegradationCode.GpuInventoryUnavailable,
+                gpuInventoryResult.exceptionOrNull()?.message
+                    ?: "The optional GPU runtime inventory could not be read.",
+            )
+        } else if (platform != null && gpuItem != null) {
+            when (gpuItem.state) {
+                SourceSeparationGpuRuntimeState.Missing -> {
+                    if (gpuEnabled) {
+                        degradations += LocalSeparationIssue(
+                            LocalSeparationDegradationCode.GpuRuntimeMissing,
+                            "The recommended bounded GPU runtime is not installed.",
+                        )
+                    }
+                    candidates += LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.InstallGpuRuntime,
+                        reason = "Install the release-qualified bounded GPU component.",
+                        required = false,
+                        componentId = gpuItem.catalogEntry.componentId,
+                    )
+                }
+
+                SourceSeparationGpuRuntimeState.Invalid -> {
+                    if (gpuEnabled) {
+                        degradations += LocalSeparationIssue(
+                            LocalSeparationDegradationCode.GpuRuntimeMissing,
+                            gpuItem.reason ?: "The bounded GPU runtime failed validation.",
+                        )
+                    }
+                    candidates += LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.RepairGpuRuntime,
+                        reason = "Repair the invalid bounded GPU component.",
+                        required = false,
+                        componentId = gpuItem.catalogEntry.componentId,
+                    )
+                }
+
+                SourceSeparationGpuRuntimeState.PendingActivation -> {
+                    if (gpuItem.installation == null) {
+                        if (gpuEnabled) {
+                            degradations += LocalSeparationIssue(
+                                LocalSeparationDegradationCode.GpuRuntimeActivationPending,
+                                gpuItem.reason ?: "A GPU runtime update is waiting to activate.",
+                            )
+                        }
+                        candidates += LocalSeparationRepairCandidate(
+                            kind = LocalSeparationRepairCandidateKind.ActivatePendingGpuRuntime,
+                            reason = "Activate the pending bounded GPU runtime.",
+                            required = false,
+                            componentId = gpuItem.catalogEntry.componentId,
+                        )
+                    } else if (gpuEnabled) {
+                        degradations += LocalSeparationIssue(
+                            LocalSeparationDegradationCode.GpuRuntimeActivationPending,
+                            gpuItem.reason ?: "A newer GPU runtime is waiting to activate.",
+                        )
+                    }
+                }
+
+                SourceSeparationGpuRuntimeState.PendingDeletion -> {
+                    if (gpuEnabled) {
+                        degradations += LocalSeparationIssue(
+                            LocalSeparationDegradationCode.GpuRuntimeDeletionPending,
+                            gpuItem.reason ?: "The GPU runtime is waiting to be removed.",
+                        )
+                    }
+                }
+
+                SourceSeparationGpuRuntimeState.Installed -> Unit
+            }
+            if (gpuItem.state == SourceSeparationGpuRuntimeState.Installed &&
+                !gpuEnabled &&
+                gpuItem.catalogEntry.maturity == "recommended"
+            ) {
+                candidates += LocalSeparationRepairCandidate(
+                    kind = LocalSeparationRepairCandidateKind.ConfigureGpuRuntime,
+                    reason = "Enable the release-recommended bounded GPU path.",
+                    required = false,
+                    componentId = gpuItem.catalogEntry.componentId,
+                )
+            }
+        }
+
         when (modelResolution) {
             is SourceSeparationActiveCacheModelResolution.Ready -> {
                 val compatibility = platform?.let { current ->
@@ -386,6 +514,8 @@ internal class LocalSeparationReadinessEvaluator(
                 platform = platform,
                 catalogRevision = catalogRevision,
                 runtime = runtimeSnapshot,
+                gpuRuntime = gpuSnapshot,
+                gpuEnabled = gpuEnabled,
                 activeReference = activeReference,
                 activeModel = activeModel,
                 state = state,
@@ -394,6 +524,8 @@ internal class LocalSeparationReadinessEvaluator(
             platform = platform,
             catalogRevision = catalogRevision,
             cpuRuntime = runtimeSnapshot,
+            gpuRuntime = gpuSnapshot,
+            gpuEnabled = gpuEnabled,
             activeModel = activeModel,
             recommendedModel = recommendedModel,
             activeModelReference = activeReference,
@@ -441,6 +573,23 @@ internal class LocalSeparationReadinessEvaluator(
             reason = reason,
             delivery = catalogEntry.deliveryReference(),
             isRunnable = installation != null && state != SourceSeparationRuntimeState.Invalid,
+        )
+
+    private fun SourceSeparationGpuRuntimeInventoryItem.toSnapshot() =
+        LocalSeparationGpuRuntimeSnapshot(
+            componentId = catalogEntry.componentId,
+            abi = catalogEntry.abi,
+            androidMinApi = catalogEntry.androidMinApi,
+            runtimeArtifactVersion = catalogEntry.runtimeArtifactVersion,
+            producerReleaseVersion = catalogEntry.producerReleaseVersion,
+            downloadBytes = catalogEntry.delivery.expectedByteSize,
+            installedBytes = installedBytes,
+            state = state,
+            reason = reason,
+            delivery = catalogEntry.deliveryReference(),
+            isRunnable = installation != null && state == SourceSeparationGpuRuntimeState.Installed,
+            maturity = catalogEntry.maturity,
+            profileId = catalogEntry.capability.profileId,
         )
 
     private fun SourceSeparationActivePresetState.installedModelSnapshot(
@@ -528,6 +677,8 @@ internal class LocalSeparationReadinessEvaluator(
         platform: MdxRuntimePlatform?,
         catalogRevision: String,
         runtime: LocalSeparationRuntimeSnapshot?,
+        gpuRuntime: LocalSeparationGpuRuntimeSnapshot?,
+        gpuEnabled: Boolean,
         activeReference: SourceSeparationActiveModelReference?,
         activeModel: LocalSeparationModelSnapshot?,
         state: LocalSeparationReadinessState,
@@ -542,6 +693,12 @@ internal class LocalSeparationReadinessEvaluator(
             append('|').append(runtime?.runtimeArtifactVersion.orEmpty())
             append('|').append(runtime?.producerReleaseVersion.orEmpty())
             append('|').append(runtime?.reason.orEmpty())
+            append('|').append(gpuRuntime?.componentId.orEmpty())
+            append('|').append(gpuRuntime?.state?.name.orEmpty())
+            append('|').append(gpuRuntime?.runtimeArtifactVersion.orEmpty())
+            append('|').append(gpuRuntime?.producerReleaseVersion.orEmpty())
+            append('|').append(gpuRuntime?.reason.orEmpty())
+            append('|').append(gpuEnabled)
             append('|').append(activeReference?.modelId.orEmpty())
             append('|').append(activeReference?.artifactSha256.orEmpty())
             append('|').append(activeReference?.contractSchemaVersion ?: 0)
@@ -566,6 +723,10 @@ internal enum class SourceSeparationQuickSetupAction {
     InstallRuntime,
     RepairRuntime,
     ActivatePendingRuntime,
+    InstallGpuRuntime,
+    RepairGpuRuntime,
+    ActivatePendingGpuRuntime,
+    ConfigureGpuRuntime,
     InstallModel,
     Validate,
     SelectModel,
@@ -664,6 +825,47 @@ internal object SourceSeparationQuickSetupPlanner {
             )
         }
 
+        val gpuRuntime = readiness.gpuRuntime
+        val gpuCandidate = readiness.repairCandidates.firstOrNull { candidate ->
+            candidate.kind in setOf(
+                LocalSeparationRepairCandidateKind.InstallGpuRuntime,
+                LocalSeparationRepairCandidateKind.RepairGpuRuntime,
+                LocalSeparationRepairCandidateKind.ActivatePendingGpuRuntime,
+                LocalSeparationRepairCandidateKind.ConfigureGpuRuntime,
+            )
+        }
+        if (gpuCandidate != null && gpuRuntime != null) {
+            val action = when (gpuCandidate.kind) {
+                LocalSeparationRepairCandidateKind.InstallGpuRuntime ->
+                    SourceSeparationQuickSetupAction.InstallGpuRuntime
+                LocalSeparationRepairCandidateKind.RepairGpuRuntime ->
+                    SourceSeparationQuickSetupAction.RepairGpuRuntime
+                LocalSeparationRepairCandidateKind.ActivatePendingGpuRuntime ->
+                    SourceSeparationQuickSetupAction.ActivatePendingGpuRuntime
+                LocalSeparationRepairCandidateKind.ConfigureGpuRuntime ->
+                    SourceSeparationQuickSetupAction.ConfigureGpuRuntime
+                else -> error("Unexpected GPU runtime candidate.")
+            }
+            items += SourceSeparationQuickSetupPlanItem(
+                itemId = "gpu:${gpuRuntime.componentId}",
+                action = action,
+                requirement = SourceSeparationQuickSetupRequirement.Recommended,
+                selected = gpuRuntime.maturity == "recommended",
+                title = "LiteRT bounded GPU",
+                reason = gpuCandidate.reason,
+                dependencyIds = items.filter {
+                    it.requirement == SourceSeparationQuickSetupRequirement.Required
+                }.map(SourceSeparationQuickSetupPlanItem::itemId),
+                componentId = gpuRuntime.componentId,
+                expectedDownloadBytes = if (action == SourceSeparationQuickSetupAction.ConfigureGpuRuntime) {
+                    0L
+                } else {
+                    gpuRuntime.downloadBytes
+                },
+                expectedInstalledBytes = gpuRuntime.installedBytes,
+            )
+        }
+
         val targetModel = if (readiness.state == LocalSeparationReadinessState.Unsupported) {
             null
         } else {
@@ -681,7 +883,9 @@ internal object SourceSeparationQuickSetupPlanner {
                 readiness.activeModelReference == null ||
                 readiness.activeModelReference.artifactSha256 != targetModel.artifactSha256
             )
-        val runtimeDependency = items.map(SourceSeparationQuickSetupPlanItem::itemId)
+        val runtimeDependency = items.filter {
+            it.requirement == SourceSeparationQuickSetupRequirement.Required
+        }.map(SourceSeparationQuickSetupPlanItem::itemId)
         if (shouldInstallModel) {
             val model = requireNotNull(targetModel)
             items += SourceSeparationQuickSetupPlanItem(
@@ -703,7 +907,9 @@ internal object SourceSeparationQuickSetupPlanner {
         }
         if (shouldSelectModel) {
             val model = requireNotNull(targetModel)
-            val dependencies = items.map(SourceSeparationQuickSetupPlanItem::itemId)
+            val dependencies = items.filter {
+                it.requirement == SourceSeparationQuickSetupRequirement.Required
+            }.map(SourceSeparationQuickSetupPlanItem::itemId)
             items += SourceSeparationQuickSetupPlanItem(
                 itemId = "select:${model.modelId}",
                 action = SourceSeparationQuickSetupAction.SelectModel,
@@ -747,7 +953,18 @@ internal object SourceSeparationQuickSetupPlanner {
             shouldSelectModel -> toReference(requireNotNull(targetModel))
             else -> readiness.activeModelReference
         }
-        val planId = hashPlan(mode, readiness.fingerprint, items, proposedModel)
+        val proposedGpuEnabled = if (gpuCandidate != null && gpuRuntime?.maturity == "recommended") {
+            true
+        } else {
+            null
+        }
+        val planId = hashPlan(
+            mode,
+            readiness.fingerprint,
+            items,
+            proposedModel,
+            proposedGpuEnabled,
+        )
         return SourceSeparationQuickSetupPlan(
             schemaVersion = LocalSeparationReadinessContract.PLAN_SCHEMA_VERSION,
             planId = planId,
@@ -756,6 +973,7 @@ internal object SourceSeparationQuickSetupPlanner {
             catalogRevision = readiness.catalogRevision,
             items = items,
             proposedActiveModel = proposedModel,
+            proposedGpuEnabled = proposedGpuEnabled,
         )
     }
 
@@ -771,6 +989,7 @@ internal object SourceSeparationQuickSetupPlanner {
         fingerprint: String,
         items: List<SourceSeparationQuickSetupPlanItem>,
         proposedModel: SourceSeparationActiveModelReference?,
+        proposedGpuEnabled: Boolean?,
     ): String {
         val canonical = buildString {
             append(mode.name).append('|').append(fingerprint)
@@ -780,6 +999,7 @@ internal object SourceSeparationQuickSetupPlanner {
             }
             append('|').append(proposedModel?.modelId.orEmpty())
             append('|').append(proposedModel?.artifactSha256.orEmpty())
+            append('|').append(proposedGpuEnabled)
         }
         return MessageDigest.getInstance("SHA-256")
             .digest(canonical.toByteArray())
