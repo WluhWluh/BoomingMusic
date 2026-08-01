@@ -30,8 +30,8 @@
         "providerId": "github",
         "artifactId": "litert-bounded-gpu-2.1.5-bss.2-arm64-v8a",
         "locator": "https://github.com/WluhWluh/bss-litert-android/releases/download/downloadable-runtime-v2.1.5-bss.2-exp.2/litert-bounded-gpu-2.1.5-bss.2-arm64-v8a.zip",
-        "expectedByteSize": 1245550,
-        "expectedSha256": "56b9d21357da440a6cfe99b297780f8f7b2c877664b1fe92fb84cc9c75e6eca2"
+        "expectedByteSize": 1251488,
+        "expectedSha256": "f10cc1f3f426017dfc9bb831f8e4b658beabc92afc20b480d1e5f6565b7ae6b2"
       },
       "innerManifestSha256": "4ae33d6696fa155775955d1221f4d0b6db4ab1b8eeb6bf4dfc37c467f3702c36",
       "files": [
