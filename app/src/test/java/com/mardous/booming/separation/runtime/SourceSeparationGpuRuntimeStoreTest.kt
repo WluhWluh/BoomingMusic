@@ -134,6 +134,22 @@ class SourceSeparationGpuRuntimeStoreTest {
     }
 
     @Test
+    fun `mismatched GPU install identity is reported invalid`() {
+        val fixture = GpuRuntimeFixture.create(temporary.root)
+        val store = fixture.store()
+        store.install(fixture.entry.componentId)
+        val recordFile = SourceSeparationRuntimeLayout.gpuCurrentDirectory(
+            temporary.root,
+            fixture.entry.abi,
+        ).resolve("install.json")
+        recordFile.writeText(recordFile.readText().replace(fixture.entry.componentId, "different-gpu-component"))
+
+        val inventory = store.inventory(fixture.entry.componentId)
+
+        assertEquals(SourceSeparationGpuRuntimeState.Invalid, inventory.state)
+    }
+
+    @Test
     fun `lease turns removal into pending deletion`() {
         val fixture = GpuRuntimeFixture.create(temporary.root)
         val store = fixture.store()

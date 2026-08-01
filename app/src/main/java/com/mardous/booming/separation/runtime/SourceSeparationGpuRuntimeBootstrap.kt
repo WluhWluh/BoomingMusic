@@ -37,6 +37,23 @@ internal object SourceSeparationGpuRuntimeBootstrap {
                 observation = unavailable(error.message ?: "The bounded GPU runtime is not installed.")
                 return
             }
+            val catalogEntry = runCatching {
+                SourceSeparationGpuRuntimeCatalogLoader.load(context).entries.singleOrNull {
+                    it.abi == abi
+                } ?: error("No bounded GPU catalog entry exists for $abi.")
+            }.getOrElse { error ->
+                observation = unavailable(
+                    "The bounded GPU runtime catalog is unavailable: " +
+                        (error.message ?: "unknown error"),
+                )
+                return
+            }
+            if (!matchesCatalogEntry(installation, catalogEntry)) {
+                observation = unavailable(
+                    "The downloaded bounded GPU runtime does not match the bundled catalog.",
+                )
+                return
+            }
             val cpu = runCatching {
                 SourceSeparationRuntimeLocator(
                     root = root,
@@ -50,8 +67,17 @@ internal object SourceSeparationGpuRuntimeBootstrap {
                 )
                 return
             }
-            if (cpu.identity.librarySha256 != installation.manifest.requiredCore.librarySha256) {
-                observation = unavailable("The installed CPU LiteRT runtime does not match the GPU dependency.")
+            val cpuRecord = SourceSeparationRuntimeInstallRecordReader.read(root, abi)
+            if (cpuRecord == null ||
+                cpuRecord.componentId != catalogEntry.requiredCpuComponentId ||
+                cpuRecord.componentType != SourceSeparationRuntimeLayout.CPU_COMPONENT ||
+                cpuRecord.abi != abi ||
+                !cpuRecord.librarySha256.equals(cpu.identity.librarySha256, ignoreCase = true) ||
+                !cpu.identity.librarySha256.equals(catalogEntry.requiredCpuLibrarySha256, ignoreCase = true)
+            ) {
+                observation = unavailable(
+                    "The installed CPU LiteRT runtime does not match the GPU dependency.",
+                )
                 return
             }
 
@@ -102,6 +128,38 @@ internal object SourceSeparationGpuRuntimeBootstrap {
 
     fun installation(): SourceSeparationGpuRuntimeInstallation? = synchronized(lock) {
         loadedInstallation
+    }
+
+    private fun matchesCatalogEntry(
+        installation: SourceSeparationGpuRuntimeInstallation,
+        entry: SourceSeparationGpuRuntimeCatalogEntry,
+    ): Boolean {
+        val expectedFiles = entry.files.associate { it.path to it.sha256.lowercase(Locale.US) }
+        val actualFiles = installation.libraryFiles.mapValues { (_, file) ->
+            file.sha256().lowercase(Locale.US)
+        }
+        val record = SourceSeparationGpuRuntimeInstallRecordReader.read(installation.directory)
+            ?: return false
+        val recordedFiles = record.fileSha256.mapValues { (_, hash) -> hash.lowercase(Locale.US) }
+        return installation.manifest.component == entry.componentType &&
+            installation.manifest.abi == entry.abi &&
+            installation.manifest.releaseVersion == entry.producerReleaseVersion &&
+            installation.manifest.runtimeArtifactVersion == entry.runtimeArtifactVersion &&
+            installation.manifest.requiredCore.librarySha256.equals(
+                entry.requiredCpuLibrarySha256,
+                ignoreCase = true,
+            ) &&
+            installation.manifest.profile == entry.capability &&
+            installation.manifestFile.sha256().equals(entry.innerManifestSha256, ignoreCase = true) &&
+            actualFiles == expectedFiles &&
+            record.componentId == entry.componentId &&
+            record.componentType == entry.componentType &&
+            record.producerReleaseTag == entry.producerReleaseTag &&
+            record.producerReleaseVersion == entry.producerReleaseVersion &&
+            record.runtimeArtifactVersion == entry.runtimeArtifactVersion &&
+            record.abi == entry.abi &&
+            record.innerManifestSha256.equals(entry.innerManifestSha256, ignoreCase = true) &&
+            recordedFiles == expectedFiles
     }
 
     private fun currentProcessAbi(): String {

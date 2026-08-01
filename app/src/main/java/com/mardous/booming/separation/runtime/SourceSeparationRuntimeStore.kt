@@ -56,7 +56,30 @@ internal data class SourceSeparationRuntimeInstallRecord(
     val librarySha256: String,
     val installedAtEpochMs: Long,
     val lastValidatedAtEpochMs: Long,
-)
+) {
+    companion object {
+        const val SCHEMA_VERSION = 1
+    }
+}
+
+internal object SourceSeparationRuntimeInstallRecordReader {
+    private val json = Json {
+        ignoreUnknownKeys = false
+        isLenient = false
+    }
+
+    fun read(root: File, abi: String): SourceSeparationRuntimeInstallRecord? {
+        val file = File(
+            SourceSeparationRuntimeLayout.cpuCurrentDirectory(root, abi),
+            "install.json",
+        )
+        if (!file.isFile) return null
+        return runCatching {
+            json.decodeFromString<SourceSeparationRuntimeInstallRecord>(file.readText())
+                .takeIf { it.schemaVersion == SourceSeparationRuntimeInstallRecord.SCHEMA_VERSION }
+        }.getOrNull()
+    }
+}
 
 @Serializable
 private data class SourceSeparationRuntimePendingOperation(
@@ -615,7 +638,7 @@ internal class SourceSeparationRuntimeStore(
 
     private companion object {
         const val INSTALL_RECORD_FILE_NAME = "install.json"
-        const val INSTALL_RECORD_SCHEMA_VERSION = 1
+        const val INSTALL_RECORD_SCHEMA_VERSION = SourceSeparationRuntimeInstallRecord.SCHEMA_VERSION
         const val PENDING_OPERATION_SCHEMA_VERSION = 1
         const val PENDING_ACTIVATION = "activation"
         const val PENDING_DELETION = "deletion"
@@ -654,7 +677,7 @@ internal class SourceSeparationRuntimeInsufficientStorageException(
         "need ${preflight.requiredBytes} bytes, have ${preflight.availableBytes}.",
 )
 
-private fun File.sha256(): String {
+internal fun File.sha256(): String {
     val digest = MessageDigest.getInstance("SHA-256")
     FileInputStream(this).use { input ->
         val buffer = ByteArray(1024 * 1024)

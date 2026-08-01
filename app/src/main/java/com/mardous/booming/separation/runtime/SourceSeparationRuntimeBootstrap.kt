@@ -342,16 +342,3 @@ internal object SourceSeparationRuntimeBootstrap {
         }
     }
 }
-
-private fun File.sha256(): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-    inputStream().buffered().use { input ->
-        val buffer = ByteArray(1024 * 1024)
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            digest.update(buffer, 0, count)
-        }
-    }
-    return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
-}

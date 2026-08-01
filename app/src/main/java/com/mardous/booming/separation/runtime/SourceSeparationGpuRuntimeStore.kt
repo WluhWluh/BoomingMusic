@@ -253,7 +253,7 @@ internal class SourceSeparationGpuRuntimeLocator(
 }
 
 @Serializable
-private data class SourceSeparationGpuRuntimeInstallRecord(
+internal data class SourceSeparationGpuRuntimeInstallRecord(
     val schemaVersion: Int,
     val componentId: String,
     val componentType: String,
@@ -265,7 +265,27 @@ private data class SourceSeparationGpuRuntimeInstallRecord(
     val fileSha256: Map<String, String>,
     val installedAtEpochMs: Long,
     val lastValidatedAtEpochMs: Long,
-)
+) {
+    companion object {
+        const val SCHEMA_VERSION = 1
+    }
+}
+
+internal object SourceSeparationGpuRuntimeInstallRecordReader {
+    private val json = Json {
+        ignoreUnknownKeys = false
+        isLenient = false
+    }
+
+    fun read(directory: File): SourceSeparationGpuRuntimeInstallRecord? {
+        val file = File(directory, "install.json")
+        if (!file.isFile) return null
+        return runCatching {
+            json.decodeFromString<SourceSeparationGpuRuntimeInstallRecord>(file.readText())
+                .takeIf { it.schemaVersion == SourceSeparationGpuRuntimeInstallRecord.SCHEMA_VERSION }
+        }.getOrNull()
+    }
+}
 
 @Serializable
 private data class SourceSeparationGpuRuntimePendingOperation(
@@ -596,15 +616,7 @@ internal class SourceSeparationGpuRuntimeStore(
     }
 
     private fun readCpuInstallRecord(abi: String): SourceSeparationRuntimeInstallRecord? {
-        val file = File(
-            SourceSeparationRuntimeLayout.cpuCurrentDirectory(root, abi),
-            INSTALL_RECORD_FILE_NAME,
-        )
-        if (!file.isFile) return null
-        return runCatching {
-            json.decodeFromString<SourceSeparationRuntimeInstallRecord>(file.readText())
-                .takeIf { it.schemaVersion == CPU_INSTALL_RECORD_SCHEMA_VERSION }
-        }.getOrNull()
+        return SourceSeparationRuntimeInstallRecordReader.read(root, abi)
     }
 
     private fun invalid(entry: SourceSeparationGpuRuntimeCatalogEntry, reason: String) =
@@ -698,12 +710,7 @@ internal class SourceSeparationGpuRuntimeStore(
     }
 
     private fun readInstallRecord(directory: File): SourceSeparationGpuRuntimeInstallRecord? {
-        val file = File(directory, INSTALL_RECORD_FILE_NAME)
-        if (!file.isFile) return null
-        return runCatching {
-            json.decodeFromString<SourceSeparationGpuRuntimeInstallRecord>(file.readText())
-                .takeIf { it.schemaVersion == INSTALL_RECORD_SCHEMA_VERSION }
-        }.getOrNull()
+        return SourceSeparationGpuRuntimeInstallRecordReader.read(directory)
     }
 
     private fun writePendingOperation(
@@ -858,8 +865,7 @@ internal class SourceSeparationGpuRuntimeStore(
 
     private companion object {
         const val INSTALL_RECORD_FILE_NAME = "install.json"
-        const val INSTALL_RECORD_SCHEMA_VERSION = 1
-        const val CPU_INSTALL_RECORD_SCHEMA_VERSION = 1
+        const val INSTALL_RECORD_SCHEMA_VERSION = SourceSeparationGpuRuntimeInstallRecord.SCHEMA_VERSION
         const val PENDING_OPERATION_SCHEMA_VERSION = 1
         const val PENDING_ACTIVATION = "activation"
         const val PENDING_DELETION = "deletion"
