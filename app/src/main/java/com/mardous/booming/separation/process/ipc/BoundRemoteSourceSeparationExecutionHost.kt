@@ -788,7 +788,13 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     private fun createServiceConnection(bindingGeneration: Long) =
         object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName, service: IBinder) {
-                connect(bindingGeneration, service)
+                Thread(
+                    { connect(bindingGeneration, service) },
+                    CONNECTION_THREAD_NAME,
+                ).apply {
+                    isDaemon = true
+                    start()
+                }
             }
 
             override fun onServiceDisconnected(name: ComponentName) {
@@ -1124,6 +1130,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         const val DEFAULT_RECYCLE_TIMEOUT_MS =
             SourceSeparationProcessLifecyclePolicy.RECYCLE_TIMEOUT_MS
         const val DEFAULT_CONTROL_POLL_INTERVAL_MS = 100L
+        const val CONNECTION_THREAD_NAME = "SourceSeparationIpcConnect"
         const val CONTROL_THREAD_NAME = "SourceSeparationIpcControl"
         const val CONTROL_CLOSE_TIMEOUT_MS = 2_000L
         const val PROCESS_EXIT_POLL_INTERVAL_MS = 20L
