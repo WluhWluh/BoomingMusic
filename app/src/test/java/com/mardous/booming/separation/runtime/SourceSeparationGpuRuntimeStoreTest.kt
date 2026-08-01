@@ -12,6 +12,7 @@ import java.io.InputStream
 import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -55,6 +56,39 @@ class SourceSeparationGpuRuntimeStoreTest {
             SourceSeparationRuntimeLayout.gpuCurrentDirectory(temporary.root, fixture.entry.abi)
                 .exists(),
         )
+    }
+
+    @Test
+    fun `mismatched CPU component identity is rejected before download`() {
+        val fixture = GpuRuntimeFixture.create(temporary.root)
+        val provider = fixture.provider()
+        val recordFile = SourceSeparationRuntimeLayout.cpuCurrentDirectory(
+            temporary.root,
+            fixture.entry.abi,
+        ).resolve("install.json")
+        recordFile.writeText(
+            Json.encodeToString(
+                SourceSeparationRuntimeInstallRecord(
+                    schemaVersion = 1,
+                    componentId = "different-cpu-component",
+                    componentType = SourceSeparationRuntimeLayout.CPU_COMPONENT,
+                    producerReleaseTag = "test-cpu-release-tag",
+                    producerReleaseVersion = "test-cpu-release",
+                    runtimeArtifactVersion = "test-cpu-runtime",
+                    abi = fixture.entry.abi,
+                    innerManifestSha256 = "a".repeat(64),
+                    librarySha256 = fixture.cpuLibrary.sha256(),
+                    installedAtEpochMs = 1L,
+                    lastValidatedAtEpochMs = 1L,
+                ),
+            ),
+        )
+
+        val error = runCatching { fixture.store(provider).install(fixture.entry.componentId) }
+            .exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertEquals(0, provider.acquireCount)
     }
 
     @Test
@@ -123,7 +157,7 @@ class SourceSeparationGpuRuntimeStoreTest {
         val entry: SourceSeparationGpuRuntimeCatalogEntry,
         val catalog: SourceSeparationGpuRuntimeCatalog,
         val zipBytes: ByteArray,
-        private val cpuLibrary: ByteArray,
+        val cpuLibrary: ByteArray,
         private val cpuManifest: ByteArray,
     ) {
         fun provider() = TestGpuRuntimeProvider(zipBytes)
@@ -141,6 +175,23 @@ class SourceSeparationGpuRuntimeStoreTest {
                 .apply { mkdirs() }
             File(cpuDirectory, SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME).writeBytes(cpuLibrary)
             File(cpuDirectory, SourceSeparationRuntimeLayout.MANIFEST_FILE_NAME).writeBytes(cpuManifest)
+            File(cpuDirectory, "install.json").writeText(
+                Json.encodeToString(
+                    SourceSeparationRuntimeInstallRecord(
+                        schemaVersion = 1,
+                        componentId = entry.requiredCpuComponentId,
+                        componentType = SourceSeparationRuntimeLayout.CPU_COMPONENT,
+                        producerReleaseTag = "test-cpu-release-tag",
+                        producerReleaseVersion = "test-cpu-release",
+                        runtimeArtifactVersion = "test-cpu-runtime",
+                        abi = entry.abi,
+                        innerManifestSha256 = cpuManifest.sha256(),
+                        librarySha256 = cpuLibrary.sha256(),
+                        installedAtEpochMs = 1L,
+                        lastValidatedAtEpochMs = 1L,
+                    ),
+                ),
+            )
         }
 
         companion object {

@@ -583,7 +583,28 @@ internal class SourceSeparationGpuRuntimeStore(
         ) {
             return "The installed CPU LiteRT runtime does not match the GPU dependency."
         }
+        val installRecord = readCpuInstallRecord(entry.abi)
+            ?: return "The installed CPU LiteRT runtime has no valid install record."
+        if (installRecord.componentId != entry.requiredCpuComponentId ||
+            installRecord.componentType != SourceSeparationRuntimeLayout.CPU_COMPONENT ||
+            installRecord.abi != entry.abi ||
+            !installRecord.librarySha256.equals(cpu.identity.librarySha256, ignoreCase = true)
+        ) {
+            return "The installed CPU LiteRT component identity does not match the GPU dependency."
+        }
         return null
+    }
+
+    private fun readCpuInstallRecord(abi: String): SourceSeparationRuntimeInstallRecord? {
+        val file = File(
+            SourceSeparationRuntimeLayout.cpuCurrentDirectory(root, abi),
+            INSTALL_RECORD_FILE_NAME,
+        )
+        if (!file.isFile) return null
+        return runCatching {
+            json.decodeFromString<SourceSeparationRuntimeInstallRecord>(file.readText())
+                .takeIf { it.schemaVersion == CPU_INSTALL_RECORD_SCHEMA_VERSION }
+        }.getOrNull()
     }
 
     private fun invalid(entry: SourceSeparationGpuRuntimeCatalogEntry, reason: String) =
@@ -838,6 +859,7 @@ internal class SourceSeparationGpuRuntimeStore(
     private companion object {
         const val INSTALL_RECORD_FILE_NAME = "install.json"
         const val INSTALL_RECORD_SCHEMA_VERSION = 1
+        const val CPU_INSTALL_RECORD_SCHEMA_VERSION = 1
         const val PENDING_OPERATION_SCHEMA_VERSION = 1
         const val PENDING_ACTIVATION = "activation"
         const val PENDING_DELETION = "deletion"
