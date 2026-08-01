@@ -4,7 +4,7 @@ Status: active product and implementation plan. The product and data contracts
 in this document are frozen; phase checklists may be refined only without
 silently changing those contracts.
 
-Updated: 2026-07-31
+Updated: 2026-08-01
 
 This document is authoritative for:
 
@@ -839,13 +839,13 @@ unrelated resources remain untouched by repair.
 
 ### Phase 4: Add downloadable bounded GPU
 
-- [ ] Add the bounded GPU catalog component and exact CPU-core dependency.
-- [ ] Load accelerator and `libBssOcl.so` in the verified dependency order and
+- [x] Add the bounded GPU catalog component and exact CPU-core dependency.
+- [x] Load accelerator and `libBssOcl.so` in the verified dependency order and
   attest `gpu-opencl-bounded-fp32-v1` with `N=1`.
-- [ ] Move the persistent GPU preference from Advanced to Runtime Management.
-- [ ] Make a qualified GPU component recommended by Quick Setup and deselectable
+- [x] Move the persistent GPU preference from Advanced to Runtime Management.
+- [x] Make a qualified GPU component recommended by Quick Setup and deselectable
   by the user.
-- [ ] Preserve the admitted preference and backend across UI, background, and
+- [x] Preserve the admitted preference and backend across UI, background, and
   screen-state changes.
 - [ ] Test setup/probe/invocation/output failure, complete cleanup, one-way CPU
   fallback, process poison/recycle, update, and loaded-version removal.
@@ -855,6 +855,31 @@ unrelated resources remain untouched by repair.
 
 **Phase 4 exit:** qualified devices default to bounded GPU without shipping its
 native payload in the APK, and CPU remains a complete verified fallback.
+
+**Phase 4 implementation record (2026-08-01):**
+
+- `litert-gpu-runtime-catalog-v1.json` describes the arm64 bounded OpenCL
+  component, its exact CPU library SHA-256 dependency, two native libraries,
+  and the fixed `N=1` capability profile.
+- GPU installation uses its own catalog/store directory and install record but
+  shares the ABI process lease with the CPU runtime. ZIP, manifest, ELF-file
+  hashes, dependency identity, pending activation, pending deletion, and
+  corrupted-payload tests pass.
+- The source-separation process loads the verified CPU library first, then
+  `libBssOcl.so`, then `libLiteRtClGlAccelerator.so` from absolute paths. JNI
+  capability is compared with the manifest before GPU eligibility is exposed;
+  failure leaves CPU available.
+- Runtime Management owns the canonical `gpu_enabled` preference and the GPU
+  component actions. The old `try_gpu` key remains a synchronized compatibility
+  projection for existing backup files.
+- Readiness and Quick Setup treat the qualified GPU as an optional selected
+  recommendation. Model installation and model selection depend only on
+  required CPU/model items, so deselecting GPU remains valid. A successful
+  Quick Setup commit resets the GPU preference to the selected recommendation.
+- JVM coverage currently passes the runtime stores, locator, planner, bounded
+  capability, Auto fallback, and model-aware engine tests. Real-device
+  downloaded-component validation and the failure/process-recycle/performance
+  matrix below remain open and are not release qualification.
 
 ### Phase 5: Add exact vendor NPU AOT variants
 
