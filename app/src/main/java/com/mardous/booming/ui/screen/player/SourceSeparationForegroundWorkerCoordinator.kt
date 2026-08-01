@@ -34,7 +34,7 @@ import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COM
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
-import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_TRY_GPU
+import com.mardous.booming.util.readSourceSeparationGpuEnabled
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
@@ -42,7 +42,6 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIM
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
-import com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -1001,10 +1000,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 songId = song.id,
                 songTitle = song.title,
             )
-            val tryGpu = preferences.getBoolean(
-                SOURCE_SEPARATION_TRY_GPU,
-                DEFAULT_SOURCE_SEPARATION_TRY_GPU,
-            )
+            val tryGpu = preferences.readSourceSeparationGpuEnabled()
             val result = sourceSeparationRuntime.separate(
                 song = resolved,
                 tryGpu = tryGpu,

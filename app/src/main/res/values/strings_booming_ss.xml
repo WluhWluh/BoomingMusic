@@ -88,6 +88,8 @@
     <string name="source_separation_runtime_activate">Activate update</string>
     <string name="source_separation_runtime_remove_title">Remove CPU runtime?</string>
     <string name="source_separation_runtime_remove_message">Remove the %1$s CPU runtime? Source-separation models and generated caches will not be deleted.</string>
+    <string name="source_separation_runtime_remove_component_title">Remove runtime component?</string>
+    <string name="source_separation_runtime_remove_component_message">Remove the runtime component for %1$s? Source-separation models and generated caches will not be deleted.</string>
     <string name="source_separation_runtime_remove_action">Remove</string>
     <string name="source_separation_runtime_missing">Not installed</string>
     <string name="source_separation_runtime_installed">Installed and verified</string>
@@ -95,6 +97,14 @@
     <string name="source_separation_runtime_pending_activation">Update waiting for the inference process</string>
     <string name="source_separation_runtime_pending_deletion">Removal waiting for the inference process</string>
     <string name="source_separation_runtime_diagnostics_title">Runtime diagnostics</string>
+    <string name="source_separation_runtime_gpu_title">GPU runtime</string>
+    <string name="source_separation_runtime_gpu_enabled_title">Use bounded GPU</string>
+    <string name="source_separation_runtime_gpu_enabled_description">Use the verified bounded OpenCL component when it is installed and eligible. CPU remains the fallback.</string>
+    <string name="source_separation_runtime_gpu_profile">Profile: gpu-opencl-bounded-fp32-v1, queue window 1</string>
+    <string name="source_separation_runtime_gpu_unavailable">No qualified GPU component is available for this process ABI.</string>
+    <string name="source_separation_runtime_gpu_component_title">Bounded OpenCL component</string>
+    <string name="source_separation_runtime_gpu_size_summary">Download %1$s, installed libraries %2$s</string>
+    <string name="source_separation_runtime_gpu_install">Install GPU runtime</string>
     <string name="source_separation_quick_setup_title">Quick Setup</string>
     <string name="source_separation_quick_setup_analyzing">Checking local separation resources...</string>
     <string name="source_separation_quick_setup_status_title">Local separation status</string>

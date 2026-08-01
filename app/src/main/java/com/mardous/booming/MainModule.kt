@@ -465,7 +465,11 @@ private val viewModule = module {
     }
 
     viewModel {
-        SourceSeparationRuntimeManagementViewModel(store = get())
+        SourceSeparationRuntimeManagementViewModel(
+            store = get(),
+            gpuStore = get(),
+            preferences = get(),
+        )
     }
 
     viewModel {

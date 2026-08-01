@@ -299,6 +299,11 @@ private fun SourceSeparationSettingsSheet(
                     onRepair = runtimeManagementViewModel::repair,
                     onActivatePending = runtimeManagementViewModel::activatePending,
                     onRemove = runtimeManagementViewModel::remove,
+                    onInstallGpu = runtimeManagementViewModel::installGpu,
+                    onRepairGpu = runtimeManagementViewModel::repairGpu,
+                    onActivatePendingGpu = runtimeManagementViewModel::activatePendingGpu,
+                    onRemoveGpu = runtimeManagementViewModel::removeGpu,
+                    onGpuEnabledChange = runtimeManagementViewModel::setGpuEnabled,
                     onDismissError = runtimeManagementViewModel::dismissError,
                 )
                 return@Column

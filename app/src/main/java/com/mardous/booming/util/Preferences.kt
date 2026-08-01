@@ -618,6 +618,7 @@ const val PLAY_ALL_SONGS_WHEN_SEARCHING = "play_all_songs_when_searching"
 const val CLEAR_QUEUE_ON_COMPLETION = "clear_queue_on_completion"
 const val REMEMBER_SHUFFLE_MODE = "remember_shuffle_mode"
 const val SOURCE_SEPARATION_AUTO_START = "source_separation.auto_start"
+const val SOURCE_SEPARATION_GPU_ENABLED = "source_separation.gpu_enabled"
 const val SOURCE_SEPARATION_TRY_GPU = "source_separation.try_gpu"
 const val SOURCE_SEPARATION_WINDOW_DECODE = "source_separation.window_decode"
 const val SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION = "source_separation.auto_flac_compression"
@@ -637,6 +638,7 @@ const val SOURCE_SEPARATION_AVERAGE_WINDOW_MS = "source_separation.average_windo
 const val SOURCE_SEPARATION_AVERAGE_WINDOW_SAMPLE_COUNT =
     "source_separation.average_window_sample_count"
 const val DEFAULT_SOURCE_SEPARATION_AUTO_START = true
+const val DEFAULT_SOURCE_SEPARATION_GPU_ENABLED = true
 const val DEFAULT_SOURCE_SEPARATION_TRY_GPU = true
 const val DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE = true
 const val DEFAULT_SOURCE_SEPARATION_PANEL_ENTRY_VISIBLE = false
@@ -653,6 +655,24 @@ const val MIN_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT = 2
 const val MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT = 8
 const val DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS = 3000L
 const val MAX_SOURCE_SEPARATION_AVERAGE_WINDOW_SAMPLE_COUNT = 32
+
+fun SharedPreferences.readSourceSeparationGpuEnabled(): Boolean {
+    if (contains(SOURCE_SEPARATION_GPU_ENABLED)) {
+        return getBoolean(SOURCE_SEPARATION_GPU_ENABLED, DEFAULT_SOURCE_SEPARATION_GPU_ENABLED)
+    }
+    val legacy = getBoolean(SOURCE_SEPARATION_TRY_GPU, DEFAULT_SOURCE_SEPARATION_GPU_ENABLED)
+    if (contains(SOURCE_SEPARATION_TRY_GPU)) {
+        edit { putBoolean(SOURCE_SEPARATION_GPU_ENABLED, legacy) }
+    }
+    return legacy
+}
+
+fun SharedPreferences.writeSourceSeparationGpuEnabled(enabled: Boolean) {
+    edit {
+        putBoolean(SOURCE_SEPARATION_GPU_ENABLED, enabled)
+        putBoolean(SOURCE_SEPARATION_TRY_GPU, enabled)
+    }
+}
 const val ALBUM_SHUFFLE_MODE = "album_shuffle_mode"
 const val ARTIST_SHUFFLE_MODE = "artist_shuffle_mode"
 const val RESUME_ON_CONNECT = "resume_on_connect"

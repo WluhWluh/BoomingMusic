@@ -88,6 +88,8 @@
     <string name="source_separation_runtime_activate">启用更新</string>
     <string name="source_separation_runtime_remove_title">移除 CPU 运行时？</string>
     <string name="source_separation_runtime_remove_message">移除 %1$s CPU 运行时？不会删除音源分离模型或已生成的缓存。</string>
+    <string name="source_separation_runtime_remove_component_title">移除运行时组件？</string>
+    <string name="source_separation_runtime_remove_component_message">移除 %1$s 的运行时组件？不会删除音源分离模型或已生成的缓存。</string>
     <string name="source_separation_runtime_remove_action">移除</string>
     <string name="source_separation_runtime_missing">未安装</string>
     <string name="source_separation_runtime_installed">已安装并通过校验</string>
@@ -95,6 +97,14 @@
     <string name="source_separation_runtime_pending_activation">等待音源分离进程后启用更新</string>
     <string name="source_separation_runtime_pending_deletion">等待音源分离进程后移除</string>
     <string name="source_separation_runtime_diagnostics_title">运行时诊断</string>
+    <string name="source_separation_runtime_gpu_title">GPU 运行时</string>
+    <string name="source_separation_runtime_gpu_enabled_title">使用有界 GPU</string>
+    <string name="source_separation_runtime_gpu_enabled_description">已安装且设备符合条件时，使用经过验证的有界 OpenCL 组件。CPU 仍会作为回退。</string>
+    <string name="source_separation_runtime_gpu_profile">配置：gpu-opencl-bounded-fp32-v1，队列窗口 1</string>
+    <string name="source_separation_runtime_gpu_unavailable">此进程 ABI 没有可用的合格 GPU 组件。</string>
+    <string name="source_separation_runtime_gpu_component_title">有界 OpenCL 组件</string>
+    <string name="source_separation_runtime_gpu_size_summary">下载 %1$s，已安装库 %2$s</string>
+    <string name="source_separation_runtime_gpu_install">安装 GPU 运行时</string>
     <string name="source_separation_quick_setup_title">快速配置</string>
     <string name="source_separation_quick_setup_analyzing">正在检查本地音源分离资源……</string>
     <string name="source_separation_quick_setup_status_title">本地音源分离状态</string>

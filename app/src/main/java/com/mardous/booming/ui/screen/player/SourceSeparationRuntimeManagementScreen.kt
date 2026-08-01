@@ -18,6 +18,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,6 +34,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mardous.booming.R
 import com.mardous.booming.extensions.files.asReadableFileSize
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeInventoryItem
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeState
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeInventoryItem
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
 import com.mardous.booming.ui.component.compose.TitledCard
@@ -47,35 +50,56 @@ internal fun SourceSeparationRuntimeManagementPage(
     onRepair: (String) -> Unit,
     onActivatePending: (String) -> Unit,
     onRemove: (String) -> Unit,
+    onInstallGpu: (String) -> Unit,
+    onRepairGpu: (String) -> Unit,
+    onActivatePendingGpu: (String) -> Unit,
+    onRemoveGpu: (String) -> Unit,
+    onGpuEnabledChange: (Boolean) -> Unit,
     onDismissError: () -> Unit,
 ) {
     var pendingRemove by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingGpuRemove by rememberSaveable { mutableStateOf<String?>(null) }
     val pendingItem = state.items.singleOrNull { it.catalogEntry.componentId == pendingRemove }
+    val pendingGpuItem = state.gpuItems.singleOrNull {
+        it.catalogEntry.componentId == pendingGpuRemove
+    }
 
-    if (pendingItem != null) {
+    if (pendingItem != null || pendingGpuItem != null) {
+        val pendingAbi = pendingItem?.catalogEntry?.abi ?: pendingGpuItem!!.catalogEntry.abi
         AlertDialog(
-            onDismissRequest = { pendingRemove = null },
-            title = { Text(stringResource(R.string.source_separation_runtime_remove_title)) },
+            onDismissRequest = {
+                pendingRemove = null
+                pendingGpuRemove = null
+            },
+            title = { Text(stringResource(R.string.source_separation_runtime_remove_component_title)) },
             text = {
                 Text(
                     stringResource(
-                        R.string.source_separation_runtime_remove_message,
-                        pendingItem.catalogEntry.abi,
+                        R.string.source_separation_runtime_remove_component_message,
+                        pendingAbi,
                     ),
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        onRemove(pendingItem.catalogEntry.componentId)
+                        if (pendingItem != null) {
+                            onRemove(pendingItem.catalogEntry.componentId)
+                        } else {
+                            onRemoveGpu(pendingGpuItem!!.catalogEntry.componentId)
+                        }
                         pendingRemove = null
+                        pendingGpuRemove = null
                     },
                 ) {
                     Text(stringResource(R.string.source_separation_runtime_remove_action))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingRemove = null }) {
+                TextButton(onClick = {
+                    pendingRemove = null
+                    pendingGpuRemove = null
+                }) {
                     Text(stringResource(R.string.action_cancel))
                 }
             },
@@ -149,6 +173,56 @@ internal fun SourceSeparationRuntimeManagementPage(
             }
         }
 
+        item {
+            TitledCard(
+                title = stringResource(R.string.source_separation_runtime_gpu_title),
+                modifier = Modifier.fillMaxWidth(),
+            ) { padding ->
+                Column(
+                    modifier = Modifier.padding(padding),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.source_separation_runtime_gpu_enabled_title),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                text = stringResource(
+                                    R.string.source_separation_runtime_gpu_enabled_description,
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Switch(
+                            checked = state.gpuEnabled,
+                            onCheckedChange = onGpuEnabledChange,
+                            enabled = state.gpuItems.any {
+                                it.catalogEntry.abi == state.device.abi
+                            },
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.source_separation_runtime_gpu_profile),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (state.gpuItems.none { it.catalogEntry.abi == state.device.abi }) {
+                        Text(
+                            text = stringResource(R.string.source_separation_runtime_gpu_unavailable),
+                            color = MaterialTheme.colorScheme.tertiary,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        }
+
         state.errorMessage?.let { message ->
             item {
                 TitledCard(
@@ -182,6 +256,20 @@ internal fun SourceSeparationRuntimeManagementPage(
                     onRepair = onRepair,
                     onActivatePending = onActivatePending,
                     onRemove = { pendingRemove = it },
+                )
+            }
+            items(
+                items = state.gpuItems,
+                key = { "gpu-${it.catalogEntry.componentId}" },
+            ) { item ->
+                SourceSeparationGpuRuntimeItemCard(
+                    item = item,
+                    currentAbi = state.device.abi,
+                    operation = state.operation,
+                    onInstall = onInstallGpu,
+                    onRepair = onRepairGpu,
+                    onActivatePending = onActivatePendingGpu,
+                    onRemove = { pendingGpuRemove = it },
                 )
             }
         }
@@ -362,5 +450,176 @@ private fun runtimeStateText(state: SourceSeparationRuntimeState): String = when
     SourceSeparationRuntimeState.PendingActivation ->
         stringResource(R.string.source_separation_runtime_pending_activation)
     SourceSeparationRuntimeState.PendingDeletion ->
+        stringResource(R.string.source_separation_runtime_pending_deletion)
+}
+
+@Composable
+private fun SourceSeparationGpuRuntimeItemCard(
+    item: SourceSeparationGpuRuntimeInventoryItem,
+    currentAbi: String,
+    operation: SourceSeparationRuntimeOperation?,
+    onInstall: (String) -> Unit,
+    onRepair: (String) -> Unit,
+    onActivatePending: (String) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    val entry = item.catalogEntry
+    val isCurrentAbi = entry.abi == currentAbi
+    val isBusy = operation?.componentId == entry.componentId
+    TitledCard(
+        title = stringResource(R.string.source_separation_runtime_gpu_component_title),
+        modifier = Modifier.fillMaxWidth(),
+    ) { padding ->
+        Column(
+            modifier = Modifier.padding(padding),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.source_separation_runtime_release_summary,
+                    entry.runtimeArtifactVersion,
+                    entry.producerReleaseVersion,
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = gpuRuntimeStateText(item.state),
+                color = if (item.state == SourceSeparationGpuRuntimeState.Invalid) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = stringResource(
+                    R.string.source_separation_runtime_gpu_size_summary,
+                    entry.delivery.expectedByteSize.asReadableFileSize(),
+                    entry.files.sumOf { it.byteSize }.asReadableFileSize(),
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = entry.capability.profileId,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            item.reason?.let { reason ->
+                Text(
+                    text = reason,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (isBusy && operation != null && operation.totalBytes > 0L) {
+                LinearProgressIndicator(
+                    progress = {
+                        (operation.downloadedBytes.toFloat() / operation.totalBytes)
+                            .coerceIn(0f, 1f)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = stringResource(
+                        R.string.source_separation_runtime_progress,
+                        operation.downloadedBytes.asReadableFileSize(),
+                        operation.totalBytes.asReadableFileSize(),
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (!isCurrentAbi) {
+                Text(
+                    text = stringResource(R.string.source_separation_runtime_other_abi),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                GpuRuntimeActionButton(
+                    item = item,
+                    enabled = operation == null,
+                    onInstall = onInstall,
+                    onRepair = onRepair,
+                    onActivatePending = onActivatePending,
+                    onRemove = onRemove,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GpuRuntimeActionButton(
+    item: SourceSeparationGpuRuntimeInventoryItem,
+    enabled: Boolean,
+    onInstall: (String) -> Unit,
+    onRepair: (String) -> Unit,
+    onActivatePending: (String) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    val componentId = item.catalogEntry.componentId
+    when (item.state) {
+        SourceSeparationGpuRuntimeState.Missing -> OutlinedButton(
+            onClick = { onInstall(componentId) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(painterResource(R.drawable.ic_download_24dp), null, Modifier.size(18.dp))
+            Text(
+                stringResource(R.string.source_separation_runtime_gpu_install),
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        SourceSeparationGpuRuntimeState.Invalid -> OutlinedButton(
+            onClick = { onRepair(componentId) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(painterResource(R.drawable.ic_update_24dp), null, Modifier.size(18.dp))
+            Text(
+                stringResource(R.string.source_separation_runtime_repair),
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        SourceSeparationGpuRuntimeState.Installed -> OutlinedButton(
+            onClick = { onRemove(componentId) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(painterResource(R.drawable.ic_delete_24dp), null, Modifier.size(18.dp))
+            Text(
+                stringResource(R.string.source_separation_runtime_remove_action),
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        SourceSeparationGpuRuntimeState.PendingActivation -> Button(
+            onClick = { onActivatePending(componentId) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(painterResource(R.drawable.ic_check_24dp), null, Modifier.size(18.dp))
+            Text(
+                stringResource(R.string.source_separation_runtime_activate),
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        SourceSeparationGpuRuntimeState.PendingDeletion -> Text(
+            text = stringResource(R.string.source_separation_runtime_pending_deletion),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+@Composable
+private fun gpuRuntimeStateText(state: SourceSeparationGpuRuntimeState): String = when (state) {
+    SourceSeparationGpuRuntimeState.Missing -> stringResource(R.string.source_separation_runtime_missing)
+    SourceSeparationGpuRuntimeState.Installed -> stringResource(R.string.source_separation_runtime_installed)
+    SourceSeparationGpuRuntimeState.Invalid -> stringResource(R.string.source_separation_runtime_invalid)
+    SourceSeparationGpuRuntimeState.PendingActivation ->
+        stringResource(R.string.source_separation_runtime_pending_activation)
+    SourceSeparationGpuRuntimeState.PendingDeletion ->
         stringResource(R.string.source_separation_runtime_pending_deletion)
 }

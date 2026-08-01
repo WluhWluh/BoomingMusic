@@ -62,7 +62,7 @@ import com.mardous.booming.util.REMEMBER_SHUFFLE_MODE
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_HYDRATED_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
-import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_TRY_GPU
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_GPU_ENABLED
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.MAX_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
@@ -79,7 +79,10 @@ import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_MESSAGES
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS
+import com.mardous.booming.util.SOURCE_SEPARATION_GPU_ENABLED
 import com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
+import com.mardous.booming.util.readSourceSeparationGpuEnabled
+import com.mardous.booming.util.writeSourceSeparationGpuEnabled
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Dispatchers.IO
@@ -322,7 +325,7 @@ class PlayerViewModel(
 
     private val sourceSeparationPreferenceChangeListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == SOURCE_SEPARATION_TRY_GPU) {
+            if (key == SOURCE_SEPARATION_GPU_ENABLED || key == SOURCE_SEPARATION_TRY_GPU) {
                 _sourceSeparationTryGpuFlow.value = readSourceSeparationTryGpu()
             }
         }
@@ -1418,12 +1421,13 @@ class PlayerViewModel(
         }
     }
 
-    fun setSourceSeparationTryGpu(enabled: Boolean) {
-        preferences.edit {
-            putBoolean(SOURCE_SEPARATION_TRY_GPU, enabled)
-        }
+    fun setSourceSeparationGpuEnabled(enabled: Boolean) {
+        preferences.writeSourceSeparationGpuEnabled(enabled)
         _sourceSeparationTryGpuFlow.value = enabled
     }
+
+    @Suppress("unused")
+    fun setSourceSeparationTryGpu(enabled: Boolean) = setSourceSeparationGpuEnabled(enabled)
 
     fun setSourceSeparationWindowDecodeEnabled(enabled: Boolean) {
         preferences.edit {
@@ -1898,10 +1902,7 @@ class PlayerViewModel(
     }
 
     private fun readSourceSeparationTryGpu(): Boolean {
-        return preferences.getBoolean(
-            SOURCE_SEPARATION_TRY_GPU,
-            DEFAULT_SOURCE_SEPARATION_TRY_GPU,
-        )
+        return preferences.readSourceSeparationGpuEnabled()
     }
 
     private fun readSourceSeparationWindowDecode(): Boolean {

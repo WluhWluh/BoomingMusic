@@ -1,12 +1,16 @@
 package com.mardous.booming.ui.screen.player
 
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.Process
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeInventoryItem
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeStore
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeInventoryItem
-import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
+import com.mardous.booming.util.readSourceSeparationGpuEnabled
+import com.mardous.booming.util.writeSourceSeparationGpuEnabled
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,16 +19,35 @@ import kotlinx.coroutines.launch
 
 internal class SourceSeparationRuntimeManagementViewModel(
     private val store: SourceSeparationRuntimeStore,
+    private val gpuStore: SourceSeparationGpuRuntimeStore,
+    private val preferences: SharedPreferences,
 ) : ViewModel() {
+    private val device = SourceSeparationRuntimeDeviceDetails.current()
     private val _state = MutableStateFlow(
         SourceSeparationRuntimeManagementUiState(
-            device = SourceSeparationRuntimeDeviceDetails.current(),
+            device = device,
+            gpuEnabled = preferences.readSourceSeparationGpuEnabled(),
         ),
     )
     val state = _state.asStateFlow()
 
+    private val preferenceListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == com.mardous.booming.util.SOURCE_SEPARATION_GPU_ENABLED ||
+                key == com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
+            ) {
+                _state.update { it.copy(gpuEnabled = preferences.readSourceSeparationGpuEnabled()) }
+            }
+        }
+
     init {
+        preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
         refresh()
+    }
+
+    override fun onCleared() {
+        preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener)
+        super.onCleared()
     }
 
     fun refresh() {
@@ -58,6 +81,35 @@ internal class SourceSeparationRuntimeManagementViewModel(
         }
     }
 
+    fun installGpu(componentId: String) {
+        runOperation(componentId, SourceSeparationRuntimeOperationKind.InstallGpu) { onProgress ->
+            gpuStore.install(componentId, onProgress)
+        }
+    }
+
+    fun repairGpu(componentId: String) {
+        runOperation(componentId, SourceSeparationRuntimeOperationKind.RepairGpu) { onProgress ->
+            gpuStore.repair(componentId, onProgress)
+        }
+    }
+
+    fun activatePendingGpu(componentId: String) {
+        runOperation(componentId, SourceSeparationRuntimeOperationKind.ActivateGpu) { _ ->
+            gpuStore.activatePending(componentId)
+        }
+    }
+
+    fun removeGpu(componentId: String) {
+        runOperation(componentId, SourceSeparationRuntimeOperationKind.RemoveGpu) { _ ->
+            gpuStore.remove(componentId)
+        }
+    }
+
+    fun setGpuEnabled(enabled: Boolean) {
+        preferences.writeSourceSeparationGpuEnabled(enabled)
+        _state.update { it.copy(gpuEnabled = enabled) }
+    }
+
     fun dismissError() {
         _state.update { it.copy(errorMessage = null) }
     }
@@ -65,7 +117,7 @@ internal class SourceSeparationRuntimeManagementViewModel(
     private fun runOperation(
         componentId: String,
         kind: SourceSeparationRuntimeOperationKind,
-        action: suspend ((Long, Long) -> Unit) -> SourceSeparationRuntimeInventoryItem,
+        action: suspend ((Long, Long) -> Unit) -> Unit,
     ) {
         if (_state.value.operation != null) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -101,9 +153,16 @@ internal class SourceSeparationRuntimeManagementViewModel(
     }
 
     private fun loadInventory() {
-        runCatching { store.inventory() }
-            .onSuccess { items ->
-                _state.update { it.copy(items = items, isLoading = false) }
+        runCatching { store.inventory() to gpuStore.inventory() }
+            .onSuccess { (items, gpuItems) ->
+                _state.update {
+                    it.copy(
+                        items = items,
+                        gpuItems = gpuItems,
+                        gpuEnabled = preferences.readSourceSeparationGpuEnabled(),
+                        isLoading = false,
+                    )
+                }
             }
             .onFailure { error ->
                 _state.update {
@@ -119,6 +178,8 @@ internal class SourceSeparationRuntimeManagementViewModel(
 internal data class SourceSeparationRuntimeManagementUiState(
     val device: SourceSeparationRuntimeDeviceDetails,
     val items: List<SourceSeparationRuntimeInventoryItem> = emptyList(),
+    val gpuItems: List<SourceSeparationGpuRuntimeInventoryItem> = emptyList(),
+    val gpuEnabled: Boolean = true,
     val isLoading: Boolean = true,
     val operation: SourceSeparationRuntimeOperation? = null,
     val errorMessage: String? = null,
@@ -136,6 +197,10 @@ internal enum class SourceSeparationRuntimeOperationKind {
     Repair,
     Activate,
     Remove,
+    InstallGpu,
+    RepairGpu,
+    ActivateGpu,
+    RemoveGpu,
 }
 
 internal data class SourceSeparationRuntimeDeviceDetails(
