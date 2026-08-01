@@ -29,6 +29,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mardous.booming.R
 import com.mardous.booming.extensions.files.asReadableFileSize
+import com.mardous.booming.separation.setup.LocalSeparationBlockerCode
+import com.mardous.booming.separation.setup.LocalSeparationDegradationCode
 import com.mardous.booming.separation.setup.LocalSeparationIssue
 import com.mardous.booming.separation.setup.LocalSeparationReadiness
 import com.mardous.booming.separation.setup.LocalSeparationReadinessState
@@ -131,6 +133,7 @@ internal fun SourceSeparationQuickSetupSheet(
                     ) { item ->
                         QuickSetupItemCard(
                             item = item,
+                            mode = plan.mode,
                             selected = item.itemId in state.selectedItemIds,
                             state = state.itemState(item),
                             progress = state.progress?.takeIf { it.itemId == item.itemId },
@@ -154,6 +157,7 @@ internal fun SourceSeparationQuickSetupSheet(
                     items(plan.items.filter { it.itemId in state.selectedItemIds }) { item ->
                         QuickSetupItemCard(
                             item = item,
+                            mode = plan.mode,
                             selected = true,
                             state = state.itemState(item),
                             progress = state.progress?.takeIf { it.itemId == item.itemId },
@@ -263,7 +267,7 @@ private fun ReadinessCard(
 @Composable
 private fun IssueText(issue: LocalSeparationIssue, error: Boolean) {
     Text(
-        text = issue.detail,
+        text = issueText(issue),
         color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
         style = MaterialTheme.typography.bodySmall,
     )
@@ -309,13 +313,14 @@ private fun ModeSummary(
 @Composable
 private fun QuickSetupItemCard(
     item: SourceSeparationQuickSetupPlanItem,
+    mode: SourceSeparationQuickSetupMode,
     selected: Boolean,
     state: SourceSeparationQuickSetupItemState,
     progress: com.mardous.booming.separation.setup.SourceSeparationQuickSetupProgress?,
     onToggle: (Boolean) -> Unit,
 ) {
     TitledCard(
-        title = item.title,
+        title = itemTitle(item),
         modifier = Modifier.fillMaxWidth(),
     ) { padding ->
         Column(
@@ -340,7 +345,7 @@ private fun QuickSetupItemCard(
                         style = MaterialTheme.typography.labelMedium,
                     )
                     Text(
-                        text = item.reason,
+                        text = itemReason(item, mode),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -368,7 +373,15 @@ private fun QuickSetupItemCard(
             }
             item.disabledReason?.let { disabledReason ->
                 Text(
-                    text = disabledReason,
+                    text = if (item.action in setOf(
+                            SourceSeparationQuickSetupAction.OpenRuntimeManagement,
+                            SourceSeparationQuickSetupAction.OpenModelManagement,
+                        )
+                    ) {
+                        stringResource(R.string.source_separation_quick_setup_auto_repair_unavailable)
+                    } else {
+                        disabledReason
+                    },
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -558,4 +571,109 @@ private fun resultText(status: SourceSeparationQuickSetupTerminalStatus?): Strin
     SourceSeparationQuickSetupTerminalStatus.Failed ->
         stringResource(R.string.source_separation_quick_setup_result_failed)
     null -> stringResource(R.string.source_separation_quick_setup_result_failed)
+}
+
+@Composable
+private fun issueText(issue: LocalSeparationIssue): String = when (issue.code) {
+    LocalSeparationBlockerCode.RuntimeInventoryUnavailable ->
+        stringResource(R.string.source_separation_quick_setup_issue_runtime_inventory)
+    LocalSeparationBlockerCode.UnsupportedProcessAbi ->
+        stringResource(R.string.source_separation_quick_setup_issue_unsupported_abi)
+    LocalSeparationBlockerCode.UnsupportedRuntimeApi ->
+        stringResource(R.string.source_separation_quick_setup_issue_unsupported_api)
+    LocalSeparationBlockerCode.MissingCpuRuntime ->
+        stringResource(R.string.source_separation_quick_setup_issue_cpu_missing)
+    LocalSeparationBlockerCode.InvalidCpuRuntime ->
+        stringResource(R.string.source_separation_quick_setup_issue_cpu_invalid)
+    LocalSeparationBlockerCode.PendingCpuRuntimeActivation,
+    LocalSeparationDegradationCode.RuntimeActivationPending,
+    -> stringResource(R.string.source_separation_quick_setup_issue_cpu_activation_pending)
+    LocalSeparationBlockerCode.PendingCpuRuntimeDeletion,
+    LocalSeparationDegradationCode.RuntimeDeletionPending,
+    -> stringResource(R.string.source_separation_quick_setup_issue_cpu_deletion_pending)
+    LocalSeparationBlockerCode.MissingGpuRuntime,
+    LocalSeparationDegradationCode.GpuRuntimeMissing,
+    -> stringResource(R.string.source_separation_quick_setup_issue_gpu_missing)
+    LocalSeparationBlockerCode.InvalidGpuRuntime ->
+        stringResource(R.string.source_separation_quick_setup_issue_gpu_invalid)
+    LocalSeparationBlockerCode.PendingGpuRuntimeActivation,
+    LocalSeparationDegradationCode.GpuRuntimeActivationPending,
+    -> stringResource(R.string.source_separation_quick_setup_issue_gpu_activation_pending)
+    LocalSeparationBlockerCode.PendingGpuRuntimeDeletion,
+    LocalSeparationDegradationCode.GpuRuntimeDeletionPending,
+    -> stringResource(R.string.source_separation_quick_setup_issue_gpu_deletion_pending)
+    LocalSeparationBlockerCode.NoActiveModel ->
+        stringResource(R.string.source_separation_quick_setup_issue_model_unselected)
+    LocalSeparationBlockerCode.PendingActiveModel ->
+        stringResource(R.string.source_separation_quick_setup_issue_model_selection_pending)
+    LocalSeparationBlockerCode.ActiveModelNotInstalled ->
+        stringResource(R.string.source_separation_quick_setup_issue_model_missing)
+    LocalSeparationBlockerCode.ActiveModelIdentityMismatch ->
+        stringResource(R.string.source_separation_quick_setup_issue_model_identity)
+    LocalSeparationBlockerCode.ActiveModelProfileMissing ->
+        stringResource(R.string.source_separation_quick_setup_issue_model_profile)
+    LocalSeparationBlockerCode.ActiveModelContractMismatch ->
+        stringResource(R.string.source_separation_quick_setup_issue_model_contract_mismatch)
+    LocalSeparationBlockerCode.ActiveModelContractInvalid ->
+        stringResource(R.string.source_separation_quick_setup_issue_model_contract_invalid)
+    LocalSeparationBlockerCode.ActiveModelDeviceUnsupported ->
+        stringResource(R.string.source_separation_quick_setup_issue_model_device)
+    LocalSeparationDegradationCode.GpuInventoryUnavailable ->
+        stringResource(R.string.source_separation_quick_setup_issue_gpu_inventory)
+    else -> issue.detail
+}
+
+@Composable
+private fun itemTitle(item: SourceSeparationQuickSetupPlanItem): String = when (item.action) {
+    SourceSeparationQuickSetupAction.InstallRuntime,
+    SourceSeparationQuickSetupAction.RepairRuntime,
+    SourceSeparationQuickSetupAction.ActivatePendingRuntime,
+    -> stringResource(R.string.source_separation_quick_setup_cpu_runtime_title)
+    SourceSeparationQuickSetupAction.InstallGpuRuntime,
+    SourceSeparationQuickSetupAction.RepairGpuRuntime,
+    SourceSeparationQuickSetupAction.ActivatePendingGpuRuntime,
+    SourceSeparationQuickSetupAction.ConfigureGpuRuntime,
+    -> stringResource(R.string.source_separation_quick_setup_gpu_runtime_title)
+    SourceSeparationQuickSetupAction.SelectModel -> stringResource(
+        R.string.source_separation_quick_setup_use_model,
+        item.title,
+    )
+    SourceSeparationQuickSetupAction.OpenRuntimeManagement,
+    SourceSeparationQuickSetupAction.OpenModelManagement,
+    -> stringResource(R.string.source_separation_quick_setup_manual_review)
+    else -> item.title
+}
+
+@Composable
+private fun itemReason(
+    item: SourceSeparationQuickSetupPlanItem,
+    mode: SourceSeparationQuickSetupMode,
+): String = when (item.action) {
+    SourceSeparationQuickSetupAction.InstallRuntime ->
+        stringResource(R.string.source_separation_quick_setup_reason_install_cpu)
+    SourceSeparationQuickSetupAction.RepairRuntime ->
+        stringResource(R.string.source_separation_quick_setup_reason_repair_cpu)
+    SourceSeparationQuickSetupAction.ActivatePendingRuntime ->
+        stringResource(R.string.source_separation_quick_setup_reason_activate_cpu)
+    SourceSeparationQuickSetupAction.InstallGpuRuntime ->
+        stringResource(R.string.source_separation_quick_setup_reason_install_gpu)
+    SourceSeparationQuickSetupAction.RepairGpuRuntime ->
+        stringResource(R.string.source_separation_quick_setup_reason_repair_gpu)
+    SourceSeparationQuickSetupAction.ActivatePendingGpuRuntime ->
+        stringResource(R.string.source_separation_quick_setup_reason_activate_gpu)
+    SourceSeparationQuickSetupAction.ConfigureGpuRuntime ->
+        stringResource(R.string.source_separation_quick_setup_reason_configure_gpu)
+    SourceSeparationQuickSetupAction.InstallModel -> if (
+        mode == SourceSeparationQuickSetupMode.RepairCurrent
+    ) {
+        stringResource(R.string.source_separation_quick_setup_reason_restore_model)
+    } else {
+        stringResource(R.string.source_separation_quick_setup_reason_install_model)
+    }
+    SourceSeparationQuickSetupAction.SelectModel ->
+        stringResource(R.string.source_separation_quick_setup_reason_select_model)
+    SourceSeparationQuickSetupAction.OpenRuntimeManagement,
+    SourceSeparationQuickSetupAction.OpenModelManagement,
+    -> stringResource(R.string.source_separation_quick_setup_reason_manual_review)
+    else -> item.reason
 }

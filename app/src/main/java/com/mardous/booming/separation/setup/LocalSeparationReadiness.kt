@@ -917,7 +917,7 @@ internal object SourceSeparationQuickSetupPlanner {
                 action = SourceSeparationQuickSetupAction.SelectModel,
                 requirement = SourceSeparationQuickSetupRequirement.Required,
                 selected = true,
-                title = "Use ${model.displayName}",
+                title = model.displayName,
                 reason = "Apply the model selection only after all required resources validate.",
                 dependencyIds = dependencies,
                 modelId = model.modelId,
