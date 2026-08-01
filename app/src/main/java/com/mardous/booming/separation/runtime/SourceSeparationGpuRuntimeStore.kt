@@ -399,6 +399,9 @@ internal class SourceSeparationGpuRuntimeStore(
                         )
                     }
                 }
+                keepStaging = false
+            } else {
+                keepStaging = false
             }
             verifyPayloadFile(payloadFile, entry)
             val stagedCurrent = extractAndVerify(payloadFile, stagingRoot, entry)

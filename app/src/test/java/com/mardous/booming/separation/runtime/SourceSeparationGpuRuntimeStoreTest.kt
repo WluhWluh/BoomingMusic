@@ -59,6 +59,55 @@ class SourceSeparationGpuRuntimeStoreTest {
     }
 
     @Test
+    fun `low disk preflight rejects before acquiring GPU payload`() {
+        val fixture = GpuRuntimeFixture.create(temporary.root)
+        val provider = fixture.provider()
+        val store = SourceSeparationGpuRuntimeStore(
+            root = temporary.root,
+            catalog = fixture.catalog,
+            provider = provider,
+            androidApi = 35,
+            usableSpace = { 0L },
+        )
+
+        val error = runCatching { store.install(fixture.entry.componentId) }.exceptionOrNull()
+
+        assertTrue(error is SourceSeparationRuntimeInsufficientStorageException)
+        assertEquals(0, provider.acquireCount)
+    }
+
+    @Test
+    fun `ZIP hash mismatch leaves no installed GPU runtime`() {
+        val fixture = GpuRuntimeFixture.create(temporary.root)
+        val tampered = fixture.zipBytes.copyOf().also { bytes ->
+            bytes[bytes.lastIndex] = (bytes[bytes.lastIndex].toInt() xor 0x01).toByte()
+        }
+        val store = fixture.store(provider = fixture.provider(tampered))
+
+        val error = runCatching { store.install(fixture.entry.componentId) }.exceptionOrNull()
+
+        assertTrue(error is SourceSeparationRuntimeInstallException)
+        assertFalse(
+            SourceSeparationRuntimeLayout.gpuCurrentDirectory(temporary.root, fixture.entry.abi)
+                .exists(),
+        )
+        assertTrue(
+            temporary.root.resolve("gpu/.staging").listFiles().orEmpty().isEmpty(),
+        )
+    }
+
+    @Test
+    fun `inventory removes unknown GPU staging directories`() {
+        val fixture = GpuRuntimeFixture.create(temporary.root)
+        val orphan = temporary.root.resolve("gpu/.staging/orphan-component").apply { mkdirs() }
+        orphan.resolve("payload.zip.part").writeBytes(byteArrayOf(1, 2, 3))
+
+        fixture.store().inventory()
+
+        assertFalse(orphan.exists())
+    }
+
+    @Test
     fun `mismatched CPU component identity is rejected before download`() {
         val fixture = GpuRuntimeFixture.create(temporary.root)
         val provider = fixture.provider()
@@ -176,7 +225,7 @@ class SourceSeparationGpuRuntimeStoreTest {
         val cpuLibrary: ByteArray,
         private val cpuManifest: ByteArray,
     ) {
-        fun provider() = TestGpuRuntimeProvider(zipBytes)
+        fun provider(bytes: ByteArray = zipBytes) = TestGpuRuntimeProvider(bytes)
 
         fun store(provider: TestGpuRuntimeProvider = provider()) = SourceSeparationGpuRuntimeStore(
             root = root,
