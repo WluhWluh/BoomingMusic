@@ -259,6 +259,9 @@ class MdxLiteRtCpuValidationTest {
         } else {
             null
         }
+        if (gpuRuntimeProfile?.productionEligible == true) {
+            SourceSeparationGpuRuntimeBootstrap.ensureLoaded(context)
+        }
         val factory = when (backend) {
             MdxInferenceBackend.LiteRtCpu -> if (processorCountOverride == null) {
                 MdxLiteRtCpuInferenceSessionFactory(

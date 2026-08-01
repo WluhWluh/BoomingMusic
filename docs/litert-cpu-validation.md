@@ -60,14 +60,16 @@ tools/run_litert_cpu_validation.ps1 `
   -Serial <adb-serial> `
   -ProcessAbi arm64-v8a `
   -Backend gpu `
-  -GpuProfileId gpu-auto-fp32-v1 `
+  -GpuProfileId gpu-opencl-bounded-fp32-v1 `
   -ModelId uvr_mdxnet_3_9662 `
   -ModelPath <bss-tflite-artifact> `
   -InputPath <nchw-input-bin> `
   -ReferencePath <ort-output-bin>
 ```
 
-`gpu-auto-fp32-v1` enforces the frozen Phase 2 parity floor.
+`gpu-opencl-bounded-fp32-v1` exercises the downloadable product GPU
+component and its fixed `N=1` queue boundary. `gpu-auto-fp32-v1` remains an
+internal comparison profile that enforces the frozen Phase 2 parity floor.
 `gpu-auto-fp16-v1` records separate numerical results without borrowing the
 FP32 pass. The runner records accelerator discovery, APK inventory,
 `libLiteRtClGlAccelerator.so` mappings after the first and reused invocation,

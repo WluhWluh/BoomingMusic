@@ -21,6 +21,7 @@ param(
     [string]$SecondaryModelPath = "",
     [string]$OutputRoot = "",
     [ValidateSet(
+        "gpu-opencl-bounded-fp32-v1",
         "gpu-auto-fp32-v1",
         "gpu-auto-fp16-v1",
         "gpu-opencl-fp32-v1",
