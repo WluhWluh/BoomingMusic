@@ -15,6 +15,8 @@ internal object SourceSeparationRuntimeLayout {
     const val CONTRACT_SCHEMA_VERSION = "bss-litert-downloadable-runtime-v2"
     const val CPU_DIRECTORY = "cpu"
     const val CPU_COMPONENT = "cpu-core"
+    const val GPU_DIRECTORY = "gpu"
+    const val GPU_COMPONENT = "bounded-gpu"
     const val CURRENT_DIRECTORY = "current"
     const val MANIFEST_FILE_NAME = "manifest.json"
     const val LIBRARY_FILE_NAME = "libLiteRt.so"
@@ -26,6 +28,11 @@ internal object SourceSeparationRuntimeLayout {
 
     fun cpuCurrentDirectory(root: File, abi: String): File = File(
         File(root, CPU_DIRECTORY),
+        "$abi/$CURRENT_DIRECTORY",
+    )
+
+    fun gpuCurrentDirectory(root: File, abi: String): File = File(
+        File(root, GPU_DIRECTORY),
         "$abi/$CURRENT_DIRECTORY",
     )
 }
