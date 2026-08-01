@@ -800,22 +800,38 @@ fully manageable without model or cache side effects.
 
 ### Phase 3: Add readiness and CPU-first Quick Setup
 
-- [ ] Introduce `LocalSeparationReadiness` and replace the current model-only
+- [x] Introduce `LocalSeparationReadiness` and replace the current model-only
   readiness gate and automatic Model Management opening.
-- [ ] Implement all readiness states, typed blockers, degradations, repair
+- [x] Implement all readiness states, typed blockers, degradations, repair
   candidates, and deterministic fingerprints.
-- [ ] Implement `BootstrapRecommended`, `RepairCurrent`, and
+- [x] Implement `BootstrapRecommended`, `RepairCurrent`, and
   `RestoreRecommended` plan generation.
-- [ ] Add sequential plan execution, item progress, cancellation boundaries,
+- [x] Add sequential plan execution, item progress, cancellation boundaries,
   retry, final validation, and atomic settings/model commit.
-- [ ] Integrate one recommended base model without changing ordinary Model
+- [x] Integrate one recommended base model without changing ordinary Model
   Management download/activation separation or exposing GitHub transport types
   outside `ModelDeliveryProvider`.
-- [ ] Add manual Quick Setup entry and automatic opening only when no runnable
+- [x] Add manual Quick Setup entry and automatic opening only when no runnable
   path exists.
 - [ ] Test fresh install, valid custom model, missing active model, corrupt
   model, corrupt runtime, no network, low storage, process death, cancel, retry,
   and optional-resource partial completion.
+
+**Phase 3 implementation status (2026-07-31):** `LocalSeparationReadiness` now
+evaluates the verified CPU runtime and active model as one runnable path. The
+planner produces deterministic bootstrap, repair, and recommended-restore plans;
+the executor validates the plan fingerprint, installs selected resources in
+dependency order, reports progress, observes cancellation at item boundaries,
+and commits an official model selection only after all selected resources have
+installed, followed by final readiness validation.
+Quick Setup is available manually from Source Separation settings and is the
+automatic recovery destination when a separation request has no runnable local
+path. Runtime and model handoffs remain separate, and the runtime handoff opens
+the Runtime Management page directly.
+
+The planner tests, complete GitHub JVM unit-test suite, Kotlin compilation, and
+GitHub Debug APK assembly pass. Device/UI lifecycle tests and the failure matrix
+above remain open; those tests must not be treated as release qualification.
 
 **Phase 3 exit:** a fresh user can obtain a verified CPU-plus-recommended-model
 path with one reviewed action, while an experienced user's valid model and
