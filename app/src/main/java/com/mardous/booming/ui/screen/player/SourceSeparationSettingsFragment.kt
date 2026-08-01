@@ -67,6 +67,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.navigation.fragment.findNavController
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
@@ -86,6 +87,10 @@ import org.koin.androidx.viewmodel.ext.android.viewModel
 import java.io.File
 
 class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
+
+    companion object {
+        const val ARG_OPEN_RUNTIME_MANAGEMENT = "open_runtime_management"
+    }
 
     private val viewModel: PlayerViewModel by activityViewModel()
     private val modelAwareCacheViewModel:
@@ -116,6 +121,20 @@ class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
                         viewModel = viewModel,
                         modelAwareCacheViewModel = modelAwareCacheViewModel,
                         runtimeManagementViewModel = runtimeManagementViewModel,
+                        initialPage = if (requireArguments().getBoolean(
+                                ARG_OPEN_RUNTIME_MANAGEMENT,
+                            )
+                        ) {
+                            SourceSeparationSettingsPage.RuntimeManagement
+                        } else {
+                            SourceSeparationSettingsPage.Main
+                        },
+                        onOpenQuickSetup = {
+                            dismiss()
+                            findNavController().navigate(
+                                R.id.nav_source_separation_quick_setup
+                            )
+                        },
                     )
                 }
             }
@@ -135,6 +154,8 @@ private fun SourceSeparationSettingsSheet(
     viewModel: PlayerViewModel,
     modelAwareCacheViewModel: SourceSeparationModelAwareCacheManagementViewModel,
     runtimeManagementViewModel: SourceSeparationRuntimeManagementViewModel,
+    initialPage: SourceSeparationSettingsPage,
+    onOpenQuickSetup: () -> Unit,
 ) {
     val hapticFeedback = LocalHapticFeedback.current
     val context = LocalContext.current
@@ -199,7 +220,7 @@ private fun SourceSeparationSettingsSheet(
     val modelAwareCacheState by modelAwareCacheViewModel.state.collectAsState()
     val runtimeManagementState by runtimeManagementViewModel.state.collectAsState()
     var page by remember {
-        mutableStateOf(SourceSeparationSettingsPage.Main)
+        mutableStateOf(initialPage)
     }
 
     val separatedPlaybackEnabled = blendMode != SourceSeparationBlendMode.Off
@@ -669,6 +690,30 @@ private fun SourceSeparationSettingsSheet(
                                 onValueChange =
                                     viewModel::setSourceSeparationPlaybackReadyWindowCount
                             )
+
+                            OutlinedButton(
+                                onClick = {
+                                    hapticFeedback.performHapticFeedback(
+                                        HapticFeedbackType.Confirm
+                                    )
+                                    onOpenQuickSetup()
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_download_24dp),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = stringResource(
+                                        R.string.source_separation_quick_setup_title
+                                    ),
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                            }
 
                             OutlinedButton(
                                 onClick = {

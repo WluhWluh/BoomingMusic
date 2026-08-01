@@ -120,6 +120,7 @@ class PlayerViewModel(
     private val sourceSeparationRuntime: SourceSeparationRuntimeFacade,
     private val sourceSeparationForegroundWorkerCoordinator:
     SourceSeparationForegroundWorkerCoordinator,
+    private val localSeparationPathReadiness: () -> Boolean,
 ) : ViewModel(), Player.Listener, SourceSeparationForegroundWorkerCallbacks {
 
     private val queueMutex = Mutex()
@@ -227,6 +228,15 @@ class PlayerViewModel(
         )
     val sourceSeparationModelManagementEventFlow =
         _sourceSeparationModelManagementEventFlow.asSharedFlow()
+
+    private val _sourceSeparationQuickSetupEventFlow =
+        MutableSharedFlow<Unit>(
+            replay = 0,
+            extraBufferCapacity = 1,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST
+        )
+    val sourceSeparationQuickSetupEventFlow =
+        _sourceSeparationQuickSetupEventFlow.asSharedFlow()
 
     private val _sourceSeparationFlacPromotionStateFlow =
         MutableStateFlow(SourceSeparationFlacPromotionUiState())
@@ -744,7 +754,7 @@ class PlayerViewModel(
             expectProcessing = false,
         )
         updateSourceSeparationPlaybackState(result)
-        openSourceSeparationModelManagement()
+        openSourceSeparationQuickSetup()
     }
 
     fun cancelSourceSeparation() {
@@ -1161,8 +1171,12 @@ class PlayerViewModel(
         _sourceSeparationModelManagementEventFlow.tryEmit(Unit)
     }
 
+    fun openSourceSeparationQuickSetup() {
+        _sourceSeparationQuickSetupEventFlow.tryEmit(Unit)
+    }
+
     private fun ensureSourceSeparationModelReady(openManagement: Boolean): Boolean {
-        if (isSourceSeparationModelReady()) return true
+        if (isSourceSeparationPathReady()) return true
 
         sourceSeparationSettingsApplyJob?.cancel()
         sourceSeparationSettingsApplyJob = null
@@ -1182,7 +1196,7 @@ class PlayerViewModel(
             )
         }
         if (openManagement) {
-            openSourceSeparationModelManagement()
+            openSourceSeparationQuickSetup()
         }
         return false
     }
@@ -1190,6 +1204,10 @@ class PlayerViewModel(
     private fun isSourceSeparationModelReady(): Boolean =
         sourceSeparationRuntime.activeModelResolution() is
                 SourceSeparationActiveCacheModelResolution.Ready
+
+    private fun isSourceSeparationPathReady(): Boolean =
+        runCatching { localSeparationPathReadiness() }
+            .getOrDefault(false)
 
     fun setSourceSeparationRememberPerSongEnabled(enabled: Boolean) {
         preferences.edit {
@@ -1616,7 +1634,7 @@ class PlayerViewModel(
                 latestMode == SourceSeparationBlendMode.Off ||
                 currentSong.id != current.id ||
                 nextSongForSourceSeparationPreStart(currentSong).id != next.id ||
-                !isSourceSeparationModelReady()
+                !isSourceSeparationPathReady()
             ) {
                 return@launch
             }

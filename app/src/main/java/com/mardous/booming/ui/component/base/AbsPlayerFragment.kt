@@ -197,6 +197,16 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
             }
         }
         viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
+            playerViewModel.sourceSeparationQuickSetupEventFlow.collect {
+                val navController = findNavController()
+                if (navController.currentDestination?.id !=
+                    R.id.nav_source_separation_quick_setup
+                ) {
+                    navController.navigate(R.id.nav_source_separation_quick_setup)
+                }
+            }
+        }
+        viewLifecycleOwner.launchAndRepeatWithViewLifecycle {
             combine(
                 playerViewModel.currentSongFlow,
                 playerViewModel.colorSchemeFlow

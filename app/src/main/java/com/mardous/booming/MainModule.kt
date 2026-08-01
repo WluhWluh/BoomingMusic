@@ -85,6 +85,9 @@ import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecoveryClient
+import com.mardous.booming.separation.setup.LocalSeparationReadinessEvaluator
+import com.mardous.booming.separation.setup.SourceSeparationQuickSetupExecutor
+import com.mardous.booming.separation.setup.SourceSeparationQuickSetupModelInstaller
 import com.mardous.booming.ui.screen.equalizer.EqualizerViewModel
 import com.mardous.booming.ui.screen.info.InfoViewModel
 import com.mardous.booming.ui.screen.library.LibraryViewModel
@@ -100,6 +103,7 @@ import com.mardous.booming.ui.screen.player.PlayerViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
 import com.mardous.booming.ui.screen.player.SourceSeparationModelAwareCacheManagementViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationPresetManagementViewModel
+import com.mardous.booming.ui.screen.player.SourceSeparationQuickSetupViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationRuntimeManagementViewModel
 import com.mardous.booming.ui.screen.sleeptimer.SleepTimerViewModel
 import com.mardous.booming.ui.screen.tageditor.TagEditorViewModel
@@ -192,6 +196,26 @@ private val mainModule = module {
     }
     single {
         SourceSeparationPresetDownloader(repository = get())
+    }
+    single {
+        SourceSeparationQuickSetupModelInstaller(
+            repository = get(),
+            provider = get(),
+        )
+    }
+    single {
+        LocalSeparationReadinessEvaluator(
+            runtimeStore = get(),
+            presetRepository = get(),
+        )
+    }
+    single {
+        SourceSeparationQuickSetupExecutor(
+            runtimeStore = get(),
+            presetRepository = get(),
+            modelInstaller = get(),
+            readinessEvaluator = { get<LocalSeparationReadinessEvaluator>().evaluate() },
+        )
     }
     single {
         SourceSeparationPresetImportCoordinator(
@@ -406,6 +430,11 @@ private val viewModule = module {
             repository = get(),
             sourceSeparationRuntime = get(),
             sourceSeparationForegroundWorkerCoordinator = get(),
+            localSeparationPathReadiness = {
+                get<LocalSeparationReadinessEvaluator>()
+                    .evaluate()
+                    .isRunnable
+            },
         )
     }
 
@@ -424,6 +453,13 @@ private val viewModule = module {
 
     viewModel {
         SourceSeparationRuntimeManagementViewModel(store = get())
+    }
+
+    viewModel {
+        SourceSeparationQuickSetupViewModel(
+            readinessEvaluator = get(),
+            executor = get(),
+        )
     }
 
     viewModel {
