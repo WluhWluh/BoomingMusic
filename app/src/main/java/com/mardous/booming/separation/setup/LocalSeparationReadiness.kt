@@ -568,7 +568,8 @@ internal class LocalSeparationReadinessEvaluator(
             runtimeArtifactVersion = catalogEntry.runtimeArtifactVersion,
             producerReleaseVersion = catalogEntry.producerReleaseVersion,
             downloadBytes = catalogEntry.delivery.expectedByteSize,
-            installedBytes = installedBytes,
+            installedBytes = installedBytes.takeIf { it > 0L }
+                ?: catalogEntry.innerLibrary.byteSize,
             state = state,
             reason = reason,
             delivery = catalogEntry.deliveryReference(),
@@ -583,7 +584,8 @@ internal class LocalSeparationReadinessEvaluator(
             runtimeArtifactVersion = catalogEntry.runtimeArtifactVersion,
             producerReleaseVersion = catalogEntry.producerReleaseVersion,
             downloadBytes = catalogEntry.delivery.expectedByteSize,
-            installedBytes = installedBytes,
+            installedBytes = installedBytes.takeIf { it > 0L }
+                ?: catalogEntry.files.sumOf { it.byteSize },
             state = state,
             reason = reason,
             delivery = catalogEntry.deliveryReference(),

@@ -53,6 +53,8 @@ class SourceSeparationQuickSetupPlannerTest {
             plan.items.map(SourceSeparationQuickSetupPlanItem::action),
         )
         assertTrue(plan.items[1].selected)
+        assertEquals(20L, plan.items[0].expectedInstalledBytes)
+        assertEquals(20L, plan.items[1].expectedInstalledBytes)
         assertEquals(listOf("runtime:cpu-arm64"), plan.items[1].dependencyIds)
         assertEquals(listOf("runtime:cpu-arm64"), plan.items[2].dependencyIds)
         assertEquals(
