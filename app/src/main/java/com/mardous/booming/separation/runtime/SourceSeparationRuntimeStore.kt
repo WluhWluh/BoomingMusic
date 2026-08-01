@@ -196,6 +196,7 @@ internal class SourceSeparationRuntimeStore(
             verifyPayloadFile(payloadFile, entry)
             val stagedCurrent = extractAndVerify(payloadFile, stagingRoot, entry)
             writeInstallRecord(stagedCurrent, entry)
+            freezeRuntimeInstallationFiles(stagedCurrent)
 
             val current = SourceSeparationRuntimeLayout.cpuCurrentDirectory(root, entry.abi)
             val currentInspection = inspectCurrent(entry)
@@ -374,7 +375,8 @@ internal class SourceSeparationRuntimeStore(
             record.runtimeArtifactVersion == entry.runtimeArtifactVersion &&
             record.abi == entry.abi &&
             record.innerManifestSha256.equals(entry.innerManifestSha256, ignoreCase = true) &&
-            record.librarySha256.equals(entry.innerLibrary.sha256, ignoreCase = true)
+            record.librarySha256.equals(entry.innerLibrary.sha256, ignoreCase = true) &&
+            runtimeInstallationFilesAreReadOnly(current)
         if (!valid) return invalid(entry, "The runtime files do not match the bundled catalog.")
         return SourceSeparationRuntimeInventoryItem(
             catalogEntry = entry,
@@ -655,6 +657,22 @@ internal class SourceSeparationRuntimeStore(
 
         val SAFE_DIRECTORY_PATTERN = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
     }
+}
+
+internal fun freezeRuntimeInstallationFiles(directory: File) {
+    val files = directory.listFiles().orEmpty().filter(File::isFile)
+    check(files.isNotEmpty()) { "Runtime installation contains no files." }
+    files.forEach { file ->
+        if (file.canWrite()) {
+            check(file.setReadOnly()) { "Unable to make runtime file read-only: ${file.name}" }
+        }
+        check(!file.canWrite()) { "Runtime file remains writable: ${file.name}" }
+    }
+}
+
+internal fun runtimeInstallationFilesAreReadOnly(directory: File): Boolean {
+    val files = directory.listFiles().orEmpty().filter(File::isFile)
+    return files.isNotEmpty() && files.all { !it.canWrite() }
 }
 
 internal open class SourceSeparationRuntimeException(

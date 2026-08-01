@@ -406,6 +406,7 @@ internal class SourceSeparationGpuRuntimeStore(
             verifyPayloadFile(payloadFile, entry)
             val stagedCurrent = extractAndVerify(payloadFile, stagingRoot, entry)
             writeInstallRecord(stagedCurrent, entry)
+            freezeRuntimeInstallationFiles(stagedCurrent)
 
             val current = SourceSeparationRuntimeLayout.gpuCurrentDirectory(root, entry.abi)
             val currentInspection = inspectCurrent(entry)
@@ -578,7 +579,8 @@ internal class SourceSeparationGpuRuntimeStore(
             record.abi == entry.abi &&
             record.innerManifestSha256.equals(entry.innerManifestSha256, true) &&
             record.fileSha256 == expectedFiles &&
-            cpuDependencyReason(entry) == null
+            cpuDependencyReason(entry) == null &&
+            runtimeInstallationFilesAreReadOnly(current)
         if (!valid) {
             val reason = cpuDependencyReason(entry) ?: "The GPU runtime files do not match the bundled catalog."
             return invalid(entry, reason)

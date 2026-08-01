@@ -39,6 +39,7 @@ class SourceSeparationGpuRuntimeStoreTest {
         assertTrue(File(current, "libBssOcl.so").isFile)
         assertTrue(File(current, "manifest.json").isFile)
         assertTrue(File(current, "install.json").isFile)
+        assertTrue(current.listFiles().orEmpty().all { !it.canWrite() })
         assertEquals(installed, fixture.store().inventory(fixture.entry.componentId))
     }
 
@@ -175,7 +176,10 @@ class SourceSeparationGpuRuntimeStoreTest {
             temporary.root,
             fixture.entry.abi,
         )
-        File(current, "libBssOcl.so").appendBytes(byteArrayOf(1))
+        File(current, "libBssOcl.so").apply {
+            assertTrue(setWritable(true))
+            appendBytes(byteArrayOf(1))
+        }
 
         val inventory = store.inventory(fixture.entry.componentId)
 
@@ -191,6 +195,7 @@ class SourceSeparationGpuRuntimeStoreTest {
             temporary.root,
             fixture.entry.abi,
         ).resolve("install.json")
+        assertTrue(recordFile.setWritable(true))
         recordFile.writeText(recordFile.readText().replace(fixture.entry.componentId, "different-gpu-component"))
 
         val inventory = store.inventory(fixture.entry.componentId)

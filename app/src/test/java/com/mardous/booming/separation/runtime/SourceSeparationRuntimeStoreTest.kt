@@ -44,6 +44,7 @@ class SourceSeparationRuntimeStoreTest {
         assertTrue(File(current, "libLiteRt.so").isFile)
         assertTrue(File(current, "manifest.json").isFile)
         assertTrue(File(current, "install.json").isFile)
+        assertTrue(current.listFiles().orEmpty().all { !it.canWrite() })
         assertFalse(File(current, "payload.zip").exists())
         assertEquals(installed, store.inventory(fixture.entry.componentId))
     }
