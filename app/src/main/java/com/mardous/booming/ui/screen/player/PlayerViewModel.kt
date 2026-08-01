@@ -191,6 +191,7 @@ class PlayerViewModel(
     val stopAfterPosition = _stopAfterPosition.receiveAsFlow()
 
     private var sourceSeparationSettingsApplyJob: Job? = null
+    private var sourceSeparationManualStartJob: Job? = null
     private var sourceSeparationAutoStartJob: Job? = null
     private var sourceSeparationPreStartJob: Job? = null
     private var sourceSeparationPlaybackSyncJob: Job? = null
@@ -721,12 +722,24 @@ class PlayerViewModel(
     }
 
     fun startSourceSeparationForCurrentSong() {
-        if (!ensureSourceSeparationModelReady(openManagement = true)) {
-            return
-        }
         val song = currentSong
-        clearSourceSeparationPausePendingAction(song)
-        sourceSeparationForegroundWorkerCoordinator.requestManualSong(song)
+        if (song == Song.emptySong || sourceSeparationManualStartJob?.isActive == true) return
+        sourceSeparationManualStartJob = viewModelScope.launch {
+            val ready = withContext(IO) { isSourceSeparationPathReady() }
+            if (!ready) {
+                ensureSourceSeparationModelReady(openManagement = true, readinessChecked = true)
+                return@launch
+            }
+            if (currentSong.id != song.id) return@launch
+            clearSourceSeparationPausePendingAction(song)
+            sourceSeparationForegroundWorkerCoordinator.requestManualSong(song)
+        }.also { job ->
+            job.invokeOnCompletion {
+                if (sourceSeparationManualStartJob === job) {
+                    sourceSeparationManualStartJob = null
+                }
+            }
+        }
     }
 
     private fun clearSourceSeparationPausePendingAction(song: Song = currentSong) {
@@ -1178,8 +1191,11 @@ class PlayerViewModel(
         _sourceSeparationQuickSetupEventFlow.tryEmit(Unit)
     }
 
-    private fun ensureSourceSeparationModelReady(openManagement: Boolean): Boolean {
-        if (isSourceSeparationPathReady()) return true
+    private fun ensureSourceSeparationModelReady(
+        openManagement: Boolean,
+        readinessChecked: Boolean = false,
+    ): Boolean {
+        if (!readinessChecked && isSourceSeparationPathReady()) return true
 
         sourceSeparationSettingsApplyJob?.cancel()
         sourceSeparationSettingsApplyJob = null
