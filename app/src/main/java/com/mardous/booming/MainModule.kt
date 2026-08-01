@@ -82,6 +82,8 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetReposit
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeCatalogLoader
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeLayout
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeCatalogLoader
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeStore
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecoveryClient
@@ -150,6 +152,17 @@ private val mainModule = module {
     }
     single {
         SourceSeparationRuntimeStore(
+            root = SourceSeparationRuntimeLayout.runtimeRoot(androidContext()),
+            catalog = get(),
+            provider = get(),
+            androidApi = Build.VERSION.SDK_INT,
+        )
+    }
+    single {
+        SourceSeparationGpuRuntimeCatalogLoader.load(androidContext())
+    }
+    single {
+        SourceSeparationGpuRuntimeStore(
             root = SourceSeparationRuntimeLayout.runtimeRoot(androidContext()),
             catalog = get(),
             provider = get(),

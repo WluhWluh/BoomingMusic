@@ -2,7 +2,6 @@ package com.mardous.booming.separation.model.litert
 
 import android.app.ActivityManager
 import android.content.Context
-import dalvik.system.BaseDexClassLoader
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.MdxExecutionProfile
@@ -16,7 +15,7 @@ import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxRuntimeSettings
-import java.io.File
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeBootstrap
 import java.util.concurrent.CancellationException
 import kotlin.math.max
 
@@ -124,12 +123,10 @@ internal class AndroidMdxLiteRtGpuEligibilityProvider(
                 capability.detail,
             )
         }
-        val acceleratorPath = (applicationContext.classLoader as? BaseDexClassLoader)
-            ?.findLibrary(GPU_ACCELERATOR_LIBRARY)
-        if (acceleratorPath.isNullOrBlank()) {
+        if (!SourceSeparationGpuRuntimeBootstrap.isLoaded()) {
             return MdxLiteRtGpuEligibilityDecision.ineligible(
                 MdxLiteRtGpuEligibilityReason.AcceleratorLibraryUnavailable,
-                "The app class loader cannot resolve $GPU_ACCELERATOR_LIBRARY.",
+                SourceSeparationGpuRuntimeBootstrap.capability().detail,
             )
         }
         val memoryInfo = ActivityManager.MemoryInfo().also { info ->
@@ -158,13 +155,11 @@ internal class AndroidMdxLiteRtGpuEligibilityProvider(
             )
         }
         return MdxLiteRtGpuEligibilityDecision.eligible(
-            "${capability.detail}, accelerator=${File(acceleratorPath).name}, " +
-                "availableMemoryBytes=${memoryInfo.availMem}",
+            "${capability.detail}, availableMemoryBytes=${memoryInfo.availMem}",
         )
     }
 
     companion object {
-        private const val GPU_ACCELERATOR_LIBRARY = "LiteRtClGlAccelerator"
         private const val ESTIMATED_LIVE_TENSOR_COUNT = 4L
         private const val DEFAULT_MINIMUM_AVAILABLE_BYTES = 512L * 1024L * 1024L
     }

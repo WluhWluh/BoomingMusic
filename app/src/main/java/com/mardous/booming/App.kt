@@ -50,6 +50,7 @@ import com.mardous.booming.coil.store.SongMapper
 import com.mardous.booming.coil.store.YearMapper
 import com.mardous.booming.data.local.ReplayGainTagExtractor
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeBootstrap
 import com.mardous.booming.ui.screen.MainActivity
 import com.mardous.booming.ui.screen.error.ErrorActivity
 import com.mardous.booming.ui.screen.settings.SettingsScreen
@@ -67,6 +68,7 @@ class App : Application(), SingletonImageLoader.Factory {
         processIdentity = AppProcessResolver.resolve(this)
         if (processIdentity.isSourceSeparationProcess) {
             SourceSeparationRuntimeBootstrap.ensureLoaded(this)
+            SourceSeparationGpuRuntimeBootstrap.ensureLoaded(this)
         }
         startKoin {
             androidContext(this@App)

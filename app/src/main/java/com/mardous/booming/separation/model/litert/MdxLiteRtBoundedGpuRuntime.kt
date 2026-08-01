@@ -1,5 +1,8 @@
 package com.mardous.booming.separation.model.litert
 
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeBootstrap
+import io.github.wluhwluh.bss.litert.BssLiteRtRuntime
+
 internal data class MdxLiteRtBoundedGpuCapability(
     val available: Boolean,
     val schemaVersion: Int,
@@ -74,13 +77,14 @@ internal object MdxLiteRtBoundedGpuContract {
 internal object MdxLiteRtNativeBoundedGpuCapabilityProvider :
     MdxLiteRtBoundedGpuCapabilityProvider {
     override fun query(): MdxLiteRtBoundedGpuCapability {
+        val capability = SourceSeparationGpuRuntimeBootstrap.capability()
         return MdxLiteRtBoundedGpuCapability(
-            available = false,
-            schemaVersion = 0,
-            artifactVersion = "uninstalled",
-            profileId = "uninstalled",
-            kernelBatchSize = 0,
-            commandQueueWindowSize = 0,
+            available = capability.available,
+            schemaVersion = capability.schemaVersion,
+            artifactVersion = capability.artifactVersion,
+            profileId = capability.profileId,
+            kernelBatchSize = capability.kernelBatchSize,
+            commandQueueWindowSize = capability.commandQueueWindowSize,
         )
     }
 }
@@ -100,19 +104,19 @@ internal object MdxLiteRtBoundedGpuRuntime {
     }
 
     fun resetInferenceCounters() {
-        // The bounded GPU component is delivered separately in a later phase.
+        BssLiteRtRuntime.resetInferenceCounters()
     }
 
     fun beginInference() {
-        // The bounded GPU component is delivered separately in a later phase.
+        BssLiteRtRuntime.beginInference()
     }
 
     fun endInference() {
-        // The bounded GPU component is delivered separately in a later phase.
+        BssLiteRtRuntime.endInference()
     }
 
     fun statistics() = MdxLiteRtBoundedGpuStatistics(
-        dispatchCount = 0L,
-        eventWaitCount = 0L,
+        dispatchCount = BssLiteRtRuntime.getDispatchCount(),
+        eventWaitCount = BssLiteRtRuntime.getEventWaitCount(),
     )
 }
