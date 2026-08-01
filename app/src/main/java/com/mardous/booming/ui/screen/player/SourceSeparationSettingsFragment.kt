@@ -111,6 +111,13 @@ class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
+        val initialPage = if (
+            arguments?.getBoolean(ARG_OPEN_RUNTIME_MANAGEMENT) == true
+        ) {
+            SourceSeparationSettingsPage.RuntimeManagement
+        } else {
+            SourceSeparationSettingsPage.Main
+        }
         return ComposeView(requireContext()).apply {
             setViewCompositionStrategy(
                 ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
@@ -121,14 +128,7 @@ class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
                         viewModel = viewModel,
                         modelAwareCacheViewModel = modelAwareCacheViewModel,
                         runtimeManagementViewModel = runtimeManagementViewModel,
-                        initialPage = if (requireArguments().getBoolean(
-                                ARG_OPEN_RUNTIME_MANAGEMENT,
-                            )
-                        ) {
-                            SourceSeparationSettingsPage.RuntimeManagement
-                        } else {
-                            SourceSeparationSettingsPage.Main
-                        },
+                        initialPage = initialPage,
                         onOpenQuickSetup = {
                             dismiss()
                             findNavController().navigate(
