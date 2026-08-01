@@ -26,7 +26,10 @@ import com.mardous.booming.separation.model.contract.SourceSeparationModelContra
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractValidator
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeBootstrap
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeLocator
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeLayout
 import dalvik.system.BaseDexClassLoader
 import org.json.JSONArray
 import org.json.JSONObject
@@ -874,6 +877,41 @@ class MdxLiteRtCpuValidationTest {
         val downloadedRuntime = runCatching {
             SourceSeparationRuntimeBootstrap.ensureLoaded(context).libraryFile
         }.getOrNull()
+        val downloadedGpuRuntime = runCatching {
+            SourceSeparationGpuRuntimeLocator(
+                root = SourceSeparationRuntimeLayout.runtimeRoot(context),
+                processAbi = processAbi,
+                androidApi = Build.VERSION.SDK_INT,
+            ).resolve()
+        }.fold(
+            onSuccess = { installation ->
+                val libraries = JSONArray()
+                installation.libraryFiles.forEach { (name, file) ->
+                    libraries.put(
+                        JSONObject()
+                            .put("name", name)
+                            .put("path", file.absolutePath)
+                            .put("byteSize", file.length())
+                            .put("sha256", file.sha256()),
+                    )
+                }
+                JSONObject()
+                    .put("state", "installed")
+                    .put("path", installation.directory.absolutePath)
+                    .put("manifestPath", installation.manifestFile.absolutePath)
+                    .put("runtimeArtifactVersion", installation.identity.runtimeArtifactVersion)
+                    .put("releaseVersion", installation.identity.releaseVersion)
+                    .put("profileId", installation.identity.profileId)
+                    .put("requiredCpuLibrarySha256", installation.manifest.requiredCore.librarySha256)
+                    .put("libraries", libraries)
+            },
+            onFailure = { error ->
+                JSONObject()
+                    .put("state", "missing-or-invalid")
+                    .put("detail", error.message.orEmpty())
+            },
+        )
+        val gpuCapability = SourceSeparationGpuRuntimeBootstrap.capability()
         val classLoaderRuntime = (context.classLoader as? BaseDexClassLoader)
             ?.findLibrary("LiteRt")
         val classLoaderAccelerator = (context.classLoader as? BaseDexClassLoader)
@@ -893,6 +931,19 @@ class MdxLiteRtCpuValidationTest {
                         .put("byteSize", runtime.length())
                         .put("sha256", runtime.sha256())
                 } ?: JSONObject.NULL,
+            )
+            .put("downloadedGpuRuntime", downloadedGpuRuntime)
+            .put(
+                "downloadedGpuCapability",
+                JSONObject()
+                    .put("loaded", SourceSeparationGpuRuntimeBootstrap.isLoaded())
+                    .put("available", gpuCapability.available)
+                    .put("schemaVersion", gpuCapability.schemaVersion)
+                    .put("artifactVersion", gpuCapability.artifactVersion)
+                    .put("profileId", gpuCapability.profileId)
+                    .put("kernelBatchSize", gpuCapability.kernelBatchSize)
+                    .put("commandQueueWindowSize", gpuCapability.commandQueueWindowSize)
+                    .put("detail", gpuCapability.detail),
             )
             .put("classLoaderResolvedRuntime", classLoaderRuntime ?: JSONObject.NULL)
             .put(

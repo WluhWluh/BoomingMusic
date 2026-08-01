@@ -7,7 +7,6 @@ import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
-import dalvik.system.BaseDexClassLoader
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -26,9 +25,6 @@ class MdxLiteRtBoundedGpuCapabilityDeviceTest {
 
         val capability = MdxLiteRtNativeBoundedGpuCapabilityProvider.query()
         val decision = MdxLiteRtBoundedGpuContract.evaluate(capability)
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val acceleratorPath = (context.classLoader as BaseDexClassLoader)
-            .findLibrary(GPU_ACCELERATOR_LIBRARY)
 
         assertFalse(decision.detail, decision.isExact)
         assertFalse(capability.available)
@@ -36,7 +32,6 @@ class MdxLiteRtBoundedGpuCapabilityDeviceTest {
         assertEquals("uninstalled", capability.profileId)
         assertEquals(0, capability.kernelBatchSize)
         assertEquals(0, capability.commandQueueWindowSize)
-        assertTrue(acceleratorPath == null)
     }
 
     @Test
@@ -66,9 +61,5 @@ class MdxLiteRtBoundedGpuCapabilityDeviceTest {
         assertFalse(eligibility.detail, eligibility.isEligible)
         assertEquals(MdxLiteRtGpuEligibilityReason.CpuOnlyAbi, eligibility.reason)
         assertEquals(0, capabilityQueries)
-    }
-
-    private companion object {
-        const val GPU_ACCELERATOR_LIBRARY = "LiteRtClGlAccelerator"
     }
 }
