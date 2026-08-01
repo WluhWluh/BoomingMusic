@@ -864,11 +864,15 @@ native payload in the APK, and CPU remains a complete verified fallback.
 - GPU installation uses its own catalog/store directory and install record but
   shares the ABI process lease with the CPU runtime. ZIP, manifest, ELF-file
   hashes, dependency identity, pending activation, pending deletion, and
-  corrupted-payload tests pass.
+  corrupted-payload tests pass. Low-storage preflight rejects before network
+  acquisition, invalid complete payloads remove their staging directory, and
+  unknown staging directories are removed during inventory rebuild.
 - The source-separation process loads the verified CPU library first, then
   `libBssOcl.so`, then `libLiteRtClGlAccelerator.so` from absolute paths. JNI
   capability is compared with the manifest before GPU eligibility is exposed;
-  failure leaves CPU available.
+  the loader also binds the GPU manifest, install record, component catalog,
+  and CPU `install.json` identity before loading; failure leaves CPU
+  available.
 - Runtime Management owns the canonical `gpu_enabled` preference and the GPU
   component actions. The old `try_gpu` key remains a synchronized compatibility
   projection for existing backup files.
@@ -876,10 +880,12 @@ native payload in the APK, and CPU remains a complete verified fallback.
   recommendation. Model installation and model selection depend only on
   required CPU/model items, so deselecting GPU remains valid. A successful
   Quick Setup commit resets the GPU preference to the selected recommendation.
-- JVM coverage currently passes the runtime stores, locator, planner, bounded
-  capability, Auto fallback, and model-aware engine tests. Real-device
-  downloaded-component validation and the failure/process-recycle/performance
-  matrix below remain open and are not release qualification.
+- JVM coverage currently passes the complete GitHub unit-test suite, including
+  runtime stores, locator, planner, bounded capability, Auto fallback, and
+  model-aware engine tests. AndroidTest sources also compile with the
+  downloaded-runtime diagnostics. Real-device downloaded-component validation
+  and the failure/process-recycle/performance matrix below remain open and are
+  not release qualification.
 
 ### Phase 5: Add exact vendor NPU AOT variants
 
