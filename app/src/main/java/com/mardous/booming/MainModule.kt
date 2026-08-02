@@ -272,7 +272,7 @@ private val mainModule = module {
         )
     }
     single {
-        SourceSeparationModelAwareEngine.createProduction(
+        SourceSeparationModelAwareEngine.createBoundRemotePrototype(
             context = androidContext(),
             presetRepository = get(),
             coordinator = get(),
