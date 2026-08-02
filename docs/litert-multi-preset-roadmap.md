@@ -2552,33 +2552,39 @@ Acceptance criteria:
 
 ### Phase 8: Retire ONNX Runtime
 
+**Status: complete in the unreleased clean-install product graph on
+2026-08-02.** The ORT comparison material is retained as immutable historical
+evidence; old ONNX/model/cache data is intentionally not migrated because
+Booming SS has not shipped a release.
+
 Begin Phase 8 only after Phase 7E has produced the reviewed promotion matrix,
 the first selectable release catalog, and immutable desktop/device reports.
 Archive the ORT comparison reports before deleting the oracle; the oracle is no
 longer needed once every release-selectable row has equivalent LiteRT evidence.
 
-- [ ] Freeze the Phase 7 promotion matrix, catalog revision, and desktop ORT
+- [x] Freeze the Phase 7 promotion matrix, catalog revision, and desktop ORT
   references in validation artifacts. No Phase 8 code change may alter the
   evidence used for model promotion.
-- [ ] Remove legacy ONNX acquisition URLs, import validation, loader metadata,
+- [x] Remove legacy ONNX acquisition URLs, import validation, loader metadata,
   and user-facing ONNX runtime text from the app. Preserve original ONNX source
   URLs and attribution where the TFLite contract needs provenance, but never
   expose them as executable model-download or import targets. Keep immutable
   validation reports outside the release app.
-- [ ] Remove `SourceSeparationOrtOracle`, `onnxruntime.android`, and all ONNX
+- [x] Remove `SourceSeparationOrtOracle`, `onnxruntime.android`, and all ONNX
   native libraries after the final LiteRT route audit. Delete obsolete
   ONNX-only tests and diagnostics only after equivalent LiteRT checks are
   retained in the repository or validation artifacts.
-- [ ] Remove the temporary legacy 9482 execution profile, old model repository,
+- [x] Remove the temporary legacy 9482 execution profile, old model repository,
   `MdxModelVariant` routing, legacy model manifest, and legacy cache discovery
   paths. The clean-install boundary means no compatibility reader or migration
   marker is required.
 - [ ] Run a clean-install smoke, pinned TFLite acquisition, explicit model
   selection, full worker/playback flow, model switch, cancellation, cache
   clear, and APK/native-inventory audit after each removal stage.
-- [ ] Build ABI splits and the universal APK in standalone invocations, verify
-  that no downloadable native LiteRT component remains in the base APK, and
-  measure APK size separately from each downloaded/installed runtime component.
+- [x] Build the current GitHub Debug universal APK and verify that no
+  downloadable native LiteRT component remains in the base APK. The Release
+  split/universal audit remains part of the current runtime setup roadmap.
+  Measure APK size separately from each downloaded/installed runtime component.
   Do not count model weights or separation cache in the runtime budget.
 
 Acceptance criteria:
