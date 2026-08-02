@@ -867,8 +867,12 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             song = song,
             fallbackBlend = null,
         )
+        val decision = autoStartDecision(song, blend)
+        if (decision.hasCompletedCache) {
+            autoStartSuppressedSongId = song.id
+        }
         return request.copy(song = song).takeIf {
-            autoStartDecision(song, blend).shouldStart
+            decision.shouldStart
         } ?: run {
             clearPendingStart()
             null
