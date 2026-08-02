@@ -4,7 +4,7 @@ Status: active product and implementation plan. The product and data contracts
 in this document are frozen; phase checklists may be refined only without
 silently changing those contracts.
 
-Updated: 2026-08-01
+Updated: 2026-08-02
 
 This document is authoritative for:
 
@@ -129,6 +129,18 @@ distribution contracts, exact device selectors, and release packages satisfy
 the phases below. No generic NPU support may be inferred from a successful run
 on one Snapdragon generation.
 
+### Current release-graph caveat
+
+The 2026-08-02 GitHub Debug universal APK audit found no packaged
+`libLiteRt.so`, `libLiteRtClGlAccelerator.so`, or `libBssOcl.so`. It still
+contains `libonnxruntime.so` and `libonnxruntime4j_jni.so` for all four ABIs
+through the main-source `SourceSeparationOrtOracle` and
+`onnxruntime.android` dependency. The audited APK is therefore about 224 MB
+and is not yet the small fixed-footprint baseline required for meaningful NPU
+package-size accounting. Retiring the ORT oracle and legacy ONNX product graph
+is a blocking pre-Phase 5 task, coordinated with Phase 8 of the multi-preset
+roadmap.
+
 ## Frozen Product Contract
 
 The decisions in this section are product requirements. A phase may reject a
@@ -211,11 +223,12 @@ The first implementations are fixed as follows:
 
 - `GitHubRuntimeDeliveryProvider` uses immutable HTTPS GitHub Release assets;
 - `GitHubModelDeliveryProvider` uses immutable `bss-tflite` Release assets;
-- `GitHubProductCapabilityPolicy` enables the complete reviewed Runtime
-  Management, model import, GPU, NPU/AOT, and optional JIT surface; and
-- test providers simulate success, progress, cancellation, corruption,
-  platform-managed installation, and unsupported operations without network
-  access.
+- `GitHubProductCapabilityPolicy` enables only reviewed, implemented product
+  capabilities. The CPU/GPU baseline must report vendor NPU, AOT, QNN JIT, and
+  custom-runtime support as unavailable until their own phases pass; and
+- deterministic test providers simulate success, progress, cancellation,
+  corruption, platform-managed installation, and unsupported operations
+  without network access before vendor acquisition is integrated.
 
 Future implementations are intentionally possible but not current tasks:
 
@@ -235,27 +248,34 @@ types directly. A future store variant may have fewer rows and actions, but it
 must preserve the same model activation, validation, cache, and admitted-run
 correctness rules for every capability it keeps.
 
-### Quick Setup entry modes
+### Quick Setup planning modes and entry policy
 
-Quick Setup has three explicit modes:
+The plan schema retains three explicit modes for deterministic planning and
+tests:
 
-- `BootstrapRecommended`: no runnable local path exists and no valid active
-  model should be preserved;
-- `RepairCurrent`: preserve a valid active model and valid installed resources,
-  then repair only blockers for that intended configuration; and
-- `RestoreRecommended`: a manual, clearly labelled action that reinstalls or
-  repairs the recommended configuration and may select the recommended model
-  after successful validation.
+- `BootstrapRecommended`: construct a first runnable recommended path;
+- `RepairCurrent`: preserve a valid active model while repairing its blockers;
+  and
+- `RestoreRecommended`: install, repair, and activate the current release's
+  recommended configuration.
+
+They are not current user-selectable tabs. Every current Quick Setup entry
+performs a fresh readiness evaluation and presents a `RestoreRecommended`
+plan. A valid custom model is never deleted, but executing the reviewed model
+item may make the installed recommended model active. Normal Model Management
+downloads and imports remain independent and never activate implicitly.
 
 An explicit separation request automatically opens Quick Setup only when the
 readiness evaluator reports no runnable end-to-end path. A missing optional GPU
 or NPU component is a degradation, not an automatic-popup condition, when CPU
 and the active model are ready.
 
-Opening or analyzing Quick Setup never mutates preferences. The user must
-review the plan and press one install action. Canceling the screen must not
-create a prompt loop. Automatic prompting may recur only after the readiness
-fingerprint changes or after another explicit separation request.
+Opening or analyzing Quick Setup never mutates preferences. The user reviews
+the generated checklist and presses `Execute selected items`; when no work is
+needed, analysis immediately shows the completed result card. Canceling the
+screen must not create a prompt loop. Automatic prompting may recur only after
+the readiness fingerprint changes or after another explicit separation
+request.
 
 ### Recommendation defaults
 
@@ -265,8 +285,9 @@ because a URL exists.
 
 - The compatible CPU core is required whenever no verified CPU core is
   installed.
-- The single release-recommended base TFLite model is required for bootstrap
-  when no valid model can be preserved.
+- The single release-recommended base TFLite model is required whenever it is
+  missing or is not the active model in the reviewed recommended plan. An
+  already installed model is represented as a zero-download `Use` item.
 - A release-qualified bounded GPU component is recommended and selected by
   default on a compatible device.
 - A vendor NPU path is recommended and selected by default only when the
@@ -292,7 +313,7 @@ Quick Setup executes selected work serially in dependency order:
 2. install and validate the CPU core;
 3. install and validate the bounded GPU component;
 4. install and validate a vendor NPU runtime component;
-5. install and validate the recommended base model when required;
+5. install if needed and activate the recommended base model when required;
 6. install and validate an exact AOT model variant when selected;
 7. validate the complete candidate execution paths;
 8. atomically commit active-model and backend preferences; and
@@ -304,9 +325,11 @@ all required postconditions pass. An optional accelerator failure must not
 destroy an existing runnable configuration or enable a missing component.
 
 In `RepairCurrent`, a valid active model remains active. In
-`BootstrapRecommended` and an explicitly confirmed `RestoreRecommended`, the
-recommended model becomes active only at the final commit. Ordinary Model
-Management downloads and imports never activate a model automatically.
+`BootstrapRecommended` and a confirmed `RestoreRecommended`, the recommended
+model becomes active only as part of the validated setup transaction. The UI
+uses one `Install and use` or zero-download `Use` row rather than separate
+download and selection rows. Ordinary Model Management downloads and imports
+never activate a model automatically.
 
 ### Runtime Management behavior
 
@@ -645,19 +668,24 @@ The screen uses four stable states:
 
 1. analyzing device and local resources;
 2. reviewing an ordered checklist;
-3. installing one item at a time with per-item and total progress; and
+3. installing one item at a time with per-item progress; and
 4. complete, partially complete, blocked, or canceled result.
 
-Each checklist row shows a checkbox or fixed-required indicator, component
-name, recommendation state, compatibility summary, download/installed size,
-current status, and disabled reason. Rows do not expose raw manifests by
-default; a details action may show version, hashes, source Release, and license.
+Each checklist row keeps its checkbox at the left of the title and a details
+action at the right. A download row shows expected download and installed size;
+a zero-download `Use` row omits both. Recommendation, reason, non-pending
+execution state, failure, and disabled details live in the details dialog. The
+always-available status dialog reports CPU, supported GPU, active model, and
+typed readiness issues.
 
-The fixed footer action is `Install selected items`. During execution it becomes
-a cancel action that stops after the current atomic step reaches a safe
-boundary. Required-item failure yields a blocked result with Retry and Runtime
-or Model Management actions. Optional-item failure yields a partial result and
-keeps the validated CPU path usable.
+The footer action is `Execute selected items`. During execution it becomes a
+cancel action that stops after the current atomic step reaches a safe boundary.
+Required-item failure yields a blocked result with retry and management
+actions. Optional-item failure yields a partial result and must keep or finish
+the required CPU/model path. The result card has no redundant heading; its
+retry, Runtime Management, and Model Management actions each occupy one full
+row. A fully recommended configuration shows this completed result card
+directly after automatic analysis.
 
 `RestoreRecommended` must state that it will select the recommended model and
 reset GPU/NPU enablement to the reviewed selection. It repairs or installs the
@@ -719,6 +747,8 @@ files directly.
 
 ### Phase 0: Freeze authority and contracts
 
+**Status: complete.**
+
 - [x] Make this document authoritative for runtime setup and local runtime
   management.
 - [x] Freeze panel ownership, Quick Setup modes, recommendation defaults,
@@ -738,6 +768,9 @@ requires native LiteRT payloads in the base APK, or routes a missing local path
 directly to Model Management.
 
 ### Phase 1: Integrate the downloadable CPU core in Booming SS
+
+**Status: implementation complete; lifecycle and ABI/API qualification remain
+open.**
 
 - [x] Introduce `RuntimeDeliveryProvider`, `ModelDeliveryProvider`, and
   `ProductCapabilityPolicy` in release-channel-neutral modules. Deterministic
@@ -768,9 +801,14 @@ directly to Model Management.
 CPU runtime only from the app-owned absolute path, and the base APK remains a
 fully functional music player without a native LiteRT payload. The phase stays
 open until the lifecycle and ABI/API coverage above is complete; the current
-S10/S25 results are validation evidence, not a universal support claim.
+S10/S25 results are validation evidence, not a universal support claim. The
+APK audit also proves only that LiteRT is downloadable; packaged ORT remains a
+separate pre-Phase 5 blocker.
 
 ### Phase 2: Build the runtime store and CPU management UI
+
+**Status: feature complete; destructive-operation, update, and UI lifecycle
+coverage remain open.**
 
 - [x] Add the bundled immutable runtime catalog snapshot and strict parser.
 - [x] Implement cross-process install locks, staging, verification, atomic
@@ -787,18 +825,23 @@ S10/S25 results are validation evidence, not a universal support claim.
 - [ ] Test canceled repair, app update, duplicate installer handling, orphan
   staging cleanup, and Runtime Management UI/device lifecycle behavior.
 
-**Phase 2 implementation status (2026-07-31):** the CPU runtime catalog, store,
+**Phase 2 implementation status (2026-08-02):** the CPU runtime catalog, store,
 GitHub delivery path, and Runtime Management page are implemented. The page
 shows every catalog ABI but only permits operations for the process ABI; runtime
 operations do not modify model selection or separation caches. The current
 GitHub Debug variant compiles, assembles, and passes the complete JVM unit-test
-suite. Phase 2 remains open only for the destructive-operation edge cases and
-device/UI lifecycle coverage listed above.
+suite. Installed CPU and GPU component files are made read-only after publish;
+GPU inventory also removes unknown staging directories. Phase 2 remains open
+for canceled repair, CPU orphan staging, duplicate/concurrent installers, app
+update/version replacement, and device/UI lifecycle coverage.
 
 **Phase 2 exit:** CPU runtime state is derived from verified disk records and is
 fully manageable without model or cache side effects.
 
 ### Phase 3: Add readiness and CPU-first Quick Setup
+
+**Status: product flow complete; transactional failure and clean-install
+qualification remain open.**
 
 - [x] Introduce `LocalSeparationReadiness` and replace the current model-only
   readiness gate and automatic Model Management opening.
@@ -813,11 +856,16 @@ fully manageable without model or cache side effects.
   outside `ModelDeliveryProvider`.
 - [x] Add manual Quick Setup entry and automatic opening only when no runnable
   path exists.
+- [x] Reanalyze on every entry, present the current recommended plan without a
+  mode switch, combine recommended-model installation and activation into one
+  row, and show the completed result card when no work remains.
+- [x] Validate on S25 the installed-ready state, status details, zero-download
+  GPU preference reset, execution result, and fresh reanalysis after re-entry.
 - [ ] Test fresh install, valid custom model, missing active model, corrupt
   model, corrupt runtime, no network, low storage, process death, cancel, retry,
   and optional-resource partial completion.
 
-**Phase 3 implementation status (2026-07-31):** `LocalSeparationReadiness` now
+**Phase 3 implementation status (2026-08-02):** `LocalSeparationReadiness` now
 evaluates the verified CPU runtime and active model as one runnable path. The
 planner produces deterministic bootstrap, repair, and recommended-restore plans;
 the executor validates the plan fingerprint, installs selected resources in
@@ -827,17 +875,26 @@ installed, followed by final readiness validation.
 Quick Setup is available manually from Source Separation settings and is the
 automatic recovery destination when a separation request has no runnable local
 path. Runtime and model handoffs remain separate, and the runtime handoff opens
-the Runtime Management page directly.
+the Runtime Management page directly. The current screen always reviews the
+release-recommended configuration, automatically rechecks on entry, keeps
+zero-download activation items compact, and exposes readiness through an
+on-demand status dialog.
 
-The planner tests, complete GitHub JVM unit-test suite, Kotlin compilation, and
-GitHub Debug APK assembly pass. Device/UI lifecycle tests and the failure matrix
-above remain open; those tests must not be treated as release qualification.
+The planner tests, complete GitHub JVM unit-test suite, Kotlin compilation,
+AndroidTest compilation, GitHub Debug APK assembly, and the focused S25 UI
+smoke pass. There is still no dedicated executor test suite. In particular,
+the current fail-fast executor can stop on an optional GPU failure before a
+later required model item; transaction ordering and commit/rollback behavior
+must be corrected before adding another optional accelerator.
 
 **Phase 3 exit:** a fresh user can obtain a verified CPU-plus-recommended-model
 path with one reviewed action, while an experienced user's valid model and
 unrelated resources remain untouched by repair.
 
 ### Phase 4: Add downloadable bounded GPU
+
+**Status: feature path complete; final downloaded-path lifecycle and device
+qualification remain open.**
 
 - [x] Add the bounded GPU catalog component and exact CPU-core dependency.
 - [x] Load accelerator and `libBssOcl.so` in the verified dependency order and
@@ -847,8 +904,10 @@ unrelated resources remain untouched by repair.
   by the user.
 - [x] Preserve the admitted preference and backend across UI, background, and
   screen-state changes.
-- [ ] Test setup/probe/invocation/output failure, complete cleanup, one-way CPU
-  fallback, process poison/recycle, update, and loaded-version removal.
+- [x] Add deterministic setup/probe/invocation/output failure, complete-cleanup,
+  one-way CPU fallback, process-poison, and backend-policy recycle coverage.
+- [ ] Repeat those cases through the final product download path and test
+  update, pending activation, loaded-version removal, and process death.
 - [ ] Repeat S10/S25 full-song, PSS, thermal, power, foreground interaction,
   FrameTimeline, and playback-underrun comparisons using the final downloaded
   component path.
@@ -856,7 +915,7 @@ unrelated resources remain untouched by repair.
 **Phase 4 exit:** qualified devices default to bounded GPU without shipping its
 native payload in the APK, and CPU remains a complete verified fallback.
 
-**Phase 4 implementation record (2026-08-01):**
+**Phase 4 implementation record (2026-08-02):**
 
 - `litert-gpu-runtime-catalog-v1.json` describes the arm64 bounded OpenCL
   component, its exact CPU library SHA-256 dependency, two native libraries,
@@ -873,6 +932,11 @@ native payload in the APK, and CPU remains a complete verified fallback.
   the loader also binds the GPU manifest, install record, component catalog,
   and CPU `install.json` identity before loading; failure leaves CPU
   available.
+- The production worker now requests a fresh inference-process generation when
+  an idle resident session was created under a different CPU/Auto backend
+  policy. JVM tests and the device-test harness assert generation, PID, binder
+  death, and admitted-backend identities rather than assuming a reconnect used
+  new native state.
 - Runtime Management owns the canonical `gpu_enabled` preference and the GPU
   component actions. The old `try_gpu` key remains a synchronized compatibility
   projection for existing backup files.
@@ -883,11 +947,91 @@ native payload in the APK, and CPU remains a complete verified fallback.
 - JVM coverage currently passes the complete GitHub unit-test suite, including
   runtime stores, locator, planner, bounded capability, Auto fallback, and
   model-aware engine tests. AndroidTest sources also compile with the
-  downloaded-runtime diagnostics. Real-device downloaded-component validation
-  and the failure/process-recycle/performance matrix below remain open and are
-  not release qualification.
+  downloaded-runtime diagnostics. A focused S25 product smoke has exercised
+  installed CPU/GPU discovery, recommended GPU preference restoration, status
+  reporting, and Quick Setup re-entry. This does not replace clean-install,
+  S10, full-song, update/removal, failure-injection, or performance reports and
+  is not release qualification.
+
+### Pre-Phase 5 gate: close the CPU/GPU product baseline
+
+Phase 5 must not begin as product implementation until the following hard
+gates are closed. Schema drafting and offline AOT tooling research may continue,
+but no NPU capability may be enabled in the app catalog or UI before this gate
+exits.
+
+#### Release graph and capability truth
+
+- [ ] Complete the multi-preset roadmap's ONNX retirement: archive the frozen
+  comparison evidence, remove `SourceSeparationOrtOracle`,
+  `onnxruntime.android`, executable ONNX acquisition/import paths, legacy
+  profiles, and obsolete legacy cache routing from the release app.
+- [ ] Build ABI splits and a universal GitHub APK from a clean checkout; prove
+  they contain no ORT, LiteRT CPU, bounded-GPU, QNN, or vendor native payload,
+  then record base APK size separately from every downloadable component.
+- [ ] Make `GitHubProductCapabilityPolicy` advertise only implemented and
+  release-visible capabilities. It currently returns true for vendor NPU,
+  AOT, QNN JIT, and custom-runtime support before those products exist.
+- [ ] Add deterministic runtime/model delivery-provider doubles and policy
+  contract tests before vendor-specific acquisition multiplies the state space.
+
+#### Quick Setup transaction safety
+
+- [ ] Reorder or dependency-schedule setup so required CPU/model work completes
+  independently of optional accelerators. A selected GPU failure must not skip
+  a later required model install/activation.
+- [ ] Make active-model and backend-preference changes a final validated commit,
+  or implement explicit rollback. Cancellation, optional failure, stale plans,
+  and final-readiness failure must preserve the previously runnable selection.
+- [ ] Add executor-level tests for clean bootstrap, installed-resource reuse,
+  valid custom model, missing/corrupt model, corrupt CPU/GPU runtime, offline,
+  bad hash, low disk, cancellation at every item boundary, retry, stale plan,
+  optional partial completion, and no-work completion.
+- [ ] Add stable UI tests for automatic prompt/no-loop behavior, manual entry,
+  result and details dialogs, selection persistence during one review, process
+  recreation, management navigation, accessibility labels, and long localized
+  text.
+
+#### Runtime lifecycle and persistence
+
+- [ ] Complete CPU and GPU canceled repair, duplicate/concurrent install,
+  orphan staging, app update, version switch, corrupt installed file,
+  wrong-ABI payload, pending activation/deletion, delete/reinstall, main-process
+  death, inference-process death, and loaded-version removal tests.
+- [ ] Promote `source_separation.gpu_enabled` into the versioned backup
+  allowlist and device tests. The current backup policy and
+  `BackupGpuPreferenceDeviceTest` still cover only legacy
+  `source_separation.try_gpu`; under the clean-install boundary the legacy key
+  must stop being canonical before `npuEnabled` extends the schema.
+- [ ] Verify clear-cache leaves runtime/model inventory intact, while clear app
+  data and uninstall remove runtimes, models, preferences, and prompt state.
+
+#### Final CPU/GPU device baseline
+
+- [ ] On clean app data, run the complete CPU + recommended 9662 + optional
+  bounded-GPU Quick Setup flow on S10 and S25, including cold/warm start,
+  force-stop, process death, repair, update, removal, opt-out, and reinstall.
+- [ ] Repeat 9662 full-song CPU/GPU numerical and listening checks on the final
+  downloaded components and record wall time, peak PSS, thermal state, power,
+  cancellation, background continuation, foreground FrameTimeline, and
+  playback underruns. These measurements become the comparison baseline for
+  every NPU claim.
+- [ ] Close the Phase 1 ABI/API support table, or explicitly mark unqualified
+  ABI/API rows unavailable. NPU work may target qualified arm64 devices without
+  pretending that unfinished x86, x86_64, or arm32 rows are release-supported.
+
+**Pre-Phase 5 exit:** the release graph is TFLite-only and runtime-download
+only; capability flags tell the truth; Quick Setup cannot let an optional
+backend block or mutate the required path; GPU intent survives backup/restore;
+CPU/GPU update, removal, process-death, and clean-install flows pass on the
+claimed support rows; and S10/S25 provide a repeatable downloaded-component
+baseline against which NPU value can be measured. Exhaustive localization and
+non-shipping ABI qualification may remain Phase 8 work, but unsupported rows
+must stay disabled.
 
 ### Phase 5: Add exact vendor NPU AOT variants
+
+**Status: blocked by the pre-Phase 5 gate.**
 
 - [ ] Freeze a vendor-neutral AOT catalog schema and Qualcomm implementation.
 - [ ] Package shared vendor runtime files separately from model-specific AOT
@@ -927,8 +1071,8 @@ delegation.
 
 ### Phase 7: Complete persistence, backup, repair, and model integration
 
-- [ ] Add versioned `gpuEnabled` and `npuEnabled` settings and backup allowlist
-  coverage; remove `tryGpu` as canonical product state.
+- [ ] Extend the pre-Phase 5 versioned `gpuEnabled` backup contract with
+  `npuEnabled`; do not reintroduce `tryGpu` as canonical product state.
 - [ ] Verify restore with no runtime, missing active model, another valid active
   model, unsupported NPU, and unavailable AOT without automatic downloads.
 - [ ] Add installed-model and AOT details, storage use, runtime dependencies,
@@ -948,7 +1092,8 @@ remain distinct through restore, repair, cache clearing, and process recreation.
 ### Phase 8: Release qualification
 
 - [ ] Build split and universal GitHub APKs from a clean runner and verify no
-  native LiteRT, GPU, QNN, or vendor payload is accidentally packaged.
+  ONNX Runtime, native LiteRT, GPU, QNN, or vendor payload is accidentally
+  packaged.
 - [ ] Verify the final GitHub graph contains only GitHub delivery adapters and
   that common product code has no Play Core, AI Pack, or F-Droid packaging
   imports.
@@ -981,7 +1126,7 @@ from another:
 
 | Dimension | Required coverage |
 | --- | --- |
-| Setup mode | bootstrap, repair current, restore recommended |
+| Setup mode | internal bootstrap/repair/restore plans; current product restore entry; automatic no-runnable trigger |
 | Resource state | absent, valid, corrupt, partial, outdated, pending activation, pending deletion |
 | Delivery | GitHub HTTP, deterministic fake, platform-managed fake, unsupported operation |
 | Backend | CPU, bounded GPU, exact NPU AOT, QNN JIT, typed fallback |
@@ -1003,7 +1148,7 @@ GPU or NPU delegation.
 Keep commits small, buildable, and specific. Recommended sequence:
 
 1. roadmap and contract authority;
-2. delivery interfaces, capability policy, and deterministic test providers;
+2. delivery interfaces and initial GitHub capability policy;
 3. GitHub runtime/model providers;
 4. classes-only API dependency and process bootstrap;
 5. runtime catalog/store and CPU installer;
@@ -1011,9 +1156,12 @@ Keep commits small, buildable, and specific. Recommended sequence:
 7. readiness evaluator;
 8. Quick Setup CPU/model orchestration;
 9. bounded GPU component and preference migration;
-10. AOT schema and first Qualcomm path;
-11. on-demand QNN JIT;
-12. backup, repair, localization, and release qualification.
+10. ORT retirement and clean APK inventory baseline;
+11. deterministic provider/executor tests and Quick Setup transaction repair;
+12. CPU/GPU lifecycle, backup, clean-install, and S10/S25 baseline closure;
+13. AOT schema and first Qualcomm path;
+14. on-demand QNN JIT; and
+15. NPU persistence, repair, localization, and release qualification.
 
 Use concrete commit scopes such as `litert-runtime`, `runtime-manager`,
 `quick-setup`, `npu-aot`, `qnn-jit`, `backup`, or `runtime-release`; do not use a
@@ -1023,8 +1171,8 @@ generic `separation` scope for these changes.
 
 This roadmap is complete only when:
 
-1. the base APK contains no downloadable native runtime payload and ordinary
-   music playback works without local separation resources;
+1. the base APK contains no ONNX Runtime or downloadable native runtime payload,
+   and ordinary music playback works without local separation resources;
 2. CPU, GPU, and each enabled NPU path install from immutable verified assets;
 3. the inference process loads one absolute CPU runtime identity before any
    LiteRT API initialization and never hot-swaps it;
