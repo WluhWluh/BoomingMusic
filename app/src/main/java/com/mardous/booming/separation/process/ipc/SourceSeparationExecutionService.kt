@@ -197,19 +197,11 @@ internal class SourceSeparationExecutionService : Service() {
                         "The IPC observer cannot replace an active client-bound owner."
                     }
                 }
-                unlinkClientDeathLocked()
-                val deathRecipient = IBinder.DeathRecipient(::handleClientDeath)
-                callback.asBinder().linkToDeath(deathRecipient, 0)
-                val connected = ConnectedClient(
-                    state = SourceSeparationIpcObserverState(
-                        observerId = request.observerId,
-                        clientProcessName = request.clientProcessName,
-                        connectedAtElapsedRealtimeNanos = nowElapsedRealtimeNanos(),
-                    ),
+                val connected = replaceClientLocked(
+                    observerId = request.observerId,
+                    clientProcessName = request.clientProcessName,
                     callback = callback,
-                    deathRecipient = deathRecipient,
                 )
-                client = connected
                 try {
                     active?.attachObserver(connected)
                     active?.let { run ->
@@ -237,7 +229,12 @@ internal class SourceSeparationExecutionService : Service() {
             )
         }
 
-        override fun start(requestJson: String): String {
+        override fun start(
+            requestJson: String,
+            observerId: String,
+            clientProcessName: String,
+            callback: ISourceSeparationExecutionCallback,
+        ): String {
             requireSameUidCaller()
             val command = try {
                 SourceSeparationExecutionIpcCodec.decodeStartCommand(requestJson)
@@ -245,7 +242,12 @@ internal class SourceSeparationExecutionService : Service() {
                 return rejectedStartResponse("malformed", error)
             }
             val active = try {
-                reserveRun(command)
+                reserveRun(
+                    command = command,
+                    observerId = observerId,
+                    clientProcessName = clientProcessName,
+                    callback = callback,
+                )
             } catch (error: Throwable) {
                 command.foregroundLease?.let { lease ->
                     foregroundController.stop(lease, "start-rejected")
@@ -488,6 +490,9 @@ internal class SourceSeparationExecutionService : Service() {
 
     private fun reserveRun(
         command: SourceSeparationIpcStartCommand,
+        observerId: String,
+        clientProcessName: String,
+        callback: ISourceSeparationExecutionCallback,
     ): ActiveRemoteRun = synchronized(stateLock) {
         require(command.descriptor.processGeneration == processGeneration) {
             "IPC start command targets a stale process generation."
@@ -497,9 +502,11 @@ internal class SourceSeparationExecutionService : Service() {
         }
         if (activeRun != null) throw SourceSeparationIpcBusyException()
         if (recycleAcknowledgement != null) throw SourceSeparationIpcRecyclingException()
-        val connectedClient = requireNotNull(client) {
-            "The remote execution client is not connected."
-        }
+        val connectedClient = replaceClientLocked(
+            observerId = observerId,
+            clientProcessName = clientProcessName,
+            callback = callback,
+        )
         ensureForegroundStarted(command.foregroundLease)
         val wakeLockDiagnostics = processingWakeLockController.diagnostics()
         require(wakeLockDiagnostics.activeLease == null &&
@@ -834,10 +841,40 @@ internal class SourceSeparationExecutionService : Service() {
         )
     )
 
-    private fun handleClientDeath() {
+    private fun handleClientDeath(observerId: String, callbackBinder: IBinder) {
         synchronized(stateLock) {
+            val connected = client
+            if (connected?.state?.observerId != observerId ||
+                connected.callback.asBinder() !== callbackBinder
+            ) {
+                return
+            }
             handleClientLossLocked("callback-binder-died")
         }
+    }
+
+    private fun replaceClientLocked(
+        observerId: String,
+        clientProcessName: String,
+        callback: ISourceSeparationExecutionCallback,
+    ): ConnectedClient {
+        val state = SourceSeparationIpcObserverState(
+            observerId = observerId,
+            clientProcessName = clientProcessName,
+            connectedAtElapsedRealtimeNanos = nowElapsedRealtimeNanos(),
+        )
+        unlinkClientDeathLocked()
+        client = null
+        val callbackBinder = callback.asBinder()
+        val deathRecipient = IBinder.DeathRecipient {
+            handleClientDeath(observerId, callbackBinder)
+        }
+        callbackBinder.linkToDeath(deathRecipient, 0)
+        return ConnectedClient(
+            state = state,
+            callback = callback,
+            deathRecipient = deathRecipient,
+        ).also { client = it }
     }
 
     private fun handleObserverDeliveryFailure(observerId: String, error: Throwable) {

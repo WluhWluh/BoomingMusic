@@ -357,7 +357,22 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                     foregroundLease = foregroundLease,
                 )
             )
-            SourceSeparationExecutionIpcCodec.decodeStartResponse(service.start(payload))
+            val callback = connectionLock.withLock {
+                check(connectionState == SourceSeparationRemoteConnectionState.Connected &&
+                    activeBindingGeneration > 0L
+                ) { "Bound-remote callback binding is unavailable." }
+                createCallback(activeBindingGeneration)
+            }
+            // Another idle host may have connected since this instance bound.
+            // Admit the run and its event callback in the same Binder call.
+            SourceSeparationExecutionIpcCodec.decodeStartResponse(
+                service.start(
+                    payload,
+                    observerId,
+                    AppProcessResolver.resolve(applicationContext).processName,
+                    callback,
+                )
+            )
         } catch (error: Throwable) {
             throw handleRemoteFailure(error)
         } finally {

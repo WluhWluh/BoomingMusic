@@ -7,7 +7,12 @@ interface ISourceSeparationExecutionService {
         String requestJson,
         ISourceSeparationExecutionCallback callback
     );
-    String start(String requestJson);
+    String start(
+        String requestJson,
+        String observerId,
+        String clientProcessName,
+        ISourceSeparationExecutionCallback callback
+    );
     String updateControl(String requestJson);
     String snapshot(String requestJson);
     String diagnostics(String requestJson);

@@ -40,6 +40,39 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `production playback and prefetch inference use the remote process`() {
+        val source = mainSource("com/mardous/booming/MainModule.kt").readText()
+
+        assertTrue(source.contains("SourceSeparationModelAwareEngine.createBoundRemotePrototype("))
+        assertFalse(source.contains("SourceSeparationModelAwareEngine.createProduction("))
+    }
+
+    @Test
+    fun `remote start binds admission to the calling host callback`() {
+        val aidl = mainAidl(
+            "com/mardous/booming/separation/process/ipc/ISourceSeparationExecutionService.aidl",
+        ).readText()
+        val host = mainSource(
+            "com/mardous/booming/separation/process/ipc/BoundRemoteSourceSeparationExecutionHost.kt",
+        ).readText()
+        val service = mainSource(
+            "com/mardous/booming/separation/process/ipc/SourceSeparationExecutionService.kt",
+        ).readText()
+
+        assertTrue(Regex(
+            """String\s+start\(.*ISourceSeparationExecutionCallback\s+callback.*\);""",
+            setOf(RegexOption.DOT_MATCHES_ALL),
+        ).containsMatchIn(aidl))
+        assertTrue(Regex(
+            """service\.start\(\s*payload,\s*observerId,\s*AppProcessResolver\.resolve\(applicationContext\)\.processName,\s*callback,""",
+        ).containsMatchIn(host))
+        assertTrue(Regex(
+            """reserveRun\(\s*command\s*=\s*command,\s*observerId\s*=\s*observerId,\s*clientProcessName\s*=\s*clientProcessName,\s*callback\s*=\s*callback,""",
+        ).containsMatchIn(service))
+        assertTrue(service.contains("val connectedClient = replaceClientLocked("))
+    }
+
+    @Test
     fun `generic inference boundaries have no implicit ORT provider`() {
         val runtime = mainSource(
             "com/mardous/booming/separation/model/MdxInferenceRuntime.kt",
@@ -83,6 +116,11 @@ class SourceSeparationProductionRouteAuditTest {
             require(source.isFile) { "Missing production source: $relativePath" }
         }
 
+    private fun mainAidl(relativePath: String): File =
+        File(mainAidlRoot, relativePath).also { source ->
+            require(source.isFile) { "Missing production AIDL: $relativePath" }
+        }
+
     private val mainKotlinRoot: File
         get() {
             val workingDirectory = File(requireNotNull(System.getProperty("user.dir")))
@@ -91,6 +129,16 @@ class SourceSeparationProductionRouteAuditTest {
                 File(workingDirectory, "app/src/main/java"),
             ).firstOrNull(File::isDirectory)
                 ?: error("Cannot locate the app production source root from $workingDirectory")
+        }
+
+    private val mainAidlRoot: File
+        get() {
+            val workingDirectory = File(requireNotNull(System.getProperty("user.dir")))
+            return listOf(
+                File(workingDirectory, "src/main/aidl"),
+                File(workingDirectory, "app/src/main/aidl"),
+            ).firstOrNull(File::isDirectory)
+                ?: error("Cannot locate the app production AIDL root from $workingDirectory")
         }
 
     private companion object {
