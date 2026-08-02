@@ -47,8 +47,7 @@ class SourceSeparationQuickSetupPlannerTest {
             listOf(
                 SourceSeparationQuickSetupAction.InstallRuntime,
                 SourceSeparationQuickSetupAction.InstallGpuRuntime,
-                SourceSeparationQuickSetupAction.InstallModel,
-                SourceSeparationQuickSetupAction.SelectModel,
+                SourceSeparationQuickSetupAction.InstallAndSelectModel,
             ),
             plan.items.map(SourceSeparationQuickSetupPlanItem::action),
         )
@@ -57,10 +56,6 @@ class SourceSeparationQuickSetupPlannerTest {
         assertEquals(20L, plan.items[1].expectedInstalledBytes)
         assertEquals(listOf("runtime:cpu-arm64"), plan.items[1].dependencyIds)
         assertEquals(listOf("runtime:cpu-arm64"), plan.items[2].dependencyIds)
-        assertEquals(
-            listOf("runtime:cpu-arm64", "model:recommended-model"),
-            plan.items[3].dependencyIds,
-        )
         assertTrue(plan.proposedGpuEnabled == true)
     }
 
@@ -102,7 +97,58 @@ class SourceSeparationQuickSetupPlannerTest {
     }
 
     @Test
-    fun `bootstrap orders CPU runtime model installation and final selection`() {
+    fun `pending runtimes are used without another download`() {
+        val plan = SourceSeparationQuickSetupPlanner.create(
+            readiness(
+                activeModel = model(
+                    modelId = "recommended-model",
+                    sha256 = "c".repeat(64),
+                    installed = true,
+                    active = true,
+                ),
+                activeReference = SourceSeparationActiveModelReference(
+                    modelId = "recommended-model",
+                    artifactSha256 = "c".repeat(64),
+                    contractSchemaVersion = 2,
+                ),
+                recommendedModel = model(
+                    modelId = "recommended-model",
+                    sha256 = "c".repeat(64),
+                    installed = true,
+                    active = true,
+                ),
+                runtimeState = SourceSeparationRuntimeState.PendingActivation,
+                gpuRuntime = gpuRuntime(SourceSeparationGpuRuntimeState.PendingActivation),
+                repairCandidates = listOf(
+                    LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.ActivatePendingCpuRuntime,
+                        reason = "Activate CPU runtime.",
+                        required = true,
+                        componentId = "cpu-arm64",
+                    ),
+                    LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.ActivatePendingGpuRuntime,
+                        reason = "Activate GPU runtime.",
+                        required = false,
+                        componentId = "gpu-arm64",
+                    ),
+                ),
+            ),
+            SourceSeparationQuickSetupMode.RestoreRecommended,
+        )
+
+        assertEquals(
+            listOf(
+                SourceSeparationQuickSetupAction.ActivatePendingRuntime,
+                SourceSeparationQuickSetupAction.ActivatePendingGpuRuntime,
+            ),
+            plan.items.map(SourceSeparationQuickSetupPlanItem::action),
+        )
+        assertTrue(plan.items.all { it.expectedDownloadBytes == 0L })
+    }
+
+    @Test
+    fun `bootstrap orders CPU runtime before installing and selecting the model`() {
         val readiness = readiness(
             activeModel = null,
             activeReference = null,
@@ -131,18 +177,13 @@ class SourceSeparationQuickSetupPlannerTest {
         assertEquals(
             listOf(
                 SourceSeparationQuickSetupAction.InstallRuntime,
-                SourceSeparationQuickSetupAction.InstallModel,
-                SourceSeparationQuickSetupAction.SelectModel,
+                SourceSeparationQuickSetupAction.InstallAndSelectModel,
             ),
             plan.items.map(SourceSeparationQuickSetupPlanItem::action),
         )
         assertEquals(
             listOf("runtime:cpu-arm64"),
             plan.items[1].dependencyIds,
-        )
-        assertEquals(
-            listOf("runtime:cpu-arm64", "model:recommended-model"),
-            plan.items[2].dependencyIds,
         )
         assertEquals("recommended-model", plan.proposedActiveModel?.modelId)
     }
@@ -184,7 +225,7 @@ class SourceSeparationQuickSetupPlannerTest {
     }
 
     @Test
-    fun `restore recommended selects an already installed recommendation`() {
+    fun `restore recommended uses one zero-download item for an installed recommendation`() {
         val current = SourceSeparationActiveModelReference(
             modelId = "old-model",
             artifactSha256 = "a".repeat(64),
@@ -211,10 +252,43 @@ class SourceSeparationQuickSetupPlannerTest {
             mode = SourceSeparationQuickSetupMode.RestoreRecommended,
         )
 
-        assertEquals(listOf(SourceSeparationQuickSetupAction.SelectModel), plan.items.map {
+        assertEquals(listOf(SourceSeparationQuickSetupAction.InstallAndSelectModel), plan.items.map {
             it.action
         })
+        assertEquals(0L, plan.items.single().expectedDownloadBytes)
+        assertEquals(30L, plan.items.single().expectedInstalledBytes)
         assertEquals("recommended-model", plan.proposedActiveModel?.modelId)
+    }
+
+    @Test
+    fun `restore recommended has no work when runtimes and model already match`() {
+        val recommended = model(
+            modelId = "recommended-model",
+            sha256 = "b".repeat(64),
+            installed = true,
+            active = true,
+        )
+        val reference = SourceSeparationActiveModelReference(
+            modelId = recommended.modelId,
+            artifactSha256 = recommended.artifactSha256,
+            contractSchemaVersion = recommended.contractSchemaVersion,
+        )
+        val plan = SourceSeparationQuickSetupPlanner.create(
+            readiness = readiness(
+                state = LocalSeparationReadinessState.Ready,
+                runtimeState = SourceSeparationRuntimeState.Installed,
+                activeModel = recommended,
+                activeReference = reference,
+                recommendedModel = recommended,
+                gpuRuntime = gpuRuntime(SourceSeparationGpuRuntimeState.Installed),
+                gpuEnabled = true,
+            ),
+            mode = SourceSeparationQuickSetupMode.RestoreRecommended,
+        )
+
+        assertTrue(plan.items.isEmpty())
+        assertEquals(reference, plan.proposedActiveModel)
+        assertEquals(3, plan.schemaVersion)
     }
 
     @Test

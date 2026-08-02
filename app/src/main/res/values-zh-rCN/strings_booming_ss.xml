@@ -144,6 +144,7 @@
     <string name="source_separation_quick_setup_retry">重新检查</string>
     <string name="source_separation_quick_setup_cpu_runtime_title">LiteRT CPU 运行时</string>
     <string name="source_separation_quick_setup_gpu_runtime_title">LiteRT 有界 GPU</string>
+    <string name="source_separation_quick_setup_install_and_use">安装并使用 %1$s</string>
     <string name="source_separation_quick_setup_use_model">使用 %1$s</string>
     <string name="source_separation_quick_setup_manual_review">手动检查资源</string>
     <string name="source_separation_quick_setup_auto_repair_unavailable">此设备无法由快速配置自动修复。</string>

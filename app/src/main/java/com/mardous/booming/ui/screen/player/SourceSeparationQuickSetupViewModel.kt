@@ -34,9 +34,8 @@ internal class SourceSeparationQuickSetupViewModel(
         analyze()
     }
 
-    fun analyze(mode: SourceSeparationQuickSetupMode? = null) {
+    fun analyze() {
         if (_state.value.phase == SourceSeparationQuickSetupPhase.Installing) return
-        val requestedMode = mode ?: _state.value.mode
         _state.update {
             it.copy(
                 phase = SourceSeparationQuickSetupPhase.Analyzing,
@@ -47,8 +46,10 @@ internal class SourceSeparationQuickSetupViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val readiness = readinessEvaluator.evaluate()
-                val effectiveMode = mode ?: defaultMode(readiness)
-                val plan = SourceSeparationQuickSetupPlanner.create(readiness, effectiveMode)
+                val plan = SourceSeparationQuickSetupPlanner.create(
+                    readiness,
+                    SourceSeparationQuickSetupMode.RestoreRecommended,
+                )
                 readiness to plan
             }.onSuccess { (readiness, plan) ->
                 val selected = plan.selectedItems.mapTo(mutableSetOf()) { it.itemId }
@@ -73,10 +74,6 @@ internal class SourceSeparationQuickSetupViewModel(
                 }
             }
         }
-    }
-
-    fun setMode(mode: SourceSeparationQuickSetupMode) {
-        analyze(mode)
     }
 
     fun setSelected(itemId: String, selected: Boolean) {
@@ -148,10 +145,6 @@ internal class SourceSeparationQuickSetupViewModel(
         }
     }
 
-    fun dismissError() {
-        _state.update { it.copy(errorMessage = null) }
-    }
-
     private fun publishProgress(progress: SourceSeparationQuickSetupProgress) {
         _state.update {
             val resultState = when (progress.state) {
@@ -170,12 +163,6 @@ internal class SourceSeparationQuickSetupViewModel(
         }
     }
 
-    private fun defaultMode(readiness: LocalSeparationReadiness): SourceSeparationQuickSetupMode =
-        if (readiness.activeModelReference == null) {
-            SourceSeparationQuickSetupMode.BootstrapRecommended
-        } else {
-            SourceSeparationQuickSetupMode.RepairCurrent
-        }
 }
 
 internal enum class SourceSeparationQuickSetupPhase {
@@ -187,7 +174,7 @@ internal enum class SourceSeparationQuickSetupPhase {
 
 internal data class SourceSeparationQuickSetupUiState(
     val phase: SourceSeparationQuickSetupPhase = SourceSeparationQuickSetupPhase.Analyzing,
-    val mode: SourceSeparationQuickSetupMode = SourceSeparationQuickSetupMode.BootstrapRecommended,
+    val mode: SourceSeparationQuickSetupMode = SourceSeparationQuickSetupMode.RestoreRecommended,
     val readiness: LocalSeparationReadiness? = null,
     val plan: SourceSeparationQuickSetupPlan? = null,
     val selectedItemIds: Set<String> = emptySet(),

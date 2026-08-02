@@ -289,9 +289,12 @@ internal class SourceSeparationQuickSetupExecutor(
 
             SourceSeparationQuickSetupAction.ConfigureGpuRuntime -> Unit
 
-            SourceSeparationQuickSetupAction.InstallModel -> {
+            SourceSeparationQuickSetupAction.InstallAndSelectModel -> {
                 val modelId = requireNotNull(item.modelId)
-                modelInstaller.install(
+                val expected = presetRepository.officialPreset(modelId)
+                val installed = presetRepository.installedModels().singleOrNull {
+                    it.sha256.equals(expected.sha256, ignoreCase = true)
+                } ?: modelInstaller.install(
                     modelId = modelId,
                     onProgress = { downloadedBytes, totalBytes ->
                         onProgress(
@@ -307,15 +310,7 @@ internal class SourceSeparationQuickSetupExecutor(
                     },
                     shouldCancel = shouldCancel,
                 )
-            }
-
-            SourceSeparationQuickSetupAction.SelectModel -> {
-                if (shouldCancel()) throw CancellationException("Selection canceled.")
-                val modelId = requireNotNull(item.modelId)
-                val expected = presetRepository.officialPreset(modelId)
-                val installed = presetRepository.installedModels().singleOrNull {
-                    it.sha256.equals(expected.sha256, ignoreCase = true)
-                } ?: throw IllegalStateException("The selected model was not installed.")
+                if (shouldCancel()) throw CancellationException("Model activation canceled.")
                 presetRepository.activate(
                     sha256 = installed.sha256,
                     platform = platformProvider(),

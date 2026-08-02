@@ -144,6 +144,7 @@
     <string name="source_separation_quick_setup_retry">Review again</string>
     <string name="source_separation_quick_setup_cpu_runtime_title">LiteRT CPU runtime</string>
     <string name="source_separation_quick_setup_gpu_runtime_title">LiteRT bounded GPU</string>
+    <string name="source_separation_quick_setup_install_and_use">Install and use %1$s</string>
     <string name="source_separation_quick_setup_use_model">Use %1$s</string>
     <string name="source_separation_quick_setup_manual_review">Manual resource review</string>
     <string name="source_separation_quick_setup_auto_repair_unavailable">This device cannot be repaired automatically.</string>

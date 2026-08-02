@@ -5,10 +5,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -21,8 +25,14 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.rememberNestedScrollInteropConnection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -36,9 +46,9 @@ import com.mardous.booming.separation.setup.LocalSeparationReadiness
 import com.mardous.booming.separation.setup.LocalSeparationReadinessState
 import com.mardous.booming.separation.setup.SourceSeparationQuickSetupAction
 import com.mardous.booming.separation.setup.SourceSeparationQuickSetupItemState
-import com.mardous.booming.separation.setup.SourceSeparationQuickSetupMode
 import com.mardous.booming.separation.setup.SourceSeparationQuickSetupPlan
 import com.mardous.booming.separation.setup.SourceSeparationQuickSetupPlanItem
+import com.mardous.booming.separation.setup.SourceSeparationQuickSetupProgress
 import com.mardous.booming.separation.setup.SourceSeparationQuickSetupRequirement
 import com.mardous.booming.separation.setup.SourceSeparationQuickSetupTerminalStatus
 import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
@@ -49,149 +59,169 @@ import com.mardous.booming.ui.component.compose.TitledCard
 internal fun SourceSeparationQuickSetupSheet(
     state: SourceSeparationQuickSetupUiState,
     onBack: () -> Unit,
-    onModeChange: (SourceSeparationQuickSetupMode) -> Unit,
     onToggleItem: (String, Boolean) -> Unit,
     onInstall: () -> Unit,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
-    onDismissError: () -> Unit,
     onOpenRuntimeManagement: () -> Unit,
     onOpenModelManagement: () -> Unit,
 ) {
+    var showStatusDetails by rememberSaveable { mutableStateOf(false) }
+    if (showStatusDetails) {
+        QuickSetupStatusDialog(
+            readiness = state.readiness,
+            errorMessage = state.errorMessage,
+            analyzing = state.phase == SourceSeparationQuickSetupPhase.Analyzing,
+            onDismiss = { showStatusDetails = false },
+        )
+    }
+
     BottomSheetDialogSurface {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .wrapContentHeight()
+                .nestedScroll(rememberNestedScrollInteropConnection()),
         ) {
-            item {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    IconButton(
-                        onClick = onBack,
-                        enabled = state.phase != SourceSeparationQuickSetupPhase.Installing,
+            BottomSheetDefaults.DragHandle(
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            )
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+            ) {
+                item {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_back_24dp),
-                            contentDescription = stringResource(R.string.back_action),
-                        )
-                    }
-                    Text(
-                        text = stringResource(R.string.source_separation_quick_setup_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (state.phase == SourceSeparationQuickSetupPhase.Reviewing) {
-                        IconButton(onClick = onRetry) {
+                        IconButton(
+                            onClick = onBack,
+                            enabled = state.phase != SourceSeparationQuickSetupPhase.Installing,
+                        ) {
                             Icon(
-                                painter = painterResource(R.drawable.ic_update_24dp),
-                                contentDescription = stringResource(R.string.refresh_action),
+                                painter = painterResource(R.drawable.ic_back_24dp),
+                                contentDescription = stringResource(R.string.back_action),
+                            )
+                        }
+                        Text(
+                            text = stringResource(R.string.source_separation_quick_setup_title),
+                            style = MaterialTheme.typography.headlineSmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { showStatusDetails = true }) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_info_24dp),
+                                contentDescription = stringResource(R.string.more_info_action),
                             )
                         }
                     }
                 }
-            }
 
-            if (state.phase == SourceSeparationQuickSetupPhase.Analyzing) {
-                item {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(16.dp),
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        Text(stringResource(R.string.source_separation_quick_setup_analyzing))
+                if (state.phase == SourceSeparationQuickSetupPhase.Analyzing) {
+                    item {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(16.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            Text(stringResource(R.string.source_separation_quick_setup_analyzing))
+                        }
                     }
                 }
-            }
 
-            state.readiness?.let { readiness ->
-                item {
-                    ReadinessCard(
-                        readiness = readiness,
-                        errorMessage = state.errorMessage,
-                        onDismissError = onDismissError,
-                    )
+                if (state.phase == SourceSeparationQuickSetupPhase.Reviewing) {
+                    state.plan?.let { plan ->
+                        if (plan.items.isEmpty()) {
+                            item {
+                                Text(
+                                    text = stringResource(
+                                        R.string.source_separation_quick_setup_result_completed,
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.padding(16.dp),
+                                )
+                            }
+                        } else {
+                            items(
+                                items = plan.items,
+                                key = SourceSeparationQuickSetupPlanItem::itemId,
+                            ) { item ->
+                                QuickSetupItemCard(
+                                    item = item,
+                                    selected = item.itemId in state.selectedItemIds,
+                                    state = state.itemState(item),
+                                    progress = state.progress?.takeIf {
+                                        it.itemId == item.itemId
+                                    },
+                                    onToggle = { selected ->
+                                        onToggleItem(item.itemId, selected)
+                                    },
+                                )
+                            }
+                            item {
+                                SetupFooter(
+                                    plan = plan,
+                                    selectedItemIds = state.selectedItemIds,
+                                    onInstall = onInstall,
+                                    onOpenRuntimeManagement = onOpenRuntimeManagement,
+                                    onOpenModelManagement = onOpenModelManagement,
+                                )
+                            }
+                        }
+                    }
                 }
-            }
 
-            if (state.phase == SourceSeparationQuickSetupPhase.Reviewing) {
-                state.plan?.let { plan ->
-                    item {
-                        ModeSummary(
-                            mode = plan.mode,
-                            onRestoreRecommended = {
-                                onModeChange(SourceSeparationQuickSetupMode.RestoreRecommended)
+                if (state.phase == SourceSeparationQuickSetupPhase.Installing) {
+                    state.plan?.let { plan ->
+                        items(
+                            items = plan.items.filter {
+                                it.itemId in state.selectedItemIds
                             },
-                        )
+                            key = SourceSeparationQuickSetupPlanItem::itemId,
+                        ) { item ->
+                            QuickSetupItemCard(
+                                item = item,
+                                selected = true,
+                                state = state.itemState(item),
+                                progress = state.progress?.takeIf {
+                                    it.itemId == item.itemId
+                                },
+                                onToggle = {},
+                            )
+                        }
+                        item {
+                            OutlinedButton(
+                                onClick = onCancel,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_cancel_24dp),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Text(
+                                    text = stringResource(R.string.action_cancel),
+                                    modifier = Modifier.padding(start = 8.dp),
+                                )
+                            }
+                        }
                     }
-                    items(
-                        items = plan.items,
-                        key = SourceSeparationQuickSetupPlanItem::itemId,
-                    ) { item ->
-                        QuickSetupItemCard(
-                            item = item,
-                            mode = plan.mode,
-                            selected = item.itemId in state.selectedItemIds,
-                            state = state.itemState(item),
-                            progress = state.progress?.takeIf { it.itemId == item.itemId },
-                            onToggle = { selected -> onToggleItem(item.itemId, selected) },
-                        )
-                    }
+                }
+
+                if (state.phase == SourceSeparationQuickSetupPhase.Finished) {
                     item {
-                        SetupFooter(
-                            plan = plan,
-                            selectedItemIds = state.selectedItemIds,
-                            onInstall = onInstall,
+                        FinishedCard(
+                            status = state.result?.status,
+                            errorMessage = state.errorMessage,
+                            onRetry = onRetry,
                             onOpenRuntimeManagement = onOpenRuntimeManagement,
                             onOpenModelManagement = onOpenModelManagement,
                         )
                     }
-                }
-            }
-
-            if (state.phase == SourceSeparationQuickSetupPhase.Installing) {
-                state.plan?.let { plan ->
-                    items(plan.items.filter { it.itemId in state.selectedItemIds }) { item ->
-                        QuickSetupItemCard(
-                            item = item,
-                            mode = plan.mode,
-                            selected = true,
-                            state = state.itemState(item),
-                            progress = state.progress?.takeIf { it.itemId == item.itemId },
-                            onToggle = {},
-                        )
-                    }
-                    item {
-                        OutlinedButton(
-                            onClick = onCancel,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_cancel_24dp),
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Text(
-                                text = stringResource(R.string.action_cancel),
-                                modifier = Modifier.padding(start = 8.dp),
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (state.phase == SourceSeparationQuickSetupPhase.Finished) {
-                item {
-                    FinishedCard(
-                        status = state.result?.status,
-                        errorMessage = state.errorMessage,
-                        onRetry = onRetry,
-                        onOpenRuntimeManagement = onOpenRuntimeManagement,
-                        onOpenModelManagement = onOpenModelManagement,
-                    )
                 }
             }
         }
@@ -199,69 +229,114 @@ internal fun SourceSeparationQuickSetupSheet(
 }
 
 @Composable
-private fun ReadinessCard(
-    readiness: LocalSeparationReadiness,
+private fun QuickSetupStatusDialog(
+    readiness: LocalSeparationReadiness?,
     errorMessage: String?,
-    onDismissError: () -> Unit,
+    analyzing: Boolean,
+    onDismiss: () -> Unit,
 ) {
-    TitledCard(
-        title = stringResource(R.string.source_separation_quick_setup_status_title),
-        modifier = Modifier.fillMaxWidth(),
-    ) { padding ->
-        Column(
-            modifier = Modifier.padding(padding),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = readinessStateText(readiness.state),
-                color = when (readiness.state) {
-                    LocalSeparationReadinessState.Ready -> MaterialTheme.colorScheme.primary
-                    LocalSeparationReadinessState.Degraded -> MaterialTheme.colorScheme.tertiary
-                    else -> MaterialTheme.colorScheme.error
-                },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_info_24dp),
+                contentDescription = null,
             )
-            readiness.cpuRuntime?.let { runtime ->
-                Text(
-                    text = stringResource(
-                        R.string.source_separation_quick_setup_runtime_summary,
-                        runtime.abi,
-                        runtime.runtimeArtifactVersion,
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            readiness.activeModel?.let { model ->
-                Text(
-                    text = stringResource(
-                        R.string.source_separation_quick_setup_model_summary,
-                        model.displayName,
-                        if (model.installed) {
-                            stringResource(R.string.source_separation_quick_setup_installed)
-                        } else {
-                            stringResource(R.string.source_separation_quick_setup_missing)
-                        },
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            readiness.blockers.forEach { issue ->
-                IssueText(issue = issue, error = true)
-            }
-            readiness.degradations.forEach { issue ->
-                IssueText(issue = issue, error = false)
-            }
-            errorMessage?.let { message ->
-                Text(text = message, color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = onDismissError) {
-                    Text(stringResource(R.string.close_action))
+        },
+        title = {
+            Text(stringResource(R.string.source_separation_quick_setup_status_title))
+        },
+        text = {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.heightIn(max = 420.dp),
+            ) {
+                if (readiness == null) {
+                    item {
+                        Text(
+                            text = errorMessage ?: stringResource(
+                                if (analyzing) {
+                                    R.string.source_separation_quick_setup_analyzing
+                                } else {
+                                    R.string.source_separation_quick_setup_result_failed
+                                },
+                            ),
+                            color = if (errorMessage == null) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                        )
+                    }
+                } else {
+                    item {
+                        Text(
+                            text = readinessStateText(readiness.state),
+                            color = when (readiness.state) {
+                                LocalSeparationReadinessState.Ready ->
+                                    MaterialTheme.colorScheme.primary
+                                LocalSeparationReadinessState.Degraded ->
+                                    MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.error
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    readiness.cpuRuntime?.let { runtime ->
+                        item {
+                            Text(
+                                text = stringResource(
+                                    R.string.source_separation_quick_setup_runtime_summary,
+                                    runtime.abi,
+                                    runtime.runtimeArtifactVersion,
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    readiness.activeModel?.let { model ->
+                        item {
+                            Text(
+                                text = stringResource(
+                                    R.string.source_separation_quick_setup_model_summary,
+                                    model.displayName,
+                                    if (model.installed) {
+                                        stringResource(
+                                            R.string.source_separation_quick_setup_installed,
+                                        )
+                                    } else {
+                                        stringResource(
+                                            R.string.source_separation_quick_setup_missing,
+                                        )
+                                    },
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    items(readiness.blockers) { issue ->
+                        IssueText(issue = issue, error = true)
+                    }
+                    items(readiness.degradations) { issue ->
+                        IssueText(issue = issue, error = false)
+                    }
+                    errorMessage?.let { message ->
+                        item {
+                            Text(text = message, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                 }
             }
-        }
-    }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close_action))
+            }
+        },
+    )
 }
 
 @Composable
@@ -274,118 +349,54 @@ private fun IssueText(issue: LocalSeparationIssue, error: Boolean) {
 }
 
 @Composable
-private fun ModeSummary(
-    mode: SourceSeparationQuickSetupMode,
-    onRestoreRecommended: () -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = modeText(mode),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = modeDescription(mode),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-        )
-        if (mode != SourceSeparationQuickSetupMode.RestoreRecommended) {
-            OutlinedButton(
-                onClick = onRestoreRecommended,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_update_24dp),
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(
-                    text = stringResource(
-                        R.string.source_separation_quick_setup_restore_recommended,
-                    ),
-                    modifier = Modifier.padding(start = 8.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun QuickSetupItemCard(
     item: SourceSeparationQuickSetupPlanItem,
-    mode: SourceSeparationQuickSetupMode,
     selected: Boolean,
     state: SourceSeparationQuickSetupItemState,
-    progress: com.mardous.booming.separation.setup.SourceSeparationQuickSetupProgress?,
+    progress: SourceSeparationQuickSetupProgress?,
     onToggle: (Boolean) -> Unit,
 ) {
+    var showDetails by rememberSaveable(item.itemId) { mutableStateOf(false) }
+    if (showDetails) {
+        QuickSetupItemDetailsDialog(
+            item = item,
+            state = state,
+            onDismiss = { showDetails = false },
+        )
+    }
+
     TitledCard(
         title = itemTitle(item),
         modifier = Modifier.fillMaxWidth(),
+        titleEndContent = {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = onToggle,
+                enabled = item.requirement != SourceSeparationQuickSetupRequirement.Required &&
+                    item.disabledReason == null &&
+                    state != SourceSeparationQuickSetupItemState.Succeeded,
+            )
+            IconButton(onClick = { showDetails = true }) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_info_24dp),
+                    contentDescription = stringResource(R.string.more_info_action),
+                )
+            }
+        },
     ) { padding ->
         Column(
             modifier = Modifier.padding(padding),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Checkbox(
-                    checked = selected,
-                    onCheckedChange = onToggle,
-                    enabled = item.requirement != SourceSeparationQuickSetupRequirement.Required &&
-                        item.disabledReason == null &&
-                        state != SourceSeparationQuickSetupItemState.Succeeded,
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = requirementText(item.requirement),
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                    Text(
-                        text = itemReason(item, mode),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Text(
-                    text = itemStateText(state),
-                    color = if (state == SourceSeparationQuickSetupItemState.Failed) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
-            if (item.expectedDownloadBytes > 0L) {
-                Text(
-                    text = stringResource(
-                        R.string.source_separation_quick_setup_size_summary,
-                        item.expectedDownloadBytes.asReadableFileSize(),
-                        item.expectedInstalledBytes.asReadableFileSize(),
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            item.disabledReason?.let { disabledReason ->
-                Text(
-                    text = if (item.action in setOf(
-                            SourceSeparationQuickSetupAction.OpenRuntimeManagement,
-                            SourceSeparationQuickSetupAction.OpenModelManagement,
-                        )
-                    ) {
-                        stringResource(R.string.source_separation_quick_setup_auto_repair_unavailable)
-                    } else {
-                        disabledReason
-                    },
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+            Text(
+                text = stringResource(
+                    R.string.source_separation_quick_setup_size_summary,
+                    item.expectedDownloadBytes.asReadableFileSize(),
+                    item.expectedInstalledBytes.asReadableFileSize(),
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
             if (progress != null && progress.totalBytes > 0L) {
                 LinearProgressIndicator(
                     progress = {
@@ -406,6 +417,69 @@ private fun QuickSetupItemCard(
             }
         }
     }
+}
+
+@Composable
+private fun QuickSetupItemDetailsDialog(
+    item: SourceSeparationQuickSetupPlanItem,
+    state: SourceSeparationQuickSetupItemState,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_info_24dp),
+                contentDescription = null,
+            )
+        },
+        title = { Text(itemTitle(item)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = requirementText(item.requirement),
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    text = itemReason(item),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = itemStateText(state),
+                    color = if (state == SourceSeparationQuickSetupItemState.Failed) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                item.disabledReason?.let { disabledReason ->
+                    Text(
+                        text = if (item.action in setOf(
+                                SourceSeparationQuickSetupAction.OpenRuntimeManagement,
+                                SourceSeparationQuickSetupAction.OpenModelManagement,
+                            )
+                        ) {
+                            stringResource(
+                                R.string.source_separation_quick_setup_auto_repair_unavailable,
+                            )
+                        } else {
+                            disabledReason
+                        },
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.close_action))
+            }
+        },
+    )
 }
 
 @Composable
@@ -515,26 +589,6 @@ private fun readinessStateText(state: LocalSeparationReadinessState): String = w
 }
 
 @Composable
-private fun modeText(mode: SourceSeparationQuickSetupMode): String = when (mode) {
-    SourceSeparationQuickSetupMode.BootstrapRecommended ->
-        stringResource(R.string.source_separation_quick_setup_mode_bootstrap)
-    SourceSeparationQuickSetupMode.RepairCurrent ->
-        stringResource(R.string.source_separation_quick_setup_mode_repair)
-    SourceSeparationQuickSetupMode.RestoreRecommended ->
-        stringResource(R.string.source_separation_quick_setup_mode_restore)
-}
-
-@Composable
-private fun modeDescription(mode: SourceSeparationQuickSetupMode): String = when (mode) {
-    SourceSeparationQuickSetupMode.BootstrapRecommended ->
-        stringResource(R.string.source_separation_quick_setup_mode_bootstrap_description)
-    SourceSeparationQuickSetupMode.RepairCurrent ->
-        stringResource(R.string.source_separation_quick_setup_mode_repair_description)
-    SourceSeparationQuickSetupMode.RestoreRecommended ->
-        stringResource(R.string.source_separation_quick_setup_mode_restore_description)
-}
-
-@Composable
 private fun requirementText(requirement: SourceSeparationQuickSetupRequirement): String = when (requirement) {
     SourceSeparationQuickSetupRequirement.Required ->
         stringResource(R.string.source_separation_quick_setup_required)
@@ -625,6 +679,30 @@ private fun issueText(issue: LocalSeparationIssue): String = when (issue.code) {
 
 @Composable
 private fun itemTitle(item: SourceSeparationQuickSetupPlanItem): String = when (item.action) {
+    SourceSeparationQuickSetupAction.OpenRuntimeManagement,
+    SourceSeparationQuickSetupAction.OpenModelManagement,
+    -> stringResource(R.string.source_separation_quick_setup_manual_review)
+    SourceSeparationQuickSetupAction.InstallRuntime,
+    SourceSeparationQuickSetupAction.RepairRuntime,
+    SourceSeparationQuickSetupAction.ActivatePendingRuntime,
+    SourceSeparationQuickSetupAction.InstallGpuRuntime,
+    SourceSeparationQuickSetupAction.RepairGpuRuntime,
+    SourceSeparationQuickSetupAction.ActivatePendingGpuRuntime,
+    SourceSeparationQuickSetupAction.ConfigureGpuRuntime,
+    SourceSeparationQuickSetupAction.InstallAndSelectModel,
+    -> stringResource(
+        if (item.expectedDownloadBytes > 0L) {
+            R.string.source_separation_quick_setup_install_and_use
+        } else {
+            R.string.source_separation_quick_setup_use_model
+        },
+        itemDisplayName(item),
+    )
+    else -> item.title
+}
+
+@Composable
+private fun itemDisplayName(item: SourceSeparationQuickSetupPlanItem): String = when (item.action) {
     SourceSeparationQuickSetupAction.InstallRuntime,
     SourceSeparationQuickSetupAction.RepairRuntime,
     SourceSeparationQuickSetupAction.ActivatePendingRuntime,
@@ -634,21 +712,11 @@ private fun itemTitle(item: SourceSeparationQuickSetupPlanItem): String = when (
     SourceSeparationQuickSetupAction.ActivatePendingGpuRuntime,
     SourceSeparationQuickSetupAction.ConfigureGpuRuntime,
     -> stringResource(R.string.source_separation_quick_setup_gpu_runtime_title)
-    SourceSeparationQuickSetupAction.SelectModel -> stringResource(
-        R.string.source_separation_quick_setup_use_model,
-        item.title,
-    )
-    SourceSeparationQuickSetupAction.OpenRuntimeManagement,
-    SourceSeparationQuickSetupAction.OpenModelManagement,
-    -> stringResource(R.string.source_separation_quick_setup_manual_review)
     else -> item.title
 }
 
 @Composable
-private fun itemReason(
-    item: SourceSeparationQuickSetupPlanItem,
-    mode: SourceSeparationQuickSetupMode,
-): String = when (item.action) {
+private fun itemReason(item: SourceSeparationQuickSetupPlanItem): String = when (item.action) {
     SourceSeparationQuickSetupAction.InstallRuntime ->
         stringResource(R.string.source_separation_quick_setup_reason_install_cpu)
     SourceSeparationQuickSetupAction.RepairRuntime ->
@@ -663,15 +731,16 @@ private fun itemReason(
         stringResource(R.string.source_separation_quick_setup_reason_activate_gpu)
     SourceSeparationQuickSetupAction.ConfigureGpuRuntime ->
         stringResource(R.string.source_separation_quick_setup_reason_configure_gpu)
-    SourceSeparationQuickSetupAction.InstallModel -> if (
-        mode == SourceSeparationQuickSetupMode.RepairCurrent
+    SourceSeparationQuickSetupAction.InstallAndSelectModel -> if (
+        item.expectedDownloadBytes > 0L
     ) {
-        stringResource(R.string.source_separation_quick_setup_reason_restore_model)
+        listOf(
+            stringResource(R.string.source_separation_quick_setup_reason_install_model),
+            stringResource(R.string.source_separation_quick_setup_reason_select_model),
+        ).joinToString(" ")
     } else {
-        stringResource(R.string.source_separation_quick_setup_reason_install_model)
-    }
-    SourceSeparationQuickSetupAction.SelectModel ->
         stringResource(R.string.source_separation_quick_setup_reason_select_model)
+    }
     SourceSeparationQuickSetupAction.OpenRuntimeManagement,
     SourceSeparationQuickSetupAction.OpenModelManagement,
     -> stringResource(R.string.source_separation_quick_setup_reason_manual_review)

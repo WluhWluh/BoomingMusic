@@ -27,7 +27,7 @@ import java.security.MessageDigest
 
 internal object LocalSeparationReadinessContract {
     const val SCHEMA_VERSION = 2
-    const val PLAN_SCHEMA_VERSION = 2
+    const val PLAN_SCHEMA_VERSION = 3
 }
 
 internal enum class LocalSeparationReadinessState {
@@ -729,9 +729,8 @@ internal enum class SourceSeparationQuickSetupAction {
     RepairGpuRuntime,
     ActivatePendingGpuRuntime,
     ConfigureGpuRuntime,
-    InstallModel,
+    InstallAndSelectModel,
     Validate,
-    SelectModel,
     Configure,
     RecycleProcess,
     OpenRuntimeManagement,
@@ -822,7 +821,15 @@ internal object SourceSeparationQuickSetupPlanner {
                 title = "LiteRT CPU runtime",
                 reason = runtimeCandidate.reason,
                 componentId = runtime.componentId,
-                expectedDownloadBytes = runtime.downloadBytes,
+                expectedDownloadBytes = if (action in setOf(
+                        SourceSeparationQuickSetupAction.InstallRuntime,
+                        SourceSeparationQuickSetupAction.RepairRuntime,
+                    )
+                ) {
+                    runtime.downloadBytes
+                } else {
+                    0L
+                },
                 expectedInstalledBytes = runtime.installedBytes,
             )
         }
@@ -859,10 +866,14 @@ internal object SourceSeparationQuickSetupPlanner {
                     it.requirement == SourceSeparationQuickSetupRequirement.Required
                 }.map(SourceSeparationQuickSetupPlanItem::itemId),
                 componentId = gpuRuntime.componentId,
-                expectedDownloadBytes = if (action == SourceSeparationQuickSetupAction.ConfigureGpuRuntime) {
-                    0L
-                } else {
+                expectedDownloadBytes = if (action in setOf(
+                        SourceSeparationQuickSetupAction.InstallGpuRuntime,
+                        SourceSeparationQuickSetupAction.RepairGpuRuntime,
+                    )
+                ) {
                     gpuRuntime.downloadBytes
+                } else {
+                    0L
                 },
                 expectedInstalledBytes = gpuRuntime.installedBytes,
             )
@@ -879,48 +890,31 @@ internal object SourceSeparationQuickSetupPlanner {
                         ?: readiness.recommendedModel?.takeIf { readiness.activeModelReference == null }
             }
         }
-        val shouldInstallModel = targetModel != null && !targetModel.installed
-        val shouldSelectModel = targetModel != null && (
-            mode == SourceSeparationQuickSetupMode.RestoreRecommended ||
-                readiness.activeModelReference == null ||
-                readiness.activeModelReference.artifactSha256 != targetModel.artifactSha256
-            )
+        val shouldApplyModel = targetModel != null && (
+            !targetModel.installed || !targetModel.active
+        )
         val runtimeDependency = items.filter {
             it.requirement == SourceSeparationQuickSetupRequirement.Required
         }.map(SourceSeparationQuickSetupPlanItem::itemId)
-        if (shouldInstallModel) {
+        if (shouldApplyModel) {
             val model = requireNotNull(targetModel)
             items += SourceSeparationQuickSetupPlanItem(
                 itemId = "model:${model.modelId}",
-                action = SourceSeparationQuickSetupAction.InstallModel,
+                action = SourceSeparationQuickSetupAction.InstallAndSelectModel,
                 requirement = SourceSeparationQuickSetupRequirement.Required,
                 selected = true,
                 title = model.displayName,
                 reason = if (mode == SourceSeparationQuickSetupMode.RepairCurrent) {
                     "Restore the selected official model."
+                } else if (model.installed) {
+                    "Use the installed release-recommended model."
                 } else {
-                    "Install the release-recommended model."
+                    "Install and use the release-recommended model."
                 },
                 dependencyIds = runtimeDependency,
                 modelId = model.modelId,
-                expectedDownloadBytes = model.byteSize,
+                expectedDownloadBytes = if (model.installed) 0L else model.byteSize,
                 expectedInstalledBytes = model.byteSize,
-            )
-        }
-        if (shouldSelectModel) {
-            val model = requireNotNull(targetModel)
-            val dependencies = items.filter {
-                it.requirement == SourceSeparationQuickSetupRequirement.Required
-            }.map(SourceSeparationQuickSetupPlanItem::itemId)
-            items += SourceSeparationQuickSetupPlanItem(
-                itemId = "select:${model.modelId}",
-                action = SourceSeparationQuickSetupAction.SelectModel,
-                requirement = SourceSeparationQuickSetupRequirement.Required,
-                selected = true,
-                title = model.displayName,
-                reason = "Apply the model selection only after all required resources validate.",
-                dependencyIds = dependencies,
-                modelId = model.modelId,
             )
         }
         val hasUnresolvedRequiredBlocker = readiness.blockers.any { blocker ->
@@ -952,7 +946,7 @@ internal object SourceSeparationQuickSetupPlanner {
         val proposedModel = when {
             mode == SourceSeparationQuickSetupMode.RestoreRecommended ->
                 targetModel?.let(::toReference)
-            shouldSelectModel -> toReference(requireNotNull(targetModel))
+            shouldApplyModel -> toReference(requireNotNull(targetModel))
             else -> readiness.activeModelReference
         }
         val proposedGpuEnabled = if (gpuCandidate != null && gpuRuntime?.maturity == "recommended") {

@@ -44,12 +44,10 @@ class SourceSeparationQuickSetupFragment : BottomSheetDialogFragment() {
                 SourceSeparationQuickSetupSheet(
                     state = state,
                     onBack = ::dismiss,
-                    onModeChange = quickSetupViewModel::setMode,
                     onToggleItem = quickSetupViewModel::setSelected,
                     onInstall = quickSetupViewModel::installSelected,
                     onCancel = quickSetupViewModel::cancel,
                     onRetry = quickSetupViewModel::analyze,
-                    onDismissError = quickSetupViewModel::dismissError,
                     onOpenRuntimeManagement = ::openRuntimeManagement,
                     onOpenModelManagement = ::openModelManagement,
                 )
