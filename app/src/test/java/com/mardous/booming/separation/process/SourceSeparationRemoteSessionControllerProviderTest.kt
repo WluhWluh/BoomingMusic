@@ -7,8 +7,10 @@ import com.mardous.booming.separation.model.MdxInferenceSessionFactory
 import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SourceSeparationRemoteSessionControllerProviderTest {
@@ -62,6 +64,16 @@ class SourceSeparationRemoteSessionControllerProviderTest {
         assertSame(cpu, provider.requireCurrent())
         assertEquals(0, autoCreations)
         assertEquals(1, cpuCreations)
+    }
+
+    @Test
+    fun `backend policy diagnostics require recycle only after a different selection`() {
+        val empty = SourceSeparationProcessSessionDiagnostics.empty()
+        val cpu = empty.copy(backendPolicy = SourceSeparationExecutionBackendPolicy.Cpu)
+
+        assertFalse(empty.requiresRecycleFor(SourceSeparationExecutionBackendPolicy.Auto))
+        assertFalse(cpu.requiresRecycleFor(SourceSeparationExecutionBackendPolicy.Cpu))
+        assertTrue(cpu.requiresRecycleFor(SourceSeparationExecutionBackendPolicy.Auto))
     }
 
     private fun controller(backend: MdxInferenceBackend) =

@@ -153,6 +153,130 @@ import kotlin.math.abs
 class SourceSeparationPhase7WorkerDeviceTest {
 
     @Test
+    fun validateBackendPolicyPreparationRecycle() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+        val preferenceKeys = setOf(
+            SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+            SOURCE_SEPARATION_WINDOW_DECODE,
+            SOURCE_SEPARATION_TRY_GPU,
+            SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+            MINIMUM_SONG_DURATION,
+        )
+        val preferenceSnapshot = snapshotPreferences(preferences, preferenceKeys)
+        var mediaUri: Uri? = null
+        var host: BoundRemoteSourceSeparationExecutionHost? = null
+        var engine: SourceSeparationModelAwareEngine? = null
+        var runtimeFacade: SourceSeparationRuntimeFacade? = null
+        var cacheKey: String? = null
+
+        try {
+            val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
+            mediaUri = registerSourceInMediaStore(context, sourcePath, runId)
+            val source = resolveMediaStoreSong(context, mediaUri, sourcePath)
+            check(preferences.edit()
+                .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
+                .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
+                .putBoolean(SOURCE_SEPARATION_TRY_GPU, false)
+                .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
+                .putInt(MINIMUM_SONG_DURATION, 0)
+                .commit()
+            ) { "Could not configure backend-policy recycle validation." }
+
+            val presetRepository = get<SourceSeparationPresetRepository>(
+                SourceSeparationPresetRepository::class.java,
+            )
+            val resolver = createCpuRuntimeFacade(
+                context = context,
+                preferences = preferences,
+                presetRepository = presetRepository,
+                backendMode = BackendMode.Cpu,
+                processorCount = null,
+            ).also { runtimeFacade = it }
+            val runtimeSong = (resolver.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The backend-policy fixture could not be resolved.")
+            cacheKey = runtimeSong.cacheKey
+            clearExactCacheEntry(resolver, runtimeSong.cacheKey)
+
+            val remoteHost = BoundRemoteSourceSeparationExecutionHost(
+                context.applicationContext,
+            ).also { host = it }
+            val remoteEngine = SourceSeparationModelAwareEngine.createBoundRemotePrototype(
+                context = context,
+                presetRepository = presetRepository,
+                coordinator = get(SourceSeparationCacheRunCoordinator::class.java),
+                executionHost = remoteHost,
+                executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Cpu,
+            ).also { engine = it }
+
+            val completed = remoteEngine.separateResolved(
+                input = runtimeSong.input,
+                model = runtimeSong.model,
+                preflight = runtimeSong.preflight,
+                executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Cpu,
+                runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+                windowDecodeEnabled = true,
+            )
+            assertTrue(completed is SourceSeparationModelAwareEngineResult.Completed)
+
+            val before = remoteHost.processDiagnostics()
+            assertEquals(
+                SourceSeparationExecutionBackendPolicy.Cpu,
+                before.session.backendPolicy,
+            )
+            assertEquals(SourceSeparationProcessSessionState.Empty, before.session.state)
+            assertEquals(1, before.session.nativeSessionCreationCount)
+            assertTrue(before.session.invocationCount > 0L)
+
+            clearExactCacheEntry(resolver, runtimeSong.cacheKey)
+            val autoCompleted = remoteEngine.separateResolved(
+                input = runtimeSong.input,
+                model = runtimeSong.model,
+                preflight = runtimeSong.preflight,
+                executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Auto,
+                runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+                windowDecodeEnabled = true,
+            )
+            assertTrue(autoCompleted is SourceSeparationModelAwareEngineResult.Completed)
+            val autoManifest = (autoCompleted as
+                SourceSeparationModelAwareEngineResult.Completed).manifest
+            assertEquals(
+                MdxInferenceBackend.LiteRtGpu.name,
+                autoManifest.runtimeRecords.last().backend,
+            )
+
+            val after = remoteHost.processDiagnostics()
+            assertNotEquals(before.processGeneration, after.processGeneration)
+            assertNotEquals(before.pid, after.pid)
+            assertNotEquals(before.processStartTicks, after.processStartTicks)
+            assertEquals(SourceSeparationProcessSessionState.Empty, after.session.state)
+            assertEquals(
+                SourceSeparationExecutionBackendPolicy.Auto,
+                after.session.backendPolicy,
+            )
+            assertEquals(1, after.session.nativeSessionCreationCount)
+            assertTrue(after.session.invocationCount > 0L)
+            assertEquals(1, remoteHost.connectionDiagnostics.expectedBinderDeathCount)
+            assertEquals(0, remoteHost.connectionDiagnostics.unexpectedBinderDeathCount)
+        } finally {
+            engine?.close()
+            host?.close()
+            cacheKey?.let { key ->
+                runtimeFacade?.let { runtime ->
+                    runCatching { clearExactCacheEntry(runtime, key) }
+                }
+            }
+            mediaUri?.let { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            restorePreferences(preferences, preferenceSnapshot)
+        }
+    }
+
+    @Test
     fun validateProductionWorker() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext

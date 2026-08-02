@@ -11,6 +11,7 @@ import androidx.core.content.ContextCompat
 import com.mardous.booming.AppProcessResolver
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationPausedException
+import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
 import com.mardous.booming.separation.process.SourceSeparationExecutionHost
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
@@ -24,6 +25,7 @@ import com.mardous.booming.separation.process.toForegroundExecutionDeferredExcep
 import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
 import com.mardous.booming.separation.process.SourceSeparationProcParser
+import com.mardous.booming.separation.process.requiresRecycleFor
 import com.mardous.booming.separation.process.toMdxRangeSeparationResult
 import java.io.File
 import java.util.UUID
@@ -84,6 +86,18 @@ internal class BoundRemoteSourceSeparationExecutionHost(
 
     override val processGeneration: Long
         get() = ensureConnected().processGeneration
+
+    override fun prepareForBackendPolicy(
+        backendPolicy: SourceSeparationExecutionBackendPolicy,
+    ): Long {
+        val diagnostics = processDiagnostics()
+        if (!diagnostics.session.requiresRecycleFor(backendPolicy)) {
+            return diagnostics.processGeneration
+        }
+        return recycle(
+            reason = SourceSeparationIpcRecycleReason.ModelOrRuntimeKeyChanged,
+        ).newProcess.processGeneration
+    }
 
     val connectionDiagnostics: SourceSeparationRemoteConnectionDiagnostics
         get() = connectionLock.withLock {

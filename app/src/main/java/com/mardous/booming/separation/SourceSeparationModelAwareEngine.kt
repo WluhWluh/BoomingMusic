@@ -151,7 +151,9 @@ internal class SourceSeparationModelAwareEngine(
         val executionRunId = runIdFactory().also {
             require(it.isNotBlank()) { "Execution run ID factory returned an empty ID." }
         }
-        val executionProcessGeneration = executionHost.processGeneration
+        val executionProcessGeneration = executionHost.prepareForBackendPolicy(
+            admittedBackendPolicy,
+        )
         if (executionHost.mode == SourceSeparationExecutionHostMode.BoundRemote) {
             coordinator.inspectCompleted(identity)?.let { manifest ->
                 return SourceSeparationModelAwareEngineResult.AlreadyCompleted(

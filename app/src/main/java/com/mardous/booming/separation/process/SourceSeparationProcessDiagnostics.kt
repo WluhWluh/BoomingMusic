@@ -125,6 +125,10 @@ internal data class SourceSeparationProcessSessionDiagnostics(
     }
 }
 
+internal fun SourceSeparationProcessSessionDiagnostics.requiresRecycleFor(
+    requestedBackendPolicy: SourceSeparationExecutionBackendPolicy,
+): Boolean = backendPolicy != null && backendPolicy != requestedBackendPolicy
+
 @Serializable
 internal data class SourceSeparationProcessValidationOverrideDiagnostics(
     val modelId: String,

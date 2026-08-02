@@ -22,6 +22,10 @@ internal interface SourceSeparationExecutionHost : AutoCloseable {
     val mode: SourceSeparationExecutionHostMode
     val processGeneration: Long
 
+    fun prepareForBackendPolicy(
+        backendPolicy: SourceSeparationExecutionBackendPolicy,
+    ): Long = processGeneration
+
     fun start(
         request: SourceSeparationExecutionHostRequest,
     ): SourceSeparationExecutionHostStartResult

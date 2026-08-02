@@ -815,6 +815,10 @@ class SourceSeparationModelAwareEngineTest {
         val unavailableHost = object : SourceSeparationExecutionHost by delegate {
             override val processGeneration: Long
                 get() = throw IllegalStateException("injected connection failure")
+
+            override fun prepareForBackendPolicy(
+                backendPolicy: SourceSeparationExecutionBackendPolicy,
+            ): Long = throw IllegalStateException("injected connection failure")
         }
         val engine = fixture.engine(
             executionHost = unavailableHost,
@@ -828,6 +832,57 @@ class SourceSeparationModelAwareEngineTest {
         assertEquals("injected connection failure", error.message)
         assertTrue(fixture.store.listManifests().isEmpty())
         assertTrue(fixture.repository.entries().isEmpty())
+    }
+
+    @Test
+    fun `remote backend preparation supplies the generation used by the run`() {
+        val fixture = fixture()
+        var preparedPolicy: SourceSeparationExecutionBackendPolicy? = null
+        var startedGeneration: Long? = null
+        val host = object : SourceSeparationExecutionHost {
+            override val mode = SourceSeparationExecutionHostMode.BoundRemote
+            override val processGeneration: Long
+                get() = error("The engine must use the prepared process generation.")
+
+            override fun prepareForBackendPolicy(
+                backendPolicy: SourceSeparationExecutionBackendPolicy,
+            ): Long {
+                preparedPolicy = backendPolicy
+                return 18L
+            }
+
+            override fun start(
+                request: SourceSeparationExecutionHostRequest,
+            ): SourceSeparationExecutionHostStartResult {
+                startedGeneration = request.descriptor.processGeneration
+                throw IllegalStateException("injected after backend preparation")
+            }
+
+            override fun snapshot(runId: String, processGeneration: Long) = null
+            override fun pause(runId: String, processGeneration: Long) =
+                SourceSeparationExecutionHostControlResult.NoActiveRun
+            override fun cancel(runId: String, processGeneration: Long) =
+                SourceSeparationExecutionHostControlResult.NoActiveRun
+            override fun closeRun(runId: String, processGeneration: Long) =
+                SourceSeparationExecutionHostControlResult.NoActiveRun
+            override fun close() = Unit
+        }
+        val engine = fixture.engine(
+            executionHost = host,
+            runIdFactory = { "run-after-policy-recycle" },
+        )
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            engine.separate(
+                fixture.input,
+                executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Auto,
+            )
+        }
+
+        assertEquals("injected after backend preparation", error.message)
+        assertEquals(SourceSeparationExecutionBackendPolicy.Auto, preparedPolicy)
+        assertEquals(18L, startedGeneration)
+        assertTrue(fixture.store.listManifests().isEmpty())
     }
 
     @Test
