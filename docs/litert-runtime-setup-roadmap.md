@@ -779,8 +779,8 @@ ABIs, while API 29, clean-install, and full product qualification remain open.**
 
 - [x] Introduce `RuntimeDeliveryProvider`, `ModelDeliveryProvider`, and
   `ProductCapabilityPolicy` in release-channel-neutral modules. Deterministic
-  provider doubles remain a test-infrastructure follow-up because the current
-  production interfaces intentionally expose only the acquisition boundary.
+  provider doubles and policy contract tests cover the acquisition boundary
+  without coupling common code to GitHub transport details.
 - [x] Implement and wire only `GitHubRuntimeDeliveryProvider`,
   `GitHubModelDeliveryProvider`, and `GitHubProductCapabilityPolicy`; prove the
   GitHub graph contains no Play Core, Dynamic Feature, AI Pack, or
@@ -804,8 +804,13 @@ ABIs, while API 29, clean-install, and full product qualification remain open.**
   forced 32-bit `armeabi-v7a` on S10, `arm64-v8a` on S25, pure `x86` on the
   API 26 emulator, and `x86_64` on the API 37 emulator. The test selected the
   process ABI explicitly and loaded only the matching app-owned library.
-- [ ] Repeat API 26, API 29, and current API CPU loading across `arm64-v8a`,
-  `armeabi-v7a`, `x86_64`, and pure `x86` where the emulator/device exists.
+- [x] Record current-API downloaded CPU-loader evidence for the four available
+  rows: S10 forced `armeabi-v7a`, S25 `arm64-v8a`, API 26 pure `x86`, and API
+  37 `x86_64`.
+- [ ] Decide the support tier for the untested API 29 row and for each
+  non-arm64 ABI. Either add the missing API 29 evidence or explicitly keep that
+  row out of the release support matrix; loader smoke alone must not promote a
+  full-song separation tier.
 
 **Phase 1 status:** the real Booming SS inference process now loads a verified
 CPU runtime only from the app-owned absolute path, and the base APK remains a
@@ -816,8 +821,8 @@ separation support, GPU support, or API 29 coverage.
 
 ### Phase 2: Build the runtime store and CPU management UI
 
-**Status: feature complete; clean-install destructive-operation and UI
-lifecycle qualification remain open.**
+**Status: feature complete; downloaded-path clean-install, destructive
+operation, and UI lifecycle qualification remain open.**
 
 - [x] Add the bundled immutable runtime catalog snapshot and strict parser.
 - [x] Implement cross-process install locks, staging, verification, atomic
@@ -853,8 +858,8 @@ fully manageable without model or cache side effects.
 
 ### Phase 3: Add readiness and CPU-first Quick Setup
 
-**Status: product flow and transactional executor complete; clean-install and
-UI qualification remain open.**
+**Status: product flow and transactional executor complete; downloaded-path
+clean-install and UI qualification remain open.**
 
 - [x] Introduce `LocalSeparationReadiness` and replace the current model-only
   readiness gate and automatic Model Management opening.
@@ -962,15 +967,16 @@ native payload in the APK, and CPU remains a complete verified fallback.
   model-aware engine tests. AndroidTest sources also compile with the
   downloaded-runtime diagnostics. A focused S25 product smoke has exercised
   installed CPU/GPU discovery, recommended GPU preference restoration, status
-  reporting, and Quick Setup re-entry. This does not replace clean-install,
-  S10, full-song, update/removal, failure-injection, or performance reports and
-is not release qualification. S10 and S25 both have a verified downloaded
-bounded-GPU path; no other ABI is promoted by inference.
+  reporting, and Quick Setup re-entry. The downloaded-runtime smoke passed on
+  S10 and S25 for the bounded GPU state and on all four ABI rows for CPU
+  loading; this does not replace clean-install, full-song, update/removal,
+  failure-injection, or performance reports and is not release qualification.
+  No non-arm64 ABI is promoted to GPU or full-song separation by inference.
 
 ### Pre-Phase 5 gate: close the CPU/GPU product baseline
 
-**Status: implementation gates closed; final clean-install, UI, and full-song
-qualification remains a prerequisite for enabling NPU product capabilities.**
+**Status: release graph, contract, and implementation gates closed; the
+product-qualification gate remains open before any NPU capability is exposed.**
 
 The current evidence is recorded in
 [pre-npu-baseline-2026-08-02.md](validation/litert-runtime/pre-npu-baseline-2026-08-02.md).
@@ -979,6 +985,44 @@ Phase 5 must not begin as product implementation until the following hard
 gates are closed. Schema drafting and offline AOT tooling research may continue,
 but no NPU capability may be enabled in the app catalog or UI before this gate
 exits.
+
+#### Remaining work before NPU product implementation
+
+The remaining work is intentionally a product-baseline gate, not a reason to
+change the frozen source-separation algorithm:
+
+1. Run a disposable clean-install Quick Setup pass on S10 and S25. Cover CPU
+   runtime plus 9662 installation, optional bounded-GPU selection and opt-out,
+   failed and retried downloads, automatic and manual entry, cold/warm start,
+   force-stop, inference-process death, repair, update, removal, and reinstall.
+2. Run the final downloaded-path 9662 CPU/GPU full-song matrix. Compare digital
+   output and representative listening, cancellation, background continuation,
+   playback readiness, and cache playback. Keep the existing window decode and
+   MP3 fallback policies unchanged; use the already-qualified GPU
+   `gpu-opencl-bounded-fp32-v1` profile with `N=1`.
+3. Record at least three cold repetitions where a recommendation decision uses
+   performance. Preserve wall time, first-ready time, peak PSS, graphics/native
+   memory, temperature, power, foreground FrameTimeline, and playback-underrun
+   data separately for CPU and GPU. These are the baseline inputs for any later
+   NPU claim.
+4. Close the downloaded-runtime lifecycle boundary: update while idle and
+   active, pending activation/deletion, loaded-version removal, process death,
+   CPU fallback, and recovery after corrupt or missing local resources. Confirm
+   that runtime/model ownership and system clear-cache behavior remain intact.
+5. Complete stable UI and accessibility coverage for Quick Setup and Runtime
+   Management: automatic no-loop prompting, manual re-entry, result/details
+   dialogs, cancellation/retry/partial results, process recreation, long
+   localized labels, and destructive-action confirmations.
+6. Publish an explicit support matrix. Current evidence supports CPU-loader
+   smoke on four ABI rows and bounded-GPU loading on arm64 S10/S25 only. Until
+   full-song evidence exists, arm32, x86, and x86_64 remain CPU-loader or
+   ordinary-player rows; an API 29 row remains unqualified unless separately
+   tested. NPU work may initially target only a named, qualified arm64 device
+   and exact model/runtime combination.
+
+No NPU capability should be added to the catalog, Quick Setup recommendation,
+Runtime Management controls, backup schema, or model guidance until items 1–6
+are either completed or explicitly waived with a documented support boundary.
 
 #### Release graph and capability truth
 
@@ -1037,22 +1081,27 @@ exits.
   cancellation, background continuation, foreground FrameTimeline, and
   playback underruns. These measurements become the comparison baseline for
   every NPU claim.
-- [ ] Close the Phase 1 ABI/API support table, or explicitly mark unqualified
-  ABI/API rows unavailable. NPU work may target qualified arm64 devices without
-  pretending that unfinished x86, x86_64, or arm32 rows are release-supported.
+- [x] Record the current downloaded CPU-loader support evidence for S10 arm32,
+  S25 arm64, API 26 pure x86, and API 37 x86_64.
+- [ ] Close the Phase 1 ABI/API support table by adding API 29 evidence or
+  explicitly marking it unavailable, and assign non-arm64 rows a loader-only
+  or ordinary-player tier. NPU work may target only a named qualified arm64
+  device/model/runtime tuple.
 
 **Pre-Phase 5 exit:** the release graph is TFLite-only and runtime-download
 only; capability flags tell the truth; Quick Setup cannot let an optional
 backend block or mutate the required path; GPU intent survives backup/restore;
-CPU/GPU update, removal, process-death, and clean-install flows pass on the
-claimed support rows; and S10/S25 provide a repeatable downloaded-component
-baseline against which NPU value can be measured. Exhaustive localization and
-non-shipping ABI qualification may remain Phase 8 work, but unsupported rows
-must stay disabled.
+the downloaded CPU/GPU lifecycle and clean-install flows pass on the claimed
+support rows; Quick Setup and Runtime Management have stable UI/accessibility
+coverage; and S10/S25 provide a repeatable full-song CPU/GPU baseline against
+which an exact NPU claim can be measured. Unqualified API/ABI rows remain
+loader-only or disabled, and the frozen window-decoding policy remains
+unchanged.
 
 ### Phase 5: Add exact vendor NPU AOT variants
 
-**Status: blocked by the pre-Phase 5 gate.**
+**Status: not started; product implementation is blocked by the open
+pre-Phase 5 product-baseline gate.**
 
 - [ ] Freeze a vendor-neutral AOT catalog schema and Qualcomm implementation.
 - [ ] Package shared vendor runtime files separately from model-specific AOT
