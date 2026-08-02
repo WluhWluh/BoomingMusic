@@ -159,6 +159,7 @@ import com.mardous.booming.util.WIDGET_IMAGE_CORNER_RADIUS
 import com.mardous.booming.util.WIDGET_SMALL_LAYOUT_STYLE
 import com.mardous.booming.util.WIDGET_THIRD_LINE_CONTENT
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.Dispatchers.Main
 import kotlinx.coroutines.Job
@@ -1646,9 +1647,19 @@ class PlaybackService :
     }
 
     private suspend fun playSourceSeparationCompletedCache(cacheKey: String): SessionResult {
+        awaitPlaybackRestoration()
         return sourceSeparationPlaybackReadinessMutex.withLock {
             playSourceSeparationCompletedCacheLocked(cacheKey)
         }
+    }
+
+    private suspend fun awaitPlaybackRestoration() {
+        if (persistentStorage.restorationState.isRestored) return
+        val completion = CompletableDeferred<Unit>()
+        persistentStorage.waitForRestoration {
+            completion.complete(Unit)
+        }
+        completion.await()
     }
 
     private suspend fun playSourceSeparationCompletedCacheLocked(

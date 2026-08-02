@@ -71,13 +71,15 @@ class PersistentStorage(
      * If restoration is already done, the listener runs immediately.
      */
     fun waitForRestoration(listener: Runnable) {
-        if (restorationState.isRestored) {
-            listener.run()
-        } else {
-            synchronized(lock) {
+        val runImmediately = synchronized(lock) {
+            if (restorationState.isRestored) {
+                true
+            } else {
                 simpleListeners.add(listener)
+                false
             }
         }
+        if (runImmediately) listener.run()
     }
 
     /**
@@ -85,8 +87,8 @@ class PersistentStorage(
      * Ignored if restoration has already completed.
      */
     fun waitForMediaItems(listener: RestorationListener) {
-        if (!restorationState.isRestored) {
-            synchronized(lock) {
+        synchronized(lock) {
+            if (!restorationState.isRestored) {
                 mediaItemsListeners.add(listener)
             }
         }
@@ -100,13 +102,15 @@ class PersistentStorage(
      * - Notifies all waiting listeners once complete.
      */
     fun restoreState(callback: RestorationListener) = coroutineScope.launch(Dispatchers.IO) {
+        // Only the coroutine that owns the transition may publish completion.
+        if (!state.compareAndSet(RestorationState.Awaiting, RestorationState.Restoring)) {
+            return@launch
+        }
         try {
             // Ensure player is empty before restoring
             val emptyTimeline = withContext(Dispatchers.Main) { player.currentTimeline.isEmpty }
 
-            // Only one restoration allowed
-            val movedToRestoringState = state.compareAndSet(RestorationState.Awaiting, RestorationState.Restoring)
-            if (movedToRestoringState && emptyTimeline) {
+            if (emptyTimeline) {
                 var startPosition = preferences.getInt(LAST_INDEX, C.INDEX_UNSET)
                 val startPositionMs = preferences.getLong(POSITION_IN_TRACK, C.TIME_UNSET)
 
@@ -221,8 +225,7 @@ class PersistentStorage(
                 shuffleOrder = null
             )
         } finally {
-            // Always mark as restored to unblock future listeners
-            state.store(RestorationState.Restored)
+            completeRestorationWithoutItems()
         }
     }
 
@@ -292,17 +295,42 @@ class PersistentStorage(
         shuffleOrder: ShuffleOrder?
     ) {
         withContext(Dispatchers.Main) {
-            synchronized(lock) {
-                if (!mediaItemsListeners.contains(callback)) {
-                    callback(items, shuffleOrder)
-                }
-
-                mediaItemsListeners.forEach { it(items, null) }
+            val pendingMediaItemsListeners = synchronized(lock) {
+                val pending = mediaItemsListeners.toList()
                 mediaItemsListeners.clear()
-
-                simpleListeners.forEach { it.run() }
-                simpleListeners.clear()
+                pending
             }
+
+            if (!pendingMediaItemsListeners.contains(callback)) {
+                callback(items, shuffleOrder)
+            }
+            pendingMediaItemsListeners.forEach { it(items, null) }
+
+            val (lateMediaItemsListeners, pendingSimpleListeners) = synchronized(lock) {
+                state.store(RestorationState.Restored)
+                val lateMediaItemsListeners = mediaItemsListeners.toList()
+                val pendingSimpleListeners = simpleListeners.toList()
+                mediaItemsListeners.clear()
+                simpleListeners.clear()
+                lateMediaItemsListeners to pendingSimpleListeners
+            }
+            lateMediaItemsListeners.forEach { it(items, null) }
+            pendingSimpleListeners.forEach { it.run() }
+        }
+    }
+
+    private suspend fun completeRestorationWithoutItems() {
+        withContext(Dispatchers.Main) {
+            val pendingSimpleListeners = synchronized(lock) {
+                if (restorationState.isRestored) {
+                    emptyList()
+                } else {
+                    state.store(RestorationState.Restored)
+                    mediaItemsListeners.clear()
+                    simpleListeners.toList().also { simpleListeners.clear() }
+                }
+            }
+            pendingSimpleListeners.forEach { it.run() }
         }
     }
 
