@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -136,13 +138,12 @@ internal fun SourceSeparationQuickSetupSheet(
                     state.plan?.let { plan ->
                         if (plan.items.isEmpty()) {
                             item {
-                                Text(
-                                    text = stringResource(
-                                        R.string.source_separation_quick_setup_result_completed,
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    modifier = Modifier.padding(16.dp),
+                                FinishedCard(
+                                    status = SourceSeparationQuickSetupTerminalStatus.Completed,
+                                    errorMessage = null,
+                                    onRetry = onRetry,
+                                    onOpenRuntimeManagement = onOpenRuntimeManagement,
+                                    onOpenModelManagement = onOpenModelManagement,
                                 )
                             }
                         } else {
@@ -296,6 +297,19 @@ private fun QuickSetupStatusDialog(
                             )
                         }
                     }
+                    readiness.gpuRuntime?.let { runtime ->
+                        item {
+                            Text(
+                                text = stringResource(
+                                    R.string.source_separation_quick_setup_gpu_runtime_summary,
+                                    runtime.abi,
+                                    runtime.runtimeArtifactVersion,
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     readiness.activeModel?.let { model ->
                         item {
                             Text(
@@ -368,7 +382,7 @@ private fun QuickSetupItemCard(
     TitledCard(
         title = itemTitle(item),
         modifier = Modifier.fillMaxWidth(),
-        titleEndContent = {
+        titleStartContent = {
             Checkbox(
                 checked = selected,
                 onCheckedChange = onToggle,
@@ -376,6 +390,8 @@ private fun QuickSetupItemCard(
                     item.disabledReason == null &&
                     state != SourceSeparationQuickSetupItemState.Succeeded,
             )
+        },
+        titleEndContent = {
             IconButton(onClick = { showDetails = true }) {
                 Icon(
                     painter = painterResource(R.drawable.ic_info_24dp),
@@ -384,36 +400,42 @@ private fun QuickSetupItemCard(
             }
         },
     ) { padding ->
-        Column(
-            modifier = Modifier.padding(padding),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = stringResource(
-                    R.string.source_separation_quick_setup_size_summary,
-                    item.expectedDownloadBytes.asReadableFileSize(),
-                    item.expectedInstalledBytes.asReadableFileSize(),
-                ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (progress != null && progress.totalBytes > 0L) {
-                LinearProgressIndicator(
-                    progress = {
-                        (progress.downloadedBytes.toFloat() / progress.totalBytes)
-                            .coerceIn(0f, 1f)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(
-                    text = stringResource(
-                        R.string.source_separation_quick_setup_progress,
-                        progress.downloadedBytes.asReadableFileSize(),
-                        progress.totalBytes.asReadableFileSize(),
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+        val hasDownload = item.expectedDownloadBytes > 0L
+        val downloadProgress = progress?.takeIf { it.totalBytes > 0L }
+        if (hasDownload || downloadProgress != null) {
+            Column(
+                modifier = Modifier.padding(padding),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (hasDownload) {
+                    Text(
+                        text = stringResource(
+                            R.string.source_separation_quick_setup_size_summary,
+                            item.expectedDownloadBytes.asReadableFileSize(),
+                            item.expectedInstalledBytes.asReadableFileSize(),
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                downloadProgress?.let { currentProgress ->
+                    LinearProgressIndicator(
+                        progress = {
+                            (currentProgress.downloadedBytes.toFloat() /
+                                currentProgress.totalBytes).coerceIn(0f, 1f)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = stringResource(
+                            R.string.source_separation_quick_setup_progress,
+                            currentProgress.downloadedBytes.asReadableFileSize(),
+                            currentProgress.totalBytes.asReadableFileSize(),
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
     }
@@ -446,15 +468,17 @@ private fun QuickSetupItemDetailsDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                Text(
-                    text = itemStateText(state),
-                    color = if (state == SourceSeparationQuickSetupItemState.Failed) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                )
+                if (state != SourceSeparationQuickSetupItemState.Pending) {
+                    Text(
+                        text = itemStateText(state),
+                        color = if (state == SourceSeparationQuickSetupItemState.Failed) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
                 item.disabledReason?.let { disabledReason ->
                     Text(
                         text = if (item.action in setOf(
@@ -500,15 +524,7 @@ private fun SetupFooter(
             enabled = hasSelectedAction && !hasDisabledSelectedAction,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_download_24dp),
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-            Text(
-                text = stringResource(R.string.source_separation_quick_setup_install),
-                modifier = Modifier.padding(start = 8.dp),
-            )
+            Text(stringResource(R.string.source_separation_quick_setup_execute_selected))
         }
         if (plan.items.any { it.action == SourceSeparationQuickSetupAction.OpenRuntimeManagement }) {
             OutlinedButton(
@@ -537,12 +553,15 @@ private fun FinishedCard(
     onOpenRuntimeManagement: () -> Unit,
     onOpenModelManagement: () -> Unit,
 ) {
-    TitledCard(
-        title = stringResource(R.string.source_separation_quick_setup_result_title),
+    Card(
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
         modifier = Modifier.fillMaxWidth(),
-    ) { padding ->
+    ) {
         Column(
-            modifier = Modifier.padding(padding),
+            modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
@@ -551,21 +570,22 @@ private fun FinishedCard(
                 fontWeight = FontWeight.SemiBold,
             )
             errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onRetry, modifier = Modifier.weight(1f)) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_update_24dp),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Text(
-                        text = stringResource(R.string.source_separation_quick_setup_retry),
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
-                OutlinedButton(onClick = onOpenRuntimeManagement, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.source_separation_manage_runtime))
-                }
+            OutlinedButton(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_update_24dp),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = stringResource(R.string.source_separation_quick_setup_retry),
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            OutlinedButton(
+                onClick = onOpenRuntimeManagement,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.source_separation_manage_runtime))
             }
             OutlinedButton(onClick = onOpenModelManagement, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.source_separation_manage_model))

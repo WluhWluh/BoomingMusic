@@ -114,6 +114,7 @@
     <string name="source_separation_quick_setup_state_repair_required">需要修复</string>
     <string name="source_separation_quick_setup_state_unsupported">此设备不支持</string>
     <string name="source_separation_quick_setup_runtime_summary">CPU 运行时：%1$s，%2$s</string>
+    <string name="source_separation_quick_setup_gpu_runtime_summary">GPU 运行时：%1$s，%2$s</string>
     <string name="source_separation_quick_setup_model_summary">当前模型：%1$s（%2$s）</string>
     <string name="source_separation_quick_setup_installed">已安装</string>
     <string name="source_separation_quick_setup_missing">缺失</string>
@@ -134,8 +135,7 @@
     <string name="source_separation_quick_setup_item_skipped">已跳过</string>
     <string name="source_separation_quick_setup_size_summary">下载 %1$s，安装后 %2$s</string>
     <string name="source_separation_quick_setup_progress">%1$s / %2$s</string>
-    <string name="source_separation_quick_setup_install">安装选中的项目</string>
-    <string name="source_separation_quick_setup_result_title">配置结果</string>
+    <string name="source_separation_quick_setup_execute_selected">执行选中项</string>
     <string name="source_separation_quick_setup_result_completed">本地音源分离已就绪。</string>
     <string name="source_separation_quick_setup_result_partial">配置已部分完成。</string>
     <string name="source_separation_quick_setup_result_blocked">配置被阻止。</string>

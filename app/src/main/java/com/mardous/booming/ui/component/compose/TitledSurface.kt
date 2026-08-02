@@ -70,6 +70,7 @@ fun TitledCard(
     style: TextStyle? = null,
     color: Color? = null,
     collapsible: Boolean = false,
+    titleStartContent: @Composable RowScope.() -> Unit = {},
     titleEndContent: @Composable RowScope.() -> Unit = {},
     content: @Composable (PaddingValues) -> Unit
 ) {
@@ -80,6 +81,7 @@ fun TitledCard(
         expanded = expanded,
         collapsible = collapsible,
         title = title,
+        titleStartContent = titleStartContent,
         titleEndContent = titleEndContent,
         style = style,
         icon = icon,
@@ -100,6 +102,7 @@ private fun TitledCard(
     icon: Painter? = null,
     style: TextStyle? = null,
     color: Color? = null,
+    titleStartContent: @Composable RowScope.() -> Unit = {},
     titleEndContent: @Composable RowScope.() -> Unit = {},
     content: @Composable (PaddingValues) -> Unit
 ) {
@@ -117,6 +120,8 @@ private fun TitledCard(
                 .clickable(enabled = collapsible, onClick = onTitleClick)
                 .padding(16.dp)
         ) {
+            titleStartContent()
+
             if (icon != null) {
                 Icon(
                     painter = icon,

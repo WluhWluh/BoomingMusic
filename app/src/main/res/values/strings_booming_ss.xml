@@ -114,6 +114,7 @@
     <string name="source_separation_quick_setup_state_repair_required">Repair required</string>
     <string name="source_separation_quick_setup_state_unsupported">Unsupported on this device</string>
     <string name="source_separation_quick_setup_runtime_summary">CPU runtime: %1$s, %2$s</string>
+    <string name="source_separation_quick_setup_gpu_runtime_summary">GPU runtime: %1$s, %2$s</string>
     <string name="source_separation_quick_setup_model_summary">Active model: %1$s (%2$s)</string>
     <string name="source_separation_quick_setup_installed">installed</string>
     <string name="source_separation_quick_setup_missing">missing</string>
@@ -134,8 +135,7 @@
     <string name="source_separation_quick_setup_item_skipped">Skipped</string>
     <string name="source_separation_quick_setup_size_summary">Download %1$s, installed %2$s</string>
     <string name="source_separation_quick_setup_progress">%1$s / %2$s</string>
-    <string name="source_separation_quick_setup_install">Install selected items</string>
-    <string name="source_separation_quick_setup_result_title">Setup result</string>
+    <string name="source_separation_quick_setup_execute_selected">Execute selected items</string>
     <string name="source_separation_quick_setup_result_completed">Local separation is ready.</string>
     <string name="source_separation_quick_setup_result_partial">Setup completed partially.</string>
     <string name="source_separation_quick_setup_result_blocked">Setup is blocked.</string>
