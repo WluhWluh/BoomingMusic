@@ -31,6 +31,7 @@ param(
         "lifecycle",
         "recreation",
         "playback",
+        "backend-switching",
         "switching",
         "background",
         "prefetch"
@@ -85,6 +86,7 @@ param(
     [switch]$CleanInstallScenario,
     [switch]$PreserveMediaStoreSource,
     [switch]$ExportCacheAudio,
+    [switch]$CleanupCacheAfterRun,
     [switch]$KaraGpuRequalification,
     [switch]$RebindAfterCompletion,
     [switch]$ProbeOriginalPlayback,
@@ -139,6 +141,7 @@ $sourceStages = @(
     "lifecycle",
     "recreation",
     "playback",
+    "backend-switching",
     "switching",
     "background",
     "prefetch"
@@ -169,6 +172,7 @@ $testMethod = switch ($Stage) {
     "lifecycle" { "validateWorkerLifecycle"; break }
     "recreation" { "validateCompletedCacheAfterProcessRestart"; break }
     "playback" { "validateMediaSessionPlayback"; break }
+    "backend-switching" { "validateBackendPolicyPreparationRecycle"; break }
     "switching" { "validateActiveModelSwitch"; break }
     "background" { "validateBackgroundServiceContinuation"; break }
     "prefetch" { "validateNextSongPrefetch"; break }
@@ -265,7 +269,7 @@ if ($ExecutionHostMode -eq "bound-remote" -and
     throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
 }
 if ($ExecutionHostMode -eq "independent-foreground" -and
-        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "cancel-cleanup", "task-removal", "force-stop", "reattachment", "independent-main-death", "independent-remote-death") -or
+        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "cancel-cleanup", "task-removal", "force-stop", "reattachment", "independent-main-death", "independent-remote-death", "switching", "prefetch") -or
         $ProcessAbi -ne "arm64-v8a" -or
         $ProcessorCount -gt 0 -or $XnnPackFlags -ge 0 -or
         $AutoFailpoint -ne "none" -or
@@ -408,8 +412,11 @@ if (-not [string]::IsNullOrWhiteSpace($SecondaryModelId) -and
         $SecondaryModelId -eq $ModelId) {
     throw "SecondaryModelId must differ from ModelId."
 }
-if ($Stage -in @("background", "prefetch") -and $BackendMode -ne "auto") {
-    throw "$Stage uses the production service graph and requires BackendMode=auto."
+if ($Stage -eq "background" -and $BackendMode -ne "auto") {
+    throw "background uses the production service graph and requires BackendMode=auto."
+}
+if ($CleanupCacheAfterRun -and $Stage -ne "worker") {
+    throw "CleanupCacheAfterRun applies only to the worker stage."
 }
 $requiresCurrentFixture = $Stage -in @(
     "prefetch",
@@ -701,7 +708,12 @@ function Get-AbiApkFromMetadata([string]$Directory, [string]$Abi) {
         }
     } | Select-Object -First 1
     if ($null -eq $element) {
-        throw "No $Abi app split was declared in $metadataPath."
+        $element = @($metadata.elements) | Where-Object {
+            @($_.filters).Count -eq 0
+        } | Select-Object -First 1
+    }
+    if ($null -eq $element) {
+        throw "No $Abi app split or universal APK was declared in $metadataPath."
     }
     $path = Join-Path $Directory ([string]$element.outputFile)
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -1163,6 +1175,9 @@ try {
         }
         if ($Stage -eq "worker" -and $ExportCacheAudio) {
             $instrumentArguments += @("-e", "exportCacheAudio", "true")
+        }
+        if ($Stage -eq "worker" -and $CleanupCacheAfterRun) {
+            $instrumentArguments += @("-e", "cleanupCacheAfterRun", "true")
         }
         if ($Stage -eq "process-cache-matrix") {
             $instrumentArguments += @(

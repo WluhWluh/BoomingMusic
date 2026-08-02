@@ -669,10 +669,16 @@ fun SharedPreferences.readSourceSeparationGpuEnabled(): Boolean {
 
 fun SharedPreferences.writeSourceSeparationGpuEnabled(enabled: Boolean) {
     edit {
-        putBoolean(SOURCE_SEPARATION_GPU_ENABLED, enabled)
-        putBoolean(SOURCE_SEPARATION_TRY_GPU, enabled)
+        putSourceSeparationGpuEnabled(enabled)
     }
 }
+
+fun SharedPreferences.Editor.putSourceSeparationGpuEnabled(
+    enabled: Boolean,
+): SharedPreferences.Editor =
+    putBoolean(SOURCE_SEPARATION_GPU_ENABLED, enabled)
+        .putBoolean(SOURCE_SEPARATION_TRY_GPU, enabled)
+
 const val ALBUM_SHUFFLE_MODE = "album_shuffle_mode"
 const val ARTIST_SHUFFLE_MODE = "artist_shuffle_mode"
 const val RESUME_ON_CONNECT = "resume_on_connect"

@@ -81,6 +81,7 @@ import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFailpoint
 import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFaultEvidence
 import com.mardous.booming.separation.model.litert.MdxLiteRtRemoteFaultInjection
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
+import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
@@ -116,10 +117,12 @@ import com.mardous.booming.util.MINIMUM_SONG_DURATION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
+import com.mardous.booming.util.SOURCE_SEPARATION_GPU_ENABLED
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.STOP_WHEN_CLOSED_FROM_RECENTS
+import com.mardous.booming.util.putSourceSeparationGpuEnabled
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -157,10 +160,12 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val report = baseReport(context, runId, arguments)
         val preferences = get<SharedPreferences>(SharedPreferences::class.java)
         val preferenceKeys = setOf(
             SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
             SOURCE_SEPARATION_WINDOW_DECODE,
+            SOURCE_SEPARATION_GPU_ENABLED,
             SOURCE_SEPARATION_TRY_GPU,
             SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
             MINIMUM_SONG_DURATION,
@@ -179,7 +184,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             check(preferences.edit()
                 .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
                 .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
-                .putBoolean(SOURCE_SEPARATION_TRY_GPU, false)
+                .putSourceSeparationGpuEnabled(false)
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
                 .putInt(MINIMUM_SONG_DURATION, 0)
                 .commit()
@@ -261,6 +266,54 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertTrue(after.session.invocationCount > 0L)
             assertEquals(1, remoteHost.connectionDiagnostics.expectedBinderDeathCount)
             assertEquals(0, remoteHost.connectionDiagnostics.unexpectedBinderDeathCount)
+
+            clearExactCacheEntry(resolver, runtimeSong.cacheKey)
+            val finalCpuCompleted = remoteEngine.separateResolved(
+                input = runtimeSong.input,
+                model = runtimeSong.model,
+                preflight = runtimeSong.preflight,
+                executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Cpu,
+                runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+                windowDecodeEnabled = true,
+            )
+            assertTrue(finalCpuCompleted is SourceSeparationModelAwareEngineResult.Completed)
+            val finalCpuManifest = (finalCpuCompleted as
+                SourceSeparationModelAwareEngineResult.Completed).manifest
+            assertEquals(
+                MdxInferenceBackend.LiteRtCpu.name,
+                finalCpuManifest.runtimeRecords.last().backend,
+            )
+            val finalCpu = remoteHost.processDiagnostics()
+            assertNotEquals(after.processGeneration, finalCpu.processGeneration)
+            assertNotEquals(after.pid, finalCpu.pid)
+            assertNotEquals(after.processStartTicks, finalCpu.processStartTicks)
+            assertEquals(SourceSeparationProcessSessionState.Empty, finalCpu.session.state)
+            assertEquals(SourceSeparationExecutionBackendPolicy.Cpu, finalCpu.session.backendPolicy)
+            assertEquals(1, finalCpu.session.nativeSessionCreationCount)
+            assertTrue(finalCpu.session.invocationCount > 0L)
+            assertEquals(2, remoteHost.connectionDiagnostics.expectedBinderDeathCount)
+            assertEquals(0, remoteHost.connectionDiagnostics.unexpectedBinderDeathCount)
+            applyRuntimeEvidence(report, autoManifest)
+            report.put("status", "passed")
+            report.put("backendSwitch", JSONObject()
+                .put("initialBackend", MdxInferenceBackend.LiteRtCpu.name)
+                .put("gpuBackend", MdxInferenceBackend.LiteRtGpu.name)
+                .put("finalBackend", MdxInferenceBackend.LiteRtCpu.name)
+                .put("initialProcessGeneration", before.processGeneration)
+                .put("gpuProcessGeneration", after.processGeneration)
+                .put("initialPid", before.pid)
+                .put("gpuPid", after.pid)
+                .put("finalCpuProcessGeneration", finalCpu.processGeneration)
+                .put("finalCpuPid", finalCpu.pid)
+                .put("expectedBinderDeathCount",
+                    remoteHost.connectionDiagnostics.expectedBinderDeathCount)
+                .put("unexpectedBinderDeathCount",
+                    remoteHost.connectionDiagnostics.unexpectedBinderDeathCount)
+            )
+        } catch (error: Throwable) {
+            report.put("status", "failed")
+            report.put("error", "${error::class.java.name}: ${error.message}")
+            throw error
         } finally {
             engine?.close()
             host?.close()
@@ -273,6 +326,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
             restorePreferences(preferences, preferenceSnapshot)
+            writeReport(context, runId, "backend-switching", report)
         }
     }
 
@@ -368,6 +422,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             ARG_PROBE_ORIGINAL_PLAYBACK,
             false,
         )
+        val cleanupCacheAfterRun = arguments.optionalBoolean(
+            ARG_CLEANUP_CACHE_AFTER_RUN,
+            false,
+        )
         val screenOffAfterReady = arguments.optionalBoolean(
             ARG_SCREEN_OFF_AFTER_READY,
             false,
@@ -387,6 +445,20 @@ class SourceSeparationPhase7WorkerDeviceTest {
         var originalPlayback: OriginalAudioPlaybackProbe? = null
         var mediaUri: Uri? = null
         var screenOffIssued = false
+        var runtimeFacadeForCleanup: SourceSeparationRuntimeFacade? = null
+        var cacheKeyForCleanup: String? = null
+        val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+        val preferenceSnapshot = snapshotPreferences(
+            preferences,
+            setOf(
+                SOURCE_SEPARATION_WINDOW_DECODE,
+                SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+                SOURCE_SEPARATION_GPU_ENABLED,
+                SOURCE_SEPARATION_TRY_GPU,
+                SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+                MINIMUM_SONG_DURATION,
+            ),
+        )
         val hostEvents = Collections.synchronizedList(
             mutableListOf<SourceSeparationExecutionHostEvent>(),
         )
@@ -397,14 +469,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             mediaUri = registeredUri
             val source = resolveMediaStoreSong(context, registeredUri, sourcePath)
             val windowDecodeEnabled = arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true)
-            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
             val preferencesEditor = preferences.edit()
                 .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, windowDecodeEnabled)
                 .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
-                .putBoolean(
-                    SOURCE_SEPARATION_TRY_GPU,
-                    backendMode == BackendMode.Auto,
-                )
+                .putSourceSeparationGpuEnabled(backendMode == BackendMode.Auto)
                 .putInt(
                     SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
                     REQUIRED_READY_WINDOWS,
@@ -466,7 +534,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 executionHostMode = executionHostMode,
                 executionHostEventSink = hostEvents::add,
                 boundRemoteHostSink = { boundRemoteHost = it },
-            )
+            ).also { runtimeFacadeForCleanup = it }
             val remoteStartup = boundRemoteHost?.let { host ->
                 host.processGeneration
                 host.connectionDiagnostics
@@ -482,6 +550,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val runtimeSong = (resolved as? SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The scanned song could not be admitted: $resolved")
             val cacheKey = runtimeSong.cacheKey
+            cacheKeyForCleanup = cacheKey
             val entriesBefore = runtimeFacade.entries().size
             runtimeFacade.entries()
                 .filter { it.cacheKey == cacheKey }
@@ -1280,8 +1349,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
             throw error
         } finally {
             MdxLiteRtRemoteFaultInjection.clear(context)
-            coordinator?.cancel()
+            coordinator?.let { worker ->
+                worker.cancel()
+                runCatching { waitForInactive(worker) }
+            }
             boundRemoteHost?.close()
+            if (cleanupCacheAfterRun) {
+                cacheKeyForCleanup?.let { cacheKey ->
+                    runtimeFacadeForCleanup?.let { runtime ->
+                        runCatching { clearExactCacheEntry(runtime, cacheKey) }
+                    }
+                }
+            }
+            restorePreferences(preferences, preferenceSnapshot)
             if (screenOffIssued) {
                 instrumentation.uiAutomation
                     .executeShellCommand("input keyevent KEYCODE_WAKEUP")
@@ -1332,7 +1412,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .putInt(MINIMUM_SONG_DURATION, 0)
                 .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
                 .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, windowDecodeEnabled)
-                .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
+                .putSourceSeparationGpuEnabled(backendMode == BackendMode.Auto)
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, REQUIRED_READY_WINDOWS)
                 .commit()
             ) { "Could not configure the product ownership handoff test." }
@@ -1596,12 +1676,25 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
         val report = baseReport(context, runId, arguments)
             .put("stage", action.stage)
+        val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+        val preferenceSnapshot = snapshotPreferences(
+            preferences,
+            setOf(
+                SOURCE_SEPARATION_AUTO_START,
+                SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+                SOURCE_SEPARATION_WINDOW_DECODE,
+                SOURCE_SEPARATION_GPU_ENABLED,
+                SOURCE_SEPARATION_TRY_GPU,
+                SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+            ),
+        )
         var mediaUri: Uri? = null
         var worker: SourceSeparationForegroundWorkerCoordinator? = null
+        var runtimeFacade: SourceSeparationRuntimeFacade? = null
+        var testCacheKey: String? = null
 
         try {
             val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
-            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
             check(preferences.edit()
                 .putBoolean(SOURCE_SEPARATION_AUTO_START, false)
                 .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
@@ -1609,7 +1702,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     SOURCE_SEPARATION_WINDOW_DECODE,
                     arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true),
                 )
-                .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
+                .putSourceSeparationGpuEnabled(backendMode == BackendMode.Auto)
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
                 .commit()
             ) { "Could not configure the product ${action.displayName} cleanup test." }
@@ -1631,7 +1724,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val source = resolveMediaStoreSong(context, registeredUri, sourcePath)
             val runtime = get<SourceSeparationRuntimeFacade>(
                 SourceSeparationRuntimeFacade::class.java,
-            )
+            ).also { runtimeFacade = it }
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
             val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
                 SourceSeparationModelAwareCacheRepository::class.java,
@@ -1644,6 +1737,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 ?: error(
                     "The product ${action.displayName} source could not be resolved: $resolution",
                 )
+            testCacheKey = runtimeSong.cacheKey
             clearExactCacheEntry(runtime, runtimeSong.cacheKey)
 
             fun awaitOwnership(
@@ -1807,6 +1901,34 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertNull(idleDiagnostics.foregroundService.activeLease)
             assertNull(idleDiagnostics.processingWakeLock.activeLease)
             assertFalse(idleDiagnostics.processingWakeLock.platformHeld)
+            var resumeElapsedMs = 0L
+            var resumedManifest: SourceSeparationCacheManifest? = null
+            var resumedJournal: SourceSeparationCacheRunJournal? = null
+            if (action == ProductTerminalCleanupAction.Pause) {
+                val resumeStartedAt = SystemClock.elapsedRealtime()
+                coordinator.updateSong(
+                    song = source,
+                    positionMs = 0L,
+                    durationMs = source.duration,
+                    isPlaying = false,
+                    sourceSeparationBlend = TEST_BLEND,
+                )
+                assertTrue(coordinator.startCurrentSong())
+                waitForCompleted(coordinator)
+                resumeElapsedMs = SystemClock.elapsedRealtime() - resumeStartedAt
+                val resumed = runtime.cacheStatus(runtimeSong) as?
+                    SourceSeparationModelAwareCacheStatus.Completed
+                    ?: error("The product pause test did not complete after resume.")
+                resumedManifest = resumed.manifest
+                resumedJournal = requireNotNull(store.readRunJournal(runtimeSong.cacheKey))
+                assertEquals(
+                    SourceSeparationCacheRunJournalLifecycle.Completed,
+                    resumedJournal.lifecycle,
+                )
+                waitForCacheLeaseRelease(cacheRepository, runtimeSong.cacheKey)
+                waitForKernelCacheLockRelease(store, runtimeSong.cacheKey)
+                applyRuntimeEvidence(report, resumed.manifest)
+            }
             applyRunAdmissionEvidence(
                 report = report,
                 request = journalAfter.request,
@@ -1824,7 +1946,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("cache", report.getJSONObject("cache")
                 .put("cacheKey", runtimeSong.cacheKey)
                 .put("exactIdentity", true)
-                .put("completedPlayable", false)
+                .put("completedPlayable", resumedManifest != null)
                 .put("runJournalSequence", journalAfter.latestSequence)
                 .put("runJournalOwnerPid", remotePid)
                 .put("leaseReleaseMs", cacheLeaseReleaseMs)
@@ -1839,6 +1961,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("journalLifecycle", journalAfter.lifecycle.name)
                 .put("journalTerminalTransition", journalAfter.transitions.last().type.name)
                 .put("cacheStatus", cacheStatus::class.java.simpleName)
+                .put("resumed", resumedManifest != null)
+                .put("resumeElapsedMs", resumeElapsedMs)
+                .put("resumedJournalLifecycle",
+                    resumedJournal?.lifecycle?.name ?: JSONObject.NULL)
                 .put(
                     "cacheManifestState",
                     (cacheStatus as? SourceSeparationModelAwareCacheStatus.Incomplete)
@@ -1870,7 +1996,16 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("error", "${error::class.java.name}: ${error.message}")
             throw error
         } finally {
-            worker?.cancel()
+            worker?.let { coordinator ->
+                coordinator.cancel()
+                runCatching { waitForInactive(coordinator) }
+            }
+            testCacheKey?.let { cacheKey ->
+                runtimeFacade?.let { runtime ->
+                    runCatching { clearExactCacheEntry(runtime, cacheKey) }
+                }
+            }
+            restorePreferences(preferences, preferenceSnapshot)
             mediaUri?.let { uri ->
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
@@ -1922,7 +2057,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     SOURCE_SEPARATION_WINDOW_DECODE,
                     arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true),
                 )
-                .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
+                .putSourceSeparationGpuEnabled(backendMode == BackendMode.Auto)
                 .putBoolean(STOP_WHEN_CLOSED_FROM_RECENTS, stopWhenClosed)
                 .putBoolean(TEST_KEY_PLAYBACK_ENABLED, false)
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
@@ -2264,7 +2399,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     SOURCE_SEPARATION_WINDOW_DECODE,
                     arguments.optionalBoolean(ARG_WINDOW_DECODE_ENABLED, true),
                 )
-                .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
+                .putSourceSeparationGpuEnabled(backendMode == BackendMode.Auto)
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, REQUIRED_READY_WINDOWS)
                 .putBoolean(TEST_KEY_PLAYBACK_ENABLED, true)
                 .putBoolean(TEST_KEY_REMEMBER_PER_SONG, false)
@@ -2595,7 +2730,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .putBoolean(SOURCE_SEPARATION_AUTO_CACHE_CLEANUP, false)
                 .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
                 .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
-                .putBoolean(SOURCE_SEPARATION_TRY_GPU, backendMode == BackendMode.Auto)
+                .putSourceSeparationGpuEnabled(backendMode == BackendMode.Auto)
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, REQUIRED_READY_WINDOWS)
                 .commit()
             ) { "Could not configure the run-reattachment test." }
@@ -5028,27 +5163,52 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
         val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
+        val executionHostMode = Phase7ExecutionHostMode.parse(
+            arguments.getString(ARG_EXECUTION_HOST_MODE),
+        )
+        require(executionHostMode == Phase7ExecutionHostMode.IndependentForeground) {
+            "Model-switch validation requires the production independent foreground host."
+        }
         val report = baseReport(context, runId, arguments)
+        val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+        val preferenceSnapshot = snapshotPreferences(
+            preferences,
+            setOf(
+                SOURCE_SEPARATION_WINDOW_DECODE,
+                SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+                SOURCE_SEPARATION_AUTO_START,
+                SOURCE_SEPARATION_GPU_ENABLED,
+                SOURCE_SEPARATION_TRY_GPU,
+                SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+                MINIMUM_SONG_DURATION,
+            ),
+        )
+        val presetRepository = get<SourceSeparationPresetRepository>(
+            SourceSeparationPresetRepository::class.java,
+        )
         val coordinators = mutableListOf<SourceSeparationForegroundWorkerCoordinator>()
         var mediaUri: Uri? = null
+        var runtimeFacade: SourceSeparationRuntimeFacade? = null
+        var executionHost: BoundRemoteSourceSeparationExecutionHost? = null
+        val cacheKeys = linkedSetOf<String>()
+        var initialActiveReference: SourceSeparationActiveModelReference? = null
+        var initialPendingReference: SourceSeparationActiveModelReference? = null
+        var initialModelStateCaptured = false
 
         try {
             val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
             mediaUri = registerSourceInMediaStore(context, sourcePath, runId)
             val source = resolveMediaStoreSong(context, mediaUri, sourcePath)
-            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
             check(preferences.edit()
                 .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
                 .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
                 .putBoolean(SOURCE_SEPARATION_AUTO_START, false)
+                .putSourceSeparationGpuEnabled(backendMode == BackendMode.Auto)
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
                 .putInt(MINIMUM_SONG_DURATION, 0)
                 .commit()
             ) { "Could not persist model-switch test preferences." }
 
-            val presetRepository = get<SourceSeparationPresetRepository>(
-                SourceSeparationPresetRepository::class.java,
-            )
             val primaryModelId = arguments.requiredString(ARG_MODEL_ID)
             val primaryArtifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
             val secondaryModelId = arguments.requiredString(ARG_SECONDARY_MODEL_ID)
@@ -5057,10 +5217,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             val initial = presetRepository.activeModel()
             assertTrue(initial is SourceSeparationActivePresetState.Reference)
+            val initialReference = (initial as SourceSeparationActivePresetState.Reference)
+                .reference
+            initialActiveReference = initialReference
+            initialPendingReference = presetRepository.pendingActiveModel()
+            initialModelStateCaptured = true
             assertEquals(
                 primaryArtifactSha256,
-                (initial as SourceSeparationActivePresetState.Reference)
-                    .reference.artifactSha256,
+                initialReference.artifactSha256,
             )
 
             val secondaryInstalled = get<SourceSeparationPresetDownloader>(
@@ -5070,7 +5234,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertEquals(primaryArtifactSha256, (presetRepository.activeModel() as
                 SourceSeparationActivePresetState.Reference).reference.artifactSha256)
 
-            val runtimeFacade = createCpuRuntimeFacade(
+            val runtime = createCpuRuntimeFacade(
                 context = context,
                 preferences = preferences,
                 presetRepository = presetRepository,
@@ -5078,18 +5242,21 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 processorCount = arguments.getString(ARG_PROCESSOR_COUNT)
                     ?.toIntOrNull()
                     ?.takeIf { it > 0 },
-            )
-            val primaryRuntimeSong = (runtimeFacade.resolve(source) as?
+                executionHostMode = executionHostMode,
+                boundRemoteHostSink = { executionHost = it },
+            ).also { runtimeFacade = it }
+            val primaryRuntimeSong = (runtime.resolve(source) as?
                 SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The primary model could not resolve the switching source.")
             assertEquals(primaryModelId, primaryRuntimeSong.modelId)
-            clearExactCacheEntry(runtimeFacade, primaryRuntimeSong.cacheKey)
+            cacheKeys += primaryRuntimeSong.cacheKey
+            clearExactCacheEntry(runtime, primaryRuntimeSong.cacheKey)
 
             val startedAtMs = SystemClock.elapsedRealtime()
             val primaryWorker = SourceSeparationForegroundWorkerCoordinator(
                 context = context,
                 preferences = preferences,
-                sourceSeparationRuntime = runtimeFacade,
+                sourceSeparationRuntime = runtime,
             )
             coordinators += primaryWorker
             primaryWorker.attachCallbacks(RecordingCallbacks())
@@ -5113,7 +5280,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertEquals(secondaryModelId, selectedSecondary.modelId)
             assertEquals(primaryRuntimeSong.cacheKey, primaryWorker.runningCacheKey())
             waitForCompleted(primaryWorker)
-            val primaryCompleted = runtimeFacade.cacheStatus(primaryRuntimeSong) as?
+            val primaryCompleted = runtime.cacheStatus(primaryRuntimeSong) as?
                 SourceSeparationModelAwareCacheStatus.Completed
                 ?: error("The admitted primary run did not complete under its original identity.")
             assertEquals(primaryModelId, primaryCompleted.manifest.identity.modelId)
@@ -5124,18 +5291,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
             primaryWorker.cancel()
             waitForInactive(primaryWorker)
 
-            val secondaryRuntimeSong = (runtimeFacade.resolve(source) as?
+            val secondaryRuntimeSong = (runtime.resolve(source) as?
                 SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The secondary model could not resolve the switching source.")
             assertEquals(secondaryModelId, secondaryRuntimeSong.modelId)
             assertEquals(secondaryArtifactSha256, secondaryRuntimeSong.artifactSha256)
             assertNotEquals(primaryRuntimeSong.cacheKey, secondaryRuntimeSong.cacheKey)
-            clearExactCacheEntry(runtimeFacade, secondaryRuntimeSong.cacheKey)
+            cacheKeys += secondaryRuntimeSong.cacheKey
+            clearExactCacheEntry(runtime, secondaryRuntimeSong.cacheKey)
 
             val secondaryWorker = SourceSeparationForegroundWorkerCoordinator(
                 context = context,
                 preferences = preferences,
-                sourceSeparationRuntime = runtimeFacade,
+                sourceSeparationRuntime = runtime,
             )
             coordinators += secondaryWorker
             secondaryWorker.attachCallbacks(RecordingCallbacks())
@@ -5148,7 +5316,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             assertTrue(secondaryWorker.startCurrentSong())
             waitForCompleted(secondaryWorker)
-            val secondaryCompleted = runtimeFacade.cacheStatus(secondaryRuntimeSong) as?
+            val secondaryCompleted = runtime.cacheStatus(secondaryRuntimeSong) as?
                 SourceSeparationModelAwareCacheStatus.Completed
                 ?: error("The first post-switch run did not complete under the secondary model.")
             assertEquals(secondaryModelId, secondaryCompleted.manifest.identity.modelId)
@@ -5156,22 +5324,28 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 secondaryArtifactSha256,
                 secondaryCompleted.manifest.identity.artifactSha256,
             )
+            val primaryBackend = primaryCompleted.manifest.runtimeRecords.last().backend
+            val secondaryBackend = secondaryCompleted.manifest.runtimeRecords.last().backend
+            if (backendMode == BackendMode.Cpu) {
+                assertEquals(MdxInferenceBackend.LiteRtCpu.name, primaryBackend)
+                assertEquals(MdxInferenceBackend.LiteRtCpu.name, secondaryBackend)
+            }
 
             val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
                 SourceSeparationModelAwareCacheRepository::class.java,
             )
             val primaryPlayback = requireNotNull(
-                runtimeFacade.openCompletedCache(primaryRuntimeSong.cacheKey),
+                runtime.openCompletedCache(primaryRuntimeSong.cacheKey),
             )
             assertTrue(cacheRepository.isLeased(primaryRuntimeSong.cacheKey))
             assertEquals(
                 SourceSeparationCacheMutationResult.Busy,
-                runtimeFacade.delete(primaryRuntimeSong.cacheKey),
+                runtime.delete(primaryRuntimeSong.cacheKey),
             )
             primaryPlayback.close()
             assertFalse(cacheRepository.isLeased(primaryRuntimeSong.cacheKey))
 
-            val entries = runtimeFacade.entries().filter {
+            val entries = runtime.entries().filter {
                 it.cacheKey == primaryRuntimeSong.cacheKey ||
                     it.cacheKey == secondaryRuntimeSong.cacheKey
             }
@@ -5194,6 +5368,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("secondaryModelId", secondaryModelId)
                 .put("secondaryArtifactSha256", secondaryArtifactSha256)
                 .put("secondaryCacheKey", secondaryRuntimeSong.cacheKey)
+                .put("primaryBackend", primaryBackend)
+                .put("secondaryBackend", secondaryBackend)
                 .put("switchedAfterReadyWindow", true)
                 .put("admittedRunRetainedIdentity", true)
                 .put("primaryPlaybackLeaseRetained", true)
@@ -5204,7 +5380,31 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("error", "${error::class.java.name}: ${error.message}")
             throw error
         } finally {
-            coordinators.forEach(SourceSeparationForegroundWorkerCoordinator::cancel)
+            coordinators.forEach { coordinator ->
+                coordinator.cancel()
+                runCatching { waitForInactive(coordinator) }
+            }
+            if (initialModelStateCaptured) {
+                initialActiveReference?.let { reference ->
+                    runCatching {
+                        restoreActiveModelSelection(
+                            repository = presetRepository,
+                            activeReference = reference,
+                            pendingReference = initialPendingReference,
+                        )
+                    }.onFailure { restoreError ->
+                        report.put("stateRestoreError",
+                            "${restoreError::class.java.name}: ${restoreError.message}")
+                    }
+                }
+            }
+            runtimeFacade?.let { runtime ->
+                cacheKeys.forEach { cacheKey ->
+                    runCatching { clearExactCacheEntry(runtime, cacheKey) }
+                }
+            }
+            executionHost?.close()
+            restorePreferences(preferences, preferenceSnapshot)
             if (!arguments.optionalBoolean(ARG_PRESERVE_MEDIA_STORE_SOURCE, false)) {
                 mediaUri?.let { uri ->
                     runCatching { context.contentResolver.delete(uri, null, null) }
@@ -5447,15 +5647,37 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
+        val backendMode = BackendMode.parse(arguments.getString(ARG_BACKEND_MODE))
+        val executionHostMode = Phase7ExecutionHostMode.parse(
+            arguments.getString(ARG_EXECUTION_HOST_MODE),
+        )
+        require(executionHostMode == Phase7ExecutionHostMode.IndependentForeground) {
+            "Next-song prefetch validation requires the production independent foreground host."
+        }
         val report = baseReport(context, runId, arguments)
+        val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+        val preferenceSnapshot = snapshotPreferences(
+            preferences,
+            setOf(
+                SOURCE_SEPARATION_WINDOW_DECODE,
+                SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+                SOURCE_SEPARATION_AUTO_START,
+                SOURCE_SEPARATION_GPU_ENABLED,
+                SOURCE_SEPARATION_TRY_GPU,
+                TEST_KEY_PLAYBACK_ENABLED,
+                TEST_KEY_REMEMBER_PER_SONG,
+                TEST_KEY_GLOBAL_BLEND,
+                SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+                MINIMUM_SONG_DURATION,
+            ),
+        )
         var currentUri: Uri? = null
         var nextUri: Uri? = null
         var worker: SourceSeparationForegroundWorkerCoordinator? = null
+        var runtimeFacade: SourceSeparationRuntimeFacade? = null
+        val cacheKeys = linkedSetOf<String>()
 
         try {
-            require(BackendMode.parse(arguments.getString(ARG_BACKEND_MODE)) == BackendMode.Auto) {
-                "Next-song prefetch validation requires the production Auto graph."
-            }
             val currentSourcePath = arguments.requiredString(ARG_CURRENT_SOURCE_PATH)
             val sourcePath = arguments.requiredString(ARG_SOURCE_PATH)
             currentUri = registerSourceInMediaStore(
@@ -5468,11 +5690,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val nextSource = resolveMediaStoreSong(context, nextUri, sourcePath)
             assertNotEquals(currentSource.id, nextSource.id)
 
-            val preferences = get<SharedPreferences>(SharedPreferences::class.java)
             check(preferences.edit()
                 .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
                 .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
                 .putBoolean(SOURCE_SEPARATION_AUTO_START, true)
+                .putSourceSeparationGpuEnabled(backendMode == BackendMode.Auto)
                 .putBoolean(TEST_KEY_PLAYBACK_ENABLED, true)
                 .putBoolean(TEST_KEY_REMEMBER_PER_SONG, false)
                 .putFloat(TEST_KEY_GLOBAL_BLEND, TEST_BLEND)
@@ -5484,13 +5706,13 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .commit()
             ) { "Could not persist next-song prefetch test preferences." }
             assertExpectedActivePreset(arguments)
-            val runtimeFacade = get<SourceSeparationRuntimeFacade>(
+            val runtime = get<SourceSeparationRuntimeFacade>(
                 SourceSeparationRuntimeFacade::class.java,
-            )
-            val currentRuntimeSong = (runtimeFacade.resolve(currentSource) as?
+            ).also { runtimeFacade = it }
+            val currentRuntimeSong = (runtime.resolve(currentSource) as?
                 SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The current prefetch source could not be resolved.")
-            val nextRuntimeSong = (runtimeFacade.resolve(nextSource) as?
+            val nextRuntimeSong = (runtime.resolve(nextSource) as?
                 SourceSeparationRuntimeSongResolution.Ready)?.song
                 ?: error("The next prefetch source could not be resolved.")
             assertNotEquals(
@@ -5498,19 +5720,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 currentRuntimeSong.cacheKey,
                 nextRuntimeSong.cacheKey,
             )
-            clearExactCacheEntry(runtimeFacade, currentRuntimeSong.cacheKey)
-            clearExactCacheEntry(runtimeFacade, nextRuntimeSong.cacheKey)
-
-            val currentResult = runtimeFacade.separate(
-                song = currentRuntimeSong,
-                playbackReadyWindowCountProvider = { REQUIRED_READY_WINDOWS },
-                windowDecodeEnabled = true,
-            )
-            val currentManifest = when (currentResult) {
-                is SourceSeparationModelAwareEngineResult.Completed -> currentResult.manifest
-                is SourceSeparationModelAwareEngineResult.AlreadyCompleted -> currentResult.manifest
-                else -> error("The current source did not complete before prefetch: $currentResult")
-            }
+            cacheKeys += currentRuntimeSong.cacheKey
+            cacheKeys += nextRuntimeSong.cacheKey
+            clearExactCacheEntry(runtime, currentRuntimeSong.cacheKey)
+            clearExactCacheEntry(runtime, nextRuntimeSong.cacheKey)
 
             val coordinator = get<SourceSeparationForegroundWorkerCoordinator>(
                 SourceSeparationForegroundWorkerCoordinator::class.java,
@@ -5524,13 +5737,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 isPlaying = false,
                 sourceSeparationBlend = TEST_BLEND,
             )
+            assertTrue(coordinator.startCurrentSong())
+            waitForCompleted(coordinator)
+            val currentManifest = (runtime.cacheStatus(currentRuntimeSong) as?
+                SourceSeparationModelAwareCacheStatus.Completed)?.manifest
+                ?: error("The current source did not complete before prefetch.")
+
             val startedAtMs = SystemClock.elapsedRealtime()
             assertTrue(
                 "The uncached next song was not admitted for prefetch.",
                 coordinator.preStartSong(nextSource, REQUIRED_READY_WINDOWS),
             )
             val prefetchedPlayback = waitForPlayable(
-                runtimeFacade = runtimeFacade,
+                runtimeFacade = runtime,
                 song = nextRuntimeSong,
                 playbackPositionMs = 0L,
                 readyWindowCount = REQUIRED_READY_WINDOWS,
@@ -5538,11 +5757,24 @@ class SourceSeparationPhase7WorkerDeviceTest {
             prefetchedPlayback.playback.close()
             val firstReadyMs = SystemClock.elapsedRealtime() - startedAtMs
             waitForWorkerToLeaveSong(coordinator, nextSource.id)
-            val prefetched = runtimeFacade.cacheStatus(nextRuntimeSong) as?
-                SourceSeparationModelAwareCacheStatus.Incomplete
-                ?: error("Next-song prefetch did not stop at an incomplete ready cache.")
-            assertTrue(prefetched.readySegments >= REQUIRED_READY_WINDOWS)
-            val prefetchCacheKey = prefetched.manifest.cacheKey
+            val prefetchStatus = runtime.cacheStatus(nextRuntimeSong)
+            val (prefetchedManifest, prefetchedReadyWindows, stoppedBeforeCompletion) =
+                when (prefetchStatus) {
+                    is SourceSeparationModelAwareCacheStatus.Incomplete -> {
+                        assertTrue(prefetchStatus.readySegments >= REQUIRED_READY_WINDOWS)
+                        Triple(prefetchStatus.manifest, prefetchStatus.readySegments, true)
+                    }
+                    is SourceSeparationModelAwareCacheStatus.Completed -> Triple(
+                        prefetchStatus.manifest,
+                        prefetchStatus.manifest.segmentPlan?.segments?.size
+                            ?: REQUIRED_READY_WINDOWS,
+                        false,
+                    )
+                    else -> error(
+                        "Next-song prefetch did not retain a ready cache: $prefetchStatus",
+                    )
+                }
+            val prefetchCacheKey = prefetchedManifest.cacheKey
 
             coordinator.updateSong(
                 song = nextSource,
@@ -5553,7 +5785,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             coordinator.requestPlaybackDemandSong(nextSource)
             waitForCompleted(coordinator)
-            val transitioned = runtimeFacade.cacheStatus(nextRuntimeSong) as?
+            val transitioned = runtime.cacheStatus(nextRuntimeSong) as?
                 SourceSeparationModelAwareCacheStatus.Completed
                 ?: error("The prefetched next song did not complete after transition.")
             assertEquals(prefetchCacheKey, transitioned.manifest.cacheKey)
@@ -5562,7 +5794,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 currentManifest.state,
             )
             assertTrue(
-                runtimeFacade.cacheStatus(currentRuntimeSong) is
+                runtime.cacheStatus(currentRuntimeSong) is
                     SourceSeparationModelAwareCacheStatus.Completed,
             )
 
@@ -5613,8 +5845,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("nextSongId", nextSource.id)
                 .put("nextCacheKey", prefetchCacheKey)
                 .put("requiredReadyWindows", REQUIRED_READY_WINDOWS)
-                .put("prefetchedReadyWindows", prefetched.readySegments)
-                .put("stoppedBeforeCompletion", true)
+                .put("prefetchedReadyWindows", prefetchedReadyWindows)
+                .put("stoppedBeforeCompletion", stoppedBeforeCompletion)
                 .put("transitionRetainedCacheIdentity", true)
             )
         } catch (error: Throwable) {
@@ -5622,7 +5854,16 @@ class SourceSeparationPhase7WorkerDeviceTest {
             report.put("error", "${error::class.java.name}: ${error.message}")
             throw error
         } finally {
-            worker?.cancel()
+            worker?.let { coordinator ->
+                coordinator.cancel()
+                runCatching { waitForInactive(coordinator) }
+            }
+            runtimeFacade?.let { runtime ->
+                cacheKeys.forEach { cacheKey ->
+                    runCatching { clearExactCacheEntry(runtime, cacheKey) }
+                }
+            }
+            restorePreferences(preferences, preferenceSnapshot)
             currentUri?.let { uri ->
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
@@ -5746,21 +5987,36 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
         val report = baseReport(context, runId, arguments)
+        val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+        val preferenceSnapshot = snapshotPreferences(
+            preferences,
+            setOf(MINIMUM_SONG_DURATION),
+        )
+        val presetRepository = get<SourceSeparationPresetRepository>(
+            SourceSeparationPresetRepository::class.java,
+        )
+        val initialActiveReference = (presetRepository.activeModel() as?
+            SourceSeparationActivePresetState.Reference)?.reference
+            ?: error("The playback validation has no active model.")
+        val initialPendingReference = presetRepository.pendingActiveModel()
+        val runtimeFacade = get<SourceSeparationRuntimeFacade>(
+            SourceSeparationRuntimeFacade::class.java,
+        )
+        val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
+            SourceSeparationModelAwareCacheRepository::class.java,
+        )
         var controller: MediaController? = null
         var sourceUri: Uri? = null
+        var testedCacheKey: String? = null
         var switchedModelDuringPlayback = false
+        var cacheLeaseReleaseMs = 0L
 
         try {
             val cacheKey = arguments.requiredString(ARG_CACHE_KEY)
+            testedCacheKey = cacheKey
             val expectedArtifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
-            val presetRepository = get<SourceSeparationPresetRepository>(
-                SourceSeparationPresetRepository::class.java,
-            )
-            val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
-                SourceSeparationModelAwareCacheRepository::class.java,
-            )
-            check(get<SharedPreferences>(SharedPreferences::class.java).edit()
+            check(preferences.edit()
                 .putInt(MINIMUM_SONG_DURATION, 0)
                 .commit()
             ) { "Could not allow the Phase 7 playback fixture in the media library." }
@@ -5874,6 +6130,12 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             assertEquals(SessionResult.RESULT_SUCCESS, blendResult.resultCode)
 
+            onMediaControllerThread(mediaController) { mediaController.pause() }
+            disableSourceSeparationPlayback(mediaController)
+            cacheLeaseReleaseMs = waitForCacheLeaseRelease(cacheRepository, cacheKey)
+            onMediaControllerThread(mediaController) { mediaController.release() }
+            controller = null
+
             report.put("status", "passed")
             report.put("lifecycle", report.getJSONObject("lifecycle")
                 .put("mediaSessionConnected", true)
@@ -5897,6 +6159,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     secondaryArtifactSha256 ?: JSONObject.NULL,
                 )
                 .put("primaryCacheLeaseRetained", switchedModelDuringPlayback)
+                .put("primaryCacheLeaseReleaseMs", cacheLeaseReleaseMs)
             )
             report.put("audio", report.getJSONObject("audio")
                 .put("finite", true)
@@ -5915,17 +6178,46 @@ class SourceSeparationPhase7WorkerDeviceTest {
         } finally {
             controller?.let { mediaController ->
                 runCatching {
+                    disableSourceSeparationPlayback(mediaController)
                     onMediaControllerThread(mediaController) {
                         mediaController.pause()
                         mediaController.release()
                     }
                 }
             }
+            runCatching {
+                restoreActiveModelSelection(
+                    repository = presetRepository,
+                    activeReference = initialActiveReference,
+                    pendingReference = initialPendingReference,
+                )
+            }.onFailure { restoreError ->
+                report.put("stateRestoreError",
+                    "${restoreError::class.java.name}: ${restoreError.message}")
+            }
+            restorePreferences(preferences, preferenceSnapshot)
+            testedCacheKey?.let { cacheKey ->
+                runCatching { waitForCacheLeaseRelease(cacheRepository, cacheKey) }
+                runCatching { clearExactCacheEntry(runtimeFacade, cacheKey) }
+            }
             sourceUri?.let { uri ->
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
             writeReport(context, runId, "playback", report)
         }
+    }
+
+    private fun disableSourceSeparationPlayback(controller: MediaController) {
+        val result = onMediaControllerThread(controller) {
+            controller.sendCustomCommand(
+                SessionCommand(Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED, Bundle.EMPTY),
+                Bundle().apply {
+                    putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, false)
+                    putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                },
+            )
+        }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        assertEquals(SessionResult.RESULT_SUCCESS, result.resultCode)
     }
 
     private fun waitForMediaController(
@@ -6739,9 +7031,21 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 readyWindowCount = readyWindowCount,
             )) {
                 is SourceSeparationModelAwarePlayableStatus.Ready -> return status
-                SourceSeparationModelAwarePlayableStatus.Processing,
-                SourceSeparationModelAwarePlayableStatus.Unavailable,
-                -> SystemClock.sleep(POLL_INTERVAL_MS)
+                SourceSeparationModelAwarePlayableStatus.Processing ->
+                    SystemClock.sleep(POLL_INTERVAL_MS)
+                SourceSeparationModelAwarePlayableStatus.Unavailable -> {
+                    when (val cache = runtimeFacade.cacheStatus(song)) {
+                        is SourceSeparationModelAwareCacheStatus.Incomplete -> {
+                            if (cache.manifest.state == SourceSeparationCacheManifestState.Failed) {
+                                error("Playable cache failed: ${cache.manifest.error}")
+                            }
+                        }
+                        is SourceSeparationModelAwareCacheStatus.Corrupt ->
+                            error("Playable cache became corrupt: ${cache.manifest.error}")
+                        else -> Unit
+                    }
+                    SystemClock.sleep(POLL_INTERVAL_MS)
+                }
             }
         }
         error("Seek target did not become playable in time.")
@@ -6892,6 +7196,29 @@ class SourceSeparationPhase7WorkerDeviceTest {
             }
         }
         check(editor.commit()) { "Could not restore playback-owned test preferences." }
+    }
+
+    private fun restoreActiveModelSelection(
+        repository: SourceSeparationPresetRepository,
+        activeReference: SourceSeparationActiveModelReference,
+        pendingReference: SourceSeparationActiveModelReference?,
+    ) {
+        if (activeReference.profileId == null) {
+            repository.activate(
+                sha256 = activeReference.artifactSha256,
+                platform = AndroidMdxRuntimePlatformProvider.current(),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                experimentalConfirmed = true,
+            )
+        } else {
+            repository.activateCustomProfile(
+                sha256 = activeReference.artifactSha256,
+                profileId = activeReference.profileId,
+                platform = AndroidMdxRuntimePlatformProvider.current(),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            )
+        }
+        repository.setPendingActiveModel(pendingReference)
     }
 
     private fun processMatrixSnapshot(
@@ -8446,6 +8773,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_WINDOW_DECODE_ENABLED = "windowDecodeEnabled"
         const val ARG_PRESERVE_MEDIA_STORE_SOURCE = "preserveMediaStoreSource"
         const val ARG_EXPORT_CACHE_AUDIO = "exportCacheAudio"
+        const val ARG_CLEANUP_CACHE_AFTER_RUN = "cleanupCacheAfterRun"
         const val ARG_RUN_CLASS = "runClass"
         const val ARG_CLEAN_INSTALL = "cleanInstallScenario"
         const val ARG_X86_PROCESS_VALIDATION = "x86ProcessValidation"
@@ -8535,6 +8863,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             SOURCE_SEPARATION_AUTO_START,
             SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
             SOURCE_SEPARATION_WINDOW_DECODE,
+            SOURCE_SEPARATION_GPU_ENABLED,
             SOURCE_SEPARATION_TRY_GPU,
             SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
             TEST_KEY_PLAYBACK_ENABLED,
