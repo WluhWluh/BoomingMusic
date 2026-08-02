@@ -238,7 +238,9 @@ data class SourceSeparationCacheRunJournal(
             var sequence = previous.latestSequence
             val resumedTransitions = buildList {
                 addAll(previous.transitions)
-                if (previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running) {
+                val previousOwnerWasRunning =
+                    previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running
+                if (previousOwnerWasRunning) {
                     sequence += 1L
                     add(
                         SourceSeparationCacheRunJournalTransition(
@@ -252,6 +254,10 @@ data class SourceSeparationCacheRunJournal(
                             timestampEpochMs = request.admittedAtEpochMs,
                         )
                     )
+                }
+                if (previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running ||
+                    previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused
+                ) {
                     previous.latestObserverTransition()
                         ?.takeIf { transition ->
                             transition.type ==
@@ -269,7 +275,11 @@ data class SourceSeparationCacheRunJournal(
                                     backgroundPolicy = previous.request.backgroundPolicy,
                                     observerId = observer.observerId,
                                     observerProcessName = observer.observerProcessName,
-                                    observerReason = PREVIOUS_OWNER_DIED_OBSERVER_REASON,
+                                    observerReason = if (previousOwnerWasRunning) {
+                                        PREVIOUS_OWNER_DIED_OBSERVER_REASON
+                                    } else {
+                                        PREVIOUS_PAUSED_RUN_REPLACED_OBSERVER_REASON
+                                    },
                                     type = SourceSeparationCacheRunTransitionType
                                         .ObserverDisconnected,
                                     timestampEpochMs = request.admittedAtEpochMs,
@@ -302,6 +312,8 @@ data class SourceSeparationCacheRunJournal(
         }
 
         private const val PREVIOUS_OWNER_DIED_OBSERVER_REASON = "owner-process-died"
+        private const val PREVIOUS_PAUSED_RUN_REPLACED_OBSERVER_REASON =
+            "paused-run-replaced"
     }
 }
 

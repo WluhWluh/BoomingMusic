@@ -307,6 +307,50 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `new owner closes the observer retained by a paused run`() {
+        val fixture = fixture()
+        val paused = fixture.beginReady()
+        fixture.coordinator.observerConnected(
+            paused,
+            observerId = "observer-paused-owner",
+            observerProcessName = "com.example",
+        )
+        fixture.coordinator.pause(paused)
+
+        val resumed = (fixture.coordinator.begin(
+            fixture.request.copy(
+                runId = "resumed-paused-run",
+                processGeneration = 2L,
+                ownerPid = 200,
+            )
+        ) as SourceSeparationCacheRunStart.Ready).run
+        val journal = requireNotNull(
+            fixture.store.readRunJournal(resumed.identity.cacheKey)
+        )
+
+        assertEquals(
+            listOf(
+                SourceSeparationCacheRunTransitionType.Admitted,
+                SourceSeparationCacheRunTransitionType.ObserverConnected,
+                SourceSeparationCacheRunTransitionType.Paused,
+                SourceSeparationCacheRunTransitionType.ObserverDisconnected,
+                SourceSeparationCacheRunTransitionType.Admitted,
+            ),
+            journal.transitions.map { it.type },
+        )
+        val disconnected = journal.transitions[3]
+        assertEquals("observer-paused-owner", disconnected.observerId)
+        assertEquals("paused-run-replaced", disconnected.observerReason)
+
+        fixture.coordinator.observerConnected(
+            resumed,
+            observerId = "observer-new-owner",
+            observerProcessName = "com.example",
+        )
+        fixture.coordinator.pause(resumed)
+    }
+
+    @Test
     fun `run class is immutable for a running owner and explicit on paused readmission`() {
         val activeFixture = fixture()
         val prefetchRequest = activeFixture.request.copy(
