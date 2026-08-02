@@ -8,11 +8,8 @@ object SourceSeparationCacheDirectories {
     fun root(context: Context): File =
         AndroidSourceSeparationCacheRootProvider(context.applicationContext).resolveRoot().directory
 
-    fun legacyOnnxEntries(context: Context): File =
-        File(root(context), "legacy-onnx-v1")
-
-    fun legacyPlaybackHydration(context: Context): File =
-        File(root(context), "legacy-playback-hydration-v1")
+    fun playbackHydration(context: Context): File =
+        File(root(context), "playback-hydration-v2")
 
     fun mp3Calibration(context: Context): File =
         File(root(context), "mp3-no-gapless-calibration")

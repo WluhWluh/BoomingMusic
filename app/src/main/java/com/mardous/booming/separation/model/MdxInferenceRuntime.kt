@@ -4,7 +4,6 @@ import java.io.File
 import java.util.Locale
 
 enum class MdxModelFormat {
-    Onnx,
     Tflite,
 }
 
@@ -49,7 +48,6 @@ data class MdxExecutionProfile(
     val expectedFileName: String,
     val expectedByteSize: Long? = null,
     val expectedSha256: String? = null,
-    val legacyModelVariant: MdxModelVariant? = null,
     val minimumAndroidApi: Int? = null,
     val runtimeCompatibility: List<MdxRuntimeCompatibilityRecord> = emptyList(),
 ) {
@@ -106,43 +104,6 @@ data class MdxExecutionProfile(
     }
 
     companion object {
-        fun legacy(
-            variant: MdxModelVariant,
-            dspConfig: MdxDspConfig = MdxDspConfig(),
-        ): MdxExecutionProfile {
-            val shape = listOf(
-                1,
-                MdxDspConfig.STEM_COMPLEX_CHANNELS,
-                dspConfig.dimF,
-                dspConfig.dimT,
-            )
-            return MdxExecutionProfile(
-                profileId = "legacy_${variant.name.lowercase(Locale.US)}",
-                displayName = variant.displayName,
-                outputTag = variant.outputTag,
-                modelFormat = MdxModelFormat.Onnx,
-                inputTensor = MdxTensorSpec(
-                    name = null,
-                    shape = shape,
-                    layout = MdxTensorLayout.Nchw,
-                    dataType = MdxTensorDataType.Float32,
-                ),
-                outputTensor = MdxTensorSpec(
-                    name = null,
-                    shape = shape,
-                    layout = MdxTensorLayout.Nchw,
-                    dataType = MdxTensorDataType.Float32,
-                ),
-                dspConfig = dspConfig,
-                modelOutputScale = 1f,
-                modelOutputStem = variant.modelOutputStem,
-                pipelineId = "booming-ss-legacy-mdx-onnx",
-                pipelineVersion = 1,
-                expectedFileName = variant.fileName,
-                legacyModelVariant = variant,
-            )
-        }
-
         private fun requireSha256(value: String) {
             require(SHA256_PATTERN.matches(value)) { "Expected model SHA-256 is invalid." }
         }
@@ -165,7 +126,6 @@ data class MdxModelArtifact(
 }
 
 enum class MdxInferenceBackend {
-    OrtCpu,
     LiteRtCpu,
     LiteRtGpu,
     LiteRtAuto,

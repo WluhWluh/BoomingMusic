@@ -263,7 +263,7 @@ class PlaybackService :
     private var sourceSeparationModelAwareHydrationCacheKey: String? = null
     private var sourceSeparationWarmHydration: SourceSeparationWarmHydration? = null
     private val sourceSeparationHydrationRootDirectory by lazy(LazyThreadSafetyMode.NONE) {
-        SourceSeparationCacheDirectories.legacyPlaybackHydration(this)
+        SourceSeparationCacheDirectories.playbackHydration(this)
     }
     private val sourceSeparationPlaybackTraceLock = Any()
     private val sourceSeparationPlaybackTraceBuffer = mutableListOf<String>()

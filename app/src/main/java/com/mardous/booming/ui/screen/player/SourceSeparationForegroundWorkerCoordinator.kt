@@ -21,7 +21,6 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheSt
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
-import com.mardous.booming.separation.model.SourceSeparationModelLoadException
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
 import com.mardous.booming.separation.process.SourceSeparationPlaybackLifecyclePolicy
@@ -704,13 +703,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 true
             }
             is SourceSeparationExecutionHostEventPayload.Failed -> {
-                val modelLoadFailure = payload.errorType ==
-                        SourceSeparationModelLoadException::class.java.name
-                val message = if (modelLoadFailure) {
-                    context.getString(R.string.source_separation_model_load_failed)
-                } else {
-                    payload.message
-                }
+                val message = payload.message
                 _workerStateFlow.value = SourceSeparationUiState.Failed(
                     songId = recoveredSong.id,
                     songTitle = recoveredSong.title,
@@ -720,13 +713,6 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 clearPendingStart()
                 cancelRequested.set(true)
                 closeRecoveredTerminal(session)
-                if (modelLoadFailure) {
-                    dispatchRecoveredTerminal(
-                        SourceSeparationRecoveredTerminal.ModelLoadFailed(
-                            requireNotNull(message),
-                        )
-                    )
-                }
                 true
             }
         }
@@ -1100,15 +1086,6 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 songTitle = song.title,
             )
             cancelRequested.set(true)
-        } catch (_: SourceSeparationModelLoadException) {
-            val message = context.getString(R.string.source_separation_model_load_failed)
-            _workerStateFlow.value = SourceSeparationUiState.Failed(
-                songId = song.id,
-                songTitle = song.title,
-                message = message,
-            )
-            callbacks?.onSourceSeparationWorkerModelLoadFailed(message)
-            cancelRequested.set(true)
         } catch (_: SourceSeparationAdmittedGpuRuntimeMismatchException) {
             val message = context.getString(R.string.source_separation_model_load_failed)
             _workerStateFlow.value = SourceSeparationUiState.Failed(
@@ -1481,7 +1458,6 @@ private sealed interface SourceSeparationRecoveredTerminal {
                 shouldPromoteCompletedStems = shouldPromoteCompletedStems,
             )
             is Paused -> callbacks.onSourceSeparationWorkerPaused(song)
-            is ModelLoadFailed -> callbacks.onSourceSeparationWorkerModelLoadFailed(message)
         }
     }
 
@@ -1493,7 +1469,6 @@ private sealed interface SourceSeparationRecoveredTerminal {
 
     data class Paused(val song: Song) : SourceSeparationRecoveredTerminal
 
-    data class ModelLoadFailed(val message: String) : SourceSeparationRecoveredTerminal
 }
 
 private fun SourceSeparationCacheRunJournal.toRecoveredSong(): Song {

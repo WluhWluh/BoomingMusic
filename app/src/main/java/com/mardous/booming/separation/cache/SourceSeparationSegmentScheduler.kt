@@ -16,34 +16,6 @@ enum class SourceSeparationSegmentPriority {
 
 object SourceSeparationSegmentScheduler {
     fun prioritize(
-        snapshot: SourceSeparationSegmentSnapshot,
-        playbackFrame: Int,
-        readyWindowCount: Int = DEFAULT_READY_WINDOW_COUNT,
-        nearFutureCount: Int = DEFAULT_NEAR_FUTURE_COUNT,
-    ): List<SourceSeparationSegmentWorkItem> {
-        val pendingSegments = snapshot.segments
-            .filter { it.state != SourceSeparationSegmentState.Ready }
-        if (pendingSegments.isEmpty()) {
-            return emptyList()
-        }
-
-        val currentIndex = snapshot.segmentPlan.segmentIndexForFrame(playbackFrame)
-        return pendingSegments
-            .map { segmentState ->
-                SourceSeparationSegmentWorkItem(
-                    segment = segmentState.segment,
-                    priority = segmentState.segment.priorityFor(
-                        currentIndex = currentIndex,
-                        readyWindowCount = readyWindowCount,
-                        nearFutureCount = nearFutureCount,
-                    ),
-                    state = segmentState.state,
-                )
-            }
-            .sortedByPriority(currentIndex)
-    }
-
-    fun prioritize(
         segmentPlan: SourceSeparationSegmentPlan,
         playbackFrame: Int,
         readyWindowCount: Int = DEFAULT_READY_WINDOW_COUNT,

@@ -391,7 +391,6 @@ class DebugFlacPlaybackActivity : Activity() {
                 ?.let(::add)
             if (isEmpty()) {
                 val cacheRoot = SourceSeparationCacheDirectories.root(this@DebugFlacPlaybackActivity)
-                add(SourceSeparationCacheDirectories.legacyOnnxEntries(this@DebugFlacPlaybackActivity))
                 add(File(cacheRoot, "entries"))
                 add(
                     File(

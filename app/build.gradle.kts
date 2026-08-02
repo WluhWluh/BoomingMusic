@@ -380,7 +380,6 @@ dependencies {
     implementation(libs.versioncompare)
     implementation(libs.commons.text)
     implementation(libs.juniversalchardet)
-    implementation(libs.onnxruntime.android)
     implementation(files(liteRtApiAar))
     implementation(libs.jtransforms)
 

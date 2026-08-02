@@ -11,7 +11,6 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentScheduler
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPriority
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
-import com.mardous.booming.separation.cache.SourceSeparationManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultInjection
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultRuntimeDiagnostics
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultStage
@@ -28,7 +27,6 @@ class MdxRangeSeparator(
     private val context: Context,
     private val config: MdxDspConfig = MdxDspConfig(),
     private val runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
-    private val modelVariant: MdxModelVariant = MdxModelVariant.MDXNET_9482,
 ) {
     fun separate(
         uri: Uri,
@@ -38,16 +36,14 @@ class MdxRangeSeparator(
         startMs: Long = 0L,
         endMs: Long? = null,
         runtimeSettings: MdxRuntimeSettings = this.runtimeSettings,
-        modelVariant: MdxModelVariant = this.modelVariant,
         onProgress: (MdxRangeProgress) -> Unit = {},
         onPrepared: (MdxRangePreparation) -> Unit = {},
         onSegmentStateChanged: (segmentIndex: Int, state: SourceSeparationSegmentState) -> Unit = { _, _ -> },
         playbackPositionMsProvider: () -> Long? = { null },
         playbackReadyWindowCountProvider: () -> Int = { DEFAULT_PLAYBACK_READY_WINDOW_COUNT },
         windowDecodeEnabled: Boolean = true,
-        resumeManifest: SourceSeparationManifest? = null,
         resumeState: MdxRangeResumeState? = null,
-        execution: MdxSeparationExecution? = null,
+        execution: MdxSeparationExecution,
         expectedSourceAudioFingerprint: String? = null,
         sessionProvider: MdxInferenceSessionProvider,
         onRuntimeDiagnostics: (MdxRuntimeDiagnostics) -> Unit = {},
@@ -58,7 +54,7 @@ class MdxRangeSeparator(
         val timing = MdxRangeTimingAccumulator()
         val totalStartedAt = SystemClock.elapsedRealtime()
         throwIfCanceled(shouldCancel)
-        val executionProfile = execution?.profile ?: MdxExecutionProfile.legacy(modelVariant, config)
+        val executionProfile = execution.profile
         require(executionProfile.dspConfig == config) {
             "The range separator DSP configuration does not match the execution profile."
         }
@@ -69,11 +65,9 @@ class MdxRangeSeparator(
             "Expected source audio fingerprint is invalid."
         }
         onProgress(MdxRangeProgress.preparing("Preparing model file"))
-        val modelArtifact = execution?.artifact ?: measureElapsed(timing, "Model file") {
-            MdxModelFile.resolve(context, modelVariant)
-        }
+        val modelArtifact = execution.artifact
         executionProfile.validateArtifact(modelArtifact)
-        val effectiveResume = resumeState ?: resumeManifest?.toMdxRangeResumeState()
+        val effectiveResume = resumeState
         var sourceInput = MdxSourceInput.create(
             context = context,
             config = config,
@@ -544,7 +538,6 @@ class MdxRangeSeparator(
             timingReport = timingReport,
             runtimeSettings = runtimeSettings,
             runtimeDiagnostics = timingReport.runtimeDiagnostics,
-            modelVariant = executionProfile.legacyModelVariant,
             executionProfile = executionProfile,
             sourceDecodeDiagnostics = sourceInput.diagnostics,
         )
@@ -1034,7 +1027,6 @@ data class MdxRangeSeparationResult(
     val timingReport: MdxRangeTimingReport,
     val runtimeSettings: MdxRuntimeSettings,
     val runtimeDiagnostics: MdxRuntimeDiagnostics,
-    val modelVariant: MdxModelVariant?,
     val executionProfile: MdxExecutionProfile,
     val sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics,
 ) {
@@ -1058,16 +1050,6 @@ data class MdxRangeResumeState(
     val segmentPlan: SourceSeparationSegmentPlan,
 )
 
-private fun SourceSeparationManifest.toMdxRangeResumeState(): MdxRangeResumeState? {
-    val output = output ?: return null
-    val plan = segmentPlan ?: return null
-    return MdxRangeResumeState(
-        vocalsFile = File(output.vocalsPath),
-        instrumentalFile = File(output.instrumentalPath),
-        timingFile = output.timingPath?.let(::File),
-        segmentPlan = plan,
-    )
-}
 
 private const val PENDING_SOURCE_AUDIO_FINGERPRINT = "pending"
 private const val DEFAULT_PLAYBACK_READY_WINDOW_COUNT = 2

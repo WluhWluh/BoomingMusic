@@ -20,12 +20,10 @@ import java.security.MessageDigest
 import java.util.UUID
 
 /**
- * Stores LiteRT model artifacts independently from the legacy ONNX model path.
+ * Stores verified TFLite model artifacts independently from generated caches.
  *
- * This repository is deliberately not consulted by the production source
- * separation worker until the Phase 6 cutover. It establishes the model
- * identity, installation, and selection contract without changing the stable
- * ONNX playback path.
+ * It is the production authority for model identity, installation, and
+ * selection while generated outputs remain independently disposable.
  */
 class SourceSeparationPresetRepository internal constructor(
     private val rootDirectory: File,

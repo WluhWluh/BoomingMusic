@@ -634,7 +634,29 @@ internal class SourceSeparationRuntimeStore(
         root.mkdirs()
         val lockFile = File(root, INSTALL_LOCK_FILE_NAME)
         RandomAccessFile(lockFile, "rw").use { file ->
-            file.channel.lock().use { block() }
+            withFileInstallLock(file, block)
+        }
+    }
+
+    private fun <T> withFileInstallLock(
+        file: RandomAccessFile,
+        block: () -> T,
+    ): T {
+        while (true) {
+            try {
+                val lock = file.channel.tryLock()
+                if (lock != null) return lock.use { block() }
+            } catch (_: OverlappingFileLockException) {
+                // Another store instance in this process owns the same file lock.
+            }
+            try {
+                Thread.sleep(INSTALL_LOCK_RETRY_MS)
+            } catch (error: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw SourceSeparationRuntimeBusyException(
+                    "The runtime installer was interrupted while waiting for its lock.",
+                )
+            }
         }
     }
 
@@ -650,6 +672,7 @@ internal class SourceSeparationRuntimeStore(
         const val INSTALL_LOCK_FILE_NAME = "install.lock"
         const val PAYLOAD_PART_FILE_NAME = "payload.zip.part"
         const val COPY_BUFFER_BYTES = 256 * 1024
+        const val INSTALL_LOCK_RETRY_MS = 10L
         const val MAX_ZIP_ENTRY_BYTES = 128L * 1024L * 1024L
         const val MANIFEST_RESERVE_BYTES = 64L * 1024L
         const val RECORD_RESERVE_BYTES = 8L * 1024L

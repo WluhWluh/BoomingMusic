@@ -234,7 +234,7 @@ class DebugFlacPromotionActivity : Activity() {
         val root = inputDirPath
             ?.takeIf { it.isNotBlank() }
             ?.let(::File)
-            ?: SourceSeparationCacheDirectories.legacyOnnxEntries(this)
+            ?: File(SourceSeparationCacheDirectories.root(this), "entries")
         if (!root.isDirectory) return emptyList()
 
         return root.walkTopDown()

@@ -111,7 +111,7 @@
         "artifactId": "litert-cpu-core-2.1.5-bss.2-x86",
         "locator": "https://github.com/WluhWluh/bss-litert-android/releases/download/downloadable-runtime-v2.1.5-bss.2-exp.2/litert-cpu-core-2.1.5-bss.2-x86.zip",
         "expectedByteSize": 2886192,
-        "expectedSha256": "8ece235a9c640ae9a2a29c6d458e3f7b63018b766981064d570f19082c2c19c1"
+        "expectedSha256": "8ece235a9c1da2478c0ff6d5f7f13908aaca5dec7c8393a36c8058975bd4c975"
       },
       "innerManifestSha256": "e3e06af11982bf2e02ea1751c889935c4d67c869a57d0eeffa2691dd9bf1679a",
       "innerLibrary": {

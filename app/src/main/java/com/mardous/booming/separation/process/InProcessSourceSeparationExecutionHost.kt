@@ -13,7 +13,6 @@ import com.mardous.booming.separation.model.MdxRangeTimingReport
 import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.MdxInferenceBackend
-import com.mardous.booming.separation.model.MdxModelVariant
 import com.mardous.booming.separation.model.MdxSegmentSchedulerProgress
 import com.mardous.booming.separation.model.MdxSourceDecodeDiagnostics
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
@@ -584,7 +583,6 @@ internal fun MdxRangeSeparationResult.toExecutionCompletion(
     sourceDecodeDiagnostics = sourceDecodeDiagnostics.toExecutionDiagnostics(),
     timingAudioDurationSeconds = timingReport.audioDurationSeconds,
     timingStageMs = timingReport.stageMs,
-    modelVariant = modelVariant?.name,
 )
 
 internal fun SourceSeparationExecutionCompletion.toMdxRangeSeparationResult(
@@ -640,7 +638,6 @@ internal fun SourceSeparationExecutionCompletion.toMdxRangeSeparationResult(
         ),
         runtimeSettings = runtimeSettings,
         runtimeDiagnostics = runtimeDiagnostics,
-        modelVariant = modelVariant?.let(MdxModelVariant::valueOf),
         executionProfile = profile,
         sourceDecodeDiagnostics = sourceDiagnostics,
     )

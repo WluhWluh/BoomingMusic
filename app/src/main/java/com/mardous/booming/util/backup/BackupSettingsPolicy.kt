@@ -223,12 +223,6 @@ object BackupSettingsPolicy {
             reason = "All generated separation output is disposable cache data",
         ),
         NonBackupRule(
-            id = "legacy-generated-cache",
-            dataClass = NonBackupDataClass.GeneratedSeparationCache,
-            storagePattern = "externalFilesDir/Music/source-separation/**",
-            reason = "Current generated output is non-portable and the new layout will not migrate it",
-        ),
-        NonBackupRule(
             id = "per-song-blend",
             dataClass = NonBackupDataClass.PerSongBlend,
             storagePattern = "**/playback-settings.json; source_separation.per_song_blend.pending.*",
