@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.navigation.fragment.findNavController
+import androidx.navigation.navOptions
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
@@ -50,22 +51,33 @@ class SourceSeparationQuickSetupFragment : BottomSheetDialogFragment() {
                     onRetry = quickSetupViewModel::analyze,
                     onDismissError = quickSetupViewModel::dismissError,
                     onOpenRuntimeManagement = ::openRuntimeManagement,
-                    onOpenModelManagement = {
-                        dismiss()
-                        playerViewModel.openSourceSeparationModelManagement()
-                    },
+                    onOpenModelManagement = ::openModelManagement,
                 )
             }
         }
     }
 
     private fun openRuntimeManagement() {
-        val navController = findNavController()
-        dismiss()
-        navController.navigate(
+        navigateReplacingQuickSetup(
             R.id.nav_source_separation_settings,
             Bundle().apply {
                 putBoolean(SourceSeparationSettingsFragment.ARG_OPEN_RUNTIME_MANAGEMENT, true)
+            },
+        )
+    }
+
+    private fun openModelManagement() {
+        navigateReplacingQuickSetup(R.id.nav_source_separation_model_management)
+    }
+
+    private fun navigateReplacingQuickSetup(destinationId: Int, arguments: Bundle? = null) {
+        findNavController().navigate(
+            destinationId,
+            arguments,
+            navOptions {
+                popUpTo(R.id.nav_source_separation_quick_setup) {
+                    inclusive = true
+                }
             },
         )
     }

@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.navigation.fragment.findNavController
+import androidx.navigation.navOptions
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
@@ -129,16 +130,23 @@ class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
                         modelAwareCacheViewModel = modelAwareCacheViewModel,
                         runtimeManagementViewModel = runtimeManagementViewModel,
                         initialPage = initialPage,
-                        onOpenQuickSetup = {
-                            dismiss()
-                            findNavController().navigate(
-                                R.id.nav_source_separation_quick_setup
-                            )
-                        },
+                        onOpenQuickSetup = ::openQuickSetup,
                     )
                 }
             }
         }
+    }
+
+    private fun openQuickSetup() {
+        findNavController().navigate(
+            R.id.nav_source_separation_quick_setup,
+            null,
+            navOptions {
+                popUpTo(R.id.nav_source_separation_settings) {
+                    inclusive = true
+                }
+            },
+        )
     }
 }
 
