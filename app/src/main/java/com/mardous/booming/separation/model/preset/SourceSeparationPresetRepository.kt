@@ -190,6 +190,16 @@ class SourceSeparationPresetRepository internal constructor(
         activeModelStore.writePending(reference)
     }
 
+    internal fun restoreSetupSelection(
+        activeReference: SourceSeparationActiveModelReference?,
+        pendingReference: SourceSeparationActiveModelReference?,
+    ) = synchronized(lock) {
+        activeReference?.validate()
+        pendingReference?.validate()
+        activeModelStore.write(activeReference)
+        activeModelStore.writePending(pendingReference)
+    }
+
     /**
      * Applies a portable active-model reference without replacing a usable
      * selection on the destination device. The model file is deliberately
