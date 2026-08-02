@@ -119,7 +119,6 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_GPU_ENABLED
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
-import com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.STOP_WHEN_CLOSED_FROM_RECENTS
 import com.mardous.booming.util.putSourceSeparationGpuEnabled
@@ -166,7 +165,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
             SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
             SOURCE_SEPARATION_WINDOW_DECODE,
             SOURCE_SEPARATION_GPU_ENABLED,
-            SOURCE_SEPARATION_TRY_GPU,
             SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
             MINIMUM_SONG_DURATION,
         )
@@ -454,7 +452,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 SOURCE_SEPARATION_WINDOW_DECODE,
                 SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
                 SOURCE_SEPARATION_GPU_ENABLED,
-                SOURCE_SEPARATION_TRY_GPU,
                 SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
                 MINIMUM_SONG_DURATION,
             ),
@@ -1684,7 +1681,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
                 SOURCE_SEPARATION_WINDOW_DECODE,
                 SOURCE_SEPARATION_GPU_ENABLED,
-                SOURCE_SEPARATION_TRY_GPU,
                 SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
             ),
         )
@@ -5178,7 +5174,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
                 SOURCE_SEPARATION_AUTO_START,
                 SOURCE_SEPARATION_GPU_ENABLED,
-                SOURCE_SEPARATION_TRY_GPU,
                 SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
                 MINIMUM_SONG_DURATION,
             ),
@@ -5663,7 +5658,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
                 SOURCE_SEPARATION_AUTO_START,
                 SOURCE_SEPARATION_GPU_ENABLED,
-                SOURCE_SEPARATION_TRY_GPU,
                 TEST_KEY_PLAYBACK_ENABLED,
                 TEST_KEY_REMEMBER_PER_SONG,
                 TEST_KEY_GLOBAL_BLEND,
@@ -8864,7 +8858,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
             SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
             SOURCE_SEPARATION_WINDOW_DECODE,
             SOURCE_SEPARATION_GPU_ENABLED,
-            SOURCE_SEPARATION_TRY_GPU,
             SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
             TEST_KEY_PLAYBACK_ENABLED,
             TEST_KEY_REMEMBER_PER_SONG,

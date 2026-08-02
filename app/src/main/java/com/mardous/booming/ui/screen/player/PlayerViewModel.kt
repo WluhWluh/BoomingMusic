@@ -80,7 +80,6 @@ import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_MESSAGES
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS
 import com.mardous.booming.util.SOURCE_SEPARATION_GPU_ENABLED
-import com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
 import com.mardous.booming.util.readSourceSeparationGpuEnabled
 import com.mardous.booming.util.writeSourceSeparationGpuEnabled
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
@@ -326,7 +325,7 @@ class PlayerViewModel(
 
     private val sourceSeparationPreferenceChangeListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == SOURCE_SEPARATION_GPU_ENABLED || key == SOURCE_SEPARATION_TRY_GPU) {
+            if (key == SOURCE_SEPARATION_GPU_ENABLED) {
                 _sourceSeparationTryGpuFlow.value = readSourceSeparationTryGpu()
             }
         }

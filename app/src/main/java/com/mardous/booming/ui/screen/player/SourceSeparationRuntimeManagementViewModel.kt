@@ -33,9 +33,7 @@ internal class SourceSeparationRuntimeManagementViewModel(
 
     private val preferenceListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == com.mardous.booming.util.SOURCE_SEPARATION_GPU_ENABLED ||
-                key == com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
-            ) {
+            if (key == com.mardous.booming.util.SOURCE_SEPARATION_GPU_ENABLED) {
                 _state.update { it.copy(gpuEnabled = preferences.readSourceSeparationGpuEnabled()) }
             }
         }

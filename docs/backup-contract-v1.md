@@ -16,7 +16,7 @@ The first format uses three independent constants:
 {
   "formatVersion": 1,
   "commonSettingsSchema": 1,
-  "sourceSeparationSettingsSchema": 1
+  "sourceSeparationSettingsSchema": 2
 }
 ```
 
@@ -68,7 +68,10 @@ login/session data, are not added implicitly.
 preference keys: panel and quick-control visibility, separated playback,
 global blend, remember-per-song policy, automatic separation and FLAC,
 Snackbar settings, both preroll values, ready-window count, and cache-cleanup
-policy and limits.
+policy and limits. Schema 2 adds the canonical
+`source_separation.gpu_enabled` preference. The superseded development-only
+`source_separation.try_gpu` key was never released and is not part of any
+supported schema or compatibility projection.
 
 The payload may additionally contain:
 

@@ -65,7 +65,7 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
-import com.mardous.booming.util.SOURCE_SEPARATION_TRY_GPU
+import com.mardous.booming.util.SOURCE_SEPARATION_GPU_ENABLED
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import org.json.JSONArray
 import org.json.JSONObject
@@ -512,10 +512,10 @@ internal object SourceSeparationMainDeathDebugHarness {
                 !originalTryGpu
             }
             check(preferences.edit()
-                .putBoolean(SOURCE_SEPARATION_TRY_GPU, persistedTryGpu)
+                .putBoolean(SOURCE_SEPARATION_GPU_ENABLED, persistedTryGpu)
                 .commit()
             ) { "Could not toggle the GPU preference before explicit resume." }
-            check(preferences.getBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu) ==
+            check(preferences.getBoolean(SOURCE_SEPARATION_GPU_ENABLED, originalTryGpu) ==
                 persistedTryGpu)
             if (request.remoteDeathRecoveryAction ==
                 RemoteDeathRecoveryAction.RejectArtifactMismatch
@@ -585,7 +585,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                 }
                 check(store.readRunJournal(cacheKey) == journalAfterDeath)
                 check(preferences.edit()
-                    .putBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu)
+                    .putBoolean(SOURCE_SEPARATION_GPU_ENABLED, originalTryGpu)
                     .commit()
                 ) { "Could not restore the GPU preference after mismatch validation." }
                 originalTryGpuForRestore = null
@@ -869,7 +869,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                         }
                 }) { "The restored-model retry did not release after Pause." }
                 check(preferences.edit()
-                    .putBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu)
+                    .putBoolean(SOURCE_SEPARATION_GPU_ENABLED, originalTryGpu)
                     .commit()
                 ) { "Could not restore the GPU preference after model-loss validation." }
                 originalTryGpuForRestore = null
@@ -1065,7 +1065,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                         }
                 }) { "The latched CPU retry did not release after Pause." }
                 check(preferences.edit()
-                    .putBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu)
+                    .putBoolean(SOURCE_SEPARATION_GPU_ENABLED, originalTryGpu)
                     .commit()
                 ) { "Could not restore the GPU preference after latch validation." }
                 originalTryGpuForRestore = null
@@ -1892,7 +1892,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     runCatching {
                         check(get<SharedPreferences>(SharedPreferences::class.java)
                             .edit()
-                            .putBoolean(SOURCE_SEPARATION_TRY_GPU, originalTryGpu)
+                            .putBoolean(SOURCE_SEPARATION_GPU_ENABLED, originalTryGpu)
                             .commit()
                         ) { "Could not commit the restored GPU preference." }
                     }.onFailure { error ->
@@ -2526,7 +2526,7 @@ internal object SourceSeparationMainDeathDebugHarness {
             .putBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, false)
             .putBoolean(SOURCE_SEPARATION_AUTO_START, false)
             .putBoolean(SOURCE_SEPARATION_WINDOW_DECODE, true)
-            .putBoolean(SOURCE_SEPARATION_TRY_GPU, request.tryGpu)
+            .putBoolean(SOURCE_SEPARATION_GPU_ENABLED, request.tryGpu)
             .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 1)
             .commit()
         ) { "Could not persist debug process-death preferences." }

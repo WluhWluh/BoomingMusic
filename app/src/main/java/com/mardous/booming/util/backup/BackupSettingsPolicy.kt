@@ -185,7 +185,7 @@ object BackupSettingsPolicy {
 
     val sourceSeparationSettingsV2: List<PortablePreferenceDefinition> =
         sourceSeparationSettingsV1 + bool(
-            key = "source_separation.try_gpu",
+            key = "source_separation.gpu_enabled",
             value = true,
             introducedInSchema = 2,
         )

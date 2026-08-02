@@ -27,7 +27,7 @@ class BackupCodecTest {
             "recursive_folder_actions" to setOf("play", "enqueue"),
             "source_separation.global_blend" to 0.25f,
             "source_separation.mixed_output_preroll_ms" to 600L,
-            "source_separation.try_gpu" to false,
+            "source_separation.gpu_enabled" to false,
             "source_separation.worker.current" to "excluded",
         )
 
@@ -218,7 +218,7 @@ class BackupCodecTest {
             assertEquals(1, decoded.sourceSettings?.schemaVersion)
             assertFalse(
                 decoded.sourceSettings?.preferences.orEmpty()
-                    .containsKey("source_separation.try_gpu")
+                    .containsKey("source_separation.gpu_enabled")
             )
         }
     }
