@@ -1369,7 +1369,6 @@ class SourceSeparationModelAwareEngineTest {
                 timingReport = timingReport,
                 runtimeSettings = request.runtimeSettings,
                 runtimeDiagnostics = runtimeDiagnostics,
-                modelVariant = null,
                 executionProfile = request.model.executionProfile,
                 sourceDecodeDiagnostics = decodeDiagnostics,
             )

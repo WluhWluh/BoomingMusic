@@ -341,7 +341,6 @@ class SourceSeparationCacheFlacPromoterTest {
                     timingReport,
                     MdxRuntimeSettings(),
                     runtime,
-                    null,
                     executionProfile,
                     decode,
                 ),

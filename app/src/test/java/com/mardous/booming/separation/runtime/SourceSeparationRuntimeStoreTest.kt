@@ -10,11 +10,17 @@ import com.mardous.booming.separation.delivery.SourceSeparationResumableDelivery
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.math.min
+import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -159,6 +165,90 @@ class SourceSeparationRuntimeStoreTest {
         assertEquals(partialBytes.toLong(), provider.resumedFrom)
     }
 
+    @Test
+    fun `failed replacement preserves the installed runtime and retry publishes replacement`() {
+        val initial = RuntimeFixture.create(temporary.root)
+        val initialStore = initial.store()
+        initialStore.install(initial.entry.componentId)
+
+        val replacement = RuntimeFixture.create(
+            root = temporary.root,
+            library = byteArrayOf(1, 2, 3),
+            runtimeVersion = "test-runtime-v2",
+            releaseVersion = "test-release-v2",
+        )
+        val failingProvider = FailingRuntimeProvider(replacement.zipBytes, failAfterBytes = 32)
+        val replacementStore = replacement.store(failingProvider)
+
+        val error = runCatching {
+            replacementStore.install(replacement.entry.componentId)
+        }.exceptionOrNull()
+
+        assertTrue(error is SourceSeparationRuntimeInstallException)
+        assertEquals(
+            SourceSeparationRuntimeState.Installed,
+            initialStore.inventory(initial.entry.componentId).state,
+        )
+        assertArrayEquals(
+            byteArrayOf(7, 8, 9),
+            File(
+                SourceSeparationRuntimeLayout.cpuCurrentDirectory(
+                    temporary.root,
+                    initial.entry.abi,
+                ),
+                SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME,
+            ).readBytes(),
+        )
+
+        val installed = replacement.store().install(replacement.entry.componentId)
+
+        assertEquals(SourceSeparationRuntimeState.Installed, installed.state)
+        assertArrayEquals(
+            byteArrayOf(1, 2, 3),
+            File(
+                SourceSeparationRuntimeLayout.cpuCurrentDirectory(
+                    temporary.root,
+                    replacement.entry.abi,
+                ),
+                SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME,
+            ).readBytes(),
+        )
+        assertTrue(temporary.root.resolve(".staging").listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun `concurrent stores serialize installation through the shared file lock`() {
+        val fixture = RuntimeFixture.create(temporary.root)
+        val firstProvider = BlockingRuntimeProvider(fixture.zipBytes)
+        val firstStore = fixture.store(firstProvider)
+        val secondStore = fixture.store()
+        var firstResult: SourceSeparationRuntimeInventoryItem? = null
+        var secondResult: SourceSeparationRuntimeInventoryItem? = null
+
+        val firstThread = thread(start = true) {
+            firstResult = firstStore.install(fixture.entry.componentId)
+        }
+        assertTrue(firstProvider.acquired.await(5, TimeUnit.SECONDS))
+        val secondThread = thread(start = true) {
+            secondResult = secondStore.install(fixture.entry.componentId)
+        }
+
+        Thread.sleep(50)
+        assertTrue(secondThread.isAlive)
+        firstProvider.release.countDown()
+        firstThread.join(5_000)
+        secondThread.join(5_000)
+
+        assertTrue(!firstThread.isAlive)
+        assertTrue(!secondThread.isAlive)
+        assertEquals(SourceSeparationRuntimeState.Installed, firstResult?.state)
+        assertEquals(SourceSeparationRuntimeState.Installed, secondResult?.state)
+        assertEquals(
+            SourceSeparationRuntimeState.Installed,
+            fixture.store().inventory(fixture.entry.componentId).state,
+        )
+    }
+
     private class RuntimeFixture private constructor(
         private val root: File,
         val entry: SourceSeparationRuntimeCatalogEntry,
@@ -176,9 +266,22 @@ class SourceSeparationRuntimeStoreTest {
             usableSpace = { Long.MAX_VALUE },
         )
 
+        fun store(provider: RuntimeDeliveryProvider) = SourceSeparationRuntimeStore(
+            root = root,
+            catalog = catalog,
+            provider = provider,
+            androidApi = 35,
+            usableSpace = { Long.MAX_VALUE },
+        )
+
         companion object {
-            fun create(root: File, zipEntryName: String = "libLiteRt.so"): RuntimeFixture {
-                val library = byteArrayOf(7, 8, 9)
+            fun create(
+                root: File,
+                zipEntryName: String = "libLiteRt.so",
+                library: ByteArray = byteArrayOf(7, 8, 9),
+                runtimeVersion: String = "test-runtime",
+                releaseVersion: String = "test-release",
+            ): RuntimeFixture {
                 val libraryHash = library.sha256()
                 val manifest = """
                     {
@@ -189,8 +292,8 @@ class SourceSeparationRuntimeStoreTest {
                       "androidMinApi": 26,
                       "baseLiteRtVersion": "2.1.5",
                       "capabilities": ["cpu"],
-                      "runtimeArtifactVersion": "test-runtime",
-                      "releaseVersion": "test-release",
+                      "runtimeArtifactVersion": "$runtimeVersion",
+                      "releaseVersion": "$releaseVersion",
                       "files": [{
                         "path": "libLiteRt.so",
                         "byteSize": 3,
@@ -217,8 +320,8 @@ class SourceSeparationRuntimeStoreTest {
                     componentId = "test-cpu-core-x86_64",
                     componentType = "cpu-core",
                     producerReleaseTag = "test-release-tag",
-                    producerReleaseVersion = "test-release",
-                    runtimeArtifactVersion = "test-runtime",
+                    producerReleaseVersion = releaseVersion,
+                    runtimeArtifactVersion = runtimeVersion,
                     baseLiteRtVersion = "2.1.5",
                     abi = "x86_64",
                     androidMinApi = 26,
@@ -326,6 +429,84 @@ class SourceSeparationRuntimeStoreTest {
                 override fun openStream(): InputStream = ByteArrayInputStream(
                     bytes.copyOfRange(existingBytes.toInt(), bytes.size),
                 )
+                override fun close() = Unit
+            }
+        }
+    }
+
+    private class FailingRuntimeProvider(
+        private val bytes: ByteArray,
+        private val failAfterBytes: Int,
+    ) : RuntimeDeliveryProvider {
+        override val providerId: String = "github"
+        override val capabilities = SourceSeparationDeliveryCapabilities(
+            operations = setOf(SourceSeparationDeliveryOperation.Acquire),
+            supportsPlatformManagedPayloads = false,
+        )
+
+        override fun supports(reference: SourceSeparationDeliveryReference): Boolean =
+            reference.providerId == providerId
+
+        override fun acquire(reference: SourceSeparationDeliveryReference): SourceSeparationDeliveryPayload =
+            object : SourceSeparationDeliveryPayload {
+                override val reference = reference
+                override val byteSize: Long = bytes.size.toLong()
+
+                override fun openStream(): InputStream = object : InputStream() {
+                    private val delegate = ByteArrayInputStream(bytes)
+                    private var delivered = 0
+
+                    override fun read(): Int {
+                        if (delivered >= failAfterBytes) {
+                            throw IOException("Injected delivery cancellation")
+                        }
+                        val value = delegate.read()
+                        if (value >= 0) delivered++
+                        return value
+                    }
+
+                    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                        if (delivered >= failAfterBytes) {
+                            throw IOException("Injected delivery cancellation")
+                        }
+                        val count = delegate.read(
+                            buffer,
+                            offset,
+                            min(length, failAfterBytes - delivered),
+                        )
+                        if (count > 0) delivered += count
+                        return count
+                    }
+
+                    override fun close() = delegate.close()
+                }
+
+                override fun close() = Unit
+            }
+    }
+
+    private class BlockingRuntimeProvider(
+        private val bytes: ByteArray,
+    ) : RuntimeDeliveryProvider {
+        val acquired = CountDownLatch(1)
+        val release = CountDownLatch(1)
+
+        override val providerId: String = "github"
+        override val capabilities = SourceSeparationDeliveryCapabilities(
+            operations = setOf(SourceSeparationDeliveryOperation.Acquire),
+            supportsPlatformManagedPayloads = false,
+        )
+
+        override fun supports(reference: SourceSeparationDeliveryReference): Boolean =
+            reference.providerId == providerId
+
+        override fun acquire(reference: SourceSeparationDeliveryReference): SourceSeparationDeliveryPayload {
+            acquired.countDown()
+            check(release.await(5, TimeUnit.SECONDS)) { "Timed out waiting to release the installer" }
+            return object : SourceSeparationDeliveryPayload {
+                override val reference = reference
+                override val byteSize: Long = bytes.size.toLong()
+                override fun openStream(): InputStream = ByteArrayInputStream(bytes)
                 override fun close() = Unit
             }
         }

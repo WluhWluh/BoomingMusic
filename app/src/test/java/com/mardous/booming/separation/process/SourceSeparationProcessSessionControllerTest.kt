@@ -1,11 +1,12 @@
 package com.mardous.booming.separation.process
 
+import com.mardous.booming.separation.model.MdxDspConfig
 import com.mardous.booming.separation.model.MdxExecutionProfile
 import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxInferenceSession
 import com.mardous.booming.separation.model.MdxInferenceSessionFactory
 import com.mardous.booming.separation.model.MdxModelArtifact
-import com.mardous.booming.separation.model.MdxModelVariant
+import com.mardous.booming.separation.model.MdxModelFormat
 import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimeCompatibilityRecord
@@ -13,6 +14,10 @@ import com.mardous.booming.separation.model.MdxRuntimePrecision
 import com.mardous.booming.separation.model.MdxRuntimeProfiles
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
+import com.mardous.booming.separation.model.MdxStem
+import com.mardous.booming.separation.model.MdxTensorDataType
+import com.mardous.booming.separation.model.MdxTensorLayout
+import com.mardous.booming.separation.model.MdxTensorSpec
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoFailureStage
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoInferenceException
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLostException
@@ -27,7 +32,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SourceSeparationProcessSessionControllerTest {
-    private val profile = MdxExecutionProfile.legacy(MdxModelVariant.MDXNET_9482).copy(
+    private val profile = testProfile().copy(
         runtimeCompatibility = listOf(
             MdxRuntimeCompatibilityRecord(
                 abi = MdxRuntimeAbi.X86,
@@ -41,6 +46,40 @@ class SourceSeparationProcessSessionControllerTest {
     )
     private val artifact = artifact(profile)
     private val settings = MdxRuntimeSettings(cpuThreads = 4, useXnnpack = true)
+
+    private fun testProfile(): MdxExecutionProfile {
+        val config = MdxDspConfig()
+        val shape = listOf(
+            1,
+            config.dimT,
+            config.dimF,
+            MdxDspConfig.STEM_COMPLEX_CHANNELS,
+        )
+        return MdxExecutionProfile(
+            profileId = "session_controller_test",
+            displayName = "Session controller test",
+            outputTag = "test",
+            modelFormat = MdxModelFormat.Tflite,
+            inputTensor = MdxTensorSpec(
+                name = "input",
+                shape = shape,
+                layout = MdxTensorLayout.Nhwc,
+                dataType = MdxTensorDataType.Float32,
+            ),
+            outputTensor = MdxTensorSpec(
+                name = "output",
+                shape = shape,
+                layout = MdxTensorLayout.Nhwc,
+                dataType = MdxTensorDataType.Float32,
+            ),
+            dspConfig = config,
+            modelOutputScale = 1f,
+            modelOutputStem = MdxStem.VOCALS,
+            pipelineId = "test-tflite",
+            pipelineVersion = 1,
+            expectedFileName = "session-controller-test.tflite",
+        )
+    }
 
     @Test
     fun `resident authority reuses one exact session across completed executions`() {

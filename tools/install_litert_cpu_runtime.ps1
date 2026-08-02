@@ -33,7 +33,7 @@ $assetByAbi = @{
     }
     "x86" = [ordered]@{
         fileName = "litert-cpu-core-2.1.5-bss.2-x86.zip"
-        sha256 = "8ece235a9c640ae9a2a29c6d458e3f7b63018b766981064d570f19082c2c19c1"
+        sha256 = "8ece235a9c1da2478c0ff6d5f7f13908aaca5dec7c8393a36c8058975bd4c975"
     }
 }
 
@@ -95,16 +95,36 @@ try {
         throw "LiteRT CPU library does not match its component manifest."
     }
 
+    $manifestSha256 = Get-Sha256 $manifestPath
+    $nowEpochMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $installRecord = [ordered]@{
+        schemaVersion = 1
+        componentId = "litert-cpu-core-$($manifest.runtimeArtifactVersion)-$ProcessAbi"
+        componentType = "cpu-core"
+        producerReleaseTag = $ReleaseTag
+        producerReleaseVersion = $manifest.releaseVersion
+        runtimeArtifactVersion = $manifest.runtimeArtifactVersion
+        abi = $ProcessAbi
+        innerManifestSha256 = $manifestSha256
+        librarySha256 = $manifestLibrary.sha256.ToLowerInvariant()
+        installedAtEpochMs = $nowEpochMs
+        lastValidatedAtEpochMs = $nowEpochMs
+    }
+    $installRecordPath = Join-Path $extractDirectory "install.json"
+    $installRecord | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $installRecordPath -Encoding utf8
+
     Invoke-Adb shell am force-stop $Package
     Invoke-Adb shell rm -rf $remoteTempRoot
     Invoke-Adb shell mkdir -p $remoteTempRoot
     Invoke-Adb push $libraryPath "$remoteTempRoot/libLiteRt.so"
     Invoke-Adb push $manifestPath "$remoteTempRoot/manifest.json"
+    Invoke-Adb push $installRecordPath "$remoteTempRoot/install.json"
     Invoke-Adb shell chmod 755 "$remoteTempRoot/libLiteRt.so"
     Invoke-Adb shell run-as $Package rm -rf $remoteRuntimeRoot
     Invoke-Adb shell run-as $Package mkdir -p $remoteRuntimeRoot
     Invoke-Adb shell run-as $Package cp "$remoteTempRoot/libLiteRt.so" "$remoteRuntimeRoot/libLiteRt.so"
     Invoke-Adb shell run-as $Package cp "$remoteTempRoot/manifest.json" "$remoteRuntimeRoot/manifest.json"
+    Invoke-Adb shell run-as $Package cp "$remoteTempRoot/install.json" "$remoteRuntimeRoot/install.json"
     Invoke-Adb shell run-as $Package chmod 755 "$remoteRuntimeRoot/libLiteRt.so"
 
     $installedHash = ((& $adb -s $Serial shell run-as $Package sha256sum "$remoteRuntimeRoot/libLiteRt.so") -join " ").Trim()

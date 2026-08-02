@@ -1,6 +1,5 @@
 package com.mardous.booming.separation
 
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -80,35 +79,24 @@ class SourceSeparationProductionRouteAuditTest {
         val separator = mainSource(
             "com/mardous/booming/separation/model/MdxRangeSeparator.kt",
         ).readText()
-        val legacyEngine = mainSource(
-            "com/mardous/booming/separation/SourceSeparationEngine.kt",
-        ).readText()
 
         assertFalse(runtime.contains("DefaultMdxInferenceSessionProvider"))
         assertFalse(runtime.contains("MdxInferenceSessionFactory ="))
         assertFalse(separator.contains("sessionProvider: MdxInferenceSessionProvider ="))
-        assertFalse(legacyEngine.contains("sessionProvider: MdxInferenceSessionProvider ="))
+        assertTrue(separator.contains("execution: MdxSeparationExecution"))
     }
 
     @Test
-    fun `ONNX Runtime imports are confined to the named oracle`() {
+    fun `release source and dependencies contain no executable ONNX runtime`() {
         val ortSources = mainKotlinRoot.walkTopDown()
             .filter(File::isFile)
             .filter { it.extension == "kt" && "ai.onnxruntime" in it.readText() }
             .map { it.relativeTo(mainKotlinRoot).invariantSeparatorsPath }
             .toList()
 
-        assertEquals(
-            listOf("com/mardous/booming/separation/model/SourceSeparationOrtOracle.kt"),
-            ortSources,
-        )
-
-        val oracleReferences = mainKotlinRoot.walkTopDown()
-            .filter(File::isFile)
-            .filter { it.extension == "kt" && "SourceSeparationOrtOracle" in it.readText() }
-            .map { it.relativeTo(mainKotlinRoot).invariantSeparatorsPath }
-            .toList()
-        assertEquals(ortSources, oracleReferences)
+        assertTrue("Production source still imports ONNX Runtime: $ortSources", ortSources.isEmpty())
+        assertFalse(appBuildFile.readText().contains("onnxruntime", ignoreCase = true))
+        assertFalse(versionCatalogFile.readText().contains("onnxruntime", ignoreCase = true))
     }
 
     private fun mainSource(relativePath: String): File =
@@ -140,6 +128,15 @@ class SourceSeparationProductionRouteAuditTest {
             ).firstOrNull(File::isDirectory)
                 ?: error("Cannot locate the app production AIDL root from $workingDirectory")
         }
+
+    private val appBuildFile: File
+        get() = File(appRoot, "build.gradle.kts")
+
+    private val versionCatalogFile: File
+        get() = File(requireNotNull(appRoot.parentFile), "gradle/libs.versions.toml")
+
+    private val appRoot: File
+        get() = requireNotNull(mainKotlinRoot.parentFile?.parentFile?.parentFile)
 
     private companion object {
         val normalRouteSources = listOf(

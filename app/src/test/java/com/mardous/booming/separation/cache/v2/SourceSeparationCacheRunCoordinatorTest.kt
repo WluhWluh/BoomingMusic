@@ -851,7 +851,6 @@ class SourceSeparationCacheRunCoordinatorTest {
                 timingReport = timingReport,
                 runtimeSettings = MdxRuntimeSettings(),
                 runtimeDiagnostics = diagnostics,
-                modelVariant = null,
                 executionProfile = profile,
                 sourceDecodeDiagnostics = sourceDiagnostics,
             )

@@ -1,6 +1,5 @@
 package com.mardous.booming.separation.model
 
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -12,24 +11,10 @@ import java.util.concurrent.CancellationException
 
 class MdxInferenceRuntimeTest {
     @Test
-    fun `legacy profile preserves current 9482 behavior`() {
-        val config = MdxDspConfig()
-
-        val profile = MdxExecutionProfile.legacy(MdxModelVariant.MDXNET_9482, config)
-
-        assertEquals(MdxModelFormat.Onnx, profile.modelFormat)
-        assertEquals(MdxTensorLayout.Nchw, profile.inputTensor.layout)
-        assertEquals(listOf(1, 4, 2048, 256), profile.inputTensor.shape)
-        assertEquals(config.tensorElementCount, profile.inputTensor.elementCount)
-        assertEquals(1f, profile.modelOutputScale)
-        assertEquals(MdxStem.VOCALS, profile.modelOutputStem)
-    }
-
-    @Test
     fun `reusable provider reuses only an identical session key`() {
         val factory = FakeFactory()
         val provider = ReusableMdxInferenceSessionProvider(factory)
-        val profile = MdxExecutionProfile.legacy(MdxModelVariant.MDXNET_9482)
+        val profile = profile()
         val artifact = artifact(profile)
         val settings = MdxRuntimeSettings(cpuThreads = 4)
 
@@ -58,7 +43,7 @@ class MdxInferenceRuntimeTest {
     fun `provider defers close until an active lease returns`() {
         val factory = FakeFactory()
         val provider = ReusableMdxInferenceSessionProvider(factory)
-        val profile = MdxExecutionProfile.legacy(MdxModelVariant.MDXNET_9482)
+        val profile = profile()
         val lease = provider.acquire(artifact(profile), profile, MdxRuntimeSettings())
         val session = factory.sessions.single()
 
@@ -79,7 +64,7 @@ class MdxInferenceRuntimeTest {
     fun `single use lease closes its session once`() {
         val factory = FakeFactory()
         val provider = SingleUseMdxInferenceSessionProvider(factory)
-        val profile = MdxExecutionProfile.legacy(MdxModelVariant.MDXNET_9482)
+        val profile = profile()
         val lease = provider.acquire(artifact(profile), profile, MdxRuntimeSettings())
 
         lease.close()
@@ -92,7 +77,7 @@ class MdxInferenceRuntimeTest {
     fun `timed factory separates setup first and reused inference`() {
         val timestamps = ArrayDeque(listOf(10L, 20L, 30L, 50L, 60L, 90L))
         val factory = FakeFactory().withMdxInferenceTiming { timestamps.removeFirst() }
-        val profile = MdxExecutionProfile.legacy(MdxModelVariant.MDXNET_9482)
+        val profile = profile()
         val session = factory.create(artifact(profile), profile, MdxRuntimeSettings())
 
         session.run(floatArrayOf(1f))
@@ -105,28 +90,6 @@ class MdxInferenceRuntimeTest {
         assertEquals(30L, session.diagnostics.reusedInferenceTotalNanos)
         assertEquals(30L, session.diagnostics.lastInferenceNanos)
         assertSame(factory, factory.withMdxInferenceTiming())
-    }
-
-    @Test
-    fun `ORT output flattening enforces the declared element count`() {
-        val output = arrayOf(
-            arrayOf(
-                arrayOf(floatArrayOf(1f, 2f), floatArrayOf(3f, 4f)),
-                arrayOf(floatArrayOf(5f, 6f), floatArrayOf(7f, 8f)),
-            )
-        )
-
-        assertArrayEquals(
-            floatArrayOf(1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f),
-            flattenOutput(output, expectedElementCount = 8),
-            0f,
-        )
-        assertThrows(IllegalArgumentException::class.java) {
-            flattenOutput(output, expectedElementCount = 7)
-        }
-        assertThrows(IllegalArgumentException::class.java) {
-            flattenOutput(output, expectedElementCount = 9)
-        }
     }
 
     @Test
@@ -171,9 +134,43 @@ class MdxInferenceRuntimeTest {
         )
     }
 
+    private fun profile(): MdxExecutionProfile {
+        val config = MdxDspConfig()
+        val shape = listOf(
+            1,
+            config.dimT,
+            config.dimF,
+            MdxDspConfig.STEM_COMPLEX_CHANNELS,
+        )
+        return MdxExecutionProfile(
+            profileId = "test_tflite",
+            displayName = "Test TFLite",
+            outputTag = "test",
+            modelFormat = MdxModelFormat.Tflite,
+            inputTensor = MdxTensorSpec(
+                name = "input",
+                shape = shape,
+                layout = MdxTensorLayout.Nhwc,
+                dataType = MdxTensorDataType.Float32,
+            ),
+            outputTensor = MdxTensorSpec(
+                name = "output",
+                shape = shape,
+                layout = MdxTensorLayout.Nhwc,
+                dataType = MdxTensorDataType.Float32,
+            ),
+            dspConfig = config,
+            modelOutputScale = 1f,
+            modelOutputStem = MdxStem.VOCALS,
+            pipelineId = "test-tflite",
+            pipelineVersion = 1,
+            expectedFileName = "test.tflite",
+        )
+    }
+
     private class FakeFactory : MdxInferenceSessionFactory {
         override val factoryId = "fake"
-        override val backend = MdxInferenceBackend.OrtCpu
+        override val backend = MdxInferenceBackend.LiteRtCpu
         val sessions = mutableListOf<FakeSession>()
 
         override fun create(
@@ -188,7 +185,7 @@ class MdxInferenceRuntimeTest {
     private class FakeSession : MdxInferenceSession {
         override val diagnostics = MdxRuntimeDiagnostics(
             runtimeName = "Fake",
-            backend = MdxInferenceBackend.OrtCpu,
+            backend = MdxInferenceBackend.LiteRtCpu,
             cpuThreads = 1,
             detail = "test",
         )
