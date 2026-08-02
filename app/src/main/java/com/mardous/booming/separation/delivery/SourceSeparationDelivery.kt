@@ -186,11 +186,7 @@ object GitHubProductCapabilityPolicy : ProductCapabilityPolicy {
         SourceSeparationProductCapability.RuntimeRepair,
         SourceSeparationProductCapability.RuntimeUninstall,
         SourceSeparationProductCapability.GpuExecution,
-        SourceSeparationProductCapability.VendorNpuExecution,
-        SourceSeparationProductCapability.AotExecution,
-        SourceSeparationProductCapability.QnnJitExecution,
         SourceSeparationProductCapability.CustomModelImport,
-        SourceSeparationProductCapability.CustomRuntimeImport,
         SourceSeparationProductCapability.RuntimeDiagnostics,
         SourceSeparationProductCapability.ModelDiagnostics,
     )
