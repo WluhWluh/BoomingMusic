@@ -111,7 +111,49 @@ class SourceSeparationRuntimeFacadeTest {
         val second = (facade.resolve(fixture.song) as SourceSeparationRuntimeSongResolution.Ready).song
         assertEquals(secondModel.contract.modelId, second.modelId)
         assertNotEquals(first.cacheKey, second.cacheKey)
+        assertEquals(1, fixture.preflightCount)
+    }
+
+    @Test
+    fun `successful source preflight is reused until the source stamp changes`() {
+        val fixture = fixture()
+        fixture.activeResolution = SourceSeparationActiveCacheModelResolution.Ready(
+            fixture.resolvedModel("uvr_mdxnet_3_9662"),
+        )
+        val facade = fixture.facade()
+
+        val first = facade.resolve(fixture.song) as SourceSeparationRuntimeSongResolution.Ready
+        val second = facade.resolve(fixture.song) as SourceSeparationRuntimeSongResolution.Ready
+        assertEquals(first.song.identity.source, second.song.identity.source)
+        assertEquals(0L, second.song.preflight.elapsedMs)
+        assertEquals(1, fixture.preflightCount)
+
+        val changed = fixture.songWithRawDateModified(fixture.song.rawDateModified + 1L)
+        assertTrue(facade.resolve(changed) is SourceSeparationRuntimeSongResolution.Ready)
         assertEquals(2, fixture.preflightCount)
+    }
+
+    @Test
+    fun `failed source preflight is never memoized`() {
+        val fixture = fixture()
+        fixture.activeResolution = SourceSeparationActiveCacheModelResolution.Ready(
+            fixture.resolvedModel("uvr_mdxnet_3_9662"),
+        )
+        var attempts = 0
+        val facade = fixture.facade(
+            preflightResolver = SourceSeparationModelAwarePreflightResolver { _, _ ->
+                attempts += 1
+                if (attempts == 1) error("injected preflight failure")
+                SourceSeparationCacheSourcePreflight(
+                    identity = firstSourceIdentity(),
+                    elapsedMs = 7L,
+                )
+            },
+        )
+
+        assertTrue(facade.resolve(fixture.song) is SourceSeparationRuntimeSongResolution.Unavailable)
+        assertTrue(facade.resolve(fixture.song) is SourceSeparationRuntimeSongResolution.Ready)
+        assertEquals(2, attempts)
     }
 
     @Test
@@ -232,6 +274,24 @@ class SourceSeparationRuntimeFacadeTest {
             genreName = null,
         )
 
+        fun songWithRawDateModified(rawDateModified: Long) = Song(
+            id = song.id,
+            data = song.data,
+            title = song.title,
+            trackNumber = song.trackNumber,
+            year = song.year,
+            size = song.size,
+            duration = song.duration,
+            dateAdded = song.dateAdded,
+            rawDateModified = rawDateModified,
+            albumId = song.albumId,
+            albumName = song.albumName,
+            artistId = song.artistId,
+            artistName = song.artistName,
+            albumArtistName = song.albumArtistName,
+            genreName = song.genreName,
+        )
+
         fun facade(
             compatibilityResolver: SourceSeparationRuntimeCompatibilityResolver =
                 SourceSeparationRuntimeCompatibilityResolver { null },
@@ -348,6 +408,16 @@ class SourceSeparationRuntimeFacadeTest {
                 SourceSeparationModelMetadata.decodeCatalog(input.readBytes().toString(Charsets.UTF_8))
             }
         }
+
+        private fun firstSourceIdentity() = SourceSeparationCacheSourceIdentity(
+            audioFingerprint = "encoded-samples-v1:${"a".repeat(64)}",
+            encodedSampleCount = 100L,
+            encodedByteCount = 1_024L,
+            mimeType = "audio/flac",
+            sourceSampleRate = 44_100,
+            sourceChannelCount = 2,
+            sourceDurationUs = 2_000_000L,
+        )
     }
 
     private data object RouteSelectedException : RuntimeException()

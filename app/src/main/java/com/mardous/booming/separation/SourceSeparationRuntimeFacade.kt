@@ -126,6 +126,8 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
     private val flacPromoter: SourceSeparationCacheFlacPromoter,
     private val hydrator: SourceSeparationCacheHydrator,
 ) : SourceSeparationRuntimeFacade {
+    private val sourcePreflightMemo = SourceSeparationSourcePreflightMemo()
+
     override fun activeModelResolution(): SourceSeparationActiveCacheModelResolution =
         activeModelResolver()
 
@@ -156,7 +158,20 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
         }
         val input = inputFactory.create(song)
         val preflight = try {
-            preflightResolver.resolve(input.sourceUri, shouldCancel)
+            if (shouldCancel()) {
+                throw CancellationException("Source audio identity resolution canceled.")
+            }
+            val memoKey = SourceSeparationSourcePreflightMemoKey(
+                sourceUri = input.sourceUri,
+                filePath = song.data,
+                fileSize = song.size,
+                rawDateModified = song.rawDateModified,
+                durationMs = song.duration,
+            )
+            sourcePreflightMemo.get(memoKey)?.copy(elapsedMs = 0L)
+                ?: preflightResolver.resolve(input.sourceUri, shouldCancel).also { resolved ->
+                    sourcePreflightMemo.put(memoKey, resolved)
+                }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -292,6 +307,46 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
 
     override fun openHydratedCache(cacheKey: String): SourceSeparationModelAwareHydratedPlayback? =
         hydrator.open(cacheKey)
+}
+
+private data class SourceSeparationSourcePreflightMemoKey(
+    val sourceUri: String,
+    val filePath: String,
+    val fileSize: Long,
+    val rawDateModified: Long,
+    val durationMs: Long,
+)
+
+private class SourceSeparationSourcePreflightMemo(
+    private val maxEntries: Int = MAX_ENTRIES,
+) {
+    private val lock = Any()
+    private val entries = object : LinkedHashMap<
+        SourceSeparationSourcePreflightMemoKey,
+        SourceSeparationCacheSourcePreflight,
+    >(maxEntries, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<
+                SourceSeparationSourcePreflightMemoKey,
+                SourceSeparationCacheSourcePreflight,
+            >?,
+        ): Boolean = size > maxEntries
+    }
+
+    fun get(
+        key: SourceSeparationSourcePreflightMemoKey,
+    ): SourceSeparationCacheSourcePreflight? = synchronized(lock) { entries[key] }
+
+    fun put(
+        key: SourceSeparationSourcePreflightMemoKey,
+        value: SourceSeparationCacheSourcePreflight,
+    ) {
+        synchronized(lock) { entries[key] = value }
+    }
+
+    private companion object {
+        const val MAX_ENTRIES = 4
+    }
 }
 
 class SourceSeparationRuntimeSong internal constructor(
