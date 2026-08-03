@@ -251,22 +251,6 @@ private fun SourceSeparationSettingsSheet(
             blendDragging = false
         }
     }
-    LaunchedEffect(
-        page,
-        modelAwareCacheViewModel,
-        autoCacheCleanup,
-        autoCacheCleanupPartialLimit,
-        autoCacheCleanupCompletedLimit,
-    ) {
-        if (page == SourceSeparationSettingsPage.CacheManagement) {
-            modelAwareCacheViewModel.updateCleanupPolicy(
-                enabled = autoCacheCleanup,
-                partialLimit = autoCacheCleanupPartialLimit,
-                completedLimit = autoCacheCleanupCompletedLimit,
-            )
-        }
-    }
-
     BottomSheetDialogSurface {
         Column(
             modifier = Modifier

@@ -27,23 +27,11 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
     val state = _state.asStateFlow()
 
     private var loadJob: Job? = null
-    private var cleanupPolicy: SourceSeparationModelAwareCacheCleanupPolicy? = null
 
     init { refresh() }
 
-    fun updateCleanupPolicy(enabled: Boolean, partialLimit: Int, completedLimit: Int) {
-        val next = SourceSeparationModelAwareCacheCleanupPolicy(
-            enabled = enabled,
-            partialLimit = partialLimit.coerceAtLeast(0),
-            completedLimit = completedLimit.coerceAtLeast(0),
-        )
-        if (cleanupPolicy == next) return
-        cleanupPolicy = next
-        refresh(pruneFirst = true)
-    }
-
     fun refresh() {
-        refresh(pruneFirst = cleanupPolicy?.enabled == true)
+        refreshEntries()
     }
 
     fun delete(cacheKey: String) {
@@ -159,19 +147,11 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
         }
     }
 
-    private fun refresh(pruneFirst: Boolean) {
+    private fun refreshEntries() {
         loadJob?.cancel()
         loadJob = viewModelScope.launch(Dispatchers.IO) {
             _state.value = _state.value.copy(loading = true, failure = null)
-            val result = runCatching {
-                cleanupPolicy?.takeIf { pruneFirst && it.enabled }?.let { policy ->
-                    runtime.prune(
-                        partialLimit = policy.partialLimit,
-                        completedLimit = policy.completedLimit,
-                    )
-                }
-                runtime.entries()
-            }
+            val result = runCatching(runtime::entries)
             _state.value = result.fold(
                 onSuccess = { items ->
                     val active = presetRepository?.activeSelectionFlow?.value?.reference
@@ -281,9 +261,3 @@ enum class SourceSeparationModelAwareCacheManagementFailureReason {
     Delete,
     Activate,
 }
-
-private data class SourceSeparationModelAwareCacheCleanupPolicy(
-    val enabled: Boolean,
-    val partialLimit: Int,
-    val completedLimit: Int,
-)

@@ -1155,7 +1155,6 @@ class PlayerViewModel(
             clearSourceSeparationPausePendingAction(song)
             refreshCurrentSourceSeparationCacheAvailable(song)
         }
-        pruneSourceSeparationCaches(protectedCacheKeys = setOf(cacheKey))
         requestSourceSeparationTemporaryCacheCleanup()
         if (shouldPromoteCompletedStems) {
             startSourceSeparationFlacPromotion(song, cacheKey)
@@ -1564,7 +1563,7 @@ class PlayerViewModel(
         }
         _sourceSeparationAutoCacheCleanupFlow.value = enabled
         if (enabled) {
-            pruneSourceSeparationCaches()
+            sourceSeparationForegroundWorkerCoordinator.requestAutomaticPrune()
         }
     }
 
@@ -1574,7 +1573,7 @@ class PlayerViewModel(
             putInt(SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT, normalized)
         }
         _sourceSeparationAutoCacheCleanupPartialLimitFlow.value = normalized
-        pruneSourceSeparationCaches()
+        sourceSeparationForegroundWorkerCoordinator.requestAutomaticPrune()
     }
 
     fun setSourceSeparationAutoCacheCleanupCompletedLimit(value: Int) {
@@ -1583,7 +1582,7 @@ class PlayerViewModel(
             putInt(SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT, normalized)
         }
         _sourceSeparationAutoCacheCleanupCompletedLimitFlow.value = normalized
-        pruneSourceSeparationCaches()
+        sourceSeparationForegroundWorkerCoordinator.requestAutomaticPrune()
     }
 
     private fun applySourceSeparationSettingsForSong(
@@ -2018,14 +2017,6 @@ class PlayerViewModel(
         return value.coerceAtLeast(MIN_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_LIMIT)
     }
 
-    private fun pruneSourceSeparationCaches(
-        protectedCacheKeys: Set<String> = emptySet(),
-    ) {
-        viewModelScope.launch(IO) {
-            pruneSourceSeparationCachesIfEnabled(protectedCacheKeys)
-        }
-    }
-
     private fun publishSourceSeparationProcessingIntent(song: Song, blend: Float) {
         if (!_sourceSeparationAutoStartFlow.value ||
             _sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
@@ -2104,21 +2095,6 @@ class PlayerViewModel(
                 )
             },
         )
-    }
-
-    private fun pruneSourceSeparationCachesIfEnabled(
-        protectedCacheKeys: Set<String> = emptySet(),
-    ) {
-        if (!_sourceSeparationAutoCacheCleanupFlow.value) return
-        runCatching {
-            sourceSeparationRuntime.prune(
-                partialLimit = _sourceSeparationAutoCacheCleanupPartialLimitFlow.value,
-                completedLimit = _sourceSeparationAutoCacheCleanupCompletedLimitFlow.value,
-                protectedCacheKeys = protectedCacheKeys,
-            )
-        }.onFailure { error ->
-            Log.w(TAG, "Failed to prune source separation caches", error)
-        }
     }
 
     private fun sourceSeparationBlendMode(

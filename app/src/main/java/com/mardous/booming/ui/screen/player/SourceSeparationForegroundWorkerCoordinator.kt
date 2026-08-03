@@ -84,6 +84,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private val requestGeneration = AtomicLong()
     private val debugWindowSamples = ArrayDeque<SourceSeparationDebugWindowSample>()
     private val stateLock = Any()
+    private val automaticPruneRequests = Channel<Unit>(Channel.CONFLATED)
 
     private var workerJob: Job? = null
     private var workerActivated = false
@@ -124,6 +125,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     init {
         trace("init recovery=${independentRunRecovery != null}")
         observeActiveSelection()
+        observeAutomaticPruneRequests()
         independentRunRecovery?.let(::startIndependentRunRecovery)
     }
 
@@ -491,6 +493,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         setOfNotNull(activeWorkerSong?.cacheKey, reconnectedSession?.cacheKey)
     }
 
+    fun requestAutomaticPrune() {
+        automaticPruneRequests.trySend(Unit)
+    }
+
     fun isModelArtifactInUse(artifactSha256: String): Boolean = synchronized(stateLock) {
         val normalized = artifactSha256.lowercase()
         activeWorkerRequest?.selection?.reference?.artifactSha256?.lowercase() == normalized ||
@@ -840,7 +846,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     selectionGeneration = reconnectedSelection?.generation,
                     cacheKey = session.cacheKey,
                 )
-                pruneCachesIfEnabled()
+                requestAutomaticPrune()
                 closeRecoveredTerminal(session)
                 dispatchRecoveredTerminal(
                     SourceSeparationRecoveredTerminal.Completed(
@@ -1358,7 +1364,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 selectionGeneration = request.selection.generation,
                 cacheKey = resolved.cacheKey,
             )
-            pruneCachesIfEnabled()
+            requestAutomaticPrune()
             callbacks?.onSourceSeparationWorkerCompleted(
                 song = song,
                 cacheKey = resolved.cacheKey,
@@ -1623,9 +1629,30 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT,
                     DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT,
                 ).coerceAtLeast(1),
-                protectedCacheKeys = protectedCacheKeys(),
+                protectedCacheKeys = pruneProtectedCacheKeys(),
             )
         }
+    }
+
+    private fun observeAutomaticPruneRequests() {
+        workerScope.launch {
+            for (ignored in automaticPruneRequests) {
+                pruneCachesIfEnabled()
+            }
+        }
+    }
+
+    private fun pruneProtectedCacheKeys(): Set<String> {
+        val playback = _playbackStateFlow.value
+        val currentCacheKey = playback.song
+            .takeIf { song ->
+                song != Song.emptySong &&
+                    readBlendMode() != SourceSeparationBlendMode.Off &&
+                    !isDefaultBlend(playback.sourceSeparationBlend)
+            }
+            ?.let(::resolveSong)
+            ?.cacheKey
+        return protectedCacheKeys() + listOfNotNull(currentCacheKey)
     }
 
     private fun isAutoStartEnabled(): Boolean {
