@@ -2286,11 +2286,12 @@ internal object SourceSeparationMainDeathDebugHarness {
                 !evidence.processingServiceAfterSilence)
             check(!evidence.wakeLockAfterStop && !evidence.wakeLockAfterSilence)
             check(!evidence.notificationAfterRestart)
+            check(!evidence.processingServiceAfterRestart)
             check(!evidence.wakeLockAfterRestart)
             check(evidence.journalSha256AfterStop == evidence.journalSha256AfterSilence)
-            check(evidence.journalSha256AfterStop == evidence.journalSha256AfterRestart)
+            check(evidence.journalSha256AfterStop != evidence.journalSha256AfterRestart)
             check(evidence.journalSequenceAfterStop == evidence.journalSequenceAfterSilence)
-            check(evidence.journalSequenceAfterStop == evidence.journalSequenceAfterRestart)
+            check(evidence.journalSequenceAfterRestart > evidence.journalSequenceAfterStop)
             check(evidence.entrySha256AfterStop == evidence.entrySha256AfterSilence)
             check(evidence.entrySha256AfterStop == evidence.entrySha256AfterRestart)
             check(evidence.entryFileCountAfterStop == evidence.entryFileCountAfterSilence)
@@ -2300,13 +2301,16 @@ internal object SourceSeparationMainDeathDebugHarness {
 
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
             val journal = requireNotNull(store.readRunJournal(cacheKey))
-            check(journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running) {
-                "Force-stop must not depend on onDestroy changing the journal."
+            check(journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused) {
+                "Explicit restart did not reconcile force-stopped work to a retained pause."
             }
             check(journal.latestSequence == evidence.journalSequenceAfterRestart)
             check(journal.request.runId == scenario.getString("executionRunId"))
             check(journal.request.processGeneration ==
                 scenario.getLong("remoteProcessGeneration"))
+            check(journal.transitions.any { transition ->
+                transition.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+            }) { "Explicit restart did not record the dead force-stop owner." }
 
             val worker = get<SourceSeparationForegroundWorkerCoordinator>(
                 SourceSeparationForegroundWorkerCoordinator::class.java,
@@ -2379,6 +2383,9 @@ internal object SourceSeparationMainDeathDebugHarness {
                     .put("entryBytesAfterStop", evidence.entryBytesAfterStop)
                     .put("entryBytesAfterSilence", evidence.entryBytesAfterSilence)
                     .put("entryBytesAfterRestart", evidence.entryBytesAfterRestart)
+                    .put("entrySnapshotExcludedPaths", JSONArray()
+                        .put(SourceSeparationCacheStore.RUN_JOURNAL_FILE_NAME))
+                    .put("previousOwnerDied", true)
                     .put("forceStopExitElapsedMs", evidence.forceStopExitElapsedMs)
                     .put("silentObservationMs", evidence.silentObservationMs)
                     .put("silentProcessSampleCount", evidence.silentProcessSampleCount)
@@ -2413,8 +2420,9 @@ internal object SourceSeparationMainDeathDebugHarness {
                     )
                     .put("idleRemoteActiveLeaseCount", idleDiagnostics.session.activeLeaseCount)
                     .put("onDestroyJournalTransitionRequired", false)
+                    .put("restartJournalReconciliationRequired", true)
                     .put("sessionOwnership", "SingleUse")
-                    .put("staleRunningJournalAccepted", true)
+                    .put("staleRunningJournalReconciled", true)
                     .put("staleCacheCleanup", "Completed")
                     .put("tryGpu", journal.request.tryGpu)
                     .put("admittedGpuRuntime", gpuRuntimeJson(journal)),
@@ -3264,7 +3272,7 @@ internal object SourceSeparationMainDeathDebugHarness {
     private const val OUTPUT_DIRECTORY = "phase7-debug-main-death"
     private const val SCENARIO_SCHEMA_VERSION = 3
     private const val REPORT_SCHEMA_VERSION = 2
-    private const val FORCE_STOP_REPORT_SCHEMA_VERSION = "phase7-task-lifecycle-report-v1"
+    private const val FORCE_STOP_REPORT_SCHEMA_VERSION = "phase7-task-lifecycle-report-v2"
     private const val REMOTE_DEATH_REPORT_SCHEMA_VERSION = "phase7-remote-death-report-v1"
     private const val REMOTE_DEATH_CACHE_CLEAR_REPORT_SCHEMA_VERSION =
         "phase7-remote-death-cache-clear-report-v1"

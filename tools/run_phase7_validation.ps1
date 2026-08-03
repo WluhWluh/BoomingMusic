@@ -589,7 +589,10 @@ function Get-RemoteJournalSnapshot([string]$Path) {
     }
 }
 
-function Get-RemoteEntrySnapshot([string]$Path) {
+function Get-RemoteEntrySnapshot(
+    [string]$Path,
+    [string[]]$ExcludedRelativePaths = @()
+) {
     $fileOutput = & $adb -s $Serial shell run-as $package find $Path -type f -print 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw "Could not enumerate remote cache entry: $Path"
@@ -605,15 +608,18 @@ function Get-RemoteEntrySnapshot([string]$Path) {
                         $filePath.Contains("..", [System.StringComparison]::Ordinal)) {
                     throw "Remote cache entry contains an unsafe file path: $filePath"
                 }
-                $sizeText = ((& $adb -s $Serial shell run-as $package stat -c '%s' $filePath `
-                    2>$null) -join "").Trim()
-                if ($LASTEXITCODE -ne 0 -or $sizeText -notmatch '^\d+$') {
-                    throw "Could not measure remote cache file: $filePath"
-                }
-                [ordered]@{
-                    path = $filePath.Substring($Path.Length + 1)
-                    bytes = [int64]$sizeText
-                    sha256 = Get-RemoteFileSha256 $filePath
+                $relativePath = $filePath.Substring($Path.Length + 1)
+                if ($relativePath -notin $ExcludedRelativePaths) {
+                    $sizeText = ((& $adb -s $Serial shell run-as $package stat -c '%s' $filePath `
+                        2>$null) -join "").Trim()
+                    if ($LASTEXITCODE -ne 0 -or $sizeText -notmatch '^\d+$') {
+                        throw "Could not measure remote cache file: $filePath"
+                    }
+                    [ordered]@{
+                        path = $relativePath
+                        bytes = [int64]$sizeText
+                        sha256 = Get-RemoteFileSha256 $filePath
+                    }
                 }
             }
     )
@@ -1328,7 +1334,9 @@ try {
             throw "The force-stop journal has no device-side parent path."
         }
         $entryPath = $journalPath.Substring(0, $journalSeparator)
-        $afterStopEntry = Get-RemoteEntrySnapshot $entryPath
+        $afterStopEntry = Get-RemoteEntrySnapshot `
+            -Path $entryPath `
+            -ExcludedRelativePaths @("run-journal.json")
         $afterStop = Get-TaskLifecycleObservation
         $silentStarted = [Diagnostics.Stopwatch]::StartNew()
         $silentProcessSampleCount = 0
@@ -1342,7 +1350,9 @@ try {
         } while ($silentStarted.Elapsed.TotalSeconds -lt $SilentObservationSeconds)
         $silentStarted.Stop()
         $afterSilenceJournal = Get-RemoteJournalSnapshot $journalPath
-        $afterSilenceEntry = Get-RemoteEntrySnapshot $entryPath
+        $afterSilenceEntry = Get-RemoteEntrySnapshot `
+            -Path $entryPath `
+            -ExcludedRelativePaths @("run-journal.json")
         $afterSilence = Get-TaskLifecycleObservation
         $stoppedAfterSilence = Get-PackageStoppedState
 
@@ -1350,7 +1360,9 @@ try {
             "$package/com.mardous.booming.activities.MainActivity"
         Start-Sleep -Seconds 5
         $afterRestartJournal = Get-RemoteJournalSnapshot $journalPath
-        $afterRestartEntry = Get-RemoteEntrySnapshot $entryPath
+        $afterRestartEntry = Get-RemoteEntrySnapshot `
+            -Path $entryPath `
+            -ExcludedRelativePaths @("run-journal.json")
         $afterRestart = Get-TaskLifecycleObservation
 
         $validationArguments = @($debugArguments) + @(
