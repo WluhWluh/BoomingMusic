@@ -476,6 +476,8 @@ private val viewModule = module {
             repository = get(),
             downloader = get(),
             importCoordinator = get(),
+            modelArtifactInUse =
+                get<SourceSeparationForegroundWorkerCoordinator>()::isModelArtifactInUse,
         )
     }
 

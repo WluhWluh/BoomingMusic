@@ -298,7 +298,6 @@ private fun SourceSeparationSettingsSheet(
                             onDeleteResult = viewModel::handleSourceSeparationCacheManualDeleteResult,
                         )
                     },
-                    onPlay = viewModel::playSourceSeparationCompletedCache,
                     onDismissFailure = modelAwareCacheViewModel::clearFailure,
                     onAutoCleanupChange =
                         viewModel::setSourceSeparationAutoCacheCleanupEnabled,

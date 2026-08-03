@@ -6043,21 +6043,32 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .buildAsync()
                 .get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             controller = mediaController
-            val playCommand = SessionCommand(
-                Playback.PLAY_SOURCE_SEPARATION_COMPLETED_CACHE,
+            val restorationCommand = SessionCommand(
+                Playback.AWAIT_PLAYBACK_RESTORATION,
                 Bundle.EMPTY,
             )
-            assertTrue(
-                "PlaybackService did not expose the debug cache command.",
-                onMediaControllerThread(mediaController) {
-                    mediaController.availableSessionCommands.contains(playCommand)
-                },
-            )
+            onMediaControllerThread(mediaController) {
+                mediaController.sendCustomCommand(restorationCommand, Bundle.EMPTY)
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            onMediaControllerThread(mediaController) {
+                mediaController.setMediaItem(
+                    MediaItem.Builder()
+                        .setMediaId(manifest.song.songId.toString())
+                        .setUri(manifest.song.mediaUri)
+                        .build(),
+                )
+                mediaController.prepare()
+            }
             val playResultFuture = onMediaControllerThread(mediaController) {
                 mediaController.sendCustomCommand(
-                    playCommand,
+                    SessionCommand(
+                        Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+                        Bundle.EMPTY,
+                    ),
                     Bundle().apply {
-                        putString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY, cacheKey)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, true)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
                     },
                 )
             }
@@ -6066,7 +6077,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 TimeUnit.SECONDS,
             )
             assertEquals(
-                "PlaybackService rejected the completed cache: " +
+                "PlaybackService rejected the active completed cache: " +
                     playResult.extras.getString(
                         Playback.EXTRA_SOURCE_SEPARATION_MESSAGE,
                     ).orEmpty(),
@@ -6086,7 +6097,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     experimentalConfirmed = true,
                 )
                 assertEquals(secondaryModelId, selected.modelId)
-                assertTrue(cacheRepository.isLeased(cacheKey))
+                cacheLeaseReleaseMs = waitForCacheLeaseRelease(cacheRepository, cacheKey)
+                assertFalse(cacheRepository.isLeased(cacheKey))
                 assertEquals(expectedArtifactSha256, store.readManifest(cacheKey)
                     ?.identity?.artifactSha256)
                 switchedModelDuringPlayback = true
@@ -6126,7 +6138,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
 
             onMediaControllerThread(mediaController) { mediaController.pause() }
             disableSourceSeparationPlayback(mediaController)
-            cacheLeaseReleaseMs = waitForCacheLeaseRelease(cacheRepository, cacheKey)
+            if (!switchedModelDuringPlayback) {
+                cacheLeaseReleaseMs = waitForCacheLeaseRelease(cacheRepository, cacheKey)
+            }
             onMediaControllerThread(mediaController) { mediaController.release() }
             controller = null
 
@@ -6152,7 +6166,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     "secondaryArtifactSha256",
                     secondaryArtifactSha256 ?: JSONObject.NULL,
                 )
-                .put("primaryCacheLeaseRetained", switchedModelDuringPlayback)
+                .put("primaryCacheLeaseReleasedOnSwitch", switchedModelDuringPlayback)
                 .put("primaryCacheLeaseReleaseMs", cacheLeaseReleaseMs)
             )
             report.put("audio", report.getJSONObject("audio")

@@ -92,15 +92,18 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -203,8 +206,18 @@ class PlayerViewModel(
     private val sourceSeparationFlacPromotionRequests =
         linkedMapOf<String, SourceSeparationFlacPromotionRequest>()
 
-    val sourceSeparationStateFlow =
-        sourceSeparationForegroundWorkerCoordinator.workerStateFlow
+    val sourceSeparationStateFlow = combine(
+        sourceSeparationForegroundWorkerCoordinator.workerStateFlow,
+        sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow,
+    ) { state, selection ->
+        if (state.selectionGenerationOrNull() == null ||
+            state.selectionGenerationOrNull() == selection.generation
+        ) {
+            state
+        } else {
+            SourceSeparationUiState.Idle
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, SourceSeparationUiState.Idle)
 
     private val _currentSourceSeparationCacheAvailableFlow = MutableStateFlow(false)
     val currentSourceSeparationCacheAvailableFlow =
@@ -339,6 +352,16 @@ class PlayerViewModel(
             sourceSeparationPreferenceChangeListener
         )
         observeSourceSeparationForegroundWorkerCoordinator()
+        sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow
+            .drop(1)
+            .onEach {
+                _currentSourceSeparationCacheKeyFlow.value = null
+                _currentSourceSeparationCacheStateFlow.value =
+                    SourceSeparationCacheUiState.NotStarted
+                _currentSourceSeparationCacheAvailableFlow.value = false
+                refreshCurrentSourceSeparationCacheAvailable()
+            }
+            .launchIn(viewModelScope)
     }
 
     override fun onCleared() {
@@ -1039,21 +1062,6 @@ class PlayerViewModel(
         }
     }
 
-    fun playSourceSeparationCompletedCache(cacheKey: String) {
-        traceSourceSeparationPlaybackUserActionMarker(
-            "modelAwareCache.play.userAction cache=${cacheKey.take(12)}"
-        )
-        viewModelScope.launch {
-            val result = sendSourceSeparationPlaybackCommand(
-                action = Playback.PLAY_SOURCE_SEPARATION_COMPLETED_CACHE,
-                args = Bundle().apply {
-                    putString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY, cacheKey)
-                },
-            )
-            updateSourceSeparationPlaybackState(result)
-        }
-    }
-
     private suspend fun waitForSourceSeparationFlacPromotionToStop(cacheKey: String) {
         while (isSourceSeparationFlacPromotionActive(cacheKey)) {
             sourceSeparationFlacPromotionJob?.join()
@@ -1125,13 +1133,13 @@ class PlayerViewModel(
     }
 
     override fun onSourceSeparationWorkerProgress(song: Song) {
-        if (currentSong.id == song.id) {
+        if (acceptsCurrentSourceSeparationWorkerState(song)) {
             syncSourceSeparationPlaybackIfRequested(force = true)
         }
     }
 
     override fun onSourceSeparationWorkerPrepared(song: Song) {
-        if (currentSong.id == song.id) {
+        if (acceptsCurrentSourceSeparationWorkerState(song)) {
             refreshCurrentSourceSeparationCacheAvailable(song)
             maybePreStartNextSourceSeparation()
         }
@@ -1142,6 +1150,7 @@ class PlayerViewModel(
         cacheKey: String,
         shouldPromoteCompletedStems: Boolean,
     ) {
+        if (!acceptsCurrentSourceSeparationWorkerState(song, cacheKey)) return
         if (currentSong.id == song.id) {
             clearSourceSeparationPausePendingAction(song)
             refreshCurrentSourceSeparationCacheAvailable(song)
@@ -1154,13 +1163,14 @@ class PlayerViewModel(
     }
 
     override fun onSourceSeparationWorkerPaused(song: Song) {
-        if (currentSong.id == song.id) {
+        if (acceptsCurrentSourceSeparationWorkerState(song)) {
             clearSourceSeparationPausePendingAction(song)
             refreshCurrentSourceSeparationCacheAvailable(song)
         }
     }
 
     override fun onSourceSeparationWorkerModelLoadFailed(message: String) {
+        if (!hasCurrentSourceSeparationWorkerSelection()) return
         Log.w(TAG, "Source separation model load failed: $message")
         clearSourceSeparationPausePendingAction()
         viewModelScope.launch {
@@ -1169,6 +1179,8 @@ class PlayerViewModel(
     }
 
     fun refreshCurrentSourceSeparationCacheAvailable(song: Song = currentSong) {
+        val selection =
+            sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value
         viewModelScope.launch(IO) {
             val runtimeSong = resolveSourceSeparationRuntimeSong(song)
             val cacheState = when {
@@ -1177,7 +1189,10 @@ class PlayerViewModel(
                     sourceSeparationRuntime.cacheStatus(runtimeSong).toUiState()
                 }.getOrDefault(SourceSeparationCacheUiState.NotStarted)
             }
-            if (currentSong.id == song.id) {
+            if (currentSong.id == song.id &&
+                sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value ==
+                selection
+            ) {
                 _currentSourceSeparationCacheKeyFlow.value = runtimeSong?.cacheKey
                 _currentSourceSeparationCacheStateFlow.value = cacheState
                 _currentSourceSeparationCacheAvailableFlow.value =
@@ -1188,6 +1203,23 @@ class PlayerViewModel(
             }
         }
     }
+
+    private fun acceptsCurrentSourceSeparationWorkerState(
+        song: Song,
+        cacheKey: String? = null,
+    ): Boolean {
+        val state = sourceSeparationForegroundWorkerCoordinator.workerStateFlow.value
+        return currentSong.id == song.id &&
+            state.songIdOrNull() == song.id &&
+            hasCurrentSourceSeparationWorkerSelection(state) &&
+            (cacheKey == null || state.cacheKeyOrNull() == cacheKey)
+    }
+
+    private fun hasCurrentSourceSeparationWorkerSelection(
+        state: SourceSeparationUiState =
+            sourceSeparationForegroundWorkerCoordinator.workerStateFlow.value,
+    ): Boolean = state.selectionGenerationOrNull() ==
+        sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value.generation
 
     private fun resolveSourceSeparationRuntimeSong(
         song: Song,

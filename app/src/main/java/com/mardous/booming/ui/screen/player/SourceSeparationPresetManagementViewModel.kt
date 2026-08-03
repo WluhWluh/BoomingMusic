@@ -20,6 +20,7 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetActivat
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloadCanceledException
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetDeletionException
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportCoordinator
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportOutcome
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
@@ -45,6 +46,7 @@ class SourceSeparationPresetManagementViewModel internal constructor(
     private val downloader: SourceSeparationPresetDownloader,
     private val importCoordinator: SourceSeparationPresetImportCoordinator,
     private val platformProvider: MdxRuntimePlatformProvider = AndroidMdxRuntimePlatformProvider,
+    private val modelArtifactInUse: (String) -> Boolean = { false },
 ) : ViewModel() {
     private val downloadJobs = ConcurrentHashMap<String, Job>()
     private val transferStates = ConcurrentHashMap<String, SourceSeparationPresetTransferState>()
@@ -549,7 +551,14 @@ class SourceSeparationPresetManagementViewModel internal constructor(
         transferStates[operationKey] = SourceSeparationPresetTransferState.Deleting
         publishState()
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { repository.delete(installed.sha256) }
+            runCatching {
+                if (modelArtifactInUse(installed.sha256)) {
+                    throw SourceSeparationPresetDeletionException(
+                        "The model is still used by source-separation work.",
+                    )
+                }
+                repository.delete(installed.sha256)
+            }
                 .onFailure { error ->
                     _state.value = _state.value.copy(errorMessage = error.message)
                 }

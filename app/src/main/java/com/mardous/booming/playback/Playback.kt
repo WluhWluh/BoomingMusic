@@ -21,8 +21,6 @@ object Playback {
     const val SET_SOURCE_SEPARATION_BLEND = "com.mardous.booming.command.source_separation.blend"
     const val NOTIFY_SOURCE_SEPARATION_CACHE_DELETED =
         "com.mardous.booming.command.source_separation.cache_deleted"
-    const val PLAY_SOURCE_SEPARATION_COMPLETED_CACHE =
-        "com.mardous.booming.command.source_separation.play_completed_cache"
     const val TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER =
         "com.mardous.booming.command.source_separation.trace_marker"
 

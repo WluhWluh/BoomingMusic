@@ -112,6 +112,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private val _workerStateFlow =
         MutableStateFlow<SourceSeparationUiState>(SourceSeparationUiState.Idle)
     val workerStateFlow = _workerStateFlow.asStateFlow()
+    val activeSelectionStateFlow: StateFlow<SourceSeparationActiveSelectionSnapshot>
+        get() = activeSelectionFlow
 
     private val _eventFlow =
         MutableSharedFlow<SourceSeparationForegroundPlaybackEvent>(
@@ -487,6 +489,14 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
 
     fun protectedCacheKeys(): Set<String> = synchronized(stateLock) {
         setOfNotNull(activeWorkerSong?.cacheKey, reconnectedSession?.cacheKey)
+    }
+
+    fun isModelArtifactInUse(artifactSha256: String): Boolean = synchronized(stateLock) {
+        val normalized = artifactSha256.lowercase()
+        activeWorkerRequest?.selection?.reference?.artifactSha256?.lowercase() == normalized ||
+            pendingStartRequest?.selection?.reference?.artifactSha256?.lowercase() == normalized ||
+            activeWorkerSong?.artifactSha256?.lowercase() == normalized ||
+            reconnectedSession?.journal?.request?.identity?.artifactSha256?.lowercase() == normalized
     }
 
     suspend fun autoStartDecision(
@@ -1358,7 +1368,12 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         } catch (_: SourceSeparationPausedException) {
             trace("worker.song paused song=${song.id}")
             if (isCurrentRequest(request, admittedSong?.cacheKey)) {
-                _workerStateFlow.value = SourceSeparationUiState.Idle
+                _workerStateFlow.value = SourceSeparationUiState.Paused(
+                    songId = song.id,
+                    songTitle = song.title,
+                    selectionGeneration = request.selection.generation,
+                    cacheKey = admittedSong?.cacheKey,
+                )
                 if (!preStartSatisfied) {
                     callbacks?.onSourceSeparationWorkerPaused(song)
                 }
@@ -2019,13 +2034,31 @@ private fun SourceSeparationUiState.debugName(): String {
     }
 }
 
-private fun SourceSeparationUiState.selectionGenerationOrNull(): Long? = when (this) {
+internal fun SourceSeparationUiState.selectionGenerationOrNull(): Long? = when (this) {
     SourceSeparationUiState.Idle -> null
     is SourceSeparationUiState.Running -> selectionGeneration
     is SourceSeparationUiState.Completed -> selectionGeneration
     is SourceSeparationUiState.Canceled -> selectionGeneration
     is SourceSeparationUiState.Paused -> selectionGeneration
     is SourceSeparationUiState.Failed -> selectionGeneration
+}
+
+internal fun SourceSeparationUiState.songIdOrNull(): Long? = when (this) {
+    SourceSeparationUiState.Idle -> null
+    is SourceSeparationUiState.Running -> songId
+    is SourceSeparationUiState.Completed -> songId
+    is SourceSeparationUiState.Canceled -> songId
+    is SourceSeparationUiState.Paused -> songId
+    is SourceSeparationUiState.Failed -> songId
+}
+
+internal fun SourceSeparationUiState.cacheKeyOrNull(): String? = when (this) {
+    SourceSeparationUiState.Idle -> null
+    is SourceSeparationUiState.Running -> cacheKey
+    is SourceSeparationUiState.Completed -> cacheKey
+    is SourceSeparationUiState.Canceled -> cacheKey
+    is SourceSeparationUiState.Paused -> cacheKey
+    is SourceSeparationUiState.Failed -> cacheKey
 }
 
 private fun MdxSourceDecodeMode.toUiState(): SourceSeparationDecodeModeUiState {
