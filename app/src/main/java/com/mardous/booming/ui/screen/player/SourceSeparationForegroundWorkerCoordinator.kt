@@ -9,6 +9,7 @@ import androidx.core.content.edit
 import com.mardous.booming.R
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.SourceSeparationAdmittedGpuRuntimeMismatchException
+import com.mardous.booming.separation.SourceSeparationBlendDemand
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
 import com.mardous.booming.separation.SourceSeparationPausedException
@@ -558,7 +559,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         if (!isAutoStartEnabled() ||
             readBlendMode() == SourceSeparationBlendMode.Off ||
             song == Song.emptySong ||
-            isDefaultBlend(blend)
+            SourceSeparationBlendDemand.isCentered(blend)
         ) {
             return SourceSeparationAutoStartDecision(
                 shouldStart = false,
@@ -622,7 +623,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                         ?: resolveSong(song)?.let { resolved ->
                             runCatching { sourceSeparationRuntime.readBlend(resolved) }.getOrNull()
                         }
-                        ?: DEFAULT_SOURCE_SEPARATION_BLEND
+                        ?: SourceSeparationBlendDemand.CENTER_BLEND
                 }
             }
         }.coerceIn(0f, 1f)
@@ -1694,7 +1695,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             .takeIf { song ->
                 song != Song.emptySong &&
                     readBlendMode() != SourceSeparationBlendMode.Off &&
-                    !isDefaultBlend(playback.sourceSeparationBlend)
+                    SourceSeparationBlendDemand.requiresSeparatedOutput(
+                        playback.sourceSeparationBlend,
+                    )
             }
             ?.let(::resolveSong)
             ?.cacheKey
@@ -1724,21 +1727,17 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private fun readGlobalBlend(): Float {
         return preferences.getFloat(
             KEY_SOURCE_SEPARATION_GLOBAL_BLEND,
-            DEFAULT_SOURCE_SEPARATION_BLEND,
+            SourceSeparationBlendDemand.CENTER_BLEND,
         ).coerceIn(0f, 1f)
-    }
-
-    private fun isDefaultBlend(blend: Float): Boolean {
-        return kotlin.math.abs(blend.coerceIn(0f, 1f) - DEFAULT_SOURCE_SEPARATION_BLEND) <
-                SOURCE_SEPARATION_BLEND_EPSILON
     }
 
     private fun songNeedsSeparatedOutputForCurrentMode(song: Song): Boolean {
         return when (readBlendMode()) {
             SourceSeparationBlendMode.Off -> false
-            SourceSeparationBlendMode.Global -> !isDefaultBlend(readGlobalBlend())
+            SourceSeparationBlendMode.Global ->
+                SourceSeparationBlendDemand.requiresSeparatedOutput(readGlobalBlend())
             SourceSeparationBlendMode.PerSong -> recordedBlendForSongBlocking(song)
-                ?.let { blend -> !isDefaultBlend(blend) }
+                ?.let(SourceSeparationBlendDemand::requiresSeparatedOutput)
                 ?: false
         }
     }
@@ -1798,7 +1797,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private fun readTemporaryPerSongBlend(song: Song): Float? {
         val key = temporaryPerSongBlendKey(song)
         return if (preferences.contains(key)) {
-            preferences.getFloat(key, DEFAULT_SOURCE_SEPARATION_BLEND).coerceIn(0f, 1f)
+            preferences.getFloat(
+                key,
+                SourceSeparationBlendDemand.CENTER_BLEND,
+            ).coerceIn(0f, 1f)
         } else {
             null
         }
@@ -2147,7 +2149,6 @@ private fun MdxSourceDecodeMode.toUiState(): SourceSeparationDecodeModeUiState {
     }
 }
 
-private const val DEFAULT_SOURCE_SEPARATION_BLEND = 0.5f
 private const val KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED =
     "source_separation.playback_enabled"
 private const val KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG =
@@ -2156,7 +2157,6 @@ private const val KEY_SOURCE_SEPARATION_GLOBAL_BLEND =
     "source_separation.global_blend"
 private const val KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND =
     "source_separation.per_song_blend.pending"
-private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
 private const val SOURCE_SEPARATION_FOREGROUND_WORKER_IDLE_MS = 250L
 private const val SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS = 50L
 private const val SOURCE_SEPARATION_DEBUG_WINDOW_SAMPLE_LIMIT = 128

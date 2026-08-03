@@ -99,6 +99,7 @@ import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.playback.renderer.AlacWorkaroundCodecSelector
 import com.mardous.booming.playback.renderer.BoomingMusicRenderersFactory
 import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
+import com.mardous.booming.separation.SourceSeparationBlendDemand
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
@@ -1208,7 +1209,7 @@ class PlaybackService :
             if (newSong != Song.emptySong) {
                 val deferredPerSongBlend = if (shouldApplyDeferredPerSongSourceSeparationSync) {
                     sourceSeparationForegroundWorkerCoordinator.recordedBlendForSong(newSong)
-                        ?: DEFAULT_SOURCE_SEPARATION_BLEND
+                        ?: SourceSeparationBlendDemand.CENTER_BLEND
                 } else {
                     null
                 }
@@ -1290,7 +1291,7 @@ class PlaybackService :
         applySourceSeparationBlend(normalizedBlend)
         updateSourceSeparationForegroundWorkerSong(song)
 
-        if (isDefaultSourceSeparationBlend(normalizedBlend)) {
+        if (SourceSeparationBlendDemand.isCentered(normalizedBlend)) {
             clearSourceSeparationPlayback(restoreOriginalItem = true, broadcast = false)
             clearSourceSeparationPlaybackProcessing()
             restoreSourceSeparationOutputVolume("perSongTransition.defaultBlend")
@@ -1551,7 +1552,9 @@ class PlaybackService :
         }
         val effectiveExpectProcessing =
             (expectProcessing || sourceSeparationPlaybackExpectProcessing) &&
-                    !isDefaultSourceSeparationBlend(sourceSeparationMixProcessor.blend)
+                    SourceSeparationBlendDemand.requiresSeparatedOutput(
+                        sourceSeparationMixProcessor.blend,
+                    )
         setSourceSeparationPlaybackExpectProcessing(effectiveExpectProcessing)
         val result = ensureSourceSeparationPlaybackReady(
             showUnavailableMessage = false,
@@ -1631,7 +1634,9 @@ class PlaybackService :
         }
         val effectiveExpectProcessing =
             sourceSeparationPlaybackExpectProcessing &&
-                    !isDefaultSourceSeparationBlend(sourceSeparationMixProcessor.blend)
+                    SourceSeparationBlendDemand.requiresSeparatedOutput(
+                        sourceSeparationMixProcessor.blend,
+                    )
         if (expectProcessing && !effectiveExpectProcessing) {
             traceSourceSeparationPlayback(
                 "check.expectProcessing.superseded",
@@ -2345,7 +2350,7 @@ class PlaybackService :
 
     private fun setSourceSeparationBlend(blend: Float, persist: Boolean): SessionResult {
         applySourceSeparationBlend(blend)
-        if (isDefaultSourceSeparationBlend(blend)) {
+        if (SourceSeparationBlendDemand.isCentered(blend)) {
             setSourceSeparationPlaybackExpectProcessing(false)
             cancelSourceSeparationPlaybackReadinessMonitor("centerBlend")
             if (sourceSeparationPlaybackIsProcessing &&
@@ -2431,8 +2436,9 @@ class PlaybackService :
                         "generation=${selection.generation}",
                 )
                 if (sourceSeparationPlaybackRequested) {
-                    val expectProcessing =
-                        !isDefaultSourceSeparationBlend(sourceSeparationMixProcessor.blend)
+                    val expectProcessing = SourceSeparationBlendDemand.requiresSeparatedOutput(
+                        sourceSeparationMixProcessor.blend,
+                    )
                     setSourceSeparationPlaybackExpectProcessing(expectProcessing)
                     ensureSourceSeparationPlaybackReady(
                         showUnavailableMessage = false,
@@ -2526,11 +2532,11 @@ class PlaybackService :
                 if (!currentCacheCompleted) return@withContext null
 
                 val nextNeedsSeparatedOutput = if (autoSyncOnTransition) {
-                    !isDefaultSourceSeparationBlend(currentBlend)
+                    SourceSeparationBlendDemand.requiresSeparatedOutput(currentBlend)
                 } else {
                     sourceSeparationForegroundWorkerCoordinator
                         .recordedBlendForSong(nextSong)
-                        ?.let { blend -> !isDefaultSourceSeparationBlend(blend) }
+                        ?.let(SourceSeparationBlendDemand::requiresSeparatedOutput)
                         ?: false
                 }
                 nextSong.takeIf { nextNeedsSeparatedOutput }
@@ -2982,7 +2988,9 @@ class PlaybackService :
                     delay(SOURCE_SEPARATION_READINESS_MONITOR_DELAY_MS)
                     val activeSession = sourceSeparationPlaybackSession
                     if (!sourceSeparationPlaybackRequested ||
-                        isDefaultSourceSeparationBlend(sourceSeparationMixProcessor.blend) ||
+                        SourceSeparationBlendDemand.isCentered(
+                            sourceSeparationMixProcessor.blend,
+                        ) ||
                         activeSession?.sessionId != session.sessionId ||
                         !activeSession.requiresReadinessGate
                     ) {
@@ -3290,13 +3298,9 @@ class PlaybackService :
             return false
         }
         if (!sourceSeparationPlaybackAutoSyncOnTransition) return false
-        return !isDefaultSourceSeparationBlend(sourceSeparationMixProcessor.blend)
-    }
-
-    private fun isDefaultSourceSeparationBlend(blend: Float): Boolean {
-        return kotlin.math.abs(
-            blend.coerceIn(0f, 1f) - DEFAULT_SOURCE_SEPARATION_BLEND
-        ) < SOURCE_SEPARATION_BLEND_EPSILON
+        return SourceSeparationBlendDemand.requiresSeparatedOutput(
+            sourceSeparationMixProcessor.blend,
+        )
     }
 
     private fun setSourceSeparationPlaybackExpectProcessing(expectProcessing: Boolean) {
@@ -4322,8 +4326,6 @@ class PlaybackService :
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_DELAY_MS = 120L
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_FALLBACK_DELAY_MS = 1500L
         private const val SOURCE_SEPARATION_BLEND_FLUSH_SEEK_OFFSET_MS = 10L
-        private const val DEFAULT_SOURCE_SEPARATION_BLEND = 0.5f
-        private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
         private const val SOURCE_SEPARATION_EXPECT_PROCESSING_TIMEOUT_MS = 10_000L
         private const val SOURCE_SEPARATION_PROCESSING_LEASE_HEARTBEAT_MS = 1_000L
         private const val SOURCE_SEPARATION_BUFFERING_FGS_REFRESH_MS = 3_000L

@@ -45,6 +45,7 @@ import com.mardous.booming.playback.getQueueItems
 import com.mardous.booming.playback.shuffle.ShuffleManager
 import com.mardous.booming.playback.toMediaItems
 import com.mardous.booming.BuildConfig
+import com.mardous.booming.separation.SourceSeparationBlendDemand
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
@@ -1465,7 +1466,7 @@ class PlayerViewModel(
             song = song,
             fallbackBlend = _sourceSeparationPlaybackStateFlow.value.blend,
         )
-        return !isDefaultSourceSeparationBlend(blend)
+        return SourceSeparationBlendDemand.requiresSeparatedOutput(blend)
     }
 
     fun setSourceSeparationBlendMode(mode: SourceSeparationBlendMode) {
@@ -1610,7 +1611,7 @@ class PlayerViewModel(
             updateSourceSeparationBlendState(blend)
             val expectProcessingImmediately =
                 _sourceSeparationAutoStartFlow.value &&
-                        !isDefaultSourceSeparationBlend(blend)
+                        SourceSeparationBlendDemand.requiresSeparatedOutput(blend)
             if (expectProcessingImmediately) {
                 publishSourceSeparationProcessingIntent(song, blend)
                 if (currentSong.id == song.id) {
@@ -1675,7 +1676,9 @@ class PlayerViewModel(
                     fallbackBlend = null,
                 )
             }
-            if (!isDefaultSourceSeparationBlend(blend) && currentSong.id == song.id) {
+            if (SourceSeparationBlendDemand.requiresSeparatedOutput(blend) &&
+                currentSong.id == song.id
+            ) {
                 sourceSeparationForegroundWorkerCoordinator
                     .requestPlaybackDemandSong(song)
             }
@@ -1717,11 +1720,13 @@ class PlayerViewModel(
             val nextNeedsSeparatedOutput = when (latestMode) {
                 SourceSeparationBlendMode.Off -> false
                 SourceSeparationBlendMode.Global ->
-                    !isDefaultSourceSeparationBlend(readSourceSeparationGlobalBlend())
+                    SourceSeparationBlendDemand.requiresSeparatedOutput(
+                        readSourceSeparationGlobalBlend(),
+                    )
                 SourceSeparationBlendMode.PerSong ->
                     sourceSeparationForegroundWorkerCoordinator
                         .recordedBlendForSong(next)
-                        ?.let { blend -> !isDefaultSourceSeparationBlend(blend) }
+                        ?.let(SourceSeparationBlendDemand::requiresSeparatedOutput)
                         ?: false
             }
             if (!nextNeedsSeparatedOutput) return@launch
@@ -1918,7 +1923,7 @@ class PlayerViewModel(
     private fun readSourceSeparationGlobalBlend(): Float {
         return preferences.getFloat(
             KEY_SOURCE_SEPARATION_GLOBAL_BLEND,
-            DEFAULT_SOURCE_SEPARATION_BLEND,
+            SourceSeparationBlendDemand.CENTER_BLEND,
         ).coerceIn(0f, 1f)
     }
 
@@ -2023,7 +2028,7 @@ class PlayerViewModel(
         if (!_sourceSeparationAutoStartFlow.value ||
             _sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
             song == Song.emptySong ||
-            isDefaultSourceSeparationBlend(blend)
+            SourceSeparationBlendDemand.isCentered(blend)
         ) {
             return
         }
@@ -2080,7 +2085,7 @@ class PlayerViewModel(
     ): SessionResult? {
         if (!_sourceSeparationAutoStartFlow.value ||
             _sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
-            isDefaultSourceSeparationBlend(blend)
+            SourceSeparationBlendDemand.isCentered(blend)
         ) {
             return null
         }
@@ -2108,11 +2113,6 @@ class PlayerViewModel(
             rememberPerSong -> SourceSeparationBlendMode.PerSong
             else -> SourceSeparationBlendMode.Global
         }
-    }
-
-    private fun isDefaultSourceSeparationBlend(blend: Float): Boolean {
-        return kotlin.math.abs(blend.coerceIn(0f, 1f) - DEFAULT_SOURCE_SEPARATION_BLEND) <
-                SOURCE_SEPARATION_BLEND_EPSILON
     }
 
     fun updateSourceSeparationPlaybackState(args: Bundle) {
@@ -2514,7 +2514,6 @@ class PlayerViewModel(
 
     companion object {
         private const val TAG = "PlayerViewModel"
-        private const val DEFAULT_SOURCE_SEPARATION_BLEND = 0.5f
         private const val KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED =
             "source_separation.playback_enabled"
         private const val KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG =
@@ -2523,7 +2522,6 @@ class PlayerViewModel(
             "source_separation.global_blend"
         private const val KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND =
             "source_separation.per_song_blend.pending"
-        private const val SOURCE_SEPARATION_BLEND_EPSILON = 0.0001f
         private const val SOURCE_SEPARATION_BLEND_PREVIEW_THROTTLE_MS = 33L
     }
 }
