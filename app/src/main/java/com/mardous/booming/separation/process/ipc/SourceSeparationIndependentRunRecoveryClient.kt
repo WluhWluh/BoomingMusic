@@ -9,9 +9,11 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLi
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
+import com.mardous.booming.separation.model.preset.SourceSeparationActiveSelectionSnapshot
 
 internal interface SourceSeparationIndependentRunRecovery {
     fun reconnect(
+        activeSelection: SourceSeparationActiveSelectionSnapshot,
         onEvent: (SourceSeparationExecutionHostEvent) -> Unit,
     ): SourceSeparationReconnectedSession?
 }
@@ -24,12 +26,14 @@ internal class SourceSeparationIndependentRunRecoveryClient(
     },
 ) : SourceSeparationIndependentRunRecovery {
     override fun reconnect(
+        activeSelection: SourceSeparationActiveSelectionSnapshot,
         onEvent: (SourceSeparationExecutionHostEvent) -> Unit,
     ): SourceSeparationReconnectedSession? {
         val candidates = SourceSeparationIndependentRunRecoveryCandidateSelector.select(
-            store.listManifests().mapNotNull { manifest ->
+            journals = store.listManifests().mapNotNull { manifest ->
                 store.readRunJournal(manifest.cacheKey)
-            }
+            },
+            activeSelection = activeSelection,
         )
         Log.d(TAG, "reconnect candidates=${candidates.size}")
         if (candidates.isEmpty()) return null
@@ -97,11 +101,27 @@ internal class SourceSeparationIndependentRunRecoveryClient(
 internal object SourceSeparationIndependentRunRecoveryCandidateSelector {
     fun select(
         journals: List<SourceSeparationCacheRunJournal>,
+        activeSelection: SourceSeparationActiveSelectionSnapshot? = null,
     ): List<SourceSeparationCacheRunJournal> = journals.filter { journal ->
         journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running &&
             journal.request.runClass == SourceSeparationExecutionRunClass.ManualFullSong &&
             journal.request.backgroundPolicy ==
-            SourceSeparationBackgroundPolicy.IndependentForegroundEligible
+            SourceSeparationBackgroundPolicy.IndependentForegroundEligible &&
+            (activeSelection == null || journal.matches(activeSelection))
+    }
+
+    fun SourceSeparationCacheRunJournal.matches(
+        activeSelection: SourceSeparationActiveSelectionSnapshot,
+    ): Boolean {
+        val active = activeSelection.reference ?: return false
+        return request.identity.modelId == active.modelId &&
+            request.identity.artifactSha256.equals(
+                active.artifactSha256,
+                ignoreCase = true,
+            ) &&
+            request.identity.contractSchemaVersion == active.contractSchemaVersion &&
+            (active.profileId == null ||
+                request.identity.profileRevisionId == active.profileId)
     }
 }
 

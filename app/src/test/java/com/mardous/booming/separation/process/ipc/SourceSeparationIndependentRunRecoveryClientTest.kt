@@ -13,12 +13,50 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceIdenti
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
+import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
+import com.mardous.booming.separation.model.preset.SourceSeparationActiveSelectionSnapshot
 import org.junit.BeforeClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SourceSeparationIndependentRunRecoveryClientTest {
+    @Test
+    fun `candidate selector rejects a running journal from an inactive model`() {
+        val modelA = journal(
+            runId = "model-a",
+            runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+            modelId = "uvr_mdxnet_3_9662",
+        )
+        val modelB = journal(
+            runId = "model-b",
+            runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+            modelId = "uvr_mdxnet_kara",
+        )
+        val active = SourceSeparationActiveSelectionSnapshot(
+            reference = SourceSeparationActiveModelReference(
+                modelId = modelB.request.identity.modelId,
+                artifactSha256 = modelB.request.identity.artifactSha256,
+                contractSchemaVersion = modelB.request.identity.contractSchemaVersion,
+            ),
+            generation = 3L,
+        )
+
+        assertEquals(
+            listOf(modelB),
+            SourceSeparationIndependentRunRecoveryCandidateSelector.select(
+                journals = listOf(modelA, modelB),
+                activeSelection = active,
+            ),
+        )
+        assertTrue(
+            SourceSeparationIndependentRunRecoveryCandidateSelector.select(
+                journals = listOf(modelA, modelB),
+                activeSelection = active.copy(reference = null),
+            ).isEmpty(),
+        )
+    }
+
     @Test
     fun `candidate selector admits only running independent manual journals`() {
         val independent = journal("manual", SourceSeparationExecutionRunClass.ManualFullSong)
@@ -54,9 +92,10 @@ class SourceSeparationIndependentRunRecoveryClientTest {
     private fun journal(
         runId: String,
         runClass: SourceSeparationExecutionRunClass,
+        modelId: String = "uvr_mdxnet_3_9662",
     ): SourceSeparationCacheRunJournal {
         val contract = SourceSeparationCacheContractSnapshot.fromOfficial(
-            catalog.contracts.single { it.modelId == "uvr_mdxnet_3_9662" },
+            catalog.contracts.single { it.modelId == modelId },
         )
         val identity = contract.identity(
             source = SourceSeparationCacheSourceIdentity(

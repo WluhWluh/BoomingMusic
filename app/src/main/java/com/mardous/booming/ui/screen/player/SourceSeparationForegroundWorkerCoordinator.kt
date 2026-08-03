@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
@@ -81,10 +82,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private val playbackOwnerActive = AtomicBoolean(true)
     private val requestGeneration = AtomicLong()
     private val debugWindowSamples = ArrayDeque<SourceSeparationDebugWindowSample>()
+    private val stateLock = Any()
 
     private var workerJob: Job? = null
     private var workerActivated = false
-    private var workerSongId: Long? = null
     private var pendingStartRequest: SourceSeparationWorkerRequest? = null
     private var activeWorkerRequest: SourceSeparationWorkerRequest? = null
     private var activeWorkerSong: SourceSeparationRuntimeSong? = null
@@ -93,6 +94,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private var reconnectedSession: SourceSeparationReconnectedSession? = null
     @Volatile
     private var reconnectedSong: Song? = null
+    private var reconnectedSelection: SourceSeparationActiveSelectionSnapshot? = null
     @Volatile
     private var reconnectedLatestSequence = 0L
     private var autoStartSuppressedSongId: Long? = null
@@ -118,7 +120,43 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
 
     init {
         trace("init recovery=${independentRunRecovery != null}")
+        observeActiveSelection()
         independentRunRecovery?.let(::startIndependentRunRecovery)
+    }
+
+    private fun observeActiveSelection() {
+        var observed = activeSelectionFlow.value
+        workerScope.launch {
+            activeSelectionFlow.collect { selection ->
+                if (selection == observed) return@collect
+                val previous = observed
+                observed = selection
+                val recoveredToPause = synchronized(stateLock) {
+                    if (pendingStartRequest?.selection != selection) {
+                        pendingStartRequest = null
+                    }
+                    if (activeWorkerRequest?.selection != selection) {
+                        pauseRequested.set(true)
+                    }
+                    reconnectedSession.takeIf { reconnectedSelection != selection }
+                }
+                val state = _workerStateFlow.value
+                if (state.selectionGenerationOrNull() != null &&
+                    state.selectionGenerationOrNull() != selection.generation
+                ) {
+                    _workerStateFlow.value = SourceSeparationUiState.Idle
+                }
+                recoveredToPause?.let { session ->
+                    requestRecoveredControl(session, SourceSeparationRecoveredControl.Pause)
+                }
+                trace(
+                    SourceSeparationLifecycleTrace.format(
+                        event = "selection.changed",
+                        selectionGeneration = selection.generation,
+                    ) + " previousGeneration=${previous.generation}",
+                )
+            }
+        }
     }
 
     fun updateSong(
@@ -187,12 +225,14 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             isPlaying = false,
             updatedAtElapsedMs = nowElapsedMs,
         )
-        workerActivated = false
-        clearPendingStart()
-        if (SourceSeparationPlaybackLifecyclePolicy.shouldPauseWhenPlaybackStops(
+        val shouldPause = synchronized(stateLock) {
+            workerActivated = false
+            pendingStartRequest = null
+            SourceSeparationPlaybackLifecyclePolicy.shouldPauseWhenPlaybackStops(
                 activeWorkerRequest?.runClass,
             )
-        ) {
+        }
+        if (shouldPause) {
             pauseRequested.set(true)
         }
     }
@@ -250,61 +290,67 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             "requestFull song=${song.id} reason=${reason.name} " +
                     "recovery=${recoveryJob?.isActive == true} " +
                     "reconnected=${reconnectedSession != null} " +
-                    "worker=${workerJob?.isActive == true} workerSong=$workerSongId " +
+                    "worker=${workerJob?.isActive == true} " +
+                    "workerSong=${activeWorkerRequest?.song?.id} " +
                     "pending=${pendingStartRequest?.song?.id}",
         )
         val incoming = newFullRequest(song, reason)
-        workerActivated = true
-        autoStartSuppressedSongId = null
-        if (recoveryJob?.isActive == true || reconnectedSession != null) {
-            setPendingStart(incoming)
-            maybePauseRecoveredRunFor(incoming)
-            return
+        val action = synchronized(stateLock) {
+            workerActivated = true
+            autoStartSuppressedSongId = null
+            when {
+                recoveryJob?.isActive == true || reconnectedSession != null -> {
+                    setPendingStartLocked(incoming)
+                    SourceSeparationRequestAction.PauseRecovered
+                }
+                workerJob?.isActive == true -> {
+                    val active = activeWorkerRequest
+                    when {
+                        active?.identity == incoming.identity &&
+                            incoming.priority > active.priority -> {
+                            setPendingStartLocked(incoming)
+                            pauseRequested.set(true)
+                        }
+                        active?.identity == incoming.identity &&
+                            incoming.priority < active.priority -> Unit
+                        active?.identity == incoming.identity -> {
+                            pauseRequested.set(false)
+                            val workerState = _workerStateFlow.value
+                            if (workerState !is SourceSeparationUiState.Running) {
+                                setPendingStartLocked(incoming)
+                            }
+                            if (workerState is SourceSeparationUiState.Paused ||
+                                workerState is SourceSeparationUiState.Idle
+                            ) {
+                                _workerStateFlow.value = SourceSeparationUiState.Running(
+                                    songId = song.id,
+                                    songTitle = song.title,
+                                    selectionGeneration = incoming.selection.generation,
+                                    cacheKey = activeWorkerSong?.cacheKey,
+                                )
+                            }
+                        }
+                        else -> {
+                            setPendingStartLocked(incoming)
+                            if (active != null) pauseRequested.set(true)
+                        }
+                    }
+                    SourceSeparationRequestAction.None
+                }
+                else -> {
+                    cancelRequested.set(false)
+                    pauseRequested.set(false)
+                    setPendingStartLocked(incoming)
+                    SourceSeparationRequestAction.EnsureWorker
+                }
+            }
         }
-        if (workerJob?.isActive == true) {
-            if (activeWorkerRequest?.identity == incoming.identity) {
-                val active = activeWorkerRequest
-                if (active != null && incoming.priority > active.priority) {
-                    setPendingStart(incoming)
-                    pauseRequested.set(true)
-                    return
-                }
-                if (active != null && incoming.priority < active.priority) {
-                    return
-                }
-                pauseRequested.set(false)
-                val workerState = _workerStateFlow.value
-                if (workerState !is SourceSeparationUiState.Running) {
-                    setPendingStart(incoming)
-                }
-                if (workerState is SourceSeparationUiState.Paused ||
-                    workerState is SourceSeparationUiState.Idle
-                ) {
-                    _workerStateFlow.value = SourceSeparationUiState.Running(
-                        songId = song.id,
-                        songTitle = song.title,
-                        selectionGeneration = incoming.selection.generation,
-                        cacheKey = activeWorkerSong?.cacheKey,
-                    )
-                }
-                return
-            }
-            if (pendingStartRequest?.identity == incoming.identity) {
-                setPendingStart(incoming)
-                return
-            }
-            setPendingStart(incoming)
-            if (workerSongId != null) {
-                pauseRequested.set(true)
-            }
-            return
-        }
-
-        cancelRequested.set(false)
-        pauseRequested.set(false)
-        setPendingStart(incoming)
-        workerJob = workerScope.launch {
-            runWorkerLoop()
+        when (action) {
+            SourceSeparationRequestAction.PauseRecovered ->
+                maybePauseRecoveredRunFor(incoming)
+            SourceSeparationRequestAction.EnsureWorker ->
+                ensureWorkerRunningIfActivated()
+            SourceSeparationRequestAction.None -> Unit
         }
     }
 
@@ -315,28 +361,26 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             song = song,
             readyWindowCount = readyWindowCount,
         )
-        if (activeWorkerRequest?.identity == request.identity) return false
+        if (synchronized(stateLock) {
+                activeWorkerRequest?.identity == request.identity
+            }
+        ) return false
         if (hasReadyPlaybackStartCache(song, readyWindowCount)) return false
 
-        workerActivated = true
-        if (recoveryJob?.isActive == true || reconnectedSession != null) {
-            setPendingStart(request)
-            return true
+        val action = synchronized(stateLock) {
+            workerActivated = true
+            setPendingStartLocked(request)
+            when {
+                recoveryJob?.isActive == true || reconnectedSession != null ->
+                    SourceSeparationRequestAction.None
+                workerJob?.isActive == true -> SourceSeparationRequestAction.None
+                else -> SourceSeparationRequestAction.EnsureWorker
+            }
         }
-        if (pendingStartRequest?.identity == request.identity) {
-            setPendingStart(request)
-            return true
-        }
-        if (workerJob?.isActive == true) {
-            setPendingStart(request)
-            return true
-        }
-
-        cancelRequested.set(false)
-        pauseRequested.set(false)
-        setPendingStart(request)
-        workerJob = workerScope.launch {
-            runWorkerLoop()
+        if (action == SourceSeparationRequestAction.EnsureWorker) {
+            cancelRequested.set(false)
+            pauseRequested.set(false)
+            ensureWorkerRunningIfActivated()
         }
         return true
     }
@@ -369,13 +413,16 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     }
 
     fun cancel() {
-        workerActivated = false
+        val job = synchronized(stateLock) {
+            workerActivated = false
+            pendingStartRequest = null
+            workerJob
+        }
         cancelRequested.set(true)
-        clearPendingStart()
         reconnectedSession?.let { session ->
             requestRecoveredControl(session, SourceSeparationRecoveredControl.Cancel)
         }
-        workerJob?.cancel()
+        job?.cancel()
     }
 
     fun suppressAndPauseSong(songId: Long) {
@@ -400,10 +447,11 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     suspend fun waitForWorkerToLeaveSong(songId: Long) {
         // Job cancellation makes isActive false before runWorkerSong finishes
         // releasing the remote execution and cache lease.
-        while (workerSongId == songId ||
-            activeWorkerSong?.song?.id == songId ||
-            activeWorkerRequest?.song?.id == songId ||
-            (reconnectedSong?.id == songId && reconnectedSession != null)
+        while (synchronized(stateLock) {
+                activeWorkerSong?.song?.id == songId ||
+                    activeWorkerRequest?.song?.id == songId ||
+                    (reconnectedSong?.id == songId && reconnectedSession != null)
+            }
         ) {
             delay(SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS)
         }
@@ -415,19 +463,26 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         }
     }
 
-    fun isWorkerActive(): Boolean = workerJob?.isActive == true ||
-            recoveryJob?.isActive == true || reconnectedSession != null
+    fun isWorkerActive(): Boolean = synchronized(stateLock) {
+        workerJob?.isActive == true || recoveryJob?.isActive == true ||
+            reconnectedSession != null
+    }
 
-    fun runningSongId(): Long? = reconnectedSong?.id ?: workerSongId
+    fun runningSongId(): Long? = synchronized(stateLock) {
+        reconnectedSong?.id ?: activeWorkerRequest?.song?.id
+    }
 
-    fun runningCacheKey(): String? = reconnectedSession?.cacheKey ?: activeWorkerSong?.cacheKey
+    fun runningCacheKey(): String? = synchronized(stateLock) {
+        reconnectedSession?.cacheKey ?: activeWorkerSong?.cacheKey
+    }
 
-    fun pendingSongId(): Long? = pendingStartRequest?.song?.id
+    fun pendingSongId(): Long? = synchronized(stateLock) {
+        pendingStartRequest?.song?.id
+    }
 
-    fun protectedCacheKeys(): Set<String> = setOfNotNull(
-        activeWorkerSong?.cacheKey,
-        reconnectedSession?.cacheKey,
-    )
+    fun protectedCacheKeys(): Set<String> = synchronized(stateLock) {
+        setOfNotNull(activeWorkerSong?.cacheKey, reconnectedSession?.cacheKey)
+    }
 
     suspend fun autoStartDecision(
         song: Song,
@@ -522,7 +577,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             append("currentSong=").append(playbackState.song.id)
             append(" title=").append(playbackState.song.title)
             append(" workerActive=").append(workerJob?.isActive == true)
-            append(" workerSong=").append(workerSongId)
+            append(" workerSong=").append(activeWorkerRequest?.song?.id)
             append(" recoveryActive=").append(recoveryJob?.isActive == true)
             append(" reconnectedSong=").append(reconnectedSong?.id)
             append(" reconnectedRun=").append(reconnectedSession?.runId)
@@ -577,21 +632,41 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         var session: SourceSeparationReconnectedSession? = null
         var terminal = false
         try {
+            val recoverySelection = activeSelectionFlow.value
             val reconnected = recovery.reconnect(
+                activeSelection = recoverySelection,
                 onEvent = { event -> events.trySend(event) },
             ) ?: run {
                 trace("recovery.run no reconnectable run")
                 return
             }
             session = reconnected
+            if (activeSelectionFlow.value != recoverySelection ||
+                (recoverySelection.reference != null &&
+                    !session.journal.matchesSelection(recoverySelection))
+            ) {
+                trace(
+                    SourceSeparationLifecycleTrace.format(
+                        event = "recovery.reject.staleSelection",
+                        selectionGeneration = recoverySelection.generation,
+                        cacheKey = session.cacheKey,
+                        runId = session.runId,
+                    ),
+                )
+                runCatching { session.pause() }
+                return
+            }
             trace(
                 "recovery.run adopted run=${reconnected.runId} " +
                         "generation=${reconnected.processGeneration} " +
                         "cache=${reconnected.cacheKey.take(12)}",
             )
-            reconnectedSession = session
-            reconnectedSong = session.journal.toRecoveredSong()
-            reconnectedLatestSequence = 0L
+            synchronized(stateLock) {
+                reconnectedSession = session
+                reconnectedSong = session.journal.toRecoveredSong()
+                reconnectedSelection = recoverySelection
+                reconnectedLatestSequence = 0L
+            }
             terminal = applyRecoveredBaseline(session)
             if (!terminal) {
                 when {
@@ -643,6 +718,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             if (reconnectedSession === session || reconnectedSession == null) {
                 reconnectedSession = null
                 reconnectedSong = null
+                reconnectedSelection = null
                 reconnectedLatestSequence = 0L
             }
             if (recoveryJob == activeJob) {
@@ -667,6 +743,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         _workerStateFlow.value = SourceSeparationUiState.Running(
             songId = song.id,
             songTitle = song.title,
+            selectionGeneration = reconnectedSelection?.generation,
+            cacheKey = session.cacheKey,
         )
         return applyRecoveredEvent(session, session.baselineEvent)
     }
@@ -675,6 +753,26 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         session: SourceSeparationReconnectedSession,
         event: SourceSeparationExecutionHostEvent,
     ): Boolean {
+        val admittedSelection = synchronized(stateLock) { reconnectedSelection }
+        if (admittedSelection != null && activeSelectionFlow.value != admittedSelection) {
+            trace(
+                SourceSeparationLifecycleTrace.format(
+                    event = "recovery.event.staleSelection",
+                    selectionGeneration = admittedSelection.generation,
+                    cacheKey = session.cacheKey,
+                    runId = session.runId,
+                ),
+            )
+            runCatching { session.pause() }
+            session.close()
+            synchronized(stateLock) {
+                if (reconnectedSession === session) {
+                    reconnectedSession = null
+                    reconnectedSelection = null
+                }
+            }
+            return true
+        }
         require(event.runId == session.runId &&
             event.processGeneration == session.processGeneration
         ) { "Recovered source-separation event has a stale identity." }
@@ -691,11 +789,18 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 _workerStateFlow.value = SourceSeparationUiState.Running(
                     songId = recoveredSong.id,
                     songTitle = recoveredSong.title,
+                    selectionGeneration = reconnectedSelection?.generation,
+                    cacheKey = session.cacheKey,
                 )
                 false
             }
             is SourceSeparationExecutionHostEventPayload.Progress -> {
-                publishWorkerProgress(recoveredSong, payload.progress.toMdxRangeProgress())
+                publishWorkerProgress(
+                    song = recoveredSong,
+                    progress = payload.progress.toMdxRangeProgress(),
+                    selectionGeneration = reconnectedSelection?.generation,
+                    cacheKey = session.cacheKey,
+                )
                 false
             }
             is SourceSeparationExecutionHostEventPayload.Prepared -> {
@@ -703,6 +808,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     _workerStateFlow.value = SourceSeparationUiState.Running(
                         songId = recoveredSong.id,
                         songTitle = recoveredSong.title,
+                        selectionGeneration = reconnectedSelection?.generation,
+                        cacheKey = session.cacheKey,
                     )
                 }
                 callbacks?.onSourceSeparationWorkerPrepared(callbackSong)
@@ -715,6 +822,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 _workerStateFlow.value = SourceSeparationUiState.Completed(
                     songId = recoveredSong.id,
                     songTitle = recoveredSong.title,
+                    selectionGeneration = reconnectedSelection?.generation,
+                    cacheKey = session.cacheKey,
                 )
                 pruneCachesIfEnabled()
                 closeRecoveredTerminal(session)
@@ -742,6 +851,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 _workerStateFlow.value = SourceSeparationUiState.Canceled(
                     songId = recoveredSong.id,
                     songTitle = recoveredSong.title,
+                    selectionGeneration = reconnectedSelection?.generation,
+                    cacheKey = session.cacheKey,
                 )
                 workerActivated = false
                 clearPendingStart()
@@ -755,6 +866,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     songId = recoveredSong.id,
                     songTitle = recoveredSong.title,
                     message = message,
+                    selectionGeneration = reconnectedSelection?.generation,
+                    cacheKey = session.cacheKey,
                 )
                 workerActivated = false
                 clearPendingStart()
@@ -822,7 +935,6 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             while (activeJob?.isActive == true && !cancelRequested.get()) {
                 val request = nextWorkerRequest()
                 if (request == null) {
-                    workerSongId = null
                     if (!workerActivated) break
                     delay(SOURCE_SEPARATION_FOREGROUND_WORKER_IDLE_MS)
                     continue
@@ -835,8 +947,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                         requestGeneration = request.requestGeneration,
                     ) + " song=${request.song.id} reason=${request.debugReason}",
                 )
-                clearPendingStart()
-                activeWorkerRequest = request
+                clearPendingStart(request)
+                synchronized(stateLock) {
+                    activeWorkerRequest = request
+                }
                 try {
                     if (!SourceSeparationPlaybackLifecyclePolicy
                             .canRunWithPlaybackOwnerState(
@@ -848,19 +962,23 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     }
                     runWorkerSong(request, activeJob)
                 } finally {
-                    if (activeWorkerRequest === request) {
-                        activeWorkerRequest = null
+                    synchronized(stateLock) {
+                        if (activeWorkerRequest?.requestGeneration ==
+                            request.requestGeneration
+                        ) {
+                            activeWorkerRequest = null
+                        }
                     }
                 }
             }
         } finally {
-            if (workerJob == activeJob) {
-                workerJob = null
+            synchronized(stateLock) {
+                if (workerJob == activeJob) {
+                    workerJob = null
+                    activeWorkerRequest = null
+                    activeWorkerSong = null
+                }
             }
-            workerSongId = null
-            activeWorkerRequest = null
-            activeWorkerSong = null
-            clearPendingStart()
             cancelRequested.set(false)
             pauseRequested.set(false)
             trace(
@@ -944,7 +1062,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         ) {
             autoStartSuppressedSongId = null
         }
-        val runningSongId = workerSongId ?: return
+        val runningSongId = synchronized(stateLock) {
+            activeWorkerRequest?.song?.id
+        } ?: return
         if (song.id != runningSongId) {
             if (isRunningPreStartRequestFor(song)) {
                 return
@@ -965,10 +1085,16 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
 
     private fun isRunningPreStartRequestFor(song: Song): Boolean {
         return activeWorkerRequest is SourceSeparationWorkerRequest.StartWindowPreStart &&
-                workerSongId == song.id
+                activeWorkerRequest?.song?.id == song.id
     }
 
     private fun setPendingStart(request: SourceSeparationWorkerRequest) {
+        synchronized(stateLock) {
+            setPendingStartLocked(request)
+        }
+    }
+
+    private fun setPendingStartLocked(request: SourceSeparationWorkerRequest) {
         val current = pendingStartRequest
         pendingStartRequest = if (current?.identity == request.identity &&
             current.priority > request.priority
@@ -979,14 +1105,31 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         }
     }
 
-    private fun clearPendingStart() {
-        pendingStartRequest = null
+    private fun clearPendingStart(expected: SourceSeparationWorkerRequest? = null) {
+        synchronized(stateLock) {
+            if (expected == null ||
+                pendingStartRequest?.requestGeneration == expected.requestGeneration
+            ) {
+                pendingStartRequest = null
+            }
+        }
     }
 
     private fun ensureWorkerRunningIfActivated() {
-        if (!workerActivated || workerJob?.isActive == true ||
-            recoveryJob?.isActive == true || reconnectedSession != null
-        ) {
+        val job = synchronized(stateLock) {
+            if (!workerActivated || workerJob?.isActive == true ||
+                recoveryJob?.isActive == true || reconnectedSession != null
+            ) {
+                null
+            } else {
+                cancelRequested.set(false)
+                pauseRequested.set(false)
+                workerScope.launch(start = CoroutineStart.LAZY) {
+                    runWorkerLoop()
+                }.also { workerJob = it }
+            }
+        }
+        if (job == null) {
             trace(
                 "worker.ensure skipped activated=$workerActivated " +
                         "worker=${workerJob?.isActive == true} " +
@@ -995,12 +1138,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             )
             return
         }
-        cancelRequested.set(false)
-        pauseRequested.set(false)
         trace("worker.ensure launch")
-        workerJob = workerScope.launch {
-            runWorkerLoop()
-        }
+        job.start()
     }
 
     private suspend fun runWorkerSong(
@@ -1020,7 +1159,6 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             )
         }
         pauseRequested.set(playbackOwnerLost())
-        workerSongId = song.id
         trace(
             "worker.song begin song=${song.id} reason=${request.debugReason} " +
                     "pause=${pauseRequested.get()}",
@@ -1035,18 +1173,34 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             )) {
                 is SourceSeparationRuntimeSongResolution.Ready -> resolution.song
                 is SourceSeparationRuntimeSongResolution.Unavailable -> {
+                    if (!isCurrentRequest(request)) {
+                        traceStaleRequest("worker.unavailable.stale", request, null)
+                        return
+                    }
                     trace("worker.song unavailable song=${song.id} reason=${resolution.reason}")
                     failUnavailableSong(song, resolution, request.selection.generation)
                     return
                 }
             }
+            if (!isCurrentRequest(request)) {
+                traceStaleRequest("worker.resolve.stale", request, resolved.cacheKey)
+                return
+            }
             admittedSong = resolved
-            activeWorkerSong = resolved
+            synchronized(stateLock) {
+                if (activeWorkerRequest?.requestGeneration == request.requestGeneration) {
+                    activeWorkerSong = resolved
+                }
+            }
             val shouldPromoteCompletedStems = preferences.getBoolean(
                 SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
                 true,
             )
             if (hasCompletedCache(resolved)) {
+                if (!isCurrentRequest(request, resolved.cacheKey)) {
+                    traceStaleRequest("worker.completedCache.stale", request, resolved.cacheKey)
+                    return
+                }
                 _workerStateFlow.value = SourceSeparationUiState.Completed(
                     songId = song.id,
                     songTitle = song.title,
@@ -1075,6 +1229,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 tryGpu = tryGpu,
                 runClass = request.runClass,
                 onProgress = { progress ->
+                    if (!isCurrentRequest(request, resolved.cacheKey)) {
+                        traceStaleRequest("worker.progress.stale", request, resolved.cacheKey)
+                        return@separate
+                    }
                     if (preStartReadyWindowCount != null &&
                         progress.scheduler?.playbackSegmentIndex == 0 &&
                         progress.scheduler.playbackReadyWindowReadyCount >=
@@ -1090,6 +1248,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     )
                 },
                 onPrepared = {
+                    if (!isCurrentRequest(request, resolved.cacheKey)) {
+                        traceStaleRequest("worker.prepared.stale", request, resolved.cacheKey)
+                        return@separate
+                    }
                     if (preStartReadyWindowCount == null &&
                         readBlendMode() == SourceSeparationBlendMode.PerSong
                     ) {
@@ -1119,6 +1281,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 ),
                 shouldPause = {
                     playbackOwnerLost() ||
+                            !isCurrentRequest(request, resolved.cacheKey) ||
                             pauseRequested.get() ||
                             preStartSatisfied ||
                             (preStartReadyWindowCount == null &&
@@ -1130,6 +1293,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                             (!pauseRequested.get() && activeJob?.isActive != true)
                 },
             )
+            if (!isCurrentRequest(request, resolved.cacheKey)) {
+                traceStaleRequest("worker.result.stale", request, resolved.cacheKey)
+                return
+            }
             if (result is SourceSeparationModelAwareEngineResult.Busy) {
                 trace("worker.song busy song=${song.id}")
                 _workerStateFlow.value = SourceSeparationUiState.Idle
@@ -1165,64 +1332,81 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             trace("worker.song completed song=${song.id} cache=${resolved.cacheKey.take(12)}")
         } catch (_: SourceSeparationPausedException) {
             trace("worker.song paused song=${song.id}")
-            _workerStateFlow.value = SourceSeparationUiState.Idle
-            if (!preStartSatisfied) {
-                callbacks?.onSourceSeparationWorkerPaused(song)
+            if (isCurrentRequest(request, admittedSong?.cacheKey)) {
+                _workerStateFlow.value = SourceSeparationUiState.Idle
+                if (!preStartSatisfied) {
+                    callbacks?.onSourceSeparationWorkerPaused(song)
+                }
+            } else {
+                traceStaleRequest("worker.paused.stale", request, admittedSong?.cacheKey)
             }
         } catch (_: CancellationException) {
             trace("worker.song canceled song=${song.id}")
-            _workerStateFlow.value = SourceSeparationUiState.Canceled(
-                songId = song.id,
-                songTitle = song.title,
-                selectionGeneration = request.selection.generation,
-                cacheKey = admittedSong?.cacheKey,
-            )
+            if (isCurrentRequest(request, admittedSong?.cacheKey)) {
+                _workerStateFlow.value = SourceSeparationUiState.Canceled(
+                    songId = song.id,
+                    songTitle = song.title,
+                    selectionGeneration = request.selection.generation,
+                    cacheKey = admittedSong?.cacheKey,
+                )
+            }
             cancelRequested.set(true)
         } catch (_: SourceSeparationAdmittedGpuRuntimeMismatchException) {
             trace("worker.song gpu runtime mismatch song=${song.id}")
             val message = context.getString(R.string.source_separation_model_load_failed)
-            _workerStateFlow.value = SourceSeparationUiState.Failed(
-                songId = song.id,
-                songTitle = song.title,
-                message = message,
-                selectionGeneration = request.selection.generation,
-                cacheKey = admittedSong?.cacheKey,
-            )
-            callbacks?.onSourceSeparationWorkerModelLoadFailed(message)
-            workerActivated = false
-            clearPendingStart()
-            cancelRequested.set(true)
+            if (isCurrentRequest(request, admittedSong?.cacheKey)) {
+                _workerStateFlow.value = SourceSeparationUiState.Failed(
+                    songId = song.id,
+                    songTitle = song.title,
+                    message = message,
+                    selectionGeneration = request.selection.generation,
+                    cacheKey = admittedSong?.cacheKey,
+                )
+                callbacks?.onSourceSeparationWorkerModelLoadFailed(message)
+                synchronized(stateLock) {
+                    workerActivated = false
+                    pendingStartRequest = null
+                }
+                cancelRequested.set(true)
+            }
         } catch (_: SourceSeparationRemoteHostDiedException) {
             trace("worker.song remote host died song=${song.id}")
-            _workerStateFlow.value = SourceSeparationUiState.Failed(
-                songId = song.id,
-                songTitle = song.title,
-                message = remoteProcessStoppedMessage(),
-                selectionGeneration = request.selection.generation,
-                cacheKey = admittedSong?.cacheKey,
-            )
-            workerActivated = false
-            clearPendingStart()
-            cancelRequested.set(true)
+            if (isCurrentRequest(request, admittedSong?.cacheKey)) {
+                _workerStateFlow.value = SourceSeparationUiState.Failed(
+                    songId = song.id,
+                    songTitle = song.title,
+                    message = remoteProcessStoppedMessage(),
+                    selectionGeneration = request.selection.generation,
+                    cacheKey = admittedSong?.cacheKey,
+                )
+                synchronized(stateLock) {
+                    workerActivated = false
+                    pendingStartRequest = null
+                }
+                cancelRequested.set(true)
+            }
         } catch (error: Throwable) {
             trace(
                 "worker.song failed song=${song.id} " +
                         "${error::class.java.simpleName}:${error.message}",
             )
-            _workerStateFlow.value = SourceSeparationUiState.Failed(
-                songId = song.id,
-                songTitle = song.title,
-                message = error.message,
-                selectionGeneration = request.selection.generation,
-                cacheKey = admittedSong?.cacheKey,
-            )
-            cancelRequested.set(true)
-        } finally {
-            if (workerSongId == song.id) {
-                workerSongId = null
+            if (isCurrentRequest(request, admittedSong?.cacheKey)) {
+                _workerStateFlow.value = SourceSeparationUiState.Failed(
+                    songId = song.id,
+                    songTitle = song.title,
+                    message = error.message,
+                    selectionGeneration = request.selection.generation,
+                    cacheKey = admittedSong?.cacheKey,
+                )
+                cancelRequested.set(true)
             }
-            if (activeWorkerSong === admittedSong) {
-                activeWorkerSong = null
+        } finally {
+            synchronized(stateLock) {
+                if (activeWorkerRequest?.requestGeneration == request.requestGeneration &&
+                    activeWorkerSong === admittedSong
+                ) {
+                    activeWorkerSong = null
+                }
             }
             pauseRequested.set(false)
             trace("worker.song end song=${song.id} worker=${workerJob?.isActive == true}")
@@ -1303,8 +1487,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         ) {
             callbacks?.onSourceSeparationWorkerModelLoadFailed(message)
         }
-        workerActivated = false
-        clearPendingStart()
+        synchronized(stateLock) {
+            workerActivated = false
+            pendingStartRequest = null
+        }
         cancelRequested.set(true)
     }
 
@@ -1543,6 +1729,31 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             requestGeneration = requestGeneration.incrementAndGet(),
         )
 
+    private fun isCurrentRequest(
+        request: SourceSeparationWorkerRequest,
+        cacheKey: String? = null,
+    ): Boolean = synchronized(stateLock) {
+        activeWorkerRequest?.requestGeneration == request.requestGeneration &&
+            activeWorkerRequest?.selection == request.selection &&
+            activeSelectionFlow.value == request.selection &&
+            (cacheKey == null || activeWorkerSong?.cacheKey == cacheKey)
+    }
+
+    private fun traceStaleRequest(
+        event: String,
+        request: SourceSeparationWorkerRequest,
+        cacheKey: String?,
+    ) {
+        trace(
+            SourceSeparationLifecycleTrace.format(
+                event = event,
+                selectionGeneration = request.selection.generation,
+                cacheKey = cacheKey,
+                requestGeneration = request.requestGeneration,
+            ),
+        )
+    }
+
     private fun trace(message: String) {
         Log.d(TAG, message)
     }
@@ -1555,6 +1766,12 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
 private enum class SourceSeparationPendingStartReason(val priority: Int) {
     Manual(priority = 2),
     PlaybackDemand(priority = 1),
+}
+
+private enum class SourceSeparationRequestAction {
+    None,
+    EnsureWorker,
+    PauseRecovered,
 }
 
 private sealed interface SourceSeparationWorkerRequest {
@@ -1674,6 +1891,16 @@ private fun SourceSeparationCacheRunJournal.toRecoveredSong(): Song {
     )
 }
 
+private fun SourceSeparationCacheRunJournal.matchesSelection(
+    selection: SourceSeparationActiveSelectionSnapshot,
+): Boolean {
+    val active = selection.reference ?: return false
+    return request.identity.modelId == active.modelId &&
+        request.identity.artifactSha256.equals(active.artifactSha256, ignoreCase = true) &&
+        request.identity.contractSchemaVersion == active.contractSchemaVersion &&
+        (active.profileId == null || request.identity.profileRevisionId == active.profileId)
+}
+
 interface SourceSeparationForegroundWorkerCallbacks {
     fun onSourceSeparationWorkerProgress(song: Song)
     fun onSourceSeparationWorkerPrepared(song: Song)
@@ -1765,6 +1992,15 @@ private fun SourceSeparationUiState.debugName(): String {
         is SourceSeparationUiState.Paused -> "Paused(song=$songId)"
         is SourceSeparationUiState.Failed -> "Failed(song=$songId message=${message.orEmpty()})"
     }
+}
+
+private fun SourceSeparationUiState.selectionGenerationOrNull(): Long? = when (this) {
+    SourceSeparationUiState.Idle -> null
+    is SourceSeparationUiState.Running -> selectionGeneration
+    is SourceSeparationUiState.Completed -> selectionGeneration
+    is SourceSeparationUiState.Canceled -> selectionGeneration
+    is SourceSeparationUiState.Paused -> selectionGeneration
+    is SourceSeparationUiState.Failed -> selectionGeneration
 }
 
 private fun MdxSourceDecodeMode.toUiState(): SourceSeparationDecodeModeUiState {

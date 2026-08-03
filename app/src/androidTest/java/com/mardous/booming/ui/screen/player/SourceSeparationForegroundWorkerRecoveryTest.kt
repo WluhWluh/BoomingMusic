@@ -26,6 +26,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
 import com.mardous.booming.separation.process.SourceSeparationExecutionProgress
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
+import com.mardous.booming.separation.model.preset.SourceSeparationActiveSelectionSnapshot
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteHostDiedException
 import com.mardous.booming.separation.process.ipc.SourceSeparationReconnectedSession
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
@@ -411,6 +412,7 @@ class SourceSeparationForegroundWorkerRecoveryTest {
         private var onEvent: ((SourceSeparationExecutionHostEvent) -> Unit)? = null
 
         override fun reconnect(
+            activeSelection: SourceSeparationActiveSelectionSnapshot,
             onEvent: (SourceSeparationExecutionHostEvent) -> Unit,
         ): SourceSeparationReconnectedSession {
             this.onEvent = onEvent
@@ -436,6 +438,7 @@ class SourceSeparationForegroundWorkerRecoveryTest {
         val release = CountDownLatch(1)
 
         override fun reconnect(
+            activeSelection: SourceSeparationActiveSelectionSnapshot,
             onEvent: (SourceSeparationExecutionHostEvent) -> Unit,
         ): SourceSeparationReconnectedSession {
             entered.countDown()
