@@ -4,7 +4,7 @@ Status: active product and implementation plan. The product and data contracts
 in this document are frozen; phase checklists may be refined only without
 silently changing those contracts.
 
-Updated: 2026-08-02
+Updated: 2026-08-03
 
 This document is authoritative for:
 
@@ -977,6 +977,14 @@ native payload in the APK, and CPU remains a complete verified fallback.
 
 **Status: release graph, contract, and implementation gates closed; the
 product-qualification gate remains open before any NPU capability is exposed.**
+
+The
+[Source-Separation Lifecycle and Cache Correctness Roadmap](source-separation-lifecycle-cache-correctness-roadmap.md)
+is an additional hard pre-NPU gate. Its active-model handoff, scheduler,
+playback, cache-state, retention, deletion, simplification, and device
+qualification phases must close before NPU AOT or JIT is exposed. NPU schema
+drafting and offline tooling research may continue, but adding another backend
+to the current song-only coordination model is not permitted.
 
 The current evidence is recorded in
 [pre-npu-baseline-2026-08-02.md](validation/litert-runtime/pre-npu-baseline-2026-08-02.md).
