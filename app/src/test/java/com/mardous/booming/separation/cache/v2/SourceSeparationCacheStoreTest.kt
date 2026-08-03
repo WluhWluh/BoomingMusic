@@ -130,28 +130,17 @@ class SourceSeparationCacheStoreTest {
     }
 
     @Test
-    fun `locator index is rebuildable and exact source matching rejects replacement`() {
+    fun `manifest writes do not create a global locator index`() {
         val store = SourceSeparationCacheStore(cacheRoot())
         val manifest = completedManifest(store)
         store.writeManifest(manifest)
-        val indexFile = File(store.root().directory, SourceSeparationCacheStore.LOCATOR_INDEX_FILE_NAME)
 
-        assertEquals(listOf(manifest), store.candidateManifests(manifest.song))
-        assertEquals(
-            listOf(manifest),
-            store.matchingManifests(manifest.song, manifest.identity.source),
-        )
-        indexFile.writeText("not-json")
-        assertEquals(listOf(manifest), store.candidateManifests(manifest.song))
-
-        val replacedSource = manifest.identity.source.copy(
-            audioFingerprint = "encoded-samples-v1:${"d".repeat(64)}",
-        )
-        assertTrue(store.matchingManifests(manifest.song, replacedSource).isEmpty())
+        assertEquals(listOf(manifest), store.listManifests())
+        assertFalse(File(store.root().directory, "locator-index.json").exists())
     }
 
     @Test
-    fun `recovery removes temp staging and unreadable entries then rebuilds index`() {
+    fun `recovery removes temp staging and unreadable entries`() {
         val store = SourceSeparationCacheStore(cacheRoot())
         val valid = completedManifest(store)
         store.writeManifest(valid)
@@ -179,7 +168,7 @@ class SourceSeparationCacheStoreTest {
         assertNotNull(store.readManifest(valid.cacheKey))
         assertFalse(tempFile.exists())
         assertFalse(invalidEntry.exists())
-        assertEquals(listOf(valid), store.candidateManifests(valid.song))
+        assertEquals(listOf(valid), store.listManifests())
     }
 
     @Test

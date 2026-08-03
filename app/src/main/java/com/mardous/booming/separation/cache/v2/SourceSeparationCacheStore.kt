@@ -66,7 +66,6 @@ class SourceSeparationCacheStore(
         val target = entryDirectory(manifest.cacheKey)
         require(!target.exists()) { "Cache entry already exists: ${manifest.cacheKey}" }
         moveDirectoryAtomically(staging.directory, target)
-        refreshLocatorIndexBestEffort()
         return target
     }
 
@@ -76,7 +75,6 @@ class SourceSeparationCacheStore(
             "Unable to create cache entry directory."
         }
         writeManifestFile(directory, manifest)
-        refreshLocatorIndexBestEffort()
         return directory
     }
 
@@ -200,9 +198,7 @@ class SourceSeparationCacheStore(
 
     fun deleteEntry(cacheKey: String): Boolean {
         val directory = entryDirectory(cacheKey)
-        val deleted = !directory.exists() || directory.deleteRecursively()
-        if (deleted) refreshLocatorIndexBestEffort()
-        return deleted
+        return !directory.exists() || directory.deleteRecursively()
     }
 
     fun validateCompletedEntry(
@@ -355,47 +351,6 @@ class SourceSeparationCacheStore(
 
     fun entrySize(cacheKey: String): Long = entryDirectory(cacheKey).directorySize()
 
-    fun candidateManifests(
-        locator: SourceSeparationCacheSongLocator,
-    ): List<SourceSeparationCacheManifest> {
-        val index = readLocatorIndex() ?: rebuildLocatorIndex()
-        val record = index.records.singleOrNull {
-            it.locatorKey == SourceSeparationCacheLocatorRecord.keyFor(locator)
-        } ?: return emptyList()
-        return record.cacheKeys.mapNotNull(::readManifest)
-    }
-
-    fun matchingManifests(
-        locator: SourceSeparationCacheSongLocator,
-        source: SourceSeparationCacheSourceIdentity,
-    ): List<SourceSeparationCacheManifest> {
-        return candidateManifests(locator).filter { it.identity.source == source }
-    }
-
-    fun rebuildLocatorIndex(): SourceSeparationCacheLocatorIndex {
-        val records = listManifests()
-            .groupBy { manifest -> SourceSeparationCacheLocatorRecord.keyFor(manifest.song) }
-            .map { (locatorKey, manifests) ->
-                val first = manifests.first().song
-                SourceSeparationCacheLocatorRecord(
-                    locatorKey = locatorKey,
-                    songId = first.songId,
-                    mediaUri = first.mediaUri,
-                    filePath = first.filePath,
-                    cacheKeys = manifests.map(SourceSeparationCacheManifest::cacheKey).distinct(),
-                )
-            }
-            .sortedBy(SourceSeparationCacheLocatorRecord::locatorKey)
-        val index = SourceSeparationCacheLocatorIndex(records = records)
-        writeJsonFile(
-            directory = root.directory,
-            targetName = LOCATOR_INDEX_FILE_NAME,
-            serializer = SourceSeparationCacheLocatorIndex.serializer(),
-            value = index,
-        )
-        return index
-    }
-
     fun recover(): SourceSeparationCacheRecoveryResult {
         ensureLayout()
         val stagingDirectory = File(root.directory, STAGING_DIR_NAME)
@@ -446,7 +401,6 @@ class SourceSeparationCacheStore(
                     }
                 }
             }
-        rebuildLocatorIndex()
         return SourceSeparationCacheRecoveryResult(
             removedTemporaryFiles = removedTemporaryFiles,
             removedStagingRuns = removedStagingRuns,
@@ -496,26 +450,6 @@ class SourceSeparationCacheStore(
                 if (file.delete()) removed += 1
             }
         return removed
-    }
-
-    private fun readLocatorIndex(): SourceSeparationCacheLocatorIndex? {
-        val file = File(root.directory, LOCATOR_INDEX_FILE_NAME)
-        if (!file.isFile || !file.isWithin(root.directory)) return null
-        val index = runCatching {
-            json.decodeFromString(
-                SourceSeparationCacheLocatorIndex.serializer(),
-                file.readText(Charsets.UTF_8),
-            )
-        }.getOrNull() ?: return null
-        val manifests = listManifests()
-        val expectedKeys = manifests.map(SourceSeparationCacheManifest::cacheKey).toSet()
-        return index.takeIf { candidate ->
-            candidate.records.flatMap(SourceSeparationCacheLocatorRecord::cacheKeys).toSet() ==
-                expectedKeys &&
-            candidate.records.all { record ->
-                record.cacheKeys.all { key -> readManifest(key) != null }
-            }
-        }
     }
 
     private fun readManifestFromDirectory(
@@ -654,10 +588,6 @@ class SourceSeparationCacheStore(
         }.getOrDefault(false)
     }
 
-    private fun refreshLocatorIndexBestEffort() {
-        runCatching { rebuildLocatorIndex() }
-    }
-
     private fun removeTemporaryFiles(
         vararg directories: File,
     ): Int {
@@ -706,8 +636,6 @@ class SourceSeparationCacheStore(
         const val RUN_JOURNAL_FILE_NAME = "run-journal.json"
         const val PLAYBACK_SETTINGS_FILE_NAME = "playback-settings.json"
         const val HYDRATION_MARKER_FILE_NAME = "hydration/v1/marker.json"
-        const val LOCATOR_INDEX_FILE_NAME = "locator-index.json"
-
         private val CACHE_KEY_PATTERN = Regex("^[0-9a-f]{64}$")
         private val RUN_ID_PATTERN = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
         private val DEFAULT_JSON = Json {
