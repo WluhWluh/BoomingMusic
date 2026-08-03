@@ -377,19 +377,22 @@ Suggested commits:
 
 ### Phase 1: Observe selection and serialize the existing coordinator
 
-- [ ] Add process-local selection generation and
+Status: complete on 2026-08-03. All `SourceSeparation*` JVM tests pass and the
+GitHub debug Android-test source set compiles.
+
+- [x] Add process-local selection generation and
   `StateFlow<ActiveSelectionSnapshot>` to `SourceSeparationPresetRepository`.
-- [ ] Make activation idempotent and publish only after active-store write and
+- [x] Make activation idempotent and publish only after active-store write and
   read-back succeed, without adding a synchronous preference fsync.
-- [ ] Capture the selection snapshot in every full-song and prestart request.
-- [ ] Replace song-only pending/running deduplication with song plus captured
+- [x] Capture the selection snapshot in every full-song and prestart request.
+- [x] Replace song-only pending/running deduplication with song plus captured
   active reference before resolve, then exact cache key after resolve.
-- [ ] Guard coordinator control fields with one short lock and request
+- [x] Guard coordinator control fields with one short lock and request
   generation. Reject stale callbacks and stale `finally` cleanup.
-- [ ] Compare a reconnectable descriptor with the current selection before
+- [x] Compare a reconnectable descriptor with the current selection before
   adopting it. Pause and retain a mismatched recovered run without publishing
   it as current work.
-- [ ] Add selection generation/cache key to existing worker UI state rather
+- [x] Add selection generation/cache key to existing worker UI state rather
   than creating another state hierarchy.
 
 **Exit:** same-song A and B are never coalesced, one run remains admitted, and
