@@ -47,7 +47,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v60",
+    [string]$RunnerRevision = "phase7-runner-v61",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -80,6 +80,12 @@ param(
     [string]$ProcessCacheScope = "all",
     [ValidateSet("single-use", "shared-reusable")]
     [string]$LifecycleSessionMode = "single-use",
+    [ValidateSet("true", "false")]
+    [string]$ModelSwitchAutoStart = "false",
+    [ValidateSet("true", "false")]
+    [string]$ModelSwitchPlaying = "false",
+    [ValidateSet("ready", "preparation")]
+    [string]$ModelSwitchBoundary = "ready",
     [bool]$WindowDecode = $true,
     [switch]$SkipBuild,
     [switch]$SkipInstall,
@@ -393,6 +399,11 @@ if ($ForceStopBeforeRun -and ($Stage -notin $sourceStages -or -not $KeepAppData)
 if ($Stage -ne "lifecycle" -and
         ($LifecycleScenario -ne "sequential" -or $LifecycleSessionMode -ne "single-use")) {
     throw "LifecycleScenario and LifecycleSessionMode apply only to the lifecycle stage."
+}
+if ($Stage -ne "switching" -and
+        ($ModelSwitchAutoStart -ne "false" -or $ModelSwitchPlaying -ne "false" -or
+        $ModelSwitchBoundary -ne "ready")) {
+    throw "Model-switch controls apply only to the switching stage."
 }
 if ($BackendMode -eq "auto" -and $Stage -eq "lifecycle" -and
         $LifecycleSessionMode -ne "single-use") {
@@ -1175,6 +1186,13 @@ try {
             $instrumentArguments += @(
                 "-e", "lifecycleScenario", $LifecycleScenario,
                 "-e", "lifecycleSessionMode", $LifecycleSessionMode
+            )
+        }
+        if ($Stage -eq "switching") {
+            $instrumentArguments += @(
+                "-e", "modelSwitchAutoStart", $ModelSwitchAutoStart,
+                "-e", "modelSwitchPlaying", $ModelSwitchPlaying,
+                "-e", "modelSwitchBoundary", $ModelSwitchBoundary
             )
         }
         if ($Stage -in @("worker", "switching") -and $PreserveMediaStoreSource) {
@@ -2099,6 +2117,15 @@ try {
                 } else { $null }
                 lifecycleScenario = if ($Stage -eq "lifecycle") { $LifecycleScenario } else { $null }
                 lifecycleSessionMode = if ($Stage -eq "lifecycle") { $LifecycleSessionMode } else { $null }
+                modelSwitchAutoStart = if ($Stage -eq "switching") {
+                    $ModelSwitchAutoStart -eq "true"
+                } else { $null }
+                modelSwitchPlaying = if ($Stage -eq "switching") {
+                    $ModelSwitchPlaying -eq "true"
+                } else { $null }
+                modelSwitchBoundary = if ($Stage -eq "switching") {
+                    $ModelSwitchBoundary
+                } else { $null }
                 currentFixture = if ($null -ne $currentFixture) {
                     [ordered]@{
                         fixtureId = $currentFixture.fixtureId
