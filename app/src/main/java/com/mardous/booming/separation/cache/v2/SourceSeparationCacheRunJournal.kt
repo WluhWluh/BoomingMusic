@@ -448,6 +448,7 @@ enum class SourceSeparationCacheRunTransitionType {
     SegmentInvalidated,
     Completed,
     Paused,
+    ActiveModelSuperseded,
     UserCanceled,
     Incompatible,
     ForegroundTimeout,

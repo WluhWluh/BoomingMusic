@@ -4,6 +4,7 @@ import com.mardous.booming.separation.SourceSeparationModelAwareExecutionRequest
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
+import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.SourceSeparationAdmittedGpuRuntimeIdentity
@@ -16,7 +17,7 @@ import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 15
+internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 16
 
 internal interface SourceSeparationExecutionHost : AutoCloseable {
     val mode: SourceSeparationExecutionHostMode
@@ -39,6 +40,12 @@ internal interface SourceSeparationExecutionHost : AutoCloseable {
         runId: String,
         processGeneration: Long,
     ): SourceSeparationExecutionHostControlResult
+
+    fun pause(
+        runId: String,
+        processGeneration: Long,
+        reason: SourceSeparationPauseReason,
+    ): SourceSeparationExecutionHostControlResult = pause(runId, processGeneration)
 
     fun cancel(
         runId: String,

@@ -74,6 +74,9 @@ interface SourceSeparationRuntimeFacade {
         playbackReadyWindowCountProvider: () -> Int = { DEFAULT_READY_WINDOW_COUNT },
         windowDecodeEnabled: Boolean = true,
         shouldPause: () -> Boolean = { false },
+        pauseReasonProvider: () -> SourceSeparationPauseReason = {
+            SourceSeparationPauseReason.Standard
+        },
         shouldCancel: () -> Boolean = { false },
     ): SourceSeparationModelAwareEngineResult
 
@@ -218,6 +221,7 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
         playbackReadyWindowCountProvider: () -> Int,
         windowDecodeEnabled: Boolean,
         shouldPause: () -> Boolean,
+        pauseReasonProvider: () -> SourceSeparationPauseReason,
         shouldCancel: () -> Boolean,
     ): SourceSeparationModelAwareEngineResult {
         val scopedEngine = if (runClass == SourceSeparationExecutionRunClass.ManualFullSong) {
@@ -244,6 +248,7 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
                 playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
                 windowDecodeEnabled = windowDecodeEnabled,
                 shouldPause = shouldPause,
+                pauseReasonProvider = pauseReasonProvider,
                 shouldCancel = shouldCancel,
             )
         } finally {

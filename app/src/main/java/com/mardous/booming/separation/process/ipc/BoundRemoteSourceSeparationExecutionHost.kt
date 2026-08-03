@@ -11,6 +11,7 @@ import androidx.core.content.ContextCompat
 import com.mardous.booming.AppProcessResolver
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationPausedException
+import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
 import com.mardous.booming.separation.process.SourceSeparationExecutionHost
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
@@ -490,6 +491,16 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     override fun pause(
         runId: String,
         processGeneration: Long,
+    ): SourceSeparationExecutionHostControlResult = pause(
+        runId,
+        processGeneration,
+        SourceSeparationPauseReason.Standard,
+    )
+
+    override fun pause(
+        runId: String,
+        processGeneration: Long,
+        reason: SourceSeparationPauseReason,
     ) = sendControl(
         runId,
         processGeneration,
@@ -497,6 +508,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         false,
         null,
         null,
+        reason,
     )
 
     override fun cancel(
@@ -997,6 +1009,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         hasPlaybackPositionUpdate: Boolean,
         playbackPositionMs: Long?,
         playbackReadyWindowCount: Int?,
+        pauseReason: SourceSeparationPauseReason? = null,
     ): SourceSeparationExecutionHostControlResult {
         val service = connectionLock.withLock {
             if (connectionState == SourceSeparationRemoteConnectionState.Closed ||
@@ -1022,6 +1035,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                 processGeneration = processGeneration,
                 controlSequence = controlSequence.incrementAndGet(),
                 action = action,
+                pauseReason = pauseReason,
                 hasPlaybackPositionUpdate = hasPlaybackPositionUpdate,
                 playbackPositionMs = playbackPositionMs,
                 playbackReadyWindowCount = playbackReadyWindowCount,
@@ -1144,6 +1158,7 @@ internal class BoundRemoteSourceSeparationExecutionHost(
                             false,
                             null,
                             null,
+                            execution.pauseReasonProvider(),
                         )
                     }
                     val position = execution.playbackPositionMsProvider()

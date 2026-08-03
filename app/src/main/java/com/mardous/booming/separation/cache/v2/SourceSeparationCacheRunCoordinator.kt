@@ -2,6 +2,7 @@ package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
@@ -436,8 +437,16 @@ class SourceSeparationCacheRunCoordinator(
         return completed
     }
 
-    fun pause(run: SourceSeparationModelAwareCacheRun): SourceSeparationCacheManifest? {
-        return finishIncomplete(run, SourceSeparationCacheManifestState.Running, null)
+    fun pause(
+        run: SourceSeparationModelAwareCacheRun,
+        reason: SourceSeparationPauseReason = SourceSeparationPauseReason.Standard,
+    ): SourceSeparationCacheManifest? {
+        return finishIncomplete(
+            run = run,
+            state = SourceSeparationCacheManifestState.Running,
+            error = null,
+            pauseReason = reason,
+        )
     }
 
     fun cancel(
@@ -485,6 +494,7 @@ class SourceSeparationCacheRunCoordinator(
         run: SourceSeparationModelAwareCacheRun,
         state: SourceSeparationCacheManifestState,
         error: Throwable?,
+        pauseReason: SourceSeparationPauseReason = SourceSeparationPauseReason.Standard,
     ): SourceSeparationCacheManifest? {
         return try {
             run.requireOpen()
@@ -512,7 +522,12 @@ class SourceSeparationCacheRunCoordinator(
             updateJournal(run) { journal, now ->
                 val transition = when (state) {
                     SourceSeparationCacheManifestState.Running ->
-                        SourceSeparationCacheRunTransitionType.Paused
+                        when (pauseReason) {
+                            SourceSeparationPauseReason.Standard ->
+                                SourceSeparationCacheRunTransitionType.Paused
+                            SourceSeparationPauseReason.ActiveModelSuperseded ->
+                                SourceSeparationCacheRunTransitionType.ActiveModelSuperseded
+                        }
                     SourceSeparationCacheManifestState.Canceled ->
                         SourceSeparationCacheRunTransitionType.UserCanceled
                     SourceSeparationCacheManifestState.Failed ->

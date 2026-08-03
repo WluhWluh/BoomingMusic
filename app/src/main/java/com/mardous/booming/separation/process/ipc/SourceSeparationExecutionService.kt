@@ -14,6 +14,7 @@ import com.mardous.booming.AppProcessResolver
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationPausedException
+import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.cache.v2.SourceSeparationExactCacheModelException
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.process.InProcessSourceSeparationExecutionHost
@@ -304,8 +305,13 @@ internal class SourceSeparationExecutionService : Service() {
                     SourceSeparationIpcControlAction.Update ->
                         SourceSeparationExecutionHostControlResult.Applied
                     SourceSeparationIpcControlAction.Pause -> {
-                        active.control.requestPause()
-                        active.host.pause(command.runId, command.processGeneration)
+                        val reason = requireNotNull(command.pauseReason)
+                        active.control.requestPause(reason)
+                        active.host.pause(
+                            command.runId,
+                            command.processGeneration,
+                            reason,
+                        )
                     }
                     SourceSeparationIpcControlAction.Cancel -> {
                         active.control.requestCancel()
@@ -590,7 +596,10 @@ internal class SourceSeparationExecutionService : Service() {
                     descriptor = command.descriptor,
                     executionRequest = active.executionRequest,
                     onEvent = { event ->
-                        active.admittedExecution.persist(event)
+                        active.admittedExecution.persist(
+                            event = event,
+                            pauseReason = active.control.pauseReason(),
+                        )
                         active.sender.offer(event)
                     },
                 )

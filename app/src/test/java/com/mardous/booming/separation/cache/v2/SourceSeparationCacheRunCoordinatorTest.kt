@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
@@ -74,6 +75,32 @@ class SourceSeparationCacheRunCoordinatorTest {
             resumeState.segmentPlan.segments[1].state,
         )
         fixture.coordinator.pause(resumed)
+    }
+
+    @Test
+    fun `model handoff pauses and retains the exact partial cache`() {
+        val fixture = fixture()
+        val run = fixture.beginReady()
+        val preparation = fixture.preparation(run, SourceSeparationSegmentState.Ready)
+        fixture.coordinator.updatePreparation(run, preparation)
+
+        val retained = requireNotNull(
+            fixture.coordinator.pause(
+                run,
+                SourceSeparationPauseReason.ActiveModelSuperseded,
+            ),
+        )
+        val journal = requireNotNull(fixture.store.readRunJournal(retained.cacheKey))
+
+        assertEquals(SourceSeparationCacheManifestState.Running, retained.state)
+        assertEquals(SourceSeparationCacheRunJournalLifecycle.Paused, journal.lifecycle)
+        assertEquals(
+            SourceSeparationCacheRunTransitionType.ActiveModelSuperseded,
+            journal.transitions.last().type,
+        )
+        assertTrue(retained.segmentPlan?.segments?.all {
+            it.state == SourceSeparationSegmentState.Ready
+        } == true)
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.process.ipc
 
+import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.process.SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION
 import com.mardous.booming.separation.process.SourceSeparationForegroundDeferredReason
 import com.mardous.booming.separation.process.SourceSeparationExecutionCompletion
@@ -292,6 +293,7 @@ internal data class SourceSeparationIpcControlCommand(
     val processGeneration: Long,
     val controlSequence: Long,
     val action: SourceSeparationIpcControlAction,
+    val pauseReason: SourceSeparationPauseReason? = null,
     val hasPlaybackPositionUpdate: Boolean = false,
     val playbackPositionMs: Long? = null,
     val playbackReadyWindowCount: Int? = null,
@@ -311,6 +313,9 @@ internal data class SourceSeparationIpcControlCommand(
         require(playbackReadyWindowCount == null || playbackReadyWindowCount > 0) {
             "IPC playback ready-window count is invalid."
         }
+        require((action == SourceSeparationIpcControlAction.Pause) ==
+            (pauseReason != null)
+        ) { "IPC pause reason is inconsistent with its control action." }
     }
 }
 

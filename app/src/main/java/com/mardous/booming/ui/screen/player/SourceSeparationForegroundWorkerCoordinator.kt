@@ -12,6 +12,7 @@ import com.mardous.booming.separation.SourceSeparationAdmittedGpuRuntimeMismatch
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
 import com.mardous.booming.separation.SourceSeparationPausedException
+import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.SourceSeparationPerformanceStats
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
@@ -147,7 +148,11 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     _workerStateFlow.value = SourceSeparationUiState.Idle
                 }
                 recoveredToPause?.let { session ->
-                    requestRecoveredControl(session, SourceSeparationRecoveredControl.Pause)
+                    requestRecoveredControl(
+                        session = session,
+                        control = SourceSeparationRecoveredControl.Pause,
+                        pauseReason = SourceSeparationPauseReason.ActiveModelSuperseded,
+                    )
                 }
                 trace(
                     SourceSeparationLifecycleTrace.format(
@@ -888,24 +893,37 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private fun maybePauseRecoveredRunFor(request: SourceSeparationWorkerRequest) {
         val session = reconnectedSession ?: return
         val song = reconnectedSong ?: return
-        if (request.song.id == song.id) {
+        val recoveredSelection = reconnectedSelection
+        if (request.song.id == song.id && recoveredSelection == request.selection) {
             clearPendingStart()
             workerActivated = false
             return
         }
-        if (request.priority >= SourceSeparationPendingStartReason.Manual.priority) {
-            requestRecoveredControl(session, SourceSeparationRecoveredControl.Pause)
+        val selectionChanged = recoveredSelection != request.selection
+        if (selectionChanged ||
+            request.priority >= SourceSeparationPendingStartReason.Manual.priority
+        ) {
+            requestRecoveredControl(
+                session = session,
+                control = SourceSeparationRecoveredControl.Pause,
+                pauseReason = if (selectionChanged) {
+                    SourceSeparationPauseReason.ActiveModelSuperseded
+                } else {
+                    SourceSeparationPauseReason.Standard
+                },
+            )
         }
     }
 
     private fun requestRecoveredControl(
         session: SourceSeparationReconnectedSession,
         control: SourceSeparationRecoveredControl,
+        pauseReason: SourceSeparationPauseReason = SourceSeparationPauseReason.Standard,
     ) {
         workerScope.launch {
             runCatching {
                 when (control) {
-                    SourceSeparationRecoveredControl.Pause -> session.pause()
+                    SourceSeparationRecoveredControl.Pause -> session.pause(pauseReason)
                     SourceSeparationRecoveredControl.Cancel -> session.cancel()
                 }
             }
@@ -1287,6 +1305,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                             (preStartReadyWindowCount == null &&
                                     _playbackStateFlow.value.song.id != song.id) ||
                             activeJob?.isActive != true
+                },
+                pauseReasonProvider = {
+                    if (activeSelectionFlow.value != request.selection) {
+                        SourceSeparationPauseReason.ActiveModelSuperseded
+                    } else {
+                        SourceSeparationPauseReason.Standard
+                    }
                 },
                 shouldCancel = {
                     cancelRequested.get() ||

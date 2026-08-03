@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.process.ipc
 
 import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
+import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.process.SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
@@ -34,7 +35,8 @@ class SourceSeparationExecutionIpcProtocolTest {
             runId = "run-1",
             processGeneration = 7L,
             controlSequence = 3L,
-            action = SourceSeparationIpcControlAction.Cancel,
+            action = SourceSeparationIpcControlAction.Pause,
+            pauseReason = SourceSeparationPauseReason.ActiveModelSuperseded,
             hasPlaybackPositionUpdate = true,
             playbackPositionMs = 1_500L,
             playbackReadyWindowCount = 3,
@@ -74,7 +76,7 @@ class SourceSeparationExecutionIpcProtocolTest {
                 SourceSeparationExecutionIpcCodec.encodeRecycleCommand(recycle),
             ),
         )
-        assertEquals(15, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
+        assertEquals(16, SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION)
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
                 """{"protocolVersion":12,"commandId":"connect","clientProcessName":"x","observerId":"observer-1"}""",
@@ -82,7 +84,7 @@ class SourceSeparationExecutionIpcProtocolTest {
         }
         assertThrows(SourceSeparationIpcProtocolException::class.java) {
             SourceSeparationExecutionIpcCodec.decodeConnectRequest(
-                """{"protocolVersion":15,"commandId":"connect","clientProcessName":"x","observerId":"observer-1","extra":1}""",
+                """{"protocolVersion":16,"commandId":"connect","clientProcessName":"x","observerId":"observer-1","extra":1}""",
             )
         }
     }

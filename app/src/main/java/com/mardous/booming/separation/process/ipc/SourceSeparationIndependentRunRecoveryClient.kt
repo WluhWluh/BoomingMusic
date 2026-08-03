@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournal
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLifecycle
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
@@ -134,6 +135,9 @@ internal interface SourceSeparationReconnectedSession : AutoCloseable {
 
     fun pause(): SourceSeparationExecutionHostControlResult
 
+    fun pause(reason: SourceSeparationPauseReason): SourceSeparationExecutionHostControlResult =
+        pause()
+
     fun cancel(): SourceSeparationExecutionHostControlResult
 
     fun closeTerminal(): SourceSeparationExecutionHostControlResult
@@ -158,6 +162,10 @@ private class BoundSourceSeparationReconnectedSession(
 
     override fun pause(): SourceSeparationExecutionHostControlResult =
         host.pause(runId, processGeneration)
+
+    override fun pause(reason: SourceSeparationPauseReason):
+        SourceSeparationExecutionHostControlResult =
+        host.pause(runId, processGeneration, reason)
 
     override fun cancel(): SourceSeparationExecutionHostControlResult =
         host.cancel(runId, processGeneration)

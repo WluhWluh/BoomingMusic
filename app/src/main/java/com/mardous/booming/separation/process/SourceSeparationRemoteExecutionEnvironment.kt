@@ -8,6 +8,7 @@ import com.mardous.booming.separation.createAutoLiteRtSessionFactory
 import com.mardous.booming.separation.SourceSeparationModelAwareExecutionRequest
 import com.mardous.booming.separation.SourceSeparationModelAwareExecutionWorkspace
 import com.mardous.booming.separation.SourceSeparationModelAwareRangeExecutor
+import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultInjection
@@ -29,6 +30,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.CancellationException
 
 internal class SourceSeparationRemoteExecutionEnvironment(
@@ -183,6 +185,7 @@ internal class SourceSeparationRemoteExecutionEnvironment(
             playbackReadyWindowCountProvider = control::playbackReadyWindowCount,
             windowDecodeEnabled = descriptor.runtime.windowDecodeEnabled,
             shouldPause = control::shouldPause,
+            pauseReasonProvider = control::pauseReason,
             shouldCancel = control::shouldCancel,
             requireWorkspaceAvailable = run::requireOpen,
         )
@@ -259,7 +262,10 @@ internal class SourceSeparationRemoteAdmittedExecution(
     }
 
     @Synchronized
-    fun persist(event: SourceSeparationExecutionHostEvent) {
+    fun persist(
+        event: SourceSeparationExecutionHostEvent,
+        pauseReason: SourceSeparationPauseReason = SourceSeparationPauseReason.Standard,
+    ) {
         check(!terminal) { "Remote cache run already reached a terminal transition." }
         when (val payload = event.payload) {
             is SourceSeparationExecutionHostEventPayload.Accepted -> Unit
@@ -281,7 +287,7 @@ internal class SourceSeparationRemoteAdmittedExecution(
                 terminal = true
             }
             is SourceSeparationExecutionHostEventPayload.Paused -> {
-                coordinator.pause(run)
+                coordinator.pause(run, pauseReason)
                 terminal = true
             }
             is SourceSeparationExecutionHostEventPayload.Canceled -> {
@@ -376,6 +382,7 @@ internal class SourceSeparationRemoteExecutionControl(
         initialPlaybackReadyWindowCount.coerceAtLeast(1),
     )
     private val pauseRequested = AtomicBoolean(false)
+    private val pauseReason = AtomicReference<SourceSeparationPauseReason?>(null)
     private val cancelRequested = AtomicBoolean(false)
 
     fun update(
@@ -391,12 +398,14 @@ internal class SourceSeparationRemoteExecutionControl(
         }
     }
 
-    fun requestPause() {
+    fun requestPause(reason: SourceSeparationPauseReason = SourceSeparationPauseReason.Standard) {
+        pauseReason.compareAndSet(null, reason)
         pauseRequested.set(true)
     }
 
     fun requestCancel() {
         pauseRequested.set(false)
+        pauseReason.set(null)
         cancelRequested.set(true)
     }
 
@@ -406,6 +415,9 @@ internal class SourceSeparationRemoteExecutionControl(
     fun playbackReadyWindowCount(): Int = playbackReadyWindowCount.get()
 
     fun shouldPause(): Boolean = !cancelRequested.get() && pauseRequested.get()
+
+    fun pauseReason(): SourceSeparationPauseReason =
+        pauseReason.get() ?: SourceSeparationPauseReason.Standard
 
     fun shouldCancel(): Boolean = cancelRequested.get()
 

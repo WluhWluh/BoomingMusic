@@ -92,6 +92,9 @@ internal class SourceSeparationModelAwareEngine(
         windowDecodeEnabled: Boolean = true,
         onPrepared: (SourceSeparationCacheManifest) -> Unit = {},
         shouldPause: () -> Boolean = { false },
+        pauseReasonProvider: () -> SourceSeparationPauseReason = {
+            SourceSeparationPauseReason.Standard
+        },
         shouldCancel: () -> Boolean = { false },
     ): SourceSeparationModelAwareEngineResult {
         check(constructionGate()) {
@@ -113,6 +116,7 @@ internal class SourceSeparationModelAwareEngine(
             windowDecodeEnabled = windowDecodeEnabled,
             onPrepared = onPrepared,
             shouldPause = shouldPause,
+            pauseReasonProvider = pauseReasonProvider,
             shouldCancel = shouldCancel,
         )
     }
@@ -132,6 +136,9 @@ internal class SourceSeparationModelAwareEngine(
         windowDecodeEnabled: Boolean = true,
         onPrepared: (SourceSeparationCacheManifest) -> Unit = {},
         shouldPause: () -> Boolean = { false },
+        pauseReasonProvider: () -> SourceSeparationPauseReason = {
+            SourceSeparationPauseReason.Standard
+        },
         shouldCancel: () -> Boolean = { false },
     ): SourceSeparationModelAwareEngineResult {
         check(constructionGate()) {
@@ -178,6 +185,7 @@ internal class SourceSeparationModelAwareEngine(
                 windowDecodeEnabled = windowDecodeEnabled,
                 onPrepared = onPrepared,
                 shouldPause = shouldPause,
+                pauseReasonProvider = pauseReasonProvider,
                 shouldCancel = shouldCancel,
                 runId = executionRunId,
                 processGeneration = executionProcessGeneration,
@@ -226,6 +234,7 @@ internal class SourceSeparationModelAwareEngine(
                 windowDecodeEnabled = windowDecodeEnabled,
                 onPrepared = onPrepared,
                 shouldPause = shouldPause,
+                pauseReasonProvider = pauseReasonProvider,
                 shouldCancel = shouldCancel,
                 runId = executionRunId,
                 processGeneration = executionProcessGeneration,
@@ -250,6 +259,7 @@ internal class SourceSeparationModelAwareEngine(
         windowDecodeEnabled: Boolean,
         onPrepared: (SourceSeparationCacheManifest) -> Unit,
         shouldPause: () -> Boolean,
+        pauseReasonProvider: () -> SourceSeparationPauseReason,
         shouldCancel: () -> Boolean,
         runId: String,
         processGeneration: Long,
@@ -286,6 +296,7 @@ internal class SourceSeparationModelAwareEngine(
             playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
             windowDecodeEnabled = windowDecodeEnabled,
             shouldPause = shouldPause,
+            pauseReasonProvider = pauseReasonProvider,
             shouldCancel = shouldCancel,
         )
         val descriptor = executionRequest.toExecutionDescriptor(
@@ -407,6 +418,7 @@ internal class SourceSeparationModelAwareEngine(
         windowDecodeEnabled: Boolean,
         onPrepared: (SourceSeparationCacheManifest) -> Unit,
         shouldPause: () -> Boolean,
+        pauseReasonProvider: () -> SourceSeparationPauseReason,
         shouldCancel: () -> Boolean,
         runId: String,
         processGeneration: Long,
@@ -443,6 +455,7 @@ internal class SourceSeparationModelAwareEngine(
                 playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
                 windowDecodeEnabled = windowDecodeEnabled,
                 shouldPause = shouldPause,
+                pauseReasonProvider = pauseReasonProvider,
                 shouldCancel = shouldCancel,
                 requireWorkspaceAvailable = run::requireOpen,
             )
@@ -531,7 +544,7 @@ internal class SourceSeparationModelAwareEngine(
             )
         } catch (error: SourceSeparationPausedException) {
             terminalError = error
-            coordinator.pause(run)
+            coordinator.pause(run, pauseReasonProvider())
             throw error
         } catch (error: CancellationException) {
             terminalError = error
@@ -697,6 +710,7 @@ internal data class SourceSeparationModelAwareExecutionRequest(
     val playbackReadyWindowCountProvider: () -> Int,
     val windowDecodeEnabled: Boolean,
     val shouldPause: () -> Boolean,
+    val pauseReasonProvider: () -> SourceSeparationPauseReason,
     val shouldCancel: () -> Boolean,
     val requireWorkspaceAvailable: () -> Unit = {},
 ) {
