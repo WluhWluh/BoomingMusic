@@ -1,7 +1,6 @@
 package com.mardous.booming.separation
 
 import android.app.ActivityManager
-import android.app.Application
 import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.ContentValues
@@ -27,6 +26,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.mardous.booming.AppProcessResolver
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.PlaybackService
@@ -108,6 +108,7 @@ import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteExecutio
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteConnectionState
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteRecycleTimeoutException
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteForegroundPolicy
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
 import com.mardous.booming.ui.screen.MainActivity
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCallbacks
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerCoordinator
@@ -4855,6 +4856,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertEquals(expectedModelId, activeReference.modelId)
             assertEquals(expectedArtifactSha256, activeReference.artifactSha256)
 
+            if (backendMode == BackendMode.Cpu) {
+                SourceSeparationRuntimeBootstrap.ensureLoaded(context.applicationContext)
+            }
             val sessionProviderFactory: (() -> MdxInferenceSessionProvider)? = if (
                 backendMode == BackendMode.Cpu
             ) {
@@ -7457,12 +7461,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
     private fun waitForPaused(worker: SourceSeparationForegroundWorkerCoordinator) {
         val deadline = SystemClock.elapsedRealtime() + LIFECYCLE_TIMEOUT_MS
         while (SystemClock.elapsedRealtime() < deadline) {
-            if (worker.runningSongId() == null &&
-                worker.workerStateFlow.value is SourceSeparationUiState.Idle
-            ) return
+            when (val state = worker.workerStateFlow.value) {
+                is SourceSeparationUiState.Paused -> {
+                    if (worker.runningSongId() == null) return
+                }
+                is SourceSeparationUiState.Failed,
+                is SourceSeparationUiState.Canceled,
+                -> error("Worker reached an unexpected terminal state while pausing: $state")
+                else -> Unit
+            }
             SystemClock.sleep(POLL_INTERVAL_MS)
         }
-        error("Worker did not reach its paused idle state in time.")
+        error("Worker did not release its active song in the paused state in time.")
     }
 
     private fun clearExactCacheEntry(
@@ -7845,6 +7855,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 )
             }
         } else {
+            if (backendMode == BackendMode.Cpu && sessionProviderFactoryOverride == null) {
+                SourceSeparationRuntimeBootstrap.ensureLoaded(context.applicationContext)
+            }
             val sessionProviderFactory: (() -> MdxInferenceSessionProvider)? =
                 sessionProviderFactoryOverride ?: if (backendMode == BackendMode.Cpu) {
                     val cpuFactory = MdxLiteRtCpuInferenceSessionFactory(
@@ -8168,7 +8181,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
     private fun currentProcessDiagnostics(): SourceSeparationProcessDiagnostics =
         SourceSeparationProcessDiagnosticsCollector.capture(
             processGeneration = 1L,
-            processName = Application.getProcessName(),
+            processName = AppProcessResolver.resolve(
+                InstrumentationRegistry.getInstrumentation().targetContext,
+            ).processName,
         )
 
     private fun processResourceJson(process: SourceSeparationProcessDiagnostics): JSONObject =
@@ -8461,7 +8476,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             .put("processRoles", JSONObject()
                 .put("mainPid", Process.myPid())
-                .put("mainProcessName", Application.getProcessName())
+                .put("mainProcessName", AppProcessResolver.resolve(context).processName)
                 .put("targetPackage", instrumentation.targetContext.packageName)
                 .put("instrumentationPackage", instrumentation.context.packageName)
                 .put("instrumentationSharesMainProcess", true)

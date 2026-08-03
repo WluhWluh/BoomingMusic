@@ -18,6 +18,8 @@ import com.mardous.booming.separation.model.litert.MdxLiteRtGpuInferenceSessionF
 import com.mardous.booming.separation.model.litert.MdxLiteRtGpuProbeResult
 import com.mardous.booming.separation.model.litert.MdxLiteRtGpuRuntimeProfile
 import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeBootstrap
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
 
 internal class MdxSourceSeparationModelAwareRangeExecutor(
     context: Context,
@@ -26,7 +28,8 @@ internal class MdxSourceSeparationModelAwareRangeExecutor(
         when (policy) {
             SourceSeparationExecutionBackendPolicy.Auto ->
                 createAutoLiteRtSessionProvider(context.applicationContext)
-            SourceSeparationExecutionBackendPolicy.Cpu -> createCpuLiteRtSessionProvider()
+            SourceSeparationExecutionBackendPolicy.Cpu ->
+                createCpuLiteRtSessionProvider(context.applicationContext)
         }
     },
 ) : SourceSeparationModelAwareRangeExecutor {
@@ -97,23 +100,28 @@ internal fun createAutoLiteRtSessionProvider(
     )
 }
 
-internal fun createCpuLiteRtSessionProvider(): MdxInferenceSessionProvider =
-    SingleUseMdxInferenceSessionProvider(
+internal fun createCpuLiteRtSessionProvider(context: Context): MdxInferenceSessionProvider {
+    SourceSeparationRuntimeBootstrap.ensureLoaded(context.applicationContext)
+    return SingleUseMdxInferenceSessionProvider(
         MdxLiteRtCpuInferenceSessionFactory(
             compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
         ).withMdxInferenceTiming()
     )
+}
 
 internal fun createAutoLiteRtSessionFactory(
     context: Context,
     gpuProfile: MdxLiteRtGpuRuntimeProfile =
         MdxLiteRtGpuRuntimeProfile.BoundedOpenClFp32V1,
 ): MdxInferenceSessionFactory {
+    val applicationContext = context.applicationContext
+    SourceSeparationRuntimeBootstrap.ensureLoaded(applicationContext)
+    SourceSeparationGpuRuntimeBootstrap.ensureLoaded(applicationContext)
     val gpuCompatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal
     val factory = MdxLiteRtAutoInferenceSessionFactory(
         gpuRuntimeProfile = gpuProfile,
         gpuCompatibilityPolicy = gpuCompatibilityPolicy,
-        gpuEligibilityProvider = AndroidMdxLiteRtGpuEligibilityProvider(context),
+        gpuEligibilityProvider = AndroidMdxLiteRtGpuEligibilityProvider(applicationContext),
         gpuProbe = { session, profile ->
             val output = session.run(FloatArray(profile.inputTensor.elementCount))
             if (output.size == profile.outputTensor.elementCount && output.all(Float::isFinite)) {
