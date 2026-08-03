@@ -15,6 +15,9 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloa
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeCatalog
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -113,6 +116,34 @@ class SourceSeparationPhase7DeviceTest {
             assertTrue(repository.installedModels().isEmpty())
             assertTrue(repository.activeModel() is SourceSeparationActivePresetState.None)
 
+            val processAbi = arguments.requiredString(ARG_PROCESS_ABI)
+            val runtimeCatalog = get<SourceSeparationRuntimeCatalog>(
+                SourceSeparationRuntimeCatalog::class.java,
+            )
+            val runtimeEntry = requireNotNull(runtimeCatalog.entryForAbi(processAbi)) {
+                "No pinned LiteRT CPU runtime exists for $processAbi."
+            }
+            val runtimeStore = get<SourceSeparationRuntimeStore>(
+                SourceSeparationRuntimeStore::class.java,
+            )
+            assertEquals(
+                SourceSeparationRuntimeState.Missing,
+                runtimeStore.inventory(runtimeEntry.componentId).state,
+            )
+            val runtimeInstallStartedAt = SystemClock.elapsedRealtime()
+            val installedRuntime = runtimeStore.install(runtimeEntry.componentId)
+            val runtimeInstallElapsedMs =
+                SystemClock.elapsedRealtime() - runtimeInstallStartedAt
+            assertEquals(SourceSeparationRuntimeState.Installed, installedRuntime.state)
+            assertEquals(processAbi, installedRuntime.catalogEntry.abi)
+            val runtimeInstallation = requireNotNull(installedRuntime.installation)
+            assertEquals(
+                runtimeEntry.innerLibrary.byteSize,
+                runtimeInstallation.libraryFile.length(),
+            )
+            assertEquals(runtimeEntry.innerLibrary.sha256, runtimeInstallation.libraryFile.sha256())
+            assertTrue(runtimeInstallation.manifestFile.isFile)
+
             val modelId = arguments.requiredString(ARG_MODEL_ID)
             val downloadStartedAt = SystemClock.elapsedRealtime()
             val installed = downloader.download(modelId)
@@ -144,9 +175,17 @@ class SourceSeparationPhase7DeviceTest {
             report.put("status", "passed")
             report.put("timing", report.getJSONObject("timing")
                 .put("downloadMs", downloadElapsedMs)
-                .put("installMs", JSONObject.NULL)
+                .put("installMs", runtimeInstallElapsedMs)
             )
             report.put("acquisition", JSONObject()
+                .put("cpuRuntime", JSONObject()
+                    .put("componentId", runtimeEntry.componentId)
+                    .put("abi", processAbi)
+                    .put("downloadBytes", runtimeEntry.delivery.expectedByteSize)
+                    .put("installedBytes", installedRuntime.installedBytes)
+                    .put("libraryBytes", runtimeInstallation.libraryFile.length())
+                    .put("librarySha256", runtimeInstallation.libraryFile.sha256())
+                )
                 .put("downloadActivatesModel", false)
                 .put("explicitUseCompleted", true)
                 .put("installedFileBytes", installed.file.length())
