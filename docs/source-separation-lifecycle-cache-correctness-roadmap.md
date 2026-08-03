@@ -1,6 +1,8 @@
 # Source-Separation Lifecycle and Cache Correctness Roadmap
 
-Status: active highest-priority correctness and simplification plan.
+Status: active highest-priority correctness and simplification plan. The
+automated/device qualification gate is complete; the final short listening
+check remains open.
 
 Updated: 2026-08-03
 
@@ -485,28 +487,60 @@ Suggested commits:
 
 ### Phase 4: Focused product qualification
 
+Status: automated and device qualification complete on 2026-08-03; final
+listening check pending.
+
 Run broad JVM coverage, but keep device work proportional to product risk.
 
-- [ ] Run all source-separation JVM tests plus repeated A/B scheduler and stale
+- [x] Run all source-separation JVM tests plus repeated A/B scheduler and stale
   callback tests.
-- [ ] On S25, test CPU and bounded GPU for A to B to A with: A partial and
+- [x] On S25, test CPU and bounded GPU for A to B to A with: A partial and
   running; B missing, partial, and completed; auto-start on and off; playback
   paused and playing.
-- [ ] On S25, switch during model preparation, ready partial playback, final
+- [x] On S25, switch during model preparation, ready partial playback, final
   completion, and independent-process recovery.
-- [ ] Verify current and inactive cache deletion, automatic prune, force-stop,
+- [x] Verify current and inactive cache deletion, automatic prune, force-stop,
   main-process restart, and inference-process death.
-- [ ] Verify panel/quick-control progress and structured cache-key traces. Use
+- [x] Verify panel/quick-control progress and structured cache-key traces. Use
   digital output capture for the model-switch boundary cases, not every UI
   permutation.
-- [ ] Run CPU lifecycle smoke tests on S10 arm32, API 26 x86, and API 37 x86_64.
+- [x] Run CPU lifecycle smoke tests on S10 arm32, API 26 x86, and API 37 x86_64.
   Repeat GPU cases only on ABIs/devices where GPU is already supported.
 - [ ] Run a short full-song listening check for handoff artifacts. Do not tune
   decode, DSP, or MP3 fallback policy in this phase.
 
-**Exit:** focused traces prove exact-active output and stale-event rejection on
-S25 CPU/GPU; the other supported ABIs pass lifecycle smoke; no core workflow
-regresses. NPU product work may then resume.
+**Automated exit evidence:** focused traces prove exact-active output and
+stale-event rejection on S25 CPU/GPU; cache deletion and retention remain
+exact-key scoped; the other ABI routes pass lifecycle smoke; and no automated
+core workflow regresses. The listening item is deliberately separate because
+it requires human confirmation and must not lead to decode, DSP, or MP3
+fallback changes. NPU product work remains gated on that final check.
+
+#### Phase 4 qualification record
+
+The current device reports use application commit `ff3169ac` and runner
+revision `phase7-runner-v61` unless noted otherwise. Build reports and traces
+remain under the ignored `build/phase7-validation/` directory.
+
+- S25 arm64: bounded GPU and CPU A/B/A handoff, automatic and manual start,
+  playing and paused playback, preparation-boundary switching, independent
+  inference-process recovery, cache deletion, and automatic pruning all pass.
+  The traces retain exact A and B cache keys, selection generations, ready
+  windows, and stale-event rejection.
+- S10 arm32: the existing Phase 4 process/cache, cancellation, reattachment,
+  process-death, and task-removal evidence passes on the previously qualified
+  arm32 baseline. This is a CPU lifecycle qualification; no new GPU claim is
+  made for arm32.
+- API 26 x86: the current CPU worker report passes with automatic GPU
+  selection correctly falling back to `LiteRtCpu`. This remains a
+  validation-only route; it does not reopen product x86 support.
+- API 37 x86_64: the current CPU lifecycle report passes. GPU is not required
+  for this smoke route.
+
+Historical reports from older commits are retained as debugging evidence but
+are not used to override the current-commit gate. The remaining open item is
+only a short human listening check across a model handoff; the existing window
+decode, DSP, STFT, overlap/join, and MP3 fallback decisions stay frozen.
 
 ## Required Regression Scenarios
 
@@ -556,4 +590,6 @@ This roadmap is complete when:
 7. unused global-index and duplicate-policy work is removed; and
 8. unchanged playback does not repeat full-source preflight hashing; and
 9. S25 CPU/GPU plus four-ABI smoke validation passes without changing audio
-   decode or DSP policy.
+   decode or DSP policy; and
+10. a short human listening check finds no audible handoff artifact. This is a
+    release-confidence check, not permission to retune the audio pipeline.
