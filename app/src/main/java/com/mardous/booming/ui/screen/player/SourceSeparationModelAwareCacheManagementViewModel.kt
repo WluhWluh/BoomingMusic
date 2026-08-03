@@ -4,8 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntry
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
+import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
+import com.mardous.booming.separation.model.MdxRuntimePlatformProvider
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,6 +20,8 @@ import kotlinx.coroutines.launch
 
 class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
     private val runtime: SourceSeparationRuntimeFacade,
+    private val presetRepository: SourceSeparationPresetRepository? = null,
+    private val platformProvider: MdxRuntimePlatformProvider = AndroidMdxRuntimePlatformProvider,
 ) : ViewModel() {
     private val _state = MutableStateFlow(SourceSeparationModelAwareCacheManagementUiState())
     val state = _state.asStateFlow()
@@ -111,6 +119,46 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
         _state.value = _state.value.copy(failure = null)
     }
 
+    fun useModel(cacheKey: String) {
+        val repository = presetRepository ?: return
+        val item = _state.value.items.singleOrNull { it.cacheKey == cacheKey } ?: return
+        if (item.modelAvailability != SourceSeparationCacheModelAvailability.InstalledExact ||
+            _state.value.activatingCacheKey != null
+        ) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _state.value = _state.value.copy(activatingCacheKey = cacheKey, failure = null)
+            val result = runCatching {
+                val installed = requireNotNull(repository.installedModel(item.artifactSha256))
+                when (installed.bindingKind) {
+                    SourceSeparationPresetBindingKind.CustomProfile ->
+                        repository.activateCustomProfile(
+                            sha256 = installed.sha256,
+                            profileId = item.profileRevisionId,
+                            platform = platformProvider.current(),
+                            scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                        )
+                    SourceSeparationPresetBindingKind.Official,
+                    SourceSeparationPresetBindingKind.Sidecar,
+                    -> repository.activate(
+                        sha256 = installed.sha256,
+                        platform = platformProvider.current(),
+                        scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                        experimentalConfirmed = true,
+                    )
+                }
+            }
+            loadEntries(
+                failure = result.exceptionOrNull()?.let { error ->
+                    SourceSeparationModelAwareCacheManagementFailure(
+                        reason = SourceSeparationModelAwareCacheManagementFailureReason.Activate,
+                        detail = error.message,
+                    )
+                },
+                activatingCacheKey = null,
+            )
+        }
+    }
+
     private fun refresh(pruneFirst: Boolean) {
         loadJob?.cancel()
         loadJob = viewModelScope.launch(Dispatchers.IO) {
@@ -126,7 +174,14 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
             }
             _state.value = result.fold(
                 onSuccess = { items ->
-                    _state.value.copy(loading = false, items = items)
+                    val active = presetRepository?.activeSelectionFlow?.value?.reference
+                    _state.value.copy(
+                        loading = false,
+                        items = items,
+                        activeModelId = active?.modelId,
+                        activeArtifactSha256 = active?.artifactSha256,
+                        activeProfileId = active?.profileId,
+                    )
                 },
                 onFailure = { error ->
                     _state.value.copy(
@@ -145,6 +200,7 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
         failure: SourceSeparationModelAwareCacheManagementFailure?,
         deletingAll: Boolean = _state.value.deletingAll,
         deletingCacheKeys: Set<String> = _state.value.deletingCacheKeys,
+        activatingCacheKey: String? = _state.value.activatingCacheKey,
     ) {
         val result = runCatching(runtime::entries)
         _state.value = result.fold(
@@ -155,6 +211,12 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
                     deletingCacheKeys = deletingCacheKeys.intersect(
                         items.mapTo(mutableSetOf(), SourceSeparationModelAwareCacheEntry::cacheKey),
                     ),
+                    activatingCacheKey = activatingCacheKey,
+                    activeModelId = presetRepository?.activeSelectionFlow?.value?.reference?.modelId,
+                    activeArtifactSha256 = presetRepository?.activeSelectionFlow?.value
+                        ?.reference?.artifactSha256,
+                    activeProfileId = presetRepository?.activeSelectionFlow?.value
+                        ?.reference?.profileId,
                     failure = failure,
                 )
             },
@@ -163,6 +225,7 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
                     loading = false,
                     deletingAll = deletingAll,
                     deletingCacheKeys = deletingCacheKeys,
+                    activatingCacheKey = activatingCacheKey,
                     failure = SourceSeparationModelAwareCacheManagementFailure(
                         reason = SourceSeparationModelAwareCacheManagementFailureReason.Load,
                         detail = error.message,
@@ -191,6 +254,10 @@ data class SourceSeparationModelAwareCacheManagementUiState(
     val items: List<SourceSeparationModelAwareCacheEntry> = emptyList(),
     val deletingAll: Boolean = false,
     val deletingCacheKeys: Set<String> = emptySet(),
+    val activatingCacheKey: String? = null,
+    val activeModelId: String? = null,
+    val activeArtifactSha256: String? = null,
+    val activeProfileId: String? = null,
     val failure: SourceSeparationModelAwareCacheManagementFailure? = null,
 ) {
     val totalSizeBytes: Long
@@ -212,6 +279,7 @@ enum class SourceSeparationModelAwareCacheManagementFailureReason {
     Load,
     Busy,
     Delete,
+    Activate,
 }
 
 private data class SourceSeparationModelAwareCacheCleanupPolicy(

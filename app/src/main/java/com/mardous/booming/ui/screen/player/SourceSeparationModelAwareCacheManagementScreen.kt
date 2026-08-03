@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -54,6 +55,7 @@ internal fun SourceSeparationModelAwareCacheManagementPage(
     onRefresh: () -> Unit,
     onDeleteAll: () -> Unit,
     onDelete: (String) -> Unit,
+    onUseModel: (String) -> Unit,
     onDismissFailure: () -> Unit,
     onAutoCleanupChange: (Boolean) -> Unit,
     onPartialLimitChange: (Int) -> Unit,
@@ -221,6 +223,9 @@ internal fun SourceSeparationModelAwareCacheManagementPage(
                     item = item,
                     deleting = item.cacheKey in state.deletingCacheKeys,
                     onDelete = { onDelete(item.cacheKey) },
+                    onUseModel = { onUseModel(item.cacheKey) },
+                    canUseModel = item.canUseModel(state),
+                    activating = state.activatingCacheKey == item.cacheKey,
                 )
             }
         }
@@ -235,6 +240,9 @@ internal fun SourceSeparationModelAwareCacheManagementPage(
                     item = item,
                     deleting = item.cacheKey in state.deletingCacheKeys,
                     onDelete = { onDelete(item.cacheKey) },
+                    onUseModel = { onUseModel(item.cacheKey) },
+                    canUseModel = item.canUseModel(state),
+                    activating = state.activatingCacheKey == item.cacheKey,
                 )
             }
         }
@@ -246,6 +254,9 @@ private fun SourceSeparationModelAwareCacheRow(
     item: SourceSeparationModelAwareCacheEntry,
     deleting: Boolean,
     onDelete: () -> Unit,
+    onUseModel: () -> Unit,
+    canUseModel: Boolean,
+    activating: Boolean,
 ) {
     val context = LocalContext.current
     val title = item.title.takeIf(String::isNotBlank) ?: stringResource(R.string.unknown_song)
@@ -386,6 +397,20 @@ private fun SourceSeparationModelAwareCacheRow(
                     label = stringResource(R.string.source_separation_cache_accessed_label),
                     value = context.dateStr(item.lastAccessedAtEpochMs),
                 )
+                if (canUseModel) {
+                    OutlinedButton(
+                        onClick = onUseModel,
+                        enabled = !deleting && !activating,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            stringResource(
+                                R.string.source_separation_quick_setup_use_model,
+                                item.displayName,
+                            ),
+                        )
+                    }
+                }
                 if (deleting) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     Text(
@@ -490,10 +515,25 @@ private fun SourceSeparationModelAwareCacheManagementFailure.displayText(): Stri
         R.string.source_separation_cache_management_load_failed,
         detail ?: stringResource(R.string.source_separation_model_source_unknown),
     )
+    SourceSeparationModelAwareCacheManagementFailureReason.Activate -> stringResource(
+        R.string.source_separation_model_error,
+        detail ?: stringResource(R.string.source_separation_model_source_unknown),
+    )
     SourceSeparationModelAwareCacheManagementFailureReason.Busy ->
         stringResource(R.string.source_separation_cache_entry_busy)
     SourceSeparationModelAwareCacheManagementFailureReason.Delete ->
         stringResource(R.string.source_separation_cache_entry_delete_failed)
+}
+
+internal fun SourceSeparationModelAwareCacheEntry.canUseModel(
+    state: SourceSeparationModelAwareCacheManagementUiState,
+): Boolean {
+    if (modelAvailability != SourceSeparationCacheModelAvailability.InstalledExact) return false
+    val activeArtifact = state.activeArtifactSha256 ?: return true
+    if (!artifactSha256.equals(activeArtifact, ignoreCase = true) ||
+        modelId != state.activeModelId
+    ) return true
+    return state.activeProfileId != null && state.activeProfileId != profileRevisionId
 }
 
 private const val SHORT_IDENTITY_LENGTH = 12

@@ -482,7 +482,10 @@ private val viewModule = module {
     }
 
     viewModel {
-        SourceSeparationModelAwareCacheManagementViewModel(runtime = get())
+        SourceSeparationModelAwareCacheManagementViewModel(
+            runtime = get(),
+            presetRepository = get(),
+        )
     }
 
     viewModel {
