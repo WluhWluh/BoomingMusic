@@ -16,8 +16,6 @@ import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoFailureStage
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoInferenceException
-import java.security.MessageDigest
-import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CancellationException
 
@@ -35,7 +33,7 @@ internal class SourceSeparationProcessSessionController(
 ) : MdxInferenceSessionProvider, AutoCloseable {
     private var state = SourceSeparationProcessSessionState.Empty
     private var residentSession: MdxInferenceSession? = null
-    private var residentKey: SessionKey? = null
+    private var residentKey: SourceSeparationExecutionSessionIdentity? = null
     private var sessionId: String? = null
     private var nativeSessionCreationCount = 0
     private var activeLeaseCount = 0
@@ -47,11 +45,14 @@ internal class SourceSeparationProcessSessionController(
     private var activeExecution: ActiveExecution? = null
 
     @Synchronized
-    fun beginExecution(runId: String) {
+    fun beginExecution(
+        runId: String,
+        sessionIdentity: SourceSeparationExecutionSessionIdentity,
+    ) {
         require(runId.isNotBlank()) { "Process session execution run ID is empty." }
         check(activeExecution == null) { "A process session execution is already active." }
         check(!closeRequested) { "The process session controller is closing." }
-        activeExecution = ActiveExecution(runId)
+        activeExecution = ActiveExecution(runId, sessionIdentity)
     }
 
     @Synchronized
@@ -90,7 +91,9 @@ internal class SourceSeparationProcessSessionController(
         if (ownership == SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit) {
             requireResidentCpuProfile(profile)
         }
-        val requestedKey = SessionKey.create(factory, artifact, profile, runtimeSettings)
+        val requestedKey = execution.sessionIdentity.also { identity ->
+            identity.requireMatches(factory, artifact, profile, runtimeSettings)
+        }
         when (state) {
             SourceSeparationProcessSessionState.Empty -> Unit
             SourceSeparationProcessSessionState.Creating ->
@@ -99,8 +102,8 @@ internal class SourceSeparationProcessSessionController(
                 if (residentKey != requestedKey) {
                     recycleReason = RECYCLE_REASON_KEY_CHANGE
                     throw SourceSeparationProcessSessionRecycleRequiredException(
-                        currentSessionKey = requireNotNull(residentKey).diagnosticIdentity,
-                        requestedSessionKey = requestedKey.diagnosticIdentity,
+                        currentSessionKey = requireNotNull(residentKey).diagnosticKey,
+                        requestedSessionKey = requestedKey.diagnosticKey,
                         reason = RECYCLE_REASON_KEY_CHANGE,
                     )
                 }
@@ -112,8 +115,8 @@ internal class SourceSeparationProcessSessionController(
                 throw SourceSeparationProcessSessionPoisonedException(poisonReason)
             SourceSeparationProcessSessionState.Recycling ->
                 throw SourceSeparationProcessSessionRecycleRequiredException(
-                    currentSessionKey = residentKey?.diagnosticIdentity,
-                    requestedSessionKey = requestedKey.diagnosticIdentity,
+                    currentSessionKey = residentKey?.diagnosticKey,
+                    requestedSessionKey = requestedKey.diagnosticKey,
                     reason = recycleReason ?: RECYCLE_REASON_CONTROLLER_CLOSING,
                 )
         }
@@ -153,7 +156,7 @@ internal class SourceSeparationProcessSessionController(
         SourceSeparationProcessSessionDiagnostics(
             state = state,
             sessionId = sessionId,
-            sessionKey = residentKey?.diagnosticIdentity,
+            sessionKey = residentKey?.diagnosticKey,
             nativeSessionCreationCount = nativeSessionCreationCount,
             activeLeaseCount = activeLeaseCount,
             invocationCount = invocationCount,
@@ -299,73 +302,15 @@ internal class SourceSeparationProcessSessionController(
 
     private data class ActiveExecution(
         val runId: String,
+        val sessionIdentity: SourceSeparationExecutionSessionIdentity,
         var nativeStateTouched: Boolean = false,
     )
-
-    private data class SessionKey(
-        val factoryId: String,
-        val requestedBackend: MdxInferenceBackend,
-        val effectiveBackend: MdxInferenceBackend,
-        val backendProfileId: String,
-        val precision: MdxRuntimePrecision,
-        val artifactSha256: String,
-        val executionProfileIdentity: String,
-        val runtimeSettings: MdxRuntimeSettings,
-    ) {
-        val diagnosticIdentity: String = sha256(buildString {
-            append(factoryId)
-            append('|').append(requestedBackend.name)
-            append('|').append(effectiveBackend.name)
-            append('|').append(backendProfileId)
-            append('|').append(precision.name)
-            append('|').append(artifactSha256)
-            append('|').append(executionProfileIdentity)
-            append('|').append(runtimeSettings.cpuThreads)
-            append('|').append(runtimeSettings.useXnnpack)
-        })
-
-        companion object {
-            fun create(
-                factory: MdxInferenceSessionFactory,
-                artifact: MdxModelArtifact,
-                profile: MdxExecutionProfile,
-                runtimeSettings: MdxRuntimeSettings,
-            ) = SessionKey(
-                factoryId = factory.factoryId,
-                requestedBackend = factory.backend,
-                effectiveBackend = if (factory.backend == MdxInferenceBackend.LiteRtAuto) {
-                    MdxInferenceBackend.LiteRtCpu
-                } else {
-                    factory.backend
-                },
-                backendProfileId = MdxRuntimeProfiles.CPU_DEFAULT_FP32,
-                precision = MdxRuntimePrecision.Fp32,
-                artifactSha256 = artifact.sha256.lowercase(Locale.US),
-                executionProfileIdentity = buildString {
-                    append(profile.sessionIdentity)
-                    append('|').append(profile.profileId)
-                    append('|').append(profile.expectedSha256)
-                    append('|').append(profile.dspConfig.sampleRate)
-                    append('|').append(profile.dspConfig.nFft)
-                    append('|').append(profile.dspConfig.hopLength)
-                    append('|').append(profile.dspConfig.dimF)
-                    append('|').append(profile.dspConfig.dimTPower)
-                    append('|').append(profile.modelOutputScale)
-                    append('|').append(profile.modelOutputStem.name)
-                },
-                runtimeSettings = runtimeSettings,
-            )
-        }
-    }
 
     private companion object {
         const val RECYCLE_REASON_KEY_CHANGE = "session-key-change"
         const val RECYCLE_REASON_CONTROLLER_CLOSING = "session-controller-closing"
         const val RECYCLE_REASON_PROCESS_TEARDOWN = "process-teardown"
 
-        fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
-            .digest(value.toByteArray(Charsets.UTF_8))
-            .joinToString("") { byte -> "%02x".format(Locale.US, byte.toInt() and 0xff) }
     }
 }
 

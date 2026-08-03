@@ -12,13 +12,13 @@ import com.mardous.booming.AppProcessResolver
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPauseReason
-import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
 import com.mardous.booming.separation.process.SourceSeparationExecutionHost
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostControlResult
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostSnapshot
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostStartResult
+import com.mardous.booming.separation.process.SourceSeparationExecutionSessionIdentity
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.process.SourceSeparationForegroundStartStage
 import com.mardous.booming.separation.process.SourceSeparationForegroundExecutionDeferredException
@@ -88,11 +88,11 @@ internal class BoundRemoteSourceSeparationExecutionHost(
     override val processGeneration: Long
         get() = ensureConnected().processGeneration
 
-    override fun prepareForBackendPolicy(
-        backendPolicy: SourceSeparationExecutionBackendPolicy,
+    override fun prepareForExecutionSession(
+        identity: SourceSeparationExecutionSessionIdentity,
     ): Long {
         val diagnostics = processDiagnostics()
-        if (!diagnostics.session.requiresRecycleFor(backendPolicy)) {
+        if (!diagnostics.session.requiresRecycleFor(identity)) {
             return diagnostics.processGeneration
         }
         return recycle(

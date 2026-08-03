@@ -36,6 +36,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
+import com.mardous.booming.separation.process.SourceSeparationExecutionSessionIdentity
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnerToken
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.separation.process.toExecutionDescriptor
@@ -158,8 +159,14 @@ internal class SourceSeparationModelAwareEngine(
         val executionRunId = runIdFactory().also {
             require(it.isNotBlank()) { "Execution run ID factory returned an empty ID." }
         }
-        val executionProcessGeneration = executionHost.prepareForBackendPolicy(
-            admittedBackendPolicy,
+        val executionSessionIdentity = SourceSeparationExecutionSessionIdentity.from(
+            model = model,
+            backendPolicy = admittedBackendPolicy,
+            gpuRuntimeIdentity = admittedRuntimePolicy.gpuRuntimeIdentity,
+            runtimeSettings = runtimeSettings,
+        )
+        val executionProcessGeneration = executionHost.prepareForExecutionSession(
+            executionSessionIdentity,
         )
         if (executionHost.mode == SourceSeparationExecutionHostMode.BoundRemote) {
             coordinator.inspectCompleted(identity)?.let { manifest ->

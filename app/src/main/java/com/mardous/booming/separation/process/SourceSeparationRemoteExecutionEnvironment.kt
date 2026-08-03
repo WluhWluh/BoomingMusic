@@ -73,8 +73,11 @@ internal class SourceSeparationRemoteExecutionEnvironment(
     fun validationOverrideDiagnostics():
         SourceSeparationProcessValidationOverrideDiagnostics? = validationOverrideDiagnostics
 
-    fun beginExecution(runId: String) =
-        sessionControllers.requireCurrent().beginExecution(runId)
+    fun beginExecution(descriptor: SourceSeparationExecutionDescriptor) =
+        sessionControllers.requireCurrent().beginExecution(
+            runId = descriptor.runId,
+            sessionIdentity = SourceSeparationExecutionSessionIdentity.from(descriptor),
+        )
 
     fun finishExecution(runId: String, failure: Throwable?) =
         sessionControllers.requireCurrent().finishExecution(runId, failure)

@@ -126,8 +126,20 @@ internal data class SourceSeparationProcessSessionDiagnostics(
 }
 
 internal fun SourceSeparationProcessSessionDiagnostics.requiresRecycleFor(
-    requestedBackendPolicy: SourceSeparationExecutionBackendPolicy,
-): Boolean = backendPolicy != null && backendPolicy != requestedBackendPolicy
+    requestedIdentity: SourceSeparationExecutionSessionIdentity,
+): Boolean {
+    if (backendPolicy != null && backendPolicy != requestedIdentity.backendPolicy) return true
+    return when (state) {
+        SourceSeparationProcessSessionState.Resident ->
+            sessionKey != requestedIdentity.diagnosticKey
+        SourceSeparationProcessSessionState.Poisoned,
+        SourceSeparationProcessSessionState.Recycling,
+        -> true
+        SourceSeparationProcessSessionState.Empty,
+        SourceSeparationProcessSessionState.Creating,
+        -> false
+    }
+}
 
 @Serializable
 internal data class SourceSeparationProcessValidationOverrideDiagnostics(

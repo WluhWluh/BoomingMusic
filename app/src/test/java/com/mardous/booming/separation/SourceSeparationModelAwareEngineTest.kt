@@ -49,6 +49,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostLifecycle
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostMode
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostRequest
+import com.mardous.booming.separation.process.SourceSeparationExecutionSessionIdentity
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostStartResult
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
@@ -825,8 +826,8 @@ class SourceSeparationModelAwareEngineTest {
             override val processGeneration: Long
                 get() = throw IllegalStateException("injected connection failure")
 
-            override fun prepareForBackendPolicy(
-                backendPolicy: SourceSeparationExecutionBackendPolicy,
+            override fun prepareForExecutionSession(
+                identity: SourceSeparationExecutionSessionIdentity,
             ): Long = throw IllegalStateException("injected connection failure")
         }
         val engine = fixture.engine(
@@ -844,19 +845,19 @@ class SourceSeparationModelAwareEngineTest {
     }
 
     @Test
-    fun `remote backend preparation supplies the generation used by the run`() {
+    fun `remote session preparation supplies the generation used by the run`() {
         val fixture = fixture()
-        var preparedPolicy: SourceSeparationExecutionBackendPolicy? = null
+        var preparedIdentity: SourceSeparationExecutionSessionIdentity? = null
         var startedGeneration: Long? = null
         val host = object : SourceSeparationExecutionHost {
             override val mode = SourceSeparationExecutionHostMode.BoundRemote
             override val processGeneration: Long
                 get() = error("The engine must use the prepared process generation.")
 
-            override fun prepareForBackendPolicy(
-                backendPolicy: SourceSeparationExecutionBackendPolicy,
+            override fun prepareForExecutionSession(
+                identity: SourceSeparationExecutionSessionIdentity,
             ): Long {
-                preparedPolicy = backendPolicy
+                preparedIdentity = identity
                 return 18L
             }
 
@@ -889,7 +890,13 @@ class SourceSeparationModelAwareEngineTest {
         }
 
         assertEquals("injected after backend preparation", error.message)
-        assertEquals(SourceSeparationExecutionBackendPolicy.Auto, preparedPolicy)
+        assertEquals(SourceSeparationExecutionBackendPolicy.Auto,
+            preparedIdentity?.backendPolicy)
+        val activeModel = requireNotNull(fixture.activeModel)
+        assertEquals(activeModel.artifact.sha256,
+            preparedIdentity?.model?.artifactSha256)
+        assertEquals(activeModel.contract.contractFingerprint,
+            preparedIdentity?.model?.contractFingerprint)
         assertEquals(18L, startedGeneration)
         assertTrue(fixture.store.listManifests().isEmpty())
     }

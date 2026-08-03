@@ -577,7 +577,7 @@ internal class SourceSeparationExecutionService : Service() {
         var executionFailure: Throwable? = null
         var foregroundStopReason = "failed"
         return try {
-            active.environment.beginExecution(command.descriptor.runId)
+            active.environment.beginExecution(command.descriptor)
             executionBegan = true
             command.foregroundLease?.let { lease ->
                 require(foregroundController.diagnostics().activeLease?.let { active ->

@@ -21,6 +21,7 @@ import com.mardous.booming.separation.model.MdxTensorSpec
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoFailureStage
 import com.mardous.booming.separation.model.litert.MdxLiteRtAutoInferenceException
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLostException
+import com.mardous.booming.separation.cache.v2.SourceSeparationAdmittedGpuRuntimeIdentity
 import java.nio.file.Files
 import java.util.concurrent.CancellationException
 import org.junit.Assert.assertEquals
@@ -126,7 +127,10 @@ class SourceSeparationProcessSessionControllerTest {
         val factory = FakeFactory()
         val controller = residentController(factory, MdxRuntimeAbi.ArmeabiV7a)
 
-        controller.beginExecution("run-arm32")
+        controller.beginExecution(
+            "run-arm32",
+            sessionIdentity(arm32Artifact, arm32Profile),
+        )
         controller.acquire(arm32Artifact, arm32Profile, settings).close()
         controller.finishExecution("run-arm32", null)
 
@@ -154,12 +158,16 @@ class SourceSeparationProcessSessionControllerTest {
         controller.finishExecution("run-1", null)
         val firstKey = controller.diagnostics().sessionKey
 
-        controller.beginExecution("run-2")
+        val changedArtifact = artifact.copy(sha256 = "b".repeat(64))
+        controller.beginExecution(
+            "run-2",
+            sessionIdentity(changedArtifact, profile),
+        )
         val mismatch = assertThrows(
             SourceSeparationProcessSessionRecycleRequiredException::class.java,
         ) {
             controller.acquire(
-                artifact.copy(sha256 = "b".repeat(64)),
+                changedArtifact,
                 profile,
                 settings,
             )
@@ -420,6 +428,43 @@ class SourceSeparationProcessSessionControllerTest {
             runtimeAbi = runtimeAbi,
             sessionIdFactory = { "session-1" },
         )
+
+    private fun SourceSeparationProcessSessionController.beginExecution(runId: String) {
+        beginExecution(runId, sessionIdentity())
+    }
+
+    private fun sessionIdentity(
+        artifact: MdxModelArtifact = this.artifact,
+        profile: MdxExecutionProfile = this.profile,
+        runtimeSettings: MdxRuntimeSettings = settings,
+    ) = SourceSeparationExecutionSessionIdentity(
+        model = SourceSeparationExecutionModelIdentity(
+            modelId = "test-model",
+            artifactFileName = artifact.file.name,
+            artifactByteSize = artifact.byteSize,
+            artifactSha256 = artifact.sha256,
+            contractId = "test-contract",
+            contractSchemaVersion = 1,
+            contractFingerprint = "c".repeat(64),
+            profileRevisionId = "test-profile-revision",
+            executionProfileId = profile.profileId,
+            executionSessionIdentity = profile.sessionIdentity,
+            pipelineId = profile.pipelineId,
+            pipelineVersion = profile.pipelineVersion,
+        ),
+        backendPolicy = SourceSeparationExecutionBackendPolicy.Auto,
+        gpuRuntimeIdentity = SourceSeparationAdmittedGpuRuntimeIdentity(
+            profileId = "test-gpu",
+            artifactVersion = "test-runtime",
+            capabilitySchemaVersion = 1,
+            backend = "OpenCL",
+            precision = "FP32",
+            kernelBatchSize = 1,
+            commandQueueWindowSize = 1,
+        ),
+        cpuThreads = runtimeSettings.cpuThreads,
+        useXnnpack = runtimeSettings.useXnnpack,
+    )
 
     private fun artifact(profile: MdxExecutionProfile): MdxModelArtifact {
         val directory = Files.createTempDirectory("process-session-test").toFile()
