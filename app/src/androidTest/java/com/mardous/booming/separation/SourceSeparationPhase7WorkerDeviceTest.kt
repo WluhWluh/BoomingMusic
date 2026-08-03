@@ -3417,9 +3417,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
         requireResidentProcessValidation(arguments)
         val report = baseReport(context, runId, arguments)
-        val events = Collections.synchronizedList(
-            mutableListOf<SourceSeparationExecutionHostEvent>(),
-        )
         val coordinators = mutableListOf<SourceSeparationForegroundWorkerCoordinator>()
         val switchCases = JSONArray()
         var host: BoundRemoteSourceSeparationExecutionHost? = null
@@ -3473,7 +3470,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
                 SourceSeparationModelAwareCacheRepository::class.java,
             )
-            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
             val runtimeFacade = createCpuRuntimeFacade(
                 context = context,
                 preferences = preferences,
@@ -3481,7 +3477,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 backendMode = BackendMode.Auto,
                 processorCount = null,
                 executionHostMode = Phase7ExecutionHostMode.BoundRemote,
-                executionHostEventSink = events::add,
                 boundRemoteHostSink = { host = it },
             )
 
@@ -3489,6 +3484,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 context = context,
                 preferences = preferences,
                 sourceSeparationRuntime = runtimeFacade,
+                activeSelectionFlow = presetRepository.activeSelectionFlow,
             ).also { worker ->
                 coordinators += worker
                 worker.attachCallbacks(RecordingCallbacks())
@@ -3564,67 +3560,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 assertEquals(targetModelId, selected.modelId)
                 assertEquals(targetArtifactSha256, selected.artifactSha256)
                 val targetSong = resolveActiveSong(targetModelId, targetArtifactSha256)
-                clearExactCacheEntry(runtimeFacade, targetSong.cacheKey)
-
                 val oldProcess = requireNotNull(host).processDiagnostics()
-                val oldInvocationCount = oldProcess.session.invocationCount
-                val mismatchWorker = newWorker()
-                assertTrue(mismatchWorker.startCurrentSong())
-                val mismatchState = waitForFailed(mismatchWorker)
-                mismatchWorker.cancel()
-                waitForInactive(mismatchWorker)
-                val mismatchLeaseReleaseMs = waitForCacheLeaseRelease(
-                    cacheRepository,
-                    targetSong.cacheKey,
-                )
-                val failedManifest = requireNotNull(store.readManifest(targetSong.cacheKey))
-                assertEquals(SourceSeparationCacheManifestState.Partial, failedManifest.state)
-                val mismatchMessage = listOfNotNull(
-                    mismatchState.message,
-                    failedManifest.error?.message,
-                ).joinToString(" | ")
-                assertTrue(
-                    "The old generation did not report its model-key boundary: $mismatchMessage",
-                    "session-key-change" in mismatchMessage,
-                )
-                val mismatchDiagnostics = requireNotNull(host).processDiagnostics()
-                assertEquals(oldProcess.processGeneration,
-                    mismatchDiagnostics.processGeneration)
-                assertEquals(oldProcess.processStartTicks,
-                    mismatchDiagnostics.processStartTicks)
-                assertEquals(oldInvocationCount,
-                    mismatchDiagnostics.session.invocationCount)
-                assertEquals(1,
-                    mismatchDiagnostics.session.nativeSessionCreationCount)
-                assertEquals("session-key-change",
-                    mismatchDiagnostics.session.recycleReason)
-                assertEquals(SourceSeparationProcessSessionState.Resident,
-                    mismatchDiagnostics.session.state)
-
-                playback.assertContinuous("switch-$switchIndex-before-recycle")
-                val recycle = requireNotNull(host).recycle(
-                    SourceSeparationIpcRecycleReason.ModelOrRuntimeKeyChanged,
-                    recycleToken = "phase3-switch-" + switchIndex.toString().padStart(2, '0'),
-                )
-                assertEquals(oldProcess.processGeneration,
-                    recycle.oldProcess.processGeneration)
-                assertNotEquals(recycle.oldProcess.processGeneration,
-                    recycle.newProcess.processGeneration)
-                assertNotEquals(recycle.oldProcess.processStartTicks,
-                    recycle.newProcess.processStartTicks)
-                assertTrue(recycle.binderDeath.expected)
-                val emptyGeneration = requireNotNull(host).processDiagnostics()
-                assertEquals(SourceSeparationProcessSessionState.Empty,
-                    emptyGeneration.session.state)
-                assertEquals(0, emptyGeneration.session.nativeSessionCreationCount)
-                playback.assertContinuous("switch-$switchIndex-after-recycle")
-
-                clearExactCacheEntry(runtimeFacade, targetSong.cacheKey)
+                val oldExpectedBinderDeathCount =
+                    requireNotNull(host).connectionDiagnostics.expectedBinderDeathCount
+                playback.assertContinuous("switch-$switchIndex-before-run")
                 val completedManifest = completeExactRun(targetSong)
                 val completedDiagnostics = requireNotNull(host).processDiagnostics()
-                assertEquals(recycle.newProcess.processGeneration,
+                assertNotEquals(oldProcess.processGeneration,
                     completedDiagnostics.processGeneration)
-                assertEquals(recycle.newProcess.processStartTicks,
+                assertNotEquals(oldProcess.processStartTicks,
                     completedDiagnostics.processStartTicks)
                 assertEquals(1,
                     completedDiagnostics.session.nativeSessionCreationCount)
@@ -3637,16 +3581,23 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 assertEquals(targetModelId, completedManifest.identity.modelId)
                 assertEquals(targetArtifactSha256,
                     completedManifest.identity.artifactSha256)
+                val connection = requireNotNull(host).connectionDiagnostics
+                val binderDeath = requireNotNull(connection.lastBinderDeath)
+                assertEquals(oldExpectedBinderDeathCount + 1,
+                    connection.expectedBinderDeathCount)
+                assertEquals(0, connection.unexpectedBinderDeathCount)
+                assertTrue(binderDeath.expected)
+                assertEquals(oldProcess.processGeneration, binderDeath.processGeneration)
                 playback.assertContinuous("switch-$switchIndex-after-run")
 
                 switchCases.put(JSONObject()
                     .put("switch", switchIndex)
                     .put("targetModelId", targetModelId)
                     .put("targetArtifactSha256", targetArtifactSha256)
-                    .put("mismatchGeneration", oldProcess.processGeneration)
-                    .put("mismatchInvocationCount", oldInvocationCount)
-                    .put("mismatchLeaseReleaseMs", mismatchLeaseReleaseMs)
-                    .put("recycleToken", recycle.recycleToken)
+                    .put("proactiveRecycle", true)
+                    .put("oldGeneration", oldProcess.processGeneration)
+                    .put("oldInvocationCount", oldProcess.session.invocationCount)
+                    .put("recycleToken", binderDeath.recycleToken ?: JSONObject.NULL)
                     .put("newGeneration", completedDiagnostics.processGeneration)
                     .put("newProcessStartTicks", completedDiagnostics.processStartTicks)
                     .put("sessionId", nextSessionId)
@@ -5246,25 +5197,35 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertEquals(primaryModelId, primaryRuntimeSong.modelId)
             cacheKeys += primaryRuntimeSong.cacheKey
             clearExactCacheEntry(runtime, primaryRuntimeSong.cacheKey)
+            val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
+                SourceSeparationModelAwareCacheRepository::class.java,
+            )
+            val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
 
             val startedAtMs = SystemClock.elapsedRealtime()
-            val primaryWorker = SourceSeparationForegroundWorkerCoordinator(
+            val worker = SourceSeparationForegroundWorkerCoordinator(
                 context = context,
                 preferences = preferences,
                 sourceSeparationRuntime = runtime,
+                activeSelectionFlow = presetRepository.activeSelectionFlow,
             )
-            coordinators += primaryWorker
-            primaryWorker.attachCallbacks(RecordingCallbacks())
-            primaryWorker.updateSong(
+            coordinators += worker
+            worker.attachCallbacks(RecordingCallbacks())
+            worker.updateSong(
                 song = source,
                 positionMs = 0L,
                 durationMs = source.duration,
                 isPlaying = false,
                 sourceSeparationBlend = TEST_BLEND,
             )
-            assertTrue(primaryWorker.startCurrentSong())
-            waitForReady(primaryWorker, minimumReadyWindows = 1)
-            assertEquals(primaryRuntimeSong.cacheKey, primaryWorker.runningCacheKey())
+            assertTrue(worker.startCurrentSong())
+            waitForReady(worker, minimumReadyWindows = 1)
+            assertEquals(primaryRuntimeSong.cacheKey, worker.runningCacheKey())
+            val primaryReadyJournal = requireNotNull(
+                store.readRunJournal(primaryRuntimeSong.cacheKey),
+            )
+            assertTrue(primaryReadyJournal.committedSegments.isNotEmpty())
+            val primaryReadySegmentCount = primaryReadyJournal.committedSegments.size
 
             val selectedSecondary = presetRepository.activate(
                 sha256 = secondaryArtifactSha256,
@@ -5273,18 +5234,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 experimentalConfirmed = true,
             )
             assertEquals(secondaryModelId, selectedSecondary.modelId)
-            assertEquals(primaryRuntimeSong.cacheKey, primaryWorker.runningCacheKey())
-            waitForCompleted(primaryWorker)
-            val primaryCompleted = runtime.cacheStatus(primaryRuntimeSong) as?
-                SourceSeparationModelAwareCacheStatus.Completed
-                ?: error("The admitted primary run did not complete under its original identity.")
-            assertEquals(primaryModelId, primaryCompleted.manifest.identity.modelId)
-            assertEquals(
-                primaryArtifactSha256,
-                primaryCompleted.manifest.identity.artifactSha256,
+            val primaryPausedJournal = waitForRunJournal(
+                store = store,
+                cacheKey = primaryRuntimeSong.cacheKey,
+                lifecycle = SourceSeparationCacheRunJournalLifecycle.Paused,
+                transition = SourceSeparationCacheRunTransitionType.ActiveModelSuperseded,
             )
-            primaryWorker.cancel()
-            waitForInactive(primaryWorker)
+            waitForCacheLeaseRelease(cacheRepository, primaryRuntimeSong.cacheKey)
+            assertTrue(primaryPausedJournal.committedSegments.size >= primaryReadySegmentCount)
+            val primaryPartial = runtime.cacheStatus(primaryRuntimeSong) as?
+                SourceSeparationModelAwareCacheStatus.Incomplete
+                ?: error("The superseded primary run did not retain a partial cache.")
+            assertEquals(SourceSeparationCacheManifestState.Partial, primaryPartial.manifest.state)
+            assertEquals(primaryModelId, primaryPartial.manifest.identity.modelId)
 
             val secondaryRuntimeSong = (runtime.resolve(source) as?
                 SourceSeparationRuntimeSongResolution.Ready)?.song
@@ -5295,40 +5257,65 @@ class SourceSeparationPhase7WorkerDeviceTest {
             cacheKeys += secondaryRuntimeSong.cacheKey
             clearExactCacheEntry(runtime, secondaryRuntimeSong.cacheKey)
 
-            val secondaryWorker = SourceSeparationForegroundWorkerCoordinator(
-                context = context,
-                preferences = preferences,
-                sourceSeparationRuntime = runtime,
+            worker.requestManualSong(source)
+            waitForReady(worker, minimumReadyWindows = 1)
+            assertEquals(secondaryRuntimeSong.cacheKey, worker.runningCacheKey())
+            val secondaryReadyJournal = requireNotNull(
+                store.readRunJournal(secondaryRuntimeSong.cacheKey),
             )
-            coordinators += secondaryWorker
-            secondaryWorker.attachCallbacks(RecordingCallbacks())
-            secondaryWorker.updateSong(
-                song = source,
-                positionMs = 0L,
-                durationMs = source.duration,
-                isPlaying = false,
-                sourceSeparationBlend = TEST_BLEND,
+            assertTrue(secondaryReadyJournal.committedSegments.isNotEmpty())
+
+            val selectedPrimary = presetRepository.activate(
+                sha256 = primaryArtifactSha256,
+                platform = AndroidMdxRuntimePlatformProvider.current(),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                experimentalConfirmed = true,
             )
-            assertTrue(secondaryWorker.startCurrentSong())
-            waitForCompleted(secondaryWorker)
-            val secondaryCompleted = runtime.cacheStatus(secondaryRuntimeSong) as?
+            assertEquals(primaryModelId, selectedPrimary.modelId)
+            val secondaryPausedJournal = waitForRunJournal(
+                store = store,
+                cacheKey = secondaryRuntimeSong.cacheKey,
+                lifecycle = SourceSeparationCacheRunJournalLifecycle.Paused,
+                transition = SourceSeparationCacheRunTransitionType.ActiveModelSuperseded,
+            )
+            waitForCacheLeaseRelease(cacheRepository, secondaryRuntimeSong.cacheKey)
+            val secondaryPartial = runtime.cacheStatus(secondaryRuntimeSong) as?
+                SourceSeparationModelAwareCacheStatus.Incomplete
+                ?: error("The superseded secondary run did not retain a partial cache.")
+            assertEquals(secondaryModelId, secondaryPartial.manifest.identity.modelId)
+
+            val resumedPrimary = (runtime.resolve(source) as?
+                SourceSeparationRuntimeSongResolution.Ready)?.song
+                ?: error("The reactivated primary model could not resolve the switching source.")
+            assertEquals(primaryRuntimeSong.cacheKey, resumedPrimary.cacheKey)
+            assertTrue(
+                requireNotNull(store.readRunJournal(resumedPrimary.cacheKey))
+                    .committedSegments.size >= primaryReadySegmentCount,
+            )
+            worker.requestManualSong(source)
+            waitForCompleted(worker)
+            val primaryCompleted = runtime.cacheStatus(resumedPrimary) as?
                 SourceSeparationModelAwareCacheStatus.Completed
-                ?: error("The first post-switch run did not complete under the secondary model.")
-            assertEquals(secondaryModelId, secondaryCompleted.manifest.identity.modelId)
-            assertEquals(
-                secondaryArtifactSha256,
-                secondaryCompleted.manifest.identity.artifactSha256,
+                ?: error("The reactivated primary cache did not resume to completion.")
+            assertEquals(primaryModelId, primaryCompleted.manifest.identity.modelId)
+            assertEquals(primaryArtifactSha256,
+                primaryCompleted.manifest.identity.artifactSha256)
+            val primaryCompletedJournal = waitForRunJournal(
+                store = store,
+                cacheKey = resumedPrimary.cacheKey,
+                lifecycle = SourceSeparationCacheRunJournalLifecycle.Completed,
             )
+            worker.cancel()
+            waitForInactive(worker)
+
             val primaryBackend = primaryCompleted.manifest.runtimeRecords.last().backend
-            val secondaryBackend = secondaryCompleted.manifest.runtimeRecords.last().backend
             if (backendMode == BackendMode.Cpu) {
                 assertEquals(MdxInferenceBackend.LiteRtCpu.name, primaryBackend)
-                assertEquals(MdxInferenceBackend.LiteRtCpu.name, secondaryBackend)
+                assertFalse(secondaryPausedJournal.request.tryGpu)
+            } else {
+                assertTrue(secondaryPausedJournal.request.tryGpu)
             }
 
-            val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
-                SourceSeparationModelAwareCacheRepository::class.java,
-            )
             val primaryPlayback = requireNotNull(
                 runtime.openCompletedCache(primaryRuntimeSong.cacheKey),
             )
@@ -5364,9 +5351,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("secondaryArtifactSha256", secondaryArtifactSha256)
                 .put("secondaryCacheKey", secondaryRuntimeSong.cacheKey)
                 .put("primaryBackend", primaryBackend)
-                .put("secondaryBackend", secondaryBackend)
-                .put("switchedAfterReadyWindow", true)
-                .put("admittedRunRetainedIdentity", true)
+                .put("secondaryTryGpu", secondaryPausedJournal.request.tryGpu)
+                .put("primaryReadySegmentsBeforeSwitch", primaryReadySegmentCount)
+                .put("primaryPausedSegments", primaryPausedJournal.committedSegments.size)
+                .put("secondaryPausedSegments", secondaryPausedJournal.committedSegments.size)
+                .put("primaryCompletedSegments", primaryCompletedJournal.committedSegments.size)
+                .put("primarySupersededTransition", true)
+                .put("secondarySupersededTransition", true)
+                .put("activeModelRoundTrip", true)
                 .put("primaryPlaybackLeaseRetained", true)
                 .put("secondaryContractId", arguments.requiredString(ARG_SECONDARY_CONTRACT_ID))
             )
@@ -7083,6 +7075,30 @@ class SourceSeparationPhase7WorkerDeviceTest {
             repository.isLeased(cacheKey),
         )
         return SystemClock.elapsedRealtime() - startedAt
+    }
+
+    private fun waitForRunJournal(
+        store: SourceSeparationCacheStore,
+        cacheKey: String,
+        lifecycle: SourceSeparationCacheRunJournalLifecycle,
+        transition: SourceSeparationCacheRunTransitionType? = null,
+    ): SourceSeparationCacheRunJournal {
+        val deadline = SystemClock.elapsedRealtime() + LIFECYCLE_TIMEOUT_MS
+        var latest: SourceSeparationCacheRunJournal? = null
+        while (SystemClock.elapsedRealtime() < deadline) {
+            latest = store.readRunJournal(cacheKey)
+            if (latest?.lifecycle == lifecycle &&
+                (transition == null || latest.transitions.any { it.type == transition })
+            ) {
+                return latest
+            }
+            SystemClock.sleep(POLL_INTERVAL_MS)
+        }
+        error(
+            "Cache run journal did not reach $lifecycle" +
+                (transition?.let { " with $it" } ?: "") +
+                ": cache=$cacheKey latest=$latest",
+        )
     }
 
     private fun waitForProcessSessionLeaseRelease(
