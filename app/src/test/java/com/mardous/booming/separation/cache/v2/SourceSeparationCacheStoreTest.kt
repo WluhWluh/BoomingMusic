@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.cache.v2
 
+import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContract
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
@@ -182,6 +183,34 @@ class SourceSeparationCacheStoreTest {
     }
 
     @Test
+    fun `recovery pauses an orphaned running journal`() {
+        val store = SourceSeparationCacheStore(cacheRoot())
+        val partial = completedManifest(store).copy(
+            state = SourceSeparationCacheManifestState.Partial,
+        )
+        store.writeManifest(partial)
+        val running = runningJournal(partial).observerConnected(
+            observerId = "main-process",
+            observerProcessName = "test",
+            nowEpochMs = partial.updatedAtEpochMs + 1L,
+        )
+        store.writeRunJournal(running)
+
+        val result = store.recover()
+
+        val reconciled = requireNotNull(store.readRunJournal(partial.cacheKey))
+        assertEquals(1, result.reconciledOrphanedRuns)
+        assertEquals(SourceSeparationCacheRunJournalLifecycle.Paused, reconciled.lifecycle)
+        assertEquals(
+            SourceSeparationCacheRunTransitionType.PreviousOwnerDied,
+            reconciled.transitions.last().type,
+        )
+        assertTrue(reconciled.transitions.any {
+            it.type == SourceSeparationCacheRunTransitionType.ObserverDisconnected
+        })
+    }
+
+    @Test
     fun `manifest reader rejects historical schema and wrong directory key`() {
         val store = SourceSeparationCacheStore(cacheRoot())
         val manifest = completedManifest(store)
@@ -192,7 +221,7 @@ class SourceSeparationCacheStoreTest {
         )
         manifestFile.writeText(
             manifestFile.readText().replace(
-                "\"manifestSchemaVersion\":2",
+                "\"manifestSchemaVersion\":3",
                 "\"manifestSchemaVersion\":1",
             )
         )
@@ -321,6 +350,28 @@ class SourceSeparationCacheStoreTest {
             updatedAtEpochMs = 2L,
         )
     }
+
+    private fun runningJournal(
+        manifest: SourceSeparationCacheManifest,
+    ): SourceSeparationCacheRunJournal = SourceSeparationCacheRunJournal.admitted(
+        SourceSeparationCacheRunJournalRequest(
+            cacheKey = manifest.cacheKey,
+            identity = manifest.identity,
+            contract = manifest.contract,
+            song = manifest.song,
+            sourceDiagnostics = manifest.sourceDiagnostics,
+            runId = "orphaned-run",
+            processGeneration = 1L,
+            ownerPid = 1234,
+            runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+            backgroundPolicy = SourceSeparationExecutionRunClass.PlaybackDemandWindow
+                .backgroundPolicy,
+            tryGpu = false,
+            gpuRuntimeIdentity = null,
+            gpuFallbackLatch = null,
+            admittedAtEpochMs = manifest.createdAtEpochMs,
+        )
+    )
 
     private fun writeCompletedFiles(
         directory: File,

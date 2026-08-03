@@ -149,7 +149,7 @@ class SourceSeparationCacheRunCoordinator(
                     committedSegments = committedSegments,
                 )
                 existing.copy(
-                    state = SourceSeparationCacheManifestState.Running,
+                    state = SourceSeparationCacheManifestState.Partial,
                     segmentPlan = resumedPlan,
                     error = null,
                     updatedAtEpochMs = nowEpochMs(),
@@ -166,7 +166,7 @@ class SourceSeparationCacheRunCoordinator(
                     cacheKey = request.identity.cacheKey,
                     identity = request.identity,
                     contract = request.contract,
-                    state = SourceSeparationCacheManifestState.Running,
+                    state = SourceSeparationCacheManifestState.Partial,
                     song = request.song,
                     sourceDiagnostics = request.sourceDiagnostics,
                     createdAtEpochMs = existing?.createdAtEpochMs ?: now,
@@ -263,7 +263,7 @@ class SourceSeparationCacheRunCoordinator(
                 }
         }
         return current.copy(
-            state = SourceSeparationCacheManifestState.Running,
+            state = SourceSeparationCacheManifestState.Partial,
             output = output,
             segmentPlan = preparation.segmentPlan,
             error = null,
@@ -443,9 +443,13 @@ class SourceSeparationCacheRunCoordinator(
     ): SourceSeparationCacheManifest? {
         return finishIncomplete(
             run = run,
-            state = SourceSeparationCacheManifestState.Running,
+            transition = when (reason) {
+                SourceSeparationPauseReason.Standard ->
+                    SourceSeparationCacheRunTransitionType.Paused
+                SourceSeparationPauseReason.ActiveModelSuperseded ->
+                    SourceSeparationCacheRunTransitionType.ActiveModelSuperseded
+            },
             error = null,
-            pauseReason = reason,
         )
     }
 
@@ -453,14 +457,22 @@ class SourceSeparationCacheRunCoordinator(
         run: SourceSeparationModelAwareCacheRun,
         error: Throwable,
     ): SourceSeparationCacheManifest? {
-        return finishIncomplete(run, SourceSeparationCacheManifestState.Canceled, error)
+        return finishIncomplete(
+            run = run,
+            transition = SourceSeparationCacheRunTransitionType.UserCanceled,
+            error = error,
+        )
     }
 
     fun fail(
         run: SourceSeparationModelAwareCacheRun,
         error: Throwable,
     ): SourceSeparationCacheManifest? {
-        return finishIncomplete(run, SourceSeparationCacheManifestState.Failed, error)
+        return finishIncomplete(
+            run = run,
+            transition = SourceSeparationCacheRunTransitionType.Failed,
+            error = error,
+        )
     }
 
     fun cleanCompletedTemporaryFiles(cacheKey: String): Boolean {
@@ -492,9 +504,8 @@ class SourceSeparationCacheRunCoordinator(
 
     private fun finishIncomplete(
         run: SourceSeparationModelAwareCacheRun,
-        state: SourceSeparationCacheManifestState,
+        transition: SourceSeparationCacheRunTransitionType,
         error: Throwable?,
-        pauseReason: SourceSeparationPauseReason = SourceSeparationPauseReason.Standard,
     ): SourceSeparationCacheManifest? {
         return try {
             run.requireOpen()
@@ -509,7 +520,7 @@ class SourceSeparationCacheRunCoordinator(
                 }
             )
             val updated = current.copy(
-                state = state,
+                state = SourceSeparationCacheManifestState.Partial,
                 segmentPlan = resetPlan,
                 error = error?.let {
                     SourceSeparationCacheError(
@@ -520,32 +531,15 @@ class SourceSeparationCacheRunCoordinator(
                 updatedAtEpochMs = nowEpochMs(),
             ).also(store::writeManifest)
             updateJournal(run) { journal, now ->
-                val transition = when (state) {
-                    SourceSeparationCacheManifestState.Running ->
-                        when (pauseReason) {
-                            SourceSeparationPauseReason.Standard ->
-                                SourceSeparationCacheRunTransitionType.Paused
-                            SourceSeparationPauseReason.ActiveModelSuperseded ->
-                                SourceSeparationCacheRunTransitionType.ActiveModelSuperseded
-                        }
-                    SourceSeparationCacheManifestState.Canceled ->
-                        SourceSeparationCacheRunTransitionType.UserCanceled
-                    SourceSeparationCacheManifestState.Failed ->
-                        SourceSeparationCacheRunTransitionType.Failed
-                    SourceSeparationCacheManifestState.Completed -> error(
-                        "Incomplete cache run cannot become completed.",
-                    )
-                }
-                val lifecycle = when (state) {
-                    SourceSeparationCacheManifestState.Running ->
-                        SourceSeparationCacheRunJournalLifecycle.Paused
-                    SourceSeparationCacheManifestState.Canceled ->
+                val lifecycle = when (transition) {
+                    SourceSeparationCacheRunTransitionType.Paused,
+                    SourceSeparationCacheRunTransitionType.ActiveModelSuperseded,
+                    -> SourceSeparationCacheRunJournalLifecycle.Paused
+                    SourceSeparationCacheRunTransitionType.UserCanceled ->
                         SourceSeparationCacheRunJournalLifecycle.Canceled
-                    SourceSeparationCacheManifestState.Failed ->
+                    SourceSeparationCacheRunTransitionType.Failed ->
                         SourceSeparationCacheRunJournalLifecycle.Failed
-                    SourceSeparationCacheManifestState.Completed -> error(
-                        "Incomplete cache run cannot become completed.",
-                    )
+                    else -> error("Invalid incomplete cache transition: $transition")
                 }
                 journal.append(
                     type = transition,

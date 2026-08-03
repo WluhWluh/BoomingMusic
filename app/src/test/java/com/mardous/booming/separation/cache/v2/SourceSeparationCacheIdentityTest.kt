@@ -127,7 +127,7 @@ class SourceSeparationCacheIdentityTest {
             manifest.copy(manifestSchemaVersion = 1)
         }
         assertThrows(IllegalArgumentException::class.java) {
-            manifest.copy(manifestSchemaVersion = 3)
+            manifest.copy(manifestSchemaVersion = 4)
         }
     }
 

@@ -18,6 +18,7 @@ class SourceSeparationModelAwareCacheRepository(
     fun entries(): List<SourceSeparationModelAwareCacheEntry> {
         return store.listManifests().map { manifest ->
             val availability = modelAvailability.availability(manifest)
+            val journal = store.readRunJournal(manifest.cacheKey)
             val validation = if (manifest.state == SourceSeparationCacheManifestState.Completed) {
                 store.validateCompletedEntry(manifest, verifyHashes = false)
             } else {
@@ -35,7 +36,7 @@ class SourceSeparationModelAwareCacheRepository(
                 contractId = manifest.identity.contractId,
                 profileRevisionId = manifest.identity.profileRevisionId,
                 renderProfileId = manifest.identity.renderProfileId,
-                state = manifest.toEntryState(availability, validation),
+                state = manifest.toEntryState(availability, validation, journal),
                 modelAvailability = availability,
                 readySegments = manifest.segmentPlan?.segments?.count {
                     it.state.isPlaybackReady
@@ -89,9 +90,7 @@ class SourceSeparationModelAwareCacheRepository(
                     }
                 }
 
-                SourceSeparationCacheManifestState.Running,
-                SourceSeparationCacheManifestState.Canceled,
-                SourceSeparationCacheManifestState.Failed ->
+                SourceSeparationCacheManifestState.Partial ->
                     SourceSeparationModelAwareCacheStatus.Incomplete(
                         manifest = manifest,
                         readySegments = manifest.segmentPlan?.segments?.count {
@@ -121,7 +120,9 @@ class SourceSeparationModelAwareCacheRepository(
                     SourceSeparationModelAwareReadyHorizonStatus.Unavailable
                 }
             }
-            if (manifest.state != SourceSeparationCacheManifestState.Running) {
+            if (manifest.state != SourceSeparationCacheManifestState.Partial ||
+                !hasLiveOrRecoverableProducer(manifest)
+            ) {
                 return@use SourceSeparationModelAwareReadyHorizonStatus.Unavailable
             }
             val output = manifest.output
@@ -187,7 +188,9 @@ class SourceSeparationModelAwareCacheRepository(
                 SourceSeparationModelAwarePlayableStatus.Unavailable
             }
         }
-        if (manifest.state != SourceSeparationCacheManifestState.Running) {
+        if (manifest.state != SourceSeparationCacheManifestState.Partial ||
+            !hasLiveOrRecoverableProducer(manifest)
+        ) {
             return SourceSeparationModelAwarePlayableStatus.Unavailable
         }
         val output = manifest.output
@@ -421,6 +424,7 @@ class SourceSeparationModelAwareCacheRepository(
     private fun SourceSeparationCacheManifest.toEntryState(
         availability: SourceSeparationCacheModelAvailability,
         validation: SourceSeparationCacheValidationResult?,
+        journal: SourceSeparationCacheRunJournal?,
     ): SourceSeparationModelAwareCacheEntryState {
         return when (state) {
             SourceSeparationCacheManifestState.Completed -> {
@@ -430,18 +434,25 @@ class SourceSeparationModelAwareCacheRepository(
                     SourceSeparationModelAwareCacheEntryState.Corrupt
                 }
             }
-            SourceSeparationCacheManifestState.Running -> {
-                if (availability == SourceSeparationCacheModelAvailability.InstalledExact) {
+            SourceSeparationCacheManifestState.Partial -> when (journal?.lifecycle) {
+                SourceSeparationCacheRunJournalLifecycle.Canceled ->
+                    SourceSeparationModelAwareCacheEntryState.Canceled
+                SourceSeparationCacheRunJournalLifecycle.Failed ->
+                    SourceSeparationModelAwareCacheEntryState.Failed
+                SourceSeparationCacheRunJournalLifecycle.CacheLost ->
+                    SourceSeparationModelAwareCacheEntryState.Corrupt
+                else -> if (availability == SourceSeparationCacheModelAvailability.InstalledExact) {
                     SourceSeparationModelAwareCacheEntryState.Partial
                 } else {
                     SourceSeparationModelAwareCacheEntryState.Stale
                 }
             }
-            SourceSeparationCacheManifestState.Canceled ->
-                SourceSeparationModelAwareCacheEntryState.Canceled
-            SourceSeparationCacheManifestState.Failed ->
-                SourceSeparationModelAwareCacheEntryState.Failed
         }
+    }
+
+    private fun hasLiveOrRecoverableProducer(manifest: SourceSeparationCacheManifest): Boolean {
+        val journal = store.readRunJournal(manifest.cacheKey) ?: return false
+        return journal.request.identity == manifest.identity && journal.hasLiveOrRecoverableOwner
     }
 
     private fun SourceSeparationCacheManifest.canPromote(): Boolean {

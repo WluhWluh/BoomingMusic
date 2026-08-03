@@ -58,6 +58,33 @@ data class SourceSeparationCacheRunJournal(
     val isTerminal: Boolean
         get() = lifecycle.isTerminal
 
+    val hasLiveOrRecoverableOwner: Boolean
+        get() = lifecycle == SourceSeparationCacheRunJournalLifecycle.Running ||
+            lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused
+
+    fun reconcileOrphanedOwner(nowEpochMs: Long): SourceSeparationCacheRunJournal {
+        require(lifecycle == SourceSeparationCacheRunJournalLifecycle.Running) {
+            "Only a running cache journal can be reconciled as orphaned."
+        }
+        var reconciled = this
+        reconciled.latestObserverTransition()
+            ?.takeIf { it.type == SourceSeparationCacheRunTransitionType.ObserverConnected }
+            ?.let { observer ->
+                reconciled = reconciled.append(
+                    type = SourceSeparationCacheRunTransitionType.ObserverDisconnected,
+                    nowEpochMs = nowEpochMs,
+                    observerId = observer.observerId,
+                    observerProcessName = observer.observerProcessName,
+                    observerReason = "owner-process-died",
+                )
+            }
+        return reconciled.append(
+            type = SourceSeparationCacheRunTransitionType.PreviousOwnerDied,
+            nowEpochMs = nowEpochMs,
+            lifecycle = SourceSeparationCacheRunJournalLifecycle.Paused,
+        )
+    }
+
     fun append(
         type: SourceSeparationCacheRunTransitionType,
         nowEpochMs: Long,

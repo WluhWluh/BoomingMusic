@@ -92,7 +92,7 @@ class SourceSeparationCacheRunCoordinatorTest {
         )
         val journal = requireNotNull(fixture.store.readRunJournal(retained.cacheKey))
 
-        assertEquals(SourceSeparationCacheManifestState.Running, retained.state)
+        assertEquals(SourceSeparationCacheManifestState.Partial, retained.state)
         assertEquals(SourceSeparationCacheRunJournalLifecycle.Paused, journal.lifecycle)
         assertEquals(
             SourceSeparationCacheRunTransitionType.ActiveModelSuperseded,
@@ -210,7 +210,11 @@ class SourceSeparationCacheRunCoordinatorTest {
         fixture.coordinator.fail(run, error)
 
         val manifest = requireNotNull(fixture.store.readManifest(run.identity.cacheKey))
-        assertEquals(SourceSeparationCacheManifestState.Failed, manifest.state)
+        assertEquals(SourceSeparationCacheManifestState.Partial, manifest.state)
+        assertEquals(
+            SourceSeparationCacheRunJournalLifecycle.Failed,
+            fixture.store.readRunJournal(run.identity.cacheKey)?.lifecycle,
+        )
         assertNull(fixture.repository.openCompletedCache(run.identity.cacheKey))
         assertFalse(fixture.repository.isLeased(run.identity.cacheKey))
     }

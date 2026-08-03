@@ -11,6 +11,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailab
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRoot
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRootLocation
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLifecycle
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunRequest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunStart
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunTransitionType
@@ -110,7 +111,11 @@ class SourceSeparationModelAwareEngineTest {
         }
 
         val manifest = fixture.store.listManifests().single()
-        assertEquals(SourceSeparationCacheManifestState.Canceled, manifest.state)
+        assertEquals(SourceSeparationCacheManifestState.Partial, manifest.state)
+        assertEquals(
+            SourceSeparationCacheRunJournalLifecycle.Canceled,
+            fixture.store.readRunJournal(manifest.cacheKey)?.lifecycle,
+        )
         assertEquals(SourceSeparationSegmentState.Queued, manifest.segmentPlan?.segments?.first()?.state)
         assertFalse(fixture.repository.isLeased(manifest.cacheKey))
     }
@@ -128,7 +133,11 @@ class SourceSeparationModelAwareEngineTest {
         }
 
         val manifest = fixture.store.listManifests().single()
-        assertEquals(SourceSeparationCacheManifestState.Failed, manifest.state)
+        assertEquals(SourceSeparationCacheManifestState.Partial, manifest.state)
+        assertEquals(
+            SourceSeparationCacheRunJournalLifecycle.Failed,
+            fixture.store.readRunJournal(manifest.cacheKey)?.lifecycle,
+        )
         assertEquals("injected inference failure", manifest.error?.message)
         assertFalse(fixture.repository.isLeased(manifest.cacheKey))
         assertFalse(fixture.store.resolveEntryPath(manifest.cacheKey, "completed/vocals.wav").exists())
@@ -230,7 +239,7 @@ class SourceSeparationModelAwareEngineTest {
 
         assertTrue(second is SourceSeparationModelAwareEngineResult.AlreadyCompleted)
         assertEquals(1, executionCount)
-        assertEquals(SourceSeparationCacheManifestState.Running, preparedManifestState)
+        assertEquals(SourceSeparationCacheManifestState.Partial, preparedManifestState)
         assertEquals(2, fixture.preflightCount)
     }
 
@@ -320,7 +329,7 @@ class SourceSeparationModelAwareEngineTest {
 
         assertTrue(error.message.orEmpty().contains("admitted source"))
         val manifest = fixture.store.listManifests().single()
-        assertEquals(SourceSeparationCacheManifestState.Failed, manifest.state)
+        assertEquals(SourceSeparationCacheManifestState.Partial, manifest.state)
         assertFalse(fixture.repository.isLeased(manifest.cacheKey))
     }
 
@@ -801,7 +810,7 @@ class SourceSeparationModelAwareEngineTest {
         assertTrue(error.message.orEmpty().contains("stale run or generation"))
         assertEquals(null, delegate.snapshot("run-stale-generation", 7L))
         val manifest = fixture.store.listManifests().single()
-        assertEquals(SourceSeparationCacheManifestState.Failed, manifest.state)
+        assertEquals(SourceSeparationCacheManifestState.Partial, manifest.state)
         assertFalse(fixture.repository.isLeased(manifest.cacheKey))
     }
 
@@ -1002,7 +1011,7 @@ class SourceSeparationModelAwareEngineTest {
         }
 
         val manifest = fixture.store.listManifests().single()
-        assertEquals(SourceSeparationCacheManifestState.Running, manifest.state)
+        assertEquals(SourceSeparationCacheManifestState.Partial, manifest.state)
         assertEquals(SourceSeparationSegmentState.Ready,
             manifest.segmentPlan?.segments?.get(0)?.state)
         assertEquals(SourceSeparationSegmentState.Queued,
@@ -1068,7 +1077,11 @@ class SourceSeparationModelAwareEngineTest {
         }
 
         val manifest = fixture.store.listManifests().single()
-        assertEquals(SourceSeparationCacheManifestState.Canceled, manifest.state)
+        assertEquals(SourceSeparationCacheManifestState.Partial, manifest.state)
+        assertEquals(
+            SourceSeparationCacheRunJournalLifecycle.Canceled,
+            fixture.store.readRunJournal(manifest.cacheKey)?.lifecycle,
+        )
         assertEquals(SourceSeparationSegmentState.Queued,
             manifest.segmentPlan?.segments?.first()?.state)
         assertFalse(fixture.repository.isLeased(manifest.cacheKey))

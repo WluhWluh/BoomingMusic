@@ -409,6 +409,7 @@ class SourceSeparationCacheStore(
         var removedInvalidEntries = 0
         var removedDerivedArtifacts = 0
         var skippedLockedEntries = 0
+        var reconciledOrphanedRuns = 0
         entriesDirectory.listFiles()
             ?.filter(File::isDirectory)
             .orEmpty()
@@ -434,6 +435,13 @@ class SourceSeparationCacheStore(
                     if (manifest == null) {
                         if (directory.deleteRecursively()) removedInvalidEntries += 1
                     } else {
+                        val journal = readRunJournal(manifest.cacheKey)
+                        if (journal?.lifecycle ==
+                            SourceSeparationCacheRunJournalLifecycle.Running
+                        ) {
+                            writeRunJournal(journal.reconcileOrphanedOwner(nowEpochMs()))
+                            reconciledOrphanedRuns += 1
+                        }
                         removedDerivedArtifacts += recoverDerivedArtifacts(manifest)
                     }
                 }
@@ -445,6 +453,7 @@ class SourceSeparationCacheStore(
             removedInvalidEntries = removedInvalidEntries,
             removedDerivedArtifacts = removedDerivedArtifacts,
             skippedLockedEntries = skippedLockedEntries,
+            reconciledOrphanedRuns = reconciledOrphanedRuns,
         )
     }
 
@@ -746,4 +755,5 @@ data class SourceSeparationCacheRecoveryResult(
     val removedInvalidEntries: Int,
     val removedDerivedArtifacts: Int = 0,
     val skippedLockedEntries: Int = 0,
+    val reconciledOrphanedRuns: Int = 0,
 )

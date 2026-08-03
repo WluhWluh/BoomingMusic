@@ -1962,7 +1962,7 @@ class PlaybackService :
             val playWhenReady = player.playWhenReady
             val shouldPlayAfterSwitch = resumeWhenReady || playWhenReady
             val originalMediaItem = song.toMediaItem(mediaItem.mediaId)
-            val isRunningCache = manifest.state == SourceSeparationCacheManifestState.Running
+            val isPartialCache = manifest.state == SourceSeparationCacheManifestState.Partial
             val useOriginalClock = manifest.canUseOriginalSourceSeparationClock(output)
             if (!useOriginalClock) {
                 clearSourceSeparationPlaybackProcessing()
@@ -2018,7 +2018,7 @@ class PlaybackService :
                 inputMode = InputMode.OriginalSource,
                 stemSampleRate = output.outputSampleRate,
                 stemChannelCount = channelCount,
-                requiresReadinessGate = isRunningCache,
+                requiresReadinessGate = isPartialCache,
                 hydratedCacheDir = hydratedPlayback?.vocalsPcmFile?.parentFile,
                 runtimeSong = runtimeSong,
                 modelAwareCachePlayback = playback,
@@ -2196,7 +2196,7 @@ class PlaybackService :
                     sourceSeparationPlaybackResumeWhenReady = false
                     val updatedSession = session.copy(
                         requiresReadinessGate = playback.manifest.state ==
-                            SourceSeparationCacheManifestState.Running,
+                            SourceSeparationCacheManifestState.Partial,
                     )
                     sourceSeparationPlaybackSession = updatedSession
                     updateSourceSeparationPlaybackReadinessMonitor(updatedSession)

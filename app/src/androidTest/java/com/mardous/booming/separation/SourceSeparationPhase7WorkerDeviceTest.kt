@@ -1840,7 +1840,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                         cacheStatus is SourceSeparationModelAwareCacheStatus.Incomplete,
                     )
                     assertEquals(
-                        SourceSeparationCacheManifestState.Canceled,
+                        SourceSeparationCacheManifestState.Partial,
                         (cacheStatus as SourceSeparationModelAwareCacheStatus.Incomplete)
                             .manifest.state,
                     )
@@ -2538,7 +2538,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val cacheStatus = runtime.cacheStatus(runtimeSong) as?
                 SourceSeparationModelAwareCacheStatus.Incomplete
                 ?: error("PlaybackService teardown did not leave an incomplete cache.")
-            assertEquals(SourceSeparationCacheManifestState.Running,
+            assertEquals(SourceSeparationCacheManifestState.Partial,
                 cacheStatus.manifest.state)
             assertTrue(cacheStatus.readySegments >= 1)
             applyRunAdmissionEvidence(
@@ -3262,7 +3262,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     scenario == ProcessMatrixScenario.Cancellation
                 ) {
                     assertEquals(
-                        SourceSeparationCacheManifestState.Canceled,
+                        SourceSeparationCacheManifestState.Partial,
                         manifest?.state,
                     )
                 }
@@ -3578,7 +3578,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     targetSong.cacheKey,
                 )
                 val failedManifest = requireNotNull(store.readManifest(targetSong.cacheKey))
-                assertEquals(SourceSeparationCacheManifestState.Failed, failedManifest.state)
+                assertEquals(SourceSeparationCacheManifestState.Partial, failedManifest.state)
                 val mismatchMessage = listOfNotNull(
                     mismatchState.message,
                     failedManifest.error?.message,
@@ -3801,7 +3801,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             assertTrue(callbackFaultObserved.get())
             val failedManifest = requireNotNull(store.readManifest(runtimeSong.cacheKey))
-            assertEquals(SourceSeparationCacheManifestState.Failed, failedManifest.state)
+            assertEquals(SourceSeparationCacheManifestState.Partial, failedManifest.state)
             val callbackFailureDiagnostics = requireNotNull(host).processDiagnostics()
             assertEquals(
                 SourceSeparationProcessSessionState.Resident,
@@ -7044,7 +7044,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 SourceSeparationModelAwarePlayableStatus.Unavailable -> {
                     when (val cache = runtimeFacade.cacheStatus(song)) {
                         is SourceSeparationModelAwareCacheStatus.Incomplete -> {
-                            if (cache.manifest.state == SourceSeparationCacheManifestState.Failed) {
+                            if (cache.manifest.error != null) {
                                 error("Playable cache failed: ${cache.manifest.error}")
                             }
                         }

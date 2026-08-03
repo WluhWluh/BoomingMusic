@@ -2,6 +2,7 @@ package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
+import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
@@ -116,6 +117,7 @@ class SourceSeparationModelAwareCacheRepositoryTest {
         val store = store()
         val running = runningManifest(store, "uvr_mdxnet_3_9662", 'a')
         store.writeManifest(running)
+        store.writeRunJournal(runningJournal(running))
         val repository = repository(store)
 
         val ready = repository.playableStatus(running.identity, 0L, 2)
@@ -138,6 +140,7 @@ class SourceSeparationModelAwareCacheRepositoryTest {
             cleanup = SourceSeparationCacheCleanup(paths = listOf("work")),
         )
         store.writeManifest(running)
+        store.writeRunJournal(runningJournal(running))
         store.writeManifest(completed)
         val repository = repository(store)
 
@@ -308,7 +311,7 @@ class SourceSeparationModelAwareCacheRepositoryTest {
         return manifest(
             identity = identity,
             snapshot = snapshot,
-            state = SourceSeparationCacheManifestState.Running,
+            state = SourceSeparationCacheManifestState.Partial,
             output = SourceSeparationCacheOutput(
                 stems = listOf(
                     renderedStem(ContractStemSemantic.Vocals, "work/vocals.wav", null),
@@ -328,6 +331,28 @@ class SourceSeparationModelAwareCacheRepositoryTest {
             updatedAt = updatedAt,
         )
     }
+
+    private fun runningJournal(
+        manifest: SourceSeparationCacheManifest,
+    ): SourceSeparationCacheRunJournal = SourceSeparationCacheRunJournal.admitted(
+        SourceSeparationCacheRunJournalRequest(
+            cacheKey = manifest.cacheKey,
+            identity = manifest.identity,
+            contract = manifest.contract,
+            song = manifest.song,
+            sourceDiagnostics = manifest.sourceDiagnostics,
+            runId = "running-${manifest.cacheKey.take(12)}",
+            processGeneration = 1L,
+            ownerPid = 1234,
+            runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+            backgroundPolicy = SourceSeparationExecutionRunClass.PlaybackDemandWindow
+                .backgroundPolicy,
+            tryGpu = false,
+            gpuRuntimeIdentity = null,
+            gpuFallbackLatch = null,
+            admittedAtEpochMs = manifest.createdAtEpochMs,
+        )
+    )
 
     private fun manifest(
         identity: SourceSeparationCacheIdentity,

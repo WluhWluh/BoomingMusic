@@ -61,16 +61,14 @@ data class SourceSeparationCacheManifest(
     }
 
     companion object {
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
     }
 }
 
 @Serializable
 enum class SourceSeparationCacheManifestState {
-    Running,
+    Partial,
     Completed,
-    Canceled,
-    Failed,
 }
 
 @Serializable
