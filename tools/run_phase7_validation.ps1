@@ -33,6 +33,7 @@ param(
         "playback",
         "backend-switching",
         "switching",
+        "cache-management",
         "background",
         "prefetch"
     )]
@@ -46,7 +47,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v58",
+    [string]$RunnerRevision = "phase7-runner-v59",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -143,6 +144,7 @@ $sourceStages = @(
     "playback",
     "backend-switching",
     "switching",
+    "cache-management",
     "background",
     "prefetch"
 )
@@ -174,6 +176,7 @@ $testMethod = switch ($Stage) {
     "playback" { "validateMediaSessionPlayback"; break }
     "backend-switching" { "validateBackendPolicyPreparationRecycle"; break }
     "switching" { "validateActiveModelSwitch"; break }
+    "cache-management" { "validateProductCacheManagement"; break }
     "background" { "validateBackgroundServiceContinuation"; break }
     "prefetch" { "validateNextSongPrefetch"; break }
     default { "validateDeviceEvidenceIdentity" }
@@ -269,7 +272,7 @@ if ($ExecutionHostMode -eq "bound-remote" -and
     throw "BoundRemote requires a supported process stage/backend and AutoFailpoint=none."
 }
 if ($ExecutionHostMode -eq "independent-foreground" -and
-        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "cancel-cleanup", "task-removal", "force-stop", "reattachment", "independent-main-death", "independent-remote-death", "switching", "prefetch") -or
+        ($Stage -notin @("worker", "ownership-handoff", "pause-cleanup", "cancel-cleanup", "task-removal", "force-stop", "reattachment", "independent-main-death", "independent-remote-death", "switching", "cache-management", "prefetch") -or
         $ProcessAbi -ne "arm64-v8a" -or
         $ProcessorCount -gt 0 -or $XnnPackFlags -ge 0 -or
         $AutoFailpoint -ne "none" -or
@@ -400,6 +403,7 @@ if ($Stage -eq "playback" -and $CacheKey -notmatch '^[0-9a-f]{64}$') {
 }
 $requiresSecondaryModel = $Stage -in @(
     "switching",
+    "cache-management",
     "process-switch-matrix",
     "process-cache-race-matrix"
 ) -or ($Stage -eq "independent-remote-death" -and
