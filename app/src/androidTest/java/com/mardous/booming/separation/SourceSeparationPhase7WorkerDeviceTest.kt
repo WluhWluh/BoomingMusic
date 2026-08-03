@@ -3165,25 +3165,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                                 cycle,
                                 pausedDiagnostics,
                             ))
-                            val oldHost = requireNotNull(host)
-                            retiredUnexpectedDeaths +=
-                                oldHost.connectionDiagnostics.unexpectedBinderDeathCount
-                            oldHost.close()
-                            SystemClock.sleep(PROCESS_REBIND_SETTLE_MS)
-                            runtimeFacade = createRuntime()
-                            runtimeSong = (runtimeFacade.resolve(source) as?
-                                SourceSeparationRuntimeSongResolution.Ready)?.song
-                                ?: error("The paused process-session run could not rebind.")
-                            tailRuntimeSong = (runtimeFacade.resolve(tailSource) as?
-                                SourceSeparationRuntimeSongResolution.Ready)?.song
-                                ?: error("The pending-tail source could not rebind.")
-                            val reboundDiagnostics = requireNotNull(host).processDiagnostics()
-                            assertProcessIdentity(reboundDiagnostics)
-                            assertEquals(
-                                pausedDiagnostics.session.invocationCount,
-                                reboundDiagnostics.session.invocationCount,
-                            )
-                            rebound = true
                         }
                         val resumeWorker = newWorker(runtimeFacade)
                         assertTrue(resumeWorker.startCurrentSong())
@@ -3289,6 +3270,27 @@ class SourceSeparationPhase7WorkerDeviceTest {
                         runtimeFacade.cacheStatus(cycleRuntimeSong) !is
                             SourceSeparationModelAwareCacheStatus.Completed,
                     )
+                }
+                if (cycle == PROCESS_MATRIX_REBIND_CYCLE) {
+                    val oldHost = requireNotNull(host)
+                    retiredUnexpectedDeaths +=
+                        oldHost.connectionDiagnostics.unexpectedBinderDeathCount
+                    oldHost.close()
+                    SystemClock.sleep(PROCESS_REBIND_SETTLE_MS)
+                    runtimeFacade = createRuntime()
+                    runtimeSong = (runtimeFacade.resolve(source) as?
+                        SourceSeparationRuntimeSongResolution.Ready)?.song
+                        ?: error("The completed process-session run could not rebind.")
+                    tailRuntimeSong = (runtimeFacade.resolve(tailSource) as?
+                        SourceSeparationRuntimeSongResolution.Ready)?.song
+                        ?: error("The pending-tail source could not rebind.")
+                    val reboundDiagnostics = requireNotNull(host).processDiagnostics()
+                    assertProcessIdentity(reboundDiagnostics)
+                    assertEquals(
+                        after.session.invocationCount,
+                        reboundDiagnostics.session.invocationCount,
+                    )
+                    rebound = true
                 }
                 cases.put(JSONObject()
                     .put("cycle", cycle)
@@ -9129,6 +9131,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val PLAYBACK_OWNER_ACTIVE_PREFETCH_READY_WINDOWS = 1_000_000
         const val PLAYBACK_NOTIFICATION_ID = 1
         const val PROCESS_MATRIX_CYCLE_COUNT = 20
+        const val PROCESS_MATRIX_REBIND_CYCLE = 1
         const val PROCESS_MODEL_SWITCH_COUNT = 20
         const val PROCESS_MATRIX_FIRST_PAUSE_CYCLE = 6
         const val PROCESS_MATRIX_MAXIMUM_PSS_GROWTH_BYTES = 64L * 1_024L * 1_024L
