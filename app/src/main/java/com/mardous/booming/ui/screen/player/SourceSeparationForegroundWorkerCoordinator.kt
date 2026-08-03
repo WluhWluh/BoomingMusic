@@ -477,14 +477,12 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 fallbackBlend ?: readGlobalBlend()
             }
             SourceSeparationBlendMode.PerSong -> {
-                withContext(Dispatchers.IO) {
-                    val persistedBlend = resolveSong(song)?.let { resolved ->
-                        runCatching { sourceSeparationRuntime.readBlend(resolved) }.getOrNull()
-                    }
-                    persistedBlend
-                        ?: readTemporaryPerSongBlend(song)
-                            ?.also { blend -> migrateTemporaryPerSongBlend(song, blend) }
-                        ?: fallbackBlend?.takeIf { trustFallbackBlend }
+                fallbackBlend?.takeIf { trustFallbackBlend } ?: withContext(Dispatchers.IO) {
+                    readTemporaryPerSongBlend(song)
+                        ?.also { blend -> migrateTemporaryPerSongBlend(song, blend) }
+                        ?: resolveSong(song)?.let { resolved ->
+                            runCatching { sourceSeparationRuntime.readBlend(resolved) }.getOrNull()
+                        }
                         ?: DEFAULT_SOURCE_SEPARATION_BLEND
                 }
             }
@@ -494,10 +492,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     suspend fun recordedBlendForSong(song: Song): Float? {
         if (song == Song.emptySong) return null
         return withContext(Dispatchers.IO) {
-            runCatching {
+            readTemporaryPerSongBlend(song) ?: runCatching {
                 resolveSong(song)?.let(sourceSeparationRuntime::readBlend)
             }.getOrNull()
-                ?: readTemporaryPerSongBlend(song)
         }?.coerceIn(0f, 1f)
     }
 

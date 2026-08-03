@@ -48,7 +48,6 @@ import com.mardous.booming.BuildConfig
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
-import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelResolution
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
@@ -194,6 +193,7 @@ class PlayerViewModel(
     private var sourceSeparationAutoStartJob: Job? = null
     private var sourceSeparationPreStartJob: Job? = null
     private var sourceSeparationPlaybackSyncJob: Job? = null
+    private var sourceSeparationReadinessCheckJob: Job? = null
     private var sourceSeparationBlendPreviewJob: Job? = null
     private var sourceSeparationBlendPreviewPending: Float? = null
     private var sourceSeparationFlacPromotionJob: Job? = null
@@ -351,6 +351,7 @@ class PlayerViewModel(
         sourceSeparationSettingsApplyJob?.cancel()
         sourceSeparationAutoStartJob?.cancel()
         sourceSeparationPreStartJob?.cancel()
+        sourceSeparationReadinessCheckJob?.cancel()
         sourceSeparationBlendPreviewJob?.cancel()
         sourceSeparationFlacPromotionJob?.cancel()
         synchronized(sourceSeparationFlacPromotionLock) {
@@ -725,15 +726,13 @@ class PlayerViewModel(
         if (song == Song.emptySong || sourceSeparationManualStartJob?.isActive == true) return
         Log.d(TAG, "source separation manual start requested song=${song.id}")
         sourceSeparationManualStartJob = viewModelScope.launch {
-            val ready = withContext(IO) { isSourceSeparationPathReady() }
-            Log.d(TAG, "source separation manual start readiness song=${song.id} ready=$ready")
-            if (!ready) {
-                ensureSourceSeparationModelReady(openManagement = true, readinessChecked = true)
-                return@launch
-            }
             if (currentSong.id != song.id) return@launch
             clearSourceSeparationPausePendingAction(song)
             Log.d(TAG, "source separation manual start dispatch song=${song.id}")
+            verifySourceSeparationPathInBackground(
+                songId = song.id,
+                requireProcessingIntent = false,
+            )
             sourceSeparationForegroundWorkerCoordinator.requestManualSong(song)
         }.also { job ->
             job.invokeOnCompletion {
@@ -1206,20 +1205,6 @@ class PlayerViewModel(
     fun setSourceSeparationPlaybackEnabled(enabled: Boolean, blend: Float? = null) {
         val normalizedBlend = blend?.coerceIn(0f, 1f)
         val rememberPerSong = _sourceSeparationRememberPerSongFlow.value
-        if (enabled && !ensureSourceSeparationModelReady(openManagement = true)) {
-            preferences.edit {
-                putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
-                if (normalizedBlend != null && !rememberPerSong) {
-                    putFloat(KEY_SOURCE_SEPARATION_GLOBAL_BLEND, normalizedBlend)
-                }
-            }
-            _sourceSeparationBlendModeFlow.value = SourceSeparationBlendMode.Off
-            updateSourceSeparationBlendState(
-                normalizedBlend ?: _sourceSeparationPlaybackStateFlow.value.blend,
-            )
-            return
-        }
-
         preferences.edit {
             putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, enabled)
             if (normalizedBlend != null && !rememberPerSong) {
@@ -1237,6 +1222,10 @@ class PlayerViewModel(
             val song = currentSong
             if (song != Song.emptySong) {
                 sourceSeparationForegroundWorkerCoordinator.clearAutoStartSuppressionForSong(song.id)
+                publishSourceSeparationProcessingIntent(
+                    song = song,
+                    blend = normalizedBlend ?: _sourceSeparationPlaybackStateFlow.value.blend,
+                )
             }
             applySourceSeparationSettingsForSong(
                 song = song,
@@ -1248,6 +1237,8 @@ class PlayerViewModel(
         } else {
             sourceSeparationSettingsApplyJob?.cancel()
             sourceSeparationSettingsApplyJob = null
+            sourceSeparationReadinessCheckJob?.cancel()
+            sourceSeparationReadinessCheckJob = null
             sourceSeparationPreStartJob?.cancel()
             sourceSeparationPreStartJob = null
             requestSourceSeparationPlaybackEnabled(
@@ -1265,43 +1256,6 @@ class PlayerViewModel(
     fun openSourceSeparationQuickSetup() {
         _sourceSeparationQuickSetupEventFlow.tryEmit(Unit)
     }
-
-    private fun ensureSourceSeparationModelReady(
-        openManagement: Boolean,
-        readinessChecked: Boolean = false,
-    ): Boolean {
-        if (!readinessChecked && isSourceSeparationPathReady()) return true
-
-        sourceSeparationSettingsApplyJob?.cancel()
-        sourceSeparationSettingsApplyJob = null
-        sourceSeparationAutoStartJob?.cancel()
-        sourceSeparationPreStartJob?.cancel()
-        sourceSeparationPreStartJob = null
-        sourceSeparationPlaybackSyncJob?.cancel()
-        sourceSeparationPlaybackSyncJob = null
-        preferences.edit {
-            putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
-        }
-        _sourceSeparationBlendModeFlow.value = SourceSeparationBlendMode.Off
-        if (_sourceSeparationPlaybackStateFlow.value.enabled) {
-            requestSourceSeparationPlaybackEnabled(
-                enabled = false,
-                showMessage = true,
-            )
-        }
-        if (openManagement) {
-            openSourceSeparationQuickSetup()
-        }
-        return false
-    }
-
-    private fun isSourceSeparationModelReady(): Boolean =
-        sourceSeparationRuntime.activeModelResolution() is
-                SourceSeparationActiveCacheModelResolution.Ready
-
-    private fun isSourceSeparationPathReady(): Boolean =
-        runCatching { localSeparationPathReadiness() }
-            .getOrDefault(false)
 
     fun setSourceSeparationRememberPerSongEnabled(enabled: Boolean) {
         preferences.edit {
@@ -1330,16 +1284,20 @@ class PlayerViewModel(
 
     fun setSourceSeparationBlend(blend: Float) {
         val normalizedBlend = blend.coerceIn(0f, 1f)
+        sourceSeparationPlaybackSyncJob?.cancel()
+        sourceSeparationPlaybackSyncJob = null
         sourceSeparationBlendPreviewJob?.cancel()
         sourceSeparationBlendPreviewJob = null
         sourceSeparationBlendPreviewPending = null
         updateSourceSeparationBlendState(normalizedBlend)
+        publishSourceSeparationProcessingIntent(currentSong, normalizedBlend)
         when (_sourceSeparationBlendModeFlow.value) {
             SourceSeparationBlendMode.PerSong -> {
                 val song = currentSong
                 if (song != Song.emptySong) {
+                    writeTemporaryPerSongSourceSeparationBlend(song, normalizedBlend)
                     viewModelScope.launch(IO) {
-                        savePerSongSourceSeparationBlend(song, normalizedBlend)
+                        persistPerSongSourceSeparationBlend(song, normalizedBlend)
                     }
                 }
             }
@@ -1415,10 +1373,6 @@ class PlayerViewModel(
         ) {
             return
         }
-        if (!ensureSourceSeparationModelReady(openManagement = true)) {
-            return
-        }
-
         sourceSeparationPlaybackSyncJob = viewModelScope.launch {
             val latestPlaybackState = _sourceSeparationPlaybackStateFlow.value
             val latestSongId = currentSong.id
@@ -1432,6 +1386,13 @@ class PlayerViewModel(
                 return@launch
             }
 
+            val expectProcessing = shouldExpectSourceSeparationProcessingForSync()
+            if (expectProcessing) {
+                publishSourceSeparationProcessingIntent(
+                    song = currentSong,
+                    blend = _sourceSeparationPlaybackStateFlow.value.blend,
+                )
+            }
             runCatching {
                 sendSourceSeparationPlaybackCommand(
                     action = Playback.SYNC_SOURCE_SEPARATION_PLAYBACK,
@@ -1442,7 +1403,7 @@ class PlayerViewModel(
                         )
                         putBoolean(
                             Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING,
-                            shouldExpectSourceSeparationProcessingForSync(),
+                            expectProcessing,
                         )
                     },
                 )
@@ -1475,11 +1436,6 @@ class PlayerViewModel(
     }
 
     fun setSourceSeparationBlendMode(mode: SourceSeparationBlendMode) {
-        if (mode != SourceSeparationBlendMode.Off &&
-            !ensureSourceSeparationModelReady(openManagement = true)
-        ) {
-            return
-        }
         when (mode) {
             SourceSeparationBlendMode.Off -> setSourceSeparationPlaybackEnabled(false)
             SourceSeparationBlendMode.Global -> {
@@ -1611,11 +1567,6 @@ class PlayerViewModel(
             sourceSeparationAutoStartJob?.cancel()
             return
         }
-        if (!ensureSourceSeparationModelReady(openManagement = true)) {
-            sourceSeparationSettingsApplyJob = null
-            return
-        }
-
         sourceSeparationSettingsApplyJob = viewModelScope.launch {
             val blend = sourceSeparationForegroundWorkerCoordinator.blendForSong(
                 mode = mode,
@@ -1627,6 +1578,13 @@ class PlayerViewModel(
             val expectProcessingImmediately =
                 _sourceSeparationAutoStartFlow.value &&
                         !isDefaultSourceSeparationBlend(blend)
+            if (expectProcessingImmediately) {
+                publishSourceSeparationProcessingIntent(song, blend)
+                if (currentSong.id == song.id) {
+                    sourceSeparationForegroundWorkerCoordinator
+                        .requestPlaybackDemandSong(song)
+                }
+            }
             val immediateResult = sendSourceSeparationPlaybackEnabledCommand(
                 enabled = true,
                 blend = blend,
@@ -1634,13 +1592,7 @@ class PlayerViewModel(
                 expectProcessing = expectProcessingImmediately,
             )
             updateSourceSeparationPlaybackState(immediateResult)
-            val autoStartDecision =
-                sourceSeparationForegroundWorkerCoordinator.autoStartDecision(song, blend)
-            if (autoStartDecision.shouldStart && currentSong.id == song.id) {
-                sourceSeparationForegroundWorkerCoordinator
-                    .requestPlaybackDemandSong(song)
-            }
-            if (!autoStartDecision.shouldStart && !autoStartDecision.hasCompletedCache) {
+            if (!expectProcessingImmediately) {
                 maybeAutoStartSourceSeparationForCurrentSong(blend)
             }
         }
@@ -1690,11 +1642,7 @@ class PlayerViewModel(
                     fallbackBlend = null,
                 )
             }
-            if (sourceSeparationForegroundWorkerCoordinator
-                    .autoStartDecision(song, blend)
-                    .shouldStart &&
-                currentSong.id == song.id
-            ) {
+            if (!isDefaultSourceSeparationBlend(blend) && currentSong.id == song.id) {
                 sourceSeparationForegroundWorkerCoordinator
                     .requestPlaybackDemandSong(song)
             }
@@ -1727,9 +1675,8 @@ class PlayerViewModel(
             val latestMode = _sourceSeparationBlendModeFlow.value
             if (!_sourceSeparationAutoStartFlow.value ||
                 latestMode == SourceSeparationBlendMode.Off ||
-                currentSong.id != current.id ||
-                nextSongForSourceSeparationPreStart(currentSong).id != next.id ||
-                !isSourceSeparationPathReady()
+                    currentSong.id != current.id ||
+                    nextSongForSourceSeparationPreStart(currentSong).id != next.id
             ) {
                 return@launch
             }
@@ -1884,9 +1831,8 @@ class PlayerViewModel(
         }
     }
 
-    private fun savePerSongSourceSeparationBlend(song: Song, blend: Float): Boolean {
+    private fun persistPerSongSourceSeparationBlend(song: Song, blend: Float): Boolean {
         val normalizedBlend = blend.coerceIn(0f, 1f)
-        writeTemporaryPerSongSourceSeparationBlend(song, normalizedBlend)
         val saved = runCatching {
             val runtimeSong = resolveSourceSeparationRuntimeSong(song)
                 ?: return@runCatching false
@@ -1926,12 +1872,6 @@ class PlayerViewModel(
             KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED,
             false,
         )
-        if (playbackEnabled && !isSourceSeparationModelReady()) {
-            preferences.edit {
-                putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
-            }
-            return SourceSeparationBlendMode.Off
-        }
         return sourceSeparationBlendMode(
             playbackEnabled = playbackEnabled,
             rememberPerSong = readSourceSeparationRememberPerSong(),
@@ -2054,6 +1994,62 @@ class PlayerViewModel(
         }
     }
 
+    private fun publishSourceSeparationProcessingIntent(song: Song, blend: Float) {
+        if (!_sourceSeparationAutoStartFlow.value ||
+            _sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
+            song == Song.emptySong ||
+            isDefaultSourceSeparationBlend(blend)
+        ) {
+            return
+        }
+        val current = _sourceSeparationPlaybackStateFlow.value
+        if (current.enabled && !current.processing && current.songId == song.id) return
+        val startsNewGeneration = !current.processing || current.songId != song.id
+        _sourceSeparationPlaybackStateFlow.value = current.copy(
+            enabled = false,
+            processing = true,
+            processingGeneration = if (startsNewGeneration) {
+                current.processingGeneration + 1L
+            } else {
+                current.processingGeneration
+            },
+            blend = blend.coerceIn(0f, 1f),
+            songId = song.id,
+            message = null,
+        )
+        if (startsNewGeneration) {
+            verifySourceSeparationPathInBackground(song.id)
+        }
+    }
+
+    private fun verifySourceSeparationPathInBackground(
+        songId: Long,
+        requireProcessingIntent: Boolean = true,
+    ) {
+        if (sourceSeparationReadinessCheckJob?.isActive == true) return
+        sourceSeparationReadinessCheckJob = viewModelScope.launch {
+            val ready = withContext(IO) {
+                runCatching { localSeparationPathReadiness() }.getOrDefault(false)
+            }
+            val processingIntentStillActive =
+                _sourceSeparationPlaybackStateFlow.value.processing &&
+                        _sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.Off
+            if (!ready &&
+                currentSong.id == songId &&
+                (!requireProcessingIntent || processingIntentStillActive)
+            ) {
+                sourceSeparationForegroundWorkerCoordinator.cancel()
+                handleSourceSeparationModelLoadFailure()
+            }
+        }.also { job ->
+            job.invokeOnCompletion {
+                if (sourceSeparationReadinessCheckJob === job) {
+                    sourceSeparationReadinessCheckJob = null
+                }
+            }
+        }
+    }
+
     private suspend fun requestImmediateSourceSeparationPlaybackGate(
         blend: Float,
     ): SessionResult? {
@@ -2157,6 +2153,8 @@ class PlayerViewModel(
         }
         val processing = if (extras.containsKey(Playback.EXTRA_SOURCE_SEPARATION_PROCESSING)) {
             extras.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_PROCESSING)
+        } else if (result.resultCode != SessionResult.RESULT_SUCCESS) {
+            false
         } else {
             current.processing
         }
