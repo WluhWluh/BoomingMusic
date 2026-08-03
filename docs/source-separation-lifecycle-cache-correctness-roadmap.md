@@ -4,702 +4,526 @@ Status: active highest-priority correctness and simplification plan.
 
 Updated: 2026-08-03
 
-This roadmap is the authoritative plan for active-model transitions,
-source-separation scheduling, worker recovery, playback cache selection,
-cache lifecycle truth, retention, and manual cache deletion. It must be
-completed before product NPU work expands the scheduling state space.
+This roadmap governs active-model changes, separation scheduling, playback
+cache selection, recovery, retention, and deletion. It must reach its focused
+product gate before NPU routing adds more execution states.
 
 The [LiteRT and Multi-Preset Roadmap](litert-multi-preset-roadmap.md) remains
-authoritative for model contracts, catalog tiers, model installation, cache
-identity fields, and release qualification. The
+authoritative for model contracts, catalog tiers, model installation, and
+cache identity. The
 [Downloadable Runtime, Quick Setup, and Local Resource Management Roadmap](litert-runtime-setup-roadmap.md)
-remains authoritative for runtime delivery, Quick Setup, backend preferences,
-and runtime inventory. The frozen
+remains authoritative for runtime delivery and backend preferences. The
 [LiteRT Inference Process and Background Execution Roadmap](litert-inference-process-roadmap.md)
-remains historical evidence for process ownership and recovery behavior.
+is frozen implementation evidence for process isolation and recovery.
 
-If those documents or their completed historical tests conflict with this
-roadmap about what happens after the active model changes, this roadmap wins.
-In particular, the following previously accepted behaviors are superseded:
+When older documents conflict about model-switch behavior, this roadmap wins.
 
-- a separated playback session may not remain on an inactive model's cache;
-- Cache Management may not directly play an inactive model's completed cache;
-- an admitted inference run may keep its immutable identity internally, but
-  product orchestration must safely stop it when that identity is no longer
-  active; and
-- song ID alone is never sufficient to admit, deduplicate, recover, display,
-  cancel, protect, or play source-separation work.
+## Goal and Priorities
 
-## Priority and Scope
+The required product behavior is small:
 
-This work precedes new NPU product integration, additional backend routing,
-and broad model qualification. Those features multiply the number of possible
-run identities and make the current song-only coordination gaps harder to
-reason about.
+1. separated playback uses only the cache for the current active model and
+   current source;
+2. changing models stops old inference safely but preserves its cache;
+3. stale work cannot alter the new model's playback or UI state;
+4. deletion and pruning affect only the intended exact cache; and
+5. the implementation stays responsive and avoids repeated model, runtime, or
+   full-source hashing, global scans, redundant durable writes, and parallel
+   policy owners.
 
-The roadmap covers:
+Implementation choices follow these priorities, in order:
 
-- one observable authority for active-model selection;
-- model-aware work admission, deduplication, cancellation, and recovery;
-- deterministic handoff when the active model changes;
-- exact-active-cache playback and progress reporting;
-- truthful persisted and live task state;
-- model-aware cache protection, deletion, pruning, and LRU accounting; and
-- removal of lifecycle code made obsolete by the LiteRT and model-aware
-  cutovers.
+1. preserve exact cache and execution identity already enforced below the UI;
+2. reuse existing types and owners before adding abstractions;
+3. keep at most one admitted inference run;
+4. serialize short control-state mutations without holding locks across I/O;
+5. optimize measured hot paths and remove known redundant writes; and
+6. qualify core user paths rather than a full Cartesian product of states.
 
-It does not change:
+All work assumes clean application data. No migration is required for
+unreleased selection, task, manifest, journal, or cache schemas.
 
-- source-window decoding or the manually qualified MP3 window fallback
-  boundaries;
-- DSP, STFT parameters, overlap, joins, stem semantics, or render format;
-- the existing cache identity formula, except for a separately reviewed schema
-  change needed to express truthful lifecycle state;
-- CPU/GPU backend qualification or the bounded `N=1` GPU profile;
-- model contract or sidecar semantics;
-- model/runtime download policy; or
-- the rule that per-song blend data remains cache-local and is not backed up.
+## Non-Goals
 
-All implementation and device validation starts from clean application data.
-No migration for unreleased lifecycle, preference, task, or cache schemas is
-required.
+This work does not change:
 
-## Review Baseline
+- source-window decoding or the manually qualified MP3 fallback boundaries;
+- DSP, STFT, overlap, joins, stem semantics, or render format;
+- CPU/GPU qualification or the bounded GPU `N=1` profile;
+- model sidecars, model/runtime delivery, or backup policy;
+- the rule that per-song blend data remains cache-local and is not backed up;
+- the one-active-inference-run product policy; or
+- inactive-cache retention as independent song/model entries.
 
-The review found a sound data identity at the cache and engine boundary, but a
-song-only control plane above it. The existing
-[`SourceSeparationCacheIdentity`](../app/src/main/java/com/mardous/booming/separation/cache/v2/SourceSeparationCacheIdentity.kt)
-already includes the finalized source fingerprint, model ID and SHA-256,
-contract fingerprint, profile revision, pipeline version, and render profile.
-Normal repository lookup validates that exact identity, and exact-entry read,
-write, and exclusive leases provide a useful foundation.
+## Existing Implementation to Keep
 
-The current focused JVM baseline passes:
+The lower layers already provide the difficult identity and process safety.
+They must be reused rather than wrapped in a second protocol.
 
-- `SourceSeparationModelAwareEngineTest`;
-- `SourceSeparationModelAwareCacheRepositoryTest`; and
-- `SourceSeparationCacheRunCoordinatorTest`.
-
-These tests establish the old baseline. They do not yet prove the product
-semantics in this roadmap. The engine invariant that an admitted run never
-mutates its own model identity remains correct; the outer scheduler must stop
-that immutable run instead of changing it in place.
-
-### Confirmed correctness gaps
-
-`C1. Active selection has no observable lifecycle event.`
-
-[`SourceSeparationPresetRepository`](../app/src/main/java/com/mardous/booming/separation/model/preset/SourceSeparationPresetRepository.kt)
-writes active-model fields to preferences, but does not atomically notify the
-scheduler, PlaybackService, current-cache queries, or process-recovery owner.
-Each consumer can therefore continue with a different view of the selection.
-
-`C2. Work admission and deduplication are keyed by song ID.`
-
-[`SourceSeparationForegroundWorkerCoordinator`](../app/src/main/java/com/mardous/booming/ui/screen/player/SourceSeparationForegroundWorkerCoordinator.kt)
-uses the song ID for running and pending checks. A request for song S under
-model B can be swallowed by an existing or recovering request for song S under
-model A.
-
-`C3. A model switch does not stop old-model inference.`
-
-The running loop checks cancellation, pause, and song changes, but not active
-selection changes. Model A can continue consuming resources and publishing
-progress after B becomes active.
-
-`C4. Independent-process recovery can adopt the wrong model.`
-
-[`SourceSeparationIndependentRunRecoveryClient`](../app/src/main/java/com/mardous/booming/separation/process/ipc/SourceSeparationIndependentRunRecoveryClient.kt)
-and coordinator reconnection compare song-level state without requiring the
-current active model and exact run identity to match the journal.
-
-`C5. Playback reuses a same-song session before resolving the active model.`
-
-[`PlaybackService`](../app/src/main/java/com/mardous/booming/playback/PlaybackService.kt)
-can retain a separated session for A after B is selected. Its stale-result
-generation guard also omits the active selection identity.
-
-`C6. Cache Management exposes an inactive-cache playback bypass.`
-
-[`SourceSeparationModelAwareCacheManagementScreen`](../app/src/main/java/com/mardous/booming/ui/screen/player/SourceSeparationModelAwareCacheManagementScreen.kt)
-can request playback by an arbitrary exact cache key. This is technically
-identity-safe but violates the product rule that separated output must match
-the active model.
-
-`C7. Worker and UI state omit model/cache identity.`
-
-[`PlayerViewModel`](../app/src/main/java/com/mardous/booming/ui/screen/player/PlayerViewModel.kt)
-maps song-only worker state into panel and quick-control progress. Completion,
-failure, or progress from A can be displayed as though it belonged to B.
-
-`C8. Current-cache refresh guards only against song changes.`
-
-An asynchronous lookup started for A can complete after B is selected and
-overwrite the current cache state because its stale-result token contains the
-song but not the selection revision or cache identity.
-
-`C9. Automatic cleanup does not consistently protect the current exact entry.`
-
-Some prune calls supply no protected keys, and Cache Management derives
-protection from current leases only. The current song plus current active
-model cache can be removed when no transient lease happens to be held.
-
-`C10. A safely paused cache remains persisted as Running.`
-
-[`SourceSeparationCacheRunCoordinator`](../app/src/main/java/com/mardous/booming/separation/cache/v2/SourceSeparationCacheRunCoordinator.kt)
-records a paused journal while leaving the manifest `Running`. Playback can
-then wait forever for a writer that no longer exists.
-
-`C11. Scheduler ownership is racy.`
-
-Mutable running, pending, cancel, and reconnect fields are accessed from the
-main thread and `Dispatchers.IO` without one actor or mutex authority. A stale
-job's `finally` block can clear state belonging to a newer run.
-
-`C12. Inactive model deletion can race an old run's model load.`
-
-After B is activated, A's weight can become deletable before A has reached a
-safe stop or acquired everything it needs. The old run can fail because its
-artifact disappears rather than ending as a model-switch handoff.
-
-`C13. Current-cache deletion uses a global pause signal.`
-
-The manual deletion path can pause unrelated next-song prefetch or a newly
-admitted run. Deletion needs to target one immutable work/cache identity while
-still sharing the ordinary user-cancel boundary and cleanup path.
-
-`C14. Resume and completion do not consistently refresh LRU access time.`
-
-A partial cache that was just resumed, or a cache just completed, can still
-look old to
-[`SourceSeparationModelAwareCacheRepository`](../app/src/main/java/com/mardous/booming/separation/cache/v2/SourceSeparationModelAwareCacheRepository.kt)
-and be selected for pruning.
-
-### Confirmed simplification opportunities
-
-`R1. Locator-index rewrites are on the segment hot path.`
-
-[`SourceSeparationCacheStore`](../app/src/main/java/com/mardous/booming/separation/cache/v2/SourceSeparationCacheStore.kt)
-rebuilds and fsyncs the global locator index after manifest updates, while the
-current production path does not use its candidate/matching APIs.
-
-`R2. Completion triggers duplicate pruning.`
-
-The worker coordinator and PlayerViewModel both request cleanup after one run
-completes. Retention should have one owner; UI refresh should not own storage
-policy.
-
-`R3. Queue-replacement state is dead.`
-
-All current separated-session construction paths set queue-replacement tokens
-and files to null, leaving an older replacement-clock path unreachable.
-
-`R4. A legacy non-model-aware hydration branch is unreachable.`
-
-All production separated sessions now carry model-aware cache data. The v2
-hydration implementation remains required, but the older branch should not
-remain as a parallel lifecycle.
-
-`R5. Temporary per-song blend policy is duplicated.`
-
-PlayerViewModel and the worker coordinator independently derive the same
-temporary blend behavior, risking different scheduling and UI decisions.
-
-`R6. Resident-session recycling reacts too late to model changes.`
-
-Experimental x86 and arm32 resident-session modes primarily key proactive
-recycling by backend. A different model can first fail admission and only then
-force recycling. The complete executor/session identity should decide reuse.
-
-## Frozen Correctness Contract
-
-### Identity hierarchy
-
-The implementation must use distinct typed identities for distinct stages:
-
-1. `ActiveModelSelectionIdentity` contains model ID, artifact SHA-256,
-   contract fingerprint, profile revision, pipeline version, and render
-   profile. It contains no song and no backend.
-2. `SelectionSnapshot` pairs that identity with a monotonically changing
-   selection revision. Switching A to B and later back to A creates a new
-   revision, but the revision is not part of the persistent cache key.
-3. `SeparationWorkKey` pairs a stable song/source locator with the selection
-   identity before final source fingerprinting is available.
-4. `SourceSeparationCacheIdentity` remains the finalized data identity after
-   decode/preflight establishes the source fingerprint.
-5. `RunToken` uniquely identifies one admitted attempt. Asynchronous callbacks
-   may mutate scheduler state only when both work key and run token still
-   match.
-
-Song ID may be a display or lookup field inside a work key. It is never the
-whole key. CPU, GPU, fallback reason, and future NPU backend are run diagnostics
-and policy, not cache identity.
-
-### Exact-active playback invariant
-
-At every routing decision, separated output must belong to the exact current
-active-model selection and finalized source identity. Playback must never:
-
-- continue reading model A after selection B is committed;
-- fall back to another model's completed cache for the same song;
-- combine A and B segments in one session;
-- treat model A progress as readiness for B; or
-- use a cache-key override to bypass active selection.
-
-On a committed selection change, PlaybackService invalidates the old separated
-session and any pending hydrated or queued data before it resolves B. It falls
-back to original audio through the existing safe audio handoff until B's exact
-cache passes the normal readiness gate. No new A frames may be read or queued
-after the selection commit.
-
-### Active-model handoff
-
-Selecting B while A inference is admitted has two independently timed effects:
-
-1. playback eligibility for A ends immediately; and
-2. inference for A stops at the next existing safe window boundary.
-
-The scheduler records the second effect as `ActiveModelSuperseded`, not as a
-user cancellation or inference failure. It publishes the last atomically ready
-window, transitions A to a resumable paused/partial state, releases the writer
-and model-artifact leases, and retains A's cache. It does not delete, append B
-windows to, or relabel A's entry.
-
-An old-model next-song prefetch is subject to the same rule. A no-op selection
-of the already active exact identity does not increment the revision or stop a
-run. A profile, contract, model ID, artifact hash, pipeline, or render-profile
-change is a real handoff even when filenames or display names match.
-
-Model switching does not wait for inactive-cache FLAC compression. If
-old-model promotion is in progress, stop or defer it at its existing atomic
-boundary, retain the validated WAV result, and allow a later idle maintenance
-pass to retry compression. This policy must be confirmed with promotion fault
-tests before implementation is considered complete.
-
-### Next action after selecting B
-
-Automatic work is demanded only when separated playback is enabled, the blend
-requires separated output, and automatic separation is enabled. An explicit
-manual start can demand work independently of automatic separation.
-
-| Exact B state | Automatic work demanded | Required result |
+| Existing component | Guarantee already present | Decision |
 | --- | --- | --- |
-| Valid completed cache | Either | Rebuild on B and use it through the ordinary readiness/playback path. |
-| Partial cache, no live writer | Yes | Resume only B's exact partial entry and play when its readiness horizon passes. |
-| No cache | Yes | Start a new B run and play when its readiness horizon passes. |
-| Partial cache or no cache | No | Keep original audio, show no false processing state, and do not resume/start work. |
-| Matching live/recoverable B run | Yes | Adopt only after exact work/cache identity and run ownership are verified. |
-| Missing or invalid B artifact/contract | Either | Keep original audio and expose the actionable model error; never use A as a hidden fallback. |
+| `SourceSeparationPresetRepository` | Serializes install and activation writes and persists one `SourceSeparationActiveModelReference` | Add observation to this owner; do not create another selection store |
+| `SourceSeparationRuntimeSong` | Resolves the active model and source to one exact `SourceSeparationCacheIdentity` and cache key | Use its cache key after preflight; do not invent another finalized work identity |
+| `SourceSeparationCacheSourceIdentityResolver` | Produces the exact encoded-audio fingerprint required by cache identity | Hash once per unchanged source stamp and memoize only successful preflight results |
+| `SourceSeparationCacheRunCoordinator` | Owns manifest/journal transitions and a run-writer lease for one exact cache | Keep it as the durable run owner |
+| `SourceSeparationCacheEntryLeaseRegistry` and entry locks | Protect exact entries in-process and across app processes | Reuse for run, playback, promotion, deletion, and pruning |
+| `SourceSeparationExecutionDescriptor` | Carries cache identity, contract, model, source, `runId`, and `processGeneration` | Keep it as the admitted and remote run identity |
+| Independent-run recovery | Matches the remote descriptor to the exact durable journal | Add only an active-selection admission check before UI adoption |
+| `PlaybackService` readiness mutex and context generation | Serializes playback resolution and rejects stale song/blend checks | Extend the context with active selection; do not build a second playback state machine |
 
-Switching back to A may resume only A's exact partial cache. A completed A
-cache can become playable again only after A is the active model.
+The trusted local-resource hot path is also established: normal inference may
+trust installed model/runtime records, structure, and byte size without
+rehashing large payloads on every start. Explicit verification and repair
+flows retain full hash checks.
 
-### Cache Management behavior
+## Confirmed Gaps
 
-Inactive-model caches remain independently listed, inspectable, manually
-deletable, and eligible for the configured LRU policy. They are not directly
-playable.
+### G1. Selection changes are not observable
 
-For a valid installed inactive model, Cache Management may offer `Use this
-model`; that action first commits the model through the normal selection
-authority and then lets ordinary playback re-resolve the current song. It is
-not a session-scoped cache override. When the model/profile is absent, the UI
-offers model details or installation instead of playback.
+`SourceSeparationPresetRepository` commits a reference, but the worker,
+PlaybackService, current-cache refresh, and recovery owner receive no ordered
+event. They can continue using different selections.
 
-Deleting a model never deletes its caches. Deleting the active model remains
-blocked until another model is selected. Deleting an inactive model with an
-old run still stopping must wait for the model-artifact read lease to release;
-it must not remove the file from beneath the executor.
+### G2. Upper scheduling state is keyed by song ID
 
-### Task, manifest, and UI truth
+`SourceSeparationForegroundWorkerCoordinator` compares running and pending
+requests by song ID. A request for song S under model B can be coalesced with
+or blocked by song S under model A.
 
-- `Running` means a matching live or recoverable writer exists.
-- Safe pause, including model handoff, must have a persisted paused/partial
-  representation and a reason distinct from user cancellation and failure.
-- Startup reconciliation converts an orphaned `Running` entry into a truthful
-  resumable state before playback/status lookup can inspect it.
-- `Processing` UI requires a matching active-selection work item that is
-  queued, running, or verifiably recoverable. A manifest label alone is not
-  enough.
-- Worker state, notifications, source-separation panel progress, quick-control
-  progress, and completion/error messages all carry and filter by work key,
-  cache key when known, run token, and selection revision.
-- An old callback may update its own retained manifest, but it may not clear a
-  newer run, replace current-song state, publish current-model progress, or
-  alter playback.
+Its control fields are also mutated by UI/service callers and the IO worker
+without one short critical section. The existing single-worker loop should be
+retained, but stale `finally` and callback paths need a generation guard.
 
-### Retention and deletion
+### G3. Model switching does not hand off the old run
 
-- Each song/model/profile cache identity is one independent retention entry.
-- Automatic pruning always protects the current song's exact active-model
-  entry, plus entries covered by read, write, promotion, hydration, or
-  exclusive leases.
-- Manual deletion may override the current-entry retention protection, but it
-  must first target and stop that exact run through the same safe cancellation
-  path as the user-facing cancel command, then acquire the exclusive lease.
-- Deleting an inactive cache must not pause a current run or next-song prefetch
-  with another work key.
-- Deleting the current exact cache immediately invalidates separated playback.
-  Preserve the current product behavior that disables separated playback when
-  automatic separation is enabled, so deletion cannot immediately recreate
-  the entry.
-- Resume admission, successful window publication, completion, successful
-  playback adoption, and successful promotion refresh the appropriate access
-  timestamp. Failed probes and status-only scans do not make an entry recent.
-- Retention has one owner and one completion trigger. View models request a
-  refresh; they do not independently run policy.
+An admitted model A run checks pause, cancel, song, and playback ownership,
+but not the active selection. It can continue consuming resources and publish
+A progress after model B becomes active.
 
-## Target Ownership Model
+### G4. Playback can bypass or outlive the active selection
 
-### Active selection authority
+Playback can reuse a same-song A session before resolving B. Cache Management
+also exposes an arbitrary completed-cache command that is exact-cache safe but
+violates the product rule that normal separated playback follows the active
+model.
 
-One repository owns a canonical `StateFlow<SelectionSnapshot>` and all
-selection writes, including Model Management, Quick Setup, restore, and test
-hooks. It persists one coherent selection snapshot rather than exposing a set
-of independently readable preference fields. The main process owns live
-selection authority; the inference process receives an immutable run request
-over IPC and never reads preferences to infer the current model.
+### G5. UI and cache refresh results are song-only
 
-Every consumer receives the same ordered selection event. Direct preference
-reads and polling outside the repository are prohibited. Restored pending-model
-metadata remains separate and does not become active until the normal
-activation transaction succeeds.
+Worker state contains song fields but no selection generation or cache key.
+`PlayerViewModel` accepts progress and asynchronous cache refreshes when only
+the song still matches, so delayed A results can be presented as B.
 
-### Scheduler actor
+### G6. Recovery is exact but selection-blind
 
-One main-process coroutine actor owns pending work, active run, safe-stop
-reason, recovery candidate, processing lease, and UI state. Requests from UI,
-playback, song transitions, automatic start, manual delete, remote callbacks,
-and process recovery enter as typed commands.
+The recovery client already validates the full descriptor, journal, run ID,
+and process generation. The missing check is whether that exact recovered run
+still belongs to the active selection before the main process adopts it into
+current UI and scheduling state.
 
-The actor may execute decoding and IPC work on background dispatchers, but all
-state mutation returns as a command carrying its run token. Exact duplicate
-work keys may coalesce. Same-song work for another model is a handoff, not a
-duplicate. Targeted pause/cancel never uses a process-global Boolean.
+### G7. Cache data state and writer lifecycle overlap
 
-### Playback authority
+The manifest uses `Running`, `Canceled`, and `Failed` while the run journal
+also records `Running`, `Paused`, `Canceled`, and `Failed`. A paused run keeps a
+`Running` manifest, and playback can interpret missing future windows as an
+active producer even when only a resumable partial cache remains.
 
-PlaybackService owns the active read session but not model selection. A
-session key includes the finalized cache key and the selection revision under
-which it was admitted. Reuse is allowed only after resolving the current
-selection and matching both. Selection changes invalidate session checks,
-hydration, pending hot swaps, and ready-horizon callbacks through the same
-generation mechanism.
+### G8. Maintenance has duplicate owners and avoidable I/O
 
-### Cache lifecycle authority
+- completion can trigger pruning from both the worker coordinator and
+  `PlayerViewModel`;
+- some prune calls omit the current exact active cache from policy protection;
+- current-cache deletion partly targets song ID and can stop a different
+  same-song model request;
+- the global locator index is rebuilt and fsynced after manifest writes even
+  though production lookup already has an exact cache key; and
+- six production `resolve` call sites can repeat an encoded-sample hash of the
+  full source even when the song has not changed; and
+- current queue-replacement and legacy hydration branches appear unreachable
+  after the model-aware cutover.
 
-The cache repository owns inspection, touches, retention planning, and
-exclusive deletion. The run coordinator owns manifest/journal transitions.
-The scheduler supplies live-run protection and the current active work key;
-PlaybackService and maintenance jobs supply exact leases. UI layers consume
-snapshots and submit commands only.
+## Minimal Frozen Contract
+
+### Selection and request identity
+
+Use three existing identity levels plus one lightweight generation:
+
+1. `ActiveSelectionSnapshot` contains the existing
+   `SourceSeparationActiveModelReference?` and a process-local monotonically
+   increasing generation.
+2. A pending `SourceSeparationWorkerRequest` captures the song plus that
+   snapshot. Before preflight, this pair is sufficient to distinguish A from
+   B.
+3. After `SourceSeparationRuntimeFacade.resolve`, the existing
+   `SourceSeparationRuntimeSong.cacheKey` is the exact work/cache identity.
+4. After admission, the existing `runId` and `processGeneration` distinguish
+   attempts and remote callbacks.
+
+Do not add a persistent selection revision, a parallel contract identity, or
+a second run token. A process restart invalidates process-local jobs; remote
+survivors already carry durable exact run identity. The selection generation
+does not enter the cache key or backup.
+
+Activating the already active exact reference is a no-op and emits no new
+generation. A different model, artifact hash, schema, or custom profile ID is
+a real change. Custom profile IDs already include revision content, so the
+existing reference is sufficient before full contract resolution.
+
+### Model switch
+
+When B is committed while A is active:
+
+1. PlaybackService invalidates A's session, hydration, readiness callbacks,
+   and pending hot swap as soon as it observes the new selection. Original
+   audio is used while B is resolved.
+2. The coordinator records a model-switch stop reason for A and lets the
+   existing separation loop stop at its normal window boundary.
+3. Ready A windows remain committed. The journal records an
+   `ActiveModelSuperseded` transition with lifecycle `Paused`; the cache is
+   retained and resumable.
+4. A pending B request is evaluated only against B's resolved cache. A is
+   never a readiness or playback fallback.
+5. Old A callbacks may finish their own atomic cache/journal write, but may not
+   publish current UI, clear B state, or start playback.
+
+Do not stop completed-cache FLAC promotion merely because the model becomes
+inactive. Promotion is already bound to one exact cache and protected by its
+lease. It may finish unless deletion, shutdown, or measured resource
+contention independently cancels it.
+
+### Next action for model B
+
+| Exact B state | Automatic demand on | Automatic demand off |
+| --- | --- | --- |
+| Valid completed cache | Use B through normal readiness | Use B if separated playback is requested |
+| Resumable partial cache | Resume B and wait only when the needed horizon is absent | Keep original audio; manual start may resume B |
+| No cache | Start B | Keep original audio; manual start may start B |
+| Matching live/recoverable run | Adopt only after exact selection/cache/run checks | Continue only explicit manual work; requested playback may use ready B windows |
+| Missing/invalid model or contract | Keep original audio and show the actionable error | Same |
+
+Automatic demand still requires separated playback, non-centered blend, and
+automatic separation. Manual start remains independent of automatic demand.
+
+### Exact-active playback and UI
+
+- A separated session is reusable only when its cache key equals the cache key
+  resolved for the current song and current selection generation.
+- An already admitted session with unchanged media and selection generation is
+  checked before calling full source resolution again.
+- A selection event invalidates playback context generation even when the song
+  and blend do not change.
+- Cache Management does not directly play an inactive cache. It may offer
+  `Use this model`, which activates the installed model and then uses the
+  ordinary playback path.
+- Worker/UI events carry selection generation and, after resolution, cache
+  key. Remote events also retain their existing run ID/process generation.
+- Current-cache refresh captures song ID plus selection generation and commits
+  only if both still match. Exact cache key is checked when available.
+- Completion, failure, Snackbar, panel progress, quick-control progress, and
+  notifications ignore stale selection generations.
+
+### Source preflight efficiency
+
+`DefaultSourceSeparationRuntimeFacade` owns a small process-local memo of
+successful source preflight results for the current and next few songs. The
+key is media URI/file path plus a cheap source stamp such as size, modified
+time, and duration. A stamp mismatch or memo miss performs the exact encoded
+sample hash once. Cancellation and failures are never memoized.
+
+The source fingerprint is model-independent, so switching A to B does not
+invalidate a matching source memo. Keep the memo bounded and in memory first;
+do not retain the global manifest locator index for this purpose. Consider a
+persistent source sidecar only if profiling shows process restarts make the
+one-time hash material.
+
+### Durable cache truth
+
+Avoid storing writer lifecycle twice:
+
+- Manifest state is reduced to data completeness: `Partial` or `Completed`.
+- The journal is the sole authority for live lifecycle: `Running`, `Paused`,
+  `Canceled`, `Failed`, `CacheLost`, or `Completed`.
+- Cancellation/failure diagnostics may remain in manifest metadata, but do
+  not create another lifecycle state.
+- A manifest is considered actively processing only when its exact journal is
+  `Running` and a matching live or recoverable owner exists.
+- Startup reconciliation changes an orphaned journal from `Running` to
+  `Paused` with an interruption transition before UI/readiness uses it.
+- A paused, canceled, or failed partial cache remains inspectable and may be
+  resumed by a later explicit admission under the same exact identity.
+
+This clean-install schema change is preferred over adding a fifth `Paused`
+manifest state, which would preserve the existing duplicated truth.
+
+### Retention, deletion, and model files
+
+- Every cache key is one retention entry. The exact-entry lease system already
+  protects active readers, writers, promotion, hydration, and mutation.
+- `SourceSeparationForegroundWorkerCoordinator` is the one automatic-prune
+  trigger owner because it already owns run completion and cleanup settings.
+  It coalesces completion and settings-change requests; Cache Management
+  refresh and `PlayerViewModel` do not prune as a side effect.
+- Automatic pruning additionally protects only policy state not guaranteed by
+  a lease: the current song's exact active-model cache while it is eligible for
+  immediate playback.
+- Manual deletion first asks the coordinator to stop only the matching cache
+  key or preflight selection. It then waits for that exact run/promotion to
+  release and acquires the existing exclusive entry lease.
+- Deleting an inactive A cache must not pause a pending or running same-song B
+  request.
+- Deleting the current exact cache immediately returns to original audio. Keep
+  the validated behavior that disables separated playback when automatic
+  separation is enabled, preventing immediate recreation.
+- Model deletion is rejected as busy while an active, pending, or recoverable
+  run references its artifact hash. Start with this focused query; do not add a
+  general model-file lease framework unless process-death tests prove it is
+  needed.
+- Touch LRU time once on successful admission/resume, completion, playback
+  session close, or promotion. Status probes and failed checks do not touch it.
+
+## Minimal Ownership Model
+
+### Selection owner
+
+`SourceSeparationPresetRepository` remains the only normal mutation owner. It
+publishes one `StateFlow<ActiveSelectionSnapshot>` after the active-model store
+write returns and read-back matches. Keep the existing non-blocking atomic
+preference edit; do not add a synchronous disk fsync to activation. Quick Setup
+and Model Management already route activation through this repository. Restore
+must either request a repository reload or restart the process after replacing
+preferences.
+
+The inference process never reads selection preferences. It continues to use
+the immutable execution descriptor.
+
+### Scheduling owner
+
+`SourceSeparationForegroundWorkerCoordinator` remains the only scheduling
+owner and keeps its existing one-worker loop. Do not replace it with a full
+command actor in the first implementation.
+
+Add one short state lock and one coordinator request generation. Pending,
+active, recovery, stop reason, and worker-job ownership are read or changed
+under that lock. Long decode, cache, IPC, and file operations run outside it.
+Callbacks and `finally` blocks commit control/UI state only when their captured
+request generation still owns the slot.
+
+The existing atomic pause/cancel flags may remain because only one run is
+admitted. They must be paired with the owning request generation and reset
+inside the same state transition so a new run cannot consume a stale flag.
+
+Escalate to a channel actor only if deterministic stress tests still find a
+transition that cannot be made correct with this lock and generation. An
+actor is a fallback, not a roadmap requirement.
+
+### Playback owner
+
+PlaybackService owns one active read session. It observes the selection flow
+through the existing runtime facade or a thin facade exposure, adds selection
+generation to its current context guard, and resolves the exact active cache
+before reusing a session.
+
+### Cache owner
+
+`SourceSeparationCacheRunCoordinator` remains the manifest/journal transition
+owner. `SourceSeparationModelAwareCacheRepository` remains the inspection,
+lease, deletion, and exact prune-execution owner. The worker coordinator
+supplies policy limits and the current exact cache to one coalesced automatic
+prune request. View models request work and display snapshots; they do not
+implement storage policy.
+
+Do not introduce a second scheduler, cache registry, retention planner, or
+playback cache override.
 
 ## Implementation Phases
 
-### Phase 0: Freeze authority and build regression oracles
+### Phase 0: Characterize the narrow failure surface
 
-Status: contract and authority complete; implementation support not started.
+Status: contract revised; implementation support not started.
 
-- [x] Record the reviewed gaps, frozen behavior, authority order, and explicit
-  non-goals in this roadmap.
-- [x] Mark conflicting multi-preset behavior as historical and add this work to
-  the pre-NPU product gate.
-- [ ] Inventory every production API and test that keys behavior by song ID,
-  directly reads active-model preferences, or directly plays a cache key.
-- [ ] Add reusable fixtures for A and B exact identities, A to B to A selection
-  revisions, partial/completed caches, and stale asynchronous callbacks.
-- [ ] Add structured debug tracing for selection revision, work key, cache key,
-  run token, command, transition reason, and playback session key. Do not log
-  model contents or user file paths in release telemetry.
-- [ ] Rewrite the test specification for historical device cases that currently
-  expect A to finish, A playback to continue, or A's weight to be deleted
-  beneath a run after B is selected. Land changed assertions only together
-  with the implementation that makes them pass.
-- [ ] Preserve the engine-level immutable admitted-run test as a lower-layer
-  invariant.
+- [x] Map existing selection, cache, run, IPC, playback, and deletion identity
+  to this roadmap.
+- [x] Replace the speculative actor and parallel identity design with the
+  minimal reuse plan above.
+- [ ] Add reusable A/B fixtures around existing active references, runtime
+  songs/cache keys, and run descriptors.
+- [ ] Add focused traces for selection generation, cache key, coordinator
+  request generation, run ID, and stop reason. Avoid user paths and model
+  contents.
+- [ ] Add passing characterization coverage and named regression destinations
+  for same-song A/B request coalescing, stale current-cache refresh, arbitrary
+  completed-cache playback, duplicate prune triggers, and orphaned `Running`
+  journals. Do not commit a red test suite.
 
-**Phase 0 exit:** every affected behavior has an owning component and a named
-test destination; no roadmap or active test specification claims that inactive
-model output may remain in normal playback.
+**Exit:** every confirmed gap has a named regression destination or passing
+characterization test using existing identities. No production behavior
+changes yet, and the suite remains green.
 
-Suggested commit boundaries:
+Suggested commits:
 
-1. roadmap authority and test matrix;
-2. identity fixtures and trace vocabulary; and
-3. non-behavioral characterization coverage.
+1. A/B fixtures and trace vocabulary;
+2. characterization tests.
 
-### Phase 1: Establish observable active selection
+### Phase 1: Observe selection and serialize the existing coordinator
 
-- [ ] Introduce typed selection identity and revision snapshots.
-- [ ] Route preset activation, custom-profile activation, Quick Setup commit,
-  restore resolution, and test activation through one serialized repository
-  operation.
-- [ ] Publish one ordered StateFlow only after the complete valid selection is
-  persisted. Invalid activation leaves the prior selection unchanged.
-- [ ] Treat exact same-selection activation as idempotent; A to B to A receives
-  distinct revisions without changing either cache identity.
-- [ ] Include selection revision and work identity in current-cache refresh
-  tokens so A results cannot overwrite B state.
-- [ ] Remove or guard direct active preference reads outside the authority and
-  add an architectural test/search allowlist.
+- [ ] Add process-local selection generation and
+  `StateFlow<ActiveSelectionSnapshot>` to `SourceSeparationPresetRepository`.
+- [ ] Make activation idempotent and publish only after active-store write and
+  read-back succeed, without adding a synchronous preference fsync.
+- [ ] Capture the selection snapshot in every full-song and prestart request.
+- [ ] Replace song-only pending/running deduplication with song plus captured
+  active reference before resolve, then exact cache key after resolve.
+- [ ] Guard coordinator control fields with one short lock and request
+  generation. Reject stale callbacks and stale `finally` cleanup.
+- [ ] Compare a reconnectable descriptor with the current selection before
+  adopting it. Pause and retain a mismatched recovered run without publishing
+  it as current work.
+- [ ] Add selection generation/cache key to existing worker UI state rather
+  than creating another state hierarchy.
 
-**Phase 1 exit:** all activation paths produce one coherent event, every
-consumer can reject stale A work after B is selected, and process recreation
-reconstructs one valid current snapshot.
+**Exit:** same-song A and B are never coalesced, one run remains admitted, and
+old local or remote callbacks cannot overwrite the current coordinator slot.
 
-Suggested commit boundaries:
+Suggested commits:
 
-1. selection types and canonical store;
-2. activation-path migration; and
-3. consumers, stale-result guards, and tests.
+1. selection observation and request capture;
+2. coordinator lock, generation, and exact deduplication;
+3. recovery and stale-callback guards.
 
-### Phase 2: Serialize scheduling around model-aware work keys
+### Phase 2: Implement model handoff and exact-active playback
 
-- [ ] Replace shared coordinator fields with one command actor or an equivalent
-  rigorously serialized owner.
-- [ ] Make pending, running, prefetch, reconnected, UI, and completion state
-  carry a full work key and run token; attach the finalized cache key once
-  preflight resolves it.
-- [ ] Coalesce only exact work-key duplicates. A same-song B request must not be
-  swallowed by A.
-- [ ] Compare run token and work key before every `finally`, completion,
-  cancellation, retry, recovery, and UI mutation.
-- [ ] Replace global pause/cancel flags with targeted commands and explicit
-  reasons.
-- [ ] Keep at most one inference run admitted under the current product policy,
-  while allowing retained caches for arbitrarily many model identities.
-- [ ] Centralize temporary per-song blend demand calculation so playback and
-  scheduling use one decision.
+- [ ] On a real selection change, invalidate old playback immediately and
+  request a safe window-boundary pause for mismatched active/prefetch work.
+- [ ] Add `ActiveModelSuperseded` to the existing journal transition enum and
+  preserve the old exact cache as partial.
+- [ ] Re-evaluate the current song under B using only the table in this
+  roadmap and the existing auto-start decision inputs.
+- [ ] Resolve the current active cache before same-song playback session reuse;
+  include selection generation in hydration, readiness, and hot-swap guards.
+- [ ] Remove the arbitrary `PLAY_SOURCE_SEPARATION_COMPLETED_CACHE` product
+  command and Cache Management play action. Add `Use this model` only where an
+  installed model can be activated normally.
+- [ ] Filter worker state, cache refresh, notifications, panel progress,
+  quick-control progress, and messages by selection generation and cache key.
+- [ ] Reject model deletion as busy while the focused active/pending/recovery
+  query reports the artifact in use.
 
-**Phase 2 exit:** deterministic race tests prove an old run cannot clear,
-complete, cancel, or relabel a newer run, and all same-song/different-model
-requests receive an explicit handoff outcome.
+**Exit:** after B is committed, no A cache can provide output or current UI;
+A stops safely and remains resumable; B alone determines subsequent work.
 
-Suggested commit boundaries:
+Suggested commits:
 
-1. work-key/run-token types and actor shell;
-2. request, deduplication, and terminal-state migration; and
-3. targeted commands, blend demand, and concurrency tests.
+1. safe model handoff;
+2. exact playback invalidation and cache-management UI;
+3. UI filtering and model-delete busy check.
 
-### Phase 3: Implement safe model handoff and recovery
+### Phase 3: Make cache lifecycle and maintenance single-source
 
-- [ ] Send every real selection change to the scheduler actor and request safe
-  stop of any inference or prefetch whose selection identity differs.
-- [ ] Publish `ActiveModelSuperseded` at the existing window boundary, retain
-  atomically ready A segments, and release A's resources without reporting
-  cancellation or failure to current-model UI.
-- [ ] Evaluate B using the frozen state/action table after A has been detached;
-  never use A as a readiness or playback fallback.
-- [ ] Bind recovery journals and IPC reconnection to work key, cache key, and
-  run token/generation. Reject or safely pause a recovered A when B is active.
-- [ ] Ensure a B request is not swallowed by a same-song A recovery candidate.
-- [ ] Add model-artifact read leases held from admission through terminal safe
-  stop. Make manual model deletion wait or report busy instead of racing the
-  loader.
-- [ ] Stop/defer old-model FLAC promotion at its atomic boundary, retain valid
-  WAV output, and test later idle retry.
-- [ ] Cover selection during model preparation, decode, every window state,
-  ready partial playback, final promotion, FLAC compression, and remote process
-  recovery.
+- [ ] Reduce manifest state to `Partial`/`Completed`; derive canceled, failed,
+  paused, and live-running presentation from the journal.
+- [ ] Reconcile orphaned `Running` journals before recovery/status publication.
+- [ ] Make playback wait for future windows only when an exact live/recoverable
+  producer exists or a matching request has actually been queued.
+- [ ] Replace song-based deletion preparation with exact cache/selection
+  targeting while reusing the ordinary pause/cancel stop routine.
+- [ ] Route completion and settings-change pruning through the worker
+  coordinator's one coalesced request, remove ViewModel/Cache Management
+  refresh triggers, and keep explicit user deletion separate.
+- [ ] Protect the exact current active cache by policy; rely on existing leases
+  for active operations.
+- [ ] Normalize LRU touches to the limited events in the frozen contract.
+- [ ] Check unchanged active playback sessions before source resolution and
+  add the bounded successful-preflight memo described above. Verify repeated
+  sync and A/B selection do not rehash an unchanged song.
+- [ ] Remove the unused locator index and its manifest-write rebuild/fsync if
+  the characterization search confirms no production caller.
+- [ ] Remove proven-dead queue-replacement and non-model-aware hydration paths;
+  retain the current v2 hydration path.
+- [ ] Keep one blend-demand calculation shared by playback and scheduling.
+- [ ] Recycle resident execution sessions by their existing complete execution
+  session identity before allocation, not after a mismatch failure.
 
-**Phase 3 exit:** A to B always leaves A as a valid retained completed or
-resumable partial entry, no A executor remains admitted after the safe boundary,
-and B takes exactly the action required by its own cache and auto-start state.
+**Exit:** cache data and writer lifecycle have one authority each; prune and
+delete cannot cross exact identities; segment publication performs no unused
+global-index write.
 
-Suggested commit boundaries:
+Suggested commits:
 
-1. scheduler handoff state and reasons;
-2. recovery identity and model-artifact leases;
-3. FLAC deferral; and
-4. handoff matrix tests.
+1. manifest/journal simplification and reconciliation;
+2. exact deletion, retention, and LRU behavior;
+3. locator-index and dead-path removal;
+4. blend/session reuse cleanup.
 
-### Phase 4: Enforce exact-active playback
+### Phase 4: Focused product qualification
 
-- [ ] Resolve the current selection before considering same-song session reuse.
-- [ ] Key session reuse, active-check generations, hydration, pending hot swap,
-  readiness callbacks, and queue state by exact cache key plus selection
-  revision.
-- [ ] On selection commit, synchronously invalidate A reads and pending output,
-  release A's read lease, and hand off to original audio before resolving B.
-- [ ] Remove the release command that starts playback from an arbitrary cache
-  key and remove the Cache Management `Play cached result` action.
-- [ ] Add `Use this model` for eligible inactive entries by routing through the
-  ordinary activation authority; do not retain a session-only override.
-- [ ] Ensure current panel, quick controls, notification, and Snackbar state
-  display only exact-current work and cache results.
-- [ ] Add digital routing assertions that record the cache key of every source
-  used after a selection event and fail on A/B output mixing.
+Run broad JVM coverage, but keep device work proportional to product risk.
 
-**Phase 4 exit:** no public or internal release path can send inactive-model
-cache output to the player, and A cannot remain audible through continued
-cache reads after B is committed.
+- [ ] Run all source-separation JVM tests plus repeated A/B scheduler and stale
+  callback tests.
+- [ ] On S25, test CPU and bounded GPU for A to B to A with: A partial and
+  running; B missing, partial, and completed; auto-start on and off; playback
+  paused and playing.
+- [ ] On S25, switch during model preparation, ready partial playback, final
+  completion, and independent-process recovery.
+- [ ] Verify current and inactive cache deletion, automatic prune, force-stop,
+  main-process restart, and inference-process death.
+- [ ] Verify panel/quick-control progress and structured cache-key traces. Use
+  digital output capture for the model-switch boundary cases, not every UI
+  permutation.
+- [ ] Run CPU lifecycle smoke tests on S10 arm32, API 26 x86, and API 37 x86_64.
+  Repeat GPU cases only on ABIs/devices where GPU is already supported.
+- [ ] Run a short full-song listening check for handoff artifacts. Do not tune
+  decode, DSP, or MP3 fallback policy in this phase.
 
-Suggested commit boundaries:
+**Exit:** focused traces prove exact-active output and stale-event rejection on
+S25 CPU/GPU; the other supported ABIs pass lifecycle smoke; no core workflow
+regresses. NPU product work may then resume.
 
-1. session identity and invalidation;
-2. cache-management command/UI removal and replacement; and
-3. playback/UI routing tests.
+## Required Regression Scenarios
 
-### Phase 5: Make persisted and live lifecycle state truthful
+These scenarios are mandatory; they are not multiplied into a full Cartesian
+matrix unless a failure points to a specific interaction.
 
-- [ ] Add a truthful persisted paused/partial state or otherwise separate
-  cache completeness from live-writer state. Do not leave a stopped writer
-  represented only as `Running`.
-- [ ] Persist distinct reasons for user pause, active-model supersession,
-  process interruption, cancellation, and failure where recovery/UI behavior
-  differs.
-- [ ] Reconcile manifest, journal, writer lock, and independent-process record
-  before exposing startup state. Orphaned `Running` becomes resumable, not
-  indefinitely processing.
-- [ ] Require a matching queued/running/recoverable work snapshot for playback
-  waiting and UI processing state.
-- [ ] Include exact identity in worker progress and terminal events and filter
-  stale model events in PlayerViewModel.
-- [ ] Verify force-stop, main-process death, inference-process death, and
-  recovery both before and after A to B selection.
-
-**Phase 5 exit:** every visible processing state has a real matching producer,
-every stopped partial cache is resumable without pretending to run, and stale
-old-model events cannot alter current-model UI or playback gates.
-
-Suggested commit boundaries:
-
-1. lifecycle schema and transitions;
-2. startup reconciliation and processing gate; and
-3. identity-rich UI state and death/recovery tests.
-
-### Phase 6: Centralize retention, deletion, and access accounting
-
-- [ ] Build one retention plan from exact current-entry protection plus active
-  read/write/promotion/hydration/exclusive leases.
-- [ ] Route all automatic prune triggers through one repository/coordinator
-  owner and remove ViewModel-owned policy execution.
-- [ ] Touch access time on resume admission, successful publication/completion,
-  playback adoption, and promotion according to the frozen contract.
-- [ ] Make current-cache deletion target the exact work/cache key, use the same
-  safe cancel boundary as manual cancel, await writer release, acquire the
-  exclusive lease, and then delete.
-- [ ] Prove inactive-entry deletion cannot pause a different current run or
-  prefetch.
-- [ ] Preserve the already validated current-song behavior: output returns to
-  original audio immediately and automatic separation cannot recreate a cache
-  the user just deleted.
-- [ ] Race prune/delete against model switch, playback, ready-window publish,
-  completion, hydration, FLAC promotion, process death, and A to B to A resume.
-
-**Phase 6 exit:** automatic cleanup cannot remove the current exact entry or a
-leased entry, manual deletion affects only its target, and recently resumed or
-completed entries have correct LRU order.
-
-Suggested commit boundaries:
-
-1. protection snapshot and single prune owner;
-2. access-time semantics; and
-3. exact deletion/cancel integration and race tests.
-
-### Phase 7: Remove obsolete lifecycle paths
-
-This phase follows correctness changes so dead-code removal cannot conceal a
-behavioral fix.
-
-- [ ] Re-audit locator-index consumers. If none remain, remove the index,
-  candidate/matching APIs, and segment-hot-path rebuild/fsync under the clean
-  install boundary. If a consumer remains necessary, rebuild lazily outside
-  segment publication rather than rewriting globally per window.
-- [ ] Remove duplicate completion-prune hooks after the Phase 6 owner is in
-  place.
-- [ ] Prove queue-replacement fields are always null in the current graph, then
-  remove the unreachable replacement-clock branch and tests.
-- [ ] Remove only the obsolete non-model-aware hydration branch; retain and
-  retest the current model-aware v2 hydration path.
-- [ ] Keep one blend-demand implementation shared by UI and scheduler.
-- [ ] Key resident executor/session reuse by complete model, contract, backend,
-  runtime, and process-generation identity so x86/arm32 modes recycle before a
-  mismatched allocation attempt.
-- [ ] Split oversized coordinator, PlaybackService, and PlayerViewModel logic
-  only along the authorities established above. Do not introduce a second
-  scheduler or cache policy owner.
-
-**Phase 7 exit:** each lifecycle decision has one owner, no production write
-amplification exists solely for an unused index, and removed branches have
-explicit coverage proving their replacement remains reachable.
-
-Suggested commit boundaries:
-
-1. locator-index decision and implementation;
-2. dead playback/hydration path removal;
-3. session reuse and blend consolidation; and
-4. ownership-focused extraction with no behavior change.
-
-### Phase 8: Product and device qualification
-
-- [ ] Run all JVM tests plus repeated scheduler race and virtual-time suites.
-- [ ] Run instrumentation from clean app data on all four ABI rows: S25
-  `arm64-v8a`, S10 `armeabi-v7a`, API 26 pure `x86`, and API 37 `x86_64`.
-- [ ] On S25, cover CPU and bounded GPU for A to B to A during preparation,
-  partial readiness, active playback, near completion, completed playback,
-  pause/resume, song transition, and force-stop/restart.
-- [ ] On S10 and both emulators, repeat the lifecycle matrix for every supported
-  backend tier without inferring unsupported GPU capability.
-- [ ] Cross product B cache state (missing, partial, completed, corrupt) with
-  auto-start on/off, separated playback on/off, centered/non-centered blend,
-  and manual start.
-- [ ] Verify panel progress, quick-control progress ring, notification,
-  PlaybackService output, cache list state, and current-cache deletion by
-  screenshot plus structured identity trace.
-- [ ] Capture digital output around every switch and prove that no rendered
-  segment after the selection boundary comes from an inactive cache key.
-- [ ] Test selection and deletion during remote process death, runtime fallback,
-  model load, cache promotion, hydration, and automatic pruning.
-- [ ] Repeat existing full-song listening probes only to detect lifecycle join
-  or handoff regressions. Do not tune window decode or MP3 fallback behavior in
-  this work.
-- [ ] Update the multi-preset and runtime-setup validation records with the new
-  contract and retire historical assertions that intentionally exercised the
-  superseded behavior.
-
-**Phase 8 exit:** the frozen model-switch matrix passes on every claimed ABI
-and backend tier; structured traces and digital output prove exact-active
-cache use; no stale task, UI, recovery, deletion, or pruning action crosses a
-work identity; and the pre-NPU correctness gate is closed.
-
-## Minimum Regression Matrix
-
-Every phase should add the smallest applicable slice of this matrix rather
-than deferring all coverage to Phase 8.
-
-| Axis | Required cases |
+| Scenario | Required assertion |
 | --- | --- |
-| Selection timing | Before admission, queued, preparing model, decoding, segment running, first ready horizon, active partial playback, final window, promotion, FLAC, completed idle, process recovery |
-| Selection sequence | A to B, A to B to A, exact A to A no-op, profile revision change, same filename with different identity |
-| B cache | Missing, partial resumable, completed valid, corrupt, model missing, contract invalid |
-| Demand | Auto-start on/off, manual start, separated playback on/off, centered/non-centered blend |
-| Playback | Paused, playing, seeking, track transition, background, hydration pending/ready, original-audio handoff |
-| Task control | User pause, user cancel, model supersession, current-cache delete, inactive-cache delete, prune, process death |
-| Backend | CPU, bounded GPU, GPU to CPU fallback; NPU remains out of scope |
-| Platform | S25 arm64, S10 arm32, API 26 x86, API 37 x86_64; only already claimed capabilities are exercised |
+| Activate A again | No generation change, pause, or playback rebuild |
+| A running, select B with no cache | A pauses at a safe boundary; B starts only when demanded |
+| A playing, select B completed | Original audio bridges the switch; only B becomes separated output |
+| A running, select B partial | A is retained; only B may resume and publish progress |
+| A to B to A | Each real change invalidates stale callbacks; A's exact cache can resume |
+| Delayed A progress/completion | No B UI, cache state, playback, or scheduler mutation |
+| Recover A while B is active | A is paused/retained and not adopted as current work |
+| Delete inactive A while B runs | B is unaffected; A deletion waits only for A users |
+| Delete current B | Playback returns to original audio and B is not immediately recreated |
+| Prune during playback/promotion | Leased and exact-current entries survive; limits still apply |
+| Main or inference process death | Durable exact run is adopted only when selection matches |
+| Repeated sync on one song | Source preflight hashes once per unchanged source stamp |
+
+## Explicitly Deferred Complexity
+
+Do not add the following unless the focused implementation or tests produce a
+concrete need:
+
+- a full command actor for the coordinator;
+- a persisted selection generation;
+- parallel active-model, work-key, and run-token hierarchies;
+- a general model-artifact lease subsystem;
+- stopping unrelated inactive-cache FLAC promotion on model switch;
+- a second cache retention or playback authority;
+- a full device/backend/state Cartesian matrix; or
+- large class extraction before ownership and behavior are stable.
 
 ## Overall Exit Gate
 
-This roadmap is complete only when:
+This roadmap is complete when:
 
-1. active selection has one observable serialized authority;
-2. no scheduler, recovery, UI, deletion, cleanup, or playback decision is
-   keyed only by song ID;
-3. model switching safely pauses old inference, preserves its cache, and
-   evaluates only the new model's state;
-4. separated playback can use only the exact current active-model cache;
-5. persisted cache state distinguishes a live writer from a stopped partial
-   entry;
-6. stale callbacks and process recovery cannot mutate a newer run;
-7. model files, current caches, and leased entries cannot be deleted beneath
-   active users;
-8. retention and blend-demand policy each have one owner;
-9. obsolete index, playback, hydration, and duplicate policy paths are removed
-   or explicitly justified; and
-10. the four-ABI/device matrix passes without changing the established audio
-    decode, DSP, or join strategy.
-
-Only after this gate closes should the runtime setup roadmap expose NPU AOT or
-JIT capability in the app catalog, Quick Setup, Runtime Management, or backend
-routing.
+1. normal activation emits one ordered process-local selection snapshot;
+2. pending, active, recovered, UI, and playback state reject a stale selection
+   or exact cache key;
+3. model switching safely pauses old inference while preserving its cache;
+4. separated output can only use the exact active-model cache;
+5. manifest data state and journal writer lifecycle no longer conflict;
+6. exact deletion, leases, pruning, and LRU behavior pass focused races;
+7. unused global-index and duplicate-policy work is removed; and
+8. unchanged playback does not repeat full-source preflight hashing; and
+9. S25 CPU/GPU plus four-ABI smoke validation passes without changing audio
+   decode or DSP policy.
