@@ -441,11 +441,13 @@ private val dataModule = module {
 
 private val viewModule = module {
     single {
+        val presetRepository = get<SourceSeparationPresetRepository>()
         SourceSeparationForegroundWorkerCoordinator(
             context = androidContext(),
             preferences = get(),
             sourceSeparationRuntime = get(),
             independentRunRecovery = get(),
+            activeSelectionFlow = presetRepository.activeSelectionFlow,
         )
     }
 

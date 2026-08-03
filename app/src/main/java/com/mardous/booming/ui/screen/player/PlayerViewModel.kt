@@ -2524,6 +2524,8 @@ sealed class SourceSeparationUiState {
     data class Running(
         val songId: Long,
         val songTitle: String,
+        val selectionGeneration: Long? = null,
+        val cacheKey: String? = null,
         val completedWindows: Int = 0,
         val totalWindows: Int = 0,
         val percent: Int = 0,
@@ -2538,22 +2540,30 @@ sealed class SourceSeparationUiState {
     data class Completed(
         val songId: Long,
         val songTitle: String,
+        val selectionGeneration: Long? = null,
+        val cacheKey: String? = null,
     ) : SourceSeparationUiState()
 
     data class Canceled(
         val songId: Long,
         val songTitle: String,
+        val selectionGeneration: Long? = null,
+        val cacheKey: String? = null,
     ) : SourceSeparationUiState()
 
     data class Paused(
         val songId: Long,
         val songTitle: String,
+        val selectionGeneration: Long? = null,
+        val cacheKey: String? = null,
     ) : SourceSeparationUiState()
 
     data class Failed(
         val songId: Long,
         val songTitle: String,
         val message: String?,
+        val selectionGeneration: Long? = null,
+        val cacheKey: String? = null,
     ) : SourceSeparationUiState()
 }
 
