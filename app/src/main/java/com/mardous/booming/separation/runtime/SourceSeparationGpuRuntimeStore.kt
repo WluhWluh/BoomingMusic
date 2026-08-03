@@ -105,7 +105,9 @@ internal class SourceSeparationGpuRuntimeLocator(
     private val processAbi: String,
     private val androidApi: Int,
 ) {
-    fun resolve(): SourceSeparationGpuRuntimeInstallation {
+    fun resolve(
+        verifyPayloadHashes: Boolean = true,
+    ): SourceSeparationGpuRuntimeInstallation {
         val directory = SourceSeparationRuntimeLayout.gpuCurrentDirectory(root, processAbi)
         val manifestFile = File(directory, SourceSeparationRuntimeLayout.MANIFEST_FILE_NAME)
         if (!manifestFile.isFile) {
@@ -151,7 +153,9 @@ internal class SourceSeparationGpuRuntimeLocator(
                     message = "The LiteRT GPU runtime library ${file.path} size is invalid.",
                 )
             }
-            if (!canonicalLibrary.sha256Gpu().equals(file.sha256, ignoreCase = true)) {
+            if (verifyPayloadHashes &&
+                !canonicalLibrary.sha256Gpu().equals(file.sha256, ignoreCase = true)
+            ) {
                 throw SourceSeparationRuntimeLoadException(
                     reason = SourceSeparationRuntimeFailureReason.CorruptPayload,
                     message = "The LiteRT GPU runtime library ${file.path} hash is invalid.",
@@ -319,7 +323,14 @@ internal class SourceSeparationGpuRuntimeStore(
 
     fun inventory(): List<SourceSeparationGpuRuntimeInventoryItem> = withInstallLock {
         cleanupOrphanStagingLocked()
-        catalog.entries.map(::inventoryLocked)
+        catalog.entries.map { entry -> inventoryLocked(entry) }
+    }
+
+    fun trustedInventory(): List<SourceSeparationGpuRuntimeInventoryItem> = withInstallLock {
+        cleanupOrphanStagingLocked()
+        catalog.entries.map { entry ->
+            inventoryLocked(entry, verifyPayloadHashes = false)
+        }
     }
 
     fun inventory(componentId: String): SourceSeparationGpuRuntimeInventoryItem = withInstallLock {
@@ -524,7 +535,10 @@ internal class SourceSeparationGpuRuntimeStore(
 
     fun cleanupOrphanStaging() = withInstallLock { cleanupOrphanStagingLocked() }
 
-    private fun inventoryLocked(entry: SourceSeparationGpuRuntimeCatalogEntry):
+    private fun inventoryLocked(
+        entry: SourceSeparationGpuRuntimeCatalogEntry,
+        verifyPayloadHashes: Boolean = true,
+    ):
         SourceSeparationGpuRuntimeInventoryItem {
         val pending = readPendingOperation(entry)
         if (pending?.operation == PENDING_DELETION) {
@@ -532,10 +546,10 @@ internal class SourceSeparationGpuRuntimeStore(
                 catalogEntry = entry,
                 state = SourceSeparationGpuRuntimeState.PendingDeletion,
                 reason = "GPU runtime is waiting for the inference process to release it.",
-                installation = inspectCurrent(entry).installation,
+                installation = inspectCurrent(entry, verifyPayloadHashes).installation,
             )
         }
-        val inspection = inspectCurrent(entry)
+        val inspection = inspectCurrent(entry, verifyPayloadHashes)
         if (pending?.operation == PENDING_ACTIVATION) {
             val version = pending.versionDirectoryName?.let { versionDirectory(entry, it) }
             if (version?.isDirectory == true) {
@@ -548,7 +562,10 @@ internal class SourceSeparationGpuRuntimeStore(
         return inspection
     }
 
-    private fun inspectCurrent(entry: SourceSeparationGpuRuntimeCatalogEntry):
+    private fun inspectCurrent(
+        entry: SourceSeparationGpuRuntimeCatalogEntry,
+        verifyPayloadHashes: Boolean = true,
+    ):
         SourceSeparationGpuRuntimeInventoryItem {
         val current = SourceSeparationRuntimeLayout.gpuCurrentDirectory(root, entry.abi)
         if (!current.isDirectory) {
@@ -560,12 +577,17 @@ internal class SourceSeparationGpuRuntimeStore(
         val record = readInstallRecord(current)
             ?: return invalid(entry, "The GPU runtime install record is missing or invalid.")
         val installation = try {
-            SourceSeparationGpuRuntimeLocator(root, entry.abi, androidApi).resolve()
+            SourceSeparationGpuRuntimeLocator(root, entry.abi, androidApi).resolve(
+                verifyPayloadHashes = verifyPayloadHashes,
+            )
         } catch (error: Throwable) {
             return invalid(entry, error.message ?: "The GPU runtime manifest could not be verified.")
         }
         val expectedFiles = entry.files.associate { it.path to it.sha256.lowercase(Locale.US) }
-        val valid = installation.manifestFile.sha256Gpu().equals(entry.innerManifestSha256, true) &&
+        val cpuDependencyReason = cpuDependencyReason(entry, verifyPayloadHashes)
+        val manifestMatchesCatalog = !verifyPayloadHashes ||
+            installation.manifestFile.sha256Gpu().equals(entry.innerManifestSha256, true)
+        val valid = manifestMatchesCatalog &&
             installation.manifest.releaseVersion == entry.producerReleaseVersion &&
             installation.manifest.runtimeArtifactVersion == entry.runtimeArtifactVersion &&
             installation.manifest.abi == entry.abi &&
@@ -579,10 +601,10 @@ internal class SourceSeparationGpuRuntimeStore(
             record.abi == entry.abi &&
             record.innerManifestSha256.equals(entry.innerManifestSha256, true) &&
             record.fileSha256 == expectedFiles &&
-            cpuDependencyReason(entry) == null &&
+            cpuDependencyReason == null &&
             runtimeInstallationFilesAreReadOnly(current)
         if (!valid) {
-            val reason = cpuDependencyReason(entry) ?: "The GPU runtime files do not match the bundled catalog."
+            val reason = cpuDependencyReason ?: "The GPU runtime files do not match the bundled catalog."
             return invalid(entry, reason)
         }
         return SourceSeparationGpuRuntimeInventoryItem(
@@ -597,9 +619,14 @@ internal class SourceSeparationGpuRuntimeStore(
         )
     }
 
-    private fun cpuDependencyReason(entry: SourceSeparationGpuRuntimeCatalogEntry): String? {
+    private fun cpuDependencyReason(
+        entry: SourceSeparationGpuRuntimeCatalogEntry,
+        verifyPayloadHash: Boolean = true,
+    ): String? {
         val cpu = runCatching {
-            SourceSeparationRuntimeLocator(root, entry.abi, androidApi).resolve()
+            SourceSeparationRuntimeLocator(root, entry.abi, androidApi).resolve(
+                verifyPayloadHash = verifyPayloadHash,
+            )
         }.getOrElse { error ->
             return "Required CPU LiteRT runtime is not valid: ${error.message ?: "unknown error"}."
         }

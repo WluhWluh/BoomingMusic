@@ -69,6 +69,42 @@ class SourceSeparationRuntimeStoreTest {
     }
 
     @Test
+    fun `trusted inventory skips content hashes but retains structural checks`() {
+        val fixture = RuntimeFixture.create(temporary.root)
+        val store = fixture.store()
+        store.install(fixture.entry.componentId)
+        val current = SourceSeparationRuntimeLayout.cpuCurrentDirectory(
+            temporary.root,
+            fixture.entry.abi,
+        )
+        val library = File(current, SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME)
+        val manifest = File(current, SourceSeparationRuntimeLayout.MANIFEST_FILE_NAME)
+        assertTrue(library.setWritable(true))
+        assertTrue(manifest.setWritable(true))
+        library.writeBytes(byteArrayOf(9, 8, 7))
+        manifest.appendText("\n")
+        assertTrue(library.setReadOnly())
+        assertTrue(manifest.setReadOnly())
+
+        assertEquals(
+            SourceSeparationRuntimeState.Invalid,
+            store.inventory(fixture.entry.componentId).state,
+        )
+        assertEquals(
+            SourceSeparationRuntimeState.Installed,
+            store.trustedInventory().single().state,
+        )
+
+        assertTrue(library.setWritable(true))
+        library.writeBytes(byteArrayOf(9, 8))
+        assertTrue(library.setReadOnly())
+        assertEquals(
+            SourceSeparationRuntimeState.Invalid,
+            store.trustedInventory().single().state,
+        )
+    }
+
+    @Test
     fun `ZIP hash mismatch leaves no installed runtime`() {
         val fixture = RuntimeFixture.create(temporary.root)
         val tampered = fixture.zipBytes.copyOf().also { bytes ->

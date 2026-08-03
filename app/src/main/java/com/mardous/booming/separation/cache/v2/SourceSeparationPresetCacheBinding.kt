@@ -48,8 +48,23 @@ fun SourceSeparationPresetRepository.resolveActiveCacheModel(): SourceSeparation
         SourceSeparationActiveCacheModelResolution.Ready)?.model
 }
 
+fun SourceSeparationPresetRepository.resolveTrustedActiveCacheModel():
+        SourceSeparationResolvedCacheModel? {
+    return (resolveActiveCacheModelResolution(verifyArtifactHash = false) as?
+        SourceSeparationActiveCacheModelResolution.Ready)?.model
+}
+
+fun SourceSeparationPresetRepository.resolveTrustedActiveCacheModelResolution():
+        SourceSeparationActiveCacheModelResolution =
+    resolveActiveCacheModelResolution(verifyArtifactHash = false)
+
 fun SourceSeparationPresetRepository.resolveActiveCacheModelResolution():
-        SourceSeparationActiveCacheModelResolution {
+        SourceSeparationActiveCacheModelResolution =
+    resolveActiveCacheModelResolution(verifyArtifactHash = true)
+
+private fun SourceSeparationPresetRepository.resolveActiveCacheModelResolution(
+    verifyArtifactHash: Boolean,
+): SourceSeparationActiveCacheModelResolution {
     val active = activeModel()
     if (active == SourceSeparationActivePresetState.None) {
         val pending = pendingActiveModel()
@@ -83,7 +98,7 @@ fun SourceSeparationPresetRepository.resolveActiveCacheModelResolution():
             reference,
         )
     }
-    if (!isInstalledArtifactIntact(installed)) {
+    if (verifyArtifactHash && !isInstalledArtifactIntact(installed)) {
         return SourceSeparationActiveCacheModelResolution.Unavailable(
             SourceSeparationActiveCacheModelUnavailableReason.ModelIdentityMismatch,
             reference,
@@ -146,12 +161,17 @@ fun SourceSeparationPresetRepository.resolveActiveCacheModelResolution():
  */
 fun SourceSeparationPresetRepository.resolveExactCacheModel(
     expected: SourceSeparationCacheContractSnapshot,
+    verifyArtifactHash: Boolean = true,
 ): SourceSeparationResolvedCacheModel {
     val baseInstalled = try {
-        requireInstalledPreset(expected.artifactSha256)
+        if (verifyArtifactHash) {
+            requireInstalledPreset(expected.artifactSha256)
+        } else {
+            requireTrustedInstalledPreset(expected.artifactSha256)
+        }
     } catch (error: Throwable) {
         throw SourceSeparationExactCacheModelException(
-            "The exact execution model is not installed or failed hash validation.",
+            "The exact execution model is not installed or failed validation.",
             error,
         )
     }

@@ -69,6 +69,21 @@ class SourceSeparationRuntimeLocatorTest {
     }
 
     @Test
+    fun `trusted loading skips payload hash but keeps manifest and size checks`() {
+        val directory = writeRuntime()
+        val library = File(directory, SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME)
+        library.writeBytes(byteArrayOf(4, 3, 2, 1))
+
+        val verifiedError = assertThrows(SourceSeparationRuntimeLoadException::class.java) {
+            locator().resolve()
+        }
+        val trusted = locator().resolve(verifyPayloadHash = false)
+
+        assertEquals(SourceSeparationRuntimeFailureReason.CorruptPayload, verifiedError.reason)
+        assertEquals(library.canonicalFile, trusted.libraryFile)
+    }
+
+    @Test
     fun `valid runtime resolves immutable identity`() {
         val directory = writeRuntime()
 

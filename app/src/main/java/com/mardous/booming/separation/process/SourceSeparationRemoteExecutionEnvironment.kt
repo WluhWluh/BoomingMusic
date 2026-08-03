@@ -91,7 +91,10 @@ internal class SourceSeparationRemoteExecutionEnvironment(
     ): SourceSeparationRemoteAdmittedExecution {
         descriptor.requireConsistentIdentity()
         validateSourceAccess(descriptor.source.sourceUri)
-        val resolvedModel = presetRepository.resolveExactCacheModel(descriptor.contract)
+        val resolvedModel = presetRepository.resolveExactCacheModel(
+            expected = descriptor.contract,
+            verifyArtifactHash = false,
+        )
         val validationOverride = runCatching {
             MdxX86ProcessValidationOverride.applyTo(
                 model = resolvedModel,

@@ -112,7 +112,9 @@ internal class SourceSeparationRuntimeLocator(
     private val processAbi: String,
     private val androidApi: Int,
 ) {
-    fun resolve(): SourceSeparationCpuRuntimeInstallation {
+    fun resolve(
+        verifyPayloadHash: Boolean = true,
+    ): SourceSeparationCpuRuntimeInstallation {
         val directory = SourceSeparationRuntimeLayout.cpuCurrentDirectory(root, processAbi)
         val manifestFile = File(directory, SourceSeparationRuntimeLayout.MANIFEST_FILE_NAME)
         if (!manifestFile.isFile) {
@@ -164,8 +166,9 @@ internal class SourceSeparationRuntimeLocator(
                 message = "The LiteRT CPU runtime library size does not match its manifest.",
             )
         }
-        val actualSha256 = canonicalLibrary.sha256()
-        if (!actualSha256.equals(file.sha256, ignoreCase = true)) {
+        if (verifyPayloadHash &&
+            !canonicalLibrary.sha256().equals(file.sha256, ignoreCase = true)
+        ) {
             throw SourceSeparationRuntimeLoadException(
                 reason = SourceSeparationRuntimeFailureReason.CorruptPayload,
                 message = "The LiteRT CPU runtime library hash does not match its manifest.",
@@ -261,7 +264,7 @@ internal object SourceSeparationRuntimeBootstrap {
     internal fun ensureLoaded(
         locator: SourceSeparationRuntimeLocator,
     ): SourceSeparationCpuRuntimeInstallation = synchronized(lock) {
-        val installation = locator.resolve()
+        val installation = locator.resolve(verifyPayloadHash = false)
         val loaded = loadedInstallation
         if (loaded != null) {
             if (loaded.identity != installation.identity ||

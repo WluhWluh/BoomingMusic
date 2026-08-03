@@ -74,7 +74,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinat
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
 import com.mardous.booming.separation.cache.v2.SourceSeparationPresetCacheAvailabilityProvider
-import com.mardous.booming.separation.cache.v2.resolveActiveCacheModelResolution
+import com.mardous.booming.separation.cache.v2.resolveTrustedActiveCacheModelResolution
 import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPresetStructuralInspector
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportCoordinator
@@ -294,7 +294,7 @@ private val mainModule = module {
     single {
         val presetRepository = get<SourceSeparationPresetRepository>()
         DefaultSourceSeparationRuntimeFacade(
-            activeModelResolver = presetRepository::resolveActiveCacheModelResolution,
+            activeModelResolver = presetRepository::resolveTrustedActiveCacheModelResolution,
             compatibilityResolver = AndroidSourceSeparationRuntimeCompatibilityResolver,
             preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(androidContext()),
             engine = get(),
@@ -462,7 +462,7 @@ private val viewModule = module {
             sourceSeparationForegroundWorkerCoordinator = get(),
             localSeparationPathReadiness = {
                 get<LocalSeparationReadinessEvaluator>()
-                    .evaluate()
+                    .evaluate(verifyPayloadHashes = false)
                     .isRunnable
             },
         )

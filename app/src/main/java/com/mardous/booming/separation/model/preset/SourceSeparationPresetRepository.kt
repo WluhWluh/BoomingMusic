@@ -558,6 +558,13 @@ class SourceSeparationPresetRepository internal constructor(
         installed
     }
 
+    internal fun requireTrustedInstalledPreset(
+        sha256: String,
+    ): SourceSeparationInstalledPreset = synchronized(lock) {
+        installedModel(sha256)
+            ?: throw SourceSeparationPresetInstallException("Model is not installed: $sha256")
+    }
+
     internal fun isInstalledArtifactIntact(installed: SourceSeparationInstalledPreset): Boolean {
         val key = installed.sha256.lowercase()
         val before = installed.file.artifactStamp(installed.byteSize) ?: return false

@@ -3,6 +3,7 @@ package com.mardous.booming.separation.model.preset
 import com.mardous.booming.separation.cache.v2.resolveActiveCacheModel
 import com.mardous.booming.separation.cache.v2.resolveActiveCacheModelResolution
 import com.mardous.booming.separation.cache.v2.resolveExactCacheModel
+import com.mardous.booming.separation.cache.v2.resolveTrustedActiveCacheModelResolution
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
 import com.mardous.booming.separation.cache.v2.SourceSeparationExactCacheModelException
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelResolution
@@ -206,6 +207,10 @@ class SourceSeparationPresetRepositoryTest {
                 SourceSeparationActiveCacheModelUnavailableReason.ModelIdentityMismatch,
                 resolution.reason,
             )
+            assertTrue(
+                fixture.repository.resolveTrustedActiveCacheModelResolution() is
+                    SourceSeparationActiveCacheModelResolution.Ready,
+            )
         }
     }
 
@@ -275,6 +280,20 @@ class SourceSeparationPresetRepositoryTest {
                     expected.copy(displayName = "Changed contract"),
                 )
             }
+
+            val originalModified = installed.file.lastModified()
+            installed.file.writeBytes(payload.reversedArray())
+            assertTrue(installed.file.setLastModified(originalModified + 2_000L))
+            assertThrows(SourceSeparationExactCacheModelException::class.java) {
+                fixture.repository.resolveExactCacheModel(expected)
+            }
+            assertEquals(
+                installed.sha256,
+                fixture.repository.resolveExactCacheModel(
+                    expected = expected,
+                    verifyArtifactHash = false,
+                ).artifact.sha256,
+            )
         }
     }
 

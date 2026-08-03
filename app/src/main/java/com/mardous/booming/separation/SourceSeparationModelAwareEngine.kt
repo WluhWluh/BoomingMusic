@@ -20,7 +20,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRe
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRun
 import com.mardous.booming.separation.cache.v2.SourceSeparationPresetCacheAvailabilityProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationResolvedCacheModel
-import com.mardous.booming.separation.cache.v2.resolveActiveCacheModel
+import com.mardous.booming.separation.cache.v2.resolveTrustedActiveCacheModel
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import com.mardous.booming.separation.model.MdxRuntimeSettings
@@ -595,7 +595,7 @@ internal class SourceSeparationModelAwareEngine(
         ): SourceSeparationModelAwareEngine {
             val appContext = context.applicationContext
             return SourceSeparationModelAwareEngine(
-                activeModelResolver = presetRepository::resolveActiveCacheModel,
+                activeModelResolver = presetRepository::resolveTrustedActiveCacheModel,
                 preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(appContext),
                 coordinator = coordinator,
                 rangeExecutor = MdxSourceSeparationModelAwareRangeExecutor(appContext),
@@ -638,7 +638,7 @@ internal class SourceSeparationModelAwareEngine(
         ): SourceSeparationModelAwareEngine {
             val appContext = context.applicationContext
             return SourceSeparationModelAwareEngine(
-                activeModelResolver = presetRepository::resolveActiveCacheModel,
+                activeModelResolver = presetRepository::resolveTrustedActiveCacheModel,
                 preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(appContext),
                 coordinator = coordinator,
                 rangeExecutor = MdxSourceSeparationModelAwareRangeExecutor(appContext),

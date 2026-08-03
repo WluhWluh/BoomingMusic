@@ -32,7 +32,7 @@ internal object SourceSeparationGpuRuntimeBootstrap {
                     root = root,
                     processAbi = abi,
                     androidApi = Build.VERSION.SDK_INT,
-                ).resolve()
+                ).resolve(verifyPayloadHashes = false)
             }.getOrElse { error ->
                 observation = unavailable(error.message ?: "The bounded GPU runtime is not installed.")
                 return
@@ -48,7 +48,12 @@ internal object SourceSeparationGpuRuntimeBootstrap {
                 )
                 return
             }
-            if (!matchesCatalogEntry(installation, catalogEntry)) {
+            if (!matchesCatalogEntry(
+                    installation = installation,
+                    entry = catalogEntry,
+                    verifyPayloadHashes = false,
+                )
+            ) {
                 observation = unavailable(
                     "The downloaded bounded GPU runtime does not match the bundled catalog.",
                 )
@@ -59,7 +64,7 @@ internal object SourceSeparationGpuRuntimeBootstrap {
                     root = root,
                     processAbi = abi,
                     androidApi = Build.VERSION.SDK_INT,
-                ).resolve()
+                ).resolve(verifyPayloadHash = false)
             }.getOrElse { error ->
                 observation = unavailable(
                     "The bounded GPU runtime requires a valid CPU LiteRT runtime: " +
@@ -130,17 +135,31 @@ internal object SourceSeparationGpuRuntimeBootstrap {
         loadedInstallation
     }
 
-    private fun matchesCatalogEntry(
+    internal fun matchesCatalogEntry(
         installation: SourceSeparationGpuRuntimeInstallation,
         entry: SourceSeparationGpuRuntimeCatalogEntry,
+        verifyPayloadHashes: Boolean = true,
     ): Boolean {
         val expectedFiles = entry.files.associate { it.path to it.sha256.lowercase(Locale.US) }
-        val actualFiles = installation.libraryFiles.mapValues { (_, file) ->
-            file.sha256().lowercase(Locale.US)
+        val expectedFileSizes = entry.files.associate { it.path to it.byteSize }
+        val manifestFiles = installation.manifest.files.associate {
+            it.path to it.sha256.lowercase(Locale.US)
+        }
+        val manifestFileSizes = installation.manifest.files.associate {
+            it.path to it.byteSize
         }
         val record = SourceSeparationGpuRuntimeInstallRecordReader.read(installation.directory)
             ?: return false
         val recordedFiles = record.fileSha256.mapValues { (_, hash) -> hash.lowercase(Locale.US) }
+        val payloadHashesMatch = !verifyPayloadHashes ||
+            installation.libraryFiles.mapValues { (_, file) ->
+                file.sha256().lowercase(Locale.US)
+            } == expectedFiles
+        val manifestHashMatches = !verifyPayloadHashes ||
+            installation.manifestFile.sha256().equals(
+                entry.innerManifestSha256,
+                ignoreCase = true,
+            )
         return installation.manifest.component == entry.componentType &&
             installation.manifest.abi == entry.abi &&
             installation.manifest.releaseVersion == entry.producerReleaseVersion &&
@@ -150,8 +169,10 @@ internal object SourceSeparationGpuRuntimeBootstrap {
                 ignoreCase = true,
             ) &&
             installation.manifest.profile == entry.capability &&
-            installation.manifestFile.sha256().equals(entry.innerManifestSha256, ignoreCase = true) &&
-            actualFiles == expectedFiles &&
+            manifestFiles == expectedFiles &&
+            manifestFileSizes == expectedFileSizes &&
+            manifestHashMatches &&
+            payloadHashesMatch &&
             record.componentId == entry.componentId &&
             record.componentType == entry.componentType &&
             record.producerReleaseTag == entry.producerReleaseTag &&

@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelResolution
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelUnavailableReason
 import com.mardous.booming.separation.cache.v2.resolveActiveCacheModelResolution
+import com.mardous.booming.separation.cache.v2.resolveTrustedActiveCacheModelResolution
 import com.mardous.booming.separation.delivery.SourceSeparationDeliveryReference
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxInferenceBackend
@@ -176,18 +177,22 @@ internal class LocalSeparationReadinessEvaluator(
         AndroidMdxRuntimePlatformProvider.current()
     },
 ) {
-    fun evaluate(): LocalSeparationReadiness {
+    fun evaluate(verifyPayloadHashes: Boolean = true): LocalSeparationReadiness {
         val platformResult = runCatching { platformProvider() }
         val platform = platformResult.getOrNull()
         val catalog = presetRepository.catalogSnapshot()
         val catalogRevision = buildCatalogRevision(catalog.catalogId, catalog.catalogSchemaVersion)
-        val runtimeInventoryResult = runCatching { runtimeStore.inventory() }
+        val runtimeInventoryResult = runCatching {
+            if (verifyPayloadHashes) runtimeStore.inventory() else runtimeStore.trustedInventory()
+        }
         val runtimeInventory = runtimeInventoryResult.getOrNull().orEmpty()
         val runtimeItem = platform?.let { current ->
             runtimeInventory.singleOrNull { it.catalogEntry.abi == current.runtimeAbi.androidName }
         }
         val runtimeSnapshot = runtimeItem?.toSnapshot()
-        val gpuInventoryResult = runCatching { gpuRuntimeStore.inventory() }
+        val gpuInventoryResult = runCatching {
+            if (verifyPayloadHashes) gpuRuntimeStore.inventory() else gpuRuntimeStore.trustedInventory()
+        }
         val gpuInventory = gpuInventoryResult.getOrNull().orEmpty()
         val gpuItem = platform?.let { current ->
             gpuInventory.singleOrNull { it.catalogEntry.abi == current.runtimeAbi.androidName }
@@ -200,7 +205,11 @@ internal class LocalSeparationReadinessEvaluator(
             SourceSeparationActivePresetState.None -> presetRepository.pendingActiveModel()
         }
         val modelResolution = runCatching {
-            presetRepository.resolveActiveCacheModelResolution()
+            if (verifyPayloadHashes) {
+                presetRepository.resolveActiveCacheModelResolution()
+            } else {
+                presetRepository.resolveTrustedActiveCacheModelResolution()
+            }
         }.getOrNull()
         val activeModel = activeState.installedModelSnapshot(
             reference = activeReference,

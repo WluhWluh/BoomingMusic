@@ -187,6 +187,63 @@ class SourceSeparationGpuRuntimeStoreTest {
     }
 
     @Test
+    fun `trusted GPU loading skips payload hashes after installation`() {
+        val fixture = GpuRuntimeFixture.create(temporary.root)
+        val store = fixture.store()
+        store.install(fixture.entry.componentId)
+        val current = SourceSeparationRuntimeLayout.gpuCurrentDirectory(
+            temporary.root,
+            fixture.entry.abi,
+        )
+        val shim = File(current, "libBssOcl.so")
+        assertTrue(shim.setWritable(true))
+        shim.writeBytes(byteArrayOf(3, 2, 1))
+        val manifest = File(current, SourceSeparationRuntimeLayout.MANIFEST_FILE_NAME)
+        assertTrue(manifest.setWritable(true))
+        manifest.appendText("\n")
+        assertTrue(shim.setReadOnly())
+        assertTrue(manifest.setReadOnly())
+
+        val verifiedError = runCatching {
+            SourceSeparationGpuRuntimeLocator(
+                root = temporary.root,
+                processAbi = fixture.entry.abi,
+                androidApi = 35,
+            ).resolve()
+        }.exceptionOrNull()
+        val trusted = SourceSeparationGpuRuntimeLocator(
+            root = temporary.root,
+            processAbi = fixture.entry.abi,
+            androidApi = 35,
+        ).resolve(verifyPayloadHashes = false)
+
+        assertTrue(verifiedError is SourceSeparationRuntimeLoadException)
+        assertEquals(shim.canonicalFile, trusted.libraryFiles[shim.name])
+        assertFalse(
+            SourceSeparationGpuRuntimeBootstrap.matchesCatalogEntry(
+                installation = trusted,
+                entry = fixture.entry,
+                verifyPayloadHashes = true,
+            ),
+        )
+        assertTrue(
+            SourceSeparationGpuRuntimeBootstrap.matchesCatalogEntry(
+                installation = trusted,
+                entry = fixture.entry,
+                verifyPayloadHashes = false,
+            ),
+        )
+        assertEquals(
+            SourceSeparationGpuRuntimeState.Invalid,
+            store.inventory(fixture.entry.componentId).state,
+        )
+        assertEquals(
+            SourceSeparationGpuRuntimeState.Installed,
+            store.trustedInventory().single().state,
+        )
+    }
+
+    @Test
     fun `mismatched GPU install identity is reported invalid`() {
         val fixture = GpuRuntimeFixture.create(temporary.root)
         val store = fixture.store()

@@ -113,7 +113,14 @@ internal class SourceSeparationRuntimeStore(
 
     fun inventory(): List<SourceSeparationRuntimeInventoryItem> = withInstallLock {
         cleanupOrphanStagingLocked()
-        catalog.entries.map(::inventoryLocked)
+        catalog.entries.map { entry -> inventoryLocked(entry) }
+    }
+
+    fun trustedInventory(): List<SourceSeparationRuntimeInventoryItem> = withInstallLock {
+        cleanupOrphanStagingLocked()
+        catalog.entries.map { entry ->
+            inventoryLocked(entry, verifyPayloadHash = false)
+        }
     }
 
     fun inventory(componentId: String): SourceSeparationRuntimeInventoryItem = withInstallLock {
@@ -316,18 +323,21 @@ internal class SourceSeparationRuntimeStore(
         cleanupOrphanStagingLocked()
     }
 
-    private fun inventoryLocked(entry: SourceSeparationRuntimeCatalogEntry): SourceSeparationRuntimeInventoryItem {
+    private fun inventoryLocked(
+        entry: SourceSeparationRuntimeCatalogEntry,
+        verifyPayloadHash: Boolean = true,
+    ): SourceSeparationRuntimeInventoryItem {
         val pending = readPendingOperation(entry)
         if (pending?.operation == PENDING_DELETION) {
             return SourceSeparationRuntimeInventoryItem(
                 catalogEntry = entry,
                 state = SourceSeparationRuntimeState.PendingDeletion,
                 reason = "Runtime is waiting for the inference process to release it.",
-                installation = inspectCurrent(entry).installation,
+                installation = inspectCurrent(entry, verifyPayloadHash).installation,
             )
         }
 
-        val inspection = inspectCurrent(entry)
+        val inspection = inspectCurrent(entry, verifyPayloadHash)
         if (pending?.operation == PENDING_ACTIVATION) {
             val versionName = pending.versionDirectoryName
             val version = versionName?.let { versionDirectory(entry, it) }
@@ -341,7 +351,10 @@ internal class SourceSeparationRuntimeStore(
         return inspection
     }
 
-    private fun inspectCurrent(entry: SourceSeparationRuntimeCatalogEntry): SourceSeparationRuntimeInventoryItem {
+    private fun inspectCurrent(
+        entry: SourceSeparationRuntimeCatalogEntry,
+        verifyPayloadHash: Boolean = true,
+    ): SourceSeparationRuntimeInventoryItem {
         val current = SourceSeparationRuntimeLayout.cpuCurrentDirectory(root, entry.abi)
         if (!current.isDirectory) {
             return SourceSeparationRuntimeInventoryItem(
@@ -356,13 +369,15 @@ internal class SourceSeparationRuntimeStore(
                 root = root,
                 processAbi = entry.abi,
                 androidApi = androidApi,
-            ).resolve()
+            ).resolve(verifyPayloadHash = verifyPayloadHash)
         } catch (error: Throwable) {
             return invalid(entry, error.message ?: "The runtime manifest could not be verified.")
         }
-        val manifestHash = runCatching { installation.manifestFile.sha256() }.getOrNull()
-        val valid = manifestHash != null &&
-            manifestHash.equals(entry.innerManifestSha256, ignoreCase = true) &&
+        val manifestMatchesCatalog = !verifyPayloadHash ||
+            runCatching { installation.manifestFile.sha256() }
+                .getOrNull()
+                ?.equals(entry.innerManifestSha256, ignoreCase = true) == true
+        val valid = manifestMatchesCatalog &&
             installation.manifest.releaseVersion == entry.producerReleaseVersion &&
             installation.manifest.runtimeArtifactVersion == entry.runtimeArtifactVersion &&
             installation.manifest.abi == entry.abi &&
