@@ -406,20 +406,24 @@ Suggested commits:
 
 ### Phase 2: Implement model handoff and exact-active playback
 
-- [ ] On a real selection change, invalidate old playback immediately and
+Status: complete on 2026-08-03. Focused JVM coverage and the GitHub debug
+Android-test source set compile successfully. Device qualification remains in
+Phase 4.
+
+- [x] On a real selection change, invalidate old playback immediately and
   request a safe window-boundary pause for mismatched active/prefetch work.
-- [ ] Add `ActiveModelSuperseded` to the existing journal transition enum and
+- [x] Add `ActiveModelSuperseded` to the existing journal transition enum and
   preserve the old exact cache as partial.
-- [ ] Re-evaluate the current song under B using only the table in this
+- [x] Re-evaluate the current song under B using only the table in this
   roadmap and the existing auto-start decision inputs.
-- [ ] Resolve the current active cache before same-song playback session reuse;
+- [x] Resolve the current active cache before same-song playback session reuse;
   include selection generation in hydration, readiness, and hot-swap guards.
-- [ ] Remove the arbitrary `PLAY_SOURCE_SEPARATION_COMPLETED_CACHE` product
+- [x] Remove the arbitrary `PLAY_SOURCE_SEPARATION_COMPLETED_CACHE` product
   command and Cache Management play action. Add `Use this model` only where an
   installed model can be activated normally.
-- [ ] Filter worker state, cache refresh, notifications, panel progress,
+- [x] Filter worker state, cache refresh, notifications, panel progress,
   quick-control progress, and messages by selection generation and cache key.
-- [ ] Reject model deletion as busy while the focused active/pending/recovery
+- [x] Reject model deletion as busy while the focused active/pending/recovery
   query reports the artifact in use.
 
 **Exit:** after B is committed, no A cache can provide output or current UI;
