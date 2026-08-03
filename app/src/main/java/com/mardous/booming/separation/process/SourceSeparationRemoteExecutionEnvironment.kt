@@ -2,6 +2,7 @@ package com.mardous.booming.separation.process
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import com.mardous.booming.separation.MdxSourceSeparationModelAwareRangeExecutor
 import com.mardous.booming.separation.createAutoLiteRtSessionFactory
 import com.mardous.booming.separation.SourceSeparationModelAwareExecutionRequest
@@ -120,7 +121,12 @@ internal class SourceSeparationRemoteExecutionEnvironment(
             "The exact execution model is outside the canonical model root."
         }
         sessionControllers.select(descriptor.runtime.backendPolicy)
-        val run = when (val start = runCoordinator.begin(
+        Log.d(
+            TAG,
+            "prepare begin run=${descriptor.runId} generation=${descriptor.processGeneration} " +
+                    "cache=${descriptor.cacheKey.take(12)}",
+        )
+        val start = runCoordinator.begin(
             SourceSeparationCacheRunRequest(
                 identity = descriptor.cacheIdentity,
                 contract = descriptor.contract,
@@ -135,7 +141,9 @@ internal class SourceSeparationRemoteExecutionEnvironment(
                 gpuRuntimeIdentity = descriptor.runtime.gpuRuntimeIdentity,
                 gpuFallbackLatch = descriptor.runtime.gpuFallbackLatch,
             )
-        )) {
+        )
+        Log.d(TAG, "prepare begin result=${start::class.java.simpleName}")
+        val run = when (start) {
             SourceSeparationCacheRunStart.Busy ->
                 throw SourceSeparationRemoteCacheBusyException(descriptor.cacheKey)
             is SourceSeparationCacheRunStart.AlreadyCompleted ->
@@ -216,6 +224,10 @@ internal class SourceSeparationRemoteExecutionEnvironment(
                 error,
             )
         }
+    }
+
+    private companion object {
+        const val TAG = "SourceSepRemoteEnv"
     }
 
 }

@@ -26,6 +26,7 @@ import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
 import com.mardous.booming.separation.process.SourceSeparationExecutionProgress
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
+import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteHostDiedException
 import com.mardous.booming.separation.process.ipc.SourceSeparationReconnectedSession
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import java.lang.reflect.Proxy
@@ -177,6 +178,56 @@ class SourceSeparationForegroundWorkerRecoveryTest {
         assertEquals(4_321L, coordinator.playbackStateFlow.value.positionMs)
         assertEquals(1, session.closeTerminalCount.get())
         assertEquals(1, session.closeCount.get())
+        preferences.edit().clear().commit()
+    }
+
+    @Test
+    fun manualRequestDuringDeadRemoteRecoveryStartsAfterRecoveryFinishes() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val preferences = context.getSharedPreferences(
+            "source-separation-recovery-dead-host-test",
+            Context.MODE_PRIVATE,
+        )
+        preferences.edit()
+            .clear()
+            .putBoolean(SOURCE_SEPARATION_AUTO_CACHE_CLEANUP, false)
+            .commit()
+        val recovery = DeadHostRecovery()
+        val resolveCalls = AtomicInteger(0)
+        val runtime = Proxy.newProxyInstance(
+            SourceSeparationRuntimeFacade::class.java.classLoader,
+            arrayOf(SourceSeparationRuntimeFacade::class.java),
+        ) { _, method, _ ->
+            if (method.name == "resolve") {
+                resolveCalls.incrementAndGet()
+            }
+            throw AssertionError("Injected runtime stop: ${method.name}")
+        } as SourceSeparationRuntimeFacade
+        val coordinator = SourceSeparationForegroundWorkerCoordinator(
+            context = context,
+            preferences = preferences,
+            sourceSeparationRuntime = runtime,
+            independentRunRecovery = recovery,
+        )
+        val song = recoveredSong(journal(context))
+
+        assertTrue(recovery.entered.await(5L, TimeUnit.SECONDS))
+        coordinator.updateSong(
+            song = song,
+            positionMs = 0L,
+            durationMs = song.duration,
+            isPlaying = false,
+            sourceSeparationBlend = 0.5f,
+        )
+        assertTrue(coordinator.startCurrentSong())
+        assertEquals(song.id, coordinator.pendingSongId())
+
+        recovery.release.countDown()
+
+        awaitCondition {
+            resolveCalls.get() == 1 && !coordinator.isWorkerActive()
+        }
+        assertEquals(null, coordinator.pendingSongId())
         preferences.edit().clear().commit()
     }
 
@@ -377,6 +428,19 @@ class SourceSeparationForegroundWorkerRecoveryTest {
                     payload = payload,
                 )
             )
+        }
+    }
+
+    private class DeadHostRecovery : SourceSeparationIndependentRunRecovery {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+
+        override fun reconnect(
+            onEvent: (SourceSeparationExecutionHostEvent) -> Unit,
+        ): SourceSeparationReconnectedSession {
+            entered.countDown()
+            assertTrue(release.await(5L, TimeUnit.SECONDS))
+            throw SourceSeparationRemoteHostDiedException(null)
         }
     }
 

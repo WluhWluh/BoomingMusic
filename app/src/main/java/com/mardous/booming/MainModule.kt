@@ -81,10 +81,12 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportC
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeCatalogLoader
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeLayout
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeProcessController
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
 import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeCatalogLoader
 import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeStore
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
+import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecoveryClient
 import com.mardous.booming.separation.setup.LocalSeparationReadinessEvaluator
@@ -232,6 +234,7 @@ private val mainModule = module {
             modelInstaller = get(),
             preferences = get(),
             readinessEvaluator = { get<LocalSeparationReadinessEvaluator>().evaluate() },
+            processController = get(),
         )
     }
     single {
@@ -272,10 +275,20 @@ private val mainModule = module {
         )
     }
     single {
+        BoundRemoteSourceSeparationExecutionHost(androidContext())
+    }
+    single {
+        SourceSeparationRuntimeProcessController(
+            executionHost = get(),
+            runtimeStore = get(),
+        )
+    }
+    single {
         SourceSeparationModelAwareEngine.createBoundRemotePrototype(
             context = androidContext(),
             presetRepository = get(),
             coordinator = get(),
+            executionHost = get<BoundRemoteSourceSeparationExecutionHost>(),
         )
     }
     single {
@@ -472,6 +485,7 @@ private val viewModule = module {
         SourceSeparationRuntimeManagementViewModel(
             store = get(),
             gpuStore = get(),
+            processController = get(),
             preferences = get(),
         )
     }

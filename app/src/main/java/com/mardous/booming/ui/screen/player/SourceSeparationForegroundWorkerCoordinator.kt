@@ -3,6 +3,7 @@ package com.mardous.booming.ui.screen.player
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.SystemClock
+import android.util.Log
 import androidx.media3.common.C
 import androidx.core.content.edit
 import com.mardous.booming.R
@@ -108,6 +109,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     val eventFlow = _eventFlow.asSharedFlow()
 
     init {
+        trace("init recovery=${independentRunRecovery != null}")
         independentRunRecovery?.let(::startIndependentRunRecovery)
     }
 
@@ -222,6 +224,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     }
 
     fun requestManualSong(song: Song) {
+        trace("requestManual song=${song.id}")
         requestFullSong(song, SourceSeparationPendingStartReason.Manual)
     }
 
@@ -235,6 +238,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         reason: SourceSeparationPendingStartReason,
     ) {
         if (song == Song.emptySong) return
+        trace(
+            "requestFull song=${song.id} reason=${reason.name} " +
+                    "recovery=${recoveryJob?.isActive == true} " +
+                    "reconnected=${reconnectedSession != null} " +
+                    "worker=${workerJob?.isActive == true} workerSong=$workerSongId " +
+                    "pending=${pendingStartRequest?.song?.id}",
+        )
         val incoming = SourceSeparationWorkerRequest.Full(song, reason)
         workerActivated = true
         autoStartSuppressedSongId = null
@@ -374,7 +384,11 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     }
 
     suspend fun waitForWorkerToLeaveSong(songId: Long) {
-        while ((workerSongId == songId && workerJob?.isActive == true) ||
+        // Job cancellation makes isActive false before runWorkerSong finishes
+        // releasing the remote execution and cache lease.
+        while (workerSongId == songId ||
+            activeWorkerSong?.song?.id == songId ||
+            activeWorkerRequest?.song?.id == songId ||
             (reconnectedSong?.id == songId && reconnectedSession != null)
         ) {
             delay(SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS)
@@ -532,6 +546,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private fun startIndependentRunRecovery(
         recovery: SourceSeparationIndependentRunRecovery,
     ) {
+        trace("recovery.start")
         val job = workerScope.launch(start = CoroutineStart.LAZY) {
             runIndependentRunRecovery(recovery)
         }
@@ -543,13 +558,23 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         recovery: SourceSeparationIndependentRunRecovery,
     ) {
         val activeJob = coroutineContext[Job]
+        trace("recovery.run begin")
         val events = Channel<SourceSeparationExecutionHostEvent>(Channel.UNLIMITED)
         var session: SourceSeparationReconnectedSession? = null
         var terminal = false
         try {
-            session = recovery.reconnect(
+            val reconnected = recovery.reconnect(
                 onEvent = { event -> events.trySend(event) },
-            ) ?: return
+            ) ?: run {
+                trace("recovery.run no reconnectable run")
+                return
+            }
+            session = reconnected
+            trace(
+                "recovery.run adopted run=${reconnected.runId} " +
+                        "generation=${reconnected.processGeneration} " +
+                        "cache=${reconnected.cacheKey.take(12)}",
+            )
             reconnectedSession = session
             reconnectedSong = session.journal.toRecoveredSong()
             reconnectedLatestSequence = 0L
@@ -572,6 +597,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 terminal = applyRecoveredEvent(session, event)
             }
         } catch (_: SourceSeparationRemoteHostDiedException) {
+            trace("recovery.run remote host died")
             val song = reconnectedSong
             if (song != null) {
                 _workerStateFlow.value = SourceSeparationUiState.Failed(
@@ -580,10 +606,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     message = remoteProcessStoppedMessage(),
                 )
             }
-            workerActivated = false
-            clearPendingStart()
-            cancelRequested.set(true)
+            // A force-stop can kill the remote process while the new main
+            // process is still trying to reconnect. Keep a request submitted
+            // during that window so it can start a fresh owner after recovery
+            // finishes. The cache coordinator records the abandoned owner
+            // when that fresh run resumes the partial cache.
         } catch (error: Throwable) {
+            trace("recovery.run failed ${error::class.java.simpleName}:${error.message}")
             val song = reconnectedSong
             if (song != null && error !is CancellationException) {
                 _workerStateFlow.value = SourceSeparationUiState.Failed(
@@ -610,6 +639,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             if (pendingStartRequest != null) {
                 ensureWorkerRunningIfActivated()
             }
+            trace(
+                "recovery.run end terminal=$terminal worker=${workerJob?.isActive == true} " +
+                        "pending=${pendingStartRequest?.song?.id} recovery=${recoveryJob?.isActive == true}",
+            )
         }
     }
 
@@ -770,6 +803,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
 
     private suspend fun runWorkerLoop() {
         val activeJob = coroutineContext[Job]
+        trace("worker.loop begin")
         try {
             while (activeJob?.isActive == true && !cancelRequested.get()) {
                 val request = nextWorkerRequest()
@@ -780,6 +814,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     continue
                 }
 
+                trace("worker.loop request song=${request.song.id} reason=${request.debugReason}")
                 clearPendingStart()
                 activeWorkerRequest = request
                 try {
@@ -808,6 +843,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             clearPendingStart()
             cancelRequested.set(false)
             pauseRequested.set(false)
+            trace(
+                "worker.loop end activated=$workerActivated " +
+                        "pending=${pendingStartRequest?.song?.id}",
+            )
         }
     }
 
@@ -928,10 +967,17 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         if (!workerActivated || workerJob?.isActive == true ||
             recoveryJob?.isActive == true || reconnectedSession != null
         ) {
+            trace(
+                "worker.ensure skipped activated=$workerActivated " +
+                        "worker=${workerJob?.isActive == true} " +
+                        "recovery=${recoveryJob?.isActive == true} " +
+                        "reconnected=${reconnectedSession != null}",
+            )
             return
         }
         cancelRequested.set(false)
         pauseRequested.set(false)
+        trace("worker.ensure launch")
         workerJob = workerScope.launch {
             runWorkerLoop()
         }
@@ -959,6 +1005,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         }
         pauseRequested.set(playbackOwnerLost())
         workerSongId = song.id
+        trace(
+            "worker.song begin song=${song.id} reason=${request.debugReason} " +
+                    "pause=${pauseRequested.get()}",
+        )
         var admittedSong: SourceSeparationRuntimeSong? = null
         try {
             val resolved = when (val resolution = sourceSeparationRuntime.resolve(
@@ -969,6 +1019,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             )) {
                 is SourceSeparationRuntimeSongResolution.Ready -> resolution.song
                 is SourceSeparationRuntimeSongResolution.Unavailable -> {
+                    trace("worker.song unavailable song=${song.id} reason=${resolution.reason}")
                     failUnavailableSong(song, resolution)
                     return
                 }
@@ -991,6 +1042,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 songTitle = song.title,
             )
             val tryGpu = preferences.readSourceSeparationGpuEnabled()
+            trace(
+                "worker.song separate song=${song.id} cache=${resolved.cacheKey.take(12)} " +
+                        "tryGpu=$tryGpu",
+            )
             val result = sourceSeparationRuntime.separate(
                 song = resolved,
                 tryGpu = tryGpu,
@@ -1047,6 +1102,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 },
             )
             if (result is SourceSeparationModelAwareEngineResult.Busy) {
+                trace("worker.song busy song=${song.id}")
                 _workerStateFlow.value = SourceSeparationUiState.Idle
                 callbacks?.onSourceSeparationWorkerPaused(song)
                 return
@@ -1075,18 +1131,22 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 cacheKey = resolved.cacheKey,
                 shouldPromoteCompletedStems = shouldPromoteCompletedStems,
             )
+            trace("worker.song completed song=${song.id} cache=${resolved.cacheKey.take(12)}")
         } catch (_: SourceSeparationPausedException) {
+            trace("worker.song paused song=${song.id}")
             _workerStateFlow.value = SourceSeparationUiState.Idle
             if (!preStartSatisfied) {
                 callbacks?.onSourceSeparationWorkerPaused(song)
             }
         } catch (_: CancellationException) {
+            trace("worker.song canceled song=${song.id}")
             _workerStateFlow.value = SourceSeparationUiState.Canceled(
                 songId = song.id,
                 songTitle = song.title,
             )
             cancelRequested.set(true)
         } catch (_: SourceSeparationAdmittedGpuRuntimeMismatchException) {
+            trace("worker.song gpu runtime mismatch song=${song.id}")
             val message = context.getString(R.string.source_separation_model_load_failed)
             _workerStateFlow.value = SourceSeparationUiState.Failed(
                 songId = song.id,
@@ -1098,6 +1158,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             clearPendingStart()
             cancelRequested.set(true)
         } catch (_: SourceSeparationRemoteHostDiedException) {
+            trace("worker.song remote host died song=${song.id}")
             _workerStateFlow.value = SourceSeparationUiState.Failed(
                 songId = song.id,
                 songTitle = song.title,
@@ -1107,6 +1168,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             clearPendingStart()
             cancelRequested.set(true)
         } catch (error: Throwable) {
+            trace(
+                "worker.song failed song=${song.id} " +
+                        "${error::class.java.simpleName}:${error.message}",
+            )
             _workerStateFlow.value = SourceSeparationUiState.Failed(
                 songId = song.id,
                 songTitle = song.title,
@@ -1121,6 +1186,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 activeWorkerSong = null
             }
             pauseRequested.set(false)
+            trace("worker.song end song=${song.id} worker=${workerJob?.isActive == true}")
         }
     }
 
@@ -1406,6 +1472,14 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(value.encodeToByteArray())
         return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun trace(message: String) {
+        Log.d(TAG, message)
+    }
+
+    private companion object {
+        const val TAG = "SourceSepWorker"
     }
 }
 

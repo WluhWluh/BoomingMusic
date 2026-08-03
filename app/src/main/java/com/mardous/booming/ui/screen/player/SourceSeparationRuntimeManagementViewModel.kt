@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeInventoryItem
 import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeStore
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeInventoryItem
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeProcessController
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
 import com.mardous.booming.util.readSourceSeparationGpuEnabled
 import com.mardous.booming.util.writeSourceSeparationGpuEnabled
@@ -20,6 +21,7 @@ import kotlinx.coroutines.launch
 internal class SourceSeparationRuntimeManagementViewModel(
     private val store: SourceSeparationRuntimeStore,
     private val gpuStore: SourceSeparationGpuRuntimeStore,
+    private val processController: SourceSeparationRuntimeProcessController,
     private val preferences: SharedPreferences,
 ) : ViewModel() {
     private val device = SourceSeparationRuntimeDeviceDetails.current()
@@ -57,48 +59,56 @@ internal class SourceSeparationRuntimeManagementViewModel(
 
     fun install(componentId: String) {
         runOperation(componentId, SourceSeparationRuntimeOperationKind.Install) { onProgress ->
+            processController.recycleIfIdle()
             store.install(componentId, onProgress)
         }
     }
 
     fun repair(componentId: String) {
         runOperation(componentId, SourceSeparationRuntimeOperationKind.Repair) { onProgress ->
+            processController.recycleIfIdle()
             store.repair(componentId, onProgress)
         }
     }
 
     fun activatePending(componentId: String) {
         runOperation(componentId, SourceSeparationRuntimeOperationKind.Activate) { _ ->
+            processController.recycleIfIdle()
             store.activatePending(componentId)
         }
     }
 
     fun remove(componentId: String) {
         runOperation(componentId, SourceSeparationRuntimeOperationKind.Remove) { _ ->
+            processController.recycleIfIdle()
             store.remove(componentId)
         }
     }
 
     fun installGpu(componentId: String) {
         runOperation(componentId, SourceSeparationRuntimeOperationKind.InstallGpu) { onProgress ->
+            processController.recycleIfIdle()
             gpuStore.install(componentId, onProgress)
         }
     }
 
     fun repairGpu(componentId: String) {
         runOperation(componentId, SourceSeparationRuntimeOperationKind.RepairGpu) { onProgress ->
+            processController.recycleIfIdle()
             gpuStore.repair(componentId, onProgress)
         }
     }
 
     fun activatePendingGpu(componentId: String) {
         runOperation(componentId, SourceSeparationRuntimeOperationKind.ActivateGpu) { _ ->
+            processController.recycleIfIdle()
             gpuStore.activatePending(componentId)
         }
     }
 
     fun removeGpu(componentId: String) {
         runOperation(componentId, SourceSeparationRuntimeOperationKind.RemoveGpu) { _ ->
+            processController.recycleIfIdle()
             gpuStore.remove(componentId)
         }
     }

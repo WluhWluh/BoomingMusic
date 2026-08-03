@@ -206,6 +206,47 @@ internal class BoundRemoteSourceSeparationExecutionHost(
         reason: SourceSeparationIpcRecycleReason,
         recycleToken: String = "recycle-${UUID.randomUUID()}",
     ): SourceSeparationRemoteRecycleResult {
+        val stopped = recycleProcess(reason, recycleToken)
+
+        val newConnection = ensureConnected()
+        require(newConnection.processGeneration != stopped.oldProcess.processGeneration) {
+            "The recycled service reused its old process generation."
+        }
+        require(newConnection.diagnostics.processStartTicks !=
+            stopped.oldProcess.processStartTicks
+        ) {
+            "The recycled service did not report a fresh process-start identity."
+        }
+        return SourceSeparationRemoteRecycleResult(
+            reason = reason,
+            recycleToken = recycleToken,
+            oldProcess = stopped.oldProcess,
+            newProcess = newConnection.diagnostics,
+            binderDeath = stopped.binderDeath,
+        )
+    }
+
+    /**
+     * Recycles an idle process and leaves this host disconnected so a runtime
+     * installer can publish a new generation before the next inference bind.
+     */
+    fun recycleAndStop(
+        reason: SourceSeparationIpcRecycleReason,
+        recycleToken: String = "recycle-${UUID.randomUUID()}",
+    ): SourceSeparationRemoteRecycleStoppedResult {
+        val stopped = recycleProcess(reason, recycleToken)
+        return SourceSeparationRemoteRecycleStoppedResult(
+            reason = reason,
+            recycleToken = recycleToken,
+            oldProcess = stopped.oldProcess,
+            binderDeath = stopped.binderDeath,
+        )
+    }
+
+    private fun recycleProcess(
+        reason: SourceSeparationIpcRecycleReason,
+        recycleToken: String,
+    ): SourceSeparationRemoteRecycleStoppedResult {
         val oldConnection = ensureConnected()
         val service = connectionLock.withLock {
             check(activeRequest == null) { "Cannot recycle during an active remote run." }
@@ -290,21 +331,10 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             }
         }
         waitForProcessIncarnationExit(oldConnection.diagnostics, deadlineNanos)
-
-        val newConnection = ensureConnected()
-        require(newConnection.processGeneration != oldConnection.processGeneration) {
-            "The recycled service reused its old process generation."
-        }
-        require(newConnection.diagnostics.processStartTicks !=
-            oldConnection.diagnostics.processStartTicks
-        ) {
-            "The recycled service did not report a fresh process-start identity."
-        }
-        return SourceSeparationRemoteRecycleResult(
+        return SourceSeparationRemoteRecycleStoppedResult(
             reason = reason,
             recycleToken = recycleToken,
             oldProcess = oldConnection.diagnostics,
-            newProcess = newConnection.diagnostics,
             binderDeath = requireNotNull(connectionDiagnostics.lastBinderDeath),
         )
     }
@@ -1300,6 +1330,13 @@ internal data class SourceSeparationRemoteRecycleResult(
     val recycleToken: String,
     val oldProcess: SourceSeparationProcessDiagnostics,
     val newProcess: SourceSeparationProcessDiagnostics,
+    val binderDeath: SourceSeparationRemoteBinderDeathDiagnostics,
+)
+
+internal data class SourceSeparationRemoteRecycleStoppedResult(
+    val reason: SourceSeparationIpcRecycleReason,
+    val recycleToken: String,
+    val oldProcess: SourceSeparationProcessDiagnostics,
     val binderDeath: SourceSeparationRemoteBinderDeathDiagnostics,
 )
 

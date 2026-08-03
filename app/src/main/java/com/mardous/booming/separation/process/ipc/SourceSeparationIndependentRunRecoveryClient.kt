@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.process.ipc
 
 import android.content.Context
+import android.util.Log
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournal
@@ -30,16 +31,31 @@ internal class SourceSeparationIndependentRunRecoveryClient(
                 store.readRunJournal(manifest.cacheKey)
             }
         )
+        Log.d(TAG, "reconnect candidates=${candidates.size}")
         if (candidates.isEmpty()) return null
         val host = hostFactory()
         return try {
             val remote = host.reconnectableRun()
-                ?: return host.close().let { null }
+                ?: return host.close().let {
+                    Log.d(TAG, "reconnect no remote active run")
+                    null
+                }
+            Log.d(
+                TAG,
+                "reconnect remote run=${remote.descriptor.runId} " +
+                        "generation=${remote.descriptor.processGeneration}",
+            )
             val matching = candidates.singleOrNull { journal ->
                 remote.matches(journal)
-            } ?: return host.close().let { null }
+            } ?: return host.close().let {
+                Log.w(TAG, "reconnect remote run did not match durable candidates")
+                null
+            }
             val adopted = host.adoptReconnectableRun(onSnapshot = {}, onEvent = onEvent)
-                ?: return host.close().let { null }
+                ?: return host.close().let {
+                    Log.w(TAG, "reconnect remote run disappeared before adoption")
+                    null
+                }
             require(adopted.state.matches(matching)) {
                 "The adopted source-separation run changed its durable identity."
             }
@@ -49,9 +65,14 @@ internal class SourceSeparationIndependentRunRecoveryClient(
                 host = host,
             )
         } catch (error: Throwable) {
+            Log.w(TAG, "reconnect failed", error)
             host.close()
             throw error
         }
+    }
+
+    private companion object {
+        const val TAG = "SourceSepRecovery"
     }
 
     private fun SourceSeparationIpcActiveRunState.matches(

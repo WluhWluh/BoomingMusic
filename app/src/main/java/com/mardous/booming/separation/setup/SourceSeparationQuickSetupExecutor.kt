@@ -11,6 +11,7 @@ import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
 import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeState
 import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeStore
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeProcessController
 import com.mardous.booming.util.readSourceSeparationGpuEnabled
 import com.mardous.booming.util.writeSourceSeparationGpuEnabled
 import java.util.concurrent.CancellationException
@@ -84,6 +85,7 @@ internal class SourceSeparationQuickSetupExecutor internal constructor(
         modelInstaller: SourceSeparationQuickSetupModelInstaller,
         preferences: SharedPreferences,
         readinessEvaluator: () -> LocalSeparationReadiness,
+        processController: SourceSeparationRuntimeProcessController? = null,
         platformProvider: () -> MdxRuntimePlatform = {
             AndroidMdxRuntimePlatformProvider.current()
         },
@@ -95,6 +97,7 @@ internal class SourceSeparationQuickSetupExecutor internal constructor(
             modelInstaller = modelInstaller,
             preferences = preferences,
             platformProvider = platformProvider,
+            processController = processController,
         ),
         readinessEvaluator = readinessEvaluator,
     )
@@ -437,6 +440,7 @@ private class DefaultSourceSeparationQuickSetupOperations(
     private val modelInstaller: SourceSeparationQuickSetupModelInstaller,
     private val preferences: SharedPreferences,
     private val platformProvider: () -> MdxRuntimePlatform,
+    private val processController: SourceSeparationRuntimeProcessController?,
 ) : SourceSeparationQuickSetupOperations {
     override fun executeItem(
         item: SourceSeparationQuickSetupPlanItem,
@@ -445,6 +449,7 @@ private class DefaultSourceSeparationQuickSetupOperations(
     ) {
         when (item.action) {
             SourceSeparationQuickSetupAction.InstallRuntime -> {
+                processController?.recycleIfIdle()
                 val result = runtimeStore.install(requireNotNull(item.componentId), onProgress)
                 require(result.state == SourceSeparationRuntimeState.Installed) {
                     result.reason ?: "The CPU runtime is waiting for activation."
@@ -452,6 +457,7 @@ private class DefaultSourceSeparationQuickSetupOperations(
             }
 
             SourceSeparationQuickSetupAction.RepairRuntime -> {
+                processController?.recycleIfIdle()
                 val result = runtimeStore.repair(requireNotNull(item.componentId), onProgress)
                 require(result.state == SourceSeparationRuntimeState.Installed) {
                     result.reason ?: "The repaired CPU runtime is waiting for activation."
@@ -459,6 +465,7 @@ private class DefaultSourceSeparationQuickSetupOperations(
             }
 
             SourceSeparationQuickSetupAction.ActivatePendingRuntime -> {
+                processController?.recycleIfIdle()
                 val result = runtimeStore.activatePending(requireNotNull(item.componentId))
                 require(result.state == SourceSeparationRuntimeState.Installed) {
                     result.reason ?: "The pending CPU runtime could not be activated."
@@ -466,6 +473,7 @@ private class DefaultSourceSeparationQuickSetupOperations(
             }
 
             SourceSeparationQuickSetupAction.InstallGpuRuntime -> {
+                processController?.recycleIfIdle()
                 val result = gpuRuntimeStore.install(requireNotNull(item.componentId), onProgress)
                 require(result.state == SourceSeparationGpuRuntimeState.Installed) {
                     result.reason ?: "The GPU runtime is waiting for activation."
@@ -473,6 +481,7 @@ private class DefaultSourceSeparationQuickSetupOperations(
             }
 
             SourceSeparationQuickSetupAction.RepairGpuRuntime -> {
+                processController?.recycleIfIdle()
                 val result = gpuRuntimeStore.repair(requireNotNull(item.componentId), onProgress)
                 require(result.state == SourceSeparationGpuRuntimeState.Installed) {
                     result.reason ?: "The repaired GPU runtime is waiting for activation."
@@ -480,6 +489,7 @@ private class DefaultSourceSeparationQuickSetupOperations(
             }
 
             SourceSeparationQuickSetupAction.ActivatePendingGpuRuntime -> {
+                processController?.recycleIfIdle()
                 val result = gpuRuntimeStore.activatePending(requireNotNull(item.componentId))
                 require(result.state == SourceSeparationGpuRuntimeState.Installed) {
                     result.reason ?: "The pending GPU runtime could not be activated."

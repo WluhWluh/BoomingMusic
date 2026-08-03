@@ -39,6 +39,18 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
     }
 
     fun delete(cacheKey: String) {
+        delete(
+            cacheKey = cacheKey,
+            beforeDelete = {},
+            onDeleteResult = { _, _ -> },
+        )
+    }
+
+    fun delete(
+        cacheKey: String,
+        beforeDelete: suspend (String) -> Unit,
+        onDeleteResult: suspend (String, SourceSeparationCacheMutationResult) -> Unit,
+    ) {
         val current = _state.value
         if (current.deletingAll || cacheKey in current.deletingCacheKeys) return
         if (current.items.none { it.cacheKey == cacheKey }) return
@@ -48,7 +60,10 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
                 deletingCacheKeys = _state.value.deletingCacheKeys + cacheKey,
                 failure = null,
             )
-            val failure = runtime.delete(cacheKey).toFailure()
+            beforeDelete(cacheKey)
+            val result = runtime.delete(cacheKey)
+            onDeleteResult(cacheKey, result)
+            val failure = result.toFailure()
             loadEntries(
                 failure = failure,
                 deletingCacheKeys = _state.value.deletingCacheKeys - cacheKey,
@@ -57,6 +72,16 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
     }
 
     fun deleteAll() {
+        deleteAll(
+            beforeDelete = {},
+            onDeleteResult = { _, _ -> },
+        )
+    }
+
+    fun deleteAll(
+        beforeDelete: suspend (String) -> Unit,
+        onDeleteResult: suspend (String, SourceSeparationCacheMutationResult) -> Unit,
+    ) {
         val current = _state.value
         if (current.deletingAll || current.items.isEmpty()) return
         val keys = current.items.mapTo(linkedSetOf(), SourceSeparationModelAwareCacheEntry::cacheKey)
@@ -69,7 +94,10 @@ class SourceSeparationModelAwareCacheManagementViewModel internal constructor(
             )
             var failure: SourceSeparationModelAwareCacheManagementFailure? = null
             keys.forEach { cacheKey ->
-                val resultFailure = runtime.delete(cacheKey).toFailure()
+                beforeDelete(cacheKey)
+                val result = runtime.delete(cacheKey)
+                onDeleteResult(cacheKey, result)
+                val resultFailure = result.toFailure()
                 if (failure == null && resultFailure != null) failure = resultFailure
                 _state.value = _state.value.copy(
                     deletingCacheKeys = _state.value.deletingCacheKeys - cacheKey,

@@ -285,8 +285,19 @@ private fun SourceSeparationSettingsSheet(
                     completedLimit = autoCacheCleanupCompletedLimit,
                     onBack = { page = SourceSeparationSettingsPage.Main },
                     onRefresh = modelAwareCacheViewModel::refresh,
-                    onDeleteAll = modelAwareCacheViewModel::deleteAll,
-                    onDelete = modelAwareCacheViewModel::delete,
+                    onDeleteAll = {
+                        modelAwareCacheViewModel.deleteAll(
+                            beforeDelete = viewModel::prepareSourceSeparationCacheForManualDelete,
+                            onDeleteResult = viewModel::handleSourceSeparationCacheManualDeleteResult,
+                        )
+                    },
+                    onDelete = { cacheKey ->
+                        modelAwareCacheViewModel.delete(
+                            cacheKey = cacheKey,
+                            beforeDelete = viewModel::prepareSourceSeparationCacheForManualDelete,
+                            onDeleteResult = viewModel::handleSourceSeparationCacheManualDeleteResult,
+                        )
+                    },
                     onPlay = viewModel::playSourceSeparationCompletedCache,
                     onDismissFailure = modelAwareCacheViewModel::clearFailure,
                     onAutoCleanupChange =
@@ -543,10 +554,6 @@ private fun SourceSeparationSettingsSheet(
                                             SourceSeparationPendingAction.DeleteCache ->
                                                 stringResource(
                                                     R.string.source_separation_clearing_current_cache
-                                                )
-                                            SourceSeparationPendingAction.DeleteCacheWaitingWindow ->
-                                                stringResource(
-                                                    R.string.source_separation_wait_current_window
                                                 )
                                             SourceSeparationPendingAction.DeleteCacheWaitingFlac ->
                                                 stringResource(
