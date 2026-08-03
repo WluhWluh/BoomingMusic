@@ -437,33 +437,44 @@ Suggested commits:
 
 ### Phase 3: Make cache lifecycle and maintenance single-source
 
-- [ ] Reduce manifest state to `Partial`/`Completed`; derive canceled, failed,
+Status: complete on 2026-08-03. All `SourceSeparation*` JVM tests pass and the
+GitHub debug Android-test source set compiles successfully.
+
+- [x] Reduce manifest state to `Partial`/`Completed`; derive canceled, failed,
   paused, and live-running presentation from the journal.
-- [ ] Reconcile orphaned `Running` journals before recovery/status publication.
-- [ ] Make playback wait for future windows only when an exact live/recoverable
+- [x] Reconcile orphaned `Running` journals before recovery/status publication.
+- [x] Make playback wait for future windows only when an exact live/recoverable
   producer exists or a matching request has actually been queued.
-- [ ] Replace song-based deletion preparation with exact cache/selection
+- [x] Replace song-based deletion preparation with exact cache/selection
   targeting while reusing the ordinary pause/cancel stop routine.
-- [ ] Route completion and settings-change pruning through the worker
+- [x] Route completion and settings-change pruning through the worker
   coordinator's one coalesced request, remove ViewModel/Cache Management
   refresh triggers, and keep explicit user deletion separate.
-- [ ] Protect the exact current active cache by policy; rely on existing leases
+- [x] Protect the exact current active cache by policy; rely on existing leases
   for active operations.
-- [ ] Normalize LRU touches to the limited events in the frozen contract.
-- [ ] Check unchanged active playback sessions before source resolution and
+- [x] Normalize LRU touches to the limited events in the frozen contract.
+- [x] Check unchanged active playback sessions before source resolution and
   add the bounded successful-preflight memo described above. Verify repeated
   sync and A/B selection do not rehash an unchanged song.
-- [ ] Remove the unused locator index and its manifest-write rebuild/fsync if
+- [x] Remove the unused locator index and its manifest-write rebuild/fsync if
   the characterization search confirms no production caller.
-- [ ] Remove proven-dead queue-replacement and non-model-aware hydration paths;
+- [x] Remove proven-dead queue-replacement and non-model-aware hydration paths;
   retain the current v2 hydration path.
-- [ ] Keep one blend-demand calculation shared by playback and scheduling.
-- [ ] Recycle resident execution sessions by their existing complete execution
+- [x] Keep one blend-demand calculation shared by playback and scheduling.
+- [x] Recycle resident execution sessions by their existing complete execution
   session identity before allocation, not after a mismatch failure.
 
 **Exit:** cache data and writer lifecycle have one authority each; prune and
 delete cannot cross exact identities; segment publication performs no unused
 global-index write.
+
+The final cleanup removed the obsolete silence-clock queue replacement and
+song/path-keyed hydration implementation. Current playback sessions must bind
+an exact runtime song and model-aware cache lease. Resident x86/arm32 validation
+processes compare model, contract, execution profile, backend, GPU runtime, and
+CPU settings before remote admission; a mismatch uses the existing controlled
+process recycle and returns a fresh process generation before descriptor
+construction.
 
 Suggested commits:
 
