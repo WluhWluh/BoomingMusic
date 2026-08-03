@@ -338,18 +338,19 @@ playback cache override.
 
 ### Phase 0: Characterize the narrow failure surface
 
-Status: contract revised; implementation support not started.
+Status: complete on 2026-08-03.
 
 - [x] Map existing selection, cache, run, IPC, playback, and deletion identity
   to this roadmap.
 - [x] Replace the speculative actor and parallel identity design with the
   minimal reuse plan above.
-- [ ] Add reusable A/B fixtures around existing active references, runtime
+- [x] Add reusable A/B fixtures around existing active references, runtime
   songs/cache keys, and run descriptors.
-- [ ] Add focused traces for selection generation, cache key, coordinator
-  request generation, run ID, and stop reason. Avoid user paths and model
+- [x] Freeze focused trace vocabulary for selection generation, cache key,
+  coordinator request generation, run ID, and stop reason. Wire each field as
+  its owning phase introduces the identity. Traces omit user paths and model
   contents.
-- [ ] Add passing characterization coverage and named regression destinations
+- [x] Add passing characterization coverage and named regression destinations
   for same-song A/B request coalescing, stale current-cache refresh, arbitrary
   completed-cache playback, duplicate prune triggers, and orphaned `Running`
   journals. Do not commit a red test suite.
@@ -357,6 +358,17 @@ Status: contract revised; implementation support not started.
 **Exit:** every confirmed gap has a named regression destination or passing
 characterization test using existing identities. No production behavior
 changes yet, and the suite remains green.
+
+Regression destinations are intentionally named without asserting the known
+incorrect behavior:
+
+| Surface | Passing baseline or destination |
+| --- | --- |
+| Same-song A/B coalescing | `SourceSeparationLifecycleIdentityTest`; add coordinator arbitration cases in `SourceSeparationForegroundWorkerCoordinatorTest` during Phase 1 |
+| Stale current-cache refresh | Add selection-generation guard cases in `SourceSeparationCurrentCacheSelectionTest` during Phase 2 |
+| Inactive completed-cache playback | Existing exact repository coverage remains valid; add product-route rejection in `SourceSeparationExactActivePlaybackPolicyTest` during Phase 2 |
+| Duplicate automatic prune | Add coalescing and single-owner cases in `SourceSeparationAutomaticPruneCoordinatorTest` during Phase 3 |
+| Orphaned `Running` journal | Existing pause/resume journal coverage remains valid; add reconciliation cases in `SourceSeparationCacheRunCoordinatorTest` during Phase 3 |
 
 Suggested commits:
 
