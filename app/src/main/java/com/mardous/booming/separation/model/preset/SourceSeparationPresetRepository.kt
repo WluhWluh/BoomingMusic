@@ -18,6 +18,8 @@ import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
 import java.util.UUID
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Stores verified TFLite model artifacts independently from generated caches.
@@ -52,6 +54,13 @@ class SourceSeparationPresetRepository internal constructor(
 
     private val lock = Any()
     private val verifiedArtifactStamps = mutableMapOf<String, InstalledArtifactStamp>()
+    private val _activeSelectionFlow = MutableStateFlow(
+        SourceSeparationActiveSelectionSnapshot(
+            reference = activeModelStore.read(),
+            generation = 0L,
+        ),
+    )
+    val activeSelectionFlow = _activeSelectionFlow.asStateFlow()
 
     fun catalogEntries() = catalog.entries
 
@@ -194,7 +203,7 @@ class SourceSeparationPresetRepository internal constructor(
     ) = synchronized(lock) {
         activeReference?.validate()
         pendingReference?.validate()
-        activeModelStore.write(activeReference)
+        commitActiveModel(activeReference)
         activeModelStore.writePending(pendingReference)
     }
 
@@ -223,10 +232,10 @@ class SourceSeparationPresetRepository internal constructor(
             }
 
             if (isUsableReference(reference)) {
-                activeModelStore.write(reference)
+                commitActiveModel(reference)
                 activeModelStore.writePending(null)
             } else {
-                activeModelStore.write(null)
+                commitActiveModel(null)
                 activeModelStore.writePending(reference)
             }
         }
@@ -520,11 +529,29 @@ class SourceSeparationPresetRepository internal constructor(
                 )
             }
         }
-        activeModelStore.write(reference)
+        commitActiveModel(reference)
         if (sameReference(activeModelStore.readPending(), reference)) {
             activeModelStore.writePending(null)
         }
         return reference
+    }
+
+    private fun commitActiveModel(reference: SourceSeparationActiveModelReference?) {
+        val current = activeModelStore.read()
+        if (sameNullableReference(current, reference)) return
+
+        activeModelStore.write(reference)
+        val committed = activeModelStore.read()
+        check(sameNullableReference(committed, reference)) {
+            "The active model selection could not be committed."
+        }
+        val previous = _activeSelectionFlow.value
+        if (!sameNullableReference(previous.reference, committed)) {
+            _activeSelectionFlow.value = SourceSeparationActiveSelectionSnapshot(
+                reference = committed,
+                generation = previous.generation + 1L,
+            )
+        }
     }
 
     fun delete(sha256: String): Boolean = synchronized(lock) {
@@ -732,6 +759,11 @@ class SourceSeparationPresetRepository internal constructor(
         first.artifactSha256.equals(second.artifactSha256, ignoreCase = true) &&
         first.contractSchemaVersion == second.contractSchemaVersion &&
         first.profileId == second.profileId
+
+    private fun sameNullableReference(
+        first: SourceSeparationActiveModelReference?,
+        second: SourceSeparationActiveModelReference?,
+    ): Boolean = (first == null && second == null) || sameReference(first, second)
 
     private fun readInstalledPreset(directory: File): SourceSeparationInstalledPreset? {
         if (!directory.isDirectory) return null
@@ -984,6 +1016,15 @@ data class SourceSeparationActiveModelReference(
     private companion object {
         private val MODEL_ID_PATTERN = Regex("^[a-z0-9_]+$")
         private val SHA256_PATTERN = Regex("^[0-9a-fA-F]{64}$")
+    }
+}
+
+data class SourceSeparationActiveSelectionSnapshot(
+    val reference: SourceSeparationActiveModelReference?,
+    val generation: Long,
+) {
+    init {
+        require(generation >= 0L) { "Active selection generation is invalid." }
     }
 }
 

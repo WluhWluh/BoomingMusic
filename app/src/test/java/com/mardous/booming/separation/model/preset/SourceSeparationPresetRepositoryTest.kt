@@ -61,6 +61,53 @@ import java.util.concurrent.TimeUnit
 
 class SourceSeparationPresetRepositoryTest {
     @Test
+    fun `active selection publishes only committed real changes`() {
+        val payload = "official-model".encodeToByteArray()
+        fixture(
+            officialPayload = payload,
+            catalog = catalog(
+                officialPayload = payload,
+                supportLevel = CatalogSupportLevel.Recommended,
+                activationPolicy = CatalogActivationPolicy.SelectableWhenQualified,
+                includeReviewedContract = true,
+            ),
+        ).use { fixture ->
+            val installed = fixture.repository.installOfficial(
+                modelId = "official_model",
+                input = ByteArrayInputStream(payload),
+            )
+            assertEquals(0L, fixture.repository.activeSelectionFlow.value.generation)
+            assertEquals(null, fixture.repository.activeSelectionFlow.value.reference)
+
+            val activated = fixture.repository.activate(
+                sha256 = installed.sha256,
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            )
+            assertEquals(
+                SourceSeparationActiveSelectionSnapshot(activated, 1L),
+                fixture.repository.activeSelectionFlow.value,
+            )
+
+            fixture.repository.activate(
+                sha256 = installed.sha256,
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            )
+            assertEquals(1L, fixture.repository.activeSelectionFlow.value.generation)
+
+            fixture.repository.restoreSetupSelection(
+                activeReference = null,
+                pendingReference = null,
+            )
+            assertEquals(
+                SourceSeparationActiveSelectionSnapshot(null, 2L),
+                fixture.repository.activeSelectionFlow.value,
+            )
+        }
+    }
+
+    @Test
     fun `active cache model resolution distinguishes no selection and pending restore`() {
         fixture("official-model".encodeToByteArray()).use { fixture ->
             val none = fixture.repository.resolveActiveCacheModelResolution()
