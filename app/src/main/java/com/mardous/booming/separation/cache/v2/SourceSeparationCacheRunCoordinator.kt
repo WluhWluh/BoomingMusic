@@ -143,6 +143,7 @@ class SourceSeparationCacheRunCoordinator(
                 .orEmpty()
             val resumed = existing?.toResumeState(store)
             val manifest = if (resumed != null) {
+                val resumedAt = nowEpochMs()
                 val resumedPlan = existing.segmentPlan!!.withValidatedReadySegments(
                     store = store,
                     cacheKey = existing.cacheKey,
@@ -152,7 +153,8 @@ class SourceSeparationCacheRunCoordinator(
                     state = SourceSeparationCacheManifestState.Partial,
                     segmentPlan = resumedPlan,
                     error = null,
-                    updatedAtEpochMs = nowEpochMs(),
+                    updatedAtEpochMs = resumedAt,
+                    lastAccessedAtEpochMs = maxOf(existing.lastAccessedAtEpochMs, resumedAt),
                 ).also(store::writeManifest)
             } else {
                 listOf(WORK_DIRECTORY, SEGMENTS_DIRECTORY, COMPLETED_DIRECTORY).forEach { path ->
@@ -387,6 +389,7 @@ class SourceSeparationCacheRunCoordinator(
             elapsedMs = result.elapsedMs,
             totalBytes = store.entrySize(run.identity.cacheKey),
         )
+        val completedAt = nowEpochMs()
         var completed = current.copy(
             state = SourceSeparationCacheManifestState.Completed,
             output = output,
@@ -415,7 +418,8 @@ class SourceSeparationCacheRunCoordinator(
                 sourceDecodeEncoderPaddingFrames =
                     result.sourceDecodeDiagnostics.encoderPaddingFrames,
             ),
-            updatedAtEpochMs = nowEpochMs(),
+            updatedAtEpochMs = completedAt,
+            lastAccessedAtEpochMs = maxOf(current.lastAccessedAtEpochMs, completedAt),
         )
         store.writeManifest(completed)
         completed = completed.copy(

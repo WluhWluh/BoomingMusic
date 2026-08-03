@@ -434,6 +434,52 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         job?.cancel()
     }
 
+    internal suspend fun cancelForCacheDeletion(
+        cacheKey: String,
+        preflightIdentity: SourceSeparationWorkerRequestIdentity?,
+    ): Boolean {
+        val target = synchronized(stateLock) {
+            val pendingMatches = preflightIdentity != null &&
+                pendingStartRequest?.identity == preflightIdentity
+            if (pendingMatches) {
+                pendingStartRequest = null
+            }
+            val activeMatches = activeWorkerSong?.cacheKey == cacheKey ||
+                (activeWorkerSong == null && preflightIdentity != null &&
+                    activeWorkerRequest?.identity == preflightIdentity)
+            val recovered = reconnectedSession?.takeIf { it.cacheKey == cacheKey }
+            val job = workerJob.takeIf { activeMatches }
+            if (!pendingMatches && job == null && recovered == null) {
+                null
+            } else {
+                SourceSeparationCacheDeletionCancellation(
+                    job = job,
+                    recovered = recovered,
+                    preflightIdentity = preflightIdentity,
+                )
+            }
+        } ?: return false
+
+        if (target.job != null) {
+            cancelRequested.set(true)
+            target.job.invokeOnCompletion { ensureWorkerRunningIfActivated() }
+            target.job.cancel()
+        }
+        target.recovered?.let { session ->
+            requestRecoveredControl(session, SourceSeparationRecoveredControl.Cancel)
+        }
+        while (synchronized(stateLock) {
+                activeWorkerSong?.cacheKey == cacheKey ||
+                    reconnectedSession?.cacheKey == cacheKey ||
+                    (activeWorkerSong == null && target.preflightIdentity != null &&
+                        activeWorkerRequest?.identity == target.preflightIdentity)
+            }
+        ) {
+            delay(SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS)
+        }
+        return true
+    }
+
     fun suppressAndPauseSong(songId: Long) {
         autoStartSuppressedSongId = songId
         if (pendingStartRequest?.song?.id == songId) {
@@ -1913,6 +1959,12 @@ private enum class SourceSeparationRecoveredControl {
     Pause,
     Cancel,
 }
+
+private data class SourceSeparationCacheDeletionCancellation(
+    val job: Job?,
+    val recovered: SourceSeparationReconnectedSession?,
+    val preflightIdentity: SourceSeparationWorkerRequestIdentity?,
+)
 
 private sealed interface SourceSeparationRecoveredTerminal {
     fun dispatch(callbacks: SourceSeparationForegroundWorkerCallbacks) {

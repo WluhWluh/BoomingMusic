@@ -96,6 +96,7 @@ class SourceSeparationCacheFlacPromoter(
             check(store.deleteRelativePath(manifest.cacheKey, PROMOTION_STAGING_DIRECTORY)) {
                 "Unable to remove FLAC promotion staging directory."
             }
+            val promotedAt = nowEpochMs()
             val promoted = manifest.copy(
                 output = output.copy(
                     stems = promotedStems,
@@ -105,7 +106,8 @@ class SourceSeparationCacheFlacPromoter(
                     paths = (manifest.cleanup?.paths.orEmpty() +
                         output.stems.map(SourceSeparationCacheRenderedStem::wavPath)).distinct(),
                 ),
-                updatedAtEpochMs = nowEpochMs(),
+                updatedAtEpochMs = promotedAt,
+                lastAccessedAtEpochMs = maxOf(manifest.lastAccessedAtEpochMs, promotedAt),
             )
             store.writeManifest(promoted)
             SourceSeparationCacheFlacPromotionResult.Completed(promoted)

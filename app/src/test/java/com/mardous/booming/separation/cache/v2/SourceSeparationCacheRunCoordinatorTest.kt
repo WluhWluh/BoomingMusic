@@ -719,6 +719,31 @@ class SourceSeparationCacheRunCoordinatorTest {
         fixture.coordinator.pause((other as SourceSeparationCacheRunStart.Ready).run)
     }
 
+    @Test
+    fun `admission resume and completion advance lru access time`() {
+        var now = 10L
+        val fixture = fixture { now }
+        val first = fixture.beginReady()
+        val preparation = fixture.preparation(first, SourceSeparationSegmentState.Ready)
+        fixture.coordinator.updatePreparation(first, preparation)
+        fixture.coordinator.pause(first)
+        assertEquals(
+            10L,
+            fixture.store.readManifest(fixture.request.identity.cacheKey)?.lastAccessedAtEpochMs,
+        )
+
+        now = 20L
+        val resumed = fixture.beginReady()
+        assertEquals(
+            20L,
+            fixture.store.readManifest(fixture.request.identity.cacheKey)?.lastAccessedAtEpochMs,
+        )
+
+        now = 30L
+        val completed = fixture.coordinator.complete(resumed, fixture.result(preparation))
+        assertEquals(30L, completed.lastAccessedAtEpochMs)
+    }
+
     private fun admittedGpuRuntimeIdentity() = SourceSeparationAdmittedGpuRuntimeIdentity(
         profileId = MdxLiteRtBoundedGpuContract.PROFILE_ID,
         artifactVersion = MdxLiteRtBoundedGpuContract.ARTIFACT_VERSION,
@@ -729,25 +754,25 @@ class SourceSeparationCacheRunCoordinatorTest {
         commandQueueWindowSize = MdxLiteRtBoundedGpuContract.COMMAND_QUEUE_WINDOW_SIZE,
     )
 
-    private fun fixture(): CoordinatorFixture {
+    private fun fixture(nowEpochMs: () -> Long = { 10L }): CoordinatorFixture {
         val store = SourceSeparationCacheStore(
             root = SourceSeparationCacheRoot(
                 directory = temporary.newFolder().absoluteFile,
                 location = SourceSeparationCacheRootLocation.InternalCache,
             ),
-            nowEpochMs = { 10L },
+            nowEpochMs = nowEpochMs,
         )
         val repository = SourceSeparationModelAwareCacheRepository(
             store = store,
             modelAvailability = SourceSeparationCacheModelAvailabilityProvider {
                 SourceSeparationCacheModelAvailability.InstalledExact
             },
-            nowEpochMs = { 10L },
+            nowEpochMs = nowEpochMs,
         )
         val coordinator = SourceSeparationCacheRunCoordinator(
             store = store,
             repository = repository,
-            nowEpochMs = { 10L },
+            nowEpochMs = nowEpochMs,
         )
         val contract = SourceSeparationCacheContractSnapshot.fromOfficial(
             catalog.contracts.single { it.modelId == "uvr_mdxnet_3_9662" }

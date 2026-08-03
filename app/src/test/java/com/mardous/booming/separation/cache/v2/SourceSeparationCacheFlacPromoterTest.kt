@@ -35,12 +35,13 @@ class SourceSeparationCacheFlacPromoterTest {
     fun `promotion publishes both flac files and indexes before wav cleanup`() {
         val fixture = fixture()
         val completed = fixture.completedManifest()
-        val promoter = fixture.promoter()
+        val promoter = fixture.promoter(nowEpochMs = { 20L })
 
         val promoted = promoter.promote(completed.cacheKey)
             as SourceSeparationCacheFlacPromotionResult.Completed
 
         assertTrue(promoted.manifest.output?.stems?.all { it.promotionValidated } == true)
+        assertEquals(20L, promoted.manifest.lastAccessedAtEpochMs)
         assertEquals(
             SourceSeparationCacheValidationResult.Valid,
             fixture.store.validateCompletedEntry(promoted.manifest),
@@ -203,6 +204,7 @@ class SourceSeparationCacheFlacPromoterTest {
         val coordinator: SourceSeparationCacheRunCoordinator,
     ) {
         fun promoter(
+            nowEpochMs: () -> Long = { 10L },
             encoder: SourceSeparationCacheFlacEncoder = SourceSeparationCacheFlacEncoder {
                     wav, flac, _, _, _ ->
                 flac.writeText("flac:${wav.readText()}")
@@ -213,7 +215,7 @@ class SourceSeparationCacheFlacPromoterTest {
             store = store,
             repository = repository,
             encoder = encoder,
-            nowEpochMs = { 10L },
+            nowEpochMs = nowEpochMs,
         )
 
         fun hydrator() = SourceSeparationCacheHydrator(

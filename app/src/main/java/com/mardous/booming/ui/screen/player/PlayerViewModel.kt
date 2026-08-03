@@ -801,11 +801,6 @@ class PlayerViewModel(
         sourceSeparationForegroundWorkerCoordinator.cancel()
     }
 
-    private suspend fun cancelSourceSeparationAndWaitForSong(songId: Long) {
-        cancelSourceSeparation()
-        sourceSeparationForegroundWorkerCoordinator.waitForWorkerToLeaveSong(songId)
-    }
-
     private suspend fun disableSourceSeparationPlaybackForManualCacheDelete(
         songId: Long,
         cacheKey: String,
@@ -843,24 +838,31 @@ class PlayerViewModel(
 
     suspend fun prepareSourceSeparationCacheForManualDelete(cacheKey: String) {
         val song = currentSong
-        val currentSongCacheKey = resolveSourceSeparationRuntimeSong(song)?.cacheKey
-        val runningCacheKey = sourceSeparationForegroundWorkerCoordinator.runningCacheKey()
-        val runningSongId = sourceSeparationForegroundWorkerCoordinator.runningSongId()
-        val isCurrentSongTask = currentSongCacheKey == cacheKey &&
-                (sourceSeparationForegroundWorkerCoordinator.pendingSongId() == song.id ||
-                        runningSongId == song.id)
-        if (currentSongCacheKey == cacheKey) {
+        val selection = sourceSeparationForegroundWorkerCoordinator
+            .activeSelectionStateFlow.value
+        val currentRuntimeSong = resolveSourceSeparationRuntimeSong(song)
+        val isCurrentCache = currentRuntimeSong?.cacheKey == cacheKey
+        if (isCurrentCache) {
             disableSourceSeparationPlaybackForManualCacheDelete(
                 songId = song.id,
                 cacheKey = cacheKey,
             )
         }
-        if (runningCacheKey == cacheKey || isCurrentSongTask) {
-            val songId = runningSongId ?: song.id
-            traceSourceSeparationPlaybackTestMarker(
-                "manualDelete.cancelSeparation songId=$songId cache=${cacheKey.take(12)}"
+        val preflightIdentity = if (isCurrentCache &&
+            sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value == selection
+        ) {
+            SourceSeparationWorkerRequestIdentity.from(song, selection)
+        } else {
+            null
+        }
+        if (sourceSeparationForegroundWorkerCoordinator.cancelForCacheDeletion(
+                cacheKey = cacheKey,
+                preflightIdentity = preflightIdentity,
             )
-            cancelSourceSeparationAndWaitForSong(songId)
+        ) {
+            traceSourceSeparationPlaybackTestMarker(
+                "manualDelete.cancelSeparation songId=${song.id} cache=${cacheKey.take(12)}"
+            )
         }
 
         val waitsForFlacPromotion = isSourceSeparationFlacPromotionActive(cacheKey)
