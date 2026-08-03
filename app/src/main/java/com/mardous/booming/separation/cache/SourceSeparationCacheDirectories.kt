@@ -8,9 +8,6 @@ object SourceSeparationCacheDirectories {
     fun root(context: Context): File =
         AndroidSourceSeparationCacheRootProvider(context.applicationContext).resolveRoot().directory
 
-    fun playbackHydration(context: Context): File =
-        File(root(context), "playback-hydration-v2")
-
     fun mp3Calibration(context: Context): File =
         File(root(context), "mp3-no-gapless-calibration")
 
