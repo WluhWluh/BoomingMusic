@@ -1,4 +1,4 @@
-package com.mardous.booming.ui.screen.player
+package com.mardous.booming.separation
 
 import android.content.Context
 import androidx.annotation.StringRes

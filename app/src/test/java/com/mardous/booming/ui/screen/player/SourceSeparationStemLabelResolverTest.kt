@@ -1,6 +1,7 @@
 package com.mardous.booming.ui.screen.player
 
 import com.mardous.booming.R
+import com.mardous.booming.separation.SourceSeparationStemLabelResolver
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

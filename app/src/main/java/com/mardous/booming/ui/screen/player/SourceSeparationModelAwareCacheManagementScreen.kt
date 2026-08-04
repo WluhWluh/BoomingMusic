@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mardous.booming.R
+import com.mardous.booming.separation.SourceSeparationStemLabelResolver
 import com.mardous.booming.extensions.files.asReadableFileSize
 import com.mardous.booming.extensions.utilities.dateStr
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
@@ -359,6 +360,14 @@ private fun SourceSeparationModelAwareCacheRow(
                     label = stringResource(R.string.source_separation_model_details_model_id),
                     value = item.modelId,
                 )
+                if (item.stemLabels.isNotEmpty()) {
+                    SourceSeparationCacheMetadataRow(
+                        label = stringResource(R.string.source_separation_model_details_stems),
+                        value = item.stemLabels.joinToString(" / ") { label ->
+                            SourceSeparationStemLabelResolver.resolve(context, label)
+                        },
+                    )
+                }
                 SourceSeparationCacheMetadataRow(
                     label = stringResource(R.string.source_separation_model_actual_hash_label),
                     value = item.artifactSha256.take(SHORT_IDENTITY_LENGTH),

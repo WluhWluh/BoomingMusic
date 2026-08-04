@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.rememberNestedScrollInteropConnection
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -48,6 +49,7 @@ import com.mardous.booming.extensions.files.asReadableFileSize
 import com.mardous.booming.separation.model.contract.CatalogActivationPolicy
 import com.mardous.booming.separation.model.contract.CatalogReleaseMaturity
 import com.mardous.booming.separation.model.contract.CatalogSupportLevel
+import com.mardous.booming.separation.SourceSeparationStemLabelResolver
 import com.mardous.booming.separation.model.preset.SourceSeparationManualModelProfileDraft
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
 import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
@@ -1091,6 +1093,7 @@ private fun SourceSeparationModelDetailsDialog(
     details: SourceSeparationModelDetailsUiState,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = {
@@ -1200,11 +1203,17 @@ private fun SourceSeparationModelDetailsDialog(
                         ModelDetailSection(R.string.source_separation_model_details_stems) {
                             ModelDetailValue(
                                 R.string.source_separation_model_details_model_output,
-                                contract.modelOutputStem,
+                                SourceSeparationStemLabelResolver.resolve(
+                                    context,
+                                    contract.modelOutputCanonicalLabel,
+                                ),
                             )
                             ModelDetailValue(
                                 R.string.source_separation_model_details_residual,
-                                contract.residualStem,
+                                SourceSeparationStemLabelResolver.resolve(
+                                    context,
+                                    contract.residualCanonicalLabel,
+                                ),
                             )
                             ModelDetailValue(
                                 R.string.source_separation_model_details_pipeline,

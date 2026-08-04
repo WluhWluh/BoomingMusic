@@ -2,6 +2,7 @@ package com.mardous.booming.ui.screen.player
 
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContract
+import com.mardous.booming.separation.model.contract.canonicalLabel
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
@@ -153,8 +154,8 @@ private fun SourceSeparationModelContract.toDetails() = SourceSeparationModelCon
     dimTPower = dsp.dimTPower,
     modelTimeFrames = dsp.modelTimeFrames,
     modelOutputScale = dsp.modelOutputScale,
-    modelOutputStem = stemContract.modelOutput.semantic.name,
-    residualStem = stemContract.residual.semantic.name,
+    modelOutputCanonicalLabel = stemContract.modelOutput.canonicalLabel,
+    residualCanonicalLabel = stemContract.residual.canonicalLabel,
     pipelineId = pipelineCompatibility.pipelineId,
     pipelineMinimumVersion = pipelineCompatibility.minimumVersion,
     pipelineMaximumVersion = pipelineCompatibility.maximumVersion,
@@ -175,8 +176,8 @@ private fun SourceSeparationCustomModelProfile.toDetails() = SourceSeparationMod
     dimTPower = dsp.dimTPower,
     modelTimeFrames = dsp.modelTimeFrames,
     modelOutputScale = dsp.modelOutputScale,
-    modelOutputStem = stemContract.modelOutput.semantic.name,
-    residualStem = stemContract.residual.semantic.name,
+    modelOutputCanonicalLabel = stemContract.modelOutput.canonicalLabel,
+    residualCanonicalLabel = stemContract.residual.canonicalLabel,
     pipelineId = pipelineCompatibility.pipelineId,
     pipelineMinimumVersion = pipelineCompatibility.minimumVersion,
     pipelineMaximumVersion = pipelineCompatibility.maximumVersion,
@@ -219,8 +220,8 @@ data class SourceSeparationModelContractDetails(
     val dimTPower: Int,
     val modelTimeFrames: Int,
     val modelOutputScale: Double,
-    val modelOutputStem: String,
-    val residualStem: String,
+    val modelOutputCanonicalLabel: String,
+    val residualCanonicalLabel: String,
     val pipelineId: String,
     val pipelineMinimumVersion: Int,
     val pipelineMaximumVersion: Int,

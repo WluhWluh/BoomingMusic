@@ -7,6 +7,7 @@ import android.util.Log
 import com.mardous.booming.BuildConfig
 import com.mardous.booming.separation.audio.WavFileWriter
 import com.mardous.booming.separation.SourceSeparationPausedException
+import com.mardous.booming.separation.SourceSeparationStemLabelResolver
 import com.mardous.booming.separation.cache.SourceSeparationSegmentScheduler
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPriority
@@ -516,6 +517,9 @@ class MdxRangeSeparator(
             timingReport.toFileText(
                 vocalsFile = vocalsFile,
                 instrumentalFile = instrumentalFile,
+                stemLabelResolver = { label ->
+                    SourceSeparationStemLabelResolver.resolve(context, label)
+                },
             ),
             Charsets.UTF_8,
         )

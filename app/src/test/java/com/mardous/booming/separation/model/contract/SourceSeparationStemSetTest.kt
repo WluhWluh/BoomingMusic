@@ -37,6 +37,20 @@ class SourceSeparationStemSetTest {
     }
 
     @Test
+    fun `MDX playback labels follow semantics instead of model output order`() {
+        for (modelId in listOf("uvr_mdxnet_3_9662", "uvr_mdxnet_kara")) {
+            assertEquals(
+                SourceSeparationMdxStemLabels("Vocals", "Instrumental"),
+                contract(modelId).stemContract.toMdxStemLabels(),
+            )
+        }
+        assertEquals(
+            SourceSeparationMdxStemLabels("Vocals", "Instrumental"),
+            contract("uvr_mdxnet_inst_hq_4").stemContract.toMdxStemLabels(),
+        )
+    }
+
+    @Test
     fun `pipeline native stem set supports the reviewed six-stem order`() {
         val semantics = listOf(
             StemSemanticId.Drums to "Drums",

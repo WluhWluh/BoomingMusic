@@ -45,6 +45,7 @@ data class MdxRangeTimingReport(
     fun toFileText(
         vocalsFile: File,
         instrumentalFile: File,
+        stemLabelResolver: (String) -> String = { it },
     ): String {
         return buildString {
             appendLine("Range separation timing report")
@@ -53,8 +54,14 @@ data class MdxRangeTimingReport(
             appendLine("Model: ${executionProfile.displayName}")
             appendLine(runtimeDiagnostics.toDisplayText())
             appendLine(sourceDecodeDiagnostics.toDisplayText())
-            appendLine("Vocals: ${vocalsFile.absolutePath}")
-            appendLine("Instrumental: ${instrumentalFile.absolutePath}")
+            appendLine(
+                "${stemLabelResolver(executionProfile.canonicalLabelFor(MdxStem.VOCALS))}: " +
+                    vocalsFile.absolutePath
+            )
+            appendLine(
+                "${stemLabelResolver(executionProfile.canonicalLabelFor(MdxStem.INSTRUMENTAL))}: " +
+                    instrumentalFile.absolutePath
+            )
             appendLine()
             appendLine("Timing:")
             appendLine("Total: ${seconds(totalMs)} (${decimal(runtimeAudioFactor())}x audio duration)")

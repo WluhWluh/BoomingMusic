@@ -49,8 +49,11 @@ import com.mardous.booming.separation.SourceSeparationBlendDemand
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
+import com.mardous.booming.separation.model.contract.SourceSeparationMdxStemLabels
+import com.mardous.booming.separation.model.contract.toMdxStemLabels
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
+import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelResolution
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
@@ -102,6 +105,7 @@ import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -219,6 +223,20 @@ class PlayerViewModel(
             SourceSeparationUiState.Idle
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SourceSeparationUiState.Idle)
+
+    val sourceSeparationBlendStemLabelsFlow = sourceSeparationForegroundWorkerCoordinator
+        .activeSelectionStateFlow
+        .map {
+            (sourceSeparationRuntime.activeModelResolution()
+                as? SourceSeparationActiveCacheModelResolution.Ready)
+                ?.model?.contract?.stemContract?.toMdxStemLabels()
+                ?: SourceSeparationMdxStemLabels.Default
+        }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            SourceSeparationMdxStemLabels.Default,
+        )
 
     private val _currentSourceSeparationCacheAvailableFlow = MutableStateFlow(false)
     val currentSourceSeparationCacheAvailableFlow =

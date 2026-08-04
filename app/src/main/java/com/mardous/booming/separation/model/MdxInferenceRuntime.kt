@@ -43,6 +43,8 @@ data class MdxExecutionProfile(
     val dspConfig: MdxDspConfig,
     val modelOutputScale: Float,
     val modelOutputStem: MdxStem,
+    val modelOutputCanonicalLabel: String = modelOutputStem.defaultCanonicalLabel(),
+    val residualCanonicalLabel: String = modelOutputStem.residual().defaultCanonicalLabel(),
     val pipelineId: String,
     val pipelineVersion: Int,
     val expectedFileName: String,
@@ -51,6 +53,11 @@ data class MdxExecutionProfile(
     val minimumAndroidApi: Int? = null,
     val runtimeCompatibility: List<MdxRuntimeCompatibilityRecord> = emptyList(),
 ) {
+    fun canonicalLabelFor(stem: MdxStem): String = when (stem) {
+        modelOutputStem -> modelOutputCanonicalLabel
+        else -> residualCanonicalLabel
+    }
+
     val sessionIdentity: String = buildString {
         append(profileId)
         append('|').append(modelFormat)
@@ -73,6 +80,12 @@ data class MdxExecutionProfile(
         require(modelOutputScale.isFinite() && modelOutputScale > 0f) {
             "Model output scale must be finite and positive."
         }
+        require(modelOutputCanonicalLabel.isNotBlank() &&
+            modelOutputCanonicalLabel == modelOutputCanonicalLabel.trim()
+        ) { "Model output stem label is invalid." }
+        require(residualCanonicalLabel.isNotBlank() &&
+            residualCanonicalLabel == residualCanonicalLabel.trim()
+        ) { "Residual stem label is invalid." }
         require(pipelineId.isNotBlank() && pipelineVersion > 0) {
             "Execution profile pipeline identity is invalid."
         }
@@ -110,6 +123,16 @@ data class MdxExecutionProfile(
 
         private val SHA256_PATTERN = Regex("^[0-9a-fA-F]{64}$")
     }
+}
+
+private fun MdxStem.residual(): MdxStem = when (this) {
+    MdxStem.VOCALS -> MdxStem.INSTRUMENTAL
+    MdxStem.INSTRUMENTAL -> MdxStem.VOCALS
+}
+
+private fun MdxStem.defaultCanonicalLabel(): String = when (this) {
+    MdxStem.VOCALS -> "Vocals"
+    MdxStem.INSTRUMENTAL -> "Instrumental"
 }
 
 data class MdxModelArtifact(

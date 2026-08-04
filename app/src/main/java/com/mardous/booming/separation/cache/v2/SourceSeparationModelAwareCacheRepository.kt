@@ -2,6 +2,7 @@ package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.contract.ContractStemSemantic
+import com.mardous.booming.separation.model.contract.toStemSet
 import java.io.File
 
 class SourceSeparationModelAwareCacheRepository(
@@ -52,6 +53,8 @@ class SourceSeparationModelAwareCacheRepository(
                 sizeBytes = store.entryDirectory(manifest.cacheKey).directorySize(),
                 updatedAtEpochMs = manifest.updatedAtEpochMs,
                 lastAccessedAtEpochMs = manifest.lastAccessedAtEpochMs,
+                stemLabels = manifest.contract.stemContract.toStemSet().stems
+                    .map { stem -> stem.canonicalLabel },
                 supportsStandardPlayback = manifest.output?.stems
                     ?.map(SourceSeparationCacheRenderedStem::semantic)
                     ?.toSet() == setOf(
@@ -508,6 +511,7 @@ data class SourceSeparationModelAwareCacheEntry(
     val sizeBytes: Long,
     val updatedAtEpochMs: Long,
     val lastAccessedAtEpochMs: Long,
+    val stemLabels: List<String> = emptyList(),
     val supportsStandardPlayback: Boolean = true,
 )
 

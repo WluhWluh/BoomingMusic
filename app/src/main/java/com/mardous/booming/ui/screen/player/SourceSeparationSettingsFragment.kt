@@ -79,6 +79,7 @@ import com.mardous.booming.extensions.files.getFormattedFileName
 import com.mardous.booming.extensions.isLandscape
 import com.mardous.booming.extensions.showToast
 import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
+import com.mardous.booming.separation.SourceSeparationStemLabelResolver
 import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
 import com.mardous.booming.ui.component.compose.TitledCard
 import com.mardous.booming.ui.theme.BoomingMusicTheme
@@ -177,6 +178,7 @@ private fun SourceSeparationSettingsSheet(
     )
 
     val playbackState by viewModel.sourceSeparationPlaybackStateFlow.collectAsState()
+    val blendStemLabels by viewModel.sourceSeparationBlendStemLabelsFlow.collectAsState()
     val blendMode by viewModel.sourceSeparationBlendModeFlow.collectAsState()
     val rememberPerSong by viewModel.sourceSeparationRememberPerSongFlow.collectAsState()
     val separationState by viewModel.sourceSeparationStateFlow.collectAsState()
@@ -432,7 +434,10 @@ private fun SourceSeparationSettingsSheet(
                                     .padding(horizontal = 8.dp)
                             ) {
                                 Text(
-                                    text = stringResource(R.string.source_separation_blend_vocals),
+                                    text = SourceSeparationStemLabelResolver.resolve(
+                                        context,
+                                        blendStemLabels.vocalsCanonicalLabel,
+                                    ),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     fontWeight = FontWeight.SemiBold,
@@ -442,7 +447,10 @@ private fun SourceSeparationSettingsSheet(
                                 )
 
                                 Text(
-                                    text = stringResource(R.string.source_separation_blend_instrumental),
+                                    text = SourceSeparationStemLabelResolver.resolve(
+                                        context,
+                                        blendStemLabels.instrumentalCanonicalLabel,
+                                    ),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     fontWeight = FontWeight.SemiBold,

@@ -26,6 +26,9 @@ class MdxContractExecutionProfileTest {
         assertEquals(2_048, profile.dspConfig.dimF)
         assertEquals(1.035f, profile.modelOutputScale)
         assertEquals(MdxStem.VOCALS, profile.modelOutputStem)
+        assertEquals("Vocals", profile.modelOutputCanonicalLabel)
+        assertEquals("Instrumental", profile.residualCanonicalLabel)
+        assertEquals("Vocals", profile.canonicalLabelFor(MdxStem.VOCALS))
         assertEquals(contract.artifact.sha256, profile.expectedSha256)
         assertEquals(26, profile.minimumAndroidApi)
     }
@@ -40,6 +43,10 @@ class MdxContractExecutionProfileTest {
         assertEquals(2_560, profile.dspConfig.dimF)
         assertEquals(listOf(1, 2560, 256, 4), profile.outputTensor.shape)
         assertEquals(MdxStem.INSTRUMENTAL, profile.modelOutputStem)
+        assertEquals("Instrumental", profile.modelOutputCanonicalLabel)
+        assertEquals("Vocals", profile.residualCanonicalLabel)
+        assertEquals("Vocals", profile.canonicalLabelFor(MdxStem.VOCALS))
+        assertEquals("Instrumental", profile.canonicalLabelFor(MdxStem.INSTRUMENTAL))
         for (abi in listOf(MdxRuntimeAbi.ArmeabiV7a, MdxRuntimeAbi.X86)) {
             assertEquals(
                 MdxRuntimeSupportStatus.Unsupported,
