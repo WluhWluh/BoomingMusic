@@ -45,6 +45,8 @@ object Playback {
         "source_separation_allow_new_session"
     const val EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING =
         "source_separation_expect_processing"
+    const val EXTRA_SOURCE_SEPARATION_PREFER_COMPLETED_CACHE =
+        "source_separation_prefer_completed_cache"
     const val EXTRA_SOURCE_SEPARATION_CACHE_KEY = "source_separation_cache_key"
     const val EXTRA_SOURCE_SEPARATION_PERSIST_BLEND = "source_separation_persist_blend"
     const val EXTRA_SOURCE_SEPARATION_TRACE_MARKER = "source_separation_trace_marker"

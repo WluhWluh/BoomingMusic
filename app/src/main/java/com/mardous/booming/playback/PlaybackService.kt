@@ -963,14 +963,20 @@ class PlaybackService :
                     Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING,
                     false,
                 )
+                val preferCompletedCache = args.getBoolean(
+                    Playback.EXTRA_SOURCE_SEPARATION_PREFER_COMPLETED_CACHE,
+                    false,
+                )
                 traceSourceSeparationPlayback(
                     "command.syncPlayback",
-                    "allowNewSession=$allowNewSession expectProcessing=$expectProcessing"
+                    "allowNewSession=$allowNewSession expectProcessing=$expectProcessing " +
+                            "preferCompletedCache=$preferCompletedCache"
                 )
                 serviceScope.future {
                     syncSourceSeparationPlayback(
                         allowNewSession = allowNewSession,
                         expectProcessing = expectProcessing,
+                        preferCompletedCache = preferCompletedCache,
                     )
                 }
             }
@@ -1540,10 +1546,12 @@ class PlaybackService :
     private suspend fun syncSourceSeparationPlayback(
         allowNewSession: Boolean = sourceSeparationPlaybackAutoSyncOnTransition,
         expectProcessing: Boolean = false,
+        preferCompletedCache: Boolean = false,
     ): SessionResult {
         traceSourceSeparationPlayback(
             "playback.sync.start",
-            "allowNewSession=$allowNewSession expectProcessing=$expectProcessing"
+            "allowNewSession=$allowNewSession expectProcessing=$expectProcessing " +
+                    "preferCompletedCache=$preferCompletedCache"
         )
         if (!sourceSeparationPlaybackRequested) {
             val result = sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
@@ -1560,6 +1568,7 @@ class PlaybackService :
             showUnavailableMessage = false,
             allowNewSession = allowNewSession,
             resumeWhenReady = shouldResumeSourceSeparationPlaybackWhenReady(),
+            preferCompletedCache = preferCompletedCache,
             expectProcessing = effectiveExpectProcessing,
         )
         traceSourceSeparationPlayback("playback.sync.end", "result=${result.resultCode}")
