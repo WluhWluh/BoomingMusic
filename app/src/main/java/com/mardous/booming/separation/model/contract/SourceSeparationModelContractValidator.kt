@@ -305,11 +305,12 @@ object SourceSeparationModelContractValidator {
         val expectedShape = listOf(1, dsp.dimF, dsp.modelTimeFrames, 4)
         validateTensor(tensorContract.input, expectedShape, "input")
         validateTensor(tensorContract.output, expectedShape, "output")
-        requireContract(stemContract.modelOutput.displayLabel.isNotBlank()) {
-            "Model output stem label is empty"
-        }
-        requireContract(stemContract.residual.displayLabel.isNotBlank()) {
-            "Residual stem label is empty"
+        try {
+            requireCanonicalStemLabel(stemContract.modelOutput.canonicalLabel)
+            requireCanonicalStemLabel(stemContract.residual.canonicalLabel)
+            stemContract.toStemSet()
+        } catch (error: IllegalArgumentException) {
+            fail(error.message ?: "Invalid stem contract")
         }
         val expectedResidual = when (stemContract.modelOutput.semantic) {
             ContractStemSemantic.Vocals -> ContractStemSemantic.Instrumental

@@ -6,6 +6,9 @@ data flow.
 
 Updated: 2026-08-04
 
+Current milestone: Phase 0 is complete. Phase 1 dynamic labels and imported
+label editing are next.
+
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
 following previously separate requirements:
@@ -431,19 +434,27 @@ must not perform semantic inference from display text.
 
 ### Phase 0: Freeze the normalized domain
 
-- [ ] Inventory every two-stem field in execution, cache, Hydration, IPC,
+- [x] Inventory every two-stem field in execution, cache, Hydration, IPC,
   playback, diagnostics, and tests.
-- [ ] Freeze `StemDescriptor`, stable `stemId`, extensible semantic ID, and
+- [x] Freeze `StemDescriptor`, stable `stemId`, extensible semantic ID, and
   canonical-label rules.
-- [ ] Decide the new contract kind/schema and the normalization from current
+- [x] Decide the new contract kind/schema and the normalization from current
   MDX v2 contracts.
-- [ ] Freeze direct, residual, and pipeline-native derivation types.
-- [ ] Add bss-tflite contract-policy tests for English canonical labels and
-  ordered output bindings.
+- [x] Freeze direct, residual, and pipeline-native derivation types.
+- [x] Add bss-tflite contract-policy tests for English canonical labels and
+  application normalization tests for ordered output bindings.
 
 **Exit:** the contract can describe current 9662, HQ4, and KARA without
 localized text and can describe a 4/6-stem output without pretending it is an
 MDX residual pair.
+
+Phase 0 evidence:
+
+- Booming SS GitHub unit tests cover v2 normalization, reversed HQ4 output,
+  six pipeline-native stems, unknown semantic IDs, strict catalog parsing,
+  custom profiles, and presentation-independent cache fingerprints.
+- `bss-tflite@c19e17a` enforces canonical English labels in conversion code and
+  schema, with all 30 repository tests passing.
 
 ### Phase 1: Dynamic labels on the stable two-stem path
 
