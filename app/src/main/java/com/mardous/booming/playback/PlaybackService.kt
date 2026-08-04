@@ -1655,11 +1655,18 @@ class PlaybackService :
             )
         }
         val waitingForExpectedProcessingTooLong =
-            effectiveExpectProcessing &&
-                    sourceSeparationPlaybackExpectProcessingStartedAtMs > 0L &&
-                    SystemClock.elapsedRealtime() -
-                    sourceSeparationPlaybackExpectProcessingStartedAtMs >
-                    SOURCE_SEPARATION_EXPECT_PROCESSING_TIMEOUT_MS
+            SourceSeparationExpectedProcessingTimeoutPolicy.hasTimedOut(
+                expected = effectiveExpectProcessing,
+                startedAtMs = sourceSeparationPlaybackExpectProcessingStartedAtMs,
+                nowMs = SystemClock.elapsedRealtime(),
+                waitingCacheKey = sourceSeparationPlaybackProcessingCacheKey,
+                activeOwnerCacheKey = sourceSeparationProcessingOwnershipHandoff
+                    .stateFlow.value.activeOwner?.owner?.cacheKey,
+                pendingResolutionTimeoutMs =
+                    SOURCE_SEPARATION_EXPECT_PROCESSING_PENDING_TIMEOUT_MS,
+                concreteTargetTimeoutMs =
+                    SOURCE_SEPARATION_EXPECT_PROCESSING_TARGET_TIMEOUT_MS,
+            )
         if (waitingForExpectedProcessingTooLong) {
             traceSourceSeparationPlayback(
                 "check.expectProcessing.timeout",
@@ -4234,7 +4241,8 @@ class PlaybackService :
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_DELAY_MS = 120L
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_FALLBACK_DELAY_MS = 1500L
         private const val SOURCE_SEPARATION_BLEND_FLUSH_SEEK_OFFSET_MS = 10L
-        private const val SOURCE_SEPARATION_EXPECT_PROCESSING_TIMEOUT_MS = 10_000L
+        private const val SOURCE_SEPARATION_EXPECT_PROCESSING_PENDING_TIMEOUT_MS = 10_000L
+        private const val SOURCE_SEPARATION_EXPECT_PROCESSING_TARGET_TIMEOUT_MS = 10 * 60_000L
         private const val SOURCE_SEPARATION_PROCESSING_LEASE_HEARTBEAT_MS = 1_000L
         private const val SOURCE_SEPARATION_BUFFERING_FGS_REFRESH_MS = 3_000L
         private const val SOURCE_SEPARATION_PROCESSING_WAKE_LOCK_REFRESH_MS = 15_000L
