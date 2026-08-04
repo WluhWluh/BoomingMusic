@@ -410,6 +410,13 @@ internal class SourceSeparationStemPlaybackEngine(
                     }
                 }
                 if (!successful) continue
+                if (currentEpoch != activeEpoch.get() ||
+                    activeSession?.epoch != currentEpoch
+                ) {
+                    block.reset(currentEpoch)
+                    freeBlocks.offer(block)
+                    continue
+                }
                 block.epoch = currentEpoch
                 block.startFrame = workerNextFrame
                 block.frameCount = frames
@@ -543,6 +550,10 @@ internal class SourceSeparationStemPlaybackEngine(
             metrics.recordLowWater()
             lowWaterEpoch.set(current)
         }
+        state.compareAndSet(
+            SourceSeparationPlaybackDataState.Ready,
+            SourceSeparationPlaybackDataState.Buffering,
+        )
         if (underflow && underflowEpoch.compareAndSet(0L, current)) {
             metrics.recordUnderrun()
         }

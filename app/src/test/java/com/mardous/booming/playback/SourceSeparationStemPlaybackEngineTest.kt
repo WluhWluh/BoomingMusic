@@ -72,6 +72,43 @@ class SourceSeparationStemPlaybackEngineTest {
     }
 
     @Test
+    fun seekRejectsAnOldEpochBlockAlreadyBeingDecoded() {
+        val geometry = geometry(frameCount = 24)
+        val oldDecodeStarted = CountDownLatch(1)
+        val releaseOldDecode = CountDownLatch(1)
+        val engine = SourceSeparationStemPlaybackEngine(
+            blockFrames = 4,
+            resumeWaterlineBlocks = 1,
+            targetWaterlineBlocks = 2,
+            blockCapacity = 3,
+        )
+        try {
+            engine.start(
+                1L,
+                listOf(
+                    testFactory("vocals", geometry, pcm(0, 24)) { startFrame ->
+                        if (startFrame == 0L) {
+                            oldDecodeStarted.countDown()
+                            releaseOldDecode.await()
+                        }
+                    },
+                ),
+            )
+            assertTrue(oldDecodeStarted.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            val seekEpoch = engine.seekTo(12L)
+            releaseOldDecode.countDown()
+            await { engine.currentEpoch == seekEpoch && engine.hasResumeWaterline() }
+
+            val output = Array(1) { ByteArray(4 * 4) }
+            assertEquals(4, engine.readInto(output, 4))
+            assertArrayEquals(pcm(12, 4), output[0])
+        } finally {
+            releaseOldDecode.countDown()
+            engine.close()
+        }
+    }
+
+    @Test
     fun shortOrMissingStemFailsAsAWholeSession() {
         val geometry = geometry(frameCount = 8)
         val engine = SourceSeparationStemPlaybackEngine(

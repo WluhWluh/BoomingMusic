@@ -63,6 +63,46 @@ class SourceSeparationMixAudioProcessorTest {
     }
 
     @Test
+    fun boundedEngineResamplesStemsWithoutReturningSilentFallback() {
+        val frames = 16_384
+        val vocals = writeWav("resampled-vocals.wav", frames, 1_000)
+        val instrumental = writeWav("resampled-instrumental.wav", frames, 2_000)
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.configure(
+                AudioProcessor.AudioFormat(48_000, 2, C.ENCODING_PCM_16BIT),
+            )
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                vocalsFile = vocals,
+                instrumentalFile = instrumental,
+                positionMs = 0L,
+                initialBlend = 0.5f,
+                inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+
+            val input = ByteBuffer.allocateDirect(480 * BYTES_PER_FRAME)
+                .order(ByteOrder.LITTLE_ENDIAN)
+            repeat(480) {
+                input.putShort(9_000)
+                input.putShort(9_000)
+            }
+            input.flip()
+            processor.queueInput(input)
+            val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            repeat(480 * 2) {
+                assertEquals(3_000, output.short.toInt())
+            }
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
     fun indexedFlacStemsUseTheSameBoundedEngineWithoutWholeSongFallback() {
         val frames = 16_384
         val vocalsWav = writeWav("vocals-source.wav", frames, 1_000)

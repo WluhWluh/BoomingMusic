@@ -7,6 +7,7 @@ import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import com.mardous.booming.playback.SourceSeparationFileStemSourceFactory
 import com.mardous.booming.playback.SourceSeparationFlacStemSourceFactory
+import com.mardous.booming.playback.SourceSeparationPlaybackDataState
 import com.mardous.booming.playback.SourceSeparationPlaybackStemSourceFactory
 import com.mardous.booming.playback.SourceSeparationStemPlaybackEngine
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
@@ -58,6 +59,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private var stemChannelCount = CHANNEL_COUNT_STEREO
 
     private val lock = Any()
+    @Volatile
     private var playbackEngine: SourceSeparationStemPlaybackEngine? = null
     private var engineStemBuffers: Array<ByteArray> = emptyArray()
     private var engineHasInstrumentalInput = false
@@ -107,16 +109,20 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             applyGainSnapshotImmediately()
             val engineFactories = createEngineFactories(vocalsFile, instrumentalFile)
             if (engineFactories != null) {
-                playbackEngine = SourceSeparationStemPlaybackEngine()
+                val engine = SourceSeparationStemPlaybackEngine()
+                playbackEngine = engine
                 engineHasInstrumentalInput = instrumentalFile != null
                 engineStemBuffers = Array(engineFactories.size) {
-                    ByteArray(playbackEngine!!.blockFrameCapacity * DEFAULT_FRAME_SIZE)
+                    ByteArray(engine.blockFrameCapacity * DEFAULT_FRAME_SIZE)
                 }
-                playbackEngine!!.start(
+                val startFrame = engineFactories.first().spec.geometry
+                    .transportPositionToStemFrame(positionMs)
+                resampleStemFramePosition = startFrame.toDouble()
+                prepareEngineResampleCachesLocked(engine.blockFrameCapacity, startFrame)
+                engine.start(
                     sessionId = debugSessionId,
                     factories = engineFactories,
-                    startFrame = engineFactories.first().spec.geometry
-                        .transportPositionToStemFrame(positionMs),
+                    startFrame = startFrame,
                 )
             } else {
                 vocalsInput = openStemInput(vocalsFile)
@@ -189,13 +195,23 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             engine.hotSwap(
                 sessionId = debugSessionId,
                 factories = factories,
-                startFrame = engine.currentFrame(),
+                startFrame = if (inputAudioFormat.sampleRate != stemSampleRate) {
+                    floor(resampleStemFramePosition).toLong().coerceAtLeast(0L)
+                } else {
+                    engine.currentFrame()
+                },
             )
-            clearResampleCachesLocked()
+            val logicalFrame = if (inputAudioFormat.sampleRate != stemSampleRate) {
+                floor(resampleStemFramePosition).toLong().coerceAtLeast(0L)
+            } else {
+                engine.currentFrame()
+            }
+            resampleStemFramePosition = logicalFrame.toDouble()
+            prepareEngineResampleCachesLocked(engine.blockFrameCapacity, logicalFrame)
             resetMixedOutputNotificationLocked()
             traceDebug(
                 "hotSwapPcm",
-                "session=$debugSessionId engine=true frame=${engine.currentFrame()} stems=${factories.size}",
+                "session=$debugSessionId engine=true frame=$logicalFrame stems=${factories.size}",
             )
             return true
         }
@@ -264,7 +280,19 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
     override fun onFlush(streamMetadata: AudioProcessor.StreamMetadata) {
         synchronized(lock) {
-            clearResampleCachesLocked()
+            val engine = playbackEngine
+            if (active && engine != null) {
+                val logicalFrame = if (inputAudioFormat.sampleRate != stemSampleRate) {
+                    floor(resampleStemFramePosition).toLong().coerceAtLeast(0L)
+                } else {
+                    engine.currentFrame()
+                }
+                engine.seekTo(logicalFrame)
+                resampleStemFramePosition = logicalFrame.toDouble()
+                prepareEngineResampleCachesLocked(engine.blockFrameCapacity, logicalFrame)
+            } else {
+                clearResampleCachesLocked()
+            }
             resetMixedOutputNotificationLocked()
         }
     }
@@ -301,13 +329,23 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         val bytesToRead = frames * frameSize
         prepareGainRamp()
         val resampled = inputAudioFormat.sampleRate != stemSampleRate
-        if (!resampled && playbackEngine != null) {
-            val mixedFrames = queueEngineInput(
-                inputBuffer = inputBuffer,
-                outputBuffer = buffer,
-                frameCount = frames,
-                frameSize = frameSize,
-            )
+        if (playbackEngine != null) {
+            val mixedFrames = if (resampled) {
+                queueResampledEngineInput(
+                    inputBuffer = inputBuffer,
+                    outputBuffer = buffer,
+                    frameCount = frames,
+                    frameSize = frameSize,
+                    outputSampleRate = inputAudioFormat.sampleRate,
+                )
+            } else {
+                queueEngineInput(
+                    inputBuffer = inputBuffer,
+                    outputBuffer = buffer,
+                    frameCount = frames,
+                    frameSize = frameSize,
+                )
+            }
             if (inputBuffer.hasRemaining()) {
                 buffer.put(inputBuffer)
             }
@@ -315,7 +353,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             if (mixedFrames > 0) notifyMixedOutputStartedIfNeeded(mixedFrames)
             traceQueueIfNeeded(
                 queueSeq = queueSeq,
-                branch = if (mixedFrames == frames) "mixed-engine" else "engine-underflow",
+                branch = when {
+                    mixedFrames != frames -> "engine-underflow"
+                    resampled -> "mixed-engine-resampled"
+                    else -> "mixed-engine"
+                },
                 remaining = remaining,
                 bytesRead = mixedFrames * frameSize,
                 instrumentalBytesRead = if (engineHasInstrumentalInput) {
@@ -485,6 +527,154 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         return mixedFrames
     }
 
+    private fun queueResampledEngineInput(
+        inputBuffer: ByteBuffer,
+        outputBuffer: ByteBuffer,
+        frameCount: Int,
+        frameSize: Int,
+        outputSampleRate: Int,
+    ): Int {
+        val engine = playbackEngine ?: return 0
+        val ratio = stemSampleRate.toDouble() / outputSampleRate.toDouble()
+        if (ratio <= 0.0 || !ratio.isFinite()) return 0
+
+        val cacheFrameSize = stemChannelCount * BYTES_PER_SAMPLE
+        val maxSourceFrames = engine.blockFrameCapacity - 2
+        val maxOutputFrames = if (ratio <= 1.0) {
+            engine.blockFrameCapacity
+        } else {
+            (maxSourceFrames / ratio).toInt().coerceAtLeast(1)
+        }
+        var handledFrames = 0
+        var mixedFrames = 0
+        val mode = inputMode
+        val hasInstrumentalStemInput = engineHasInstrumentalInput
+
+        while (handledFrames < frameCount) {
+            val chunkFrames = minOf(frameCount - handledFrames, maxOutputFrames)
+            val startPosition = resampleStemFramePosition
+            val startFrame = floor(startPosition).toLong().coerceAtLeast(0L)
+            val sessionEndFrame = engine.currentSession?.geometry?.frameCount ?: Long.MAX_VALUE
+            val endExclusiveFrame = (floor(
+                startPosition + chunkFrames * ratio,
+            ).toLong().coerceAtLeast(startFrame) + 1L).coerceAtMost(sessionEndFrame)
+            val cachedEndFrame = vocalsResampleCache.endExclusiveFrame
+            val framesToReadLong = (endExclusiveFrame - cachedEndFrame).coerceAtLeast(0L)
+            if (cachedEndFrame < startFrame ||
+                framesToReadLong > engine.blockFrameCapacity
+            ) {
+                writeUnmixedInput(
+                    inputBuffer = inputBuffer,
+                    outputBuffer = outputBuffer,
+                    byteCount = (frameCount - handledFrames) * frameSize,
+                )
+                break
+            }
+            val framesToRead = framesToReadLong.toInt()
+            if (!vocalsResampleCache.canAppend(framesToRead, cacheFrameSize)) {
+                writeUnmixedInput(
+                    inputBuffer = inputBuffer,
+                    outputBuffer = outputBuffer,
+                    byteCount = (frameCount - handledFrames) * frameSize,
+                )
+                break
+            }
+            if (framesToRead > 0) {
+                val readFrames = engine.readInto(engineStemBuffers, framesToRead)
+                if (readFrames != framesToRead ||
+                    !vocalsResampleCache.appendFrom(
+                        source = engineStemBuffers[0],
+                        frameCount = readFrames,
+                        frameSize = cacheFrameSize,
+                    ) ||
+                    (engineHasInstrumentalInput &&
+                            !instrumentalResampleCache.appendFrom(
+                                source = engineStemBuffers[1],
+                                frameCount = readFrames,
+                                frameSize = cacheFrameSize,
+                            ))
+                ) {
+                    writeUnmixedInput(
+                        inputBuffer = inputBuffer,
+                        outputBuffer = outputBuffer,
+                        byteCount = (frameCount - handledFrames) * frameSize,
+                    )
+                    break
+                }
+            }
+
+            repeat(chunkFrames) { outputFrame ->
+                advanceGainRamp()
+                val inputLeft = inputBuffer.short.toInt()
+                val inputRight = inputBuffer.short.toInt()
+                val sourcePosition = startPosition + outputFrame * ratio
+                val sourceFrame = floor(sourcePosition).toLong().coerceAtLeast(0L)
+                val fraction = sourcePosition - sourceFrame
+                val vocalLeft = interpolatePcm16(
+                    vocalsResampleCache,
+                    sourceFrame,
+                    CHANNEL_LEFT,
+                    fraction,
+                    cacheFrameSize,
+                )
+                val vocalRight = interpolatePcm16(
+                    vocalsResampleCache,
+                    sourceFrame,
+                    CHANNEL_RIGHT,
+                    fraction,
+                    cacheFrameSize,
+                )
+                val instrumentalLeft = if (hasInstrumentalStemInput) {
+                    interpolatePcm16(
+                        instrumentalResampleCache,
+                        sourceFrame,
+                        CHANNEL_LEFT,
+                        fraction,
+                        cacheFrameSize,
+                    )
+                } else {
+                    0
+                }
+                val instrumentalRight = if (hasInstrumentalStemInput) {
+                    interpolatePcm16(
+                        instrumentalResampleCache,
+                        sourceFrame,
+                        CHANNEL_RIGHT,
+                        fraction,
+                        cacheFrameSize,
+                    )
+                } else {
+                    0
+                }
+                outputBuffer.putShort(
+                    mixSample(
+                        inputSample = inputLeft,
+                        vocalSample = vocalLeft,
+                        instrumentalSample = instrumentalLeft,
+                        mode = mode,
+                        hasInstrumentalStemInput = hasInstrumentalStemInput,
+                    ),
+                )
+                outputBuffer.putShort(
+                    mixSample(
+                        inputSample = inputRight,
+                        vocalSample = vocalRight,
+                        instrumentalSample = instrumentalRight,
+                        mode = mode,
+                        hasInstrumentalStemInput = hasInstrumentalStemInput,
+                    ),
+                )
+            }
+            handledFrames += chunkFrames
+            mixedFrames += chunkFrames
+            resampleStemFramePosition += chunkFrames * ratio
+            val keepFromFrame = floor(resampleStemFramePosition).toLong().coerceAtLeast(0L)
+            vocalsResampleCache.dropBefore(keepFromFrame, cacheFrameSize)
+            instrumentalResampleCache.dropBefore(keepFromFrame, cacheFrameSize)
+        }
+        return mixedFrames
+    }
+
     private fun writeUnmixedInput(
         inputBuffer: ByteBuffer,
         outputBuffer: ByteBuffer,
@@ -498,13 +688,14 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         }
     }
 
-    internal fun isDataPlaneReady(): Boolean {
-        return playbackEngine?.hasResumeWaterline() ?: active
-    }
+    internal fun isDataPlaneReady(): Boolean = playbackEngine?.hasResumeWaterline() ?: active
 
-    internal fun dataPlaneNeedsRecovery(): Boolean {
-        return playbackEngine?.currentState ==
-                com.mardous.booming.playback.SourceSeparationPlaybackDataState.Buffering
+    internal fun dataPlaneState(): SourceSeparationPlaybackDataState {
+        return playbackEngine?.currentState ?: if (active) {
+            SourceSeparationPlaybackDataState.Ready
+        } else {
+            SourceSeparationPlaybackDataState.Idle
+        }
     }
 
     internal fun consumeDataPlaneReadyNotification(): Boolean {
@@ -726,10 +917,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             ?.times(BYTES_PER_SAMPLE)
             ?: DEFAULT_FRAME_SIZE
         val frame = (positionMs.coerceAtLeast(0) * sampleRate / MILLIS_PER_SECOND.toFloat()).roundToLong()
-        if (playbackEngine != null) {
-            playbackEngine?.seekTo(frame)
+        val engine = playbackEngine
+        if (engine != null) {
+            engine.seekTo(frame)
             resampleStemFramePosition = frame.toDouble()
-            clearResampleCachesLocked()
+            prepareEngineResampleCachesLocked(engine.blockFrameCapacity, frame)
             return
         }
         val bytePosition = frame * frameSize
@@ -756,6 +948,16 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private fun clearResampleCachesLocked() {
         vocalsResampleCache.clear()
         instrumentalResampleCache.clear()
+    }
+
+    private fun prepareEngineResampleCachesLocked(
+        blockFrameCapacity: Int,
+        startFrame: Long,
+    ) {
+        val frameSize = stemChannelCount * BYTES_PER_SAMPLE
+        val capacityFrames = blockFrameCapacity + 2
+        vocalsResampleCache.prepare(startFrame, capacityFrames, frameSize)
+        instrumentalResampleCache.prepare(startFrame, capacityFrames, frameSize)
     }
 
     private fun resetMixedOutputNotificationLocked() {
@@ -941,6 +1143,20 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         private var bytes = ByteArray(0)
         private var readScratch = ByteArray(0)
 
+        val endExclusiveFrame: Long
+            get() = baseFrame + frameCount
+
+        fun prepare(
+            startFrame: Long,
+            capacityFrames: Int,
+            frameSize: Int,
+        ) {
+            require(capacityFrames > 0) { "Resample cache capacity must be positive." }
+            ensureCapacity(capacityFrames * frameSize)
+            baseFrame = startFrame.coerceAtLeast(0L)
+            frameCount = 0
+        }
+
         fun clear() {
             baseFrame = 0L
             frameCount = 0
@@ -993,6 +1209,29 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 bytes.fill(0, appendOffset + totalRead, appendOffset + appendBytes)
             }
             frameCount += framesToAppend
+        }
+
+        fun canAppend(frameCountToAppend: Int, frameSize: Int): Boolean {
+            if (frameCountToAppend <= 0) return true
+            return (frameCount + frameCountToAppend) * frameSize <= bytes.size
+        }
+
+        fun appendFrom(
+            source: ByteArray,
+            frameCount: Int,
+            frameSize: Int,
+        ): Boolean {
+            if (frameCount < 0 || !canAppend(frameCount, frameSize)) return false
+            val byteCount = frameCount * frameSize
+            val destinationOffset = this.frameCount * frameSize
+            source.copyInto(
+                destination = bytes,
+                destinationOffset = destinationOffset,
+                startIndex = 0,
+                endIndex = byteCount,
+            )
+            this.frameCount += frameCount
+            return true
         }
 
         fun dropBefore(frame: Long, frameSize: Int) {
