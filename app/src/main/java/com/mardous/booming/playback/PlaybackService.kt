@@ -2349,6 +2349,7 @@ class PlaybackService :
     }
 
     private fun setSourceSeparationBlend(blend: Float, persist: Boolean): SessionResult {
+        val previousBlend = sourceSeparationMixProcessor.blend
         applySourceSeparationBlend(blend)
         if (SourceSeparationBlendDemand.isCentered(blend)) {
             setSourceSeparationPlaybackExpectProcessing(false)
@@ -2379,24 +2380,17 @@ class PlaybackService :
             sourceSeparationPausedBlendFlushPending = true
         }
         broadcastSourceSeparationPlaybackChanged()
-        maybePreStartNextSourceSeparation("blendChanged")
+        if (SourceSeparationBlendDemand.requiresSeparatedOutput(previousBlend) !=
+            SourceSeparationBlendDemand.requiresSeparatedOutput(blend)
+        ) {
+            maybePreStartNextSourceSeparation("blendDemandChanged")
+        }
         return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
     }
 
     private fun applySourceSeparationBlend(blend: Float) {
         val normalizedBlend = blend.coerceIn(0f, 1f)
-        val previousBlend = sourceSeparationMixProcessor.blend
         sourceSeparationMixProcessor.setBlend(normalizedBlend)
-        if (previousBlend != normalizedBlend) {
-            sourceSeparationPlaybackContextGeneration++
-            sourceSeparationPlaybackGateJob?.cancel()
-            sourceSeparationPlaybackGateJob = null
-            traceSourceSeparationPlayback(
-                "playback.blendContextChanged",
-                "previous=$previousBlend current=$normalizedBlend " +
-                        "generation=$sourceSeparationPlaybackContextGeneration"
-            )
-        }
     }
 
     private fun observeSourceSeparationForegroundWorker() {

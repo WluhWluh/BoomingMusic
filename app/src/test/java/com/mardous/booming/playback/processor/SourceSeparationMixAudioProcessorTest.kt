@@ -8,6 +8,8 @@ import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -147,6 +149,65 @@ class SourceSeparationMixAudioProcessorTest {
             processor.queueInput(input)
             val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
             repeat(8) { assertEquals(7_000, output.short.toInt()) }
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun gainChangesRampWithoutChangingTheSteadyStateBlendLaw() {
+        val frames = 16_384
+        val vocals = writeWav("ramp-vocals.wav", frames, 1_000)
+        val instrumental = writeWav("ramp-instrumental.wav", frames, 2_000)
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                vocalsFile = vocals,
+                instrumentalFile = instrumental,
+                positionMs = 0L,
+                initialBlend = 0.5f,
+                inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+            processor.setBlend(0f)
+            val input = ByteBuffer.allocateDirect(512 * BYTES_PER_FRAME)
+                .order(ByteOrder.LITTLE_ENDIAN)
+            repeat(512) {
+                input.putShort(9_000)
+                input.putShort(9_000)
+            }
+            input.flip()
+            processor.queueInput(input)
+            val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            val first = output.short.toInt()
+            output.position(output.limit() - 2)
+            val last = output.short.toInt()
+            assertTrue(first in 1_001..2_999)
+            assertEquals(1_000, last)
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun unequalStemLengthsAreRejectedBeforeSessionInstallation() {
+        val vocals = writeWav("unequal-vocals.wav", 16_384, 1_000)
+        val instrumental = writeWav("unequal-instrumental.wav", 8_192, 2_000)
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            assertThrows(IllegalArgumentException::class.java) {
+                processor.enable(
+                    vocalsFile = vocals,
+                    instrumentalFile = instrumental,
+                    positionMs = 0L,
+                    inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
+                )
+            }
         } finally {
             processor.disable()
         }

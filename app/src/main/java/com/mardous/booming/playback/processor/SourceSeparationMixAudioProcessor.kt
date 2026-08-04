@@ -16,6 +16,7 @@ import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.floor
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -36,11 +37,16 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     @Volatile
     private var active = false
 
-    @Volatile
-    private var vocalsGain = 1f
-
-    @Volatile
-    private var instrumentalGain = 1f
+    private val gainGeneration = AtomicLong()
+    private val gainSnapshot = AtomicReference(GainSnapshot.centered())
+    private var appliedGainGeneration = 0L
+    private var currentVocalsGain = 1f
+    private var currentInstrumentalGain = 1f
+    private var targetVocalsGain = 1f
+    private var targetInstrumentalGain = 1f
+    private var vocalsGainStep = 0f
+    private var instrumentalGainStep = 0f
+    private var gainRampFramesRemaining = 0
 
     @Volatile
     private var inputMode = InputMode.InstrumentalStem
@@ -98,6 +104,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             this.stemSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
             this.stemChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
             this.mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs.coerceAtLeast(0L)
+            applyGainSnapshotImmediately()
             val engineFactories = createEngineFactories(vocalsFile, instrumentalFile)
             if (engineFactories != null) {
                 playbackEngine = SourceSeparationStemPlaybackEngine()
@@ -138,8 +145,18 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     fun setBlend(value: Float) {
         val normalized = value.coerceIn(0f, 1f)
         blend = normalized
-        vocalsGain = if (normalized <= CENTER_BLEND) 1f else (1f - normalized) / CENTER_BLEND
-        instrumentalGain = if (normalized >= CENTER_BLEND) 1f else normalized / CENTER_BLEND
+        val vocalsGain = if (normalized <= CENTER_BLEND) 1f else
+            (1f - normalized) / CENTER_BLEND
+        val instrumentalGain = if (normalized >= CENTER_BLEND) 1f else
+            normalized / CENTER_BLEND
+        gainSnapshot.set(
+            GainSnapshot(
+                generation = gainGeneration.incrementAndGet(),
+                blend = normalized,
+                vocalsGain = vocalsGain,
+                instrumentalGain = instrumentalGain,
+            ),
+        )
         traceDebug(
             "setBlend",
             "session=$debugSessionId blend=$blend vocalsGain=$vocalsGain instrumentalGain=$instrumentalGain"
@@ -282,6 +299,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         val frameSize = inputAudioFormat.channelCount * BYTES_PER_SAMPLE
         val frames = remaining / frameSize
         val bytesToRead = frames * frameSize
+        prepareGainRamp()
         val resampled = inputAudioFormat.sampleRate != stemSampleRate
         if (!resampled && playbackEngine != null) {
             val mixedFrames = queueEngineInput(
@@ -337,6 +355,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         val hasInstrumentalStemInput = instrumentalBytesRead != null
         var vocalsOffset = 0
         while (inputBuffer.remaining() >= frameSize) {
+            advanceGainRamp()
             val inputLeft = inputBuffer.short.toInt()
             val inputRight = inputBuffer.short.toInt()
             val vocalLeft = readPcm16(vocalsOffset, bytesRead)
@@ -418,6 +437,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 val instrumental = engineStemBuffers.getOrNull(1)
                 var stemOffset = 0
                 repeat(chunkFrames) {
+                    advanceGainRamp()
                     val inputLeft = inputBuffer.short.toInt()
                     val inputRight = inputBuffer.short.toInt()
                     val vocalLeft = readPcm16(stemOffset, vocals, chunkBytes)
@@ -646,18 +666,57 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     ): Short {
         val output = when (mode) {
             InputMode.InstrumentalStem ->
-                inputSample * instrumentalGain + vocalSample * vocalsGain
+                inputSample * currentInstrumentalGain + vocalSample * currentVocalsGain
             InputMode.OriginalSource ->
                 if (hasInstrumentalStemInput) {
-                    instrumentalSample * instrumentalGain + vocalSample * vocalsGain
+                    instrumentalSample * currentInstrumentalGain +
+                            vocalSample * currentVocalsGain
                 } else {
-                    inputSample * instrumentalGain + vocalSample * (vocalsGain - instrumentalGain)
+                    inputSample * currentInstrumentalGain +
+                            vocalSample * (currentVocalsGain - currentInstrumentalGain)
                 }
         }
         return output
             .toInt()
             .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
             .toShort()
+    }
+
+    private fun prepareGainRamp() {
+        val snapshot = gainSnapshot.get()
+        if (snapshot.generation == appliedGainGeneration) return
+        appliedGainGeneration = snapshot.generation
+        targetVocalsGain = snapshot.vocalsGain
+        targetInstrumentalGain = snapshot.instrumentalGain
+        val sampleRate = inputAudioFormat.sampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
+        gainRampFramesRemaining =
+            (sampleRate * GAIN_RAMP_MILLIS / MILLIS_PER_SECOND).coerceAtLeast(1)
+        vocalsGainStep = (targetVocalsGain - currentVocalsGain) / gainRampFramesRemaining
+        instrumentalGainStep =
+            (targetInstrumentalGain - currentInstrumentalGain) / gainRampFramesRemaining
+    }
+
+    private fun advanceGainRamp() {
+        if (gainRampFramesRemaining <= 0) return
+        currentVocalsGain += vocalsGainStep
+        currentInstrumentalGain += instrumentalGainStep
+        gainRampFramesRemaining -= 1
+        if (gainRampFramesRemaining == 0) {
+            currentVocalsGain = targetVocalsGain
+            currentInstrumentalGain = targetInstrumentalGain
+        }
+    }
+
+    private fun applyGainSnapshotImmediately() {
+        val snapshot = gainSnapshot.get()
+        appliedGainGeneration = snapshot.generation
+        currentVocalsGain = snapshot.vocalsGain
+        currentInstrumentalGain = snapshot.instrumentalGain
+        targetVocalsGain = snapshot.vocalsGain
+        targetInstrumentalGain = snapshot.instrumentalGain
+        vocalsGainStep = 0f
+        instrumentalGainStep = 0f
+        gainRampFramesRemaining = 0
     }
 
     private fun seekToLocked(positionMs: Long) {
@@ -791,7 +850,10 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         }) {
             "Playback stem geometry does not match the separation contract."
         }
-        return factories.takeIf { entries -> entries.map { it.spec.geometry }.distinct().size == 1 }
+        require(factories.map { it.spec.geometry }.distinct().size == 1) {
+            "Playback stems do not share one complete audio geometry."
+        }
+        return factories
     }
 
     private fun createEngineFactory(
@@ -840,6 +902,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         private const val DEFAULT_SAMPLE_RATE = 44_100
         private const val DEFAULT_FRAME_SIZE = CHANNEL_COUNT_STEREO * BYTES_PER_SAMPLE
         private const val RESAMPLE_READ_CHUNK_BYTES = 16 * 1024
+        private const val GAIN_RAMP_MILLIS = 5
         private const val MILLIS_PER_SECOND = 1000
         private const val WAV_HEADER_SIZE = 44L
     }
@@ -847,6 +910,22 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     enum class InputMode {
         InstrumentalStem,
         OriginalSource,
+    }
+
+    private data class GainSnapshot(
+        val generation: Long,
+        val blend: Float,
+        val vocalsGain: Float,
+        val instrumentalGain: Float,
+    ) {
+        companion object {
+            fun centered(): GainSnapshot = GainSnapshot(
+                generation = 0L,
+                blend = CENTER_BLEND,
+                vocalsGain = 1f,
+                instrumentalGain = 1f,
+            )
+        }
     }
 
     private interface StemPcmInput : Closeable {
