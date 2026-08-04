@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Sporenmix resetten</string>
     <string name="source_separation_blend_vocals">Zang</string>
     <string name="source_separation_blend_instrumental">Instrumentaal</string>
+    <string name="source_separation_stem_bass">Bas</string>
+    <string name="source_separation_stem_drums">Drums</string>
+    <string name="source_separation_stem_other">Overig</string>
+    <string name="source_separation_stem_reverb">Galm</string>
+    <string name="source_separation_stem_no_crowd">Zonder publiek</string>
+    <string name="source_separation_stem_guitar">Gitaar</string>
+    <string name="source_separation_stem_piano">Piano</string>
+    <string name="source_separation_stem_target">Doelspoor</string>
+    <string name="source_separation_stem_remaining_audio">Resterende audio</string>
     <string name="source_separation_playback_unavailable">Gescheiden afspelen is niet beschikbaar</string>
     <string name="source_separation_playback_title">Gescheiden afspelen</string>
     <string name="source_separation_playback_description">Speel af met gescheiden sporen wanneer genoeg audio in de cache klaarstaat voor de huidige positie.</string>

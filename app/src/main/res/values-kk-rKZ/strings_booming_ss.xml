@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Жолдар миксін ысыру</string>
     <string name="source_separation_blend_vocals">Вокал</string>
     <string name="source_separation_blend_instrumental">Инструментал</string>
+    <string name="source_separation_stem_bass">Бас</string>
+    <string name="source_separation_stem_drums">Соқпалы аспаптар</string>
+    <string name="source_separation_stem_other">Басқа</string>
+    <string name="source_separation_stem_reverb">Реверберация</string>
+    <string name="source_separation_stem_no_crowd">Көрерменсіз</string>
+    <string name="source_separation_stem_guitar">Гитара</string>
+    <string name="source_separation_stem_piano">Фортепиано</string>
+    <string name="source_separation_stem_target">Нысаналы трек</string>
+    <string name="source_separation_stem_remaining_audio">Қалған аудио</string>
     <string name="source_separation_playback_unavailable">Бөлінген ойнату қолжетімсіз</string>
     <string name="source_separation_playback_title">Бөлінген ойнату</string>
     <string name="source_separation_playback_description">Ағымдағы орын үшін кэштелген аудио жеткілікті дайын болғанда, бөлінген жолдармен ойнату.</string>

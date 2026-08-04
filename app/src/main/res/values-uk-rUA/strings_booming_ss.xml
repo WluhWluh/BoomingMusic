@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Скинути мікс доріжок</string>
     <string name="source_separation_blend_vocals">Вокал</string>
     <string name="source_separation_blend_instrumental">Інструментал</string>
+    <string name="source_separation_stem_bass">Бас</string>
+    <string name="source_separation_stem_drums">Ударні</string>
+    <string name="source_separation_stem_other">Інше</string>
+    <string name="source_separation_stem_reverb">Реверберація</string>
+    <string name="source_separation_stem_no_crowd">Без публіки</string>
+    <string name="source_separation_stem_guitar">Гітара</string>
+    <string name="source_separation_stem_piano">Фортепіано</string>
+    <string name="source_separation_stem_target">Цільова доріжка</string>
+    <string name="source_separation_stem_remaining_audio">Решта аудіо</string>
     <string name="source_separation_playback_unavailable">Роздільне відтворення недоступне</string>
     <string name="source_separation_playback_title">Роздільне відтворення</string>
     <string name="source_separation_playback_description">Відтворювати через розділені доріжки, коли для поточної позиції готово достатньо аудіо в кеші.</string>

@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Återställ spårmixning</string>
     <string name="source_separation_blend_vocals">Vokal</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Bas</string>
+    <string name="source_separation_stem_drums">Trummor</string>
+    <string name="source_separation_stem_other">Övrigt</string>
+    <string name="source_separation_stem_reverb">Efterklang</string>
+    <string name="source_separation_stem_no_crowd">Utan publik</string>
+    <string name="source_separation_stem_guitar">Gitarr</string>
+    <string name="source_separation_stem_piano">Piano</string>
+    <string name="source_separation_stem_target">Målspår</string>
+    <string name="source_separation_stem_remaining_audio">Återstående ljud</string>
     <string name="source_separation_playback_unavailable">Separerad uppspelning är inte tillgänglig</string>
     <string name="source_separation_playback_title">Separerad uppspelning</string>
     <string name="source_separation_playback_description">Spela upp med separerade spår när tillräckligt med cachat ljud är klart för aktuell position.</string>

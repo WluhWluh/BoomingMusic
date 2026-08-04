@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">스템 믹스 초기화</string>
     <string name="source_separation_blend_vocals">보컬</string>
     <string name="source_separation_blend_instrumental">반주</string>
+    <string name="source_separation_stem_bass">베이스</string>
+    <string name="source_separation_stem_drums">드럼</string>
+    <string name="source_separation_stem_other">기타 음원</string>
+    <string name="source_separation_stem_reverb">잔향</string>
+    <string name="source_separation_stem_no_crowd">관객 소리 없음</string>
+    <string name="source_separation_stem_guitar">기타</string>
+    <string name="source_separation_stem_piano">피아노</string>
+    <string name="source_separation_stem_target">대상 트랙</string>
+    <string name="source_separation_stem_remaining_audio">나머지 오디오</string>
     <string name="source_separation_playback_unavailable">분리 재생을 사용할 수 없습니다</string>
     <string name="source_separation_playback_title">분리 재생</string>
     <string name="source_separation_playback_description">현재 위치에 충분한 캐시 오디오가 준비되면 분리된 스템으로 재생합니다.</string>

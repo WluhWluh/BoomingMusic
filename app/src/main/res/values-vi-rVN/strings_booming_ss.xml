@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Đặt lại trộn stem</string>
     <string name="source_separation_blend_vocals">Giọng hát</string>
     <string name="source_separation_blend_instrumental">Nhạc nền</string>
+    <string name="source_separation_stem_bass">Bass</string>
+    <string name="source_separation_stem_drums">Trống</string>
+    <string name="source_separation_stem_other">Khác</string>
+    <string name="source_separation_stem_reverb">Tiếng vang</string>
+    <string name="source_separation_stem_no_crowd">Không có tiếng đám đông</string>
+    <string name="source_separation_stem_guitar">Guitar</string>
+    <string name="source_separation_stem_piano">Piano</string>
+    <string name="source_separation_stem_target">Âm thanh mục tiêu</string>
+    <string name="source_separation_stem_remaining_audio">Âm thanh còn lại</string>
     <string name="source_separation_playback_unavailable">Không thể phát tách nguồn</string>
     <string name="source_separation_playback_title">Phát tách nguồn</string>
     <string name="source_separation_playback_description">Phát bằng các stem đã tách khi đã có đủ âm thanh trong bộ nhớ đệm cho vị trí hiện tại.</string>

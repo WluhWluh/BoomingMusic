@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Réinitialiser le mixage des pistes</string>
     <string name="source_separation_blend_vocals">Voix</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Basse</string>
+    <string name="source_separation_stem_drums">Batterie</string>
+    <string name="source_separation_stem_other">Autres</string>
+    <string name="source_separation_stem_reverb">Réverbération</string>
+    <string name="source_separation_stem_no_crowd">Sans public</string>
+    <string name="source_separation_stem_guitar">Guitare</string>
+    <string name="source_separation_stem_piano">Piano</string>
+    <string name="source_separation_stem_target">Piste cible</string>
+    <string name="source_separation_stem_remaining_audio">Audio restant</string>
     <string name="source_separation_playback_unavailable">La lecture séparée n\'est pas disponible</string>
     <string name="source_separation_playback_title">Lecture séparée</string>
     <string name="source_separation_playback_description">Lire avec les pistes séparées lorsque suffisamment d\'audio en cache est disponible pour la position actuelle.</string>

@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Сбросить микс дорожек</string>
     <string name="source_separation_blend_vocals">Вокал</string>
     <string name="source_separation_blend_instrumental">Инструментал</string>
+    <string name="source_separation_stem_bass">Бас</string>
+    <string name="source_separation_stem_drums">Ударные</string>
+    <string name="source_separation_stem_other">Прочее</string>
+    <string name="source_separation_stem_reverb">Реверберация</string>
+    <string name="source_separation_stem_no_crowd">Без публики</string>
+    <string name="source_separation_stem_guitar">Гитара</string>
+    <string name="source_separation_stem_piano">Фортепиано</string>
+    <string name="source_separation_stem_target">Целевая дорожка</string>
+    <string name="source_separation_stem_remaining_audio">Оставшийся звук</string>
     <string name="source_separation_playback_unavailable">Раздельное воспроизведение недоступно</string>
     <string name="source_separation_playback_title">Раздельное воспроизведение</string>
     <string name="source_separation_playback_description">Воспроизводить через разделенные дорожки, когда для текущей позиции готово достаточно аудио в кэше.</string>

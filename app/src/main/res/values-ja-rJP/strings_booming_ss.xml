@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">ステムミックスをリセット</string>
     <string name="source_separation_blend_vocals">ボーカル</string>
     <string name="source_separation_blend_instrumental">インストゥルメンタル</string>
+    <string name="source_separation_stem_bass">ベース</string>
+    <string name="source_separation_stem_drums">ドラム</string>
+    <string name="source_separation_stem_other">その他</string>
+    <string name="source_separation_stem_reverb">リバーブ</string>
+    <string name="source_separation_stem_no_crowd">観客なし</string>
+    <string name="source_separation_stem_guitar">ギター</string>
+    <string name="source_separation_stem_piano">ピアノ</string>
+    <string name="source_separation_stem_target">対象トラック</string>
+    <string name="source_separation_stem_remaining_audio">残りの音声</string>
     <string name="source_separation_playback_unavailable">分離再生は利用できません</string>
     <string name="source_separation_playback_title">分離再生</string>
     <string name="source_separation_playback_description">現在位置に十分なキャッシュ音声が用意できている場合、分離済みステムで再生します。</string>

@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">إعادة ضبط مزج المسارات</string>
     <string name="source_separation_blend_vocals">الغناء</string>
     <string name="source_separation_blend_instrumental">العزف</string>
+    <string name="source_separation_stem_bass">الباس</string>
+    <string name="source_separation_stem_drums">الطبول</string>
+    <string name="source_separation_stem_other">أخرى</string>
+    <string name="source_separation_stem_reverb">الصدى</string>
+    <string name="source_separation_stem_no_crowd">بدون جمهور</string>
+    <string name="source_separation_stem_guitar">الغيتار</string>
+    <string name="source_separation_stem_piano">البيانو</string>
+    <string name="source_separation_stem_target">المسار المستهدف</string>
+    <string name="source_separation_stem_remaining_audio">الصوت المتبقي</string>
     <string name="source_separation_playback_unavailable">تشغيل المسارات المفصولة غير متاح</string>
     <string name="source_separation_playback_title">تشغيل المسارات المفصولة</string>
     <string name="source_separation_playback_description">التشغيل باستخدام المسارات المفصولة عندما يكون ما يكفي من الصوت المخزّن مؤقتًا جاهزًا للموضع الحالي.</string>

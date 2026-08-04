@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Скінуць мікс дарожак</string>
     <string name="source_separation_blend_vocals">Вакал</string>
     <string name="source_separation_blend_instrumental">Інструментал</string>
+    <string name="source_separation_stem_bass">Бас</string>
+    <string name="source_separation_stem_drums">Ударныя</string>
+    <string name="source_separation_stem_other">Іншае</string>
+    <string name="source_separation_stem_reverb">Рэверберацыя</string>
+    <string name="source_separation_stem_no_crowd">Без публікі</string>
+    <string name="source_separation_stem_guitar">Гітара</string>
+    <string name="source_separation_stem_piano">Фартэпіяна</string>
+    <string name="source_separation_stem_target">Мэтавая дарожка</string>
+    <string name="source_separation_stem_remaining_audio">Рэшта аўдыя</string>
     <string name="source_separation_playback_unavailable">Раздзельнае прайграванне недаступнае</string>
     <string name="source_separation_playback_title">Раздзельнае прайграванне</string>
     <string name="source_separation_playback_description">Прайграваць праз раздзеленыя дарожкі, калі для бягучай пазіцыі гатова дастаткова аўдыя ў кэшы.</string>

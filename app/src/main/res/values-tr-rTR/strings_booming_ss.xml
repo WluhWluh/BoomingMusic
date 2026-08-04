@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Parça karışımını sıfırla</string>
     <string name="source_separation_blend_vocals">Vokal</string>
     <string name="source_separation_blend_instrumental">Enstrümantal</string>
+    <string name="source_separation_stem_bass">Bas</string>
+    <string name="source_separation_stem_drums">Davullar</string>
+    <string name="source_separation_stem_other">Diğer</string>
+    <string name="source_separation_stem_reverb">Yankı</string>
+    <string name="source_separation_stem_no_crowd">Seyirci olmadan</string>
+    <string name="source_separation_stem_guitar">Gitar</string>
+    <string name="source_separation_stem_piano">Piyano</string>
+    <string name="source_separation_stem_target">Hedef parça</string>
+    <string name="source_separation_stem_remaining_audio">Kalan ses</string>
     <string name="source_separation_playback_unavailable">Ayrılmış çalma kullanılamıyor</string>
     <string name="source_separation_playback_title">Ayrılmış çalma</string>
     <string name="source_separation_playback_description">Geçerli konum için yeterli önbelleğe alınmış ses hazır olduğunda ayrılmış parçalarla çal.</string>

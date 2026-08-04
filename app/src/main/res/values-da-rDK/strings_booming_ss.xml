@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Nulstil sporblanding</string>
     <string name="source_separation_blend_vocals">Vokal</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Bas</string>
+    <string name="source_separation_stem_drums">Trommer</string>
+    <string name="source_separation_stem_other">Andet</string>
+    <string name="source_separation_stem_reverb">Rumklang</string>
+    <string name="source_separation_stem_no_crowd">Uden publikum</string>
+    <string name="source_separation_stem_guitar">Guitar</string>
+    <string name="source_separation_stem_piano">Klaver</string>
+    <string name="source_separation_stem_target">Målspor</string>
+    <string name="source_separation_stem_remaining_audio">Resterende lyd</string>
     <string name="source_separation_playback_unavailable">Separat afspilning er ikke tilgængelig</string>
     <string name="source_separation_playback_title">Separat afspilning</string>
     <string name="source_separation_playback_description">Afspil med separerede spor, når der er nok cachelagret lyd klar til den aktuelle position.</string>

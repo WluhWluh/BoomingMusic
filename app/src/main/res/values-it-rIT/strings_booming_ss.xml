@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Reimposta mix delle tracce</string>
     <string name="source_separation_blend_vocals">Voce</string>
     <string name="source_separation_blend_instrumental">Strumentale</string>
+    <string name="source_separation_stem_bass">Basso</string>
+    <string name="source_separation_stem_drums">Batteria</string>
+    <string name="source_separation_stem_other">Altro</string>
+    <string name="source_separation_stem_reverb">Riverbero</string>
+    <string name="source_separation_stem_no_crowd">Senza pubblico</string>
+    <string name="source_separation_stem_guitar">Chitarra</string>
+    <string name="source_separation_stem_piano">Pianoforte</string>
+    <string name="source_separation_stem_target">Traccia di destinazione</string>
+    <string name="source_separation_stem_remaining_audio">Audio rimanente</string>
     <string name="source_separation_playback_unavailable">La riproduzione separata non è disponibile</string>
     <string name="source_separation_playback_title">Riproduzione separata</string>
     <string name="source_separation_playback_description">Riproduci con tracce separate quando c\'è abbastanza audio in cache pronto per la posizione corrente.</string>

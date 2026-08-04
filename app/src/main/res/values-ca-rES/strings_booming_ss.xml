@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Restableix la mescla de pistes</string>
     <string name="source_separation_blend_vocals">Veus</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Baix</string>
+    <string name="source_separation_stem_drums">Bateria</string>
+    <string name="source_separation_stem_other">Altres</string>
+    <string name="source_separation_stem_reverb">Reverberació</string>
+    <string name="source_separation_stem_no_crowd">Sense públic</string>
+    <string name="source_separation_stem_guitar">Guitarra</string>
+    <string name="source_separation_stem_piano">Piano</string>
+    <string name="source_separation_stem_target">Pista objectiu</string>
+    <string name="source_separation_stem_remaining_audio">Àudio restant</string>
     <string name="source_separation_playback_unavailable">La reproducció separada no està disponible</string>
     <string name="source_separation_playback_title">Reproducció separada</string>
     <string name="source_separation_playback_description">Reprodueix amb pistes separades quan hi hagi prou àudio a la memòria cau per a la posició actual.</string>

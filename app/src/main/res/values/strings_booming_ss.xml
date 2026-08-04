@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Reset stem blend</string>
     <string name="source_separation_blend_vocals">Vocals</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Bass</string>
+    <string name="source_separation_stem_drums">Drums</string>
+    <string name="source_separation_stem_other">Other</string>
+    <string name="source_separation_stem_reverb">Reverb</string>
+    <string name="source_separation_stem_no_crowd">No Crowd</string>
+    <string name="source_separation_stem_guitar">Guitar</string>
+    <string name="source_separation_stem_piano">Piano</string>
+    <string name="source_separation_stem_target">Target Stem</string>
+    <string name="source_separation_stem_remaining_audio">Remaining Audio</string>
     <string name="source_separation_playback_unavailable">Separated playback is unavailable</string>
     <string name="source_separation_playback_title">Separated playback</string>
     <string name="source_separation_playback_description">Play with separated stems when enough cached audio is ready for the current position.</string>

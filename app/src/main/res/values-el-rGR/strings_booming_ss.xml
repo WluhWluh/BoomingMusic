@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Επαναφορά μίξης διαχωρισμένων μερών</string>
     <string name="source_separation_blend_vocals">Φωνητικά</string>
     <string name="source_separation_blend_instrumental">Ορχηστρικό</string>
+    <string name="source_separation_stem_bass">Μπάσο</string>
+    <string name="source_separation_stem_drums">Τύμπανα</string>
+    <string name="source_separation_stem_other">Άλλα</string>
+    <string name="source_separation_stem_reverb">Αντήχηση</string>
+    <string name="source_separation_stem_no_crowd">Χωρίς κοινό</string>
+    <string name="source_separation_stem_guitar">Κιθάρα</string>
+    <string name="source_separation_stem_piano">Πιάνο</string>
+    <string name="source_separation_stem_target">Στοχευμένο κανάλι</string>
+    <string name="source_separation_stem_remaining_audio">Υπόλοιπος ήχος</string>
     <string name="source_separation_playback_unavailable">Η διαχωρισμένη αναπαραγωγή δεν είναι διαθέσιμη</string>
     <string name="source_separation_playback_title">Διαχωρισμένη αναπαραγωγή</string>
     <string name="source_separation_playback_description">Αναπαραγωγή με διαχωρισμένα μέρη όταν υπάρχει αρκετός αποθηκευμένος ήχος για την τρέχουσα θέση.</string>

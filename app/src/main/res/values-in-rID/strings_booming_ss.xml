@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Reset campuran stem</string>
     <string name="source_separation_blend_vocals">Vokal</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Bas</string>
+    <string name="source_separation_stem_drums">Drum</string>
+    <string name="source_separation_stem_other">Lainnya</string>
+    <string name="source_separation_stem_reverb">Gema</string>
+    <string name="source_separation_stem_no_crowd">Tanpa penonton</string>
+    <string name="source_separation_stem_guitar">Gitar</string>
+    <string name="source_separation_stem_piano">Piano</string>
+    <string name="source_separation_stem_target">Trek target</string>
+    <string name="source_separation_stem_remaining_audio">Audio tersisa</string>
     <string name="source_separation_playback_unavailable">Pemutaran terpisah tidak tersedia</string>
     <string name="source_separation_playback_title">Pemutaran terpisah</string>
     <string name="source_separation_playback_description">Putar dengan stem terpisah saat audio cache yang cukup sudah siap untuk posisi saat ini.</string>

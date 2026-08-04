@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Restablecer mestura de pistas</string>
     <string name="source_separation_blend_vocals">Voces</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Baixo</string>
+    <string name="source_separation_stem_drums">Batería</string>
+    <string name="source_separation_stem_other">Outros</string>
+    <string name="source_separation_stem_reverb">Reverberación</string>
+    <string name="source_separation_stem_no_crowd">Sen público</string>
+    <string name="source_separation_stem_guitar">Guitarra</string>
+    <string name="source_separation_stem_piano">Piano</string>
+    <string name="source_separation_stem_target">Pista obxectivo</string>
+    <string name="source_separation_stem_remaining_audio">Audio restante</string>
     <string name="source_separation_playback_unavailable">A reprodución separada non está dispoñible</string>
     <string name="source_separation_playback_title">Reprodución separada</string>
     <string name="source_separation_playback_description">Reproduce con pistas separadas cando haxa suficiente audio na caché listo para a posición actual.</string>

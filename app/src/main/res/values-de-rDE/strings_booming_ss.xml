@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Spurmischung zurücksetzen</string>
     <string name="source_separation_blend_vocals">Gesang</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Bass</string>
+    <string name="source_separation_stem_drums">Schlagzeug</string>
+    <string name="source_separation_stem_other">Sonstiges</string>
+    <string name="source_separation_stem_reverb">Hall</string>
+    <string name="source_separation_stem_no_crowd">Ohne Publikum</string>
+    <string name="source_separation_stem_guitar">Gitarre</string>
+    <string name="source_separation_stem_piano">Klavier</string>
+    <string name="source_separation_stem_target">Zielspur</string>
+    <string name="source_separation_stem_remaining_audio">Restliches Audio</string>
     <string name="source_separation_playback_unavailable">Wiedergabe getrennter Spuren ist nicht verfügbar</string>
     <string name="source_separation_playback_title">Wiedergabe getrennter Spuren</string>
     <string name="source_separation_playback_description">Mit getrennten Spuren wiedergeben, wenn für die aktuelle Position genug zwischengespeichertes Audio bereitsteht.</string>

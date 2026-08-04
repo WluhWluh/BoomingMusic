@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Tilbakestill spormiks</string>
     <string name="source_separation_blend_vocals">Vokal</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Bass</string>
+    <string name="source_separation_stem_drums">Trommer</string>
+    <string name="source_separation_stem_other">Annet</string>
+    <string name="source_separation_stem_reverb">Romklang</string>
+    <string name="source_separation_stem_no_crowd">Uten publikum</string>
+    <string name="source_separation_stem_guitar">Gitar</string>
+    <string name="source_separation_stem_piano">Piano</string>
+    <string name="source_separation_stem_target">Målspor</string>
+    <string name="source_separation_stem_remaining_audio">Gjenværende lyd</string>
     <string name="source_separation_playback_unavailable">Separert avspilling er ikke tilgjengelig</string>
     <string name="source_separation_playback_title">Separert avspilling</string>
     <string name="source_separation_playback_description">Spill av med separerte spor når nok hurtigbufret lyd er klar for gjeldende posisjon.</string>

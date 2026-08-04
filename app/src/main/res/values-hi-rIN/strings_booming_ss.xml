@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">स्टेम मिक्स रीसेट करें</string>
     <string name="source_separation_blend_vocals">वोकल</string>
     <string name="source_separation_blend_instrumental">संगत</string>
+    <string name="source_separation_stem_bass">बास</string>
+    <string name="source_separation_stem_drums">ड्रम</string>
+    <string name="source_separation_stem_other">अन्य</string>
+    <string name="source_separation_stem_reverb">रीवर्ब</string>
+    <string name="source_separation_stem_no_crowd">दर्शकों के बिना</string>
+    <string name="source_separation_stem_guitar">गिटार</string>
+    <string name="source_separation_stem_piano">पियानो</string>
+    <string name="source_separation_stem_target">लक्षित ट्रैक</string>
+    <string name="source_separation_stem_remaining_audio">शेष ऑडियो</string>
     <string name="source_separation_playback_unavailable">अलग किया गया प्लेबैक उपलब्ध नहीं है</string>
     <string name="source_separation_playback_title">अलग किया गया प्लेबैक</string>
     <string name="source_separation_playback_description">मौजूदा स्थिति के लिए पर्याप्त कैश ऑडियो तैयार होने पर अलग किए गए स्टेम से चलाएँ।</string>

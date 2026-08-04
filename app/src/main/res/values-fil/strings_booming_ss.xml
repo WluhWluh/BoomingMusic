@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">I-reset ang stem mix</string>
     <string name="source_separation_blend_vocals">Vocals</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Bass</string>
+    <string name="source_separation_stem_drums">Drums</string>
+    <string name="source_separation_stem_other">Iba pa</string>
+    <string name="source_separation_stem_reverb">Reverb</string>
+    <string name="source_separation_stem_no_crowd">Walang madla</string>
+    <string name="source_separation_stem_guitar">Gitara</string>
+    <string name="source_separation_stem_piano">Piano</string>
+    <string name="source_separation_stem_target">Target na track</string>
+    <string name="source_separation_stem_remaining_audio">Natitirang audio</string>
     <string name="source_separation_playback_unavailable">Hindi available ang hiwalay na playback</string>
     <string name="source_separation_playback_title">Hiwalay na playback</string>
     <string name="source_separation_playback_description">Mag-play gamit ang mga hiwalay na stem kapag sapat na naka-cache na audio ang handa para sa kasalukuyang posisyon.</string>

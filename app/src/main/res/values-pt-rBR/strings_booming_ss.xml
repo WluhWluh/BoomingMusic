@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Redefinir mixagem de faixas</string>
     <string name="source_separation_blend_vocals">Vocais</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Baixo</string>
+    <string name="source_separation_stem_drums">Bateria</string>
+    <string name="source_separation_stem_other">Outros</string>
+    <string name="source_separation_stem_reverb">Reverberação</string>
+    <string name="source_separation_stem_no_crowd">Sem público</string>
+    <string name="source_separation_stem_guitar">Guitarra</string>
+    <string name="source_separation_stem_piano">Piano</string>
+    <string name="source_separation_stem_target">Faixa-alvo</string>
+    <string name="source_separation_stem_remaining_audio">Áudio restante</string>
     <string name="source_separation_playback_unavailable">Reprodução separada indisponível</string>
     <string name="source_separation_playback_title">Reprodução separada</string>
     <string name="source_separation_playback_description">Reproduzir usando faixas separadas quando houver áudio em cache suficiente para a posição atual.</string>

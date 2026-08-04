@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Resetiraj miks kanala</string>
     <string name="source_separation_blend_vocals">Vokal</string>
     <string name="source_separation_blend_instrumental">Instrumental</string>
+    <string name="source_separation_stem_bass">Bas</string>
+    <string name="source_separation_stem_drums">Bubnjevi</string>
+    <string name="source_separation_stem_other">Ostalo</string>
+    <string name="source_separation_stem_reverb">Reverberacija</string>
+    <string name="source_separation_stem_no_crowd">Bez publike</string>
+    <string name="source_separation_stem_guitar">Gitara</string>
+    <string name="source_separation_stem_piano">Klavir</string>
+    <string name="source_separation_stem_target">Ciljana dionica</string>
+    <string name="source_separation_stem_remaining_audio">Preostali zvuk</string>
     <string name="source_separation_playback_unavailable">Odvojena reprodukcija nije dostupna</string>
     <string name="source_separation_playback_title">Odvojena reprodukcija</string>
     <string name="source_separation_playback_description">Reproduciraj s odvojenim kanalima kad je za trenutačni položaj spremno dovoljno zvuka iz predmemorije.</string>

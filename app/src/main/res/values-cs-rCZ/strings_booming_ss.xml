@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">Obnovit mix stop</string>
     <string name="source_separation_blend_vocals">Vokály</string>
     <string name="source_separation_blend_instrumental">Instrumentál</string>
+    <string name="source_separation_stem_bass">Baskytara</string>
+    <string name="source_separation_stem_drums">Bicí</string>
+    <string name="source_separation_stem_other">Ostatní</string>
+    <string name="source_separation_stem_reverb">Dozvuk</string>
+    <string name="source_separation_stem_no_crowd">Bez publika</string>
+    <string name="source_separation_stem_guitar">Kytara</string>
+    <string name="source_separation_stem_piano">Klavír</string>
+    <string name="source_separation_stem_target">Cílová stopa</string>
+    <string name="source_separation_stem_remaining_audio">Zbývající zvuk</string>
     <string name="source_separation_playback_unavailable">Oddělené přehrávání není dostupné</string>
     <string name="source_separation_playback_title">Oddělené přehrávání</string>
     <string name="source_separation_playback_description">Přehrávat s oddělenými stopami, když je pro aktuální pozici připraven dostatek zvuku v mezipaměti.</string>

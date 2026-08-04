@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">איפוס מיקס סטמים</string>
     <string name="source_separation_blend_vocals">שירה</string>
     <string name="source_separation_blend_instrumental">אינסטרומנטלי</string>
+    <string name="source_separation_stem_bass">בס</string>
+    <string name="source_separation_stem_drums">תופים</string>
+    <string name="source_separation_stem_other">אחר</string>
+    <string name="source_separation_stem_reverb">הדהוד</string>
+    <string name="source_separation_stem_no_crowd">ללא קהל</string>
+    <string name="source_separation_stem_guitar">גיטרה</string>
+    <string name="source_separation_stem_piano">פסנתר</string>
+    <string name="source_separation_stem_target">ערוץ יעד</string>
+    <string name="source_separation_stem_remaining_audio">שמע שנותר</string>
     <string name="source_separation_playback_unavailable">השמעה מופרדת אינה זמינה</string>
     <string name="source_separation_playback_title">השמעה מופרדת</string>
     <string name="source_separation_playback_description">השמע באמצעות סטמים מופרדים כאשר מספיק שמע שמור במטמון מוכן למיקום הנוכחי.</string>

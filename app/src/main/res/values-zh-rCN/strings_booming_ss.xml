@@ -15,6 +15,15 @@
     <string name="source_separation_reset_blend">重置分轨混音</string>
     <string name="source_separation_blend_vocals">人声</string>
     <string name="source_separation_blend_instrumental">伴奏</string>
+    <string name="source_separation_stem_bass">贝斯</string>
+    <string name="source_separation_stem_drums">鼓</string>
+    <string name="source_separation_stem_other">其他</string>
+    <string name="source_separation_stem_reverb">混响</string>
+    <string name="source_separation_stem_no_crowd">无观众声</string>
+    <string name="source_separation_stem_guitar">吉他</string>
+    <string name="source_separation_stem_piano">钢琴</string>
+    <string name="source_separation_stem_target">目标分轨</string>
+    <string name="source_separation_stem_remaining_audio">剩余音频</string>
     <string name="source_separation_playback_unavailable">分轨播放不可用</string>
     <string name="source_separation_playback_title">分轨播放</string>
     <string name="source_separation_playback_description">当前位置有足够的音频缓存就绪时，播放已分离的音轨。</string>
