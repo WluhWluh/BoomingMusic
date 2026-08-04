@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Show short player-screen notices such as separated cache not found or separated playback unavailable.</string>
     <string name="source_separation_mixed_output_preroll_title">Mixed output preroll</string>
     <string name="source_separation_mixed_output_preroll_description">Delay before unmuting separated playback from cached files after mixed audio starts.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Hydrated PCM mixed output preroll</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Delay before unmuting separated playback when hydrated PCM stems are used.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Playback buffer windows</string>
     <string name="source_separation_playback_ready_windows_description">Require this many consecutive windows before separated playback resumes; also use this count when preprocessing the next song.</string>

@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Показувати на екрані програвача короткі сповіщення, наприклад про відсутній кеш розділення або недоступне роздільне відтворення.</string>
     <string name="source_separation_mixed_output_preroll_title">Попередній запуск змішаного виводу</string>
     <string name="source_separation_mixed_output_preroll_description">Затримка перед увімкненням звуку роздільного відтворення з файлів кешу після запуску змішаного аудіо.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Попередній запуск змішаного виводу попередньо завантаженого PCM</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Затримка перед увімкненням звуку роздільного відтворення, коли використовуються попередньо завантажені доріжки PCM.</string>
     <string name="source_separation_preroll_ms_suffix">мс</string>
     <string name="source_separation_playback_ready_windows_title">Вікна буфера відтворення</string>
     <string name="source_separation_playback_ready_windows_description">Вимагати стільки послідовних готових вікон перед відновленням роздільного відтворення; це саме число використовується під час попередньої обробки наступної пісні.</string>

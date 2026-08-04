@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Kurze Hinweise auf dem Player-Bildschirm anzeigen, etwa wenn kein getrennter Cache gefunden wird oder die Wiedergabe getrennter Spuren nicht verfügbar ist.</string>
     <string name="source_separation_mixed_output_preroll_title">Vorlauf für gemischte Ausgabe</string>
     <string name="source_separation_mixed_output_preroll_description">Wartezeit, bevor die Stummschaltung der Wiedergabe getrennter Spuren aus Cache-Dateien nach Beginn der gemischten Ausgabe aufgehoben wird.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Vorlauf für vorgeladene PCM-Mischausgabe</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Wartezeit, bevor die Stummschaltung der Wiedergabe getrennter Spuren bei vorgeladenen PCM-Spuren aufgehoben wird.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Wiedergabepuffer-Fenster</string>
     <string name="source_separation_playback_ready_windows_description">So viele aufeinanderfolgende Fenster müssen bereit sein, bevor die Wiedergabe getrennter Spuren fortgesetzt wird; diese Anzahl wird auch beim Vorverarbeiten des nächsten Titels verwendet.</string>

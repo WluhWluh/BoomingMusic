@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Hiển thị thông báo ngắn trên màn hình trình phát, chẳng hạn như không tìm thấy bộ nhớ đệm đã tách hoặc không thể phát tách nguồn.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll đầu ra đã trộn</string>
     <string name="source_separation_mixed_output_preroll_description">Khoảng trễ trước khi mở tiếng phát tách nguồn từ các tệp trong bộ nhớ đệm sau khi âm thanh đã trộn bắt đầu.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll đầu ra đã trộn PCM nạp sẵn</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Khoảng trễ trước khi mở tiếng phát tách nguồn khi dùng các stem PCM nạp sẵn.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Cửa sổ bộ đệm phát</string>
     <string name="source_separation_playback_ready_windows_description">Yêu cầu số cửa sổ liên tiếp này trước khi tiếp tục phát tách nguồn; số này cũng được dùng khi xử lý trước bài hát tiếp theo.</string>

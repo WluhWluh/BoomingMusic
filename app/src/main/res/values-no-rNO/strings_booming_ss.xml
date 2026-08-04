@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Vis korte varsler på avspillingsskjermen, for eksempel at separert hurtigbuffer ikke finnes eller at separert avspilling ikke er tilgjengelig.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll for mikset utgang</string>
     <string name="source_separation_mixed_output_preroll_description">Forsinkelse før lyden for separert avspilling fra hurtigbufrede filer slås på etter at mikset lyd starter.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll for forhåndslastet PCM-mikset utgang</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Forsinkelse før lyden for separert avspilling slås på når forhåndslastede PCM-spor brukes.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Avspillingsbuffervinduer</string>
     <string name="source_separation_playback_ready_windows_description">Krev så mange sammenhengende vinduer før separert avspilling gjenopptas. Antallet brukes også når neste sang forhåndsbehandles.</string>

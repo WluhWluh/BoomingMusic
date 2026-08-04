@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Tampilkan pemberitahuan singkat di layar pemutar, seperti cache terpisah tidak ditemukan atau pemutaran terpisah tidak tersedia.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll keluaran campuran</string>
     <string name="source_separation_mixed_output_preroll_description">Jeda sebelum membuka suara pemutaran terpisah dari file cache setelah audio campuran mulai.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll keluaran campuran PCM pramuat</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Jeda sebelum membuka suara pemutaran terpisah saat stem PCM pramuat digunakan.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Jendela buffer pemutaran</string>
     <string name="source_separation_playback_ready_windows_description">Memerlukan sebanyak ini jendela berurutan sebelum pemutaran terpisah dilanjutkan; jumlah ini juga digunakan saat memproses lagu berikutnya lebih awal.</string>

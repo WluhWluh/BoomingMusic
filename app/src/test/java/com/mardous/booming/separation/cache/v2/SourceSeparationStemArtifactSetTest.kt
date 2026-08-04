@@ -130,55 +130,6 @@ class SourceSeparationStemArtifactSetTest {
         }
     }
 
-    @Test
-    fun `hydration markers preserve complete ordered two four and six stem sets`() {
-        for (stemCount in listOf(2, 4, 6)) {
-            val stems = stemIds(stemCount)
-            val marker = SourceSeparationCacheHydrationMarker(
-                cacheKey = "a".repeat(64),
-                sources = stems.mapIndexed { order, stemId ->
-                    SourceSeparationCacheHydrationSource(
-                        stemId = stemId,
-                        order = order,
-                        path = "completed/stem-%02d.flac".format(order),
-                        integrity = integrity(order),
-                    )
-                },
-                stems = stems.mapIndexed { order, stemId ->
-                    SourceSeparationCacheHydratedStem(
-                        stemId = stemId,
-                        order = order,
-                        pcmPath = "hydration/v2/stem-%02d.pcm".format(order),
-                        integrity = integrity(order + stemCount),
-                    )
-                },
-                createdAtEpochMs = 1L,
-            )
-
-            assertEquals(2, marker.hydrationSchemaVersion)
-            assertEquals(
-                marker,
-                json.decodeFromString<SourceSeparationCacheHydrationMarker>(
-                    json.encodeToString(marker),
-                ),
-            )
-            assertThrows(IllegalArgumentException::class.java) {
-                marker.copy(stems = marker.stems.dropLast(1))
-            }
-            assertThrows(IllegalArgumentException::class.java) {
-                marker.copy(
-                    stems = marker.stems.mapIndexed { index, stem ->
-                        if (index == marker.stems.lastIndex) {
-                            stem.copy(pcmPath = marker.stems.first().pcmPath)
-                        } else {
-                            stem
-                        }
-                    },
-                )
-            }
-        }
-    }
-
     private fun segmentPlan(stemIds: List<StemId>): SourceSeparationSegmentPlan =
         SourceSeparationSegmentPlan.build(
             rangeStartFrame = 0,

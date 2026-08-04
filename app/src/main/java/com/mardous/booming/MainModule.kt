@@ -69,7 +69,6 @@ import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheEntryLeaseRegistry
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
-import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
@@ -268,7 +267,6 @@ private val mainModule = module {
     }
     single { SourceSeparationCacheRunCoordinator(store = get(), repository = get()) }
     single { SourceSeparationCacheFlacPromoter(store = get(), repository = get()) }
-    single { SourceSeparationCacheHydrator(store = get(), repository = get()) }
     single {
         SourceSeparationProcessingOwnershipHandoff(
             android.os.SystemClock::elapsedRealtimeNanos,
@@ -310,7 +308,6 @@ private val mainModule = module {
             cacheRepository = get(),
             runCoordinator = get(),
             flacPromoter = get(),
-            hydrator = get(),
         )
     } bind SourceSeparationRuntimeFacade::class
 }

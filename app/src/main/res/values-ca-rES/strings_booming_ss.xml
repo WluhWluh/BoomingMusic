@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Mostra avisos breus a la pantalla del reproductor, com ara memòria cau separada no trobada o reproducció separada no disponible.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll de sortida mesclada</string>
     <string name="source_separation_mixed_output_preroll_description">Retard abans de treure el silenci de la reproducció separada des de fitxers en memòria cau després que comenci l\'àudio mesclat.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll de sortida mesclada PCM precarregada</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Retard abans de treure el silenci de la reproducció separada quan s\'utilitzen pistes PCM precarregades.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Finestres de memòria intermèdia de reproducció</string>
     <string name="source_separation_playback_ready_windows_description">Requereix aquest nombre de finestres consecutives abans de reprendre la reproducció separada; també s\'utilitza aquest nombre en preprocessar la cançó següent.</string>

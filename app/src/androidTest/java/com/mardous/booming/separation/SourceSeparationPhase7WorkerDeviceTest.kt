@@ -38,7 +38,6 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultControl
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultHit
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultInjection
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultStage
-import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournal
@@ -47,7 +46,6 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLi
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunTransitionType
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
-import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheValidationResult
@@ -1122,13 +1120,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertEquals("flac", promotedPlayback.instrumentalFile.extension.lowercase())
             promotedPlayback.close()
 
-            val hydration = runtimeFacade.hydrate(cacheKey)
-            assertTrue(hydration is SourceSeparationCacheHydrationResult.Completed)
-            val hydrated = requireNotNull(runtimeFacade.openHydratedCache(cacheKey))
-            assertTrue(hydrated.vocalsPcmFile.isFile)
-            assertTrue(hydrated.instrumentalPcmFile.isFile)
-            hydrated.close()
-
             val completedAfter = runtimeFacade.entries().single { it.cacheKey == cacheKey }
             val promotedManifest = requireNotNull(store.readManifest(cacheKey))
             val runJournal = requireNotNull(store.readRunJournal(cacheKey))
@@ -1272,7 +1263,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("manifestPathRelative", "entries/$cacheKey/manifest.json")
                 .put("entryDirectoryPath", entryDirectory.absolutePath)
                 .put("promotedFormat", completedAfter.format.name)
-                .put("hydrationPassed", true)
                 .put("stems", JSONArray(promotedManifest.output!!.stems.map { stem ->
                     val exportedStem = artifactExport?.stems?.get(stem.semanticId.value)
                     val wavIntegrity = requireNotNull(stem.wavIntegrity)
@@ -4084,8 +4074,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     assertFalse(runtime.writeBlend(runtimeSong, 0.25f))
                     assertTrue(runtime.promote(cacheKey) is
                         SourceSeparationCacheFlacPromotionResult.Busy)
-                    assertTrue(runtime.hydrate(cacheKey) is
-                        SourceSeparationCacheHydrationResult.Busy)
                     val journalBeforeDeath = store.readRunJournal(cacheKey)
                     Process.killProcess(hit.pid)
 
@@ -4373,8 +4361,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 ).deletedEntries,
             )
             assertFalse(runtime.writeBlend(primarySong, 0.2f))
-            assertTrue(runtime.hydrate(primarySong.cacheKey) is
-                SourceSeparationCacheHydrationResult.Busy)
             Process.killProcess(idleRemote.pid)
             waitForRemoteConnectionState(
                 idleHost,
@@ -6380,11 +6366,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertTrue(tailPlayback is SourceSeparationModelAwarePlayableStatus.Ready)
             (tailPlayback as SourceSeparationModelAwarePlayableStatus.Ready).playback.close()
 
-            val hydrated = requireNotNull(runtimeFacade.openHydratedCache(runtimeSong.cacheKey))
-            assertTrue(hydrated.vocalsPcmFile.isFile)
-            assertTrue(hydrated.instrumentalPcmFile.isFile)
-            hydrated.close()
-
             report.put("status", "passed")
             report.put("lifecycle", report.getJSONObject("lifecycle")
                 .put("workerCompleted", true)
@@ -6403,7 +6384,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("cacheKey", runtimeSong.cacheKey)
                 .put("exactIdentity", true)
                 .put("completedPlayable", true)
-                .put("hydratedPlayable", true)
                 .put("manifestState", completed.manifest.state.name)
             )
         } catch (error: Throwable) {
@@ -8000,7 +7980,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val promoter = get<SourceSeparationCacheFlacPromoter>(
             SourceSeparationCacheFlacPromoter::class.java,
         )
-        val hydrator = get<SourceSeparationCacheHydrator>(SourceSeparationCacheHydrator::class.java)
         val engine = if (executionHostMode.isRemote) {
             require(sessionProviderFactoryOverride == null) {
                 "Bound-remote validation does not support an injected session provider."
@@ -8096,7 +8075,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
             cacheRepository = cacheRepository,
             runCoordinator = runCoordinator,
             flacPromoter = promoter,
-            hydrator = hydrator,
         )
     }
 

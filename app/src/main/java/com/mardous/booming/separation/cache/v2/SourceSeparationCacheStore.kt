@@ -159,44 +159,6 @@ class SourceSeparationCacheStore(
         }.getOrNull()?.takeIf { it.matches(manifest) }
     }
 
-    fun writeHydrationMarker(
-        manifest: SourceSeparationCacheManifest,
-        marker: SourceSeparationCacheHydrationMarker,
-    ) {
-        require(marker.matches(manifest)) {
-            "Hydration marker does not match its completed cache entry."
-        }
-        val markerFile = resolveEntryPath(manifest.cacheKey, HYDRATION_MARKER_FILE_NAME)
-        writeJsonFile(
-            directory = requireNotNull(markerFile.parentFile),
-            targetName = markerFile.name,
-            serializer = SourceSeparationCacheHydrationMarker.serializer(),
-            value = marker,
-        )
-    }
-
-    fun readHydrationMarker(
-        manifest: SourceSeparationCacheManifest,
-    ): SourceSeparationCacheHydrationMarker? {
-        val directory = entryDirectory(manifest.cacheKey)
-        val file = resolveRelativePath(directory, HYDRATION_MARKER_FILE_NAME)
-        if (!file.isFile) return null
-        return runCatching {
-            json.decodeFromString(
-                SourceSeparationCacheHydrationMarker.serializer(),
-                file.readText(Charsets.UTF_8),
-            )
-        }.getOrNull()?.takeIf { marker ->
-            marker.matches(manifest) && marker.stems.all { stem ->
-                validateFile(
-                    file = resolveRelativePath(directory, stem.pcmPath),
-                    expected = stem.integrity,
-                    verifyHash = true,
-                )
-            }
-        }
-    }
-
     fun deleteEntry(cacheKey: String): Boolean {
         val directory = entryDirectory(cacheKey)
         return !directory.exists() || directory.deleteRecursively()
@@ -414,27 +376,11 @@ class SourceSeparationCacheStore(
 
     private fun recoverDerivedArtifacts(manifest: SourceSeparationCacheManifest): Int {
         var removed = 0
-        listOf(
-            SourceSeparationCacheFlacPromoter.PROMOTION_STAGING_DIRECTORY,
-            SourceSeparationCacheHydrator.HYDRATION_STAGING_DIRECTORY,
-        ).forEach { path ->
+        listOf(SourceSeparationCacheFlacPromoter.PROMOTION_STAGING_DIRECTORY).forEach { path ->
             val directory = resolveEntryPath(manifest.cacheKey, path)
             if (directory.exists() && deleteRelativePath(manifest.cacheKey, path)) {
                 removed += 1
             }
-        }
-
-        val hydrationDirectory = resolveEntryPath(
-            manifest.cacheKey,
-            SourceSeparationCacheHydrator.HYDRATION_OUTPUT_DIRECTORY,
-        )
-        if (hydrationDirectory.exists() && readHydrationMarker(manifest) == null &&
-            deleteRelativePath(
-                manifest.cacheKey,
-                SourceSeparationCacheHydrator.HYDRATION_OUTPUT_DIRECTORY,
-            )
-        ) {
-            removed += 1
         }
 
         val referencedPromotedPaths = manifest.output?.stems.orEmpty()
@@ -637,7 +583,6 @@ class SourceSeparationCacheStore(
         const val MANIFEST_FILE_NAME = "manifest.json"
         const val RUN_JOURNAL_FILE_NAME = "run-journal.json"
         const val PLAYBACK_SETTINGS_FILE_NAME = "playback-settings.json"
-        const val HYDRATION_MARKER_FILE_NAME = "hydration/v1/marker.json"
         private val CACHE_KEY_PATTERN = Regex("^[0-9a-f]{64}$")
         private val RUN_ID_PATTERN = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
         private val DEFAULT_JSON = Json {

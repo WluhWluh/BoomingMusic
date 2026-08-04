@@ -153,10 +153,6 @@ class SourceSeparationCacheStoreTest {
             valid.cacheKey,
             SourceSeparationCacheFlacPromoter.PROMOTION_STAGING_DIRECTORY,
         ).apply { mkdirs() }.resolve("partial.flac").writeText("partial")
-        store.resolveEntryPath(
-            valid.cacheKey,
-            SourceSeparationCacheHydrator.HYDRATION_OUTPUT_DIRECTORY,
-        ).apply { mkdirs() }.resolve("partial.pcm").writeText("partial")
         store.resolveEntryPath(valid.cacheKey, "completed/orphan.flac").writeText("orphan")
         store.resolveEntryPath(valid.cacheKey, "completed/orphan.flac.idx").writeText("orphan")
 
@@ -165,7 +161,7 @@ class SourceSeparationCacheStoreTest {
         assertEquals(1, result.removedTemporaryFiles)
         assertEquals(1, result.removedStagingRuns)
         assertEquals(1, result.removedInvalidEntries)
-        assertEquals(4, result.removedDerivedArtifacts)
+        assertEquals(3, result.removedDerivedArtifacts)
         assertNotNull(store.readManifest(valid.cacheKey))
         assertFalse(tempFile.exists())
         assertFalse(invalidEntry.exists())

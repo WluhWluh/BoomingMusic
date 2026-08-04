@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Afficher de courts messages sur l\'écran du lecteur, par exemple lorsqu\'un cache séparé est introuvable ou que la lecture séparée est indisponible.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll de la sortie mixée</string>
     <string name="source_separation_mixed_output_preroll_description">Délai avant de réactiver le son de la lecture séparée depuis les fichiers en cache après le démarrage de l\'audio mixé.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll de la sortie mixée PCM préchargée</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Délai avant de réactiver le son de la lecture séparée lorsque des pistes PCM préchargées sont utilisées.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Fenêtres de tampon de lecture</string>
     <string name="source_separation_playback_ready_windows_description">Nombre de fenêtres consécutives requises avant la reprise de la lecture séparée ; ce nombre est aussi utilisé pour prétraiter le morceau suivant.</string>

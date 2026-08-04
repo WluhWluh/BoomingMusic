@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">顯示播放介面的短提示，例如找不到分離快取或分軌播放不可用。</string>
     <string name="source_separation_mixed_output_preroll_title">混合輸出預滾</string>
     <string name="source_separation_mixed_output_preroll_description">混合音訊開始後，等待一段時間再取消基於快取檔案的分軌播放靜音。</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">預載 PCM 混合輸出預滾</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">使用預載 PCM 分軌時，等待一段時間再取消分軌播放靜音。</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">播放緩衝窗口</string>
     <string name="source_separation_playback_ready_windows_description">分軌播放恢復前需要連續就緒的窗口數。預先處理下一首歌曲時也使用這個數量。</string>

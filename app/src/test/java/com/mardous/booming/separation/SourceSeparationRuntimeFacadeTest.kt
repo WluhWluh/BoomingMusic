@@ -5,7 +5,6 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelR
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelUnavailableReason
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
-import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailabilityProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRoot
@@ -335,7 +334,6 @@ class SourceSeparationRuntimeFacadeTest {
                 cacheRepository = repository,
                 runCoordinator = coordinator,
                 flacPromoter = SourceSeparationCacheFlacPromoter(store, repository),
-                hydrator = SourceSeparationCacheHydrator(store, repository),
             )
         }
 

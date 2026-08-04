@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">分離キャッシュが見つからない場合や分離再生が利用できない場合など、プレーヤー画面に短い通知を表示します。</string>
     <string name="source_separation_mixed_output_preroll_title">混合出力プリロール</string>
     <string name="source_separation_mixed_output_preroll_description">混合音声が開始した後、キャッシュファイルからの分離再生のミュート解除を遅らせます。</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">事前読み込み PCM 混合出力プリロール</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">事前読み込み済みの PCM ステムを使用する場合、分離再生のミュート解除を遅らせます。</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">再生バッファウィンドウ</string>
     <string name="source_separation_playback_ready_windows_description">分離再生を再開する前に必要な連続準備済みウィンドウ数です。次の曲を事前処理するときにも同じ数を使用します。</string>

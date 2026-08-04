@@ -5,8 +5,6 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelR
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelUnavailableReason
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
-import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrationResult
-import com.mardous.booming.separation.cache.v2.SourceSeparationCacheHydrator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
@@ -17,7 +15,6 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCachePl
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCachePruneResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
-import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareHydratedPlayback
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareReadyHorizonStatus
 import com.mardous.booming.separation.cache.v2.SourceSeparationResolvedCacheModel
@@ -101,13 +98,6 @@ interface SourceSeparationRuntimeFacade {
 
     fun openCompletedCache(cacheKey: String): SourceSeparationModelAwareCachePlayback?
 
-    fun hydrate(
-        cacheKey: String,
-        shouldCancel: () -> Boolean = { false },
-    ): SourceSeparationCacheHydrationResult
-
-    fun openHydratedCache(cacheKey: String): SourceSeparationModelAwareHydratedPlayback?
-
     private companion object {
         const val DEFAULT_READY_WINDOW_COUNT = 2
     }
@@ -124,7 +114,6 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
     private val cacheRepository: SourceSeparationModelAwareCacheRepository,
     private val runCoordinator: SourceSeparationCacheRunCoordinator,
     private val flacPromoter: SourceSeparationCacheFlacPromoter,
-    private val hydrator: SourceSeparationCacheHydrator,
 ) : SourceSeparationRuntimeFacade {
     private val sourcePreflightMemo = SourceSeparationSourcePreflightMemo()
 
@@ -300,13 +289,6 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
     override fun openCompletedCache(cacheKey: String): SourceSeparationModelAwareCachePlayback? =
         cacheRepository.openCompletedCache(cacheKey)
 
-    override fun hydrate(
-        cacheKey: String,
-        shouldCancel: () -> Boolean,
-    ): SourceSeparationCacheHydrationResult = hydrator.hydrate(cacheKey, shouldCancel)
-
-    override fun openHydratedCache(cacheKey: String): SourceSeparationModelAwareHydratedPlayback? =
-        hydrator.open(cacheKey)
 }
 
 private data class SourceSeparationSourcePreflightMemoKey(

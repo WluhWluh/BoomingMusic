@@ -176,7 +176,6 @@ object BackupSettingsPolicy {
         bool("source_separation.show_snackbar_progress", false),
         bool("source_separation.show_snackbar_messages", false),
         long("source_separation.mixed_output_preroll_ms", 400L),
-        long("source_separation.hydrated_mixed_output_preroll_ms", 0L),
         integer("source_separation.playback_ready_window_count", 2),
         bool("source_separation.auto_cache_cleanup", true),
         integer("source_separation.auto_cache_cleanup_partial_limit", 5),

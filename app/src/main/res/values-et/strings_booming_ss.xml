@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Kuva mängija ekraanil lühiteateid, näiteks eraldamise vahemälu puudumine või eraldatud taasesituse kättesaamatus.</string>
     <string name="source_separation_mixed_output_preroll_title">Miksitud väljundi eelkäivitus</string>
     <string name="source_separation_mixed_output_preroll_description">Viivitus enne vahemällu salvestatud failidest tuleva eraldatud taasesituse heli sisselülitamist pärast miksitud heli algust.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Eellaaditud PCM-i miksitud väljundi eelkäivitus</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Viivitus enne eraldatud taasesituse heli sisselülitamist, kui kasutatakse eellaaditud PCM-radu.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Taasesituse puhvraknad</string>
     <string name="source_separation_playback_ready_windows_description">Nõua nii palju järjestikuseid aknaid enne eraldatud taasesituse jätkamist. Sama arvu kasutatakse ka järgmise loo eeltöötlemisel.</string>

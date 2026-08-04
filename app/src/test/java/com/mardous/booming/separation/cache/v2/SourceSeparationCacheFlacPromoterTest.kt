@@ -243,51 +243,6 @@ class SourceSeparationCacheFlacPromoterTest {
         )
     }
 
-    @Test
-    fun `hydration can read flac during playback and its session blocks deletion`() {
-        val fixture = fixture()
-        val completed = fixture.completedManifest()
-        fixture.promoter().promote(completed.cacheKey)
-        val flacPlayback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
-        val hydrator = fixture.hydrator()
-
-        assertTrue(
-            hydrator.hydrate(completed.cacheKey) is SourceSeparationCacheHydrationResult.Completed,
-        )
-        flacPlayback.close()
-        val hydrated = requireNotNull(hydrator.open(completed.cacheKey))
-        assertEquals(88_200L * 2L * 2L, hydrated.vocalsPcmFile.length())
-        assertEquals(SourceSeparationCacheMutationResult.Busy, fixture.repository.delete(completed.cacheKey))
-
-        hydrated.close()
-        assertEquals(
-            SourceSeparationCacheMutationResult.Completed,
-            fixture.repository.delete(completed.cacheKey),
-        )
-    }
-
-    @Test
-    fun `corrupt hydrated pcm is rejected and rebuilt atomically`() {
-        val fixture = fixture()
-        val completed = fixture.completedManifest()
-        fixture.promoter().promote(completed.cacheKey)
-        val hydrator = fixture.hydrator()
-        hydrator.hydrate(completed.cacheKey)
-        val marker = requireNotNull(
-            fixture.store.readHydrationMarker(
-                requireNotNull(fixture.store.readManifest(completed.cacheKey)),
-            ),
-        )
-        fixture.store.resolveEntryPath(completed.cacheKey, marker.stems.first().pcmPath)
-            .writeText("corrupt")
-
-        assertEquals(null, hydrator.open(completed.cacheKey))
-        assertTrue(
-            hydrator.hydrate(completed.cacheKey) is SourceSeparationCacheHydrationResult.Completed,
-        )
-        requireNotNull(hydrator.open(completed.cacheKey)).close()
-    }
-
     private fun fixture(): PromotionFixture {
         val store = SourceSeparationCacheStore(
             SourceSeparationCacheRoot(
@@ -338,20 +293,6 @@ class SourceSeparationCacheFlacPromoterTest {
             store = store,
             repository = repository,
             nowEpochMs = nowEpochMs,
-        )
-
-        fun hydrator() = SourceSeparationCacheHydrator(
-            store = store,
-            repository = repository,
-            decoder = SourceSeparationCacheFlacDecoder {
-                    _, pcm, _, channels, frames, shouldCancel ->
-                if (shouldCancel()) throw CancellationException("test cancellation")
-                pcm.parentFile?.mkdirs()
-                RandomAccessFile(pcm, "rw").use { output ->
-                    output.setLength(frames.toLong() * channels * Short.SIZE_BYTES)
-                }
-            },
-            nowEpochMs = { 10L },
         )
 
         fun completedManifest(

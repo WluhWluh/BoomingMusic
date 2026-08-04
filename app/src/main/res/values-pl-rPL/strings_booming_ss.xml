@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Pokazuj na ekranie odtwarzacza krótkie powiadomienia, na przykład o braku pamięci podręcznej separacji albo niedostępności odtwarzania rozdzielonego.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll zmiksowanego wyjścia</string>
     <string name="source_separation_mixed_output_preroll_description">Opóźnienie przed włączeniem dźwięku odtwarzania rozdzielonego z plików w pamięci podręcznej po rozpoczęciu zmiksowanego audio.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll zmiksowanego wyjścia z wczytanego PCM</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Opóźnienie przed włączeniem dźwięku odtwarzania rozdzielonego, gdy używane są wczytane ścieżki PCM.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Okna bufora odtwarzania</string>
     <string name="source_separation_playback_ready_windows_description">Wymagaj tylu kolejnych gotowych okien przed wznowieniem odtwarzania rozdzielonego. Ta sama liczba jest używana przy wstępnym przetwarzaniu następnego utworu.</string>

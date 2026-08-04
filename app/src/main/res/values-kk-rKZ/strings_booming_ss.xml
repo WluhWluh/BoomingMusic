@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Ойнатқыш экранында бөлу кэші табылмады немесе бөлінген ойнату қолжетімсіз сияқты қысқа ескертулерді көрсету.</string>
     <string name="source_separation_mixed_output_preroll_title">Аралас шығыстың алдын ала ойнатуы</string>
     <string name="source_separation_mixed_output_preroll_description">Аралас аудио басталғаннан кейін кэштегі файлдардан бөлінген ойнату дыбысын қоспас бұрын кідіріс.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Жүктелген PCM аралас шығысының алдын ала ойнатуы</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Алдын ала жүктелген PCM жолдары қолданылғанда бөлінген ойнату дыбысын қоспас бұрын кідіріс.</string>
     <string name="source_separation_preroll_ms_suffix">мс</string>
     <string name="source_separation_playback_ready_windows_title">Ойнату буферінің терезелері</string>
     <string name="source_separation_playback_ready_windows_description">Бөлінген ойнату жалғасуы үшін осынша тізбекті дайын терезені талап ету; келесі әнді алдын ала өңдегенде де осы сан қолданылады.</string>

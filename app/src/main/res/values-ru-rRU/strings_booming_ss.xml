@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Показывать на экране плеера короткие уведомления, например о ненайденном кэше разделения или недоступном раздельном воспроизведении.</string>
     <string name="source_separation_mixed_output_preroll_title">Предварительный запуск смешанного вывода</string>
     <string name="source_separation_mixed_output_preroll_description">Задержка перед включением звука раздельного воспроизведения из файлов кэша после запуска смешанного аудио.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Предварительный запуск смешанного вывода предзагруженного PCM</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Задержка перед включением звука раздельного воспроизведения при использовании предварительно загруженных дорожек PCM.</string>
     <string name="source_separation_preroll_ms_suffix">мс</string>
     <string name="source_separation_playback_ready_windows_title">Окна буфера воспроизведения</string>
     <string name="source_separation_playback_ready_windows_description">Требовать столько последовательных готовых окон перед возобновлением раздельного воспроизведения; это же число используется при предварительной обработке следующей песни.</string>

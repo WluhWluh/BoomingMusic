@@ -65,7 +65,6 @@ class BackupContractV1Test {
             "source_separation.show_snackbar_progress",
             "source_separation.show_snackbar_messages",
             "source_separation.mixed_output_preroll_ms",
-            "source_separation.hydrated_mixed_output_preroll_ms",
             "source_separation.playback_ready_window_count",
             "source_separation.auto_cache_cleanup",
             "source_separation.auto_cache_cleanup_partial_limit",

@@ -128,7 +128,6 @@ enum class SourceSeparationCacheLockPurpose {
     Delete,
     Prune,
     Promotion,
-    Hydration,
     Cleanup,
     PlaybackSettings,
     Recovery,

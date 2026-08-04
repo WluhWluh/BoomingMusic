@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Visa korta meddelanden på spelarskärmen, till exempel att separerad cache saknas eller att separerad uppspelning inte är tillgänglig.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll för mixad utgång</string>
     <string name="source_separation_mixed_output_preroll_description">Fördröjning innan ljudet för separerad uppspelning från cachade filer slås på efter att mixat ljud startar.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll för förinläst PCM-mixad utgång</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Fördröjning innan ljudet för separerad uppspelning slås på när förinlästa PCM-spår används.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Uppspelningsbuffertfönster</string>
     <string name="source_separation_playback_ready_windows_description">Kräv så här många sammanhängande fönster innan separerad uppspelning återupptas. Antalet används också när nästa låt förbehandlas.</string>

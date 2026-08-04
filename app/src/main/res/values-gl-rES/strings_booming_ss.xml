@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Mostra avisos breves na pantalla do reprodutor, como caché separada non atopada ou reprodución separada non dispoñible.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll de saída mesturada</string>
     <string name="source_separation_mixed_output_preroll_description">Atraso antes de quitar o silencio da reprodución separada desde ficheiros na caché despois de que comece o audio mesturado.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll de saída mesturada PCM precargada</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Atraso antes de quitar o silencio da reprodución separada cando se usan pistas PCM precargadas.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Xanelas de búfer de reprodución</string>
     <string name="source_separation_playback_ready_windows_description">Require este número de xanelas consecutivas antes de retomar a reprodución separada; tamén se usa este número ao preprocesar a seguinte canción.</string>

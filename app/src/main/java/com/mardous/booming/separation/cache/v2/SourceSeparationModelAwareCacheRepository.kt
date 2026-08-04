@@ -327,16 +327,6 @@ class SourceSeparationModelAwareCacheRepository(
         )
     }
 
-    fun tryAcquireRunWrite(
-        cacheKey: String,
-        purpose: SourceSeparationCacheLockPurpose = SourceSeparationCacheLockPurpose.Hydration,
-    ): SourceSeparationCacheEntryLease? {
-        return tryAcquireMutation(
-            localLease = leases.tryAcquireRunWrite(cacheKey),
-            owner = SourceSeparationCacheLockOwner(purpose),
-        )
-    }
-
     fun tryAcquireRead(cacheKey: String): SourceSeparationCacheEntryLease? {
         return leases.tryAcquireRead(cacheKey)
     }

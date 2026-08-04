@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">प्लेयर स्क्रीन पर छोटी सूचनाएँ दिखाएँ, जैसे पृथक्करण कैश नहीं मिला या अलग किया गया प्लेबैक उपलब्ध नहीं है।</string>
     <string name="source_separation_mixed_output_preroll_title">मिक्स आउटपुट प्रीरोल</string>
     <string name="source_separation_mixed_output_preroll_description">मिक्स ऑडियो शुरू होने के बाद कैश फ़ाइलों से अलग किए गए प्लेबैक का म्यूट हटाने से पहले की देरी।</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">पहले से लोड PCM मिक्स आउटपुट प्रीरोल</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">पहले से लोड PCM स्टेम इस्तेमाल होने पर अलग किए गए प्लेबैक का म्यूट हटाने से पहले की देरी।</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">प्लेबैक बफ़र विंडो</string>
     <string name="source_separation_playback_ready_windows_description">अलग किए गए प्लेबैक को फिर शुरू करने से पहले इतनी लगातार तैयार विंडो चाहिए; अगले गाने को पहले से प्रोसेस करते समय भी यही संख्या इस्तेमाल होती है।</string>

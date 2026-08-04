@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">اعلان‌های کوتاه صفحه پخش‌کننده را نشان دهید، مانند پیدا نشدن کش جداسازی یا در دسترس نبودن پخش جداشده.</string>
     <string name="source_separation_mixed_output_preroll_title">پری‌رول خروجی میکس‌شده</string>
     <string name="source_separation_mixed_output_preroll_description">تاخیر پیش از برداشتن بی‌صدایی پخش جداشده از فایل‌های کش پس از شروع صدای میکس‌شده.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">پری‌رول خروجی میکس‌شده PCM از پیش بارگذاری‌شده</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">تاخیر پیش از برداشتن بی‌صدایی پخش جداشده هنگام استفاده از استم‌های PCM از پیش بارگذاری‌شده.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">پنجره‌های بافر پخش</string>
     <string name="source_separation_playback_ready_windows_description">پیش از ازسرگیری پخش جداشده، این تعداد پنجره آماده پیاپی لازم است؛ هنگام پیش‌پردازش آهنگ بعدی نیز از همین تعداد استفاده می‌شود.</string>

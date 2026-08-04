@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Ipakita ang maiikling abiso sa screen ng player, gaya ng hindi nahanap ang separation cache o hindi available ang hiwalay na playback.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll ng mixed output</string>
     <string name="source_separation_mixed_output_preroll_description">Delay bago alisin ang mute ng hiwalay na playback mula sa mga cache file pagkatapos magsimula ang mixed audio.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll ng mixed output mula sa preloaded PCM</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Delay bago alisin ang mute ng hiwalay na playback kapag ginagamit ang mga preloaded PCM stem.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Mga playback buffer window</string>
     <string name="source_separation_playback_ready_windows_description">Kailangan ang ganitong karaming magkakasunod na nakahandang window bago ipagpatuloy ang hiwalay na playback; ginagamit din ang bilang na ito kapag maagang pinoproseso ang susunod na kanta.</string>

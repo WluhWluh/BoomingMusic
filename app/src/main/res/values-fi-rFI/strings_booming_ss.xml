@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Näytä soitinnäkymässä lyhyitä ilmoituksia esimerkiksi siitä, että erotteluvälimuistia ei löydy tai eroteltu toisto ei ole saatavilla.</string>
     <string name="source_separation_mixed_output_preroll_title">Miksatun ulostulon preroll</string>
     <string name="source_separation_mixed_output_preroll_description">Viive ennen kuin välimuistitiedostoista tulevan erotellun toiston ääni palautetaan miksatun äänen alettua.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Esiladatun PCM-miksatun ulostulon preroll</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Viive ennen kuin erotellun toiston ääni palautetaan, kun käytössä ovat esiladatut PCM-raidat.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Toiston puskuri-ikkunat</string>
     <string name="source_separation_playback_ready_windows_description">Vaadi näin monta peräkkäistä ikkunaa valmiiksi ennen erotellun toiston jatkamista. Samaa määrää käytetään myös seuraavan kappaleen esikäsittelyssä.</string>

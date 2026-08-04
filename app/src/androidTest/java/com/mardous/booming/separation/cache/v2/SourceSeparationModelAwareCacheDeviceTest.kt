@@ -60,9 +60,6 @@ class SourceSeparationModelAwareCacheDeviceTest {
             val engine = get<SourceSeparationModelAwareEngine>(
                 SourceSeparationModelAwareEngine::class.java,
             )
-            val hydrator = get<SourceSeparationCacheHydrator>(
-                SourceSeparationCacheHydrator::class.java,
-            )
             val promoter = SourceSeparationCacheFlacPromoter(store, cacheRepository)
 
             assertTrue(presetRepository.installedModels().isEmpty())
@@ -77,7 +74,7 @@ class SourceSeparationModelAwareCacheDeviceTest {
                 engine = engine,
             )
             runs += primary
-            validateCompletedLifecycle(primary, store, cacheRepository, promoter, hydrator)
+            validateCompletedLifecycle(primary, store, cacheRepository, promoter)
 
             if (secondaryModelId != null && secondaryModel != null) {
                 val secondary = runModel(
@@ -221,7 +218,6 @@ class SourceSeparationModelAwareCacheDeviceTest {
         store: SourceSeparationCacheStore,
         repository: SourceSeparationModelAwareCacheRepository,
         promoter: SourceSeparationCacheFlacPromoter,
-        hydrator: SourceSeparationCacheHydrator,
     ) {
         val manifest = run.manifest
         assertTrue(repository.writeBlend(manifest.identity, TEST_BLEND))
@@ -240,17 +236,7 @@ class SourceSeparationModelAwareCacheDeviceTest {
         assertTrue(flacPlayback.vocalsFile.extension.equals("flac", ignoreCase = true))
         flacPlayback.close()
 
-        val hydration = hydrator.hydrate(manifest.cacheKey)
-        assertTrue(hydration is SourceSeparationCacheHydrationResult.Completed)
-        val hydratedPlayback = requireNotNull(hydrator.open(manifest.cacheKey))
-        assertTrue(hydratedPlayback.vocalsPcmFile.isFile)
-        assertEquals(SourceSeparationCacheMutationResult.Busy, repository.delete(manifest.cacheKey))
-        val prune = repository.prune(partialLimit = 0, completedLimit = 0)
-        assertEquals(0, prune.deletedEntries)
-        hydratedPlayback.close()
-
         assertTrue(store.readPlaybackSettings(promoted)?.matches(promoted) == true)
-        assertTrue(store.readHydrationMarker(promoted)?.matches(promoted) == true)
     }
 
     private fun baseReport(runId: String, stage: String) = JSONObject()

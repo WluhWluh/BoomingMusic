@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">분리 캐시를 찾을 수 없거나 분리 재생을 사용할 수 없는 경우 등 플레이어 화면에 짧은 안내를 표시합니다.</string>
     <string name="source_separation_mixed_output_preroll_title">믹스 출력 프리롤</string>
     <string name="source_separation_mixed_output_preroll_description">믹스 오디오가 시작된 뒤 캐시 파일 기반 분리 재생의 음소거를 해제하기 전까지 기다리는 시간입니다.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">사전 로드 PCM 믹스 출력 프리롤</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">사전 로드된 PCM 스템을 사용할 때 분리 재생의 음소거를 해제하기 전까지 기다리는 시간입니다.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">재생 버퍼 창</string>
     <string name="source_separation_playback_ready_windows_description">분리 재생을 재개하기 전에 필요한 연속 준비 창 수입니다. 다음 곡을 미리 처리할 때도 같은 수를 사용합니다.</string>

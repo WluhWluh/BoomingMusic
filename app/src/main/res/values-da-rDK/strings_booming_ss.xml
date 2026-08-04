@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Vis korte beskeder på afspillerskærmen, f.eks. når separeret cache ikke findes, eller separat afspilning ikke er tilgængelig.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll for mixet output</string>
     <string name="source_separation_mixed_output_preroll_description">Forsinkelse før separat afspilning fra cachelagrede filer slås til efter start af mixet lyd.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll for forudindlæst PCM-mixet output</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Forsinkelse før separat afspilning slås til, når forudindlæste PCM-spor bruges.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Buffervinduer til afspilning</string>
     <string name="source_separation_playback_ready_windows_description">Kræv så mange sammenhængende vinduer, før separat afspilning genoptages. Antallet bruges også ved forbehandling af den næste sang.</string>

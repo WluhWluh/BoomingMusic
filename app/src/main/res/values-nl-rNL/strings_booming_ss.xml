@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Toon korte meldingen op het spelerscherm, zoals dat de gescheiden cache niet is gevonden of dat gescheiden afspelen niet beschikbaar is.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll voor gemixte uitvoer</string>
     <string name="source_separation_mixed_output_preroll_description">Vertraging voordat het dempen van gescheiden afspelen vanuit cachebestanden wordt opgeheven nadat gemixte audio start.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll voor voorgeladen PCM-gemixte uitvoer</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Vertraging voordat het dempen van gescheiden afspelen wordt opgeheven wanneer voorgeladen PCM-sporen worden gebruikt.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Buffervensters voor afspelen</string>
     <string name="source_separation_playback_ready_windows_description">Vereist dit aantal opeenvolgende vensters voordat gescheiden afspelen wordt hervat; dit aantal wordt ook gebruikt bij het voorbereiden van het volgende nummer.</string>

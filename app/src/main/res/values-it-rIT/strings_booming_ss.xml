@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Mostra brevi avvisi nella schermata del lettore, ad esempio cache separata non trovata o riproduzione separata non disponibile.</string>
     <string name="source_separation_mixed_output_preroll_title">Preroll uscita mixata</string>
     <string name="source_separation_mixed_output_preroll_description">Ritardo prima di riattivare l\'audio della riproduzione separata dai file in cache dopo l\'avvio dell\'audio mixato.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Preroll uscita mixata PCM precaricata</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Ritardo prima di riattivare l\'audio della riproduzione separata quando vengono usate tracce PCM precaricate.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Finestre del buffer di riproduzione</string>
     <string name="source_separation_playback_ready_windows_description">Richiede questo numero di finestre consecutive prima di riprendere la riproduzione separata; lo stesso numero viene usato anche durante il pretrattamento del brano successivo.</string>

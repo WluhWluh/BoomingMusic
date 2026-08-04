@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Na obrazovce přehrávače zobrazovat krátká upozornění, například že mezipaměť oddělení nebyla nalezena nebo že oddělené přehrávání není dostupné.</string>
     <string name="source_separation_mixed_output_preroll_title">Předběh mixovaného výstupu</string>
     <string name="source_separation_mixed_output_preroll_description">Prodleva před zapnutím zvuku odděleného přehrávání ze souborů v mezipaměti po spuštění mixovaného zvuku.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Předběh mixovaného výstupu z přednačteného PCM</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Prodleva před zapnutím zvuku odděleného přehrávání při použití přednačtených stop PCM.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">Okna vyrovnávací paměti přehrávání</string>
     <string name="source_separation_playback_ready_windows_description">Před obnovením odděleného přehrávání vyžadovat tento počet navazujících oken. Stejný počet se použije i při předzpracování další skladby.</string>

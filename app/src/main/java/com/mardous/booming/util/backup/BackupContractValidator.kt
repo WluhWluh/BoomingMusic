@@ -267,7 +267,6 @@ object BackupContractValidator {
             normalized.endsWith("playback-settings.json") ||
             "/cache/" in normalized ||
             "/debug/" in normalized ||
-            "/hydration/" in normalized ||
             normalized.endsWith(".part")
     }
 

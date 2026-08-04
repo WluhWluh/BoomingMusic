@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">הצג התראות קצרות במסך הנגן, למשל כאשר מטמון הפרדה לא נמצא או כאשר השמעה מופרדת אינה זמינה.</string>
     <string name="source_separation_mixed_output_preroll_title">פרירול פלט מעורב</string>
     <string name="source_separation_mixed_output_preroll_description">השהיה לפני ביטול ההשתקה של השמעה מופרדת מקובצי מטמון לאחר שהשמע המעורב מתחיל.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">פרירול פלט PCM מעורב שנטען מראש</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">השהיה לפני ביטול ההשתקה של השמעה מופרדת כאשר משתמשים בסטמים PCM שנטענו מראש.</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">חלונות מאגר להשמעה</string>
     <string name="source_separation_playback_ready_windows_description">דרוש מספר כזה של חלונות רצופים ומוכנים לפני חידוש ההשמעה המופרדת; אותו מספר ישמש גם בעיבוד מראש של השיר הבא.</string>

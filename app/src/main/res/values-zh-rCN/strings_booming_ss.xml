@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">显示播放界面的短提示，例如找不到分离缓存或分轨播放不可用。</string>
     <string name="source_separation_mixed_output_preroll_title">混合输出预滚</string>
     <string name="source_separation_mixed_output_preroll_description">混合音频开始后，等待一段时间再取消基于缓存文件的分轨播放的静音。</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">预载 PCM 混合输出预滚</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">使用预载 PCM 分轨时，等待一段时间再取消分轨播放的静音。</string>
     <string name="source_separation_preroll_ms_suffix">ms</string>
     <string name="source_separation_playback_ready_windows_title">播放缓冲窗口</string>
     <string name="source_separation_playback_ready_windows_description">分轨播放恢复前需要连续就绪的窗口数。预处理下一首歌时也使用这个数量。</string>

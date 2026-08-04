@@ -206,9 +206,6 @@ private fun SourceSeparationSettingsSheet(
     val mixedOutputPrerollMs by viewModel
         .sourceSeparationMixedOutputPrerollMsFlow
         .collectAsState()
-    val hydratedMixedOutputPrerollMs by viewModel
-        .sourceSeparationHydratedMixedOutputPrerollMsFlow
-        .collectAsState()
     val playbackReadyWindowCount by viewModel
         .sourceSeparationPlaybackReadyWindowCountFlow
         .collectAsState()
@@ -674,18 +671,6 @@ private fun SourceSeparationSettingsSheet(
                                     R.string.source_separation_mixed_output_preroll_description
                                 ),
                                 onValueChange = viewModel::setSourceSeparationMixedOutputPrerollMs
-                            )
-
-                            PrerollMsField(
-                                valueMs = hydratedMixedOutputPrerollMs,
-                                title = stringResource(
-                                    R.string.source_separation_hydrated_mixed_output_preroll_title
-                                ),
-                                description = stringResource(
-                                    R.string.source_separation_hydrated_mixed_output_preroll_description
-                                ),
-                                onValueChange =
-                                    viewModel::setSourceSeparationHydratedMixedOutputPrerollMs
                             )
 
                             NumberSettingField(

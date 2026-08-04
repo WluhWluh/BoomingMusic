@@ -77,8 +77,6 @@
     <string name="source_separation_show_snackbar_messages_description">Паказваць на экране прайгравальніка кароткія паведамленні, напрыклад пра адсутны кэш раздзялення або недаступнае раздзельнае прайграванне.</string>
     <string name="source_separation_mixed_output_preroll_title">Папярэдні запуск змяшанага вываду</string>
     <string name="source_separation_mixed_output_preroll_description">Затрымка перад уключэннем гуку раздзельнага прайгравання з файлаў кэша пасля запуску змяшанага аўдыя.</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_title">Папярэдні запуск змяшанага вываду з папярэдне загружаным PCM</string>
-    <string name="source_separation_hydrated_mixed_output_preroll_description">Затрымка перад уключэннем гуку раздзельнага прайгравання, калі выкарыстоўваюцца папярэдне загружаныя дарожкі PCM.</string>
     <string name="source_separation_preroll_ms_suffix">мс</string>
     <string name="source_separation_playback_ready_windows_title">Вокны буфера прайгравання</string>
     <string name="source_separation_playback_ready_windows_description">Патрабаваць столькі паслядоўных гатовых вокнаў перад аднаўленнем раздзельнага прайгравання; гэтая ж колькасць выкарыстоўваецца пры папярэдняй апрацоўцы наступнай песні.</string>
