@@ -6,8 +6,8 @@ data flow.
 
 Updated: 2026-08-04
 
-Current milestone: Phases 0-1 are complete. Phase 2 list-based execution,
-cache, and IPC foundations are next.
+Current milestone: Phases 0-2 are complete. Phase 3 N-stem Hydration and
+playback data-plane work is next.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -484,20 +484,41 @@ Phase 1 evidence:
   profile labels, contract validation, cache identity, and cache-management
   projection.
 
-### Phase 2: List-based execution and cache foundations
+### Phase 2: List-based execution and cache foundations (complete)
 
-- [ ] Introduce list-based window results, segment artifacts, journals, IPC
+- [x] Introduce list-based window results, segment artifacts, journals, IPC
   descriptors, and playback cache objects while keeping the MDX adapter's
   output unchanged.
-- [ ] Add explicit stem role/binding data where semantic IDs are insufficient.
-- [ ] Bump new manifest/Hydration/pipeline schemas under the clean-install
-  boundary; do not migrate old experimental entries.
-- [ ] Make segment commits, cancellation, recovery, promotion, deletion, and
+- [x] Add explicit stem role/binding data where semantic IDs are insufficient.
+- [x] Bump the affected identity, manifest, journal, Hydration, and IPC schemas
+  under the clean-install boundary; do not migrate old experimental entries.
+- [x] Make segment commits, cancellation, recovery, promotion, deletion, and
   pruning operate on complete stem sets.
-- [ ] Add synthetic 2-, 4-, and 6-stem cache fixtures.
+- [x] Add synthetic 2-, 4-, and 6-stem cache fixtures.
 
 **Exit:** the current two-stem product passes all existing lifecycle and cache
 tests through the list-based data types.
+
+Phase 2 evidence:
+
+- Transient window results, segment plans, rendered outputs, run journals,
+  Hydration markers, playback sources, and IPC preparation/resume/completion
+  descriptors all carry ordered stem collections keyed by stable `stemId`.
+- Cache identity schema 2, manifest schema 4, journal schema 7, Hydration
+  schema 2, and execution protocol 17 intentionally reject older unreleased
+  data under the clean-install boundary.
+- Completed, promoted, hydrated, and per-segment files use stable ordinal
+  paths. Readiness and journal commit fail when any expected artifact is
+  absent, aliased, reordered, or has inconsistent audio geometry.
+- Synthetic 2-, 4-, and 6-stem tests cover window PCM, segment paths, atomic
+  commit/integrity, deletion, Hydration serialization, and IPC serialization.
+  The existing MDX execution adapter still accepts exactly vocals and
+  instrumental while resolving files by ID.
+- The full GitHub debug unit-test suite passes, including cache,
+  FLAC/Hydration, engine lifecycle, and process IPC coverage. HQ4 verifies
+  contract order `instrumental, vocals` while standard playback still resolves
+  the correct semantic files. GitHub Android-test sources also compile with
+  list-based device evidence and export keys.
 
 ### Phase 3: N-stem playback data plane
 
