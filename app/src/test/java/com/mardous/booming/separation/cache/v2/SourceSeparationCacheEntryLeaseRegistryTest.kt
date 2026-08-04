@@ -23,6 +23,7 @@ class SourceSeparationCacheEntryLeaseRegistryTest {
             SourceSeparationCacheLeaseSnapshot(
                 readerCount = 2,
                 runWriterActive = false,
+                promotionActive = false,
                 exclusiveActive = false,
             ),
             registry.snapshot()[KEY_A],
@@ -63,6 +64,7 @@ class SourceSeparationCacheEntryLeaseRegistryTest {
             SourceSeparationCacheLeaseSnapshot(
                 readerCount = 1,
                 runWriterActive = true,
+                promotionActive = false,
                 exclusiveActive = false,
             ),
             registry.snapshot()[KEY_A],
@@ -70,6 +72,33 @@ class SourceSeparationCacheEntryLeaseRegistryTest {
 
         reader.close()
         writer.close()
+        assertTrue(registry.snapshot().isEmpty())
+    }
+
+    @Test
+    fun `promotion coexists with readers and blocks every cache mutation`() {
+        val registry = SourceSeparationCacheEntryLeaseRegistry()
+        val reader = requireNotNull(registry.tryAcquireRead(KEY_A))
+        val promotion = requireNotNull(registry.tryAcquirePromotion(KEY_A))
+
+        assertNotNull(registry.tryAcquireRead(KEY_A)?.also { it.close() })
+        assertNull(registry.tryAcquireRunWrite(KEY_A))
+        assertNull(registry.tryAcquirePromotion(KEY_A))
+        assertNull(registry.tryAcquireExclusive(KEY_A))
+        assertEquals(
+            SourceSeparationCacheLeaseSnapshot(
+                readerCount = 1,
+                runWriterActive = false,
+                promotionActive = true,
+                exclusiveActive = false,
+            ),
+            registry.snapshot()[KEY_A],
+        )
+
+        promotion.close()
+        assertNull(registry.tryAcquireExclusive(KEY_A))
+        reader.close()
+        assertNotNull(registry.tryAcquireExclusive(KEY_A)?.also { it.close() })
         assertTrue(registry.snapshot().isEmpty())
     }
 

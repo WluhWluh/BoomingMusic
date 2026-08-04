@@ -13,10 +13,7 @@ class SourceSeparationCacheFlacPromoter(
         cacheKey: String,
         shouldCancel: () -> Boolean = { false },
     ): SourceSeparationCacheFlacPromotionResult {
-        val lease = repository.tryAcquireExclusive(
-            cacheKey,
-            SourceSeparationCacheLockPurpose.Promotion,
-        )
+        val lease = repository.tryAcquirePromotion(cacheKey)
             ?: return SourceSeparationCacheFlacPromotionResult.Busy
         return lease.use {
             it.bindEntryDirectory(store.entryDirectory(cacheKey))

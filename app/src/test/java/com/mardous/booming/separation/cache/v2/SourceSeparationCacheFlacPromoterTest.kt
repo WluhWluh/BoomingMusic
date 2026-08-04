@@ -170,21 +170,29 @@ class SourceSeparationCacheFlacPromoterTest {
     }
 
     @Test
-    fun `playback read lease blocks promotion`() {
+    fun `promotion publishes new playback while existing wav playback remains leased`() {
         val fixture = fixture()
         val completed = fixture.completedManifest()
-        val playback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
+        val wavPlayback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
 
-        assertEquals(
-            SourceSeparationCacheFlacPromotionResult.Busy,
-            fixture.promoter().promote(completed.cacheKey),
-        )
+        val promoted = fixture.promoter().promote(completed.cacheKey)
+            as SourceSeparationCacheFlacPromotionResult.Completed
+        assertEquals("stem-00.wav", wavPlayback.vocalsFile.name)
+        assertTrue(wavPlayback.vocalsFile.isFile)
 
-        playback.close()
-        assertTrue(
-            fixture.promoter().promote(completed.cacheKey) is
-                SourceSeparationCacheFlacPromotionResult.Completed,
+        val flacPlayback = requireNotNull(
+            fixture.repository.openCompletedCache(promoted.manifest.cacheKey),
         )
+        assertEquals("stem-00.flac", flacPlayback.vocalsFile.name)
+        assertTrue(flacPlayback.vocalsFile.isFile)
+        assertFalse(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
+
+        flacPlayback.close()
+        assertFalse(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
+        wavPlayback.close()
+        assertTrue(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
+        assertFalse(wavPlayback.vocalsFile.exists())
+        assertTrue(flacPlayback.vocalsFile.isFile)
     }
 
     @Test
@@ -219,7 +227,7 @@ class SourceSeparationCacheFlacPromoterTest {
     }
 
     @Test
-    fun `canceled promotion releases exclusive lease and remains retryable`() {
+    fun `canceled promotion releases promotion lease and remains retryable`() {
         val fixture = fixture()
         val completed = fixture.completedManifest()
         var shouldCancel = false

@@ -22,7 +22,7 @@ class SourceSeparationCacheEntryLeaseRegistry {
     fun tryAcquireRunWrite(cacheKey: String): SourceSeparationCacheEntryLease? {
         requireCacheKey(cacheKey)
         val current = states.getOrPut(cacheKey, ::LeaseState)
-        if (current.exclusiveActive || current.runWriterActive) {
+        if (current.exclusiveActive || current.runWriterActive || current.promotionActive) {
             return null
         }
         current.runWriterActive = true
@@ -34,10 +34,29 @@ class SourceSeparationCacheEntryLeaseRegistry {
     }
 
     @Synchronized
+    fun tryAcquirePromotion(cacheKey: String): SourceSeparationCacheEntryLease? {
+        requireCacheKey(cacheKey)
+        val current = states.getOrPut(cacheKey, ::LeaseState)
+        if (current.exclusiveActive || current.runWriterActive || current.promotionActive) {
+            return null
+        }
+        current.promotionActive = true
+        return SourceSeparationCacheEntryLease(
+            cacheKey = cacheKey,
+            mode = SourceSeparationCacheLeaseMode.Promotion,
+            release = ::release,
+        )
+    }
+
+    @Synchronized
     fun tryAcquireExclusive(cacheKey: String): SourceSeparationCacheEntryLease? {
         requireCacheKey(cacheKey)
         val current = states.getOrPut(cacheKey, ::LeaseState)
-        if (current.exclusiveActive || current.runWriterActive || current.readerCount > 0) {
+        if (current.exclusiveActive ||
+            current.runWriterActive ||
+            current.promotionActive ||
+            current.readerCount > 0
+        ) {
             return null
         }
         current.exclusiveActive = true
@@ -52,7 +71,10 @@ class SourceSeparationCacheEntryLeaseRegistry {
     fun isLeased(cacheKey: String): Boolean {
         requireCacheKey(cacheKey)
         return states[cacheKey]?.let {
-            it.exclusiveActive || it.runWriterActive || it.readerCount > 0
+            it.exclusiveActive ||
+                    it.runWriterActive ||
+                    it.promotionActive ||
+                    it.readerCount > 0
         } == true
     }
 
@@ -62,6 +84,7 @@ class SourceSeparationCacheEntryLeaseRegistry {
             SourceSeparationCacheLeaseSnapshot(
                 readerCount = state.readerCount,
                 runWriterActive = state.runWriterActive,
+                promotionActive = state.promotionActive,
                 exclusiveActive = state.exclusiveActive,
             )
         }
@@ -79,12 +102,20 @@ class SourceSeparationCacheEntryLeaseRegistry {
                 check(state.runWriterActive) { "Cache run-writer lease was not active." }
                 state.runWriterActive = false
             }
+            SourceSeparationCacheLeaseMode.Promotion -> {
+                check(state.promotionActive) { "Cache promotion lease was not active." }
+                state.promotionActive = false
+            }
             SourceSeparationCacheLeaseMode.Exclusive -> {
                 check(state.exclusiveActive) { "Cache exclusive lease was not active." }
                 state.exclusiveActive = false
             }
         }
-        if (state.readerCount == 0 && !state.runWriterActive && !state.exclusiveActive) {
+        if (state.readerCount == 0 &&
+            !state.runWriterActive &&
+            !state.promotionActive &&
+            !state.exclusiveActive
+        ) {
             states.remove(cacheKey)
         }
     }
@@ -96,6 +127,7 @@ class SourceSeparationCacheEntryLeaseRegistry {
     private data class LeaseState(
         var readerCount: Int = 0,
         var runWriterActive: Boolean = false,
+        var promotionActive: Boolean = false,
         var exclusiveActive: Boolean = false,
     )
 
@@ -149,11 +181,13 @@ class SourceSeparationCacheEntryLease internal constructor(
 enum class SourceSeparationCacheLeaseMode {
     Read,
     RunWrite,
+    Promotion,
     Exclusive,
 }
 
 data class SourceSeparationCacheLeaseSnapshot(
     val readerCount: Int,
     val runWriterActive: Boolean,
+    val promotionActive: Boolean,
     val exclusiveActive: Boolean,
 )

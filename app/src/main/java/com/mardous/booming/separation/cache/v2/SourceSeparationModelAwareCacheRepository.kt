@@ -331,6 +331,13 @@ class SourceSeparationModelAwareCacheRepository(
         return leases.tryAcquireRead(cacheKey)
     }
 
+    fun tryAcquirePromotion(cacheKey: String): SourceSeparationCacheEntryLease? {
+        return tryAcquireMutation(
+            localLease = leases.tryAcquirePromotion(cacheKey),
+            owner = SourceSeparationCacheLockOwner(SourceSeparationCacheLockPurpose.Promotion),
+        )
+    }
+
     fun tryAcquireExclusive(
         cacheKey: String,
         purpose: SourceSeparationCacheLockPurpose = SourceSeparationCacheLockPurpose.Other,
