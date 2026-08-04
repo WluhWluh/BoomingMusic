@@ -6,8 +6,8 @@ data flow.
 
 Updated: 2026-08-04
 
-Current milestone: Phase 0 is complete. Phase 1 dynamic labels and imported
-label editing are next.
+Current milestone: Phases 0-1 are complete. Phase 2 list-based execution,
+cache, and IPC foundations are next.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -456,19 +456,33 @@ Phase 0 evidence:
 - `bss-tflite@c19e17a` enforces canonical English labels in conversion code and
   schema, with all 30 repository tests passing.
 
-### Phase 1: Dynamic labels on the stable two-stem path
+### Phase 1: Dynamic labels on the stable two-stem path (complete)
 
-- [ ] Implement the explicit label resolver and base/localized resources.
-- [ ] Drive settings endpoints, model details, cache details, progress, and
+- [x] Implement the explicit label resolver and base/localized resources.
+- [x] Drive settings endpoints, model details, cache details, progress, and
   timing from the active or cached contract.
-- [ ] Add model-output and residual label fields to manual import and profile
+- [x] Add model-output and residual label fields to manual import and profile
   editing.
-- [ ] Preserve exact labels in profile and cache snapshots.
-- [ ] Test 9662, reversed HQ4 orientation, KARA, unknown English labels, and
+- [x] Preserve exact labels in profile and cache snapshots.
+- [x] Test 9662, reversed HQ4 orientation, KARA, unknown English labels, and
   user-entered non-English labels.
 
 **Exit:** no user-visible track name is supplied by a fixed
 Vocals/Instrumental string when a contract is available.
+
+Phase 1 evidence:
+
+- `SourceSeparationStemLabelResolver` uses an explicit reviewed map across all
+  37 existing Booming SS locales and preserves unknown labels exactly.
+- Settings endpoints, model details, cache details, and timing reports resolve
+  labels from active or cached contracts; HQ4 remains semantically ordered as
+  vocals/instrumental despite its reversed model-output direction.
+- Manual profiles preserve editable Unicode model-output and residual labels,
+  include them in content-addressed profile revisions, and snapshot them into
+  cache contracts without changing presentation-independent cache fingerprints.
+- Focused GitHub unit tests pass for 9662, KARA, HQ4, unknown labels, Unicode
+  profile labels, contract validation, cache identity, and cache-management
+  projection.
 
 ### Phase 2: List-based execution and cache foundations
 
