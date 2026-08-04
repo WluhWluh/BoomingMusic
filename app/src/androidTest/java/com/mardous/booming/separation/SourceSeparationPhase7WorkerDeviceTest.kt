@@ -1010,7 +1010,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val output = requireNotNull(manifest.output)
             val entryDirectory = store.entryDirectory(cacheKey)
             val wavStemPaths = output.stems.associate { stem ->
-                stem.semantic.name to store.resolveRelativePath(entryDirectory, stem.wavPath)
+                stem.semanticId.value to store.resolveRelativePath(entryDirectory, stem.wavPath)
             }
             assertEquals(cacheKey, manifest.cacheKey)
             assertEquals(expectedArtifactSha256, manifest.identity.artifactSha256)
@@ -1233,7 +1233,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("frameDelta", frameDelta)
                 .put("maxAbsError", 0.0)
                 .put("stemSemantics", output.stems.joinToString(",") {
-                    it.semantic.name
+                    it.semanticId.value
                 })
                 .put("sourceAudioFingerprint", manifest.identity.source.audioFingerprint)
                 .put("joinFrames", JSONArray(joinFrames))
@@ -1274,12 +1274,12 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("promotedFormat", completedAfter.format.name)
                 .put("hydrationPassed", true)
                 .put("stems", JSONArray(promotedManifest.output!!.stems.map { stem ->
-                    val exportedStem = artifactExport?.stems?.get(stem.semantic.name)
+                    val exportedStem = artifactExport?.stems?.get(stem.semanticId.value)
                     val wavIntegrity = requireNotNull(stem.wavIntegrity)
                     val promotedIntegrity = requireNotNull(stem.promotedIntegrity)
                     JSONObject()
-                        .put("semantic", stem.semantic.name)
-                        .put("wavPath", wavStemPaths.getValue(stem.semantic.name).absolutePath)
+                        .put("semantic", stem.semanticId.value)
+                        .put("wavPath", wavStemPaths.getValue(stem.semanticId.value).absolutePath)
                         .put("wavByteSize", wavIntegrity.byteSize)
                         .put("wavSha256", wavIntegrity.sha256)
                         .put(
@@ -3105,7 +3105,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     .put("sessionId", diagnostics.session.sessionId)
                     .put("stems", JSONArray(output.stems.map { stem ->
                         JSONObject()
-                            .put("semantic", stem.semantic.name)
+                            .put("semantic", stem.semanticId.value)
                             .put("sha256", requireNotNull(stem.wavIntegrity).sha256)
                     }))
                 )
@@ -3318,10 +3318,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
             )
             assertEquals(
                 beforeMatrixFullSong.output?.stems.orEmpty().associate { stem ->
-                    stem.semantic to requireNotNull(stem.wavIntegrity).sha256
+                    stem.stemId to requireNotNull(stem.wavIntegrity).sha256
                 },
                 afterMatrixFullSong.output?.stems.orEmpty().associate { stem ->
-                    stem.semantic to requireNotNull(stem.wavIntegrity).sha256
+                    stem.stemId to requireNotNull(stem.wavIntegrity).sha256
                 },
             )
 
@@ -6396,7 +6396,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("expectedFrameCount", output.outputFrameCount)
                 .put("frameDelta", 0)
                 .put("stemSemantics", output.stems.joinToString(",") {
-                    it.semantic.name
+                    it.semanticId.value
                 })
             )
             report.put("cache", report.getJSONObject("cache")
@@ -6620,7 +6620,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("frameDelta", 0)
                 .put("playerTimestampDriftMs", 0)
                 .put("stemSemantics", manifest.output?.stems?.joinToString(",") {
-                    it.semantic.name
+                    it.semanticId.value
                 } ?: "unknown")
             )
         } catch (error: Throwable) {
@@ -8305,7 +8305,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val manifestDestination = File(exportDirectory, "cache-manifest.json")
         copyArtifact(manifestSource, manifestDestination)
         val stemExports = requireNotNull(manifest.output).stems.associate { stem ->
-            val filePrefix = stem.semantic.name.lowercase()
+            val filePrefix = stem.semanticId.value
             val wavDestination = File(exportDirectory, "$filePrefix.wav")
             copyArtifact(
                 store.resolveRelativePath(entryDirectory, stem.wavPath),
@@ -8319,7 +8319,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     )
                 }
             }
-            stem.semantic.name to Phase7StemArtifactExport(
+            stem.semanticId.value to Phase7StemArtifactExport(
                 wavPathRelative = "files/$directoryRelative/${wavDestination.name}",
                 promotedPathRelative = promotedDestination?.let { destination ->
                     "files/$directoryRelative/${destination.name}"

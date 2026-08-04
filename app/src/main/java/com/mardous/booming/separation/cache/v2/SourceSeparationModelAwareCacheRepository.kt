@@ -1,7 +1,8 @@
 package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
-import com.mardous.booming.separation.model.contract.ContractStemSemantic
+import com.mardous.booming.separation.model.contract.StemDescriptor
+import com.mardous.booming.separation.model.contract.StemSemanticId
 import com.mardous.booming.separation.model.contract.toStemSet
 import java.io.File
 
@@ -56,10 +57,10 @@ class SourceSeparationModelAwareCacheRepository(
                 stemLabels = manifest.contract.stemContract.toStemSet().stems
                     .map { stem -> stem.canonicalLabel },
                 supportsStandardPlayback = manifest.output?.stems
-                    ?.map(SourceSeparationCacheRenderedStem::semantic)
+                    ?.map(SourceSeparationCacheRenderedStem::semanticId)
                     ?.toSet() == setOf(
-                    ContractStemSemantic.Vocals,
-                    ContractStemSemantic.Instrumental,
+                    StemSemanticId.Vocals,
+                    StemSemanticId.Instrumental,
                 ),
             )
         }
@@ -150,14 +151,14 @@ class SourceSeparationModelAwareCacheRepository(
             val segmentIndex = plan.segmentIndexForFrame(frame)
             val current = plan.segments.getOrNull(segmentIndex)
                 ?: return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
-            if (!current.isReady(manifest.cacheKey)) {
+            if (!current.hasCompleteReadyArtifactSet(store, manifest.cacheKey)) {
                 return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
             }
             var readyThroughSegmentIndex = segmentIndex
             var readyUntilFrame = current.playbackEndFrame
             for (index in (segmentIndex + 1)..plan.segments.lastIndex) {
                 val segment = plan.segments[index]
-                if (!segment.isReady(manifest.cacheKey)) break
+                if (!segment.hasCompleteReadyArtifactSet(store, manifest.cacheKey)) break
                 readyThroughSegmentIndex = index
                 readyUntilFrame = segment.playbackEndFrame
             }
@@ -202,7 +203,7 @@ class SourceSeparationModelAwareCacheRepository(
             ?: return SourceSeparationModelAwarePlayableStatus.Processing
         val sampleRate = plan.sampleRate.takeIf { it > 0 }
             ?: return SourceSeparationModelAwarePlayableStatus.Processing
-        if (plan.segments.isEmpty() || output.stems.size != 2) {
+        if (plan.segments.isEmpty() || output.stems.isEmpty()) {
             return SourceSeparationModelAwarePlayableStatus.Processing
         }
         val frame = ((playbackPositionMs.coerceAtLeast(0L) * sampleRate) / 1_000L)
@@ -212,9 +213,7 @@ class SourceSeparationModelAwareCacheRepository(
         val endExclusive = (startIndex + readyWindowCount.coerceAtLeast(1))
             .coerceAtMost(plan.segments.size)
         val ready = plan.segments.subList(startIndex, endExclusive).all { segment ->
-            segment.state.isPlaybackReady &&
-                store.resolveEntryPath(manifest.cacheKey, segment.vocalsPath).isFile &&
-                store.resolveEntryPath(manifest.cacheKey, segment.instrumentalPath).isFile
+            segment.hasCompleteReadyArtifactSet(store, manifest.cacheKey)
         }
         if (!ready) return SourceSeparationModelAwarePlayableStatus.Processing
         return openPlayback(manifest)?.let(SourceSeparationModelAwarePlayableStatus::Ready)
@@ -364,21 +363,22 @@ class SourceSeparationModelAwareCacheRepository(
     ): SourceSeparationModelAwareCachePlayback? {
         val lease = leases.tryAcquireRead(manifest.cacheKey) ?: return null
         return try {
-            val stems = manifest.output?.stems.orEmpty().associate { stem ->
-                stem.semantic to store.resolveEntryPath(manifest.cacheKey, stem.playbackPath())
+            val stems = manifest.output?.stems.orEmpty().map { stem ->
+                SourceSeparationPlaybackStemSource(
+                    descriptor = stem.descriptor(),
+                    file = store.resolveEntryPath(manifest.cacheKey, stem.playbackPath()),
+                )
             }
-            val vocals = stems[ContractStemSemantic.Vocals]
-                ?: return lease.close().let { null }
-            val instrumental = stems[ContractStemSemantic.Instrumental]
-                ?: return lease.close().let { null }
-            if (!vocals.isFile || !instrumental.isFile) {
+            val expectedStems = manifest.contract.stemContract.toStemSet().stems
+            if (stems.map(SourceSeparationPlaybackStemSource::descriptor) != expectedStems ||
+                stems.any { !it.file.isFile }
+            ) {
                 lease.close()
                 return null
             }
             SourceSeparationModelAwareCachePlayback(
                 manifest = manifest,
-                vocalsFile = vocals,
-                instrumentalFile = instrumental,
+                stems = stems,
                 timingFile = manifest.output?.timingPath?.let { path ->
                     store.resolveEntryPath(manifest.cacheKey, path).takeIf(File::isFile)
                 },
@@ -465,14 +465,6 @@ class SourceSeparationModelAwareCacheRepository(
         }
     }
 
-    private fun com.mardous.booming.separation.cache.SourceSeparationSegment.isReady(
-        cacheKey: String,
-    ): Boolean {
-        return state.isPlaybackReady &&
-            store.resolveEntryPath(cacheKey, vocalsPath).isFile &&
-            store.resolveEntryPath(cacheKey, instrumentalPath).isFile
-    }
-
     private fun File.directorySize(): Long {
         if (!isDirectory) return 0L
         return walkTopDown().filter(File::isFile).sumOf(File::length)
@@ -532,12 +524,35 @@ enum class SourceSeparationModelAwareCacheFormat {
 
 class SourceSeparationModelAwareCachePlayback internal constructor(
     val manifest: SourceSeparationCacheManifest,
-    val vocalsFile: File,
-    val instrumentalFile: File,
+    val stems: List<SourceSeparationPlaybackStemSource>,
     val timingFile: File?,
     private val closeAction: () -> Unit,
 ) : AutoCloseable {
+    init {
+        require(stems.isNotEmpty()) { "Cache playback stem set is empty." }
+        require(stems.map { it.descriptor.order } == stems.indices.toList()) {
+            "Cache playback stem order is not contiguous."
+        }
+        require(stems.map { it.descriptor.stemId }.distinct().size == stems.size) {
+            "Cache playback stem IDs are not unique."
+        }
+    }
+
+    val vocalsFile: File
+        get() = requireStemFile(StemSemanticId.Vocals)
+
+    val instrumentalFile: File
+        get() = requireStemFile(StemSemanticId.Instrumental)
+
     private var closed = false
+
+    fun fileFor(semanticId: StemSemanticId): File? =
+        stems.singleOrNull { it.descriptor.semanticId == semanticId }?.file
+
+    private fun requireStemFile(semanticId: StemSemanticId): File =
+        requireNotNull(fileFor(semanticId)) {
+            "Cache playback has no ${semanticId.value} stem."
+        }
 
     override fun close() {
         synchronized(this) {
@@ -547,6 +562,11 @@ class SourceSeparationModelAwareCachePlayback internal constructor(
         closeAction()
     }
 }
+
+data class SourceSeparationPlaybackStemSource(
+    val descriptor: StemDescriptor,
+    val file: File,
+)
 
 sealed class SourceSeparationModelAwarePlayableStatus {
     data class Ready(

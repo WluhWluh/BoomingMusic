@@ -3,6 +3,9 @@ package com.mardous.booming.separation.cache.v2
 import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
+import com.mardous.booming.separation.cache.SourceSeparationCacheRelativePath
+import com.mardous.booming.separation.model.contract.StemId
+import com.mardous.booming.separation.model.contract.toStemSet
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -32,6 +35,10 @@ data class SourceSeparationCacheRunJournal(
         require(committedSegments.map { it.segmentIndex }.distinct().size ==
             committedSegments.size
         ) { "Cache run journal contains duplicate segment records." }
+        val expectedStemIds = request.contract.stemContract.toStemSet().stems.map { it.stemId }
+        require(committedSegments.all { segment ->
+            segment.stems.map(SourceSeparationCacheCommittedStem::stemId) == expectedStemIds
+        }) { "Cache run journal contains an incomplete or reordered stem commit." }
         require(lastCommittedWindow == null || committedSegments.any {
             it.segmentIndex == lastCommittedWindow
         }) { "Cache run journal last window is not committed." }
@@ -215,7 +222,7 @@ data class SourceSeparationCacheRunJournal(
         }
 
     companion object {
-        const val SCHEMA_VERSION = 6
+        const val SCHEMA_VERSION = 7
 
         fun admitted(
             request: SourceSeparationCacheRunJournalRequest,
@@ -502,14 +509,32 @@ enum class SourceSeparationCacheRunJournalLifecycle {
 @Serializable
 data class SourceSeparationCacheCommittedSegment(
     val segmentIndex: Int,
-    val vocalsPath: String,
-    val vocalsIntegrity: SourceSeparationCacheFileIntegrity,
-    val instrumentalPath: String,
-    val instrumentalIntegrity: SourceSeparationCacheFileIntegrity,
+    val stems: List<SourceSeparationCacheCommittedStem>,
 ) {
     init {
         require(segmentIndex >= 0) { "Committed cache segment index is invalid." }
-        SourceSeparationCacheRelativePath.requireValid(vocalsPath)
-        SourceSeparationCacheRelativePath.requireValid(instrumentalPath)
+        require(stems.isNotEmpty()) { "Committed cache segment stem set is empty." }
+        require(stems.map(SourceSeparationCacheCommittedStem::stemId).distinct().size ==
+            stems.size
+        ) { "Committed cache segment stem IDs are not unique." }
+        require(stems.map(SourceSeparationCacheCommittedStem::order) == stems.indices.toList()) {
+            "Committed cache segment stem order is not contiguous."
+        }
+        require(stems.map(SourceSeparationCacheCommittedStem::path).distinct().size == stems.size) {
+            "Committed cache segment stem paths are not unique."
+        }
+    }
+}
+
+@Serializable
+data class SourceSeparationCacheCommittedStem(
+    val stemId: StemId,
+    val order: Int,
+    val path: String,
+    val integrity: SourceSeparationCacheFileIntegrity,
+) {
+    init {
+        require(order >= 0) { "Committed cache stem order is invalid." }
+        SourceSeparationCacheRelativePath.requireValid(path)
     }
 }

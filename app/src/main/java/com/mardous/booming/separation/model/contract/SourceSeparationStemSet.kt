@@ -1,7 +1,10 @@
 package com.mardous.booming.separation.model.contract
 
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import java.util.Locale
 
+@Serializable
 @JvmInline
 value class StemId(val value: String) {
     init {
@@ -9,8 +12,15 @@ value class StemId(val value: String) {
     }
 
     override fun toString(): String = value
+
+    companion object {
+        val Vocals = StemId("vocals")
+        val Instrumental = StemId("instrumental")
+        val MdxOrdered = listOf(Vocals, Instrumental)
+    }
 }
 
+@Serializable
 @JvmInline
 value class StemSemanticId(val value: String) {
     init {
@@ -34,6 +44,7 @@ value class StemSemanticId(val value: String) {
     }
 }
 
+@Serializable
 data class StemDescriptor(
     val stemId: StemId,
     val semanticId: StemSemanticId,
@@ -47,7 +58,10 @@ data class StemDescriptor(
     }
 }
 
+@Serializable
 sealed interface StemProduction {
+    @Serializable
+    @SerialName("direct-model-output")
     data class DirectModelOutput(
         val bindingId: String,
         val stemIndex: Int,
@@ -58,11 +72,15 @@ sealed interface StemProduction {
         }
     }
 
+    @Serializable
+    @SerialName("derived-residual")
     data class DerivedResidual(
         val sourceStemId: StemId,
         val rule: ContractResidualRule,
     ) : StemProduction
 
+    @Serializable
+    @SerialName("pipeline-native")
     data class PipelineNative(
         val stemIndex: Int,
     ) : StemProduction {
@@ -72,6 +90,7 @@ sealed interface StemProduction {
     }
 }
 
+@Serializable
 data class StemSet(
     val stems: List<StemDescriptor>,
 ) {
@@ -153,6 +172,19 @@ fun ContractStemSemantic.toSemanticId(): StemSemanticId = when (this) {
     ContractStemSemantic.NoCrowd -> StemSemanticId.NoCrowd
     ContractStemSemantic.TargetStem -> StemSemanticId.TargetStem
     ContractStemSemantic.RemainingAudio -> StemSemanticId.RemainingAudio
+}
+
+fun StemSemanticId.toContractSemanticOrNull(): ContractStemSemantic? = when (this) {
+    StemSemanticId.Vocals -> ContractStemSemantic.Vocals
+    StemSemanticId.Instrumental -> ContractStemSemantic.Instrumental
+    StemSemanticId.Bass -> ContractStemSemantic.Bass
+    StemSemanticId.Drums -> ContractStemSemantic.Drums
+    StemSemanticId.Other -> ContractStemSemantic.Other
+    StemSemanticId.Reverb -> ContractStemSemantic.Reverb
+    StemSemanticId.NoCrowd -> ContractStemSemantic.NoCrowd
+    StemSemanticId.TargetStem -> ContractStemSemantic.TargetStem
+    StemSemanticId.RemainingAudio -> ContractStemSemantic.RemainingAudio
+    else -> null
 }
 
 internal fun normalizeStemLabel(value: String): String =

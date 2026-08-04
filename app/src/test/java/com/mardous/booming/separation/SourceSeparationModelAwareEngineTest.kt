@@ -141,7 +141,7 @@ class SourceSeparationModelAwareEngineTest {
         )
         assertEquals("injected inference failure", manifest.error?.message)
         assertFalse(fixture.repository.isLeased(manifest.cacheKey))
-        assertFalse(fixture.store.resolveEntryPath(manifest.cacheKey, "completed/vocals.wav").exists())
+        assertFalse(fixture.store.resolveEntryPath(manifest.cacheKey, "completed/stem-00.wav").exists())
     }
 
     @Test
@@ -543,7 +543,7 @@ class SourceSeparationModelAwareEngineTest {
             identity.commandQueueWindowSize,
         )
         assertEquals(identity, fixture.currentRunJournal().request.gpuRuntimeIdentity)
-        assertEquals(6, fixture.currentRunJournal().journalSchemaVersion)
+        assertEquals(7, fixture.currentRunJournal().journalSchemaVersion)
     }
 
     @Test
@@ -1306,7 +1306,7 @@ class SourceSeparationModelAwareEngineTest {
                 defaultState = SourceSeparationSegmentState.Queued,
             )
             plan.segments.forEach { segment ->
-                listOf(segment.vocalsPath, segment.instrumentalPath).forEach { path ->
+                segment.stems.map { it.path }.forEach { path ->
                     store.resolveEntryPath(request.workspace.identity.cacheKey, path).apply {
                         parentFile?.mkdirs()
                         if (!preserveFiles || !exists()) writeText(path)

@@ -1,9 +1,7 @@
 package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
-import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import java.io.File
-import java.util.Locale
 
 class SourceSeparationCacheFlacPromoter(
     private val store: SourceSeparationCacheStore,
@@ -56,7 +54,7 @@ class SourceSeparationCacheFlacPromoter(
             val promotedStems = output.stems.map { stem ->
                 throwIfCanceled(shouldCancel)
                 val source = store.resolveEntryPath(manifest.cacheKey, stem.wavPath)
-                val baseName = stem.semantic.fileName()
+                val baseName = stemFileName(stem.order)
                 val stagedFlac = File(stagingDirectory, "$baseName.flac")
                 val encoded = encoder.encodeAndValidate(
                     wavFile = source,
@@ -118,8 +116,7 @@ class SourceSeparationCacheFlacPromoter(
         }
     }
 
-    private fun ContractStemSemantic.fileName(): String =
-        name.lowercase(Locale.US).replace('_', '-')
+    private fun stemFileName(order: Int): String = "stem-%02d".format(order)
 
     private fun throwIfCanceled(shouldCancel: () -> Boolean) {
         if (shouldCancel()) {

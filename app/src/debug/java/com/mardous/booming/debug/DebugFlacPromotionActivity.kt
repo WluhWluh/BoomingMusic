@@ -246,8 +246,7 @@ class DebugFlacPromotionActivity : Activity() {
             .filter { file ->
                 file.name.equals("vocals.wav", ignoreCase = true) ||
                         file.name.equals("instrumental.wav", ignoreCase = true) ||
-                        file.name.equals("vocals.flac", ignoreCase = true) ||
-                        file.name.equals("instrumental.flac", ignoreCase = true)
+                        file.nameWithoutExtension.matches(STEM_FILE_NAME)
             }
             .mapNotNull { file ->
                 runCatching {
@@ -372,6 +371,7 @@ class DebugFlacPromotionActivity : Activity() {
 
     private companion object {
         const val TAG = "DebugFlacPromotion"
+        val STEM_FILE_NAME = Regex("stem-[0-9]+", RegexOption.IGNORE_CASE)
         const val EXTRA_INPUT_DIR = "input_dir"
         const val EXTRA_OUTPUT_TAG = "output_tag"
         const val EXTRA_MAX_FILES = "max_files"

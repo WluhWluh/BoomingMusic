@@ -1,9 +1,8 @@
 package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
-import com.mardous.booming.separation.model.contract.ContractStemSemantic
+import com.mardous.booming.separation.model.contract.StemSemanticId
 import java.io.File
-import java.util.Locale
 
 class SourceSeparationCacheHydrator(
     private val store: SourceSeparationCacheStore,
@@ -46,18 +45,20 @@ class SourceSeparationCacheHydrator(
                 ?: return lease.close().let { null }
             val marker = store.readHydrationMarker(manifest)
                 ?: return lease.close().let { null }
-            val stems = marker.stems.associate { stem ->
-                stem.semantic to store.resolveEntryPath(cacheKey, stem.pcmPath)
+            val descriptors = manifest.output?.stems.orEmpty().associateBy { it.stemId }
+            val stems = marker.stems.map { stem ->
+                val descriptor = descriptors[stem.stemId]?.descriptor()
+                    ?: return lease.close().let { null }
+                SourceSeparationPlaybackStemSource(
+                    descriptor = descriptor,
+                    file = store.resolveEntryPath(cacheKey, stem.pcmPath),
+                )
             }
-            val vocals = stems[ContractStemSemantic.Vocals]
-                ?: return lease.close().let { null }
-            val instrumental = stems[ContractStemSemantic.Instrumental]
-                ?: return lease.close().let { null }
+            if (stems.any { !it.file.isFile }) return lease.close().let { null }
             SourceSeparationModelAwareHydratedPlayback(
                 manifest = manifest,
                 marker = marker,
-                vocalsPcmFile = vocals,
-                instrumentalPcmFile = instrumental,
+                stems = stems,
                 closeAction = lease::close,
             )
         } catch (error: Throwable) {
@@ -77,7 +78,8 @@ class SourceSeparationCacheHydrator(
         return try {
             val sources = output.stems.map { stem ->
                 SourceSeparationCacheHydrationSource(
-                    semantic = stem.semantic,
+                    stemId = stem.stemId,
+                    order = stem.order,
                     path = stem.playbackPath(),
                     integrity = requireNotNull(stem.promotedIntegrity),
                 )
@@ -85,7 +87,8 @@ class SourceSeparationCacheHydrator(
             val hydrated = output.stems.map { stem ->
                 throwIfCanceled(shouldCancel)
                 val source = store.resolveEntryPath(manifest.cacheKey, stem.playbackPath())
-                val stagedPcm = File(staging, "${stem.semantic.fileName()}.pcm")
+                val fileName = stemFileName(stem.order)
+                val stagedPcm = File(staging, "$fileName.pcm")
                 decoder.decode(
                     flacFile = source,
                     pcmFile = stagedPcm,
@@ -101,13 +104,13 @@ class SourceSeparationCacheHydrator(
                 require(stagedPcm.length() == expectedBytes) {
                     "Hydrated PCM size does not match the rendered stem."
                 }
-                val path = "hydration/v1/${stem.semantic.fileName()}.pcm"
+                val path = "$HYDRATION_OUTPUT_DIRECTORY/$fileName.pcm"
                 val integrity = store.copyIntoEntryAtomically(
                     cacheKey = manifest.cacheKey,
                     source = stagedPcm,
                     relativePath = path,
                 )
-                SourceSeparationCacheHydratedStem(stem.semantic, path, integrity)
+                SourceSeparationCacheHydratedStem(stem.stemId, stem.order, path, integrity)
             }
             throwIfCanceled(shouldCancel)
             val marker = SourceSeparationCacheHydrationMarker(
@@ -126,8 +129,7 @@ class SourceSeparationCacheHydrator(
         }
     }
 
-    private fun ContractStemSemantic.fileName(): String =
-        name.lowercase(Locale.US).replace('_', '-')
+    private fun stemFileName(order: Int): String = "stem-%02d".format(order)
 
     private fun throwIfCanceled(shouldCancel: () -> Boolean) {
         if (shouldCancel()) {
@@ -136,7 +138,7 @@ class SourceSeparationCacheHydrator(
     }
 
     companion object {
-        const val HYDRATION_OUTPUT_DIRECTORY = "hydration/v1"
+        const val HYDRATION_OUTPUT_DIRECTORY = "hydration/v2"
         const val HYDRATION_STAGING_DIRECTORY = "hydration/staging"
     }
 }
@@ -181,11 +183,31 @@ private object PcmSourceSeparationCacheFlacDecoder : SourceSeparationCacheFlacDe
 class SourceSeparationModelAwareHydratedPlayback internal constructor(
     val manifest: SourceSeparationCacheManifest,
     val marker: SourceSeparationCacheHydrationMarker,
-    val vocalsPcmFile: File,
-    val instrumentalPcmFile: File,
+    val stems: List<SourceSeparationPlaybackStemSource>,
     private val closeAction: () -> Unit,
 ) : AutoCloseable {
+    init {
+        require(stems.isNotEmpty()) { "Hydrated playback stem set is empty." }
+        require(stems.map { it.descriptor.order } == stems.indices.toList()) {
+            "Hydrated playback stem order is not contiguous."
+        }
+    }
+
+    val vocalsPcmFile: File
+        get() = requireStemFile(StemSemanticId.Vocals)
+
+    val instrumentalPcmFile: File
+        get() = requireStemFile(StemSemanticId.Instrumental)
+
     private var closed = false
+
+    fun fileFor(semanticId: StemSemanticId): File? =
+        stems.singleOrNull { it.descriptor.semanticId == semanticId }?.file
+
+    private fun requireStemFile(semanticId: StemSemanticId): File =
+        requireNotNull(fileFor(semanticId)) {
+            "Hydrated playback has no ${semanticId.value} stem."
+        }
 
     override fun close() {
         synchronized(this) {

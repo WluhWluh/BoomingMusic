@@ -47,12 +47,12 @@ class SourceSeparationCacheFlacPromoterTest {
             fixture.store.validateCompletedEntry(promoted.manifest),
         )
         val playback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
-        assertEquals("vocals.flac", playback.vocalsFile.name)
-        assertEquals("instrumental.flac", playback.instrumentalFile.name)
+        assertEquals("stem-00.flac", playback.vocalsFile.name)
+        assertEquals("stem-01.flac", playback.instrumentalFile.name)
         assertFalse(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
         playback.close()
         assertTrue(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
-        assertFalse(fixture.store.resolveEntryPath(completed.cacheKey, "completed/vocals.wav").exists())
+        assertFalse(fixture.store.resolveEntryPath(completed.cacheKey, "completed/stem-00.wav").exists())
         assertEquals(
             SourceSeparationCacheValidationResult.Valid,
             fixture.store.validateCompletedEntry(
@@ -271,7 +271,7 @@ class SourceSeparationCacheFlacPromoterTest {
                 defaultState = SourceSeparationSegmentState.Ready,
             )
             plan.segments.forEach { segment ->
-                listOf(segment.vocalsPath, segment.instrumentalPath).forEach { path ->
+                segment.stems.map { it.path }.forEach { path ->
                     store.resolveEntryPath(run.identity.cacheKey, path).apply {
                         parentFile?.mkdirs()
                         writeText(path)

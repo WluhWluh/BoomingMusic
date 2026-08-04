@@ -5,10 +5,12 @@ import com.mardous.booming.separation.model.contract.ContractConversion
 import com.mardous.booming.separation.model.contract.ContractDtype
 import com.mardous.booming.separation.model.contract.ContractResidualRule
 import com.mardous.booming.separation.model.contract.ContractSource
-import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.ContractTensor
 import com.mardous.booming.separation.model.contract.ContractTensorLayout
 import com.mardous.booming.separation.model.contract.ContractWindow
+import com.mardous.booming.separation.model.contract.StemDescriptor
+import com.mardous.booming.separation.model.contract.StemProduction
+import com.mardous.booming.separation.model.contract.toStemSet
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContract
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractValidator
@@ -70,7 +72,7 @@ data class SourceSeparationCacheIdentity(
         )
 
     companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
         const val FP32_RENDER_PROFILE_ID = "mdx-fp32-render-v1"
     }
 }
@@ -234,9 +236,9 @@ object SourceSeparationCacheContractFingerprint {
     fun from(snapshot: SourceSeparationCacheContractSnapshot): String {
         val tensor = snapshot.tensorContract
         val dsp = snapshot.dsp
-        val stems = snapshot.stemContract
+        val stems = snapshot.stemContract.toStemSet()
         return SourceSeparationCacheCanonicalEncoding.sha256(
-            namespace = "booming-ss-cache-contract-v1",
+            namespace = "booming-ss-cache-contract-v2",
             fields = buildList {
                 addTensor(tensor.input)
                 addTensor(tensor.output)
@@ -251,9 +253,7 @@ object SourceSeparationCacheContractFingerprint {
                 add(dsp.modelTimeFrames.toString())
                 add(dsp.window.canonicalName())
                 add(dsp.modelOutputScale.toBits().toString())
-                addStem(stems.modelOutput.semantic)
-                addStem(stems.residual.semantic)
-                add(stems.residualRule.canonicalName())
+                stems.stems.forEach { stem -> addStem(stem) }
                 add(snapshot.pipelineId)
                 add(snapshot.pipelineVersion.toString())
             },
@@ -267,8 +267,26 @@ object SourceSeparationCacheContractFingerprint {
         add(tensor.shape.joinToString(","))
     }
 
-    private fun MutableList<String>.addStem(semantic: ContractStemSemantic) {
-        add(semantic.canonicalName())
+    private fun MutableList<String>.addStem(stem: StemDescriptor) {
+        add(stem.stemId.value)
+        add(stem.semanticId.value)
+        add(stem.order.toString())
+        when (val production = stem.production) {
+            is StemProduction.DirectModelOutput -> {
+                add("direct-model-output")
+                add(production.bindingId)
+                add(production.stemIndex.toString())
+            }
+            is StemProduction.DerivedResidual -> {
+                add("derived-residual")
+                add(production.sourceStemId.value)
+                add(production.rule.canonicalName())
+            }
+            is StemProduction.PipelineNative -> {
+                add("pipeline-native")
+                add(production.stemIndex.toString())
+            }
+        }
     }
 
     private fun ContractTensorLayout.canonicalName(): String = when (this) {
@@ -288,17 +306,6 @@ object SourceSeparationCacheContractFingerprint {
             "mixture-minus-scaled-model-output"
     }
 
-    private fun ContractStemSemantic.canonicalName(): String = when (this) {
-        ContractStemSemantic.Vocals -> "vocals"
-        ContractStemSemantic.Instrumental -> "instrumental"
-        ContractStemSemantic.Bass -> "bass"
-        ContractStemSemantic.Drums -> "drums"
-        ContractStemSemantic.Other -> "other"
-        ContractStemSemantic.Reverb -> "reverb"
-        ContractStemSemantic.NoCrowd -> "no_crowd"
-        ContractStemSemantic.TargetStem -> "target_stem"
-        ContractStemSemantic.RemainingAudio -> "remaining_audio"
-    }
 }
 
 private object SourceSeparationCacheCanonicalEncoding {

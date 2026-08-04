@@ -15,6 +15,7 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultInjection
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultRuntimeDiagnostics
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultStage
+import com.mardous.booming.separation.model.contract.StemId
 import java.io.File
 import java.util.LinkedHashMap
 import java.util.Locale
@@ -114,6 +115,11 @@ class MdxRangeSeparator(
             generationSize = config.generationSize,
             trim = config.trim,
             chunkSize = config.chunkSize,
+            stemIds = if (executionProfile.modelOutputStem == MdxStem.VOCALS) {
+                StemId.MdxOrdered
+            } else {
+                StemId.MdxOrdered.reversed()
+            },
             defaultState = if (segmentOutputDir != null) {
                 SourceSeparationSegmentState.Queued
             } else {
@@ -403,36 +409,45 @@ class MdxRangeSeparator(
                                 frames = writeFrames,
                             )
                         }
+                        val windowResult = SourceSeparationWindowResult(
+                            frameCount = writeFrames,
+                            channelCount = MdxDspConfig.STEREO_CHANNELS,
+                            stems = segment.stems.map { stem ->
+                                SourceSeparationStemChunk(
+                                    stemId = stem.stemId,
+                                    order = stem.order,
+                                    pcm16 = when (stem.stemId) {
+                                        StemId.Vocals -> vocalsPcm
+                                        StemId.Instrumental -> instrumentalPcm
+                                        else -> error("MDX cannot render stem ${stem.stemId}.")
+                                    },
+                                )
+                            },
+                        )
                         measureElapsed(timing, "WAV write") {
                             val writeFrameOffset = generationStartFrame - startFrame
-                            if (declaredOutputDataSizeBytes != null) {
+                            windowResult.stems.forEach { stem ->
+                                val writer = when (stem.stemId) {
+                                    StemId.Vocals -> vocalsWriter
+                                    StemId.Instrumental -> instrumentalWriter
+                                    else -> error("MDX cannot write stem ${stem.stemId}.")
+                                }
                                 requireWorkspaceAvailable()
-                                vocalsWriter.writePcm16AtFrame(writeFrameOffset, vocalsPcm)
-                                requireWorkspaceAvailable()
-                                instrumentalWriter.writePcm16AtFrame(writeFrameOffset, instrumentalPcm)
-                            } else {
-                                requireWorkspaceAvailable()
-                                vocalsWriter.writePcm16(vocalsPcm)
-                                requireWorkspaceAvailable()
-                                instrumentalWriter.writePcm16(instrumentalPcm)
-                            }
-                            if (segmentOutputDir != null) {
-                                requireWorkspaceAvailable()
-                                writeSegmentWav(
-                                    segmentOutputDir,
-                                    segment.vocalsPath,
-                                    vocalsPcm,
-                                    segmentPublicationId,
-                                    requireWorkspaceAvailable,
-                                )
-                                requireWorkspaceAvailable()
-                                writeSegmentWav(
-                                    segmentOutputDir,
-                                    segment.instrumentalPath,
-                                    instrumentalPcm,
-                                    segmentPublicationId,
-                                    requireWorkspaceAvailable,
-                                )
+                                if (declaredOutputDataSizeBytes != null) {
+                                    writer.writePcm16AtFrame(writeFrameOffset, stem.pcm16)
+                                } else {
+                                    writer.writePcm16(stem.pcm16)
+                                }
+                                if (segmentOutputDir != null) {
+                                    requireWorkspaceAvailable()
+                                    writeSegmentWav(
+                                        segmentOutputDir,
+                                        segment.pathFor(stem.stemId),
+                                        stem.pcm16,
+                                        segmentPublicationId,
+                                        requireWorkspaceAvailable,
+                                    )
+                                }
                             }
                         }
                         processedSegments += segment.index

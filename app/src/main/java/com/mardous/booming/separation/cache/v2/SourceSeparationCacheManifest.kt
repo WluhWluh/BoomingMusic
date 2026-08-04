@@ -1,7 +1,13 @@
 package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
-import com.mardous.booming.separation.model.contract.ContractStemSemantic
+import com.mardous.booming.separation.cache.SourceSeparationCacheRelativePath
+import com.mardous.booming.separation.model.contract.StemDescriptor
+import com.mardous.booming.separation.model.contract.StemId
+import com.mardous.booming.separation.model.contract.StemProduction
+import com.mardous.booming.separation.model.contract.StemSemanticId
+import com.mardous.booming.separation.model.contract.StemSet
+import com.mardous.booming.separation.model.contract.toStemSet
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -52,16 +58,18 @@ data class SourceSeparationCacheManifest(
         require(createdAtEpochMs >= 0L) { "Cache creation time is invalid." }
         require(updatedAtEpochMs >= createdAtEpochMs) { "Cache update time is invalid." }
         require(lastAccessedAtEpochMs >= createdAtEpochMs) { "Cache access time is invalid." }
-        output?.validate(state)
-        segmentPlan?.segments?.forEach { segment ->
-            SourceSeparationCacheRelativePath.requireValid(segment.vocalsPath)
-            SourceSeparationCacheRelativePath.requireValid(segment.instrumentalPath)
+        val expectedStems = contract.stemContract.toStemSet()
+        output?.validate(state, expectedStems, contract.dsp.channelCount)
+        segmentPlan?.let { plan ->
+            require(plan.stemIds == expectedStems.stems.map(StemDescriptor::stemId)) {
+                "Cache segment plan does not match the contract stem set."
+            }
         }
         cleanup?.paths?.forEach(SourceSeparationCacheRelativePath::requireValid)
     }
 
     companion object {
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
     }
 }
 
@@ -99,19 +107,41 @@ data class SourceSeparationCacheOutput(
     val totalBytes: Long,
 ) {
     init {
-        require(stems.size == 2) { "A cache output must contain exactly two stems." }
-        require(stems.map { it.semantic }.distinct().size == stems.size) {
-            "Cache output stem semantics must be unique."
+        require(stems.isNotEmpty()) { "A cache output must contain at least one stem." }
+        require(stems.map(SourceSeparationCacheRenderedStem::stemId).distinct().size == stems.size) {
+            "Cache output stem IDs must be unique."
+        }
+        require(stems.map(SourceSeparationCacheRenderedStem::order) == stems.indices.toList()) {
+            "Cache output stem order must be contiguous."
+        }
+        val artifactPaths = stems.flatMap { stem ->
+            listOfNotNull(stem.wavPath, stem.promotedPath, stem.promotedIndexPath)
+        }
+        require(artifactPaths.distinct().size == artifactPaths.size) {
+            "Cache output artifact paths must be unique."
         }
         timingPath?.let(SourceSeparationCacheRelativePath::requireValid)
         require(outputSampleRate > 0) { "Cache output sample rate is invalid." }
         require(outputFrameCount > 0) { "Cache output frame count is invalid." }
+        require(stems.all { stem ->
+            stem.sampleRate == outputSampleRate && stem.frameCount == outputFrameCount
+        }) { "Cache output stem audio geometry is inconsistent." }
         require(windowCount > 0) { "Cache output window count is invalid." }
         require(elapsedMs >= 0L) { "Cache output elapsed time is invalid." }
         require(totalBytes >= 0L) { "Cache output size is invalid." }
     }
 
-    internal fun validate(state: SourceSeparationCacheManifestState) {
+    internal fun validate(
+        state: SourceSeparationCacheManifestState,
+        expectedStemSet: StemSet,
+        expectedChannelCount: Int,
+    ) {
+        require(stems.map(SourceSeparationCacheRenderedStem::descriptor) ==
+            expectedStemSet.stems
+        ) { "Cache output does not match the complete contract stem set." }
+        require(stems.all { it.channelCount == expectedChannelCount }) {
+            "Cache output stem channel count does not match the contract."
+        }
         if (state == SourceSeparationCacheManifestState.Completed) {
             require(stems.all { stem ->
                 if (stem.promotionValidated) {
@@ -128,8 +158,11 @@ data class SourceSeparationCacheOutput(
 
 @Serializable
 data class SourceSeparationCacheRenderedStem(
-    val semantic: ContractStemSemantic,
-    val displayLabel: String,
+    val stemId: StemId,
+    val semanticId: StemSemanticId,
+    val canonicalLabel: String,
+    val order: Int,
+    val production: StemProduction,
     val wavPath: String,
     val promotedPath: String? = null,
     val promotedFormat: SourceSeparationCacheAudioFormat? = null,
@@ -143,7 +176,7 @@ data class SourceSeparationCacheRenderedStem(
     val promotedIndexIntegrity: SourceSeparationCacheFileIntegrity? = null,
 ) {
     init {
-        require(displayLabel.isNotBlank()) { "Cache output stem label is empty." }
+        StemDescriptor(stemId, semanticId, canonicalLabel, order, production)
         SourceSeparationCacheRelativePath.requireValid(wavPath)
         promotedPath?.let(SourceSeparationCacheRelativePath::requireValid)
         require((promotedPath == null) == (promotedFormat == null)) {
@@ -165,6 +198,14 @@ data class SourceSeparationCacheRenderedStem(
         require(sampleRate > 0) { "Cache stem sample rate is invalid." }
         require(frameCount > 0) { "Cache stem frame count is invalid." }
     }
+
+    fun descriptor(): StemDescriptor = StemDescriptor(
+        stemId = stemId,
+        semanticId = semanticId,
+        canonicalLabel = canonicalLabel,
+        order = order,
+        production = production,
+    )
 
     fun playbackPath(): String = promotedPath.takeIf { promotionValidated } ?: wavPath
 }
@@ -257,26 +298,6 @@ data class SourceSeparationCachePlaybackSettings(
     }
 }
 
-object SourceSeparationCacheRelativePath {
-    fun requireValid(path: String) {
-        require(path.isNotBlank()) { "Cache path is empty." }
-        require(!path.startsWith('/') && !path.startsWith('\\')) {
-            "Cache path must be relative."
-        }
-        require(!WINDOWS_DRIVE_PATH.matches(path)) { "Cache path must not use a drive root." }
-        require('\\' !in path) { "Cache path must use forward slashes." }
-        val parts = path.split('/')
-        require(parts.none { it.isBlank() || it == "." || it == ".." }) {
-            "Cache path contains an unsafe segment."
-        }
-        require(parts.none { ':' in it || '\u0000' in it }) {
-            "Cache path contains an unsafe character."
-        }
-    }
-
-    private val WINDOWS_DRIVE_PATH = Regex("^[A-Za-z]:.*")
-}
-
 @Serializable
 data class SourceSeparationCacheHydrationMarker(
     val hydrationSchemaVersion: Int = SCHEMA_VERSION,
@@ -290,15 +311,32 @@ data class SourceSeparationCacheHydrationMarker(
             "Unsupported cache hydration schema: $hydrationSchemaVersion"
         }
         require(CACHE_KEY_PATTERN.matches(cacheKey)) { "Hydration cache key is invalid." }
-        require(sources.size == 2 && stems.size == 2) {
-            "Hydration requires exactly two source and PCM stems."
+        require(sources.isNotEmpty() && sources.size == stems.size) {
+            "Hydration requires matching non-empty source and PCM stem sets."
         }
-        require(sources.map { it.semantic }.distinct().size == sources.size) {
-            "Hydration source semantics must be unique."
+        require(sources.map(SourceSeparationCacheHydrationSource::stemId).distinct().size ==
+            sources.size
+        ) {
+            "Hydration source stem IDs must be unique."
         }
-        require(stems.map { it.semantic }.distinct().size == stems.size) {
-            "Hydration PCM semantics must be unique."
+        require(stems.map(SourceSeparationCacheHydratedStem::stemId).distinct().size == stems.size) {
+            "Hydration PCM stem IDs must be unique."
         }
+        require(sources.map(SourceSeparationCacheHydrationSource::order) ==
+            sources.indices.toList() &&
+            stems.map(SourceSeparationCacheHydratedStem::order) == stems.indices.toList()
+        ) {
+            "Hydration stem order must be contiguous."
+        }
+        require(sources.map(SourceSeparationCacheHydrationSource::stemId) ==
+            stems.map(SourceSeparationCacheHydratedStem::stemId)
+        ) {
+            "Hydration source and PCM stem sets do not match."
+        }
+        require(sources.map(SourceSeparationCacheHydrationSource::path).distinct().size ==
+            sources.size &&
+            stems.map(SourceSeparationCacheHydratedStem::pcmPath).distinct().size == stems.size
+        ) { "Hydration stem paths must be unique." }
         require(createdAtEpochMs >= 0L) { "Hydration creation time is invalid." }
     }
 
@@ -308,9 +346,16 @@ data class SourceSeparationCacheHydrationMarker(
         ) {
             return false
         }
-        val outputStems = manifest.output?.stems.orEmpty().associateBy { it.semantic }
+        val outputStems = manifest.output?.stems.orEmpty()
+        if (sources.map(SourceSeparationCacheHydrationSource::stemId) !=
+            outputStems.map(SourceSeparationCacheRenderedStem::stemId)
+        ) {
+            return false
+        }
         return sources.all { source ->
-            val output = outputStems[source.semantic] ?: return@all false
+            val output = outputStems.getOrNull(source.order)
+                ?.takeIf { it.stemId == source.stemId }
+                ?: return@all false
             val integrity = if (output.promotionValidated) {
                 output.promotedIntegrity
             } else {
@@ -321,29 +366,33 @@ data class SourceSeparationCacheHydrationMarker(
     }
 
     companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
         private val CACHE_KEY_PATTERN = Regex("^[0-9a-f]{64}$")
     }
 }
 
 @Serializable
 data class SourceSeparationCacheHydrationSource(
-    val semantic: ContractStemSemantic,
+    val stemId: StemId,
+    val order: Int,
     val path: String,
     val integrity: SourceSeparationCacheFileIntegrity,
 ) {
     init {
+        require(order >= 0) { "Hydration source stem order is invalid." }
         SourceSeparationCacheRelativePath.requireValid(path)
     }
 }
 
 @Serializable
 data class SourceSeparationCacheHydratedStem(
-    val semantic: ContractStemSemantic,
+    val stemId: StemId,
+    val order: Int,
     val pcmPath: String,
     val integrity: SourceSeparationCacheFileIntegrity,
 ) {
     init {
+        require(order >= 0) { "Hydrated PCM stem order is invalid." }
         SourceSeparationCacheRelativePath.requireValid(pcmPath)
     }
 }

@@ -2653,12 +2653,14 @@ internal object SourceSeparationMainDeathDebugHarness {
     ): JSONArray = JSONArray(journal.committedSegments.map { segment ->
         JSONObject()
             .put("segmentIndex", segment.segmentIndex)
-            .put("vocalsPath", segment.vocalsPath)
-            .put("vocalsByteSize", segment.vocalsIntegrity.byteSize)
-            .put("vocalsSha256", segment.vocalsIntegrity.sha256)
-            .put("instrumentalPath", segment.instrumentalPath)
-            .put("instrumentalByteSize", segment.instrumentalIntegrity.byteSize)
-            .put("instrumentalSha256", segment.instrumentalIntegrity.sha256)
+            .put("stems", JSONArray(segment.stems.map { stem ->
+                JSONObject()
+                    .put("stemId", stem.stemId.value)
+                    .put("order", stem.order)
+                    .put("path", stem.path)
+                    .put("byteSize", stem.integrity.byteSize)
+                    .put("sha256", stem.integrity.sha256)
+            }))
     })
 
     private fun validateCommittedSegmentEvidence(
@@ -2672,14 +2674,16 @@ internal object SourceSeparationMainDeathDebugHarness {
             val segment = requireNotNull(finalByIndex[expected.getInt("segmentIndex")]) {
                 "A segment committed before main-process death disappeared."
             }
-            check(segment.vocalsPath == expected.getString("vocalsPath"))
-            check(segment.vocalsIntegrity.byteSize == expected.getLong("vocalsByteSize"))
-            check(segment.vocalsIntegrity.sha256 == expected.getString("vocalsSha256"))
-            check(segment.instrumentalPath == expected.getString("instrumentalPath"))
-            check(segment.instrumentalIntegrity.byteSize ==
-                expected.getLong("instrumentalByteSize"))
-            check(segment.instrumentalIntegrity.sha256 ==
-                expected.getString("instrumentalSha256"))
+            val expectedStems = expected.getJSONArray("stems")
+            check(segment.stems.size == expectedStems.length())
+            segment.stems.forEachIndexed { stemIndex, stem ->
+                val expectedStem = expectedStems.getJSONObject(stemIndex)
+                check(stem.stemId.value == expectedStem.getString("stemId"))
+                check(stem.order == expectedStem.getInt("order"))
+                check(stem.path == expectedStem.getString("path"))
+                check(stem.integrity.byteSize == expectedStem.getLong("byteSize"))
+                check(stem.integrity.sha256 == expectedStem.getString("sha256"))
+            }
         }
     }
 

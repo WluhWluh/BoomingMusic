@@ -17,6 +17,7 @@ import com.mardous.booming.separation.model.MdxSourceDecodeMode
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
+import com.mardous.booming.separation.model.contract.toStemSet
 import com.mardous.booming.separation.model.litert.MdxLiteRtBoundedGpuContract
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -61,7 +62,10 @@ class SourceSeparationCacheRunCoordinatorTest {
         fixture.coordinator.updatePreparation(first, preparation)
         fixture.coordinator.pause(first)
         val missing = preparation.segmentPlan.segments[1]
-        fixture.store.resolveEntryPath(first.identity.cacheKey, missing.vocalsPath).delete()
+        fixture.store.resolveEntryPath(
+            first.identity.cacheKey,
+            missing.stems.first().path,
+        ).delete()
 
         val resumed = fixture.beginReady()
         val resumeState = requireNotNull(resumed.resumeState)
@@ -135,6 +139,29 @@ class SourceSeparationCacheRunCoordinatorTest {
             SourceSeparationCacheValidationResult.Valid,
             fixture.store.validateCompletedEntry(requireNotNull(fixture.store.readManifest(completed.cacheKey))),
         )
+    }
+
+    @Test
+    fun `instrumental output model preserves contract order without swapping playback semantics`() {
+        val fixture = fixture(modelId = "uvr_mdxnet_inst_hq_4")
+        val run = fixture.beginReady()
+        val preparation = fixture.preparation(run, SourceSeparationSegmentState.Ready)
+        fixture.coordinator.updatePreparation(run, preparation)
+
+        val completed = fixture.coordinator.complete(run, fixture.result(preparation))
+
+        assertEquals(
+            listOf("instrumental", "vocals"),
+            completed.output!!.stems.map { it.stemId.value },
+        )
+        assertEquals(
+            listOf("completed/stem-00.wav", "completed/stem-01.wav"),
+            completed.output.stems.map { it.wavPath },
+        )
+        requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey)).use { playback ->
+            assertEquals("stem-00.wav", playback.instrumentalFile.name)
+            assertEquals("stem-01.wav", playback.vocalsFile.name)
+        }
     }
 
     @Test
@@ -229,15 +256,25 @@ class SourceSeparationCacheRunCoordinatorTest {
 
         val committed = requireNotNull(fixture.store.readRunJournal(first.identity.cacheKey))
             .committedSegments.single()
-        assertTrue(
-            fixture.store.validateIntegrity(
-                first.identity.cacheKey,
-                committed.vocalsPath,
-                committed.vocalsIntegrity,
+        val journal = requireNotNull(fixture.store.readRunJournal(first.identity.cacheKey))
+        assertThrows(IllegalArgumentException::class.java) {
+            journal.copy(
+                committedSegments = listOf(
+                    committed.copy(stems = committed.stems.dropLast(1)),
+                ),
             )
-        )
+        }
+        committed.stems.forEach { stem ->
+            assertTrue(
+                fixture.store.validateIntegrity(
+                    first.identity.cacheKey,
+                    stem.path,
+                    stem.integrity,
+                )
+            )
+        }
         fixture.coordinator.pause(first)
-        fixture.store.resolveEntryPath(first.identity.cacheKey, committed.vocalsPath)
+        fixture.store.resolveEntryPath(first.identity.cacheKey, committed.stems.first().path)
             .appendText("corrupt")
 
         val resumed = fixture.beginReady()
@@ -251,7 +288,10 @@ class SourceSeparationCacheRunCoordinatorTest {
                 .committedSegments.isEmpty()
         )
         assertFalse(
-            fixture.store.resolveEntryPath(resumed.identity.cacheKey, committed.vocalsPath).exists()
+            fixture.store.resolveEntryPath(
+                resumed.identity.cacheKey,
+                committed.stems.first().path,
+            ).exists()
         )
         fixture.coordinator.pause(resumed)
     }
@@ -463,7 +503,7 @@ class SourceSeparationCacheRunCoordinatorTest {
                 .gpuRuntimeIdentity,
         )
         assertEquals(
-            6,
+            7,
             fixture.store.readRunJournal(gpuRequest.identity.cacheKey)?.journalSchemaVersion,
         )
         fixture.coordinator.pause(first.run)
@@ -657,7 +697,7 @@ class SourceSeparationCacheRunCoordinatorTest {
 
         assertEquals(connected, duplicateConnected)
         assertEquals(disconnected, duplicateDisconnected)
-        assertEquals(6, disconnected.journalSchemaVersion)
+        assertEquals(7, disconnected.journalSchemaVersion)
         assertEquals(
             listOf(
                 SourceSeparationCacheRunTransitionType.ObserverConnected,
@@ -754,7 +794,10 @@ class SourceSeparationCacheRunCoordinatorTest {
         commandQueueWindowSize = MdxLiteRtBoundedGpuContract.COMMAND_QUEUE_WINDOW_SIZE,
     )
 
-    private fun fixture(nowEpochMs: () -> Long = { 10L }): CoordinatorFixture {
+    private fun fixture(
+        modelId: String = "uvr_mdxnet_3_9662",
+        nowEpochMs: () -> Long = { 10L },
+    ): CoordinatorFixture {
         val store = SourceSeparationCacheStore(
             root = SourceSeparationCacheRoot(
                 directory = temporary.newFolder().absoluteFile,
@@ -775,7 +818,7 @@ class SourceSeparationCacheRunCoordinatorTest {
             nowEpochMs = nowEpochMs,
         )
         val contract = SourceSeparationCacheContractSnapshot.fromOfficial(
-            catalog.contracts.single { it.modelId == "uvr_mdxnet_3_9662" }
+            catalog.contracts.single { it.modelId == modelId }
         )
         return CoordinatorFixture(
             store = store,
@@ -833,10 +876,11 @@ class SourceSeparationCacheRunCoordinatorTest {
                 generationSize = 44_100,
                 trim = 1_024,
                 chunkSize = 46_148,
+                stemIds = first.contract.stemContract.toStemSet().stems.map { it.stemId },
                 defaultState = state,
             )
             plan.segments.forEach { segment ->
-                listOf(segment.vocalsPath, segment.instrumentalPath).forEach { path ->
+                segment.stems.map { it.path }.forEach { path ->
                     store.resolveEntryPath(first.identity.cacheKey, path).apply {
                         parentFile?.mkdirs()
                         writeText(path)
@@ -861,7 +905,7 @@ class SourceSeparationCacheRunCoordinatorTest {
         }
 
         fun result(preparation: MdxRangePreparation): MdxRangeSeparationResult {
-            val profile = catalog.contracts.single { it.modelId == "uvr_mdxnet_3_9662" }
+            val profile = catalog.contracts.single { it.modelId == request.contract.modelId }
                 .toMdxExecutionProfile(catalog.runtimeQualifications)
             val diagnostics = MdxRuntimeDiagnostics(
                 runtimeName = "fake-litert",

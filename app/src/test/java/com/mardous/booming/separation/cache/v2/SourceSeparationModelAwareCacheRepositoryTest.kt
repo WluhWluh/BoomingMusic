@@ -124,7 +124,10 @@ class SourceSeparationModelAwareCacheRepositoryTest {
         assertTrue(ready is SourceSeparationModelAwarePlayableStatus.Ready)
         (ready as SourceSeparationModelAwarePlayableStatus.Ready).playback.close()
 
-        store.resolveEntryPath(running.cacheKey, running.segmentPlan!!.segments[1].vocalsPath)
+        store.resolveEntryPath(
+            running.cacheKey,
+            running.segmentPlan!!.segments[1].stems.first().path,
+        )
             .delete()
         assertEquals(
             SourceSeparationModelAwarePlayableStatus.Processing,
@@ -233,8 +236,8 @@ class SourceSeparationModelAwareCacheRepositoryTest {
         val identity = snapshot.identity(sourceIdentity(fingerprintSeed))
         val directory = store.entryDirectory(identity.cacheKey).apply { mkdirs() }
         val contents = mapOf(
-            "completed/vocals.wav" to "vocals-$modelId-$fingerprintSeed",
-            "completed/instrumental.wav" to "instrumental-$modelId-$fingerprintSeed",
+            "completed/stem-00.wav" to "vocals-$modelId-$fingerprintSeed",
+            "completed/stem-01.wav" to "instrumental-$modelId-$fingerprintSeed",
             "completed/timing.txt" to "timing",
         )
         contents.forEach { (path, content) ->
@@ -253,15 +256,15 @@ class SourceSeparationModelAwareCacheRepositoryTest {
             state = SourceSeparationCacheManifestState.Completed,
             output = SourceSeparationCacheOutput(
                 stems = listOf(
-                    renderedStem(
+                    snapshot.renderedStemFor(
                         ContractStemSemantic.Vocals,
-                        "completed/vocals.wav",
-                        integrity("completed/vocals.wav"),
+                        "completed/stem-00.wav",
+                        integrity("completed/stem-00.wav"),
                     ),
-                    renderedStem(
+                    snapshot.renderedStemFor(
                         ContractStemSemantic.Instrumental,
-                        "completed/instrumental.wav",
-                        integrity("completed/instrumental.wav"),
+                        "completed/stem-01.wav",
+                        integrity("completed/stem-01.wav"),
                     ),
                 ),
                 timingPath = "completed/timing.txt",
@@ -301,7 +304,7 @@ class SourceSeparationModelAwareCacheRepositoryTest {
             }
         }
         plan.segments.forEach { segment ->
-            listOf(segment.vocalsPath, segment.instrumentalPath).forEach { path ->
+            segment.stems.map { it.path }.forEach { path ->
                 File(directory, path).apply {
                     parentFile?.mkdirs()
                     writeText(path)
@@ -314,8 +317,8 @@ class SourceSeparationModelAwareCacheRepositoryTest {
             state = SourceSeparationCacheManifestState.Partial,
             output = SourceSeparationCacheOutput(
                 stems = listOf(
-                    renderedStem(ContractStemSemantic.Vocals, "work/vocals.wav", null),
-                    renderedStem(
+                    snapshot.renderedStemFor(ContractStemSemantic.Vocals, "work/vocals.wav", null),
+                    snapshot.renderedStemFor(
                         ContractStemSemantic.Instrumental,
                         "work/instrumental.wav",
                         null,
@@ -384,22 +387,6 @@ class SourceSeparationModelAwareCacheRepositoryTest {
             segmentPlan = segmentPlan,
             createdAtEpochMs = 1L,
             updatedAtEpochMs = updatedAt,
-        )
-    }
-
-    private fun renderedStem(
-        semantic: ContractStemSemantic,
-        path: String,
-        integrity: SourceSeparationCacheFileIntegrity?,
-    ): SourceSeparationCacheRenderedStem {
-        return SourceSeparationCacheRenderedStem(
-            semantic = semantic,
-            displayLabel = semantic.name,
-            wavPath = path,
-            channelCount = 2,
-            sampleRate = 44_100,
-            frameCount = 88_200,
-            wavIntegrity = integrity,
         )
     }
 

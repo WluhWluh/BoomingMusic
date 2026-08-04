@@ -10,14 +10,15 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.SourceSeparationAdmittedGpuRuntimeIdentity
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity
-import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRelativePath
+import com.mardous.booming.separation.cache.SourceSeparationCacheRelativePath
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSongLocator
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
+import com.mardous.booming.separation.model.contract.StemId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 16
+internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 17
 
 internal interface SourceSeparationExecutionHost : AutoCloseable {
     val mode: SourceSeparationExecutionHostMode
@@ -283,15 +284,48 @@ internal enum class SourceSeparationExecutionBackendPolicy {
 }
 
 @Serializable
+internal data class SourceSeparationExecutionStemPath(
+    val stemId: StemId,
+    val order: Int,
+    val path: String,
+) {
+    init {
+        require(order >= 0) { "Execution stem order is invalid." }
+        SourceSeparationCacheRelativePath.requireValid(path)
+    }
+}
+
+private fun requireExecutionStemPaths(
+    stemPaths: List<SourceSeparationExecutionStemPath>,
+) {
+    require(stemPaths.isNotEmpty()) { "Execution stem paths are empty." }
+    require(stemPaths.map(SourceSeparationExecutionStemPath::stemId).distinct().size ==
+        stemPaths.size
+    ) {
+        "Execution stem IDs must be unique."
+    }
+    require(stemPaths.map(SourceSeparationExecutionStemPath::order) == stemPaths.indices.toList()) {
+        "Execution stem order is not contiguous."
+    }
+    require(stemPaths.map(SourceSeparationExecutionStemPath::path).distinct().size ==
+        stemPaths.size
+    ) { "Execution stem paths must be unique." }
+    stemPaths.forEach { stemPath ->
+        SourceSeparationCacheRelativePath.requireValid(stemPath.path)
+    }
+}
+
+@Serializable
 internal data class SourceSeparationExecutionResumeState(
-    val vocalsPath: String,
-    val instrumentalPath: String,
+    val stemPaths: List<SourceSeparationExecutionStemPath>,
     val timingPath: String?,
     val segmentPlan: SourceSeparationSegmentPlan,
 ) {
     init {
-        SourceSeparationCacheRelativePath.requireValid(vocalsPath)
-        SourceSeparationCacheRelativePath.requireValid(instrumentalPath)
+        requireExecutionStemPaths(stemPaths)
+        require(stemPaths.map(SourceSeparationExecutionStemPath::stemId) == segmentPlan.stemIds) {
+            "Execution resume stems do not match the segment plan."
+        }
         timingPath?.let(SourceSeparationCacheRelativePath::requireValid)
     }
 }
@@ -468,8 +502,7 @@ internal data class SourceSeparationExecutionSourceDecodeDiagnostics(
 
 @Serializable
 internal data class SourceSeparationExecutionPreparation(
-    val vocalsPath: String,
-    val instrumentalPath: String,
+    val stemPaths: List<SourceSeparationExecutionStemPath>,
     val timingPath: String,
     val startMs: Long,
     val endMs: Long,
@@ -483,16 +516,17 @@ internal data class SourceSeparationExecutionPreparation(
     val segmentPlan: SourceSeparationSegmentPlan,
 ) {
     init {
-        SourceSeparationCacheRelativePath.requireValid(vocalsPath)
-        SourceSeparationCacheRelativePath.requireValid(instrumentalPath)
+        requireExecutionStemPaths(stemPaths)
+        require(stemPaths.map(SourceSeparationExecutionStemPath::stemId) == segmentPlan.stemIds) {
+            "Execution preparation stems do not match the segment plan."
+        }
         SourceSeparationCacheRelativePath.requireValid(timingPath)
     }
 }
 
 @Serializable
 internal data class SourceSeparationExecutionCompletion(
-    val vocalsPath: String,
-    val instrumentalPath: String,
+    val stemPaths: List<SourceSeparationExecutionStemPath>,
     val timingPath: String,
     val startMs: Long,
     val endMs: Long,
@@ -512,8 +546,10 @@ internal data class SourceSeparationExecutionCompletion(
     val timingStageMs: Map<String, Long>,
 ) {
     init {
-        SourceSeparationCacheRelativePath.requireValid(vocalsPath)
-        SourceSeparationCacheRelativePath.requireValid(instrumentalPath)
+        requireExecutionStemPaths(stemPaths)
+        require(stemPaths.map(SourceSeparationExecutionStemPath::stemId) == segmentPlan.stemIds) {
+            "Execution completion stems do not match the segment plan."
+        }
         SourceSeparationCacheRelativePath.requireValid(timingPath)
     }
 }

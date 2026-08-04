@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.cache.v2
 
+import com.mardous.booming.separation.cache.SourceSeparationCacheRelativePath
 import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContract
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
@@ -127,7 +128,7 @@ class SourceSeparationCacheIdentityTest {
             manifest.copy(manifestSchemaVersion = 1)
         }
         assertThrows(IllegalArgumentException::class.java) {
-            manifest.copy(manifestSchemaVersion = 4)
+            manifest.copy(manifestSchemaVersion = 5)
         }
     }
 
@@ -183,23 +184,17 @@ class SourceSeparationCacheIdentityTest {
             sha256 = "c".repeat(64),
         )
         val stems = listOf(
-            SourceSeparationCacheRenderedStem(
+            snapshot.renderedStemFor(
                 semantic = ContractStemSemantic.Vocals,
-                displayLabel = "Vocals",
-                wavPath = "completed/vocals.wav",
-                channelCount = 2,
-                sampleRate = 44_100,
+                path = "completed/stem-00.wav",
+                integrity = integrity,
                 frameCount = 44_100,
-                wavIntegrity = integrity,
             ),
-            SourceSeparationCacheRenderedStem(
+            snapshot.renderedStemFor(
                 semantic = ContractStemSemantic.Instrumental,
-                displayLabel = "Instrumental",
-                wavPath = "completed/instrumental.wav",
-                channelCount = 2,
-                sampleRate = 44_100,
+                path = "completed/stem-01.wav",
+                integrity = integrity,
                 frameCount = 44_100,
-                wavIntegrity = integrity,
             ),
         )
         return SourceSeparationCacheManifest(

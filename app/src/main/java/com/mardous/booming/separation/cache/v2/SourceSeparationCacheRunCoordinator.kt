@@ -9,7 +9,10 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.MdxRangePreparation
 import com.mardous.booming.separation.model.MdxRangeResumeState
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
-import com.mardous.booming.separation.model.contract.ContractStemSemantic
+import com.mardous.booming.separation.model.contract.StemDescriptor
+import com.mardous.booming.separation.model.contract.StemId
+import com.mardous.booming.separation.model.contract.StemSemanticId
+import com.mardous.booming.separation.model.contract.toStemSet
 import java.io.File
 
 class SourceSeparationCacheRunCoordinator(
@@ -139,7 +142,9 @@ class SourceSeparationCacheRunCoordinator(
             )
             val committedSegments = existingJournal
                 ?.committedSegments
-                ?.filter { segment -> segment.isValid(store, request.identity.cacheKey) }
+                ?.filter { segment ->
+                    segment.hasValidArtifactSet(store, request.identity.cacheKey)
+                }
                 .orEmpty()
             val resumed = existing?.toResumeState(store)
             val manifest = if (resumed != null) {
@@ -222,20 +227,17 @@ class SourceSeparationCacheRunCoordinator(
             "Cache run manifest disappeared during preparation."
         }
         val output = SourceSeparationCacheOutput(
-            stems = listOf(
+            stems = run.mdxStemFiles(
+                vocalsFile = preparation.vocalsFile,
+                instrumentalFile = preparation.instrumentalFile,
+            ).map { (descriptor, file) ->
                 run.renderedStem(
-                    semantic = ContractStemSemantic.Vocals,
-                    file = preparation.vocalsFile,
+                    descriptor = descriptor,
+                    file = file,
                     frameCount = preparation.frames,
                     sampleRate = preparation.outputSampleRate,
-                ),
-                run.renderedStem(
-                    semantic = ContractStemSemantic.Instrumental,
-                    file = preparation.instrumentalFile,
-                    frameCount = preparation.frames,
-                    sampleRate = preparation.outputSampleRate,
-                ),
-            ),
+                )
+            },
             timingPath = store.relativeEntryPath(run.identity.cacheKey, preparation.timingFile),
             outputSampleRate = preparation.outputSampleRate,
             outputFrameCount = preparation.frames,
@@ -260,7 +262,10 @@ class SourceSeparationCacheRunCoordinator(
                         type = SourceSeparationCacheRunTransitionType.SegmentReady,
                         nowEpochMs = now,
                         segmentIndex = segment.index,
-                        committedSegment = committedSegment(run, segment),
+                        committedSegment = segment.captureCommittedArtifactSet(
+                            store,
+                            run.identity.cacheKey,
+                        ),
                     )
                 }
         }
@@ -316,7 +321,10 @@ class SourceSeparationCacheRunCoordinator(
                 )
 
                 SourceSeparationSegmentState.Ready -> {
-                    val committed = committedSegment(run, segment)
+                    val committed = segment.captureCommittedArtifactSet(
+                        store,
+                        run.identity.cacheKey,
+                    )
                     journal.append(
                         type = SourceSeparationCacheRunTransitionType.SegmentReady,
                         nowEpochMs = now,
@@ -333,10 +341,14 @@ class SourceSeparationCacheRunCoordinator(
                 )
             }
         }
-        return current.copy(
+        val updated = current.copy(
             segmentPlan = plan.withSegmentState(segmentIndex, state),
             updatedAtEpochMs = nowEpochMs(),
         ).also(store::writeManifest)
+        if (state != SourceSeparationSegmentState.Running && !state.isPlaybackReady) {
+            segment.deleteArtifactSet(store, run.identity.cacheKey)
+        }
+        return updated
     }
 
     fun complete(
@@ -347,16 +359,23 @@ class SourceSeparationCacheRunCoordinator(
         require(result.sourceAudioFingerprint == run.identity.source.audioFingerprint) {
             "Completed source fingerprint does not match the cache identity."
         }
-        val vocalsIntegrity = store.copyIntoEntryAtomically(
-            cacheKey = run.identity.cacheKey,
-            source = result.vocalsFile,
-            relativePath = COMPLETED_VOCALS_PATH,
-        )
-        val instrumentalIntegrity = store.copyIntoEntryAtomically(
-            cacheKey = run.identity.cacheKey,
-            source = result.instrumentalFile,
-            relativePath = COMPLETED_INSTRUMENTAL_PATH,
-        )
+        val completedStems = run.mdxStemFiles(
+            vocalsFile = result.vocalsFile,
+            instrumentalFile = result.instrumentalFile,
+        ).map { (descriptor, file) ->
+            val path = completedStemPath(descriptor.order)
+            val integrity = store.copyIntoEntryAtomically(
+                cacheKey = run.identity.cacheKey,
+                source = file,
+                relativePath = path,
+            )
+            completedStem(
+                descriptor = descriptor,
+                path = path,
+                integrity = integrity,
+                result = result,
+            )
+        }
         store.copyIntoEntryAtomically(
             cacheKey = run.identity.cacheKey,
             source = result.timingFile,
@@ -366,22 +385,7 @@ class SourceSeparationCacheRunCoordinator(
             "Cache run manifest disappeared before completion."
         }
         val output = SourceSeparationCacheOutput(
-            stems = listOf(
-                completedStem(
-                    run = run,
-                    semantic = ContractStemSemantic.Vocals,
-                    path = COMPLETED_VOCALS_PATH,
-                    integrity = vocalsIntegrity,
-                    result = result,
-                ),
-                completedStem(
-                    run = run,
-                    semantic = ContractStemSemantic.Instrumental,
-                    path = COMPLETED_INSTRUMENTAL_PATH,
-                    integrity = instrumentalIntegrity,
-                    result = result,
-                ),
-            ),
+            stems = completedStems,
             timingPath = COMPLETED_TIMING_PATH,
             outputSampleRate = result.outputSampleRate,
             outputFrameCount = result.frames,
@@ -563,9 +567,9 @@ class SourceSeparationCacheRunCoordinator(
     ): MdxRangeResumeState? {
         if (state == SourceSeparationCacheManifestState.Completed) return null
         val plan = segmentPlan ?: return null
-        val stems = output?.stems.orEmpty().associateBy { it.semantic }
-        val vocals = stems[ContractStemSemantic.Vocals] ?: return null
-        val instrumental = stems[ContractStemSemantic.Instrumental] ?: return null
+        val stems = output?.stems.orEmpty().associateBy { it.semanticId }
+        val vocals = stems[StemSemanticId.Vocals] ?: return null
+        val instrumental = stems[StemSemanticId.Instrumental] ?: return null
         val vocalsFile = store.resolveEntryPath(cacheKey, vocals.wavPath)
         val instrumentalFile = store.resolveEntryPath(cacheKey, instrumental.wavPath)
         if (!vocalsFile.isFile || !instrumentalFile.isFile) return null
@@ -587,9 +591,8 @@ class SourceSeparationCacheRunCoordinator(
             segments = segments.map { segment ->
                 val committed = committedByIndex[segment.index]
                 val canPreserve = segment.state.isPlaybackReady && committed != null &&
-                    committed.vocalsPath == segment.vocalsPath &&
-                    committed.instrumentalPath == segment.instrumentalPath &&
-                    committed.isValid(store, cacheKey)
+                    committed.matches(segment) &&
+                    committed.hasValidArtifactSet(store, cacheKey)
                 segment.copy(
                     state = if (canPreserve) {
                         segment.state
@@ -618,21 +621,6 @@ class SourceSeparationCacheRunCoordinator(
         return update(current, nowEpochMs()).also(store::writeRunJournal)
     }
 
-    private fun committedSegment(
-        run: SourceSeparationModelAwareCacheRun,
-        segment: com.mardous.booming.separation.cache.SourceSeparationSegment,
-    ) = SourceSeparationCacheCommittedSegment(
-        segmentIndex = segment.index,
-        vocalsPath = segment.vocalsPath,
-        vocalsIntegrity = store.fileIntegrity(
-            store.resolveEntryPath(run.identity.cacheKey, segment.vocalsPath),
-        ),
-        instrumentalPath = segment.instrumentalPath,
-        instrumentalIntegrity = store.fileIntegrity(
-            store.resolveEntryPath(run.identity.cacheKey, segment.instrumentalPath),
-        ),
-    )
-
     private fun cleanUncommittedSegments(
         cacheKey: String,
         plan: SourceSeparationSegmentPlan?,
@@ -642,27 +630,13 @@ class SourceSeparationCacheRunCoordinator(
         plan?.segments.orEmpty()
             .filterNot { it.index in committedIndexes }
             .forEach { segment ->
-                store.deleteRelativePath(cacheKey, segment.vocalsPath)
-                store.deleteRelativePath(cacheKey, segment.instrumentalPath)
+                segment.deleteArtifactSet(store, cacheKey)
             }
         store.resolveEntryPath(cacheKey, SEGMENTS_DIRECTORY)
             .walkTopDown()
             .filter { file -> file.isFile && file.name.endsWith(".tmp") }
             .forEach(File::delete)
     }
-
-    private fun SourceSeparationCacheCommittedSegment.isValid(
-        store: SourceSeparationCacheStore,
-        cacheKey: String,
-    ): Boolean = store.validateIntegrity(
-        cacheKey = cacheKey,
-        relativePath = vocalsPath,
-        expected = vocalsIntegrity,
-    ) && store.validateIntegrity(
-        cacheKey = cacheKey,
-        relativePath = instrumentalPath,
-        expected = instrumentalIntegrity,
-    )
 
     private fun SourceSeparationCacheRunRequest.toJournalRequest(
         admittedAtEpochMs: Long,
@@ -689,14 +663,17 @@ class SourceSeparationCacheRunCoordinator(
     )
 
     private fun SourceSeparationModelAwareCacheRun.renderedStem(
-        semantic: ContractStemSemantic,
+        descriptor: StemDescriptor,
         file: File,
         frameCount: Int,
         sampleRate: Int,
     ): SourceSeparationCacheRenderedStem {
         return SourceSeparationCacheRenderedStem(
-            semantic = semantic,
-            displayLabel = labelFor(semantic),
+            stemId = descriptor.stemId,
+            semanticId = descriptor.semanticId,
+            canonicalLabel = descriptor.canonicalLabel,
+            order = descriptor.order,
+            production = descriptor.production,
             wavPath = store.relativeEntryPath(identity.cacheKey, file),
             channelCount = 2,
             sampleRate = sampleRate,
@@ -705,15 +682,17 @@ class SourceSeparationCacheRunCoordinator(
     }
 
     private fun completedStem(
-        run: SourceSeparationModelAwareCacheRun,
-        semantic: ContractStemSemantic,
+        descriptor: StemDescriptor,
         path: String,
         integrity: SourceSeparationCacheFileIntegrity,
         result: MdxRangeSeparationResult,
     ): SourceSeparationCacheRenderedStem {
         return SourceSeparationCacheRenderedStem(
-            semantic = semantic,
-            displayLabel = run.labelFor(semantic),
+            stemId = descriptor.stemId,
+            semanticId = descriptor.semanticId,
+            canonicalLabel = descriptor.canonicalLabel,
+            order = descriptor.order,
+            production = descriptor.production,
             wavPath = path,
             channelCount = 2,
             sampleRate = result.outputSampleRate,
@@ -722,19 +701,28 @@ class SourceSeparationCacheRunCoordinator(
         )
     }
 
-    private fun SourceSeparationModelAwareCacheRun.labelFor(
-        semantic: ContractStemSemantic,
-    ): String {
-        val stems = listOf(contract.stemContract.modelOutput, contract.stemContract.residual)
-        return stems.singleOrNull { it.semantic == semantic }?.displayLabel ?: semantic.name
+    private fun SourceSeparationModelAwareCacheRun.mdxStemFiles(
+        vocalsFile: File,
+        instrumentalFile: File,
+    ): List<Pair<StemDescriptor, File>> {
+        val files = mapOf(
+            StemSemanticId.Vocals to vocalsFile,
+            StemSemanticId.Instrumental to instrumentalFile,
+        )
+        return contract.stemContract.toStemSet().stems.map { descriptor ->
+            descriptor to requireNotNull(files[descriptor.semanticId]) {
+                "The MDX adapter cannot render stem ${descriptor.stemId}."
+            }
+        }
     }
+
+    private fun completedStemPath(order: Int): String =
+        "$COMPLETED_DIRECTORY/stem-%02d.wav".format(order)
 
     companion object {
         const val WORK_DIRECTORY = "work"
         const val COMPLETED_DIRECTORY = "completed"
         const val SEGMENTS_DIRECTORY = "segments"
-        const val COMPLETED_VOCALS_PATH = "completed/vocals.wav"
-        const val COMPLETED_INSTRUMENTAL_PATH = "completed/instrumental.wav"
         const val COMPLETED_TIMING_PATH = "completed/timing.txt"
     }
 }

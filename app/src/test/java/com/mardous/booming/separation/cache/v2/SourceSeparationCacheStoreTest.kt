@@ -92,14 +92,14 @@ class SourceSeparationCacheStoreTest {
             store.validateCompletedEntry(manifest),
         )
 
-        store.resolveEntryPath(manifest.cacheKey, "completed/vocals.wav")
+        store.resolveEntryPath(manifest.cacheKey, "completed/stem-00.wav")
             .appendText("changed")
         assertEquals(
             SourceSeparationCacheValidationResult.Invalid("wav-invalid"),
             store.validateCompletedEntry(manifest),
         )
 
-        store.resolveEntryPath(manifest.cacheKey, "completed/instrumental.wav").delete()
+        store.resolveEntryPath(manifest.cacheKey, "completed/stem-01.wav").delete()
         assertEquals(
             SourceSeparationCacheValidationResult.Invalid("wav-invalid"),
             store.validateCompletedEntry(manifest),
@@ -210,7 +210,7 @@ class SourceSeparationCacheStoreTest {
         )
         manifestFile.writeText(
             manifestFile.readText().replace(
-                "\"manifestSchemaVersion\":3",
+                "\"manifestSchemaVersion\":4",
                 "\"manifestSchemaVersion\":1",
             )
         )
@@ -268,8 +268,8 @@ class SourceSeparationCacheStoreTest {
         val identity = snapshot.identity(source)
         val entryDirectory = store.entryDirectory(identity.cacheKey)
         val fileContents = mapOf(
-            "completed/vocals.wav" to "vocals",
-            "completed/instrumental.wav" to "instrumental",
+            "completed/stem-00.wav" to "vocals",
+            "completed/stem-01.wav" to "instrumental",
             "completed/timing.txt" to "timing",
         )
         if (createFiles) {
@@ -289,23 +289,17 @@ class SourceSeparationCacheStoreTest {
             )
         }
         val stems = listOf(
-            SourceSeparationCacheRenderedStem(
+            snapshot.renderedStemFor(
                 semantic = ContractStemSemantic.Vocals,
-                displayLabel = "Vocals",
-                wavPath = "completed/vocals.wav",
-                channelCount = 2,
-                sampleRate = 44_100,
+                path = "completed/stem-00.wav",
+                integrity = integrity("completed/stem-00.wav"),
                 frameCount = 44_100,
-                wavIntegrity = integrity("completed/vocals.wav"),
             ),
-            SourceSeparationCacheRenderedStem(
+            snapshot.renderedStemFor(
                 semantic = ContractStemSemantic.Instrumental,
-                displayLabel = "Instrumental",
-                wavPath = "completed/instrumental.wav",
-                channelCount = 2,
-                sampleRate = 44_100,
+                path = "completed/stem-01.wav",
+                integrity = integrity("completed/stem-01.wav"),
                 frameCount = 44_100,
-                wavIntegrity = integrity("completed/instrumental.wav"),
             ),
         )
         return SourceSeparationCacheManifest(
@@ -369,7 +363,7 @@ class SourceSeparationCacheStoreTest {
         manifest.output!!.stems.forEach { stem ->
             File(directory, stem.wavPath).apply {
                 parentFile?.mkdirs()
-                writeText(if (stem.semantic == ContractStemSemantic.Vocals) "vocals" else "instrumental")
+                writeText(if (stem.semanticId.value == "vocals") "vocals" else "instrumental")
             }
         }
         manifest.output.timingPath?.let { path ->

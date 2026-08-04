@@ -3,11 +3,12 @@ package com.mardous.booming.separation.process
 import com.mardous.booming.separation.SourceSeparationModelAwareExecutionRequest
 import com.mardous.booming.separation.SourceSeparationModelAwareRangeExecutor
 import com.mardous.booming.separation.SourceSeparationPausedException
-import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRelativePath
+import com.mardous.booming.separation.cache.SourceSeparationCacheRelativePath
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSongLocator
 import com.mardous.booming.separation.model.MdxRangePreparation
 import com.mardous.booming.separation.model.MdxRangeProgress
+import com.mardous.booming.separation.model.MdxRangeResumeState
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
 import com.mardous.booming.separation.model.MdxRangeTimingReport
 import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
@@ -16,6 +17,7 @@ import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxSegmentSchedulerProgress
 import com.mardous.booming.separation.model.MdxSourceDecodeDiagnostics
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
+import com.mardous.booming.separation.model.contract.StemId
 import java.io.File
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -407,8 +409,12 @@ internal fun SourceSeparationModelAwareExecutionRequest.resumeDescriptor():
     SourceSeparationExecutionResumeState? {
     val resume = workspace.resumeState ?: return null
     return SourceSeparationExecutionResumeState(
-        vocalsPath = relativeEntryPath(workspace.entryDirectory, resume.vocalsFile),
-        instrumentalPath = relativeEntryPath(workspace.entryDirectory, resume.instrumentalFile),
+        stemPaths = mdxExecutionStemPaths(
+            entryDirectory = workspace.entryDirectory,
+            vocalsFile = resume.vocalsFile,
+            instrumentalFile = resume.instrumentalFile,
+            stemIds = resume.segmentPlan.stemIds,
+        ),
         timingPath = resume.timingFile?.let {
             relativeEntryPath(workspace.entryDirectory, it)
         },
@@ -499,8 +505,12 @@ internal fun SourceSeparationExecutionSourceDecodeDiagnostics.toMdxDiagnostics()
 private fun MdxRangePreparation.toExecutionPreparation(
     entryDirectory: File,
 ) = SourceSeparationExecutionPreparation(
-    vocalsPath = relativeEntryPath(entryDirectory, vocalsFile),
-    instrumentalPath = relativeEntryPath(entryDirectory, instrumentalFile),
+    stemPaths = mdxExecutionStemPaths(
+        entryDirectory = entryDirectory,
+        vocalsFile = vocalsFile,
+        instrumentalFile = instrumentalFile,
+        stemIds = segmentPlan.stemIds,
+    ),
     timingPath = relativeEntryPath(entryDirectory, timingFile),
     startMs = startMs,
     endMs = endMs,
@@ -516,27 +526,46 @@ private fun MdxRangePreparation.toExecutionPreparation(
 
 internal fun SourceSeparationExecutionPreparation.toMdxRangePreparation(
     entryDirectory: File,
-) = MdxRangePreparation(
-    vocalsFile = resolveEntryPath(entryDirectory, vocalsPath),
-    instrumentalFile = resolveEntryPath(entryDirectory, instrumentalPath),
-    timingFile = resolveEntryPath(entryDirectory, timingPath),
-    startMs = startMs,
-    endMs = endMs,
-    frames = frames,
-    windowCount = windowCount,
-    sourceAudioFingerprint = sourceAudioFingerprint,
-    sourceFrameCount = sourceFrameCount,
-    sourceSampleRate = sourceSampleRate,
-    sourceChannelCount = sourceChannelCount,
-    outputSampleRate = outputSampleRate,
-    segmentPlan = segmentPlan,
-)
+): MdxRangePreparation {
+    val mdxFiles = stemPaths.requireMdxStemFiles(entryDirectory)
+    return MdxRangePreparation(
+        vocalsFile = mdxFiles.vocals,
+        instrumentalFile = mdxFiles.instrumental,
+        timingFile = resolveEntryPath(entryDirectory, timingPath),
+        startMs = startMs,
+        endMs = endMs,
+        frames = frames,
+        windowCount = windowCount,
+        sourceAudioFingerprint = sourceAudioFingerprint,
+        sourceFrameCount = sourceFrameCount,
+        sourceSampleRate = sourceSampleRate,
+        sourceChannelCount = sourceChannelCount,
+        outputSampleRate = outputSampleRate,
+        segmentPlan = segmentPlan,
+    )
+}
+
+internal fun SourceSeparationExecutionResumeState.toMdxRangeResumeState(
+    entryDirectory: File,
+): MdxRangeResumeState {
+    val mdxFiles = stemPaths.requireMdxStemFiles(entryDirectory)
+    return MdxRangeResumeState(
+        vocalsFile = mdxFiles.vocals,
+        instrumentalFile = mdxFiles.instrumental,
+        timingFile = timingPath?.let { resolveEntryPath(entryDirectory, it) },
+        segmentPlan = segmentPlan,
+    )
+}
 
 internal fun MdxRangeSeparationResult.toExecutionCompletion(
     request: SourceSeparationModelAwareExecutionRequest,
 ) = SourceSeparationExecutionCompletion(
-    vocalsPath = relativeEntryPath(request.workspace.entryDirectory, vocalsFile),
-    instrumentalPath = relativeEntryPath(request.workspace.entryDirectory, instrumentalFile),
+    stemPaths = mdxExecutionStemPaths(
+        entryDirectory = request.workspace.entryDirectory,
+        vocalsFile = vocalsFile,
+        instrumentalFile = instrumentalFile,
+        stemIds = segmentPlan.stemIds,
+    ),
     timingPath = relativeEntryPath(request.workspace.entryDirectory, timingFile),
     startMs = startMs,
     endMs = endMs,
@@ -575,6 +604,7 @@ internal fun MdxRangeSeparationResult.toExecutionCompletion(
 internal fun SourceSeparationExecutionCompletion.toMdxRangeSeparationResult(
     request: SourceSeparationModelAwareExecutionRequest,
 ): MdxRangeSeparationResult {
+    val mdxFiles = stemPaths.requireMdxStemFiles(request.workspace.entryDirectory)
     val runtimeSettings = MdxRuntimeSettings(
         cpuThreads = this.runtimeSettings.cpuThreads,
         useXnnpack = this.runtimeSettings.useXnnpack,
@@ -596,11 +626,8 @@ internal fun SourceSeparationExecutionCompletion.toMdxRangeSeparationResult(
     val sourceDiagnostics = sourceDecodeDiagnostics.toMdxDiagnostics()
     val profile = request.model.executionProfile
     return MdxRangeSeparationResult(
-        vocalsFile = resolveEntryPath(request.workspace.entryDirectory, vocalsPath),
-        instrumentalFile = resolveEntryPath(
-            request.workspace.entryDirectory,
-            instrumentalPath,
-        ),
+        vocalsFile = mdxFiles.vocals,
+        instrumentalFile = mdxFiles.instrumental,
         timingFile = resolveEntryPath(request.workspace.entryDirectory, timingPath),
         startMs = startMs,
         endMs = endMs,
@@ -627,6 +654,62 @@ internal fun SourceSeparationExecutionCompletion.toMdxRangeSeparationResult(
         runtimeDiagnostics = runtimeDiagnostics,
         executionProfile = profile,
         sourceDecodeDiagnostics = sourceDiagnostics,
+    )
+}
+
+private fun mdxExecutionStemPaths(
+    entryDirectory: File,
+    vocalsFile: File,
+    instrumentalFile: File,
+    stemIds: List<StemId>,
+): List<SourceSeparationExecutionStemPath> {
+    val filesByStemId = mapOf(
+        StemId.Vocals to vocalsFile,
+        StemId.Instrumental to instrumentalFile,
+    )
+    require(stemIds.size == filesByStemId.size && stemIds.toSet() == filesByStemId.keys) {
+        "MDX execution requires exactly vocals and instrumental stem IDs."
+    }
+    return stemIds.mapIndexed { order, stemId ->
+        SourceSeparationExecutionStemPath(
+            stemId = stemId,
+            order = order,
+            path = relativeEntryPath(
+                entryDirectory,
+                requireNotNull(filesByStemId[stemId]),
+            ),
+        )
+    }
+}
+
+private data class MdxExecutionStemFiles(
+    val vocals: File,
+    val instrumental: File,
+)
+
+private fun List<SourceSeparationExecutionStemPath>.requireMdxStemFiles(
+    entryDirectory: File,
+): MdxExecutionStemFiles {
+    require(isNotEmpty()) { "MDX execution stem paths are empty." }
+    require(map(SourceSeparationExecutionStemPath::stemId).distinct().size == size) {
+        "MDX execution stem IDs must be unique."
+    }
+    val expectedIds = setOf(StemId.Vocals, StemId.Instrumental)
+    require(size == expectedIds.size &&
+        map(SourceSeparationExecutionStemPath::stemId).toSet() == expectedIds
+    ) {
+        "MDX execution requires exactly vocals and instrumental stem paths."
+    }
+    val pathsByStem = associateBy(SourceSeparationExecutionStemPath::stemId)
+    return MdxExecutionStemFiles(
+        vocals = resolveEntryPath(
+            entryDirectory,
+            requireNotNull(pathsByStem[StemId.Vocals]).path,
+        ),
+        instrumental = resolveEntryPath(
+            entryDirectory,
+            requireNotNull(pathsByStem[StemId.Instrumental]).path,
+        ),
     )
 }
 
