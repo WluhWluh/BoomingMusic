@@ -5,6 +5,8 @@ import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
+import com.mardous.booming.playback.SourceSeparationFileStemSourceFactory
+import com.mardous.booming.playback.SourceSeparationStemPlaybackEngine
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import java.io.File
@@ -49,6 +51,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private var stemChannelCount = CHANNEL_COUNT_STEREO
 
     private val lock = Any()
+    private var playbackEngine: SourceSeparationStemPlaybackEngine? = null
+    private var engineStemBuffers: Array<ByteArray> = emptyArray()
+    private var engineHasInstrumentalInput = false
     private var vocalsInput: StemPcmInput? = null
     private var instrumentalInput: StemPcmInput? = null
     private var scratch = ByteArray(0)
@@ -92,10 +97,25 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             this.stemSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
             this.stemChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
             this.mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs.coerceAtLeast(0L)
-            vocalsInput = openStemInput(vocalsFile)
-            instrumentalInput = instrumentalFile?.let(::openStemInput)
+            val engineFactories = createEngineFactories(vocalsFile, instrumentalFile)
+            if (engineFactories != null) {
+                playbackEngine = SourceSeparationStemPlaybackEngine()
+                engineHasInstrumentalInput = instrumentalFile != null
+                engineStemBuffers = Array(engineFactories.size) {
+                    ByteArray(playbackEngine!!.blockFrameCapacity * DEFAULT_FRAME_SIZE)
+                }
+                playbackEngine!!.start(
+                    sessionId = debugSessionId,
+                    factories = engineFactories,
+                    startFrame = engineFactories.first().spec.geometry
+                        .transportPositionToStemFrame(positionMs),
+                )
+            } else {
+                vocalsInput = openStemInput(vocalsFile)
+                instrumentalInput = instrumentalFile?.let(::openStemInput)
+            }
             active = true
-            seekToLocked(positionMs)
+            if (playbackEngine == null) seekToLocked(positionMs)
             traceDebug(
                 "enable",
                 "session=$debugSessionId mode=$inputMode positionMs=$positionMs " +
@@ -228,6 +248,31 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         val frames = remaining / frameSize
         val bytesToRead = frames * frameSize
         val resampled = inputAudioFormat.sampleRate != stemSampleRate
+        if (!resampled && playbackEngine != null) {
+            val mixedFrames = queueEngineInput(
+                inputBuffer = inputBuffer,
+                outputBuffer = buffer,
+                frameCount = frames,
+                frameSize = frameSize,
+            )
+            if (inputBuffer.hasRemaining()) {
+                buffer.put(inputBuffer)
+            }
+            buffer.flip()
+            if (mixedFrames > 0) notifyMixedOutputStartedIfNeeded(mixedFrames)
+            traceQueueIfNeeded(
+                queueSeq = queueSeq,
+                branch = if (mixedFrames == frames) "mixed-engine" else "engine-underflow",
+                remaining = remaining,
+                bytesRead = mixedFrames * frameSize,
+                instrumentalBytesRead = if (engineHasInstrumentalInput) {
+                    mixedFrames * frameSize
+                } else {
+                    null
+                },
+            )
+            return
+        }
         val stemReadResult = if (resampled) {
             readResampledStems(
                 frameCount = frames,
@@ -315,6 +360,91 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             outputBuffer.put(inputBuffer)
         }
         outputBuffer.flip()
+    }
+
+    private fun queueEngineInput(
+        inputBuffer: ByteBuffer,
+        outputBuffer: ByteBuffer,
+        frameCount: Int,
+        frameSize: Int,
+    ): Int {
+        val engine = playbackEngine ?: return 0
+        var handledFrames = 0
+        var mixedFrames = 0
+        while (handledFrames < frameCount) {
+            val chunkFrames = minOf(
+                frameCount - handledFrames,
+                engine.blockFrameCapacity,
+            )
+            val chunkBytes = chunkFrames * frameSize
+            val readFrames = engine.readInto(engineStemBuffers, chunkFrames)
+            if (readFrames == chunkFrames) {
+                val vocals = engineStemBuffers[0]
+                val instrumental = engineStemBuffers.getOrNull(1)
+                var stemOffset = 0
+                repeat(chunkFrames) {
+                    val inputLeft = inputBuffer.short.toInt()
+                    val inputRight = inputBuffer.short.toInt()
+                    val vocalLeft = readPcm16(stemOffset, vocals, chunkBytes)
+                    val vocalRight = readPcm16(
+                        stemOffset + BYTES_PER_SAMPLE,
+                        vocals,
+                        chunkBytes,
+                    )
+                    val instrumentalLeft = instrumental?.let { bytes ->
+                        readPcm16(stemOffset, bytes, chunkBytes)
+                    } ?: 0
+                    val instrumentalRight = instrumental?.let { bytes ->
+                        readPcm16(stemOffset + BYTES_PER_SAMPLE, bytes, chunkBytes)
+                    } ?: 0
+                    outputBuffer.putShort(
+                        mixSample(
+                            inputSample = inputLeft,
+                            vocalSample = vocalLeft,
+                            instrumentalSample = instrumentalLeft,
+                            mode = inputMode,
+                            hasInstrumentalStemInput = engineHasInstrumentalInput,
+                        ),
+                    )
+                    outputBuffer.putShort(
+                        mixSample(
+                            inputSample = inputRight,
+                            vocalSample = vocalRight,
+                            instrumentalSample = instrumentalRight,
+                            mode = inputMode,
+                            hasInstrumentalStemInput = engineHasInstrumentalInput,
+                        ),
+                    )
+                    stemOffset += frameSize
+                }
+                mixedFrames += chunkFrames
+            } else {
+                writeUnmixedInput(
+                    inputBuffer = inputBuffer,
+                    outputBuffer = outputBuffer,
+                    byteCount = chunkBytes,
+                )
+            }
+            handledFrames += chunkFrames
+        }
+        return mixedFrames
+    }
+
+    private fun writeUnmixedInput(
+        inputBuffer: ByteBuffer,
+        outputBuffer: ByteBuffer,
+        byteCount: Int,
+    ) {
+        if (active && inputMode == InputMode.OriginalSource) {
+            repeat(byteCount) { outputBuffer.put(0) }
+            inputBuffer.position(inputBuffer.position() + byteCount)
+        } else {
+            repeat(byteCount) { outputBuffer.put(inputBuffer.get()) }
+        }
+    }
+
+    internal fun isDataPlaneReady(): Boolean {
+        return playbackEngine?.hasResumeWaterline() ?: active
     }
 
     private fun readStems(byteCount: Int): StemReadResult {
@@ -493,6 +623,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             ?.times(BYTES_PER_SAMPLE)
             ?: DEFAULT_FRAME_SIZE
         val frame = (positionMs.coerceAtLeast(0) * sampleRate / MILLIS_PER_SECOND.toFloat()).roundToLong()
+        playbackEngine?.seekTo(frame)
         val bytePosition = frame * frameSize
         resampleStemFramePosition = frame.toDouble()
         clearResampleCachesLocked()
@@ -501,6 +632,10 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     private fun closeLocked() {
+        playbackEngine?.close()
+        playbackEngine = null
+        engineStemBuffers = emptyArray()
+        engineHasInstrumentalInput = false
         vocalsInput?.close()
         vocalsInput = null
         instrumentalInput?.close()
@@ -596,6 +731,47 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 WavStemPcmInput(file)
             }
         }
+    }
+
+    private fun createEngineFactories(
+        vocalsFile: File,
+        instrumentalFile: File?,
+    ): List<SourceSeparationFileStemSourceFactory>? {
+        if (stemChannelCount != CHANNEL_COUNT_STEREO ||
+            !isEngineFile(vocalsFile) ||
+            (instrumentalFile != null && !isEngineFile(instrumentalFile))
+        ) {
+            return null
+        }
+        return runCatching {
+            buildList {
+                add(
+                    SourceSeparationFileStemSourceFactory(
+                        file = vocalsFile,
+                        stemId = "vocals",
+                        sampleRate = stemSampleRate,
+                        channelCount = stemChannelCount,
+                    ),
+                )
+                instrumentalFile?.let { file ->
+                    add(
+                        SourceSeparationFileStemSourceFactory(
+                            file = file,
+                            stemId = "instrumental",
+                            sampleRate = stemSampleRate,
+                            channelCount = stemChannelCount,
+                        ),
+                    )
+                }
+            }
+        }.getOrNull()?.takeIf { factories ->
+            factories.map { it.spec.geometry }.distinct().size == 1
+        }
+    }
+
+    private fun isEngineFile(file: File): Boolean {
+        return file.extension.equals("wav", ignoreCase = true) ||
+                file.extension.equals("pcm", ignoreCase = true)
     }
 
     companion object {

@@ -43,6 +43,8 @@ internal class SourceSeparationStemPlaybackEngine(
     private val workerRunning = AtomicBoolean(false)
     private val state = AtomicReference(SourceSeparationPlaybackDataState.Idle)
     private val activeEpoch = AtomicLong(0L)
+    private val readyFrameCount = AtomicLong(0L)
+    private val endOfStreamQueued = AtomicBoolean(false)
     private val readyBlocks = ArrayBlockingQueue<StemPcmBlockSet>(blockCapacity)
     private val freeBlocks = ArrayBlockingQueue<StemPcmBlockSet>(blockCapacity)
     private val worker = Thread(::workerLoop, "BoomingStemDecode")
@@ -81,6 +83,9 @@ internal class SourceSeparationStemPlaybackEngine(
 
     val currentEpoch: Long
         get() = activeEpoch.get()
+
+    val blockFrameCapacity: Int
+        get() = blockFrames
 
     val currentSession: SourceSeparationPlaybackDataSession?
         get() = activeSession
@@ -166,6 +171,14 @@ internal class SourceSeparationStemPlaybackEngine(
     ): Int {
         if (frameCount <= 0) return 0
         val session = activeSession ?: return 0
+        if (readyFrameCount.get() < frameCount.toLong()) {
+            metrics.recordUnderrun()
+            state.compareAndSet(
+                SourceSeparationPlaybackDataState.Ready,
+                SourceSeparationPlaybackDataState.Buffering,
+            )
+            return 0
+        }
         val bytesPerFrame = session.geometry.channelCount * BYTES_PER_SAMPLE
         require(destinations.size == session.stems.size) {
             "Destination stem count does not match the active playback session."
@@ -211,6 +224,7 @@ internal class SourceSeparationStemPlaybackEngine(
                 )
             }
             copiedFrames += copyFrames
+            readyFrameCount.addAndGet(-copyFrames.toLong())
             consumerBlockOffsetFrames += copyFrames
             if (consumerBlockOffsetFrames == block.frameCount) {
                 val ended = block.endOfStream
@@ -218,6 +232,7 @@ internal class SourceSeparationStemPlaybackEngine(
                 consumerBlock = null
                 consumerBlockOffsetFrames = 0
                 if (ended && readyBlocks.isEmpty()) {
+                    endOfStreamQueued.set(false)
                     state.set(SourceSeparationPlaybackDataState.Ended)
                 }
             }
@@ -240,7 +255,9 @@ internal class SourceSeparationStemPlaybackEngine(
     }
 
     fun hasResumeWaterline(): Boolean {
-        return readyBlocks.size >= resumeWaterlineBlocks || consumerBlock != null
+        return readyBlocks.size >= resumeWaterlineBlocks ||
+                consumerBlock != null ||
+                (endOfStreamQueued.get() && readyFrameCount.get() > 0L)
     }
 
     fun metricsSnapshot(): SourceSeparationPlaybackMetricsSnapshot = metrics.snapshot()
@@ -360,10 +377,12 @@ internal class SourceSeparationStemPlaybackEngine(
                     Thread.sleep(WORKER_FULL_SLEEP_MS)
                     continue
                 }
+                readyFrameCount.addAndGet(frames.toLong())
+                if (block.endOfStream) endOfStreamQueued.set(true)
                 workerNextFrame += frames
                 metrics.recordDecodeBlock(System.nanoTime() - startNs)
                 metrics.recordRingOccupancy(readyBlocks.size)
-                if (readyBlocks.size >= resumeWaterlineBlocks) {
+                if (readyBlocks.size >= resumeWaterlineBlocks || block.endOfStream) {
                     state.set(SourceSeparationPlaybackDataState.Ready)
                     if (state.get() == SourceSeparationPlaybackDataState.Ready) {
                         metrics.recordSeekReady()
@@ -441,6 +460,8 @@ internal class SourceSeparationStemPlaybackEngine(
         clearConsumerBlock()
         freeBlocks.clear()
         readyBlocks.clear()
+        readyFrameCount.set(0L)
+        endOfStreamQueued.set(false)
         poolStemCount = stemCount
         poolChannelCount = channelCount
         val blockBytes = blockFrames * channelCount * BYTES_PER_SAMPLE
@@ -456,10 +477,14 @@ internal class SourceSeparationStemPlaybackEngine(
     }
 
     private fun drainReadyBlocks() {
+        readyFrameCount.set(consumerBlock?.let { block ->
+            (block.frameCount - consumerBlockOffsetFrames).coerceAtLeast(0).toLong()
+        } ?: 0L)
         while (true) {
             val block = readyBlocks.poll() ?: break
             freeBlocks.offer(block)
         }
+        endOfStreamQueued.set(false)
     }
 
     private fun closeWorkerSources() {
