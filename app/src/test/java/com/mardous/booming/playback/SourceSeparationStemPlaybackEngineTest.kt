@@ -133,6 +133,31 @@ class SourceSeparationStemPlaybackEngineTest {
     }
 
     @Test
+    fun shortFinalBlockRemainsReadyUntilTheConsumerDrainsIt() {
+        val geometry = geometry(frameCount = 3)
+        val engine = SourceSeparationStemPlaybackEngine(
+            blockFrames = 4,
+            resumeWaterlineBlocks = 1,
+            targetWaterlineBlocks = 2,
+            blockCapacity = 3,
+        )
+        try {
+            engine.start(
+                1L,
+                listOf(testFactory("vocals", geometry, pcm(0, 3))),
+            )
+            await { engine.hasResumeWaterline() }
+            assertEquals(SourceSeparationPlaybackDataState.Ready, engine.currentState)
+            val output = Array(1) { ByteArray(3 * 4) }
+            assertEquals(3, engine.readInto(output, 3))
+            assertArrayEquals(pcm(0, 3), output[0])
+            assertEquals(SourceSeparationPlaybackDataState.Ended, engine.currentState)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
     fun lowWaterRecoveryWaitsForTheTargetWaterlineAndNotifiesOnce() {
         val geometry = geometry(frameCount = 40)
         val allowRecoveryDecode = CountDownLatch(1)

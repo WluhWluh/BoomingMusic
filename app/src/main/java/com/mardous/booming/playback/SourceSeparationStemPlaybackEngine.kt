@@ -23,6 +23,8 @@ internal interface SourceSeparationPlaybackStemSource : Closeable {
 
 internal interface SourceSeparationPlaybackStemSourceFactory {
     val spec: SourceSeparationPlaybackStemSpec
+    val openFileDescriptorCount: Int
+        get() = 1
 
     fun open(): SourceSeparationPlaybackStemSource
 }
@@ -301,6 +303,10 @@ internal class SourceSeparationStemPlaybackEngine(
 
     fun metricsSnapshot(): SourceSeparationPlaybackMetricsSnapshot = metrics.snapshot()
 
+    fun recordAudioThreadTime(elapsedNs: Long) {
+        metrics.recordAudioThreadTime(elapsedNs)
+    }
+
     fun realtimeAudit(): SourceSeparationPlaybackRealtimeAudit = realtimeAudit
 
     fun stop() {
@@ -427,7 +433,11 @@ internal class SourceSeparationStemPlaybackEngine(
                     continue
                 }
                 readyFrameCount.addAndGet(frames.toLong())
-                if (block.endOfStream) endOfStreamQueued.set(true)
+                if (block.endOfStream) {
+                    endOfStreamQueued.set(true)
+                    workerFactories = emptyList()
+                    closeWorkerSources()
+                }
                 workerNextFrame += frames
                 metrics.recordDecodeBlock(System.nanoTime() - startNs)
                 metrics.recordRingOccupancy(readyBlocks.size)
@@ -455,21 +465,9 @@ internal class SourceSeparationStemPlaybackEngine(
     private fun applyStart(start: EngineCommand.Start) {
         closeWorkerSources()
         drainReadyBlocks()
-        val factories = workerFactories
         val current = activeSession ?: return
         if (current.epoch != start.epoch || start.epoch != activeEpoch.get()) return
-        workerSources = runCatching { factories.map { it.open() } }
-            .getOrElse {
-                state.set(SourceSeparationPlaybackDataState.Failed)
-                workerFactories = emptyList()
-                return
-            }
-        workerSources.forEachIndexed { index, source ->
-            require(source.geometry == current.stems[index].geometry) {
-                "Playback source geometry changed while opening stem ${current.stems[index].stemId}."
-            }
-        }
-        workerSources.forEach { source -> source.seekToFrame(start.frame) }
+        if (!openWorkerSources(current, start.frame, "opening")) return
         workerNextFrame = start.frame
         consumedFrame.set(start.frame)
         state.set(SourceSeparationPlaybackDataState.Buffering)
@@ -480,19 +478,7 @@ internal class SourceSeparationStemPlaybackEngine(
         if (current.epoch != seek.epoch || seek.epoch != activeEpoch.get()) return
         closeWorkerSources()
         drainReadyBlocks()
-        val factories = workerFactories
-        workerSources = runCatching { factories.map { it.open() } }
-            .getOrElse {
-                state.set(SourceSeparationPlaybackDataState.Failed)
-                workerFactories = emptyList()
-                return
-            }
-        workerSources.forEachIndexed { index, source ->
-            require(source.geometry == current.stems[index].geometry) {
-                "Playback source geometry changed while seeking stem ${current.stems[index].stemId}."
-            }
-        }
-        workerSources.forEach { source -> source.seekToFrame(seek.frame) }
+        if (!openWorkerSources(current, seek.frame, "seeking")) return
         workerNextFrame = seek.frame
         consumedFrame.set(seek.frame)
         state.set(SourceSeparationPlaybackDataState.Buffering)
@@ -559,9 +545,43 @@ internal class SourceSeparationStemPlaybackEngine(
         }
     }
 
+    private fun openWorkerSources(
+        session: SourceSeparationPlaybackDataSession,
+        frame: Long,
+        operation: String,
+    ): Boolean {
+        val factories = workerFactories
+        val opened = ArrayList<SourceSeparationPlaybackStemSource>(factories.size)
+        return try {
+            factories.forEachIndexed { index, factory ->
+                val source = factory.open()
+                opened += source
+                require(source.geometry == session.stems[index].geometry) {
+                    "Playback source geometry changed while $operation stem " +
+                            "${session.stems[index].stemId}."
+                }
+            }
+            opened.forEach { source -> source.seekToFrame(frame) }
+            workerSources = opened
+            metrics.setOpenFileDescriptors(
+                factories.sumOf { factory -> factory.openFileDescriptorCount }.toLong(),
+            )
+            true
+        } catch (_: Throwable) {
+            opened.forEach { source -> runCatching { source.close() } }
+            workerSources = emptyList()
+            metrics.setOpenFileDescriptors(0L)
+            state.set(SourceSeparationPlaybackDataState.Failed)
+            workerFactories = emptyList()
+            drainReadyBlocks()
+            false
+        }
+    }
+
     private fun closeWorkerSources() {
         workerSources.forEach { source -> runCatching { source.close() } }
         workerSources = emptyList()
+        metrics.setOpenFileDescriptors(0L)
     }
 
     private sealed interface EngineCommand {

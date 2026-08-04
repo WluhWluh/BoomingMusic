@@ -20,7 +20,7 @@ class SourceSeparationMixAudioProcessorTest {
 
     @Test
     fun wavStemsPlayThroughBoundedEngineWithExistingBlendLaw() {
-        val frames = 16_384
+        val frames = 65_536
         val vocals = writeWav("vocals.wav", frames, 1_000)
         val instrumental = writeWav("instrumental.wav", frames, 2_000)
         val processor = SourceSeparationMixAudioProcessor()
@@ -57,6 +57,9 @@ class SourceSeparationMixAudioProcessorTest {
             repeat(8) {
                 assertEquals(3_000, output.short.toInt())
             }
+            val metrics = requireNotNull(processor.dataPlaneMetrics())
+            assertTrue(metrics.audioThreadTimeNs.count > 0)
+            assertEquals(2L, metrics.openFileDescriptors)
         } finally {
             processor.disable()
         }

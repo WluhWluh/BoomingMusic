@@ -22,6 +22,14 @@ import kotlin.math.floor
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
+class PreparedSourceSeparationPlaybackInputs internal constructor(
+    internal val vocalsFile: File,
+    internal val instrumentalFile: File?,
+    internal val stemSampleRate: Int,
+    internal val stemChannelCount: Int,
+    internal val factories: List<SourceSeparationPlaybackStemSourceFactory>,
+)
+
 @OptIn(UnstableApi::class)
 class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
@@ -94,6 +102,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         stemSampleRate: Int = DEFAULT_SAMPLE_RATE,
         stemChannelCount: Int = CHANNEL_COUNT_STEREO,
         mixedOutputReadyPrerollMs: Long = DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS,
+        preparedInputs: PreparedSourceSeparationPlaybackInputs? = null,
     ) {
         setBlend(initialBlend)
         synchronized(lock) {
@@ -107,7 +116,21 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             this.stemChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
             this.mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs.coerceAtLeast(0L)
             applyGainSnapshotImmediately()
-            val engineFactories = createEngineFactories(vocalsFile, instrumentalFile)
+            val engineFactories = preparedInputs?.let { prepared ->
+                require(prepared.vocalsFile == vocalsFile &&
+                        prepared.instrumentalFile == instrumentalFile &&
+                        prepared.stemSampleRate == this.stemSampleRate &&
+                        prepared.stemChannelCount == this.stemChannelCount
+                ) {
+                    "Prepared playback inputs do not match the requested stem session."
+                }
+                prepared.factories
+            } ?: createEngineFactories(
+                vocalsFile = vocalsFile,
+                instrumentalFile = instrumentalFile,
+                sampleRate = this.stemSampleRate,
+                channelCount = this.stemChannelCount,
+            )
             if (engineFactories != null) {
                 val engine = SourceSeparationStemPlaybackEngine()
                 playbackEngine = engine
@@ -135,9 +158,34 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 "session=$debugSessionId mode=$inputMode positionMs=$positionMs " +
                         "blend=$blend stemRate=${this.stemSampleRate} stemChannels=${this.stemChannelCount} " +
                         "mixedPrerollMs=${this.mixedOutputReadyPrerollMs} " +
-                        "vocals=${vocalsFile.length()} instrumental=${instrumentalFile?.length()}"
+                        "vocals=${vocalsFile.name} instrumental=${instrumentalFile?.name}"
             )
         }
+    }
+
+    internal fun prepareInputs(
+        vocalsFile: File,
+        instrumentalFile: File?,
+        stemSampleRate: Int,
+        stemChannelCount: Int,
+    ): PreparedSourceSeparationPlaybackInputs {
+        val normalizedSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
+        val normalizedChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
+        val factories = requireNotNull(
+            createEngineFactories(
+                vocalsFile = vocalsFile,
+                instrumentalFile = instrumentalFile,
+                sampleRate = normalizedSampleRate,
+                channelCount = normalizedChannelCount,
+            ),
+        ) { "Separated playback cache uses unsupported stem files." }
+        return PreparedSourceSeparationPlaybackInputs(
+            vocalsFile = vocalsFile,
+            instrumentalFile = instrumentalFile,
+            stemSampleRate = normalizedSampleRate,
+            stemChannelCount = normalizedChannelCount,
+            factories = factories,
+        )
     }
 
     fun disable() {
@@ -187,7 +235,12 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     ): Boolean {
         playbackEngine?.let { engine ->
             if (!active || inputMode != InputMode.OriginalSource) return false
-            val factories = createEngineFactories(vocalsFile, instrumentalFile) ?: return false
+            val factories = createEngineFactories(
+                vocalsFile = vocalsFile,
+                instrumentalFile = instrumentalFile,
+                sampleRate = stemSampleRate,
+                channelCount = stemChannelCount,
+            ) ?: return false
             engineHasInstrumentalInput = true
             engineStemBuffers = Array(factories.size) {
                 ByteArray(engine.blockFrameCapacity * DEFAULT_FRAME_SIZE)
@@ -329,7 +382,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         val bytesToRead = frames * frameSize
         prepareGainRamp()
         val resampled = inputAudioFormat.sampleRate != stemSampleRate
-        if (playbackEngine != null) {
+        val engine = playbackEngine
+        if (engine != null) {
+            val audioThreadStartNs = System.nanoTime()
             val mixedFrames = if (resampled) {
                 queueResampledEngineInput(
                     inputBuffer = inputBuffer,
@@ -346,6 +401,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                     frameSize = frameSize,
                 )
             }
+            engine.recordAudioThreadTime(System.nanoTime() - audioThreadStartNs)
             if (inputBuffer.hasRemaining()) {
                 buffer.put(inputBuffer)
             }
@@ -698,6 +754,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         }
     }
 
+    internal fun dataPlaneMetrics() = playbackEngine?.metricsSnapshot()
+
     internal fun consumeDataPlaneReadyNotification(): Boolean {
         return playbackEngine?.pollReadyNotification() == true
     }
@@ -1035,20 +1093,24 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private fun createEngineFactories(
         vocalsFile: File,
         instrumentalFile: File?,
+        sampleRate: Int,
+        channelCount: Int,
     ): List<SourceSeparationPlaybackStemSourceFactory>? {
-        if (stemChannelCount != CHANNEL_COUNT_STEREO ||
+        if (channelCount != CHANNEL_COUNT_STEREO ||
             !isEngineFile(vocalsFile) ||
             (instrumentalFile != null && !isEngineFile(instrumentalFile))
         ) {
             return null
         }
         val factories = buildList {
-            add(createEngineFactory(vocalsFile, "vocals"))
-            instrumentalFile?.let { file -> add(createEngineFactory(file, "instrumental")) }
+            add(createEngineFactory(vocalsFile, "vocals", sampleRate, channelCount))
+            instrumentalFile?.let { file ->
+                add(createEngineFactory(file, "instrumental", sampleRate, channelCount))
+            }
         }
         require(factories.all { factory ->
-            factory.spec.geometry.sampleRate == stemSampleRate &&
-                    factory.spec.geometry.channelCount == stemChannelCount
+            factory.spec.geometry.sampleRate == sampleRate &&
+                    factory.spec.geometry.channelCount == channelCount
         }) {
             "Playback stem geometry does not match the separation contract."
         }
@@ -1061,6 +1123,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private fun createEngineFactory(
         file: File,
         stemId: String,
+        sampleRate: Int,
+        channelCount: Int,
     ): SourceSeparationPlaybackStemSourceFactory {
         return if (file.extension.equals("flac", ignoreCase = true)) {
             SourceSeparationFlacStemSourceFactory(
@@ -1072,8 +1136,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             SourceSeparationFileStemSourceFactory(
                 file = file,
                 stemId = stemId,
-                sampleRate = stemSampleRate,
-                channelCount = stemChannelCount,
+                sampleRate = sampleRate,
+                channelCount = channelCount,
             )
         }
     }

@@ -94,6 +94,7 @@ import com.mardous.booming.playback.equalizer.EqualizerManager
 import com.mardous.booming.playback.library.LibraryProvider
 import com.mardous.booming.playback.library.MediaIDs
 import com.mardous.booming.playback.processor.BalanceAudioProcessor
+import com.mardous.booming.playback.processor.PreparedSourceSeparationPlaybackInputs
 import com.mardous.booming.playback.processor.ReplayGainAudioProcessor
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.playback.renderer.AlacWorkaroundCodecSelector
@@ -1877,10 +1878,14 @@ class PlaybackService :
                 )
             val vocalsFile = playback.vocalsFile
             val instrumentalFile = playback.instrumentalFile
-            if (!vocalsFile.isFile || !instrumentalFile.isFile) {
+            val availableFiles = withContext(IO) {
+                vocalsFile.isFile to instrumentalFile.isFile
+            }
+            if (!availableFiles.first || !availableFiles.second) {
                 traceSourceSeparationPlayback(
                     "check.newSession.missingFiles",
-                    "id=$checkId vocals=${vocalsFile.isFile} instrumental=${instrumentalFile.isFile}"
+                    "id=$checkId vocals=${availableFiles.first} " +
+                            "instrumental=${availableFiles.second}"
                 )
                 return sourceSeparationPlaybackUnavailable(
                     showMessage = showUnavailableMessage,
@@ -1926,6 +1931,14 @@ class PlaybackService :
                     message = getString(R.string.source_separation_playback_unavailable),
                 )
             }
+            val preparedInputs = withContext(IO) {
+                sourceSeparationMixProcessor.prepareInputs(
+                    vocalsFile = vocalsFile,
+                    instrumentalFile = instrumentalFile,
+                    stemSampleRate = output.outputSampleRate,
+                    stemChannelCount = channelCount,
+                )
+            }
             val session = SourceSeparationPlaybackSession(
                 songId = song.id,
                 sessionId = checkId,
@@ -1936,6 +1949,7 @@ class PlaybackService :
                 inputMode = InputMode.OriginalSource,
                 stemSampleRate = output.outputSampleRate,
                 stemChannelCount = channelCount,
+                preparedInputs = preparedInputs,
                 requiresReadinessGate = isPartialCache,
                 runtimeSong = runtimeSong,
                 modelAwareCachePlayback = playback,
@@ -1976,7 +1990,6 @@ class PlaybackService :
                 "id=$checkId position=$switchPositionMs shouldPlayAfterSwitch=$shouldPlayAfterSwitch " +
                         "resumeAfterSwitch=$resumeAfterSwitch"
             )
-            sourceSeparationMixProcessor.seekTo(switchPositionMs)
             resumeSourceSeparationOutputAfterSwitch("newSession", shouldPlayAfterSwitch || resumeAfterSwitch)
 
             broadcastSourceSeparationPlaybackChanged()
@@ -2188,13 +2201,16 @@ class PlaybackService :
             "check.activeSession.upgradeCompleted.start",
             "id=$checkId songId=${song.id} active=${activeSession.traceSummary()} " +
                     "position=$positionMs outputFormat=${vocalsFile.extension} " +
-                    "vocalsExt=${vocalsFile.extension} instrumentalExt=${instrumentalFile.extension} " +
-                    "vocalsBytes=${vocalsFile.length()} instrumentalBytes=${instrumentalFile.length()}"
+                    "vocalsExt=${vocalsFile.extension} instrumentalExt=${instrumentalFile.extension}"
         )
-        if (!vocalsFile.isFile || !instrumentalFile.isFile) {
+        val availableFiles = withContext(IO) {
+            vocalsFile.isFile to instrumentalFile.isFile
+        }
+        if (!availableFiles.first || !availableFiles.second) {
             traceSourceSeparationPlayback(
                 "check.activeSession.completedFilesMissing",
-                "id=$checkId vocals=${vocalsFile.isFile} instrumental=${instrumentalFile.isFile}"
+                "id=$checkId vocals=${availableFiles.first} " +
+                        "instrumental=${availableFiles.second}"
             )
             return sourceSeparationPlaybackUnavailable(
                 showMessage = showUnavailableMessage,
@@ -2238,6 +2254,14 @@ class PlaybackService :
                 message = getString(R.string.source_separation_playback_unavailable),
             )
         }
+        val preparedInputs = withContext(IO) {
+            sourceSeparationMixProcessor.prepareInputs(
+                vocalsFile = vocalsFile,
+                instrumentalFile = instrumentalFile,
+                stemSampleRate = output.outputSampleRate,
+                stemChannelCount = channelCount,
+            )
+        }
         val session = SourceSeparationPlaybackSession(
             songId = song.id,
             sessionId = checkId,
@@ -2248,6 +2272,7 @@ class PlaybackService :
             inputMode = InputMode.OriginalSource,
             stemSampleRate = output.outputSampleRate,
             stemChannelCount = channelCount,
+            preparedInputs = preparedInputs,
             requiresReadinessGate = false,
             runtimeSong = activeSession.runtimeSong,
             modelAwareCachePlayback = playback,
@@ -2269,7 +2294,6 @@ class PlaybackService :
             sourceSeparationPlaybackSession = session
             enableSourceSeparationMixProcessor(session, switchPositionMs)
             updateSourceSeparationPlaybackReadinessMonitor(session)
-            sourceSeparationMixProcessor.seekTo(switchPositionMs)
             resumeSourceSeparationOutputAfterSwitch(
                 reason = "completedCacheUpgrade",
                 resume = shouldPlayAfterSwitch || resumeAfterSwitch,
@@ -2568,6 +2592,7 @@ class PlaybackService :
             stemSampleRate = session.stemSampleRate,
             stemChannelCount = session.stemChannelCount,
             mixedOutputReadyPrerollMs = sourceSeparationMixedOutputPrerollMs,
+            preparedInputs = session.preparedInputs,
         )
         updateSourceSeparationDataPlaneMonitor(session)
         traceSourceSeparationPlayback("processor.enable.done", "songId=${session.songId}")
@@ -4225,6 +4250,7 @@ private data class SourceSeparationPlaybackSession(
     val inputMode: InputMode,
     val stemSampleRate: Int,
     val stemChannelCount: Int,
+    val preparedInputs: PreparedSourceSeparationPlaybackInputs,
     val requiresReadinessGate: Boolean,
     val runtimeSong: SourceSeparationRuntimeSong,
     val modelAwareCachePlayback: SourceSeparationModelAwareCachePlayback,
@@ -4232,8 +4258,7 @@ private data class SourceSeparationPlaybackSession(
     fun traceSummary(): String {
         return "song=$songId id=$sessionId mode=$inputMode gate=$requiresReadinessGate " +
                 "cache=${modelAwareCachePlayback.manifest.cacheKey.take(12)} " +
-                "vocals=${vocalsFile.extension}:${vocalsFile.length()} " +
-                "instrumental=${instrumentalFile.extension}:${instrumentalFile.length()}"
+                "vocals=${vocalsFile.name} instrumental=${instrumentalFile.name}"
     }
 
     fun closeModelAwareResources() {
