@@ -162,6 +162,26 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         vocalsFile: File,
         instrumentalFile: File,
     ): Boolean {
+        playbackEngine?.let { engine ->
+            if (!active || inputMode != InputMode.OriginalSource) return false
+            val factories = createEngineFactories(vocalsFile, instrumentalFile) ?: return false
+            engineHasInstrumentalInput = true
+            engineStemBuffers = Array(factories.size) {
+                ByteArray(engine.blockFrameCapacity * DEFAULT_FRAME_SIZE)
+            }
+            engine.hotSwap(
+                sessionId = debugSessionId,
+                factories = factories,
+                startFrame = engine.currentFrame(),
+            )
+            clearResampleCachesLocked()
+            resetMixedOutputNotificationLocked()
+            traceDebug(
+                "hotSwapPcm",
+                "session=$debugSessionId engine=true frame=${engine.currentFrame()} stems=${factories.size}",
+            )
+            return true
+        }
         val newVocalsInput = runCatching { RawPcmStemInput(vocalsFile) }
             .getOrElse { error ->
                 traceDebug("hotSwapPcm.failed", "session=$debugSessionId stem=vocals error=${error.message}")
@@ -223,6 +243,20 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
         return inputAudioFormat
+    }
+
+    override fun onFlush(streamMetadata: AudioProcessor.StreamMetadata) {
+        synchronized(lock) {
+            clearResampleCachesLocked()
+            resetMixedOutputNotificationLocked()
+        }
+    }
+
+    override fun onReset() {
+        synchronized(lock) {
+            active = false
+            closeLocked()
+        }
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
@@ -448,6 +482,15 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         return playbackEngine?.hasResumeWaterline() ?: active
     }
 
+    internal fun dataPlaneNeedsRecovery(): Boolean {
+        return playbackEngine?.currentState ==
+                com.mardous.booming.playback.SourceSeparationPlaybackDataState.Buffering
+    }
+
+    internal fun consumeDataPlaneReadyNotification(): Boolean {
+        return playbackEngine?.pollReadyNotification() == true
+    }
+
     private fun readStems(byteCount: Int): StemReadResult {
         return synchronized(lock) {
             val activeVocalsInput = vocalsInput
@@ -624,7 +667,12 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             ?.times(BYTES_PER_SAMPLE)
             ?: DEFAULT_FRAME_SIZE
         val frame = (positionMs.coerceAtLeast(0) * sampleRate / MILLIS_PER_SECOND.toFloat()).roundToLong()
-        playbackEngine?.seekTo(frame)
+        if (playbackEngine != null) {
+            playbackEngine?.seekTo(frame)
+            resampleStemFramePosition = frame.toDouble()
+            clearResampleCachesLocked()
+            return
+        }
         val bytePosition = frame * frameSize
         resampleStemFramePosition = frame.toDouble()
         clearResampleCachesLocked()

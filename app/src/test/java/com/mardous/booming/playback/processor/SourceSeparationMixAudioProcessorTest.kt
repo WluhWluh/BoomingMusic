@@ -110,6 +110,48 @@ class SourceSeparationMixAudioProcessorTest {
         }
     }
 
+    @Test
+    fun pcmHotSwapUsesOneLogicalFrameBarrier() {
+        val frames = 16_384
+        val vocals = writeWav("initial-vocals.wav", frames, 1_000)
+        val instrumental = writeWav("initial-instrumental.wav", frames, 2_000)
+        val replacementVocals = writePcm("replacement-vocals.pcm", frames, 3_000)
+        val replacementInstrumental = writePcm("replacement-instrumental.pcm", frames, 4_000)
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                vocalsFile = vocals,
+                instrumentalFile = instrumental,
+                positionMs = 0L,
+                inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+            assertEquals(true, processor.hotSwapToPcmInputs(
+                vocalsFile = replacementVocals,
+                instrumentalFile = replacementInstrumental,
+            ))
+            await { processor.isDataPlaneReady() }
+
+            val input = ByteBuffer.allocateDirect(4 * BYTES_PER_FRAME)
+                .order(ByteOrder.LITTLE_ENDIAN)
+            repeat(4) {
+                input.putShort(9_000)
+                input.putShort(9_000)
+            }
+            input.flip()
+            processor.queueInput(input)
+            val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            repeat(8) { assertEquals(7_000, output.short.toInt()) }
+        } finally {
+            processor.disable()
+        }
+    }
+
     private fun writeWav(name: String, frames: Int, sample: Int): File {
         val file = temporaryFolder.newFile(name)
         RandomAccessFile(file, "rw").use { output ->
@@ -130,6 +172,14 @@ class SourceSeparationMixAudioProcessorTest {
             repeat(frames * 2) {
                 output.writeLittleEndianShort(sample)
             }
+        }
+        return file
+    }
+
+    private fun writePcm(name: String, frames: Int, sample: Int): File {
+        val file = temporaryFolder.newFile(name)
+        RandomAccessFile(file, "rw").use { output ->
+            repeat(frames * 2) { output.writeLittleEndianShort(sample) }
         }
         return file
     }

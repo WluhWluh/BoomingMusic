@@ -45,6 +45,11 @@ internal class SourceSeparationStemPlaybackEngine(
     private val activeEpoch = AtomicLong(0L)
     private val readyFrameCount = AtomicLong(0L)
     private val endOfStreamQueued = AtomicBoolean(false)
+    private val recoveryRequired = AtomicBoolean(false)
+    private val lowWaterEpoch = AtomicLong(0L)
+    private val underflowEpoch = AtomicLong(0L)
+    private val readyNotificationEpoch = AtomicLong(0L)
+    private val consumedFrame = AtomicLong(0L)
     private val readyBlocks = ArrayBlockingQueue<StemPcmBlockSet>(blockCapacity)
     private val freeBlocks = ArrayBlockingQueue<StemPcmBlockSet>(blockCapacity)
     private val worker = Thread(::workerLoop, "BoomingStemDecode")
@@ -104,7 +109,12 @@ internal class SourceSeparationStemPlaybackEngine(
         activeEpoch.set(newEpoch)
         this.sessionId.set(sessionId)
         activeSession = session
-        clearConsumerBlock()
+        readyFrameCount.set(0L)
+        recoveryRequired.set(false)
+        lowWaterEpoch.set(0L)
+        underflowEpoch.set(0L)
+        readyNotificationEpoch.set(0L)
+        consumedFrame.set(startFrame.coerceAtLeast(0L))
         drainReadyBlocks()
         ensureBlockPool(specs.size, specs.first().geometry.channelCount)
         workerFactories = factories.toList()
@@ -121,7 +131,12 @@ internal class SourceSeparationStemPlaybackEngine(
         val newEpoch = epoch.next()
         activeEpoch.set(newEpoch)
         activeSession = current.copy(epoch = newEpoch)
-        clearConsumerBlock()
+        readyFrameCount.set(0L)
+        recoveryRequired.set(false)
+        lowWaterEpoch.set(0L)
+        underflowEpoch.set(0L)
+        readyNotificationEpoch.set(0L)
+        consumedFrame.set(frame.coerceAtLeast(0L))
         workerNextFrame = frame.coerceIn(0L, current.geometry.frameCount)
         state.set(SourceSeparationPlaybackDataState.Seeking)
         metrics.recordEpochChange()
@@ -148,7 +163,12 @@ internal class SourceSeparationStemPlaybackEngine(
         activeEpoch.set(newEpoch)
         this.sessionId.set(sessionId)
         activeSession = session
-        clearConsumerBlock()
+        readyFrameCount.set(0L)
+        recoveryRequired.set(false)
+        lowWaterEpoch.set(0L)
+        underflowEpoch.set(0L)
+        readyNotificationEpoch.set(0L)
+        consumedFrame.set(startFrame.coerceAtLeast(0L))
         drainReadyBlocks()
         ensureBlockPool(session.stems.size, session.geometry.channelCount)
         workerFactories = factories.toList()
@@ -170,9 +190,12 @@ internal class SourceSeparationStemPlaybackEngine(
         frameCount: Int,
     ): Int {
         if (frameCount <= 0) return 0
-        val session = activeSession ?: return 0
+        val session = activeSession ?: run {
+            clearConsumerBlock()
+            return 0
+        }
         if (readyFrameCount.get() < frameCount.toLong()) {
-            metrics.recordUnderrun()
+            markRecovery(underflow = true)
             state.compareAndSet(
                 SourceSeparationPlaybackDataState.Ready,
                 SourceSeparationPlaybackDataState.Buffering,
@@ -225,6 +248,7 @@ internal class SourceSeparationStemPlaybackEngine(
             }
             copiedFrames += copyFrames
             readyFrameCount.addAndGet(-copyFrames.toLong())
+            consumedFrame.addAndGet(copyFrames.toLong())
             consumerBlockOffsetFrames += copyFrames
             if (consumerBlockOffsetFrames == block.frameCount) {
                 val ended = block.endOfStream
@@ -239,13 +263,18 @@ internal class SourceSeparationStemPlaybackEngine(
         }
 
         metrics.recordRingOccupancy(readyBlocks.size)
+        if (copiedFrames > 0 &&
+            !endOfStreamQueued.get() &&
+            readyFrameCount.get() <= lowWaterFrameCount()
+        ) {
+            markRecovery(underflow = false)
+        }
         if (copiedFrames < frameCount) {
-            metrics.recordUnderrun()
             state.compareAndSet(
                 SourceSeparationPlaybackDataState.Ready,
                 SourceSeparationPlaybackDataState.Buffering,
             )
-        } else if (readyBlocks.size >= resumeWaterlineBlocks || consumerBlock != null) {
+        } else if (hasResumeWaterline()) {
             state.compareAndSet(
                 SourceSeparationPlaybackDataState.Buffering,
                 SourceSeparationPlaybackDataState.Ready,
@@ -255,10 +284,20 @@ internal class SourceSeparationStemPlaybackEngine(
     }
 
     fun hasResumeWaterline(): Boolean {
-        return readyBlocks.size >= resumeWaterlineBlocks ||
-                consumerBlock != null ||
+        val requiredFrames = if (recoveryRequired.get()) {
+            targetWaterlineBlocks * blockFrames
+        } else {
+            resumeWaterlineBlocks * blockFrames
+        }
+        return readyFrameCount.get() >= requiredFrames ||
                 (endOfStreamQueued.get() && readyFrameCount.get() > 0L)
     }
+
+    fun pollReadyNotification(): Boolean {
+        return readyNotificationEpoch.getAndSet(0L) > 0L
+    }
+
+    fun currentFrame(): Long = consumedFrame.get().coerceAtLeast(0L)
 
     fun metricsSnapshot(): SourceSeparationPlaybackMetricsSnapshot = metrics.snapshot()
 
@@ -269,6 +308,9 @@ internal class SourceSeparationStemPlaybackEngine(
         val newEpoch = epoch.next()
         activeEpoch.set(newEpoch)
         metrics.recordEpochChange()
+        readyFrameCount.set(0L)
+        recoveryRequired.set(false)
+        readyNotificationEpoch.set(0L)
         command.set(EngineCommand.Stop(newEpoch))
         activeSession = null
         workerFactories = emptyList()
@@ -382,11 +424,15 @@ internal class SourceSeparationStemPlaybackEngine(
                 workerNextFrame += frames
                 metrics.recordDecodeBlock(System.nanoTime() - startNs)
                 metrics.recordRingOccupancy(readyBlocks.size)
-                if (readyBlocks.size >= resumeWaterlineBlocks || block.endOfStream) {
+                val requiredBlocks = if (recoveryRequired.get()) {
+                    targetWaterlineBlocks
+                } else {
+                    resumeWaterlineBlocks
+                }
+                if (readyBlocks.size >= requiredBlocks || block.endOfStream) {
                     state.set(SourceSeparationPlaybackDataState.Ready)
-                    if (state.get() == SourceSeparationPlaybackDataState.Ready) {
-                        metrics.recordSeekReady()
-                    }
+                    readyNotificationEpoch.compareAndSet(0L, currentEpoch)
+                    metrics.recordSeekReady()
                 } else {
                     state.set(SourceSeparationPlaybackDataState.Buffering)
                 }
@@ -418,6 +464,7 @@ internal class SourceSeparationStemPlaybackEngine(
         }
         workerSources.forEach { source -> source.seekToFrame(start.frame) }
         workerNextFrame = start.frame
+        consumedFrame.set(start.frame)
         state.set(SourceSeparationPlaybackDataState.Buffering)
     }
 
@@ -440,6 +487,7 @@ internal class SourceSeparationStemPlaybackEngine(
         }
         workerSources.forEach { source -> source.seekToFrame(seek.frame) }
         workerNextFrame = seek.frame
+        consumedFrame.set(seek.frame)
         state.set(SourceSeparationPlaybackDataState.Buffering)
     }
 
@@ -477,14 +525,27 @@ internal class SourceSeparationStemPlaybackEngine(
     }
 
     private fun drainReadyBlocks() {
-        readyFrameCount.set(consumerBlock?.let { block ->
-            (block.frameCount - consumerBlockOffsetFrames).coerceAtLeast(0).toLong()
-        } ?: 0L)
+        readyFrameCount.set(0L)
         while (true) {
             val block = readyBlocks.poll() ?: break
             freeBlocks.offer(block)
         }
         endOfStreamQueued.set(false)
+    }
+
+    private fun lowWaterFrameCount(): Long {
+        return resumeWaterlineBlocks.toLong() * blockFrames
+    }
+
+    private fun markRecovery(underflow: Boolean) {
+        val current = activeEpoch.get()
+        if (recoveryRequired.compareAndSet(false, true)) {
+            metrics.recordLowWater()
+            lowWaterEpoch.set(current)
+        }
+        if (underflow && underflowEpoch.compareAndSet(0L, current)) {
+            metrics.recordUnderrun()
+        }
     }
 
     private fun closeWorkerSources() {

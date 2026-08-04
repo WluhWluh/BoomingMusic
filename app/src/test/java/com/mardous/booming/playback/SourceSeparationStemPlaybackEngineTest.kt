@@ -1,9 +1,11 @@
 package com.mardous.booming.playback
 
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -93,6 +95,41 @@ class SourceSeparationStemPlaybackEngineTest {
         }
     }
 
+    @Test
+    fun lowWaterRecoveryWaitsForTheTargetWaterlineAndNotifiesOnce() {
+        val geometry = geometry(frameCount = 40)
+        val allowRecoveryDecode = CountDownLatch(1)
+        val engine = SourceSeparationStemPlaybackEngine(
+            blockFrames = 4,
+            resumeWaterlineBlocks = 1,
+            targetWaterlineBlocks = 3,
+            blockCapacity = 4,
+        )
+        try {
+            engine.start(
+                1L,
+                listOf(
+                    testFactory("vocals", geometry, pcm(0, 40)) { startFrame ->
+                        if (startFrame >= 12L) allowRecoveryDecode.await()
+                    },
+                ),
+            )
+            await { engine.metricsSnapshot().decodeBlockCount >= 3L }
+            assertTrue(engine.pollReadyNotification())
+            assertEquals(8, engine.readInto(Array(1) { ByteArray(8 * 4) }, 8))
+            assertFalse(engine.hasResumeWaterline())
+            assertFalse(engine.pollReadyNotification())
+
+            allowRecoveryDecode.countDown()
+            await { engine.hasResumeWaterline() }
+            assertTrue(engine.pollReadyNotification())
+            assertFalse(engine.pollReadyNotification())
+        } finally {
+            allowRecoveryDecode.countDown()
+            engine.close()
+        }
+    }
+
     private fun geometry(frameCount: Int): SourceSeparationPlaybackGeometry {
         return SourceSeparationPlaybackGeometry(
             sampleRate = 44_100,
@@ -117,6 +154,7 @@ class SourceSeparationStemPlaybackEngineTest {
         stemId: String,
         geometry: SourceSeparationPlaybackGeometry,
         pcm: ByteArray,
+        beforeRead: (Long) -> Unit = {},
     ): SourceSeparationPlaybackStemSourceFactory {
         val sourceGeometry = geometry
         return object : SourceSeparationPlaybackStemSourceFactory {
@@ -135,6 +173,7 @@ class SourceSeparationStemPlaybackEngineTest {
                         frameCount: Int,
                     ): Int {
                         if (closed.get()) return 0
+                        beforeRead(startFrame)
                         val sourceOffset = startFrame.toInt() * 4
                         val byteCount = frameCount * 4
                         if (sourceOffset < 0 || sourceOffset + byteCount > pcm.size) return 0
