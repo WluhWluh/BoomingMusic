@@ -183,7 +183,7 @@ class SourceSeparationModelAwareCacheRepository(
         val manifest = manifest(identity)
             ?: return SourceSeparationModelAwarePlayableStatus.Unavailable
         if (manifest.state == SourceSeparationCacheManifestState.Completed) {
-            return if (store.validateCompletedEntry(manifest) ==
+            return if (store.validateCompletedEntry(manifest, verifyHashes = false) ==
                 SourceSeparationCacheValidationResult.Valid
             ) {
                 openPlayback(manifest)?.let(SourceSeparationModelAwarePlayableStatus::Ready)
@@ -224,7 +224,9 @@ class SourceSeparationModelAwareCacheRepository(
         val manifest = store.readManifest(cacheKey)
             ?.takeIf { it.state == SourceSeparationCacheManifestState.Completed }
             ?: return null
-        if (store.validateCompletedEntry(manifest) != SourceSeparationCacheValidationResult.Valid) {
+        if (store.validateCompletedEntry(manifest, verifyHashes = false) !=
+            SourceSeparationCacheValidationResult.Valid
+        ) {
             return null
         }
         return openPlayback(manifest)

@@ -129,12 +129,44 @@ class SourceSeparationCacheFlacPromoterTest {
                 instrumentalFile = playback.instrumentalFile,
                 positionMs = 0L,
             )
+            awaitCondition { mixTrace.count { "indexedOpen success" in it } == 2 }
         } finally {
             processor.disable()
             playback.close()
         }
         assertEquals(2, mixTrace.count { "indexedOpen success" in it })
         assertFalse(mixTrace.any { "fallbackWholeFileDecode" in it })
+    }
+
+    @Test
+    fun `indexed playback rejects a frame crc failure`() {
+        val expectedPcm = testPcm16Stereo(frameCount = TEST_FRAME_COUNT, seed = 17)
+        val fixture = fixture()
+        val completed = fixture.completedManifest(listOf(expectedPcm, expectedPcm))
+        fixture.realPromoter().promote(completed.cacheKey)
+        val flac = fixture.store.resolveEntryPath(
+            completed.cacheKey,
+            requireNotNull(fixture.store.readManifest(completed.cacheKey))
+                .output!!.stems.first().promotedPath!!,
+        )
+        val index = Pcm16StereoFlacEncoder.frameIndexFileFor(flac)
+        val firstFrameOffset = index.readLines()
+            .first { line -> line.startsWith("0,") }
+            .split(',')[3]
+            .toLong()
+        RandomAccessFile(flac, "rw").use { file ->
+            file.seek(firstFrameOffset + 8L)
+            file.write(file.read().xor(0x01))
+        }
+
+        val reader = requireNotNull(Pcm16StereoFlacEncoder.openIndexedPcmReader(flac))
+        try {
+            assertThrows(IllegalArgumentException::class.java) {
+                reader.read(ByteArray(FLAC_BLOCK_FRAME_COUNT * PCM16_STEREO_BYTES_PER_FRAME), 1)
+            }
+        } finally {
+            reader.close()
+        }
     }
 
     @Test
@@ -506,4 +538,13 @@ private fun testPcm16Stereo(frameCount: Int, seed: Int): ByteArray {
         output[offset++] = (right ushr 8).toByte()
     }
     return output
+}
+
+private fun awaitCondition(timeoutMs: Long = 2_000L, condition: () -> Boolean) {
+    val deadline = System.nanoTime() + timeoutMs * 1_000_000L
+    while (System.nanoTime() < deadline) {
+        if (condition()) return
+        Thread.sleep(2L)
+    }
+    assertTrue("Timed out waiting for asynchronous playback setup.", condition())
 }

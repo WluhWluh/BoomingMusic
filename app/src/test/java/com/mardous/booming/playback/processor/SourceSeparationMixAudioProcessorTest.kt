@@ -2,6 +2,7 @@ package com.mardous.booming.playback.processor
 
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
+import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
@@ -54,6 +55,56 @@ class SourceSeparationMixAudioProcessorTest {
             repeat(8) {
                 assertEquals(3_000, output.short.toInt())
             }
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun indexedFlacStemsUseTheSameBoundedEngineWithoutWholeSongFallback() {
+        val frames = 16_384
+        val vocalsWav = writeWav("vocals-source.wav", frames, 1_000)
+        val instrumentalWav = writeWav("instrumental-source.wav", frames, 2_000)
+        val vocalsFlac = temporaryFolder.newFile("vocals.flac")
+        val instrumentalFlac = temporaryFolder.newFile("instrumental.flac")
+        Pcm16StereoFlacEncoder.encodeWavToFlac(
+            wavFile = vocalsWav,
+            flacFile = vocalsFlac,
+            expectedSampleRate = 44_100,
+            expectedFrameCount = frames,
+        )
+        Pcm16StereoFlacEncoder.encodeWavToFlac(
+            wavFile = instrumentalWav,
+            flacFile = instrumentalFlac,
+            expectedSampleRate = 44_100,
+            expectedFrameCount = frames,
+        )
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.configure(
+                AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT),
+            )
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                vocalsFile = vocalsFlac,
+                instrumentalFile = instrumentalFlac,
+                positionMs = 0L,
+                inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+            val input = ByteBuffer.allocateDirect(4 * BYTES_PER_FRAME)
+                .order(ByteOrder.LITTLE_ENDIAN)
+            repeat(4) {
+                input.putShort(9_000)
+                input.putShort(9_000)
+            }
+            input.flip()
+            processor.queueInput(input)
+            val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            repeat(8) { assertEquals(3_000, output.short.toInt()) }
         } finally {
             processor.disable()
         }

@@ -6,8 +6,9 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import com.mardous.booming.playback.SourceSeparationFileStemSourceFactory
+import com.mardous.booming.playback.SourceSeparationFlacStemSourceFactory
+import com.mardous.booming.playback.SourceSeparationPlaybackStemSourceFactory
 import com.mardous.booming.playback.SourceSeparationStemPlaybackEngine
-import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import java.io.File
 import java.io.Closeable
@@ -711,19 +712,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         debugTraceSink?.invoke("mix.$event | $detail")
     }
 
-    private fun traceSinkForDebugEvent(event: String): ((String) -> Unit)? {
-        return if (debugTraceSink == null) {
-            null
-        } else {
-            { detail -> traceDebug(event, detail) }
-        }
-    }
-
     private fun openStemInput(file: File): StemPcmInput {
         return when {
-            file.extension.equals("flac", ignoreCase = true) -> {
-                FlacStemPcmInput(file, traceSink = traceSinkForDebugEvent("flac"))
-            }
             file.extension.equals("pcm", ignoreCase = true) -> {
                 RawPcmStemInput(file)
             }
@@ -736,42 +726,56 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private fun createEngineFactories(
         vocalsFile: File,
         instrumentalFile: File?,
-    ): List<SourceSeparationFileStemSourceFactory>? {
+    ): List<SourceSeparationPlaybackStemSourceFactory>? {
         if (stemChannelCount != CHANNEL_COUNT_STEREO ||
             !isEngineFile(vocalsFile) ||
             (instrumentalFile != null && !isEngineFile(instrumentalFile))
         ) {
             return null
         }
-        return runCatching {
-            buildList {
-                add(
-                    SourceSeparationFileStemSourceFactory(
-                        file = vocalsFile,
-                        stemId = "vocals",
-                        sampleRate = stemSampleRate,
-                        channelCount = stemChannelCount,
-                    ),
-                )
-                instrumentalFile?.let { file ->
-                    add(
-                        SourceSeparationFileStemSourceFactory(
-                            file = file,
-                            stemId = "instrumental",
-                            sampleRate = stemSampleRate,
-                            channelCount = stemChannelCount,
-                        ),
-                    )
-                }
-            }
-        }.getOrNull()?.takeIf { factories ->
-            factories.map { it.spec.geometry }.distinct().size == 1
+        val factories = buildList {
+            add(createEngineFactory(vocalsFile, "vocals"))
+            instrumentalFile?.let { file -> add(createEngineFactory(file, "instrumental")) }
+        }
+        require(factories.all { factory ->
+            factory.spec.geometry.sampleRate == stemSampleRate &&
+                    factory.spec.geometry.channelCount == stemChannelCount
+        }) {
+            "Playback stem geometry does not match the separation contract."
+        }
+        return factories.takeIf { entries -> entries.map { it.spec.geometry }.distinct().size == 1 }
+    }
+
+    private fun createEngineFactory(
+        file: File,
+        stemId: String,
+    ): SourceSeparationPlaybackStemSourceFactory {
+        return if (file.extension.equals("flac", ignoreCase = true)) {
+            SourceSeparationFlacStemSourceFactory(
+                file = file,
+                stemId = stemId,
+                traceSink = traceSinkForEngineSource(),
+            )
+        } else {
+            SourceSeparationFileStemSourceFactory(
+                file = file,
+                stemId = stemId,
+                sampleRate = stemSampleRate,
+                channelCount = stemChannelCount,
+            )
         }
     }
 
     private fun isEngineFile(file: File): Boolean {
         return file.extension.equals("wav", ignoreCase = true) ||
-                file.extension.equals("pcm", ignoreCase = true)
+                file.extension.equals("pcm", ignoreCase = true) ||
+                file.extension.equals("flac", ignoreCase = true)
+    }
+
+    private fun traceSinkForEngineSource(): ((String) -> Unit)? {
+        return debugTraceSink?.let { sink ->
+            { detail -> sink("mix.flac | $detail") }
+        }
     }
 
     companion object {
@@ -789,7 +793,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         private const val DEFAULT_FRAME_SIZE = CHANNEL_COUNT_STEREO * BYTES_PER_SAMPLE
         private const val RESAMPLE_READ_CHUNK_BYTES = 16 * 1024
         private const val MILLIS_PER_SECOND = 1000
-        private const val NANOS_PER_MILLISECOND = 1_000_000L
         private const val WAV_HEADER_SIZE = 44L
     }
 
@@ -943,68 +946,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
         override fun close() {
             input.close()
-        }
-    }
-
-    private class FlacStemPcmInput(
-        file: File,
-        private val traceSink: ((String) -> Unit)?,
-    ) : StemPcmInput {
-        private val reader = Pcm16StereoFlacEncoder.openIndexedPcmReader(file, traceSink)
-        private val fallbackPcm = if (reader == null) {
-            val startedAtNs = System.nanoTime()
-            traceSink?.invoke("fallbackWholeFileDecode.start file=${file.name} bytes=${file.length()}")
-            Pcm16StereoFlacEncoder.decodeFlacFile(file).pcm16.also { pcm ->
-                traceSink?.invoke(
-                    "fallbackWholeFileDecode.end file=${file.name} pcmBytes=${pcm.size} " +
-                            "decodeMs=${(System.nanoTime() - startedAtNs) / NANOS_PER_MILLISECOND.toFloat()}"
-                )
-            }
-        } else {
-            null
-        }
-        private var position = 0L
-
-        override val pcmBytePosition: Long
-            get() = position
-
-        override fun read(buffer: ByteArray, byteCount: Int): Int {
-            val activeReader = reader
-            if (activeReader != null) {
-                val count = activeReader.read(buffer, byteCount)
-                if (count > 0) {
-                    position += count
-                }
-                return count
-            }
-            val pcm = fallbackPcm ?: return -1
-            if (position >= pcm.size) return -1
-            val start = position.toInt()
-            val count = minOf(byteCount, pcm.size - start)
-            pcm.copyInto(buffer, destinationOffset = 0, startIndex = start, endIndex = start + count)
-            position += count
-            return count
-        }
-
-        override fun seekToPcmByte(bytePosition: Long) {
-            val activeReader = reader
-            if (activeReader != null) {
-                activeReader.seekToPcmByte(bytePosition)
-            }
-            val maxBytes = fallbackPcm?.size?.toLong()
-            position = bytePosition
-                .coerceAtLeast(0L)
-                .let { position ->
-                    maxBytes?.let(position::coerceAtMost) ?: position
-                }
-            traceSink?.invoke(
-                "flacInput.seek requestedByte=$bytePosition appliedByte=$position " +
-                        "indexed=${activeReader != null} fallbackBytes=${fallbackPcm?.size}"
-            )
-        }
-
-        override fun close() {
-            reader?.close()
         }
     }
 
