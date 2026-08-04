@@ -46,9 +46,17 @@ class MdxLiteRtCompatibilityTest {
     }
 
     @Test
-    fun `candidate GPU profile is internal only and precision specific`() {
+    fun `candidate GPU profile requires explicit product or internal admission`() {
         val profile = profile("uvr_mdxnet_3_9662")
         val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a)
+        val productCandidate = MdxLiteRtCompatibilityResolver.resolve(
+            profile = profile,
+            backend = MdxInferenceBackend.LiteRtGpu,
+            platform = platform,
+            policy = MdxCompatibilityPolicy.AllowCandidates,
+            profileId = "gpu-auto-fp32-v1",
+            precision = MdxRuntimePrecision.Fp32,
+        )
         val candidate = MdxLiteRtCompatibilityResolver.resolve(
             profile = profile,
             backend = MdxInferenceBackend.LiteRtGpu,
@@ -66,8 +74,33 @@ class MdxLiteRtCompatibilityTest {
             precision = MdxRuntimePrecision.Fp16,
         )
 
+        assertEquals(MdxCompatibilityOutcome.Experimental, productCandidate.outcome)
         assertEquals(MdxCompatibilityOutcome.InternalValidationOnly, candidate.outcome)
         assertEquals(MdxCompatibilityOutcome.Unsupported, rejectedFp16.outcome)
+    }
+
+    @Test
+    fun `reviewed HQ4 CPU and GPU candidates are product experimental on arm64`() {
+        val profile = profile("uvr_mdxnet_inst_hq_4")
+        val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a)
+
+        val cpu = MdxLiteRtCompatibilityResolver.resolve(
+            profile,
+            MdxInferenceBackend.LiteRtCpu,
+            platform,
+            MdxCompatibilityPolicy.AllowCandidates,
+        )
+        val gpu = MdxLiteRtCompatibilityResolver.resolve(
+            profile,
+            MdxInferenceBackend.LiteRtGpu,
+            platform,
+            MdxCompatibilityPolicy.AllowCandidates,
+            profileId = "gpu-auto-fp32-v1",
+            precision = MdxRuntimePrecision.Fp32,
+        )
+
+        assertEquals(MdxCompatibilityOutcome.Experimental, cpu.outcome)
+        assertEquals(MdxCompatibilityOutcome.Experimental, gpu.outcome)
     }
 
     @Test

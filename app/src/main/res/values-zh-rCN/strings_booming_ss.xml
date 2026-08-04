@@ -191,7 +191,7 @@
     <string name="source_separation_preset_restored_target_current_retained">当前模型仍保持选中。</string>
     <string name="source_separation_preset_restored_target_discard">放弃恢复目标</string>
     <string name="source_separation_preset_experimental_confirm_title">使用实验性模型？</string>
-    <string name="source_separation_preset_experimental_confirm_message">%1$s 是仅使用 CPU 的实验性模型，尚未完成发布验证，运行速度或输出结果可能不符合预期。</string>
+    <string name="source_separation_preset_experimental_confirm_message">%1$s 是实验性模型，尚未完成发布验证，可能占用大量内存、运行较慢或产生异常输出。</string>
     <string name="source_separation_preset_use_for_validation">用于开发验证</string>
     <string name="source_separation_preset_selecting">正在选择用于开发验证的模型……</string>
     <string name="source_separation_preset_delete_confirm_message">删除已安装的 %1$s 模型？现有的音源分离缓存不会被删除。</string>
@@ -201,7 +201,7 @@
     <string name="source_separation_preset_size_and_release">%1$s / Release %2$s</string>
     <string name="source_separation_preset_recommended_ready">推荐模型，已完成发布资格验证。</string>
     <string name="source_separation_preset_promotion_pending">推荐候选模型。完成全设备验证前，正常使用仍被禁用。</string>
-    <string name="source_separation_preset_experimental_cpu_only">仅使用 CPU 的实验性候选模型，需要明确确认后才能选择。</string>
+    <string name="source_separation_preset_experimental_candidate">实验性候选模型，需要明确确认后才能选择；是否使用 GPU 取决于已安装的运行时和设备条件。</string>
     <string name="source_separation_preset_resource_gated">仅供下载。当前资源限制不允许启用此模型。</string>
     <string name="source_separation_preset_contract_pending">仅供下载。此模型的 DSP 与分轨契约尚未经过审核。</string>
     <string name="source_separation_preset_generic_stem_pending">仅供下载。启用前需要实现中性的目标分轨界面。</string>

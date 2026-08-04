@@ -625,7 +625,7 @@ class SourceSeparationPresetRepositoryTest {
             catalog = catalog(
                 officialPayload = payload,
                 supportLevel = CatalogSupportLevel.Experimental,
-                activationPolicy = CatalogActivationPolicy.SelectableExperimentalCpuOnly,
+                activationPolicy = CatalogActivationPolicy.SelectableExperimental,
                 includeReviewedContract = true,
             ),
         ).use { fixture ->

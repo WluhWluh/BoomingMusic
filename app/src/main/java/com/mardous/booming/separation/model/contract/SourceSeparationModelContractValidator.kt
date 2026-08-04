@@ -179,7 +179,7 @@ object SourceSeparationModelContractValidator {
         catalog.entries
             .filter {
                 it.activationPolicy == CatalogActivationPolicy.SelectableWhenQualified ||
-                    it.activationPolicy == CatalogActivationPolicy.SelectableExperimentalCpuOnly
+                    it.activationPolicy == CatalogActivationPolicy.SelectableExperimental
             }
             .forEach { resolveActivationContract(catalog, it.modelId) }
         return catalog
@@ -193,7 +193,7 @@ object SourceSeparationModelContractValidator {
             ?: fail("Expected one catalog entry for $modelId")
         requireContract(
             entry.activationPolicy == CatalogActivationPolicy.SelectableWhenQualified ||
-                entry.activationPolicy == CatalogActivationPolicy.SelectableExperimentalCpuOnly
+                entry.activationPolicy == CatalogActivationPolicy.SelectableExperimental
         ) {
             "Catalog entry $modelId is not selectable"
         }
@@ -445,8 +445,8 @@ object SourceSeparationModelContractValidator {
             ) { "Recommended model ${entry.modelId} must be selectable" }
 
             CatalogSupportLevel.Experimental -> requireContract(
-                entry.activationPolicy == CatalogActivationPolicy.SelectableExperimentalCpuOnly
-            ) { "Experimental model ${entry.modelId} must use the warned CPU-only policy" }
+                entry.activationPolicy == CatalogActivationPolicy.SelectableExperimental
+            ) { "Experimental model ${entry.modelId} must use the warned activation policy" }
 
             CatalogSupportLevel.DownloadOnly -> requireContract(
                 entry.activationPolicy == CatalogActivationPolicy.DownloadOnlyResourceGated ||
@@ -456,7 +456,7 @@ object SourceSeparationModelContractValidator {
         }
         when (entry.activationPolicy) {
             CatalogActivationPolicy.SelectableWhenQualified,
-            CatalogActivationPolicy.SelectableExperimentalCpuOnly -> {
+            CatalogActivationPolicy.SelectableExperimental -> {
                 requireContract(entry.contractId in contracts) {
                     "Selectable model ${entry.modelId} has no complete contract"
                 }

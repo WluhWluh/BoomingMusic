@@ -131,7 +131,7 @@ class SourceSeparationManagementScreenTest {
             modelId = modelId,
             displayName = installed.displayName,
             supportLevel = CatalogSupportLevel.Experimental,
-            activationPolicy = CatalogActivationPolicy.SelectableExperimentalCpuOnly,
+            activationPolicy = CatalogActivationPolicy.SelectableExperimental,
             releaseMaturity = CatalogReleaseMaturity.Candidate,
             isDefault = false,
             byteSize = installed.byteSize,

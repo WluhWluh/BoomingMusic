@@ -111,7 +111,7 @@ class SourceSeparationModelContractTest {
         val karaoke = catalog.entries.single { it.modelId == "uvr_mdxnet_kara" }
         assertEquals(CatalogSupportLevel.Experimental, karaoke.supportLevel)
         assertEquals(
-            CatalogActivationPolicy.SelectableExperimentalCpuOnly,
+            CatalogActivationPolicy.SelectableExperimental,
             karaoke.activationPolicy,
         )
         assertNotNull(
@@ -122,9 +122,9 @@ class SourceSeparationModelContractTest {
         )
 
         val hq4 = catalog.entries.single { it.modelId == "uvr_mdxnet_inst_hq_4" }
-        assertEquals(CatalogSupportLevel.DownloadOnly, hq4.supportLevel)
+        assertEquals(CatalogSupportLevel.Experimental, hq4.supportLevel)
         assertEquals(
-            CatalogActivationPolicy.DownloadOnlyResourceGated,
+            CatalogActivationPolicy.SelectableExperimental,
             hq4.activationPolicy,
         )
         assertNotNull(
@@ -133,12 +133,12 @@ class SourceSeparationModelContractTest {
                 hq4.modelId,
             )
         )
-        assertThrows(SourceSeparationModelContractException::class.java) {
+        assertNotNull(
             SourceSeparationModelContractValidator.resolveActivationContract(
                 catalog,
                 hq4.modelId,
             )
-        }
+        )
     }
 
     @Test

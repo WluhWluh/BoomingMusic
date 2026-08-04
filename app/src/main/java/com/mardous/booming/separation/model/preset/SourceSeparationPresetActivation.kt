@@ -29,7 +29,6 @@ enum class SourceSeparationPresetSelectionBlockReason {
     AndroidApiTooLow,
     MissingKnownGoodCpuProfile,
     CandidatePromotionPending,
-    ExperimentalFullSongValidationPending,
     ExperimentalConfirmationRequired,
     UnsupportedCustomModel,
     CustomModelStructuralInspectionUnavailable,
@@ -69,7 +68,7 @@ object SourceSeparationPresetActivationResolver {
             }
 
             CatalogActivationPolicy.SelectableWhenQualified,
-            CatalogActivationPolicy.SelectableExperimentalCpuOnly -> Unit
+            CatalogActivationPolicy.SelectableExperimental -> Unit
         }
         val contractId = entry.contractId
             ?: return blocked(SourceSeparationPresetSelectionBlockReason.MissingReviewedContract)
@@ -96,7 +95,11 @@ object SourceSeparationPresetActivationResolver {
                 qualification,
             )
         }
+        val reviewedExperimentalCandidate =
+            entry.supportLevel == CatalogSupportLevel.Experimental &&
+                qualification.status == ContractRuntimeQualificationStatus.Candidate
         if (qualification.status != ContractRuntimeQualificationStatus.KnownGood &&
+            !reviewedExperimentalCandidate &&
             !(scope == SourceSeparationPresetSelectionScope.InternalValidation &&
                 MdxX86ProcessValidationOverride.permitsCatalogQualification(
                     modelId = modelId,
@@ -130,14 +133,7 @@ object SourceSeparationPresetActivationResolver {
             }
 
             CatalogSupportLevel.Experimental -> {
-                if (entry.validation.fullSong != CatalogValidationStatus.Passed) {
-                    blocked(
-                        SourceSeparationPresetSelectionBlockReason.ExperimentalFullSongValidationPending,
-                        qualification,
-                    )
-                } else {
-                    allowed(qualification, requiresExperimentalConfirmation = true)
-                }
+                allowed(qualification, requiresExperimentalConfirmation = true)
             }
 
             CatalogSupportLevel.DownloadOnly ->

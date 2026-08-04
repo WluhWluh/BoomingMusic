@@ -3,6 +3,7 @@ package com.mardous.booming.separation.model.preset
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.contract.ContractAbi
+import com.mardous.booming.separation.model.contract.ContractRuntimeQualificationStatus
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import org.junit.Assert.assertEquals
@@ -39,7 +40,7 @@ class SourceSeparationPresetActivationTest {
     }
 
     @Test
-    fun `karaoke remains a user-blocked experimental candidate until full song validation`() {
+    fun `karaoke is selectable only with experimental confirmation`() {
         val userEligibility = resolve(
             modelId = "uvr_mdxnet_kara",
             scope = SourceSeparationPresetSelectionScope.User,
@@ -49,16 +50,13 @@ class SourceSeparationPresetActivationTest {
             scope = SourceSeparationPresetSelectionScope.InternalValidation,
         )
 
-        assertFalse(userEligibility.allowed)
-        assertEquals(
-            SourceSeparationPresetSelectionBlockReason.ExperimentalFullSongValidationPending,
-            userEligibility.blockReason,
-        )
+        assertTrue(userEligibility.allowed)
+        assertTrue(userEligibility.requiresExperimentalConfirmation)
         assertTrue(internalEligibility.allowed)
     }
 
     @Test
-    fun `resource gated and generic candidates have no internal selection exception`() {
+    fun `HQ4 uses reviewed candidate fallback while generic models remain blocked`() {
         val hq4 = resolve(
             modelId = "uvr_mdxnet_inst_hq_4",
             scope = SourceSeparationPresetSelectionScope.InternalValidation,
@@ -68,8 +66,11 @@ class SourceSeparationPresetActivationTest {
             scope = SourceSeparationPresetSelectionScope.InternalValidation,
         )
 
-        assertFalse(hq4.allowed)
-        assertEquals(SourceSeparationPresetSelectionBlockReason.DownloadOnly, hq4.blockReason)
+        assertTrue(hq4.allowed)
+        assertEquals(
+            ContractRuntimeQualificationStatus.Candidate,
+            hq4.cpuQualification?.status,
+        )
         assertFalse(generic.allowed)
         assertEquals(SourceSeparationPresetSelectionBlockReason.DownloadOnly, generic.blockReason)
     }

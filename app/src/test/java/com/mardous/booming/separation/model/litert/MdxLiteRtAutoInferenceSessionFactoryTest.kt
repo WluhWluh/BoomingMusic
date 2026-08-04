@@ -431,7 +431,7 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
     }
 
     @Test
-    fun `model without known good CPU fallback is rejected before allocation`() {
+    fun `candidate CPU fallback is rejected without explicit product admission`() {
         val profile = profile("uvr_mdxnet_inst_hq_4")
         val gpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtGpu)
         val cpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtCpu)
@@ -445,6 +445,25 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
         assertEquals(0, cpuFactory.createCount)
     }
 
+    @Test
+    fun `reviewed HQ4 candidate can create an experimental GPU session`() {
+        val profile = profile("uvr_mdxnet_inst_hq_4")
+        val gpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtGpu)
+        val cpuFactory = RecordingFactory(MdxInferenceBackend.LiteRtCpu)
+
+        val session = factory(
+            gpuFactory = gpuFactory,
+            cpuFactory = cpuFactory,
+            gpuCompatibilityPolicy = MdxCompatibilityPolicy.AllowCandidates,
+            cpuCompatibilityPolicy = MdxCompatibilityPolicy.AllowCandidates,
+        ).create(artifact(profile), profile, MdxRuntimeSettings())
+
+        assertEquals(1, gpuFactory.createCount)
+        assertEquals(0, cpuFactory.createCount)
+        assertEquals(MdxInferenceBackend.LiteRtGpu, session.autoDiagnostics().activeBackend)
+        session.close()
+    }
+
     private fun factory(
         abi: MdxRuntimeAbi = MdxRuntimeAbi.Arm64V8a,
         gpuFactory: RecordingFactory = RecordingFactory(MdxInferenceBackend.LiteRtGpu),
@@ -453,10 +472,15 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
         probe: MdxLiteRtGpuProbe = { _, _ ->
             MdxLiteRtGpuProbeResult.accepted("probe passed")
         },
+        gpuCompatibilityPolicy: MdxCompatibilityPolicy =
+            MdxCompatibilityPolicy.AllowUntestedInternal,
+        cpuCompatibilityPolicy: MdxCompatibilityPolicy =
+            MdxCompatibilityPolicy.KnownGoodOnly,
     ) = MdxLiteRtAutoInferenceSessionFactory(
         gpuRuntimeProfile = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1,
         platformProvider = { MdxRuntimePlatform(35, abi) },
-        gpuCompatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+        gpuCompatibilityPolicy = gpuCompatibilityPolicy,
+        cpuCompatibilityPolicy = cpuCompatibilityPolicy,
         gpuEligibilityProvider = eligibilityProvider,
         gpuProbe = probe,
         gpuFactory = gpuFactory,

@@ -224,7 +224,9 @@ internal class MdxLiteRtAutoInferenceSessionFactory(
     private val gpuRuntimeProfile: MdxLiteRtGpuRuntimeProfile,
     private val platformProvider: MdxRuntimePlatformProvider = AndroidMdxRuntimePlatformProvider,
     private val gpuCompatibilityPolicy: MdxCompatibilityPolicy =
-        MdxCompatibilityPolicy.AllowUntestedInternal,
+        MdxCompatibilityPolicy.AllowCandidates,
+    private val cpuCompatibilityPolicy: MdxCompatibilityPolicy =
+        MdxCompatibilityPolicy.KnownGoodOnly,
     private val gpuEligibilityProvider: MdxLiteRtGpuEligibilityProvider,
     private val gpuProbe: MdxLiteRtGpuProbe,
     private val gpuFactory: MdxInferenceSessionFactory,
@@ -259,7 +261,7 @@ internal class MdxLiteRtAutoInferenceSessionFactory(
             profile = profile,
             backend = MdxInferenceBackend.LiteRtCpu,
             platform = platform,
-            policy = MdxCompatibilityPolicy.KnownGoodOnly,
+            policy = cpuCompatibilityPolicy,
         ).requireAllowed()
         val gpuCompatibility = MdxLiteRtCompatibilityResolver.resolve(
             profile = profile,

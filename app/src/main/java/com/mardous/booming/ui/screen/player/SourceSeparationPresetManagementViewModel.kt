@@ -698,7 +698,7 @@ data class SourceSeparationPresetManagementItem(
 ) {
     val offersUseForValidation: Boolean
         get() = activationPolicy == CatalogActivationPolicy.SelectableWhenQualified ||
-            activationPolicy == CatalogActivationPolicy.SelectableExperimentalCpuOnly
+            activationPolicy == CatalogActivationPolicy.SelectableExperimental
 
     val canDelete: Boolean
         get() = installed != null && !active

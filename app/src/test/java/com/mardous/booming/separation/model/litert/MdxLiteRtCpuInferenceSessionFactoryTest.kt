@@ -61,6 +61,23 @@ class MdxLiteRtCpuInferenceSessionFactoryTest {
     }
 
     @Test
+    fun `reviewed HQ4 candidate reaches CPU when GPU is disabled`() {
+        val allocator = RecordingAllocator()
+        val profile = profile("uvr_mdxnet_inst_hq_4")
+        val factory = factory(
+            abi = MdxRuntimeAbi.Arm64V8a,
+            allocator = allocator,
+            processors = 8,
+            compatibilityPolicy = MdxCompatibilityPolicy.AllowCandidates,
+        )
+
+        val session = factory.create(artifact(profile), profile, MdxRuntimeSettings())
+
+        assertEquals(1, allocator.createCount)
+        assertEquals(MdxInferenceBackend.LiteRtCpu, session.diagnostics.backend)
+    }
+
+    @Test
     fun `explicit XNNPACK flags are part of factory identity and reach allocator`() {
         val allocator = RecordingAllocator()
         val profile = profile("uvr_mdxnet_3_9662")
@@ -147,9 +164,11 @@ class MdxLiteRtCpuInferenceSessionFactoryTest {
         allocator: RecordingAllocator,
         processors: Int,
         xnnPackFlags: Int? = null,
+        compatibilityPolicy: MdxCompatibilityPolicy =
+            MdxCompatibilityPolicy.AllowUntestedInternal,
     ) = MdxLiteRtCpuInferenceSessionFactory(
         platformProvider = { MdxRuntimePlatform(35, abi) },
-        compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+        compatibilityPolicy = compatibilityPolicy,
         sessionAllocator = allocator,
         availableProcessors = { processors },
         xnnPackFlags = xnnPackFlags,

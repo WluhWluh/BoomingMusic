@@ -72,11 +72,13 @@ object AndroidMdxRuntimePlatformProvider : MdxRuntimePlatformProvider {
 
 enum class MdxCompatibilityPolicy {
     KnownGoodOnly,
+    AllowCandidates,
     AllowUntestedInternal,
 }
 
 enum class MdxCompatibilityOutcome {
     Supported,
+    Experimental,
     InternalValidationOnly,
     Unsupported,
 }
@@ -137,7 +139,23 @@ object MdxLiteRtCompatibilityResolver {
                 evidence = record.evidence,
             )
 
-            MdxRuntimeSupportStatus.Candidate,
+            MdxRuntimeSupportStatus.Candidate -> when (policy) {
+                MdxCompatibilityPolicy.KnownGoodOnly -> unsupported(
+                    "The runtime target is experimental and requires explicit candidate admission.",
+                    record.evidence,
+                )
+                MdxCompatibilityPolicy.AllowCandidates -> MdxCompatibilityDecision(
+                    outcome = MdxCompatibilityOutcome.Experimental,
+                    reason = "The reviewed experimental runtime target is allowed.",
+                    evidence = record.evidence,
+                )
+                MdxCompatibilityPolicy.AllowUntestedInternal -> MdxCompatibilityDecision(
+                    outcome = MdxCompatibilityOutcome.InternalValidationOnly,
+                    reason = "The runtime target is available only for internal validation.",
+                    evidence = record.evidence,
+                )
+            }
+
             MdxRuntimeSupportStatus.Untested -> if (
                 policy == MdxCompatibilityPolicy.AllowUntestedInternal
             ) {
@@ -148,7 +166,7 @@ object MdxLiteRtCompatibilityResolver {
                 )
             } else {
                 unsupported(
-                    "The runtime target is untested and cannot be used outside internal validation.",
+                    "The runtime target is untested and cannot be used by the product.",
                     record.evidence,
                 )
             }

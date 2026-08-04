@@ -1163,7 +1163,7 @@
       }
     },
     {
-      "activationPolicy": "download-only-resource-gated",
+      "activationPolicy": "selectable-experimental",
       "artifactId": "uvr_mdxnet_inst_hq_4",
       "contractId": "uvr_mdxnet_inst_hq_4@2",
       "displayName": "UVR-MDX-NET Inst HQ 4",
@@ -1172,10 +1172,10 @@
       "modelId": "uvr_mdxnet_inst_hq_4",
       "releaseMaturity": "candidate",
       "stemUi": "vocals-instrumental",
-      "supportLevel": "download-only",
+      "supportLevel": "experimental",
       "validation": {
-        "androidCpu": "rejected",
-        "androidGpu": "rejected",
+        "androidCpu": "partial",
+        "androidGpu": "partial",
         "conversion": "passed",
         "desktopNumerical": "passed",
         "fullSong": "pending"
@@ -1327,7 +1327,7 @@
       }
     },
     {
-      "activationPolicy": "selectable-experimental-cpu-only",
+      "activationPolicy": "selectable-experimental",
       "artifactId": "uvr_mdxnet_kara",
       "contractId": "uvr_mdxnet_kara@2",
       "displayName": "UVR-MDX-NET Karaoke",
@@ -1339,10 +1339,10 @@
       "supportLevel": "experimental",
       "validation": {
         "androidCpu": "passed",
-        "androidGpu": "rejected",
+        "androidGpu": "passed",
         "conversion": "passed",
         "desktopNumerical": "passed",
-        "fullSong": "pending"
+        "fullSong": "passed"
       }
     },
     {
@@ -1533,21 +1533,21 @@
       "artifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
       "backend": "gpu",
       "contractId": "uvr_mdxnet_kara@2",
-      "evidence": "BoomingSS app-packaged LiteRT 2.1.5 final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 passed Coast Town but deterministically missed the 109 dB synthetic-input SNR floor on Galaxy S10/S25; gpu-auto-fp16-v1 failed parity; neither profile enters Phase 7",
+      "evidence": "BoomingSS bounded OpenCL FP32 full-song requalification at WluhWluh/BoomingSS@a931081f (docs/validation/litert-phase7/kara-gpu-requalification-2026-07-30.md): S10/S25 completed without fallback; GPU output was PCM16-quantization-equivalent to ORT and CPU; S10 GPU was slower than CPU, so the profile remains experimental",
       "minimumAndroidApi": 26,
       "modelId": "uvr_mdxnet_kara",
       "precision": "fp32",
       "profileId": "gpu-auto-fp32-v1",
       "runtimeId": "litert",
       "runtimeVersion": "2.1.5",
-      "status": "rejected"
+      "status": "candidate"
     },
     {
       "abi": "arm64-v8a",
       "artifactSha256": "4bf2fbd2c416a934cd5f9e3f8a154dc7c30bc616494216699ae2459c18f51c64",
       "backend": "gpu",
       "contractId": "uvr_mdxnet_kara@2",
-      "evidence": "BoomingSS app-packaged LiteRT 2.1.5 final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 passed Coast Town but deterministically missed the 109 dB synthetic-input SNR floor on Galaxy S10/S25; gpu-auto-fp16-v1 failed parity; neither profile enters Phase 7",
+      "evidence": "BoomingSS app-packaged LiteRT 2.1.5 Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e: KARA gpu-auto-fp16-v1 produced only about 28-30 dB SNR and remains rejected; the later FP32 requalification does not apply to FP16",
       "minimumAndroidApi": 26,
       "modelId": "uvr_mdxnet_kara",
       "precision": "fp16",
@@ -1561,14 +1561,14 @@
       "artifactSha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742",
       "backend": "cpu",
       "contractId": "uvr_mdxnet_inst_hq_4@2",
-      "evidence": "Window parity passed on Galaxy S10 and S25, but the approximately 1.1 GiB PSS increase exceeds the provisional 384 MiB hard limit; full-song gate pending",
+      "evidence": "MusicSourceSeparation HQ4 short smoke at 9bcdd34/1e59b3a on Galaxy S10/S25: LiteRT CPU completed with approximately 1.18 GiB peak process PSS; full-song, repeated-session, and listening gates remain pending; CPU is an experimental direct path and GPU fallback",
       "minimumAndroidApi": 26,
       "modelId": "uvr_mdxnet_inst_hq_4",
       "precision": "fp32",
       "profileId": "cpu-default-fp32-v1",
       "runtimeId": "litert",
       "runtimeVersion": "2.1.5",
-      "status": "rejected"
+      "status": "candidate"
     },
     {
       "abi": "x86",
@@ -1617,21 +1617,21 @@
       "artifactSha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742",
       "backend": "gpu",
       "contractId": "uvr_mdxnet_inst_hq_4@2",
-      "evidence": "BoomingSS final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 synthetic window parity passed on Galaxy S10/S25, but the approximately 0.76-0.80 GiB peak validation PSS increase exceeds 384 MiB and no known-good CPU fallback exists",
+      "evidence": "MusicSourceSeparation HQ4 short smoke at 9bcdd34/1e59b3a: bounded OpenCL FP32 completed on Galaxy S10/S25 with verified N=1 dispatch, 105.97 dB SNR versus ORT, and approximately 0.91-0.93 GiB peak process PSS; full-song and repeated-session gates remain pending",
       "minimumAndroidApi": 26,
       "modelId": "uvr_mdxnet_inst_hq_4",
       "precision": "fp32",
       "profileId": "gpu-auto-fp32-v1",
       "runtimeId": "litert",
       "runtimeVersion": "2.1.5",
-      "status": "rejected"
+      "status": "candidate"
     },
     {
       "abi": "arm64-v8a",
       "artifactSha256": "5f091562bd0297ff2223015a219d12cc1136a9d54df975680ff4eb239629c742",
       "backend": "gpu",
       "contractId": "uvr_mdxnet_inst_hq_4@2",
-      "evidence": "BoomingSS final Phase 3 matrix at WluhWluh/BoomingSS@b0201f9e4a0c8e79140f8895aa9ae0e4e7bd733b (docs/validation/litert-gpu-phase3): gpu-auto-fp32-v1 synthetic window parity passed on Galaxy S10/S25, but the approximately 0.76-0.80 GiB peak validation PSS increase exceeds 384 MiB and no known-good CPU fallback exists",
+      "evidence": "HQ4 gpu-auto-fp16-v1 has no accepted numerical or full-song qualification; the successful 2026-08-03 bounded FP32 smoke does not apply to FP16",
       "minimumAndroidApi": 26,
       "modelId": "uvr_mdxnet_inst_hq_4",
       "precision": "fp16",

@@ -100,8 +100,8 @@ enum class CatalogActivationPolicy {
     @SerialName("selectable-when-qualified")
     SelectableWhenQualified,
 
-    @SerialName("selectable-experimental-cpu-only")
-    SelectableExperimentalCpuOnly,
+    @SerialName("selectable-experimental")
+    SelectableExperimental,
 
     @SerialName("download-only-resource-gated")
     DownloadOnlyResourceGated,

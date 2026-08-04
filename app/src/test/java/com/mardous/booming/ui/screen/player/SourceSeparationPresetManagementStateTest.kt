@@ -51,7 +51,7 @@ class SourceSeparationPresetManagementStateTest {
         )
         val experimental = item(
             supportLevel = CatalogSupportLevel.Experimental,
-            activationPolicy = CatalogActivationPolicy.SelectableExperimentalCpuOnly,
+            activationPolicy = CatalogActivationPolicy.SelectableExperimental,
             canUseForValidation = true,
         )
 

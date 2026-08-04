@@ -1379,8 +1379,8 @@ private fun SourceSeparationPresetManagementItem.activationText(): String = when
                 R.string.source_separation_preset_promotion_pending
             },
         )
-    CatalogActivationPolicy.SelectableExperimentalCpuOnly ->
-        stringResource(R.string.source_separation_preset_experimental_cpu_only)
+    CatalogActivationPolicy.SelectableExperimental ->
+        stringResource(R.string.source_separation_preset_experimental_candidate)
     CatalogActivationPolicy.DownloadOnlyResourceGated ->
         stringResource(R.string.source_separation_preset_resource_gated)
     CatalogActivationPolicy.BlockedUntilReviewedContract ->

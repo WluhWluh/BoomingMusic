@@ -191,7 +191,7 @@
     <string name="source_separation_preset_restored_target_current_retained">Your current model remains selected.</string>
     <string name="source_separation_preset_restored_target_discard">Discard restored target</string>
     <string name="source_separation_preset_experimental_confirm_title">Use experimental model?</string>
-    <string name="source_separation_preset_experimental_confirm_message">%1$s is an experimental CPU-only model. It has not completed release validation and may be slower or produce unexpected output.</string>
+    <string name="source_separation_preset_experimental_confirm_message">%1$s is an experimental model. It has not completed release validation and may use substantially more memory, run slower, or produce unexpected output.</string>
     <string name="source_separation_preset_use_for_validation">Use for validation</string>
     <string name="source_separation_preset_selecting">Selecting model for development validation...</string>
     <string name="source_separation_preset_delete_confirm_message">Delete the installed %1$s model? Existing separated caches are not deleted.</string>
@@ -201,7 +201,7 @@
     <string name="source_separation_preset_size_and_release">%1$s / Release %2$s</string>
     <string name="source_separation_preset_recommended_ready">Recommended model with completed release qualification.</string>
     <string name="source_separation_preset_promotion_pending">Recommended candidate. Normal use remains blocked pending full-device validation.</string>
-    <string name="source_separation_preset_experimental_cpu_only">Experimental CPU-only candidate. Explicit confirmation is required.</string>
+    <string name="source_separation_preset_experimental_candidate">Experimental candidate. Explicit confirmation is required; GPU use depends on the installed runtime and device eligibility.</string>
     <string name="source_separation_preset_resource_gated">Download only. Activation is blocked by the current resource limits.</string>
     <string name="source_separation_preset_contract_pending">Download only. Its DSP and stem contract has not been reviewed.</string>
     <string name="source_separation_preset_generic_stem_pending">Download only. A neutral target-stem interface is required before activation.</string>

@@ -411,7 +411,7 @@ internal object AndroidSourceSeparationRuntimeCompatibilityResolver :
             profile = model.executionProfile,
             backend = MdxInferenceBackend.LiteRtCpu,
             platform = platform,
-            policy = MdxCompatibilityPolicy.KnownGoodOnly,
+            policy = MdxCompatibilityPolicy.AllowCandidates,
         )
         return decision.reason.takeUnless { decision.isAllowed }
     }
