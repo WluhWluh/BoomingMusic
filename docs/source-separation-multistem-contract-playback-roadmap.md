@@ -1,13 +1,13 @@
 # Source-Separation Contract and Multi-Stem Data-Plane Roadmap
 
-Status: active pre-implementation roadmap and design authority for stem
-identity, model contracts, imported metadata, cache output shape, and playback
-data flow.
+Status: active implementation roadmap and design authority for stem identity,
+model contracts, imported metadata, cache output shape, and playback data flow.
 
 Updated: 2026-08-04
 
-Current milestone: Phases 0-2 are complete. Phase 3 N-stem Hydration and
-playback data-plane work is next.
+Current milestone: Phases 0-2 are complete. Phase 3 first rebuilds the stable
+two-stem playback data plane around bounded background decode. Synthetic N-stem
+playback follows in Phase 4.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -18,7 +18,8 @@ following previously separate requirements:
   to the original label;
 - imported models can carry user-entered labels;
 - contracts describe output semantics rather than relying on filenames;
-- separation, cache, hydration, and playback use a variable-size stem set; and
+- separation, cache, and playback use a variable-size stem set without relying
+  on persistent full-song PCM Hydration; and
 - model catalog tiers and model-purpose groups remain independent from labels.
 
 This document does not design the visual controls for a multi-stem mix. It
@@ -32,7 +33,7 @@ This roadmap is authoritative for:
 - the portable model-contract shape for two-stem and multi-stem pipelines;
 - imported sidecars and custom profile metadata;
 - separation result and cache representations;
-- hydration, playback-session, and multi-stem audio data interfaces; and
+- streaming decode, playback-session, and multi-stem audio data interfaces; and
 - the prerequisites for exposing generic model families in the catalog.
 
 The following documents remain authoritative for their separate concerns:
@@ -354,10 +355,11 @@ Use stable ordinal paths such as `stems/00.wav` and
 `segments/0001/stem-00.wav`. Never derive paths from localized or arbitrary
 user labels. The manifest maps each path back to its stem ID.
 
-FLAC promotion, deletion, pruning, hydration, and total-byte accounting must
-iterate over the set. A song/model cache remains one retention entry, while
-its size naturally grows with stem count. Hydration remains cache data and may
-be removed by system clear-cache or explicit cache cleanup.
+FLAC promotion, deletion, pruning, and total-byte accounting must iterate over
+the set. A song/model cache remains one retention entry, while its size
+naturally grows with stem count. Persistent full-song PCM Hydration is not part
+of the target product path. Any temporary decoded-block data remains bounded
+cache data and may be removed by system clear-cache or explicit cache cleanup.
 
 ### Model switching
 
@@ -376,36 +378,81 @@ its semantic or label matches.
 
 ## Result Playback Data Plane
 
-The playback cache object, Hydration marker, and playback session should expose
-an ordered list of `PlaybackStemSource` values instead of two file properties.
-The list is validated as a complete set before a session is installed.
+The playback cache object and playback session expose an ordered list of
+`PlaybackStemSource` values instead of two file properties. The list is
+validated as a complete set before a session is installed. The current
+Hydration marker and full-song PCM files are transitional implementation
+details; do not generalize them into the N-stem product contract.
 
-For a generic multi-stem path, use the original song as the Media3 clock and
-read all separated stems as synchronized side inputs. Do not select
-Instrumental as the implicit base stream; that assumption does not exist for
-Bass/Drums/Guitar/Piano models.
+Retain Media3/ExoPlayer, `MediaSession`, `PlaybackService`, the existing queue,
+and the original song as the single transport clock. All separated stems are
+synchronized side inputs. Do not select Instrumental as an implicit base
+stream; that assumption does not exist for Bass/Drums/Guitar/Piano models.
 
-The mixer API should eventually accept an immutable stem set and a per-stem
-gain snapshot. UI design is explicitly outside this roadmap. The data plane
-must nevertheless guarantee:
+The target ownership boundary is:
 
-- one synchronized read per active stem for each audio block;
-- preallocated scratch and resampling state, with no allocation in the audio
-  callback;
-- floating-point or wide-accumulator summation followed by one final clamp;
-- atomic seek and hot-swap of the complete set;
-- exact sample-rate, channel-count, and frame-count validation; and
-- an explicit original-audio bypass rather than an implicit synthetic residual.
+```text
+PlaybackService / MediaSession
+        |
+SourceSeparationPlaybackCoordinator
+        |
+StemPlaybackEngine
+  - immutable ordered stem session
+  - bounded decode and prefetch
+  - logical-frame seek and hot-swap barriers
+  - transport epoch and gain commands
+        |
+StemMixAudioProcessor
+  - consume ready PCM blocks
+  - mix N synchronized stems
+  - no file I/O, decode, hashing, allocation, or lock waits
+        |
+DefaultAudioSink / AudioTrack
+```
 
-For N greater than two, compressed FLAC streams must not be decoded lazily by
-multiple audio-thread readers as the default path. Background Hydration to
-PCM should complete for the required set before playback, with the existing
-readiness/hot-swap mechanism used to replace a temporary source set.
+The engine owns one or two bounded decode workers shared by all stems. It
+decodes one logical FLAC block for the complete stem set, publishes that block
+set atomically, and retains reusable PCM blocks in a bounded ring. Start with a
+two- or three-block resume waterline and an eight- to twelve-block target
+waterline. At 44.1 kHz one 4096-frame block covers about 92.9 ms, so even twelve
+six-stem blocks require only about 1.125 MiB of PCM.
 
-The first implementation should retain separate per-stem cache files for
-inspection, export, deletion, and recovery. A future packed hydration file may
-reduce file-descriptor and seek overhead, but it is an optimization to measure
-after the list-based implementation is correct.
+`queueInput()` may only consume an already published block set. It must never
+open files, decode FLAC, wait on a `Future`, grow a buffer, construct tracing
+strings, or synchronously repair an underflow. A low-water event is reported
+once to the coordinator; playback pauses through an explicit buffering state
+and resumes once after the resume waterline is restored. Hysteresis must prevent
+the earlier pause/resume loop.
+
+Seek, song change, model change, process recreation, and source hot-swap each
+advance a transport epoch. A seek coalesces obsolete requests, decodes the
+target block set first, positions every stem by the same logical frame, and
+resumes only after the complete set is ready. Hot-swap uses the Media3 logical
+position, never the minimum physical reader pointer.
+
+The mixer accepts an immutable stem set and one atomic per-stem gain snapshot
+per output block. It uses floating-point or wide accumulation and clamps once.
+The current two-stem blend curve and audible output remain compatibility
+requirements until a separate listening-qualified change; short gain ramps may
+remove clicks without changing steady-state gain values.
+
+Keep separate compressed per-stem cache files for inspection, export, deletion,
+and recovery. Do not persist full-song PCM by default. A small in-memory recent
+block LRU or a bounded session-scoped decoded cache may be tested only if
+repeated-seek evidence requires it. A full-song temporary PCM fallback is a
+last-resort device policy, must never become durable cache state, and requires
+explicit low-end-device evidence.
+
+Newly promoted caches use one `.flac.idx` contract and must open on the indexed
+path. Missing or invalid index data is an explicit cache error, not permission
+to decode an entire song into Java heap. The embedded FLAC SEEKTABLE may later
+replace the sidecar after equivalent corruption, seek, and recovery coverage.
+
+Normal playback admission trusts locally promoted artifacts after checking
+identity, path, size, and audio geometry. Full-file hashes belong to promotion,
+recovery after suspicious metadata changes, and explicit repair. Indexed FLAC
+reads must instead validate frame bounds and CRCs before repeated full-open
+hashing is removed.
 
 Per-song mix state must become a cache-keyed map or ordered list keyed by
 `stemId`, not a single vocals/instrumental float. It remains cache-local and is
@@ -520,21 +567,175 @@ Phase 2 evidence:
   the correct semantic files. GitHub Android-test sources also compile with
   list-based device evidence and export keys.
 
-### Phase 3: N-stem playback data plane
+### Phase 3: Rebuild the separated-playback data plane
 
-- [ ] Generalize Hydration and the playback session to a complete ordered stem
-  set.
-- [ ] Implement the list-based mixer behind the existing two-stem behavior.
+Status: next. Complete this phase on the qualified two-stem MDX path before
+enabling N-stem playback.
+
+#### Phase 3A: Freeze the realtime contract and baseline
+
+- [x] Align promotion and playback on the single `.flac.idx` contract and add a
+  real WAV-to-FLAC-to-promoted-cache regression that rejects whole-song mixer
+  fallback (`3e8a7bb5`).
+- [ ] Record current two-stem WAV, indexed-FLAC, seek, pause/resume, model
+  switch, and process-recreation output as compatibility fixtures.
+- [ ] Add structured metrics for decode-block p50/p95/p99, ring occupancy,
+  low-water events, underruns, seek readiness, audio-thread time, allocations,
+  file descriptors, and session epochs.
+- [ ] Freeze explicit session states for preparing, buffering, ready, seeking,
+  hot-swapping, ended, and failed. One epoch may publish at most one active
+  complete stem set.
+- [ ] Freeze the mapping from the original-source transport position to logical
+  stem frames, including sample rate, channel count, exact frame count, delay,
+  padding, and any required timing metadata. Reject unsupported geometry before
+  session installation.
+- [ ] Freeze the realtime rule: the Media3 audio thread performs no file I/O,
+  FLAC decode, hashing, executor waits, dynamic allocation, or contended lock
+  acquisition.
+
+**3A exit:** existing two-stem behavior has repeatable audio and timing oracles,
+and every forbidden realtime operation is observable in tests.
+
+#### Phase 3B: Introduce the engine boundary and bounded PCM transport
+
+- [ ] Add `SourceSeparationPlaybackCoordinator`, `StemPlaybackEngine`, immutable
+  `StemPlaybackSession`, logical `StemPcmBlockSet`, and a reusable block pool.
+- [ ] Keep `PlaybackService` responsible for MediaSession, queue, focus,
+  transport position, separation policy, and one current engine handle; move
+  stem files, readers, prefetch, and buffer ownership out of the service.
+- [ ] Start with one dedicated decode worker and a bounded priority queue;
+  qualify a second worker only if S10 measurements improve without reordering
+  or excess contention.
+- [ ] Publish one complete same-frame block set atomically. Never expose one
+  stem from a block before every required stem is decoded and validated.
+- [ ] Use an initial resume waterline of two or three blocks and a target
+  waterline of eight to twelve blocks. Make the values measurable and bounded,
+  not user-facing settings in the first implementation.
+- [ ] Convert `SourceSeparationMixAudioProcessor` into a consumer of ready PCM
+  blocks. Remove direct `RandomAccessFile`, FLAC-reader, and scratch-growth
+  ownership from `queueInput()`.
+
+**3B exit:** the existing two-stem WAV path plays through the engine with
+bit-identical or explicitly bounded output differences and no realtime file
+access.
+
+#### Phase 3C: Move indexed FLAC entirely off the audio thread
+
+- [ ] Open and validate FLAC metadata and indexes before installing a ready
+  session. Decode target and ahead block sets only on the bounded workers;
+  `PlaybackService` entry points must not wait on decoder work or the engine's
+  audio-consumer state.
+- [ ] Reuse decoder scratch and PCM blocks; eliminate per-frame `ByteArray`,
+  `Future`, task-result, and trace-string allocation from steady playback.
+- [ ] Strengthen index validation for monotonic, contiguous, non-overlapping,
+  in-file byte spans and exact PCM coverage; validate FLAC header CRC8 and frame
+  CRC16 during indexed reads.
+- [ ] Delete the whole-song Java-heap decode fallback. A missing, truncated, or
+  invalid index fails the exact cache and directs the lifecycle layer to repair
+  or rerun separation.
+- [ ] Remove repeated full FLAC/index hashes from normal playback admission.
+  Retain full verification for promotion, explicit repair, and recovery after
+  suspicious size or metadata changes.
+- [ ] Evaluate parsing the embedded per-frame SEEKTABLE as a replacement for
+  the external index only after the sidecar path passes corruption, seek, and
+  recovery gates. Do not combine that storage change with initial scheduling
+  validation.
+
+**3C exit:** indexed FLAC playback and seek never synchronously decode on the
+Media3 thread and cannot allocate an entire decoded song.
+
+#### Phase 3D: Make transport changes atomic
+
+- [ ] Give every start, seek, song change, active-model change, hot-swap,
+  process recreation, and cache invalidation a monotonically increasing
+  transport epoch.
+- [ ] Coalesce rapid seeks to the latest target. Decode the target block set
+  first, establish the resume waterline, position all stems at one logical
+  frame, then resume once.
+- [ ] Replace physical-reader-pointer hot-swap with a logical-frame barrier.
+  Clear all old resampling and decoded-block state before publishing the new
+  complete source set.
+- [ ] Implement `onFlush`, `onReset`, format-change, EOS, and Media3 internal
+  seek handling so the engine and transport clock cannot advance separately.
+- [ ] Route model switching, song switching, manual cache deletion, task
+  cancellation, and delayed old callbacks through the same epoch barrier while
+  preserving exact-model cache isolation from the lifecycle roadmap.
+- [ ] Add low-water hysteresis and one-shot readiness notification so an
+  underrun cannot create an automatic pause/resume loop.
+
+**3D exit:** seek, switch, recreation, and deletion either install one complete
+exact-session stem set or remain explicitly buffered/failed; no mixed epoch or
+mixed model can reach output.
+
+#### Phase 3E: Harden mixing and realtime gain control
+
+- [ ] Replace independent volatile gain fields with one immutable atomic gain
+  snapshot read once per output block.
+- [ ] Apply short frame-based ramps for gain changes while preserving the
+  current two-stem steady-state blend curve and center behavior.
+- [ ] Accumulate in float or a sufficiently wide integer and clamp once when
+  writing PCM16. Do not change the established audible gain law without a
+  separate listening comparison.
+- [ ] Report unequal lengths, unexpected EOF, short reads, missing stems, and
+  decode failure explicitly. Do not silently convert structural errors into
+  indefinite zero samples.
+- [ ] Make slider gain updates lightweight engine commands. They must not bump
+  playback-context generation, reopen caches, cancel readiness, or rebuild a
+  playback session.
+
+**3E exit:** rapid gain changes are click-free and cannot trigger lifecycle
+work, while existing two-stem output remains listening-compatible.
+
+#### Phase 3F: Remove persistent Hydration and qualify the two-stem engine
+
+- [ ] Stop scheduling full-song PCM Hydration during normal FLAC playback and
+  remove product dependence on Hydration markers, pending hydrated files, and
+  pointer-based hot-swap fields.
+- [ ] Under the clean-install boundary, delete obsolete persistent Hydration
+  schema and recovery paths once all playback callers use the bounded engine.
+- [ ] Run at least 30 minutes of continuous FLAC playback and 100 cold/warm
+  random seeks on S25 and S10, including rapid scrubbing, pause/resume, app
+  recreation, background separation, cache deletion, and active-model changes.
+- [ ] Require zero normal-path `fallbackWholeFileDecode`, zero mixed-epoch
+  output, zero sustained pause/resume loops, and zero audio-thread file/decode
+  operations.
+- [ ] Initially target aggregate decode throughput above 3x realtime, two-stem
+  block-group p99 well below 92.9 ms, FLAC seek-readiness p95 below 100 ms on
+  S25 and 200 ms on S10, and bounded memory/file-descriptor counts. Revisit
+  numerical thresholds from the recorded baseline rather than hiding misses.
+- [ ] Compile and smoke the final engine on arm64-v8a, armeabi-v7a, x86_64, and
+  x86. Performance gates belong to S25 and S10; emulators verify portability,
+  lifecycle, corruption, and deterministic PCM output.
+- [ ] Test a bounded in-memory recent-block LRU only if repeated-seek evidence
+  warrants it. Test session-scoped temporary PCM or a small native decoder only
+  if a qualified device cannot sustain bounded streaming; neither is a default
+  or persistent fallback.
+
+**Phase 3 exit:** stable two-stem WAV and FLAC playback uses one logical clock,
+bounded background decode, atomic transport barriers, and a realtime-safe
+mixer. Normal playback creates no persistent full-song PCM.
+
+### Phase 4: N-stem playback data plane
+
+- [ ] Generalize the engine session, block set, gain snapshot, diagnostics, and
+  playback-service handle from the qualified two-stem adapter to a complete
+  ordered stem set.
+- [ ] Implement the list-based mixer while preserving the Phase 3 realtime and
+  transport invariants.
 - [ ] Add atomic seek, hot-swap, missing-stem rejection, clipping, resampling,
-  and process-recreation tests.
-- [ ] Measure audio-thread load, underruns, PSS, file descriptors, and cache
-  size with synthetic 4- and 6-stem PCM/FLAC fixtures on S25, S10, and the
-  available emulators.
+  unequal-length, EOF, corruption, and process-recreation tests for synthetic
+  2-, 4-, 6-, and 8-stem sources.
+- [ ] Measure audio-thread load, decode throughput, underruns, PSS, buffer-pool
+  size, file descriptors, seek readiness, and cache size with synthetic
+  4- and 6-stem PCM/FLAC fixtures on S25, S10, and available emulators.
+- [ ] Define memory admission from measured stem count and block geometry;
+  unsupported counts fail before session installation rather than degrading
+  into partial playback or a full-song PCM fallback.
 
-**Exit:** N-stem playback is technically stable with synthetic outputs; this
-does not yet activate a multi-stem model.
+**Exit:** N-stem playback is technically stable with synthetic outputs and the
+same bounded engine; this does not yet activate a multi-stem model.
 
-### Phase 4: Multi-tensor pipeline contract and neural-core adapter
+### Phase 5: Multi-tensor pipeline contract and neural-core adapter
 
 - [ ] Implement the static multi-input/output contract loader and strict
   tensor-axis validation.
@@ -548,7 +749,7 @@ does not yet activate a multi-stem model.
 **Exit:** a canonical multi-stem candidate produces verified per-stem PCM on
 the host and one device window without falling back to an undeclared pipeline.
 
-### Phase 5: Experimental model qualification
+### Phase 6: Experimental model qualification
 
 - [ ] Complete canonical 7.8-second and full-song DSP validation.
 - [ ] Measure peak PSS, native/graphics memory, thermal behavior, cancellation,
@@ -561,7 +762,7 @@ the host and one device window without falling back to an undeclared pipeline.
 **Exit:** a model-specific catalog decision exists. No broad multi-stem
 promotion is implied by a successful smoke test.
 
-### Phase 6: Catalog grouping and controlled activation
+### Phase 7: Catalog grouping and controlled activation
 
 - [ ] Add independent family/purpose metadata for all candidate models.
 - [ ] Add representative recommendations and folded category records.
@@ -590,7 +791,7 @@ source of model semantics.
 - cancellation halfway through reconstruction;
 - process death after one stem and after all but one stem are written;
 - resume without mixing stem sets or models;
-- FLAC promotion and Hydration integrity for every stem;
+- FLAC promotion, index, frame-integrity, and decoded-PCM parity for every stem;
 - deletion while a multi-stem run is active; and
 - exact-active-model switching with retained inactive caches.
 
@@ -599,8 +800,12 @@ source of model semantics.
 - deterministic per-stem tones to detect ordering swaps;
 - all-stem sum, single-stem, mute, seek, pause/resume, and hot-swap;
 - sample-rate conversion and unequal-length rejection;
-- compressed-source Hydration before audio-thread use;
-- audio underrun and frame-time observation on S10 and S25; and
+- bounded background decode of compressed sources before audio-thread use;
+- missing/corrupt index, CRC failure, EOF, low-water, and stale-epoch behavior;
+- no file I/O, decode, hashing, allocation, or contended waits on the Media3
+  audio thread;
+- sustained playback, rapid random seek, underrun, PSS, file-descriptor, and
+  frame-time observation on S10 and S25; and
 - locale changes and deleted-profile read-only cache playback.
 
 ### Model qualification
@@ -618,9 +823,21 @@ source of model semantics.
 - Add a new contract kind/schema for multi-input or multi-output pipelines;
   do not turn the MDX contract into a collection of optional Demucs fields.
 - Use stable ordinal cache paths and manifest mappings, not labels as paths.
-- Keep separate per-stem rendered files; defer packed hydration optimization.
+- Keep separate compressed per-stem rendered files. Do not persist full-song
+  decoded PCM during normal playback.
 - Use the original source as the generic playback clock and treat all model
   stems as synchronized side inputs.
+- Keep Media3/ExoPlayer, MediaSession, and one AudioTrack. Put bounded stem
+  decode and transport barriers behind a playback engine instead of adding one
+  player or output clock per stem.
+- Do not migrate the product player to CompositionPlayer, multiple ExoPlayers,
+  Oboe, or miniaudio unless the bounded engine fails measured correctness,
+  underrun, CPU, or power gates that a lower-level engine can demonstrably fix.
+- Require one atomic block set and one transport epoch across every active stem;
+  the audio processor consumes ready PCM and never owns cache files or decoders.
+- Preserve the current two-stem steady-state gain law until a separately
+  listening-qualified change; use atomic snapshots, ramps, wide accumulation,
+  and one final clamp to make its implementation realtime-safe.
 - Treat Demucs output as model-native direct stems unless its contract declares
   a specific derivation; never invent a residual automatically.
 - Cap the first product playback implementation at eight stems while allowing
@@ -634,14 +851,24 @@ source of model semantics.
 1. Whether the normalized semantic ID is represented as a Kotlin value class
    or a string-backed enum adapter. Recommendation: value class plus known
    constants, so unknown reviewed IDs survive parsing.
-2. Whether Hydration should later use one packed PCM file. Recommendation: keep
-   per-stem files until multi-stem audio-thread measurements justify packing.
+2. Final low/high waterlines and whether a second decode worker helps.
+   Recommendation: begin with a 2-3 block resume waterline, an 8-12 block
+   target, and one worker; change them only from S10/S25 block-latency and
+   underflow evidence.
 3. Whether all-stem playback should use model sum or original-source bypass when
    gains are neutral. Recommendation: make both explicit states and do not
    silently apply a residual correction.
 4. The final maximum stem count and memory admission policy. Recommendation:
    start with eight and derive a higher limit only from device measurements.
-5. Whether an imported multi-stem sidecar may declare a custom pipeline.
+5. Whether the external `.flac.idx` should eventually be replaced by the
+   embedded SEEKTABLE. Recommendation: keep the now-tested sidecar for the first
+   engine implementation, then compare corruption handling, seek latency, and
+   recovery before removing it under the clean-install boundary.
+6. Whether any low-end device needs session-scoped decoded PCM or a native FLAC
+   decoder. Recommendation: add neither by default; require evidence that the
+   bounded Kotlin decoder cannot sustain the qualified stem count. Never retain
+   full-song PCM as durable cache.
+7. Whether an imported multi-stem sidecar may declare a custom pipeline.
    Recommendation: only reviewed, app-bundled pipeline IDs may activate;
    unknown pipelines remain installed and inspectable but download-only.
 
@@ -653,8 +880,12 @@ This roadmap is complete only when:
 - known English labels localize and unknown labels remain unchanged;
 - imported profiles preserve and expose their labels;
 - model-output order cannot be confused with display order;
-- separation, recovery, cache deletion, Hydration, and playback operate on one
+- separation, recovery, cache deletion, and playback operate on one
   coherent stem set;
+- normal FLAC playback uses bounded background decode and creates no persistent
+  full-song PCM;
+- the Media3 audio thread performs no file I/O, FLAC decode, hashing, dynamic
+  allocation, or blocking repair work;
 - active-model switching preserves exact cache isolation;
 - at least one 4- or 6-stem pipeline passes host, device, full-song, and
   listening gates; and
