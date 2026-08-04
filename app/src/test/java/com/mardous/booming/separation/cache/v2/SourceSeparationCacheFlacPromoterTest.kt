@@ -1,6 +1,9 @@
 package com.mardous.booming.separation.cache.v2
 
+import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
+import com.mardous.booming.separation.audio.WavFileWriter
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.MdxInferenceBackend
@@ -17,6 +20,7 @@ import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.CancellationException
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -49,6 +53,10 @@ class SourceSeparationCacheFlacPromoterTest {
         val playback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
         assertEquals("stem-00.flac", playback.vocalsFile.name)
         assertEquals("stem-01.flac", playback.instrumentalFile.name)
+        assertEquals(
+            listOf("completed/stem-00.flac.idx", "completed/stem-01.flac.idx"),
+            requireNotNull(promoted.manifest.output).stems.map { it.promotedIndexPath },
+        )
         assertFalse(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
         playback.close()
         assertTrue(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
@@ -59,6 +67,74 @@ class SourceSeparationCacheFlacPromoterTest {
                 requireNotNull(fixture.store.readManifest(completed.cacheKey)),
             ),
         )
+    }
+
+    @Test
+    fun `real promotion publishes indexes readable by the playback decoder`() {
+        val expectedPcm = listOf(
+            testPcm16Stereo(frameCount = TEST_FRAME_COUNT, seed = 17),
+            testPcm16Stereo(frameCount = TEST_FRAME_COUNT, seed = 53),
+        )
+        val fixture = fixture()
+        val completed = fixture.completedManifest(expectedPcm)
+
+        val promoted = fixture.realPromoter().promote(completed.cacheKey)
+            as SourceSeparationCacheFlacPromotionResult.Completed
+
+        requireNotNull(promoted.manifest.output).stems.forEach { stem ->
+            val flac = fixture.store.resolveEntryPath(
+                completed.cacheKey,
+                requireNotNull(stem.promotedPath),
+            )
+            val index = Pcm16StereoFlacEncoder.frameIndexFileFor(flac)
+            assertEquals(
+                fixture.store.relativeEntryPath(completed.cacheKey, index),
+                stem.promotedIndexPath,
+            )
+            assertTrue(index.isFile)
+
+            val trace = mutableListOf<String>()
+            val reader = requireNotNull(
+                Pcm16StereoFlacEncoder.openIndexedPcmReader(flac, trace::add),
+            )
+            reader.use {
+                assertEquals(TEST_FRAME_COUNT, reader.frameCount)
+
+                val expected = expectedPcm[stem.order]
+                val actual = ByteArray(expected.size)
+                assertEquals(actual.size, reader.read(actual, actual.size))
+                assertArrayEquals(expected, actual)
+
+                val seekByte = (FLAC_BLOCK_FRAME_COUNT - 3) * PCM16_STEREO_BYTES_PER_FRAME
+                val seekResult = ByteArray(8 * PCM16_STEREO_BYTES_PER_FRAME)
+                reader.seekToPcmByte(seekByte.toLong())
+                assertEquals(seekResult.size, reader.read(seekResult, seekResult.size))
+                assertArrayEquals(
+                    expected.copyOfRange(seekByte, seekByte + seekResult.size),
+                    seekResult,
+                )
+            }
+            assertTrue(trace.any { it.startsWith("indexedOpen success") })
+            assertFalse(trace.any { "missingIndex" in it })
+        }
+
+        val playback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
+        val mixTrace = mutableListOf<String>()
+        val processor = SourceSeparationMixAudioProcessor().apply {
+            debugTraceSink = mixTrace::add
+        }
+        try {
+            processor.enable(
+                vocalsFile = playback.vocalsFile,
+                instrumentalFile = playback.instrumentalFile,
+                positionMs = 0L,
+            )
+        } finally {
+            processor.disable()
+            playback.close()
+        }
+        assertEquals(2, mixTrace.count { "indexedOpen success" in it })
+        assertFalse(mixTrace.any { "fallbackWholeFileDecode" in it })
     }
 
     @Test
@@ -88,7 +164,9 @@ class SourceSeparationCacheFlacPromoterTest {
             encoded += 1
             if (encoded == 2) error("injected encoder failure")
             flac.writeText(wav.readText())
-            val index = File(flac.absolutePath + ".frames").apply { writeText("index") }
+            val index = Pcm16StereoFlacEncoder.frameIndexFileFor(flac).apply {
+                writeText("index")
+            }
             SourceSeparationCacheEncodedFlac(flac, index)
         }
 
@@ -115,7 +193,9 @@ class SourceSeparationCacheFlacPromoterTest {
         var shouldCancel = false
         val promoter = fixture.promoter { wav, flac, _, _, _ ->
             flac.writeText(wav.readText())
-            val index = File(flac.absolutePath + ".frames").apply { writeText("index") }
+            val index = Pcm16StereoFlacEncoder.frameIndexFileFor(flac).apply {
+                writeText("index")
+            }
             shouldCancel = true
             SourceSeparationCacheEncodedFlac(flac, index)
         }
@@ -208,13 +288,23 @@ class SourceSeparationCacheFlacPromoterTest {
             encoder: SourceSeparationCacheFlacEncoder = SourceSeparationCacheFlacEncoder {
                     wav, flac, _, _, _ ->
                 flac.writeText("flac:${wav.readText()}")
-                val index = File(flac.absolutePath + ".frames").apply { writeText("index") }
+                val index = Pcm16StereoFlacEncoder.frameIndexFileFor(flac).apply {
+                    writeText("index")
+                }
                 SourceSeparationCacheEncodedFlac(flac, index)
             },
         ) = SourceSeparationCacheFlacPromoter(
             store = store,
             repository = repository,
             encoder = encoder,
+            nowEpochMs = nowEpochMs,
+        )
+
+        fun realPromoter(
+            nowEpochMs: () -> Long = { 10L },
+        ) = SourceSeparationCacheFlacPromoter(
+            store = store,
+            repository = repository,
             nowEpochMs = nowEpochMs,
         )
 
@@ -232,7 +322,18 @@ class SourceSeparationCacheFlacPromoterTest {
             nowEpochMs = { 10L },
         )
 
-        fun completedManifest(): SourceSeparationCacheManifest {
+        fun completedManifest(
+            stemPcm16: List<ByteArray>? = null,
+        ): SourceSeparationCacheManifest {
+            require(
+                stemPcm16 == null ||
+                    (stemPcm16.size == 2 &&
+                        stemPcm16.all {
+                            it.size == TEST_FRAME_COUNT * PCM16_STEREO_BYTES_PER_FRAME
+                        }),
+            ) {
+                "Real FLAC fixtures must contain two complete PCM16 stereo stems."
+            }
             val contract = SourceSeparationCacheContractSnapshot.fromOfficial(
                 catalog.contracts.single { it.modelId == "uvr_mdxnet_3_9662" },
             )
@@ -256,9 +357,11 @@ class SourceSeparationCacheFlacPromoterTest {
                 gpuFallbackLatch = null,
             )
             val run = (coordinator.begin(request) as SourceSeparationCacheRunStart.Ready).run
-            val vocals = File(run.workDirectory, "vocals.wav").apply { writeText("vocals") }
+            val vocals = File(run.workDirectory, "vocals.wav").apply {
+                stemPcm16?.get(0)?.let { writePcm16StereoWav(it) } ?: writeText("vocals")
+            }
             val instrumental = File(run.workDirectory, "instrumental.wav").apply {
-                writeText("instrumental")
+                stemPcm16?.get(1)?.let { writePcm16StereoWav(it) } ?: writeText("instrumental")
             }
             val timing = File(run.workDirectory, "timing.txt").apply { writeText("timing") }
             val plan = SourceSeparationSegmentPlan.build(
@@ -361,6 +464,10 @@ class SourceSeparationCacheFlacPromoterTest {
     }
 
     companion object {
+        private const val TEST_FRAME_COUNT = 88_200
+        private const val FLAC_BLOCK_FRAME_COUNT = 4_096
+        private const val PCM16_STEREO_BYTES_PER_FRAME = 4
+
         private lateinit var catalog: SourceSeparationModelCatalog
 
         @JvmStatic
@@ -375,4 +482,28 @@ class SourceSeparationCacheFlacPromoterTest {
             }
         }
     }
+}
+
+private fun File.writePcm16StereoWav(pcm16: ByteArray) {
+    WavFileWriter(
+        file = this,
+        sampleRate = 44_100,
+        channelCount = 2,
+    ).use { writer ->
+        writer.writePcm16(pcm16)
+    }
+}
+
+private fun testPcm16Stereo(frameCount: Int, seed: Int): ByteArray {
+    val output = ByteArray(frameCount * 4)
+    var offset = 0
+    repeat(frameCount) { frame ->
+        val left = (frame * 251 + seed * 97).toShort().toInt()
+        val right = (frame * 131 + seed * 193).toShort().toInt()
+        output[offset++] = left.toByte()
+        output[offset++] = (left ushr 8).toByte()
+        output[offset++] = right.toByte()
+        output[offset++] = (right ushr 8).toByte()
+    }
+    return output
 }

@@ -444,7 +444,8 @@ class SourceSeparationCacheStore(
         completedDirectory.listFiles()
             ?.filter { file ->
                 file.isFile &&
-                    (file.name.endsWith(".flac") || file.name.endsWith(".flac.frames")) &&
+                    (file.name.endsWith(".flac") ||
+                        file.name.endsWith(".flac.idx")) &&
                     relativeEntryPath(manifest.cacheKey, file) !in referencedPromotedPaths
             }
             ?.forEach { file ->

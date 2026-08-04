@@ -322,8 +322,10 @@ object Pcm16StereoFlacEncoder {
         }
     }
 
+    fun frameIndexPathFor(flacPath: String): String = flacPath + FRAME_INDEX_EXTENSION
+
     fun frameIndexFileFor(flacFile: File): File {
-        return File(flacFile.absolutePath + FRAME_INDEX_EXTENSION)
+        return File(frameIndexPathFor(flacFile.absolutePath))
     }
 
     fun openIndexedPcmReader(

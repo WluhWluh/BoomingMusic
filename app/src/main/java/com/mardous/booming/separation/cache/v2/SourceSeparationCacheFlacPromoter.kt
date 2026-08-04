@@ -65,7 +65,7 @@ class SourceSeparationCacheFlacPromoter(
                 )
                 throwIfCanceled(shouldCancel)
                 val promotedPath = "completed/$baseName.flac"
-                val promotedIndexPath = "$promotedPath.frames"
+                val promotedIndexPath = Pcm16StereoFlacEncoder.frameIndexPathFor(promotedPath)
                 val promotedIntegrity = store.copyIntoEntryAtomically(
                     cacheKey = manifest.cacheKey,
                     source = encoded.flacFile,

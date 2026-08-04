@@ -158,13 +158,14 @@ class SourceSeparationCacheStoreTest {
             SourceSeparationCacheHydrator.HYDRATION_OUTPUT_DIRECTORY,
         ).apply { mkdirs() }.resolve("partial.pcm").writeText("partial")
         store.resolveEntryPath(valid.cacheKey, "completed/orphan.flac").writeText("orphan")
+        store.resolveEntryPath(valid.cacheKey, "completed/orphan.flac.idx").writeText("orphan")
 
         val result = store.recover()
 
         assertEquals(1, result.removedTemporaryFiles)
         assertEquals(1, result.removedStagingRuns)
         assertEquals(1, result.removedInvalidEntries)
-        assertEquals(3, result.removedDerivedArtifacts)
+        assertEquals(4, result.removedDerivedArtifacts)
         assertNotNull(store.readManifest(valid.cacheKey))
         assertFalse(tempFile.exists())
         assertFalse(invalidEntry.exists())
