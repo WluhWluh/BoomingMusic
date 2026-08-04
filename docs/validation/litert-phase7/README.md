@@ -25,9 +25,13 @@ precision. A successful short-window probe is not a Phase 7 promotion result.
   and full-track desktop-reference equivalence. Listening and gesture-level UI
   review remain open.
 - `kara-gpu-requalification-2026-07-30.md` and its machine-readable summary
-  record the Galaxy S10/S25 bounded OpenCL FP32 full-song requalification. The
-  numerical result passes, while listening, lifecycle, UI, and device-specific
-  performance gates keep KARA CPU-only in the catalog.
+  record the Galaxy S10/S25 bounded OpenCL FP32 full-song requalification. Its
+  historical decision kept KARA CPU-only pending product admission; FP16
+  remains rejected and S10 GPU remains slower than CPU.
+- `kara-hq4-product-experiment-2026-08-03.md` records the later S25 production
+  UI and independent-process admission smoke. KARA and HQ4 completed bounded
+  FP32 GPU runs, and HQ4 also completed after the user disabled GPU and selected
+  its direct CPU path. Both models remain explicitly confirmed experiments.
 - `candidate-catalog-2026-07-24/` contains the 27-row immutable download-only
   candidate audit: online Release acquisition, catalog/sidecar reconciliation,
   Android LiteRT structural compile, activation rejection, and cleanup.
