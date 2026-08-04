@@ -641,6 +641,8 @@ class SourceSeparationPresetManagementViewModel internal constructor(
             dimTPower = 8,
             modelOutputScale = 1.035,
             modelOutputStem = SourceSeparationManualModelStem.Vocals,
+            modelOutputLabel = SourceSeparationManualModelStem.Vocals.defaultCanonicalLabel(),
+            residualLabel = SourceSeparationManualModelStem.Instrumental.defaultCanonicalLabel(),
         )
     }
 

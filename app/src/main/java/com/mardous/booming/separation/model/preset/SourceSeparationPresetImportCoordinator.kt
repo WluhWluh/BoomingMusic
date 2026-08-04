@@ -12,6 +12,7 @@ import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.ContractTensor
 import com.mardous.booming.separation.model.contract.ContractTensorLayout
 import com.mardous.booming.separation.model.contract.ContractWindow
+import com.mardous.booming.separation.model.contract.canonicalLabel
 import com.mardous.booming.separation.model.contract.PipelineCompatibility
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractValidator
@@ -276,13 +277,15 @@ data class SourceSeparationManualModelProfileDraft(
     val dimTPower: Int,
     val modelOutputScale: Double,
     val modelOutputStem: SourceSeparationManualModelStem,
+    val modelOutputLabel: String,
+    val residualLabel: String,
 ) {
     internal fun toProfile(
         artifact: SourceSeparationPendingModelImport,
     ): SourceSeparationCustomModelProfile {
         val modelTimeFrames = 1 shl dimTPower
-        val modelStem = modelOutputStem.toContractStem()
-        val residualStem = modelOutputStem.residual().toContractStem()
+        val modelStem = modelOutputStem.toContractStem(modelOutputLabel)
+        val residualStem = modelOutputStem.residual().toContractStem(residualLabel)
         val provisional = SourceSeparationCustomModelProfile(
             profileSchemaVersion = SourceSeparationModelContractValidator.CUSTOM_PROFILE_SCHEMA_VERSION,
             profileId = "pending-revision",
@@ -365,6 +368,8 @@ internal fun SourceSeparationCustomModelProfile.toManualDraft():
         dimTPower = dsp.dimTPower,
         modelOutputScale = dsp.modelOutputScale,
         modelOutputStem = outputStem,
+        modelOutputLabel = stemContract.modelOutput.canonicalLabel,
+        residualLabel = stemContract.residual.canonicalLabel,
     )
 }
 
@@ -378,8 +383,13 @@ enum class SourceSeparationManualModelStem {
         Instrumental -> Vocals
     }
 
-    fun toContractStem(): ContractStem = when (this) {
-        Vocals -> ContractStem(ContractStemSemantic.Vocals, "Vocals")
-        Instrumental -> ContractStem(ContractStemSemantic.Instrumental, "Instrumental")
+    fun defaultCanonicalLabel(): String = when (this) {
+        Vocals -> "Vocals"
+        Instrumental -> "Instrumental"
+    }
+
+    fun toContractStem(canonicalLabel: String = defaultCanonicalLabel()): ContractStem = when (this) {
+        Vocals -> ContractStem(ContractStemSemantic.Vocals, canonicalLabel)
+        Instrumental -> ContractStem(ContractStemSemantic.Instrumental, canonicalLabel)
     }
 }

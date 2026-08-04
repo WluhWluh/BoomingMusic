@@ -2,6 +2,7 @@ package com.mardous.booming.separation.model.preset
 
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimePlatform
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
 import com.mardous.booming.separation.model.contract.CatalogActivationPolicy
 import com.mardous.booming.separation.model.contract.CatalogArtifactRecord
 import com.mardous.booming.separation.model.contract.CatalogConversionState
@@ -54,10 +55,55 @@ class SourceSeparationPresetImportCoordinatorTest {
         val first = manualDraft().toProfile(artifact)
         val repeated = manualDraft().toProfile(artifact)
         val changed = manualDraft().copy(modelOutputScale = 1.1).toProfile(artifact)
+        val relabeled = manualDraft().copy(modelOutputLabel = "Lead Vocals").toProfile(artifact)
 
         assertEquals(first.profileId, repeated.profileId)
         assertNotEquals(first.profileId, changed.profileId)
+        assertNotEquals(first.profileId, relabeled.profileId)
         assertTrue(first.profileId.startsWith("custom-${"a".repeat(12)}-"))
+    }
+
+    @Test
+    fun `manual profile preserves Unicode labels through editable revisions`() {
+        val artifact = SourceSeparationPendingModelImport(
+            fileName = "custom.tflite",
+            byteSize = 1_024L,
+            sha256 = "a".repeat(64),
+        )
+        val profile = manualDraft().copy(
+            modelOutputStem = SourceSeparationManualModelStem.Instrumental,
+            modelOutputLabel = "纯伴奏",
+            residualLabel = "主唱",
+        ).toProfile(artifact)
+
+        assertEquals("纯伴奏", profile.stemContract.modelOutput.displayLabel)
+        assertEquals(ContractStemSemantic.Instrumental, profile.stemContract.modelOutput.semantic)
+        assertEquals("主唱", profile.stemContract.residual.displayLabel)
+        assertEquals(ContractStemSemantic.Vocals, profile.stemContract.residual.semantic)
+        assertEquals("纯伴奏", profile.toManualDraft().modelOutputLabel)
+        assertEquals("主唱", profile.toManualDraft().residualLabel)
+        val cacheSnapshot = SourceSeparationCacheContractSnapshot.fromCustom(profile)
+        assertEquals("纯伴奏", cacheSnapshot.stemContract.modelOutput.displayLabel)
+        assertEquals("主唱", cacheSnapshot.stemContract.residual.displayLabel)
+    }
+
+    @Test
+    fun `manual profile rejects ambiguous or unsafe labels`() {
+        val artifact = SourceSeparationPendingModelImport(
+            fileName = "custom.tflite",
+            byteSize = 1_024L,
+            sha256 = "a".repeat(64),
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            manualDraft().copy(
+                modelOutputLabel = "Lead Vocals",
+                residualLabel = "lead   vocals",
+            ).toProfile(artifact)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            manualDraft().copy(modelOutputLabel = "Vocals/Lead").toProfile(artifact)
+        }
     }
 
     @Test
@@ -304,6 +350,8 @@ class SourceSeparationPresetImportCoordinatorTest {
         dimTPower = 8,
         modelOutputScale = 1.035,
         modelOutputStem = SourceSeparationManualModelStem.Vocals,
+        modelOutputLabel = "Vocals",
+        residualLabel = "Instrumental",
     )
 
     private fun tensor(name: String) = ContractTensor(

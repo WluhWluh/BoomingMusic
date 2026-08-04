@@ -29,6 +29,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.mardous.booming.R
 import com.mardous.booming.extensions.files.asReadableFileSize
+import com.mardous.booming.separation.SourceSeparationStemLabelResolver
 import com.mardous.booming.separation.model.preset.SourceSeparationManualModelProfileDraft
 import com.mardous.booming.separation.model.preset.SourceSeparationManualModelStem
 import com.mardous.booming.separation.model.preset.SourceSeparationPendingModelImport
@@ -244,6 +246,7 @@ internal fun ManualProfileDialog(
     saveRes: Int = R.string.source_separation_preset_import_save_profile,
     saving: Boolean = false,
 ) {
+    val context = LocalContext.current
     var modelId by rememberSaveable(pending.sha256) { mutableStateOf(initialDraft.modelId) }
     var displayName by rememberSaveable(pending.sha256) { mutableStateOf(initialDraft.displayName) }
     var inputTensorName by rememberSaveable(pending.sha256) {
@@ -263,6 +266,12 @@ internal fun ManualProfileDialog(
     var outputStemName by rememberSaveable(pending.sha256) {
         mutableStateOf(initialDraft.modelOutputStem.name)
     }
+    var modelOutputLabel by rememberSaveable(pending.sha256) {
+        mutableStateOf(initialDraft.modelOutputLabel)
+    }
+    var residualLabel by rememberSaveable(pending.sha256) {
+        mutableStateOf(initialDraft.residualLabel)
+    }
 
     val outputStem = SourceSeparationManualModelStem.entries.singleOrNull {
         it.name == outputStemName
@@ -279,6 +288,8 @@ internal fun ManualProfileDialog(
         dimTPower = dimTPower,
         modelOutputScale = modelOutputScale,
         outputStem = outputStem,
+        modelOutputLabel = modelOutputLabel,
+        residualLabel = residualLabel,
     )?.takeIf { candidate ->
         runCatching { candidate.toProfile(pending) }.isSuccess
     }
@@ -397,7 +408,12 @@ internal fun ManualProfileDialog(
                                 SegmentedButton(
                                     selected = outputStem == SourceSeparationManualModelStem.Vocals,
                                     onClick = {
-                                        outputStemName = SourceSeparationManualModelStem.Vocals.name
+                                        if (outputStem != SourceSeparationManualModelStem.Vocals) {
+                                            outputStemName = SourceSeparationManualModelStem.Vocals.name
+                                            val previousOutputLabel = modelOutputLabel
+                                            modelOutputLabel = residualLabel
+                                            residualLabel = previousOutputLabel
+                                        }
                                     },
                                     shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
                                     modifier = Modifier.weight(1f),
@@ -407,7 +423,15 @@ internal fun ManualProfileDialog(
                                 SegmentedButton(
                                     selected = outputStem == SourceSeparationManualModelStem.Instrumental,
                                     onClick = {
-                                        outputStemName = SourceSeparationManualModelStem.Instrumental.name
+                                        if (outputStem !=
+                                            SourceSeparationManualModelStem.Instrumental
+                                        ) {
+                                            outputStemName =
+                                                SourceSeparationManualModelStem.Instrumental.name
+                                            val previousOutputLabel = modelOutputLabel
+                                            modelOutputLabel = residualLabel
+                                            residualLabel = previousOutputLabel
+                                        }
                                     },
                                     shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
                                     modifier = Modifier.weight(1f),
@@ -415,6 +439,31 @@ internal fun ManualProfileDialog(
                                     Text(stringResource(R.string.source_separation_blend_instrumental))
                                 }
                             }
+                            ManualProfileTextField(
+                                value = modelOutputLabel,
+                                onValueChange = { modelOutputLabel = it },
+                                label = stringResource(
+                                    R.string.source_separation_model_details_model_output,
+                                ),
+                                supportingText = SourceSeparationStemLabelResolver
+                                    .resolve(context, modelOutputLabel)
+                                    .takeIf { localized ->
+                                        modelOutputLabel.isNotBlank() &&
+                                            localized != modelOutputLabel
+                                    },
+                            )
+                            ManualProfileTextField(
+                                value = residualLabel,
+                                onValueChange = { residualLabel = it },
+                                label = stringResource(
+                                    R.string.source_separation_model_details_residual,
+                                ),
+                                supportingText = SourceSeparationStemLabelResolver
+                                    .resolve(context, residualLabel)
+                                    .takeIf { localized ->
+                                        residualLabel.isNotBlank() && localized != residualLabel
+                                    },
+                            )
                         }
                     }
                 }
@@ -461,11 +510,15 @@ private fun ManualProfileTextField(
     onValueChange: (String) -> Unit,
     label: String,
     keyboardType: KeyboardType = KeyboardType.Text,
+    supportingText: String? = null,
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
+        supportingText = supportingText?.let { text ->
+            { Text(text) }
+        },
         singleLine = true,
         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = keyboardType),
         modifier = Modifier.fillMaxWidth(),
@@ -484,6 +537,8 @@ private fun manualDraftOrNull(
     dimTPower: String,
     modelOutputScale: String,
     outputStem: SourceSeparationManualModelStem,
+    modelOutputLabel: String,
+    residualLabel: String,
 ): SourceSeparationManualModelProfileDraft? {
     val parsedSampleRate = sampleRate.toIntOrNull() ?: return null
     val parsedNfFt = nFft.toIntOrNull() ?: return null
@@ -492,7 +547,8 @@ private fun manualDraftOrNull(
     val parsedDimTPower = dimTPower.toIntOrNull() ?: return null
     val parsedOutputScale = modelOutputScale.toDoubleOrNull() ?: return null
     if (modelId.isBlank() || displayName.isBlank() ||
-        inputTensorName.isBlank() || outputTensorName.isBlank()
+        inputTensorName.isBlank() || outputTensorName.isBlank() ||
+        modelOutputLabel.isBlank() || residualLabel.isBlank()
     ) return null
     return SourceSeparationManualModelProfileDraft(
         modelId = modelId,
@@ -506,5 +562,7 @@ private fun manualDraftOrNull(
         dimTPower = parsedDimTPower,
         modelOutputScale = parsedOutputScale,
         modelOutputStem = outputStem,
+        modelOutputLabel = modelOutputLabel,
+        residualLabel = residualLabel,
     )
 }
