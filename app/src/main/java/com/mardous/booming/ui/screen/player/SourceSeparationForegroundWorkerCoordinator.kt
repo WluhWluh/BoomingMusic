@@ -1277,7 +1277,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
                 true,
             )
-            if (hasCompletedCache(resolved)) {
+            val completedCache = completedCacheStatus(resolved)
+            if (completedCache != null) {
                 if (!isCurrentRequest(request, resolved.cacheKey)) {
                     traceStaleRequest("worker.completedCache.stale", request, resolved.cacheKey)
                     return
@@ -1287,6 +1288,12 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     songTitle = song.title,
                     selectionGeneration = request.selection.generation,
                     cacheKey = resolved.cacheKey,
+                )
+                callbacks?.onSourceSeparationWorkerCompleted(
+                    song = song,
+                    cacheKey = resolved.cacheKey,
+                    shouldPromoteCompletedStems = shouldPromoteCompletedStems &&
+                            completedCache.canPromote,
                 )
                 return
             }
@@ -1510,16 +1517,12 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         R.string.source_separation_process_stopped_unexpectedly,
     )
 
-    private suspend fun hasCompletedCache(song: SourceSeparationRuntimeSong): Boolean {
+    private suspend fun completedCacheStatus(
+        song: SourceSeparationRuntimeSong,
+    ): SourceSeparationModelAwareCacheStatus.Completed? {
         return withContext(Dispatchers.IO) {
-            when (runCatching { sourceSeparationRuntime.cacheStatus(song) }.getOrNull()) {
-                is SourceSeparationModelAwareCacheStatus.Completed -> true
-                SourceSeparationModelAwareCacheStatus.Busy,
-                is SourceSeparationModelAwareCacheStatus.Corrupt,
-                is SourceSeparationModelAwareCacheStatus.Incomplete,
-                SourceSeparationModelAwareCacheStatus.Missing,
-                null -> false
-            }
+            runCatching { sourceSeparationRuntime.cacheStatus(song) }
+                .getOrNull() as? SourceSeparationModelAwareCacheStatus.Completed
         }
     }
 

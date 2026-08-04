@@ -55,6 +55,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotio
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelResolution
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
+import com.mardous.booming.separation.cache.v2.promoteSourceSeparationCacheWhenAvailable
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
@@ -992,10 +993,14 @@ class PlayerViewModel(
                                     "current=${currentSong.id == request.song.id}"
                         )
                         runCatching {
-                            sourceSeparationRuntime.promote(
-                                cacheKey = request.cacheKey,
+                            promoteSourceSeparationCacheWhenAvailable(
                                 shouldCancel = shouldCancelRequest,
-                            )
+                            ) {
+                                sourceSeparationRuntime.promote(
+                                    cacheKey = request.cacheKey,
+                                    shouldCancel = shouldCancelRequest,
+                                )
+                            }
                         }.onSuccess { result ->
                             val manifest = when (result) {
                                 is SourceSeparationCacheFlacPromotionResult.Completed ->
@@ -1164,15 +1169,22 @@ class PlayerViewModel(
         cacheKey: String,
         shouldPromoteCompletedStems: Boolean,
     ) {
-        if (!acceptsCurrentSourceSeparationWorkerState(song, cacheKey)) return
-        if (currentSong.id == song.id) {
+        val plan = sourceSeparationWorkerCompletionPlan(
+            acceptsCurrentPlaybackState = acceptsCurrentSourceSeparationWorkerState(
+                song,
+                cacheKey,
+            ),
+            shouldPromoteCompletedStems = shouldPromoteCompletedStems,
+        )
+        if (plan.syncCurrentPlayback) {
             clearSourceSeparationPausePendingAction(song)
             refreshCurrentSourceSeparationCacheAvailable(song)
             syncCompletedSourceSeparationPlaybackWhenIdle(song)
         }
-        requestSourceSeparationTemporaryCacheCleanup()
-        if (shouldPromoteCompletedStems) {
+        if (plan.promoteCompletedStems) {
             startSourceSeparationFlacPromotion(song, cacheKey)
+        } else if (plan.cleanTemporaryFilesNow) {
+            requestSourceSeparationTemporaryCacheCleanup()
         }
     }
 

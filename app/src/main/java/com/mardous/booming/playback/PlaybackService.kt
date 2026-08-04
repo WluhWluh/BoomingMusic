@@ -108,6 +108,7 @@ import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
 import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
+import com.mardous.booming.separation.cache.v2.promoteSourceSeparationCacheWhenAvailable
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheOutput
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCachePlayback
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
@@ -875,7 +876,9 @@ class PlaybackService :
                             throw IllegalStateException("The resolved model became unavailable.")
                     }
                     if (preferences.getBoolean(SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION, true)) {
-                        sourceSeparationRuntime.promote(manifest.cacheKey)
+                        promoteSourceSeparationCacheWhenAvailable(shouldCancel = { false }) {
+                            sourceSeparationRuntime.promote(manifest.cacheKey)
+                        }
                     }
                     sourceSeparationRuntime.cleanCompletedTemporaryFiles(manifest.cacheKey)
                     val playback = requireNotNull(
