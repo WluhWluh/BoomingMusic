@@ -1361,13 +1361,14 @@ class PlaybackService :
             val activeSession = sourceSeparationPlaybackSession
             gateSourceSeparationDataPlaneUntilReady(activeSession, "seek")
             if (activeSession != null &&
+                !shouldCheckForDeferredCompletedPlaybackUpgrade(activeSession) &&
                 !activeSession.requiresReadinessGate &&
                 !sourceSeparationPlaybackIsProcessing &&
                 !sourceSeparationPlaybackExpectProcessing
             ) {
                 traceSourceSeparationPlayback(
                     "check.seek.skip",
-                    "reason=activeCompletedSession position=${newPosition.positionMs}"
+                    "reason=preferredCompletedSession position=${newPosition.positionMs}"
                 )
                 return
             }
@@ -1567,6 +1568,14 @@ class PlaybackService :
         if (!sourceSeparationPlaybackRequested) {
             val result = sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
             traceSourceSeparationPlayback("playback.sync.skip", "requested=false")
+            return result
+        }
+        if (preferCompletedCache && player.playWhenReady) {
+            val result = sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+            traceSourceSeparationPlayback(
+                "playback.sync.skip",
+                "reason=completedCacheUpgradeDeferred playWhenReady=true",
+            )
             return result
         }
         val effectiveExpectProcessing =
@@ -2204,6 +2213,15 @@ class PlaybackService :
                 session.inputMode != InputMode.OriginalSource ||
                 session.vocalsFile != playback.vocalsFile ||
                 session.instrumentalFile != playback.instrumentalFile
+    }
+
+    private fun shouldCheckForDeferredCompletedPlaybackUpgrade(
+        session: SourceSeparationPlaybackSession,
+    ): Boolean {
+        return session.requiresReadinessGate ||
+                session.inputMode != InputMode.OriginalSource ||
+                !session.vocalsFile.extension.equals("flac", ignoreCase = true) ||
+                !session.instrumentalFile.extension.equals("flac", ignoreCase = true)
     }
 
     private suspend fun switchActiveSourceSeparationSessionToCompletedCache(

@@ -1049,9 +1049,9 @@ class PlayerViewModel(
                                 if (currentSong.id == request.song.id) {
                                     refreshCurrentSourceSeparationCacheAvailable(request.song)
                                     traceSourceSeparationPlaybackTestMarker(
-                                        "flacPromotion.syncPlayback songId=${request.song.id} force=true"
+                                        "flacPromotion.playbackUpgrade.evaluate songId=${request.song.id}"
                                     )
-                                    syncCompletedSourceSeparationPlaybackWhenIdle(request.song)
+                                    syncCompletedSourceSeparationPlaybackIfPaused(request.song)
                                 } else {
                                     traceSourceSeparationPlaybackTestMarker(
                                         "flacPromotion.syncPlayback.skip songId=${request.song.id} " +
@@ -1202,12 +1202,15 @@ class PlayerViewModel(
                 song,
                 cacheKey,
             ),
+            playWhenReady = sourceSeparationPlaybackHasPlayIntent(),
             shouldPromoteCompletedStems = shouldPromoteCompletedStems,
         )
-        if (plan.syncCurrentPlayback) {
+        if (plan.refreshCurrentCacheState) {
             clearSourceSeparationPausePendingAction(song)
             refreshCurrentSourceSeparationCacheAvailable(song)
-            syncCompletedSourceSeparationPlaybackWhenIdle(song)
+        }
+        if (plan.syncCurrentPlayback) {
+            syncCompletedSourceSeparationPlaybackIfPaused(song)
         }
         if (plan.promoteCompletedStems) {
             startSourceSeparationFlacPromotion(song, cacheKey)
@@ -2095,22 +2098,36 @@ class PlayerViewModel(
         }
     }
 
-    private fun syncCompletedSourceSeparationPlaybackWhenIdle(song: Song) {
+    private fun syncCompletedSourceSeparationPlaybackIfPaused(song: Song) {
         viewModelScope.launch {
+            if (sourceSeparationPlaybackHasPlayIntent()) {
+                traceSourceSeparationPlaybackTestMarker(
+                    "completedPlaybackUpgrade.deferred songId=${song.id} reason=playWhenReady"
+                )
+                return@launch
+            }
             while (true) {
                 val activeSync = sourceSeparationPlaybackSyncJob
                     ?.takeIf(Job::isActive)
                     ?: break
                 activeSync.join()
             }
-            if (currentSong.id == song.id) {
+            if (currentSong.id == song.id && !sourceSeparationPlaybackHasPlayIntent()) {
                 syncSourceSeparationPlaybackIfRequested(
                     force = true,
                     preferCompletedCache = true,
                 )
+            } else {
+                traceSourceSeparationPlaybackTestMarker(
+                    "completedPlaybackUpgrade.deferred songId=${song.id} " +
+                            "reason=${if (currentSong.id != song.id) "songChanged" else "playWhenReady"}"
+                )
             }
         }
     }
+
+    private fun sourceSeparationPlaybackHasPlayIntent(): Boolean =
+        mediaController?.playWhenReady ?: _isPlayingFlow.value
 
     private fun verifySourceSeparationPathInBackground(
         songId: Long,
