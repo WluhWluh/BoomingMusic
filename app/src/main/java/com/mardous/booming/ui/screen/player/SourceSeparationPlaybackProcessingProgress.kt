@@ -1,148 +1,309 @@
 package com.mardous.booming.ui.screen.player
 
-import android.os.SystemClock
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS
-import kotlinx.coroutines.delay
 import kotlin.math.ceil
 import kotlin.math.max
+import kotlin.math.min
 
 data class SourceSeparationPlaybackProcessingProgressState(
     val progress: Float,
-    val resetKey: List<Any?>,
     val estimatedRemainingSeconds: Int,
     val readyWindows: Int,
     val targetWindows: Int,
     val pendingWindows: Int,
     val initialProcessingLabel: String,
     val hasScheduler: Boolean,
+    val isCompletionTail: Boolean = false,
 )
 
 @Composable
-fun rememberSourceSeparationPlaybackProcessingProgressState(
-    separationState: SourceSeparationUiState,
-    processingGeneration: Long,
-    processingSongId: Long? = null,
-): SourceSeparationPlaybackProcessingProgressState {
-    val rawRunningState = (separationState as? SourceSeparationUiState.Running)
-        ?.takeIf { state ->
-            processingSongId == null || state.songId == processingSongId
-        }
-    val rawScheduler = rawRunningState?.scheduler
-    val rawSnapshotKey = listOf(
-        rawRunningState?.songId,
-        rawRunningState?.sourceDecodeMode,
-        rawRunningState?.stage,
-        rawScheduler?.playbackSegmentIndex,
-        rawScheduler?.processingSegmentIndex,
-        rawScheduler?.playbackReadyWindowReadyCount,
-        rawScheduler?.playbackReadyWindowPendingCount,
-        rawScheduler?.readyWindowCount,
-    )
-    val generationGuard = remember {
-        SourceSeparationPlaybackProcessingProgressGenerationGuard()
-    }
-    if (generationGuard.generation != processingGeneration) {
-        generationGuard.ignoredSnapshotKey = if (
-            generationGuard.hasSeenGeneration &&
-            generationGuard.latestSnapshotKey == rawSnapshotKey
-        ) {
-            rawSnapshotKey
+internal fun animateSourceSeparationPlaybackProcessingProgress(
+    state: SourceSeparationPlaybackProcessingProgressState,
+): Float {
+    val progress by animateFloatAsState(
+        targetValue = state.progress,
+        animationSpec = if (state.isCompletionTail) {
+            tween(
+                durationMillis = SOURCE_SEPARATION_PLAYBACK_PROGRESS_COMPLETION_TAIL_MS.toInt(),
+                easing = LinearOutSlowInEasing,
+            )
         } else {
-            null
-        }
-        generationGuard.generation = processingGeneration
-        generationGuard.hasSeenGeneration = true
-    } else if (generationGuard.ignoredSnapshotKey != null &&
-        generationGuard.ignoredSnapshotKey != rawSnapshotKey
-    ) {
-        generationGuard.ignoredSnapshotKey = null
-    }
-    generationGuard.latestSnapshotKey = rawSnapshotKey
+            snap()
+        },
+        label = "SourceSeparationPlaybackProgress",
+    )
+    return progress
+}
 
-    val runningState = rawRunningState.takeUnless {
-        generationGuard.ignoredSnapshotKey != null &&
-                generationGuard.ignoredSnapshotKey == rawSnapshotKey
+internal class SourceSeparationPlaybackProcessingProgressCoordinator {
+    private var sessionKey: SourceSeparationPlaybackProcessingSessionKey? = null
+    private var tracker: SourceSeparationPlaybackProcessingProgressTracker? = null
+    private val generationGuard = SourceSeparationPlaybackProcessingProgressGenerationGuard()
+    private var wasProcessing = false
+    private var becamePlayableSinceLastWait = false
+    private var lastProgressState: SourceSeparationPlaybackProcessingProgressState? = null
+    private var completionTailStartedAtMs: Long? = null
+
+    fun sample(
+        playbackState: SourceSeparationPlaybackUiState,
+        separationState: SourceSeparationUiState,
+        currentSongId: Long?,
+        nowMs: Long,
+    ): SourceSeparationPlaybackProcessingProgressState? {
+        val processingSongId = playbackState.songId ?: currentSongId
+        if (!playbackState.processing) {
+            val becameReady = playbackState.enabled &&
+                    sessionKey?.songId == processingSongId
+            if (becameReady) {
+                becamePlayableSinceLastWait = true
+            }
+            if (wasProcessing && becameReady &&
+                lastProgressState?.progress?.let { it < 1f } == true
+            ) {
+                completionTailStartedAtMs = nowMs
+            }
+            wasProcessing = false
+            if (!playbackState.enabled) {
+                completionTailStartedAtMs = null
+                return null
+            }
+            val tailStartedAtMs = completionTailStartedAtMs ?: return null
+            if (nowMs - tailStartedAtMs >=
+                SOURCE_SEPARATION_PLAYBACK_PROGRESS_COMPLETION_TAIL_MS
+            ) {
+                completionTailStartedAtMs = null
+                return null
+            }
+            return lastProgressState?.copy(
+                progress = 1f,
+                isCompletionTail = true,
+            )
+        }
+
+        completionTailStartedAtMs = null
+        val nextSessionKey = SourceSeparationPlaybackProcessingSessionKey(
+            generation = playbackState.processingGeneration,
+            songId = processingSongId,
+        )
+        if (sessionKey != nextSessionKey) {
+            sessionKey = nextSessionKey
+            tracker = SourceSeparationPlaybackProcessingProgressTracker(startedAtMs = nowMs)
+            becamePlayableSinceLastWait = false
+            lastProgressState = null
+        } else if (!wasProcessing && becamePlayableSinceLastWait) {
+            tracker = SourceSeparationPlaybackProcessingProgressTracker(startedAtMs = nowMs)
+            becamePlayableSinceLastWait = false
+            lastProgressState = null
+        }
+        wasProcessing = true
+
+        val rawRunningState = (separationState as? SourceSeparationUiState.Running)
+            ?.takeIf { state ->
+                processingSongId == null || state.songId == processingSongId
+            }
+        val rawSnapshotKey = rawRunningState.playbackProcessingProgressSnapshotKey()
+        val runningState = rawRunningState.takeIf {
+            generationGuard.accepts(playbackState.processingGeneration, rawSnapshotKey)
+        }
+        return requireNotNull(tracker).sample(
+            observation = runningState?.toPlaybackProcessingProgressObservation(),
+            nowMs = nowMs,
+        ).also { lastProgressState = it }
     }
-    val scheduler = runningState?.scheduler
+}
+
+internal class SourceSeparationPlaybackProcessingSessionGeneration {
+    private var songId: Long? = null
+
+    fun generationFor(songId: Long, currentGeneration: Long): Long {
+        if (this.songId == songId) return currentGeneration
+        this.songId = songId
+        return currentGeneration + 1L
+    }
+
+    fun invalidate(songId: Long? = null) {
+        if (songId == null || this.songId == songId) {
+            this.songId = null
+        }
+    }
+}
+
+private data class SourceSeparationPlaybackProcessingSessionKey(
+    val generation: Long,
+    val songId: Long?,
+)
+
+internal class SourceSeparationPlaybackProcessingProgressGenerationGuard {
+    var generation: Long = Long.MIN_VALUE
+    var ignoredSnapshotKey: List<Any?>? = null
+    var latestSnapshotKey: List<Any?>? = null
+    var hasSeenGeneration: Boolean = false
+
+    fun accepts(
+        processingGeneration: Long,
+        snapshotKey: List<Any?>,
+    ): Boolean {
+        if (generation != processingGeneration) {
+            ignoredSnapshotKey = if (
+                hasSeenGeneration && latestSnapshotKey == snapshotKey
+            ) {
+                snapshotKey
+            } else {
+                null
+            }
+            generation = processingGeneration
+            hasSeenGeneration = true
+        } else if (ignoredSnapshotKey != null && ignoredSnapshotKey != snapshotKey) {
+            ignoredSnapshotKey = null
+        }
+        latestSnapshotKey = snapshotKey
+        return ignoredSnapshotKey == null || ignoredSnapshotKey != snapshotKey
+    }
+}
+
+private fun SourceSeparationUiState.Running?.playbackProcessingProgressSnapshotKey():
+        List<Any?> {
+    val scheduler = this?.scheduler
+    return listOf(
+        this?.songId,
+        this?.sourceDecodeMode,
+        this?.stage,
+        scheduler?.playbackSegmentIndex,
+        scheduler?.processingSegmentIndex,
+        scheduler?.playbackReadyWindowReadyCount,
+        scheduler?.playbackReadyWindowPendingCount,
+        scheduler?.readyWindowCount,
+    )
+}
+
+internal data class SourceSeparationPlaybackProcessingProgressObservation(
+    val schedulerPlaybackSegmentIndex: Int?,
+    val hasScheduler: Boolean,
+    val hasUsableProgressSource: Boolean,
+    val completeSnapshot: Boolean,
+    val completedWorkUnits: Int,
+    val readyWindows: Int,
+    val targetWindows: Int,
+    val pendingWindows: Int,
+    val estimatedWindowMs: Long,
+    val initialProcessingLabel: String,
+)
+
+internal class SourceSeparationPlaybackProcessingProgressTracker(
+    private val startedAtMs: Long,
+) {
+    private var latestWorkIdentity: WorkIdentity? = null
+    private var estimateStartedAtMs: Long = startedAtMs
+    private var projectedProgress: Float = 0f
+    private var displayedProgress: Float = 0f
+    private var lastSampleAtMs: Long = startedAtMs
+
+    fun sample(
+        observation: SourceSeparationPlaybackProcessingProgressObservation?,
+        nowMs: Long,
+    ): SourceSeparationPlaybackProcessingProgressState {
+        val safeNowMs = nowMs.coerceAtLeast(startedAtMs)
+        val workIdentity = observation
+            ?.takeIf { it.hasUsableProgressSource }
+            ?.let {
+                WorkIdentity(
+                    scheduler = it.hasScheduler,
+                    playbackSegmentIndex = it.schedulerPlaybackSegmentIndex,
+                    completedWorkUnits = it.completedWorkUnits,
+                    targetWindows = it.targetWindows,
+                )
+            }
+        if (workIdentity != null && workIdentity != latestWorkIdentity) {
+            latestWorkIdentity = workIdentity
+            estimateStartedAtMs = safeNowMs
+        }
+        val elapsedInEstimateMs = if (workIdentity != null) {
+            (safeNowMs - estimateStartedAtMs).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        val estimatedWindowMs = observation?.estimatedWindowMs
+            ?: estimatedWindowMs(DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS)
+        val targetProgress = if (
+            observation != null &&
+            observation.hasUsableProgressSource &&
+            observation.targetWindows > 0
+        ) {
+            val initialLeadMs = (estimatedWindowMs / 5L)
+                .coerceAtMost(PROGRESS_INITIAL_LEAD_MS)
+            val estimatedWorkUnits = (
+                    (elapsedInEstimateMs + initialLeadMs).toFloat() /
+                            estimatedWindowMs.toFloat()
+                    ).coerceIn(0f, PROGRESS_MAX_ESTIMATED_WORK_UNITS)
+            val workProgress = (
+                    observation.completedWorkUnits.toFloat() + estimatedWorkUnits
+                    ) / observation.targetWindows.toFloat()
+            (PROGRESS_WARMUP_CAP +
+                    workProgress * (PROGRESS_MAX_TARGET - PROGRESS_WARMUP_CAP))
+                .coerceIn(0f, PROGRESS_ABSOLUTE_CAP)
+        } else {
+            (((safeNowMs - startedAtMs).toFloat() / PROGRESS_WARMUP_DURATION_MS.toFloat()) *
+                    PROGRESS_WARMUP_CAP)
+                .coerceIn(0f, PROGRESS_WARMUP_CAP)
+        }
+        projectedProgress = max(projectedProgress, targetProgress)
+        val elapsedSinceSampleMs = (safeNowMs - lastSampleAtMs).coerceAtLeast(0L)
+        val maximumAdvance = elapsedSinceSampleMs * PROGRESS_MAX_ADVANCE_PER_MS
+        displayedProgress = min(projectedProgress, displayedProgress + maximumAdvance)
+        lastSampleAtMs = safeNowMs
+
+        val remainingWorkUnits = when {
+            observation == null -> 1
+            observation.hasScheduler && observation.pendingWindows > 0 ->
+                observation.pendingWindows
+            else -> observation.targetWindows - observation.completedWorkUnits
+        }.coerceAtLeast(1)
+        val estimatedRemainingSeconds = ceil(
+            ((remainingWorkUnits * estimatedWindowMs) - elapsedInEstimateMs)
+                .coerceAtLeast(0L) / 1000.0
+        ).toInt()
+        val hideCompleteSnapshot = observation?.completeSnapshot == true
+
+        return SourceSeparationPlaybackProcessingProgressState(
+            progress = displayedProgress,
+            estimatedRemainingSeconds = estimatedRemainingSeconds,
+            readyWindows = if (hideCompleteSnapshot) 0 else observation?.readyWindows ?: 0,
+            targetWindows = observation?.targetWindows ?: 0,
+            pendingWindows = if (hideCompleteSnapshot) {
+                observation.targetWindows
+            } else {
+                observation?.pendingWindows ?: 0
+            },
+            initialProcessingLabel = observation?.initialProcessingLabel.orEmpty(),
+            hasScheduler = observation?.hasScheduler == true &&
+                    observation.hasUsableProgressSource &&
+                    !hideCompleteSnapshot,
+        )
+    }
+
+    private data class WorkIdentity(
+        val scheduler: Boolean,
+        val playbackSegmentIndex: Int?,
+        val completedWorkUnits: Int,
+        val targetWindows: Int,
+    )
+}
+
+internal fun SourceSeparationUiState.Running.toPlaybackProcessingProgressObservation():
+        SourceSeparationPlaybackProcessingProgressObservation {
+    val scheduler = scheduler
     val pendingWindows = scheduler?.playbackReadyWindowPendingCount?.coerceAtLeast(0) ?: 0
     val readyWindows = scheduler?.playbackReadyWindowReadyCount?.coerceAtLeast(0) ?: 0
     val targetWindows = scheduler?.readyWindowCount?.coerceAtLeast(1)
-        ?: runningState?.initialProcessingWindowCount()
-        ?: 0
-    val schedulerHasOnlyOutsidePendingWork = scheduler != null &&
-            targetWindows > 0 &&
-            pendingWindows > 0 &&
-            readyWindows >= targetWindows
-    val hasUsableProgressSource = when {
-        scheduler != null -> pendingWindows > 0 && !schedulerHasOnlyOutsidePendingWork
-        runningState?.sourceDecodeMode != null -> targetWindows > 0
-        else -> false
-    }
-    val averageWindowMs = runningState
-        ?.averageWindowMs
-        ?.coerceAtLeast(MIN_SOURCE_SEPARATION_PROGRESS_WINDOW_MS)
-        ?: DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS
-    val estimatedWindowMs = (averageWindowMs * PROGRESS_WINDOW_ESTIMATE_SCALE)
-        .toLong()
-        .coerceAtLeast(MIN_SOURCE_SEPARATION_PROGRESS_WINDOW_MS)
-    val effectiveProgressSongId = processingSongId ?: runningState?.songId
-    val progressSessionKey = listOf(
-        processingGeneration,
-        effectiveProgressSongId,
-    )
-    val progressPhaseKey = progressSessionKey + listOf(
-        scheduler?.playbackSegmentIndex,
-    )
-    var elapsedInProgressMs by remember(progressSessionKey) {
-        mutableStateOf(0L)
-    }
-    LaunchedEffect(progressSessionKey) {
-        val startedAt = SystemClock.elapsedRealtime()
-        while (true) {
-            elapsedInProgressMs = SystemClock.elapsedRealtime() - startedAt
-            delay(PROGRESS_ESTIMATE_TICK_MS)
-        }
-    }
-    val estimateKey = listOf(
-        processingGeneration,
-        processingSongId,
-        runningState?.songId,
-        scheduler?.playbackSegmentIndex,
-        scheduler?.processingSegmentIndex,
-        pendingWindows,
-        readyWindows,
-        targetWindows,
-    )
-    var elapsedInEstimateMs by remember(estimateKey) {
-        mutableStateOf(0L)
-    }
-    LaunchedEffect(estimateKey) {
-        val startedAt = SystemClock.elapsedRealtime()
-        while (true) {
-            elapsedInEstimateMs = SystemClock.elapsedRealtime() - startedAt
-            delay(PROGRESS_ESTIMATE_TICK_MS)
-        }
-    }
-    val estimatedRemainingSeconds = ceil(
-        (((pendingWindows.takeIf { hasUsableProgressSource && it > 0 } ?: targetWindows)
-            .coerceAtLeast(1) *
-                estimatedWindowMs) - elapsedInEstimateMs)
-            .coerceAtLeast(0L) / 1000.0
-    ).toInt()
-    val initialCompletedUnits = runningState?.initialProcessingCompletedUnits()
-        ?.coerceAtLeast(0)
-        ?: 0
+        ?: initialProcessingWindowCount()
+    val initialCompletedUnits = initialProcessingCompletedUnits()
+        .coerceIn(0, targetWindows.coerceAtLeast(0))
     val completeSchedulerSnapshot = scheduler != null &&
             targetWindows > 0 &&
             pendingWindows == 0 &&
@@ -150,111 +311,33 @@ fun rememberSourceSeparationPlaybackProcessingProgressState(
     val completeInitialSnapshot = scheduler == null &&
             targetWindows > 0 &&
             initialCompletedUnits >= targetWindows
-    val ignoreCompleteSnapshot = completeSchedulerSnapshot || completeInitialSnapshot
-    var progressWindowCount by remember(progressPhaseKey) {
-        mutableStateOf(
-            if (scheduler != null && hasUsableProgressSource) {
-                max(targetWindows, pendingWindows)
-            } else {
-                targetWindows
-            }
-        )
-    }
-    LaunchedEffect(
-        progressPhaseKey,
-        pendingWindows,
-        targetWindows,
-    ) {
-        if (scheduler != null && hasUsableProgressSource) {
-            progressWindowCount = max(
-                progressWindowCount,
-                max(targetWindows, pendingWindows),
-            )
-        } else {
-            progressWindowCount = targetWindows
-        }
-    }
-    val progressTarget = if (progressWindowCount > 0 && hasUsableProgressSource) {
-        val baseCompletedWindows = when {
-            ignoreCompleteSnapshot -> 0f
-            scheduler != null -> (progressWindowCount - pendingWindows)
-                .coerceIn(0, progressWindowCount)
-                .toFloat()
-            else -> initialCompletedUnits.toFloat()
-        }
-        val estimatedCompletedWindows = if (ignoreCompleteSnapshot) {
-            0f
-        } else {
-            val initialLeadMs = (estimatedWindowMs / 5L)
-                .coerceAtMost(PROGRESS_INITIAL_LEAD_MS)
-            (elapsedInEstimateMs + initialLeadMs).toFloat() / estimatedWindowMs.toFloat()
-        }
-        val estimatedWorkProgress =
-            (baseCompletedWindows + estimatedCompletedWindows) / progressWindowCount.toFloat()
-        (PROGRESS_WARMUP_CAP +
-                estimatedWorkProgress * (PROGRESS_MAX_TARGET - PROGRESS_WARMUP_CAP))
-            .coerceIn(0f, 0.98f)
-    } else {
-        ((elapsedInProgressMs.toFloat() / PROGRESS_WARMUP_DURATION_MS.toFloat()) *
-                PROGRESS_WARMUP_CAP)
-            .coerceIn(0f, PROGRESS_WARMUP_CAP)
-    }
-    var displayedProgressTarget by remember(progressSessionKey) {
-        mutableFloatStateOf(0f)
-    }
-    LaunchedEffect(progressPhaseKey, progressTarget) {
-        displayedProgressTarget = max(displayedProgressTarget, progressTarget)
-    }
-    val animatedProgress = remember(progressSessionKey) {
-        Animatable(0f)
-    }
-    LaunchedEffect(progressSessionKey, displayedProgressTarget) {
-        val progressDelta = (displayedProgressTarget - animatedProgress.value)
-            .coerceAtLeast(0f)
-        if (progressDelta <= PROGRESS_ANIMATION_EPSILON) {
-            animatedProgress.snapTo(displayedProgressTarget)
-            return@LaunchedEffect
-        }
-        val durationMillis = if (progressDelta >= PROGRESS_LARGE_JUMP_DELTA) {
-            (progressDelta * PROGRESS_LARGE_JUMP_DURATION_FACTOR_MS)
-                .toInt()
-                .coerceIn(
-                    PROGRESS_LARGE_JUMP_MIN_ANIMATION_MS,
-                    PROGRESS_LARGE_JUMP_MAX_ANIMATION_MS,
-                )
-        } else {
-            PROGRESS_SMALL_UPDATE_ANIMATION_MS
-        }
-        animatedProgress.animateTo(
-            targetValue = displayedProgressTarget,
-            animationSpec = tween(
-                durationMillis = durationMillis,
-                easing = if (progressDelta >= PROGRESS_LARGE_JUMP_DELTA) {
-                    FastOutSlowInEasing
-                } else {
-                    LinearEasing
-                },
-            ),
-        )
+    val completeSnapshot = completeSchedulerSnapshot || completeInitialSnapshot
+    val schedulerHasOnlyOutsidePendingWork = scheduler != null &&
+            targetWindows > 0 &&
+            pendingWindows > 0 &&
+            readyWindows >= targetWindows
+    val hasUsableProgressSource = !completeSnapshot && when {
+        scheduler != null -> pendingWindows > 0 && !schedulerHasOnlyOutsidePendingWork
+        sourceDecodeMode != null -> targetWindows > 0
+        else -> false
     }
 
-    return SourceSeparationPlaybackProcessingProgressState(
-        progress = animatedProgress.value,
-        resetKey = progressSessionKey,
-        estimatedRemainingSeconds = estimatedRemainingSeconds,
-        readyWindows = if (ignoreCompleteSnapshot) 0 else readyWindows,
+    return SourceSeparationPlaybackProcessingProgressObservation(
+        schedulerPlaybackSegmentIndex = scheduler?.playbackSegmentIndex,
+        hasScheduler = scheduler != null,
+        hasUsableProgressSource = hasUsableProgressSource,
+        completeSnapshot = completeSnapshot,
+        completedWorkUnits = if (scheduler != null) {
+            readyWindows.coerceIn(0, targetWindows.coerceAtLeast(0))
+        } else {
+            initialCompletedUnits
+        },
+        readyWindows = readyWindows,
         targetWindows = targetWindows,
-        pendingWindows = if (ignoreCompleteSnapshot) targetWindows else pendingWindows,
-        initialProcessingLabel = runningState?.initialProcessingLabel().orEmpty(),
-        hasScheduler = scheduler != null && !ignoreCompleteSnapshot && hasUsableProgressSource,
+        pendingWindows = pendingWindows,
+        estimatedWindowMs = estimatedWindowMs(averageWindowMs),
+        initialProcessingLabel = initialProcessingLabel(),
     )
-}
-
-private class SourceSeparationPlaybackProcessingProgressGenerationGuard {
-    var generation: Long = Long.MIN_VALUE
-    var ignoredSnapshotKey: List<Any?>? = null
-    var latestSnapshotKey: List<Any?>? = null
-    var hasSeenGeneration: Boolean = false
 }
 
 private fun SourceSeparationUiState.Running.initialProcessingWindowCount(): Int {
@@ -300,16 +383,21 @@ private fun SourceSeparationUiState.Running.initialProcessingLabel(): String {
     }.ifBlank { "Processing" }
 }
 
+private fun estimatedWindowMs(averageWindowMs: Long): Long {
+    return (averageWindowMs.coerceAtLeast(MIN_SOURCE_SEPARATION_PROGRESS_WINDOW_MS) *
+            PROGRESS_WINDOW_ESTIMATE_SCALE)
+        .toLong()
+        .coerceAtLeast(MIN_SOURCE_SEPARATION_PROGRESS_WINDOW_MS)
+}
+
 private const val MIN_SOURCE_SEPARATION_PROGRESS_WINDOW_MS = 500L
-private const val PROGRESS_ESTIMATE_TICK_MS = 100L
+internal const val SOURCE_SEPARATION_PLAYBACK_PROGRESS_SAMPLE_TICK_MS = 50L
+private const val SOURCE_SEPARATION_PLAYBACK_PROGRESS_COMPLETION_TAIL_MS = 200L
 private const val PROGRESS_WINDOW_ESTIMATE_SCALE = 0.9
 private const val PROGRESS_WARMUP_CAP = 0.2f
 private const val PROGRESS_WARMUP_DURATION_MS = 3000L
 private const val PROGRESS_MAX_TARGET = 0.9f
 private const val PROGRESS_INITIAL_LEAD_MS = 700L
-private const val PROGRESS_ANIMATION_EPSILON = 0.001f
-private const val PROGRESS_LARGE_JUMP_DELTA = 0.08f
-private const val PROGRESS_SMALL_UPDATE_ANIMATION_MS = 80
-private const val PROGRESS_LARGE_JUMP_MIN_ANIMATION_MS = 220
-private const val PROGRESS_LARGE_JUMP_MAX_ANIMATION_MS = 700
-private const val PROGRESS_LARGE_JUMP_DURATION_FACTOR_MS = 1800
+private const val PROGRESS_MAX_ESTIMATED_WORK_UNITS = 0.9f
+private const val PROGRESS_ABSOLUTE_CAP = 0.98f
+private const val PROGRESS_MAX_ADVANCE_PER_MS = 0.0006f

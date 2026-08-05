@@ -3,6 +3,7 @@ package com.mardous.booming.ui.screen.player
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.edit
 import androidx.lifecycle.ViewModel
@@ -285,6 +286,15 @@ class PlayerViewModel(
         )
     val sourceSeparationPlaybackStateFlow = _sourceSeparationPlaybackStateFlow.asStateFlow()
 
+    private val sourceSeparationPlaybackProgressCoordinator =
+        SourceSeparationPlaybackProcessingProgressCoordinator()
+    private val sourceSeparationPlaybackProcessingSessionGeneration =
+        SourceSeparationPlaybackProcessingSessionGeneration()
+    private val _sourceSeparationPlaybackProcessingProgressStateFlow =
+        MutableStateFlow<SourceSeparationPlaybackProcessingProgressState?>(null)
+    val sourceSeparationPlaybackProcessingProgressStateFlow =
+        _sourceSeparationPlaybackProcessingProgressStateFlow.asStateFlow()
+
     private val _sourceSeparationRememberPerSongFlow =
         MutableStateFlow(readSourceSeparationRememberPerSong())
     val sourceSeparationRememberPerSongFlow =
@@ -365,9 +375,11 @@ class PlayerViewModel(
             sourceSeparationPreferenceChangeListener
         )
         observeSourceSeparationForegroundWorkerCoordinator()
+        observeSourceSeparationPlaybackProcessingProgress()
         sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow
             .drop(1)
             .onEach {
+                sourceSeparationPlaybackProcessingSessionGeneration.invalidate()
                 _currentSourceSeparationCacheKeyFlow.value = null
                 _currentSourceSeparationCacheStateFlow.value =
                     SourceSeparationCacheUiState.NotStarted
@@ -493,6 +505,21 @@ class PlayerViewModel(
                 }
             }
             .launchIn(viewModelScope)
+    }
+
+    private fun observeSourceSeparationPlaybackProcessingProgress() {
+        viewModelScope.launch {
+            while (true) {
+                _sourceSeparationPlaybackProcessingProgressStateFlow.value =
+                    sourceSeparationPlaybackProgressCoordinator.sample(
+                        playbackState = _sourceSeparationPlaybackStateFlow.value,
+                        separationState = sourceSeparationStateFlow.value,
+                        currentSongId = currentSong.id,
+                        nowMs = SystemClock.elapsedRealtime(),
+                    )
+                delay(SOURCE_SEPARATION_PLAYBACK_PROGRESS_SAMPLE_TICK_MS)
+            }
+        }
     }
 
     private fun handleSourceSeparationForegroundSongChanged(
@@ -788,6 +815,7 @@ class PlayerViewModel(
     }
 
     private suspend fun handleSourceSeparationModelLoadFailure() {
+        sourceSeparationPlaybackProcessingSessionGeneration.invalidate()
         sourceSeparationSettingsApplyJob?.cancel()
         sourceSeparationSettingsApplyJob = null
         sourceSeparationAutoStartJob?.cancel()
@@ -811,6 +839,7 @@ class PlayerViewModel(
     }
 
     fun cancelSourceSeparation() {
+        sourceSeparationPlaybackProcessingSessionGeneration.invalidate(currentSong.id)
         sourceSeparationForegroundWorkerCoordinator.cancel()
     }
 
@@ -856,6 +885,7 @@ class PlayerViewModel(
         val currentRuntimeSong = resolveSourceSeparationRuntimeSong(song)
         val isCurrentCache = currentRuntimeSong?.cacheKey == cacheKey
         if (isCurrentCache) {
+            sourceSeparationPlaybackProcessingSessionGeneration.invalidate(song.id)
             disableSourceSeparationPlaybackForManualCacheDelete(
                 songId = song.id,
                 cacheKey = cacheKey,
@@ -1152,9 +1182,7 @@ class PlayerViewModel(
     }
 
     override fun onSourceSeparationWorkerProgress(song: Song) {
-        if (acceptsCurrentSourceSeparationWorkerState(song)) {
-            syncSourceSeparationPlaybackIfRequested(force = true)
-        }
+        // PlaybackService owns the bounded readiness retry while processing.
     }
 
     override fun onSourceSeparationWorkerPrepared(song: Song) {
@@ -2048,15 +2076,16 @@ class PlayerViewModel(
         }
         val current = _sourceSeparationPlaybackStateFlow.value
         if (current.enabled && !current.processing && current.songId == song.id) return
-        val startsNewGeneration = !current.processing || current.songId != song.id
+        val processingGeneration = sourceSeparationPlaybackProcessingSessionGeneration
+            .generationFor(
+                songId = song.id,
+                currentGeneration = current.processingGeneration,
+            )
+        val startsNewGeneration = processingGeneration != current.processingGeneration
         _sourceSeparationPlaybackStateFlow.value = current.copy(
             enabled = false,
             processing = true,
-            processingGeneration = if (startsNewGeneration) {
-                current.processingGeneration + 1L
-            } else {
-                current.processingGeneration
-            },
+            processingGeneration = processingGeneration,
             blend = blend.coerceIn(0f, 1f),
             songId = song.id,
             message = null,
@@ -2217,11 +2246,7 @@ class PlayerViewModel(
         _sourceSeparationPlaybackStateFlow.value = SourceSeparationPlaybackUiState(
             enabled = enabled,
             processing = processing,
-            processingGeneration = if (processing && !current.processing) {
-                current.processingGeneration + 1L
-            } else {
-                current.processingGeneration
-            },
+            processingGeneration = current.processingGeneration,
             blend = blend,
             songId = songId,
             message = message,

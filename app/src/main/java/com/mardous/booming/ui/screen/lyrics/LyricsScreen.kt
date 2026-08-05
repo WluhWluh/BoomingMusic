@@ -110,7 +110,7 @@ import com.mardous.booming.ui.screen.library.LibraryViewModel
 import com.mardous.booming.ui.screen.player.PlayerViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
 import com.mardous.booming.ui.screen.player.SourceSeparationPlaybackProcessingProgressState
-import com.mardous.booming.ui.screen.player.rememberSourceSeparationPlaybackProcessingProgressState
+import com.mardous.booming.ui.screen.player.animateSourceSeparationPlaybackProcessingProgress
 import com.mardous.booming.ui.theme.PlayerTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
@@ -324,23 +324,15 @@ fun CoverLyricsScreen(
         val sourceSeparationPlaybackState by playerViewModel
             .sourceSeparationPlaybackStateFlow
             .collectAsStateWithLifecycle()
-        val sourceSeparationState by playerViewModel
-            .sourceSeparationStateFlow
+        val sourceSeparationPlaybackProcessingProgressState by playerViewModel
+            .sourceSeparationPlaybackProcessingProgressStateFlow
             .collectAsStateWithLifecycle()
         val quickBlendExpanded = showSourceSeparationQuickControls &&
                 sourceSeparationBlendMode != SourceSeparationBlendMode.Off
-        val quickBlendProcessingProgressState = if (
-            quickBlendExpanded &&
-            sourceSeparationPlaybackState.processing
-        ) {
-            rememberSourceSeparationPlaybackProcessingProgressState(
-                separationState = sourceSeparationState,
-                processingGeneration = sourceSeparationPlaybackState.processingGeneration,
-                processingSongId = currentSong.id,
-            )
-        } else {
-            null
-        }
+        val quickBlendProcessingProgressState =
+            sourceSeparationPlaybackProcessingProgressState.takeIf {
+                quickBlendExpanded
+            }
         val quickBlendHeight = if (quickBlendExpanded) {
             CoverLyricsQuickBlendSliderHeight
         } else {
@@ -801,13 +793,15 @@ private fun CoverLyricsQuickBlendControl(
         }
 
         if (processingProgressState != null) {
+            val displayedProgress =
+                animateSourceSeparationPlaybackProcessingProgress(processingProgressState)
             val progressModifier = Modifier
                 .align(Alignment.TopCenter)
                 .offset(y = -CoverLyricsQuickBlendProgressOffset)
                 .size(CoverLyricsQuickBlendProgressSize)
                 .alpha(endpointIconAlpha)
             CircularProgressIndicator(
-                progress = { processingProgressState.progress },
+                progress = { displayedProgress },
                 color = progressColor,
                 trackColor = progressColor.copy(alpha = 0.1f),
                 strokeWidth = CoverLyricsQuickBlendProgressStrokeWidth,

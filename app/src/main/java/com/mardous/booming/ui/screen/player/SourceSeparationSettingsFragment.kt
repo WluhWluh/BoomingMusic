@@ -178,6 +178,9 @@ private fun SourceSeparationSettingsSheet(
     )
 
     val playbackState by viewModel.sourceSeparationPlaybackStateFlow.collectAsState()
+    val playbackProcessingProgressState by viewModel
+        .sourceSeparationPlaybackProcessingProgressStateFlow
+        .collectAsState()
     val blendStemLabels by viewModel.sourceSeparationBlendStemLabelsFlow.collectAsState()
     val blendMode by viewModel.sourceSeparationBlendModeFlow.collectAsState()
     val rememberPerSong by viewModel.sourceSeparationRememberPerSongFlow.collectAsState()
@@ -475,13 +478,11 @@ private fun SourceSeparationSettingsSheet(
                                 SourceSeparationDecodeDiagnosticsText(separationState)
                             }
                             AnimatedVisibility(
-                                visible = playbackState.processing
+                                visible = playbackProcessingProgressState != null
                             ) {
-                                SourceSeparationPlaybackProcessingProgress(
-                                    separationState = separationState,
-                                    processingGeneration = playbackState.processingGeneration,
-                                    processingSongId = currentSongId,
-                                )
+                                playbackProcessingProgressState?.let {
+                                    SourceSeparationPlaybackProcessingProgress(it)
+                                }
                             }
 
                             AnimatedVisibility(
@@ -864,16 +865,11 @@ private fun SourceSeparationDecodeDiagnosticsText(
 
 @Composable
 private fun SourceSeparationPlaybackProcessingProgress(
-    separationState: SourceSeparationUiState,
-    processingGeneration: Long,
-    processingSongId: Long?,
+    progressState: SourceSeparationPlaybackProcessingProgressState,
 ) {
     val context = LocalContext.current
-    val progressState = rememberSourceSeparationPlaybackProcessingProgressState(
-        separationState = separationState,
-        processingGeneration = processingGeneration,
-        processingSongId = processingSongId,
-    )
+    val displayedProgress =
+        animateSourceSeparationPlaybackProcessingProgress(progressState)
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -887,7 +883,7 @@ private fun SourceSeparationPlaybackProcessingProgress(
                     progressState.pendingWindows,
                     progressState.estimatedRemainingSeconds,
                 )
-            } else if (separationState is SourceSeparationUiState.Running &&
+            } else if (progressState.initialProcessingLabel.isNotBlank() &&
                 progressState.targetWindows > 0
             ) {
                 stringResource(
@@ -903,7 +899,7 @@ private fun SourceSeparationPlaybackProcessingProgress(
             style = MaterialTheme.typography.bodyMedium
         )
         LinearProgressIndicator(
-            progress = { progressState.progress },
+            progress = { displayedProgress },
             modifier = Modifier.fillMaxWidth()
         )
     }
