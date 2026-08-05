@@ -1570,11 +1570,20 @@ class PlaybackService :
             traceSourceSeparationPlayback("playback.sync.skip", "requested=false")
             return result
         }
-        if (preferCompletedCache && player.playWhenReady) {
+        if (preferCompletedCache &&
+            SourceSeparationCompletedCacheUpgradePolicy.shouldDeferAutomaticUpgrade(
+                hasActiveSession = sourceSeparationPlaybackSession != null,
+                playWhenReady = player.playWhenReady,
+                hasPlayIntent = sourceSeparationPlaybackPlayIntent,
+                isProcessing = sourceSeparationPlaybackIsProcessing,
+            )
+        ) {
             val result = sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
             traceSourceSeparationPlayback(
                 "playback.sync.skip",
-                "reason=completedCacheUpgradeDeferred playWhenReady=true",
+                "reason=completedCacheUpgradeDeferred " +
+                        "playWhenReady=${player.playWhenReady} " +
+                        "playIntent=$sourceSeparationPlaybackPlayIntent",
             )
             return result
         }

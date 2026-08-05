@@ -202,6 +202,7 @@ class PlayerViewModel(
     private var sourceSeparationPreStartJob: Job? = null
     private var sourceSeparationPlaybackSyncJob: Job? = null
     private var sourceSeparationReadinessCheckJob: Job? = null
+    private val sourceSeparationCacheRefreshGeneration = AtomicLong(0L)
     private var sourceSeparationBlendPreviewJob: Job? = null
     private var sourceSeparationBlendPreviewPending: Float? = null
     private var sourceSeparationFlacPromotionJob: Job? = null
@@ -1049,12 +1050,11 @@ class PlayerViewModel(
                                 if (currentSong.id == request.song.id) {
                                     refreshCurrentSourceSeparationCacheAvailable(request.song)
                                     traceSourceSeparationPlaybackTestMarker(
-                                        "flacPromotion.playbackUpgrade.evaluate songId=${request.song.id}"
+                                        "flacPromotion.playbackUpgrade.deferred songId=${request.song.id}"
                                     )
-                                    syncCompletedSourceSeparationPlaybackIfPaused(request.song)
                                 } else {
                                     traceSourceSeparationPlaybackTestMarker(
-                                        "flacPromotion.syncPlayback.skip songId=${request.song.id} " +
+                                        "flacPromotion.playbackUpgrade.skip songId=${request.song.id} " +
                                                 "current=${currentSong.id}"
                                     )
                                 }
@@ -1205,17 +1205,22 @@ class PlayerViewModel(
             playWhenReady = sourceSeparationPlaybackHasPlayIntent(),
             shouldPromoteCompletedStems = shouldPromoteCompletedStems,
         )
-        if (plan.refreshCurrentCacheState) {
+        val cacheRefreshJob = if (plan.refreshCurrentCacheState) {
             clearSourceSeparationPausePendingAction(song)
             refreshCurrentSourceSeparationCacheAvailable(song)
+        } else {
+            null
         }
-        if (plan.syncCurrentPlayback) {
-            syncCompletedSourceSeparationPlaybackIfPaused(song)
-        }
-        if (plan.promoteCompletedStems) {
-            startSourceSeparationFlacPromotion(song, cacheKey)
-        } else if (plan.cleanTemporaryFilesNow) {
-            requestSourceSeparationTemporaryCacheCleanup()
+        viewModelScope.launch {
+            cacheRefreshJob?.join()
+            if (plan.syncCurrentPlayback) {
+                syncCompletedSourceSeparationPlaybackIfPaused(song)
+            }
+            if (plan.promoteCompletedStems) {
+                startSourceSeparationFlacPromotion(song, cacheKey)
+            } else if (plan.cleanTemporaryFilesNow) {
+                requestSourceSeparationTemporaryCacheCleanup()
+            }
         }
     }
 
@@ -1235,10 +1240,11 @@ class PlayerViewModel(
         }
     }
 
-    fun refreshCurrentSourceSeparationCacheAvailable(song: Song = currentSong) {
+    fun refreshCurrentSourceSeparationCacheAvailable(song: Song = currentSong): Job {
         val selection =
             sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value
-        viewModelScope.launch(IO) {
+        val refreshGeneration = sourceSeparationCacheRefreshGeneration.incrementAndGet()
+        return viewModelScope.launch(IO) {
             val runtimeSong = resolveSourceSeparationRuntimeSong(song)
             val cacheState = when {
                 runtimeSong == null -> SourceSeparationCacheUiState.NotStarted
@@ -1246,9 +1252,16 @@ class PlayerViewModel(
                     sourceSeparationRuntime.cacheStatus(runtimeSong).toUiState()
                 }.getOrDefault(SourceSeparationCacheUiState.NotStarted)
             }
-            if (currentSong.id == song.id &&
+            val selectionMatches =
                 sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value ==
-                selection
+                    selection
+            if (SourceSeparationCacheRefreshPolicy.canApply(
+                    requestGeneration = refreshGeneration,
+                    latestGeneration = sourceSeparationCacheRefreshGeneration.get(),
+                    requestedSongId = song.id,
+                    currentSongId = currentSong.id,
+                    selectionMatches = selectionMatches,
+                )
             ) {
                 _currentSourceSeparationCacheKeyFlow.value = runtimeSong?.cacheKey
                 _currentSourceSeparationCacheStateFlow.value = cacheState
