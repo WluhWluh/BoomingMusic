@@ -256,7 +256,11 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             this.callbacks = callbacks
             pendingRecoveredTerminal.also { pendingRecoveredTerminal = null }
         }
-        terminal?.dispatch(callbacks)
+        terminal?.let { recoveredTerminal ->
+            dispatchCallbackSafely("recoveredTerminal", callbacks) {
+                recoveredTerminal.dispatch(it)
+            }
+        }
     }
 
     fun detachCallbacks(callbacks: SourceSeparationForegroundWorkerCallbacks) {
@@ -264,6 +268,28 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             if (this.callbacks === callbacks) {
                 this.callbacks = null
             }
+        }
+    }
+
+    private inline fun notifyCallbacks(
+        event: String,
+        dispatch: (SourceSeparationForegroundWorkerCallbacks) -> Unit,
+    ) {
+        val callback = callbacks ?: return
+        dispatchCallbackSafely(event, callback, dispatch)
+    }
+
+    private inline fun dispatchCallbackSafely(
+        event: String,
+        callback: SourceSeparationForegroundWorkerCallbacks,
+        dispatch: (SourceSeparationForegroundWorkerCallbacks) -> Unit,
+    ) {
+        try {
+            dispatch(callback)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.e(TAG, "callback.$event failed", error)
         }
     }
 
@@ -880,7 +906,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                         cacheKey = session.cacheKey,
                     )
                 }
-                callbacks?.onSourceSeparationWorkerPrepared(callbackSong)
+                notifyCallbacks("prepared") {
+                    it.onSourceSeparationWorkerPrepared(callbackSong)
+                }
                 false
             }
             is SourceSeparationExecutionHostEventPayload.SegmentStateChanged,
@@ -1000,7 +1028,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 null
             }
         }
-        callback?.let(terminal::dispatch)
+        callback?.let {
+            dispatchCallbackSafely("recoveredTerminal", it, terminal::dispatch)
+        }
     }
 
     private fun Song.callbackSong(): Song {
@@ -1289,12 +1319,14 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     selectionGeneration = request.selection.generation,
                     cacheKey = resolved.cacheKey,
                 )
-                callbacks?.onSourceSeparationWorkerCompleted(
-                    song = song,
-                    cacheKey = resolved.cacheKey,
-                    shouldPromoteCompletedStems = shouldPromoteCompletedStems &&
-                            completedCache.canPromote,
-                )
+                notifyCallbacks("completed") {
+                    it.onSourceSeparationWorkerCompleted(
+                        song = song,
+                        cacheKey = resolved.cacheKey,
+                        shouldPromoteCompletedStems = shouldPromoteCompletedStems &&
+                                completedCache.canPromote,
+                    )
+                }
                 return
             }
             _workerStateFlow.value = SourceSeparationUiState.Running(
@@ -1345,7 +1377,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     ) {
                         migrateTemporaryPerSongBlend(song, resolved)
                     }
-                    callbacks?.onSourceSeparationWorkerPrepared(song)
+                    notifyCallbacks("prepared") {
+                        it.onSourceSeparationWorkerPrepared(song)
+                    }
                 },
                 playbackPositionMsProvider = {
                     if (preStartReadyWindowCount != null) {
@@ -1395,7 +1429,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             if (result is SourceSeparationModelAwareEngineResult.Busy) {
                 trace("worker.song busy song=${song.id}")
                 _workerStateFlow.value = SourceSeparationUiState.Idle
-                callbacks?.onSourceSeparationWorkerPaused(song)
+                notifyCallbacks("paused") {
+                    it.onSourceSeparationWorkerPaused(song)
+                }
                 return
             }
             check(result !is SourceSeparationModelAwareEngineResult.ActiveModelUnavailable) {
@@ -1419,11 +1455,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 cacheKey = resolved.cacheKey,
             )
             requestAutomaticPrune()
-            callbacks?.onSourceSeparationWorkerCompleted(
-                song = song,
-                cacheKey = resolved.cacheKey,
-                shouldPromoteCompletedStems = shouldPromoteCompletedStems,
-            )
+            notifyCallbacks("completed") {
+                it.onSourceSeparationWorkerCompleted(
+                    song = song,
+                    cacheKey = resolved.cacheKey,
+                    shouldPromoteCompletedStems = shouldPromoteCompletedStems,
+                )
+            }
             trace("worker.song completed song=${song.id} cache=${resolved.cacheKey.take(12)}")
         } catch (_: SourceSeparationPausedException) {
             trace("worker.song paused song=${song.id}")
@@ -1435,7 +1473,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     cacheKey = admittedSong?.cacheKey,
                 )
                 if (!preStartSatisfied) {
-                    callbacks?.onSourceSeparationWorkerPaused(song)
+                    notifyCallbacks("paused") {
+                        it.onSourceSeparationWorkerPaused(song)
+                    }
                 }
             } else {
                 traceStaleRequest("worker.paused.stale", request, admittedSong?.cacheKey)
@@ -1462,7 +1502,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     selectionGeneration = request.selection.generation,
                     cacheKey = admittedSong?.cacheKey,
                 )
-                callbacks?.onSourceSeparationWorkerModelLoadFailed(message)
+                notifyCallbacks("modelLoadFailed") {
+                    it.onSourceSeparationWorkerModelLoadFailed(message)
+                }
                 synchronized(stateLock) {
                     workerActivated = false
                     pendingStartRequest = null
@@ -1581,7 +1623,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         if (resolution.reason != SourceSeparationRuntimeUnavailableReason.SourceUnavailable &&
             resolution.reason != SourceSeparationRuntimeUnavailableReason.NoSong
         ) {
-            callbacks?.onSourceSeparationWorkerModelLoadFailed(message)
+            notifyCallbacks("modelLoadFailed") {
+                it.onSourceSeparationWorkerModelLoadFailed(message)
+            }
         }
         synchronized(stateLock) {
             workerActivated = false
@@ -1634,7 +1678,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         if (pendingStartRequest?.song?.id == song.id) {
             clearPendingStart()
         }
-        callbacks?.onSourceSeparationWorkerProgress(song.callbackSong())
+        notifyCallbacks("progress") {
+            it.onSourceSeparationWorkerProgress(song.callbackSong())
+        }
     }
 
     private fun recordDebugWindowSample(

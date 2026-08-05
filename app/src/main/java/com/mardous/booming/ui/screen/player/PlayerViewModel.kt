@@ -202,7 +202,7 @@ class PlayerViewModel(
     private var sourceSeparationPreStartJob: Job? = null
     private var sourceSeparationPlaybackSyncJob: Job? = null
     private var sourceSeparationReadinessCheckJob: Job? = null
-    private val sourceSeparationCacheRefreshGeneration = AtomicLong(0L)
+    private val sourceSeparationCacheRefreshGate = SourceSeparationCacheRefreshGate()
     private var sourceSeparationBlendPreviewJob: Job? = null
     private var sourceSeparationBlendPreviewPending: Float? = null
     private var sourceSeparationFlacPromotionJob: Job? = null
@@ -1197,21 +1197,22 @@ class PlayerViewModel(
         cacheKey: String,
         shouldPromoteCompletedStems: Boolean,
     ) {
-        val plan = sourceSeparationWorkerCompletionPlan(
-            acceptsCurrentPlaybackState = acceptsCurrentSourceSeparationWorkerState(
-                song,
-                cacheKey,
-            ),
-            playWhenReady = sourceSeparationPlaybackHasPlayIntent(),
-            shouldPromoteCompletedStems = shouldPromoteCompletedStems,
+        val acceptsCurrentPlaybackState = acceptsCurrentSourceSeparationWorkerState(
+            song,
+            cacheKey,
         )
-        val cacheRefreshJob = if (plan.refreshCurrentCacheState) {
-            clearSourceSeparationPausePendingAction(song)
-            refreshCurrentSourceSeparationCacheAvailable(song)
-        } else {
-            null
-        }
         viewModelScope.launch {
+            val plan = sourceSeparationWorkerCompletionPlan(
+                acceptsCurrentPlaybackState = acceptsCurrentPlaybackState,
+                playWhenReady = sourceSeparationPlaybackHasPlayIntent(),
+                shouldPromoteCompletedStems = shouldPromoteCompletedStems,
+            )
+            val cacheRefreshJob = if (plan.refreshCurrentCacheState) {
+                clearSourceSeparationPausePendingAction(song)
+                refreshCurrentSourceSeparationCacheAvailable(song)
+            } else {
+                null
+            }
             cacheRefreshJob?.join()
             if (plan.syncCurrentPlayback) {
                 syncCompletedSourceSeparationPlaybackIfPaused(song)
@@ -1243,7 +1244,7 @@ class PlayerViewModel(
     fun refreshCurrentSourceSeparationCacheAvailable(song: Song = currentSong): Job {
         val selection =
             sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value
-        val refreshGeneration = sourceSeparationCacheRefreshGeneration.incrementAndGet()
+        val refreshGeneration = sourceSeparationCacheRefreshGate.nextGeneration()
         return viewModelScope.launch(IO) {
             val runtimeSong = resolveSourceSeparationRuntimeSong(song)
             val cacheState = when {
@@ -1255,21 +1256,20 @@ class PlayerViewModel(
             val selectionMatches =
                 sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value ==
                     selection
-            if (SourceSeparationCacheRefreshPolicy.canApply(
-                    requestGeneration = refreshGeneration,
-                    latestGeneration = sourceSeparationCacheRefreshGeneration.get(),
-                    requestedSongId = song.id,
-                    currentSongId = currentSong.id,
-                    selectionMatches = selectionMatches,
-                )
+            val currentSongId = currentSong.id
+            val published = sourceSeparationCacheRefreshGate.publishIfCurrent(
+                requestGeneration = refreshGeneration,
+                requestedSongId = song.id,
+                currentSongId = currentSongId,
+                selectionMatches = selectionMatches,
             ) {
                 _currentSourceSeparationCacheKeyFlow.value = runtimeSong?.cacheKey
                 _currentSourceSeparationCacheStateFlow.value = cacheState
                 _currentSourceSeparationCacheAvailableFlow.value =
                     cacheState != SourceSeparationCacheUiState.NotStarted
-                if (cacheState.isCompleted) {
-                    maybePreStartNextSourceSeparation()
-                }
+            }
+            if (published && cacheState.isCompleted) {
+                maybePreStartNextSourceSeparation()
             }
         }
     }
@@ -2209,7 +2209,6 @@ class PlayerViewModel(
         updateSourceSeparationPlaybackState(
             SessionResult(SessionResult.RESULT_SUCCESS, args)
         )
-        refreshCurrentSourceSeparationCacheAvailable()
     }
 
     private suspend fun sendSourceSeparationPlaybackCommand(

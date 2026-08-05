@@ -47,6 +47,52 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `worker completion keeps identity stable across its guarded main thread boundary`() {
+        val coordinator = mainSource(
+            "com/mardous/booming/ui/screen/player/SourceSeparationForegroundWorkerCoordinator.kt",
+        ).readText()
+        val viewModel = mainSource(
+            "com/mardous/booming/ui/screen/player/PlayerViewModel.kt",
+        ).readText()
+        val completionStart = viewModel.indexOf(
+            "override fun onSourceSeparationWorkerCompleted(",
+        )
+        val completionEnd = viewModel.indexOf(
+            "override fun onSourceSeparationWorkerPaused(",
+            completionStart,
+        )
+        val completion = viewModel.substring(completionStart, completionEnd)
+        val identitySnapshot = completion.indexOf("val acceptsCurrentPlaybackState")
+        val mainThreadLaunch = completion.indexOf("viewModelScope.launch")
+        val controllerRead = completion.indexOf(
+            "playWhenReady = sourceSeparationPlaybackHasPlayIntent()",
+        )
+
+        assertTrue(coordinator.contains("dispatchCallbackSafely("))
+        assertFalse(coordinator.contains("callbacks?.onSourceSeparationWorker"))
+        assertTrue(identitySnapshot >= 0)
+        assertTrue(identitySnapshot < mainThreadLaunch)
+        assertTrue(controllerRead > mainThreadLaunch)
+    }
+
+    @Test
+    fun `playback state broadcasts do not poll the cache repository`() {
+        val viewModel = mainSource(
+            "com/mardous/booming/ui/screen/player/PlayerViewModel.kt",
+        ).readText()
+        val updateStart = viewModel.indexOf(
+            "fun updateSourceSeparationPlaybackState(args: Bundle)",
+        )
+        val updateEnd = viewModel.indexOf(
+            "private suspend fun sendSourceSeparationPlaybackCommand(",
+            updateStart,
+        )
+        val update = viewModel.substring(updateStart, updateEnd)
+
+        assertFalse(update.contains("refreshCurrentSourceSeparationCacheAvailable"))
+    }
+
+    @Test
     fun `remote start binds admission to the calling host callback`() {
         val aidl = mainAidl(
             "com/mardous/booming/separation/process/ipc/ISourceSeparationExecutionService.aidl",
