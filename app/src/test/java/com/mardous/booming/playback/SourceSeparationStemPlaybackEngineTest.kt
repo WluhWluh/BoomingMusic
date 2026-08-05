@@ -256,13 +256,16 @@ class SourceSeparationStemPlaybackEngineTest {
             engine.start(1L, listOf(factory))
             await { engine.hasResumeWaterline() }
 
-            engine.seekTo(32L)
-            await { engine.hasResumeWaterline() && engine.currentFrame() == 32L }
-            engine.seekTo(64L)
-            await { engine.hasResumeWaterline() && engine.currentFrame() == 64L }
+            val seekFrames = List(16) { index ->
+                if (index % 2 == 0) 32L else 64L
+            }
+            seekFrames.forEach { frame ->
+                engine.seekTo(frame)
+                await { engine.hasResumeWaterline() && engine.currentFrame() == frame }
+            }
 
             assertEquals(1, openCount.get())
-            assertEquals(3, seekCount.get())
+            assertEquals(1 + seekFrames.size, seekCount.get())
         } finally {
             engine.close()
         }

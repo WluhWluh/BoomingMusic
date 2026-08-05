@@ -42,6 +42,7 @@ internal class SourceSeparationStemPlaybackEngine(
 ) : Closeable {
     private val closed = AtomicBoolean(false)
     private val command = AtomicReference<EngineCommand?>(null)
+    private val transitionLock = Any()
     private val epoch = SourceSeparationPlaybackEpoch()
     private val sessionId = AtomicLong(0L)
     private val workerRunning = AtomicBoolean(false)
@@ -70,6 +71,9 @@ internal class SourceSeparationStemPlaybackEngine(
 
     @Volatile
     private var workerNextFrame = 0L
+
+    @Volatile
+    private var workerPositionEpoch = 0L
 
     @Volatile
     private var workerExhausted = false
@@ -118,48 +122,52 @@ internal class SourceSeparationStemPlaybackEngine(
         require(sessionId > 0L) { "Playback session ID must be positive." }
         require(factories.isNotEmpty()) { "Playback engine requires at least one stem." }
         val specs = factories.map(SourceSeparationPlaybackStemSourceFactory::spec)
-        val newEpoch = epoch.next()
-        val session = SourceSeparationPlaybackDataSession(sessionId, newEpoch, specs)
-        activeEpoch.set(newEpoch)
-        this.sessionId.set(sessionId)
-        activeSession = session
-        readyFrameCount.set(0L)
-        recoveryRequired.set(false)
-        seekResumeState.set(SeekResumeState.None)
-        lowWaterEpoch.set(0L)
-        underflowEpoch.set(0L)
-        readyNotificationEpoch.set(0L)
-        consumedFrame.set(startFrame.coerceAtLeast(0L))
-        drainReadyBlocks()
-        ensureBlockPool(specs.size, specs.first().geometry.channelCount)
-        workerFactories = factories.toList()
-        workerNextFrame = startFrame.coerceIn(0L, session.geometry.frameCount)
-        state.set(SourceSeparationPlaybackDataState.Preparing)
-        metrics.recordEpochChange()
-        command.set(EngineCommand.Start(newEpoch, workerNextFrame))
-        startWorkerIfNeeded()
-        return newEpoch
+        return synchronized(transitionLock) {
+            val newEpoch = epoch.next()
+            val session = SourceSeparationPlaybackDataSession(sessionId, newEpoch, specs)
+            activeEpoch.set(newEpoch)
+            this.sessionId.set(sessionId)
+            activeSession = session
+            readyFrameCount.set(0L)
+            recoveryRequired.set(false)
+            seekResumeState.set(SeekResumeState.None)
+            lowWaterEpoch.set(0L)
+            underflowEpoch.set(0L)
+            readyNotificationEpoch.set(0L)
+            consumedFrame.set(startFrame.coerceAtLeast(0L))
+            drainReadyBlocks()
+            ensureBlockPool(specs.size, specs.first().geometry.channelCount)
+            workerFactories = factories.toList()
+            workerNextFrame = startFrame.coerceIn(0L, session.geometry.frameCount)
+            state.set(SourceSeparationPlaybackDataState.Preparing)
+            metrics.recordEpochChange()
+            command.set(EngineCommand.Start(newEpoch, workerNextFrame))
+            startWorkerIfNeeded()
+            newEpoch
+        }
     }
 
     fun seekTo(frame: Long): Long {
-        val current = activeSession ?: return activeEpoch.get()
-        val newEpoch = epoch.next()
-        activeEpoch.set(newEpoch)
-        activeSession = current.copy(epoch = newEpoch)
-        readyFrameCount.set(0L)
-        recoveryRequired.set(false)
-        seekResumeState.set(SeekResumeState.Waiting)
-        lowWaterEpoch.set(0L)
-        underflowEpoch.set(0L)
-        readyNotificationEpoch.set(0L)
-        consumedFrame.set(frame.coerceAtLeast(0L))
-        workerNextFrame = frame.coerceIn(0L, current.geometry.frameCount)
-        state.set(SourceSeparationPlaybackDataState.Seeking)
-        metrics.recordEpochChange()
-        metrics.recordSeekRequest()
-        command.set(EngineCommand.Seek(newEpoch, workerNextFrame))
-        startWorkerIfNeeded()
-        return newEpoch
+        return synchronized(transitionLock) {
+            val current = activeSession ?: return@synchronized activeEpoch.get()
+            val newEpoch = epoch.next()
+            activeEpoch.set(newEpoch)
+            activeSession = current.copy(epoch = newEpoch)
+            readyFrameCount.set(0L)
+            recoveryRequired.set(false)
+            seekResumeState.set(SeekResumeState.Waiting)
+            lowWaterEpoch.set(0L)
+            underflowEpoch.set(0L)
+            readyNotificationEpoch.set(0L)
+            consumedFrame.set(frame.coerceAtLeast(0L))
+            workerNextFrame = frame.coerceIn(0L, current.geometry.frameCount)
+            state.set(SourceSeparationPlaybackDataState.Seeking)
+            metrics.recordEpochChange()
+            metrics.recordSeekRequest()
+            command.set(EngineCommand.Seek(newEpoch, workerNextFrame))
+            startWorkerIfNeeded()
+            newEpoch
+        }
     }
 
     fun hotSwap(
@@ -170,31 +178,33 @@ internal class SourceSeparationStemPlaybackEngine(
         check(!closed.get()) { "Playback engine is closed." }
         require(sessionId > 0L) { "Playback session ID must be positive." }
         require(factories.isNotEmpty()) { "Playback engine requires at least one stem." }
-        val newEpoch = epoch.next()
-        val session = SourceSeparationPlaybackDataSession(
-            sessionId = sessionId,
-            epoch = newEpoch,
-            stems = factories.map(SourceSeparationPlaybackStemSourceFactory::spec),
-        )
-        activeEpoch.set(newEpoch)
-        this.sessionId.set(sessionId)
-        activeSession = session
-        readyFrameCount.set(0L)
-        recoveryRequired.set(false)
-        seekResumeState.set(SeekResumeState.None)
-        lowWaterEpoch.set(0L)
-        underflowEpoch.set(0L)
-        readyNotificationEpoch.set(0L)
-        consumedFrame.set(startFrame.coerceAtLeast(0L))
-        drainReadyBlocks()
-        ensureBlockPool(session.stems.size, session.geometry.channelCount)
-        workerFactories = factories.toList()
-        workerNextFrame = startFrame.coerceIn(0L, session.geometry.frameCount)
-        state.set(SourceSeparationPlaybackDataState.HotSwapping)
-        metrics.recordEpochChange()
-        command.set(EngineCommand.Start(newEpoch, workerNextFrame))
-        startWorkerIfNeeded()
-        return newEpoch
+        return synchronized(transitionLock) {
+            val newEpoch = epoch.next()
+            val session = SourceSeparationPlaybackDataSession(
+                sessionId = sessionId,
+                epoch = newEpoch,
+                stems = factories.map(SourceSeparationPlaybackStemSourceFactory::spec),
+            )
+            activeEpoch.set(newEpoch)
+            this.sessionId.set(sessionId)
+            activeSession = session
+            readyFrameCount.set(0L)
+            recoveryRequired.set(false)
+            seekResumeState.set(SeekResumeState.None)
+            lowWaterEpoch.set(0L)
+            underflowEpoch.set(0L)
+            readyNotificationEpoch.set(0L)
+            consumedFrame.set(startFrame.coerceAtLeast(0L))
+            drainReadyBlocks()
+            ensureBlockPool(session.stems.size, session.geometry.channelCount)
+            workerFactories = factories.toList()
+            workerNextFrame = startFrame.coerceIn(0L, session.geometry.frameCount)
+            state.set(SourceSeparationPlaybackDataState.HotSwapping)
+            metrics.recordEpochChange()
+            command.set(EngineCommand.Start(newEpoch, workerNextFrame))
+            startWorkerIfNeeded()
+            newEpoch
+        }
     }
 
     /**
@@ -331,19 +341,21 @@ internal class SourceSeparationStemPlaybackEngine(
 
     fun stop() {
         if (closed.get()) return
-        val newEpoch = epoch.next()
-        activeEpoch.set(newEpoch)
-        metrics.recordEpochChange()
-        readyFrameCount.set(0L)
-        recoveryRequired.set(false)
-        seekResumeState.set(SeekResumeState.None)
-        readyNotificationEpoch.set(0L)
-        command.set(EngineCommand.Stop(newEpoch))
-        activeSession = null
-        workerFactories = emptyList()
-        clearConsumerBlock()
-        state.set(SourceSeparationPlaybackDataState.Idle)
-        startWorkerIfNeeded()
+        synchronized(transitionLock) {
+            val newEpoch = epoch.next()
+            activeEpoch.set(newEpoch)
+            metrics.recordEpochChange()
+            readyFrameCount.set(0L)
+            recoveryRequired.set(false)
+            seekResumeState.set(SeekResumeState.None)
+            readyNotificationEpoch.set(0L)
+            command.set(EngineCommand.Stop(newEpoch))
+            activeSession = null
+            workerFactories = emptyList()
+            clearConsumerBlock()
+            state.set(SourceSeparationPlaybackDataState.Idle)
+            startWorkerIfNeeded()
+        }
     }
 
     override fun close() {
@@ -384,6 +396,7 @@ internal class SourceSeparationStemPlaybackEngine(
                 if (factories.isEmpty() ||
                     current == null ||
                     current.epoch != currentEpoch ||
+                    workerPositionEpoch != currentEpoch ||
                     workerExhausted
                 ) {
                     Thread.sleep(WORKER_IDLE_SLEEP_MS)
@@ -441,52 +454,67 @@ internal class SourceSeparationStemPlaybackEngine(
                     }
                 }
                 if (!successful) continue
-                if (currentEpoch != activeEpoch.get() ||
-                    activeSession?.epoch != currentEpoch
-                ) {
-                    block.reset(currentEpoch)
-                    freeBlocks.offer(block)
-                    continue
-                }
-                block.epoch = currentEpoch
-                block.startFrame = workerNextFrame
-                block.frameCount = frames
-                block.endOfStream = workerNextFrame + frames >= current.geometry.frameCount
-                if (!readyBlocks.offer(block)) {
-                    freeBlocks.offer(block)
-                    Thread.sleep(WORKER_FULL_SLEEP_MS)
-                    continue
-                }
-                readyFrameCount.addAndGet(frames.toLong())
-                if (!recoveryRequired.get() &&
-                    readyFrameCount.get() >= seekResumeWaterlineBlocks.toLong() * blockFrames
-                ) {
-                    seekResumeState.compareAndSet(
-                        SeekResumeState.Waiting,
-                        SeekResumeState.Granted,
-                    )
-                }
-                if (seekResumeState.get() != SeekResumeState.None &&
-                    (readyFrameCount.get() >= targetWaterlineBlocks.toLong() * blockFrames ||
-                            block.endOfStream)
-                ) {
-                    seekResumeState.set(SeekResumeState.None)
-                }
-                if (block.endOfStream) {
-                    endOfStreamQueued.set(true)
-                    workerExhausted = true
-                }
-                workerNextFrame += frames
-                metrics.recordDecodeBlock(System.nanoTime() - startNs)
-                metrics.recordRingOccupancy(readyBlocks.size)
-                val requiredBlocks = requiredResumeWaterlineBlocks()
-                if (readyBlocks.size >= requiredBlocks || block.endOfStream) {
-                    publishWorkerState(SourceSeparationPlaybackDataState.Ready, currentEpoch)
-                    if (readyNotificationEpoch.compareAndSet(0L, currentEpoch)) {
-                        metrics.recordSeekReady()
+                val published = synchronized(transitionLock) {
+                    if (currentEpoch != activeEpoch.get() ||
+                        activeSession?.epoch != currentEpoch
+                    ) {
+                        block.reset(currentEpoch)
+                        freeBlocks.offer(block)
+                        false
+                    } else {
+                        block.epoch = currentEpoch
+                        block.startFrame = workerNextFrame
+                        block.frameCount = frames
+                        block.endOfStream = workerNextFrame + frames >= current.geometry.frameCount
+                        if (!readyBlocks.offer(block)) {
+                            freeBlocks.offer(block)
+                            false
+                        } else {
+                            readyFrameCount.addAndGet(frames.toLong())
+                            if (!recoveryRequired.get() &&
+                                readyFrameCount.get() >=
+                                    seekResumeWaterlineBlocks.toLong() * blockFrames
+                            ) {
+                                seekResumeState.compareAndSet(
+                                    SeekResumeState.Waiting,
+                                    SeekResumeState.Granted,
+                                )
+                            }
+                            if (seekResumeState.get() != SeekResumeState.None &&
+                                (readyFrameCount.get() >=
+                                    targetWaterlineBlocks.toLong() * blockFrames ||
+                                        block.endOfStream)
+                            ) {
+                                seekResumeState.set(SeekResumeState.None)
+                            }
+                            if (block.endOfStream) {
+                                endOfStreamQueued.set(true)
+                                workerExhausted = true
+                            }
+                            workerNextFrame += frames
+                            metrics.recordDecodeBlock(System.nanoTime() - startNs)
+                            metrics.recordRingOccupancy(readyBlocks.size)
+                            val requiredBlocks = requiredResumeWaterlineBlocks()
+                            if (readyBlocks.size >= requiredBlocks || block.endOfStream) {
+                                publishWorkerState(
+                                    SourceSeparationPlaybackDataState.Ready,
+                                    currentEpoch,
+                                )
+                                if (readyNotificationEpoch.compareAndSet(0L, currentEpoch)) {
+                                    metrics.recordSeekReady()
+                                }
+                            } else {
+                                publishWorkerState(
+                                    SourceSeparationPlaybackDataState.Buffering,
+                                    currentEpoch,
+                                )
+                            }
+                            true
+                        }
                     }
-                } else {
-                    publishWorkerState(SourceSeparationPlaybackDataState.Buffering, currentEpoch)
+                }
+                if (!published) {
+                    Thread.sleep(WORKER_FULL_SLEEP_MS)
                 }
             }
         } catch (_: InterruptedException) {
@@ -504,6 +532,7 @@ internal class SourceSeparationStemPlaybackEngine(
         if (current.epoch != start.epoch || start.epoch != activeEpoch.get()) return
         if (!openWorkerSources(current, start.frame, "opening")) return
         workerExhausted = false
+        workerPositionEpoch = start.epoch
         workerNextFrame = start.frame
         consumedFrame.set(start.frame)
         publishWorkerState(SourceSeparationPlaybackDataState.Buffering, start.epoch)
@@ -515,6 +544,7 @@ internal class SourceSeparationStemPlaybackEngine(
         drainReadyBlocks()
         if (!positionWorkerSources(current, seek.frame)) return
         workerExhausted = false
+        workerPositionEpoch = seek.epoch
         workerNextFrame = seek.frame
         consumedFrame.set(seek.frame)
         publishWorkerState(SourceSeparationPlaybackDataState.Buffering, seek.epoch)
@@ -525,6 +555,7 @@ internal class SourceSeparationStemPlaybackEngine(
         closeWorkerSources()
         drainReadyBlocks()
         workerExhausted = true
+        workerPositionEpoch = stop.epoch
         publishWorkerState(SourceSeparationPlaybackDataState.Idle, stop.epoch)
     }
 
