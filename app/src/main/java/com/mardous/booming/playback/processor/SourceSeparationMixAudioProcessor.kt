@@ -44,6 +44,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     var mixedOutputStartedSink: (() -> Unit)? = null
 
     @Volatile
+    internal var dataPlaneStateChangedSink: ((SourceSeparationPlaybackDataState) -> Unit)? = null
+
+    @Volatile
     private var active = false
 
     private val gainGeneration = AtomicLong()
@@ -132,7 +135,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 channelCount = this.stemChannelCount,
             )
             if (engineFactories != null) {
-                val engine = SourceSeparationStemPlaybackEngine()
+                val engine = SourceSeparationStemPlaybackEngine(
+                    stateChangedSink = { state -> dataPlaneStateChangedSink?.invoke(state) },
+                )
                 playbackEngine = engine
                 engineHasInstrumentalInput = instrumentalFile != null
                 engineStemBuffers = Array(engineFactories.size) {
@@ -340,7 +345,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 } else {
                     engine.currentFrame()
                 }
-                engine.seekTo(logicalFrame)
                 resampleStemFramePosition = logicalFrame.toDouble()
                 prepareEngineResampleCachesLocked(engine.blockFrameCapacity, logicalFrame)
             } else {

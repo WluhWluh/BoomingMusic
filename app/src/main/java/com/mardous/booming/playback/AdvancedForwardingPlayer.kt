@@ -10,7 +10,8 @@ import org.koin.core.component.KoinComponent
 
 @UnstableApi
 class AdvancedForwardingPlayer(
-    player: Player
+    player: Player,
+    private val onSeekRequested: ((mediaItemIndex: Int, positionMs: Long) -> Unit)? = null,
 ) : ForwardingPlayer(player), KoinComponent {
 
     private val listeners = mutableListOf<Player.Listener>()
@@ -61,6 +62,51 @@ class AdvancedForwardingPlayer(
     override fun removeListener(listener: Player.Listener) {
         listeners.remove(listener)
         super.removeListener(listener)
+    }
+
+    override fun seekToDefaultPosition() {
+        notifySeekRequested(currentMediaItemIndex, 0L)
+        super.seekToDefaultPosition()
+    }
+
+    override fun seekToDefaultPosition(mediaItemIndex: Int) {
+        notifySeekRequested(mediaItemIndex, 0L)
+        super.seekToDefaultPosition(mediaItemIndex)
+    }
+
+    override fun seekTo(positionMs: Long) {
+        notifySeekRequested(currentMediaItemIndex, positionMs)
+        super.seekTo(positionMs)
+    }
+
+    override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+        notifySeekRequested(mediaItemIndex, positionMs)
+        super.seekTo(mediaItemIndex, positionMs)
+    }
+
+    override fun seekBack() {
+        notifySeekRequested(
+            currentMediaItemIndex,
+            (currentPosition - seekBackIncrement).coerceAtLeast(0L),
+        )
+        super.seekBack()
+    }
+
+    override fun seekForward() {
+        val requestedPosition = currentPosition + seekForwardIncrement
+        val targetPosition = duration
+            .takeIf { it != C.TIME_UNSET }
+            ?.let(requestedPosition::coerceAtMost)
+            ?: requestedPosition
+        notifySeekRequested(currentMediaItemIndex, targetPosition)
+        super.seekForward()
+    }
+
+    override fun seekToPrevious() {
+        if (!hasPreviousMediaItem() || currentPosition > maxSeekToPreviousPosition) {
+            notifySeekRequested(currentMediaItemIndex, 0L)
+        }
+        super.seekToPrevious()
     }
 
     fun setSequentialTimelineEnabled(sequentialTimelineEnabled: Boolean) {
@@ -297,6 +343,11 @@ class AdvancedForwardingPlayer(
         if (hasChanges) {
             replaceMediaItems(0, mediaItemCount, updatedMediaItems)
         }
+    }
+
+    private fun notifySeekRequested(mediaItemIndex: Int, positionMs: Long) {
+        if (mediaItemIndex == C.INDEX_UNSET) return
+        onSeekRequested?.invoke(mediaItemIndex, positionMs.coerceAtLeast(0L))
     }
 
     private fun MediaItem.isUpcoming() =

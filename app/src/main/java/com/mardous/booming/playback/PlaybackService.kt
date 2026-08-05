@@ -331,6 +331,11 @@ class PlaybackService :
                 onSourceSeparationMixedOutputStarted()
             }
         }
+        sourceSeparationMixProcessor.dataPlaneStateChangedSink = { signaledState ->
+            serviceScope.launch {
+                onSourceSeparationDataPlaneStateChanged(signaledState)
+            }
+        }
         traceSourceSeparationPlayback("service.onCreate")
         cleanupCompletedSourceSeparationTemporaryDirs()
 
@@ -391,7 +396,8 @@ class PlaybackService :
                 .setSeekBackIncrementMs(seekInterval)
                 .setSeekForwardIncrementMs(seekInterval)
                 .setPlaybackLooper(playerThread.looper)
-                .build()
+                .build(),
+            onSeekRequested = ::onSourceSeparationSeekRequested,
         )
 
         player.exoPlayer.shuffleOrder = ImprovedShuffleOrder(0, 0, Random.nextLong())
@@ -498,6 +504,7 @@ class PlaybackService :
         sourceSeparationMixProcessor.disable()
         sourceSeparationMixProcessor.debugTraceSink = null
         sourceSeparationMixProcessor.mixedOutputStartedSink = null
+        sourceSeparationMixProcessor.dataPlaneStateChangedSink = null
         if (BuildConfig.DEBUG) {
             PlaybackContentionDiagnostics.detach(player.exoPlayer)
         }
@@ -1175,9 +1182,7 @@ class PlaybackService :
         )
         sourceSeparationPlaybackContextGeneration++
         if (activeSession != null) {
-            if (mediaItem?.mediaId == activeSession.songId.toString()) {
-                sourceSeparationMixProcessor.seekTo(player.currentPosition)
-            } else {
+            if (mediaItem?.mediaId != activeSession.songId.toString()) {
                 clearSourceSeparationPlayback(restoreOriginalItem = true, broadcast = false)
             }
         }
@@ -1354,7 +1359,6 @@ class PlaybackService :
             reason == Player.DISCONTINUITY_REASON_SEEK
         ) {
             val activeSession = sourceSeparationPlaybackSession
-            sourceSeparationMixProcessor.seekTo(newPosition.positionMs)
             gateSourceSeparationDataPlaneUntilReady(activeSession, "seek")
             if (activeSession != null &&
                 !activeSession.requiresReadinessGate &&
@@ -1377,7 +1381,11 @@ class PlaybackService :
                 )
             }
         } else if (sourceSeparationPlaybackSession != null) {
-            sourceSeparationMixProcessor.seekTo(newPosition.positionMs)
+            requestSourceSeparationDataPlaneSeek(
+                session = sourceSeparationPlaybackSession,
+                positionMs = newPosition.positionMs,
+                reason = "${discontinuityReasonName(reason)}Discontinuity",
+            )
         }
     }
 
@@ -2407,6 +2415,36 @@ class PlaybackService :
         }
     }
 
+    private fun onSourceSeparationSeekRequested(
+        mediaItemIndex: Int,
+        positionMs: Long,
+    ) {
+        val session = sourceSeparationPlaybackSession ?: return
+        if (mediaItemIndex != player.currentMediaItemIndex ||
+            player.currentMediaItem?.mediaId != session.songId.toString()
+        ) {
+            return
+        }
+        traceSourceSeparationPlayback(
+            "player.seekRequested",
+            "index=$mediaItemIndex position=$positionMs session=${session.traceSummary()}",
+        )
+        requestSourceSeparationDataPlaneSeek(session, positionMs, "seekRequest")
+    }
+
+    private fun requestSourceSeparationDataPlaneSeek(
+        session: SourceSeparationPlaybackSession?,
+        positionMs: Long,
+        reason: String,
+    ) {
+        if (session == null || sourceSeparationPlaybackSession?.sessionId != session.sessionId) {
+            return
+        }
+        sourceSeparationMixProcessor.seekTo(positionMs)
+        updateSourceSeparationDataPlaneMonitor(session)
+        gateSourceSeparationDataPlaneUntilReady(session, reason)
+    }
+
     private fun observeSourceSeparationActiveSelection() {
         sourceSeparationActiveSelection = sourceSeparationPresetRepository.activeSelectionFlow.value
         serviceScope.launch {
@@ -2916,31 +2954,8 @@ class PlaybackService :
                 while (true) {
                     val activeSession = sourceSeparationPlaybackSession
                     if (activeSession?.sessionId != session.sessionId) break
-                    when (sourceSeparationMixProcessor.dataPlaneState()) {
-                        SourceSeparationPlaybackDataState.Preparing,
-                        SourceSeparationPlaybackDataState.Buffering,
-                        SourceSeparationPlaybackDataState.Seeking,
-                        SourceSeparationPlaybackDataState.HotSwapping,
-                        -> gateSourceSeparationDataPlaneUntilReady(
-                            session = activeSession,
-                            reason = "monitor",
-                        )
-
-                        SourceSeparationPlaybackDataState.Ready -> {
-                            sourceSeparationMixProcessor.consumeDataPlaneReadyNotification()
-                            resumeSourceSeparationDataPlaneIfRequested(activeSession)
-                        }
-
-                        SourceSeparationPlaybackDataState.Failed -> {
-                            handleSourceSeparationDataPlaneFailure(activeSession)
-                            break
-                        }
-
-                        SourceSeparationPlaybackDataState.Idle,
-                        SourceSeparationPlaybackDataState.Ended,
-                        -> break
-                    }
-                    delay(SOURCE_SEPARATION_DATA_PLANE_MONITOR_DELAY_MS)
+                    if (!handleSourceSeparationDataPlaneState(activeSession, "fallback")) break
+                    delay(SOURCE_SEPARATION_DATA_PLANE_MONITOR_FALLBACK_DELAY_MS)
                 }
             } finally {
                 if (sourceSeparationDataPlaneMonitorJob == monitorJob) {
@@ -2952,6 +2967,48 @@ class PlaybackService :
                     "songId=${session.songId} session=${session.sessionId}",
                 )
             }
+        }
+    }
+
+    private fun onSourceSeparationDataPlaneStateChanged(
+        signaledState: SourceSeparationPlaybackDataState,
+    ) {
+        val session = sourceSeparationPlaybackSession ?: return
+        handleSourceSeparationDataPlaneState(
+            session = session,
+            reason = "event:$signaledState",
+        )
+    }
+
+    private fun handleSourceSeparationDataPlaneState(
+        session: SourceSeparationPlaybackSession,
+        reason: String,
+    ): Boolean {
+        if (sourceSeparationPlaybackSession?.sessionId != session.sessionId) return false
+        return when (sourceSeparationMixProcessor.dataPlaneState()) {
+            SourceSeparationPlaybackDataState.Preparing,
+            SourceSeparationPlaybackDataState.Buffering,
+            SourceSeparationPlaybackDataState.Seeking,
+            SourceSeparationPlaybackDataState.HotSwapping,
+            -> {
+                gateSourceSeparationDataPlaneUntilReady(session, reason)
+                true
+            }
+
+            SourceSeparationPlaybackDataState.Ready -> {
+                sourceSeparationMixProcessor.consumeDataPlaneReadyNotification()
+                resumeSourceSeparationDataPlaneIfRequested(session)
+                true
+            }
+
+            SourceSeparationPlaybackDataState.Failed -> {
+                handleSourceSeparationDataPlaneFailure(session)
+                false
+            }
+
+            SourceSeparationPlaybackDataState.Idle,
+            SourceSeparationPlaybackDataState.Ended,
+            -> false
         }
     }
 
@@ -4238,7 +4295,7 @@ class PlaybackService :
         private const val SOURCE_SEPARATION_PROCESSING_RETRY_DELAY_MS = 500L
         private const val SOURCE_SEPARATION_READY_RETRY_DELAY_MS = 2000L
         private const val SOURCE_SEPARATION_READINESS_MONITOR_DELAY_MS = 250L
-        private const val SOURCE_SEPARATION_DATA_PLANE_MONITOR_DELAY_MS = 20L
+        private const val SOURCE_SEPARATION_DATA_PLANE_MONITOR_FALLBACK_DELAY_MS = 250L
         private const val SOURCE_SEPARATION_READY_HORIZON_GATE_MARGIN_MS = 250L
         private const val SOURCE_SEPARATION_READY_HORIZON_GATE_CONFIRM_COUNT = 2
         private const val SOURCE_SEPARATION_OUTPUT_UNMUTE_DELAY_MS = 120L

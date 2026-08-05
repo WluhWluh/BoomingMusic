@@ -1580,13 +1580,18 @@ object Pcm16StereoFlacEncoder {
         }
 
         override fun seekToPcmByte(bytePosition: Long) {
-            pcmBytePosition = bytePosition
+            val targetBytePosition = bytePosition
                 .coerceAtLeast(0L)
                 .coerceAtMost(totalPcmBytes())
-            currentFrameIndex = -1
+            if (targetBytePosition == pcmBytePosition) return
+            val targetFrameIndex = frameIndexForPcmByte(targetBytePosition)
+            pcmBytePosition = targetBytePosition
+            if (targetFrameIndex != currentFrameIndex) {
+                currentFrameIndex = -1
+            }
             traceSink?.invoke(
                 "indexedSeek byte=$pcmBytePosition frame=${pcmBytePosition / BYTES_PER_FRAME} " +
-                        "index=${frameIndexForPcmByte(pcmBytePosition)}"
+                        "index=$targetFrameIndex"
             )
         }
 

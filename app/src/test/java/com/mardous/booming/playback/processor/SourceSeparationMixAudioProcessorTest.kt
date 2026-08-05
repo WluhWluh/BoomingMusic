@@ -140,6 +140,12 @@ class SourceSeparationMixAudioProcessorTest {
                 mixedOutputReadyPrerollMs = 0L,
             )
             await { processor.isDataPlaneReady() }
+            val seekRequestsBeforeFlush = requireNotNull(processor.dataPlaneMetrics()).seekRequests
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            assertEquals(
+                seekRequestsBeforeFlush,
+                requireNotNull(processor.dataPlaneMetrics()).seekRequests,
+            )
             val input = ByteBuffer.allocateDirect(4 * BYTES_PER_FRAME)
                 .order(ByteOrder.LITTLE_ENDIAN)
             repeat(4) {

@@ -56,6 +56,14 @@ internal class SourceSeparationFileStemSourceFactory(
     ) : SourceSeparationPlaybackStemSource {
         private val input = RandomAccessFile(file, "r")
         private val bytesPerFrame = geometry.channelCount * BYTES_PER_SAMPLE
+        private var nextFrame = -1L
+
+        override fun seekToFrame(frame: Long) {
+            val targetFrame = frame.coerceIn(0L, geometry.frameCount)
+            if (targetFrame == nextFrame) return
+            input.seek(dataOffsetBytes + targetFrame * bytesPerFrame)
+            nextFrame = targetFrame
+        }
 
         override fun readFrames(
             startFrame: Long,
@@ -75,8 +83,11 @@ internal class SourceSeparationFileStemSourceFactory(
             ) {
                 "Playback source destination is too small."
             }
-            input.seek(dataOffsetBytes + startFrame * bytesPerFrame)
+            if (startFrame != nextFrame) {
+                seekToFrame(startFrame)
+            }
             input.readFully(destination, destinationOffsetBytes, byteCount)
+            nextFrame += frameCount
             return frameCount
         }
 

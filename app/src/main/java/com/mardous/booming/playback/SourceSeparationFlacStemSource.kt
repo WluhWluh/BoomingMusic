@@ -46,6 +46,15 @@ internal class SourceSeparationFlacStemSourceFactory(
         private val reader: Pcm16StereoFlacPcmReader,
         override val geometry: SourceSeparationPlaybackGeometry,
     ) : SourceSeparationPlaybackStemSource {
+        private var nextFrame = -1L
+
+        override fun seekToFrame(frame: Long) {
+            val targetFrame = frame.coerceIn(0L, geometry.frameCount)
+            if (targetFrame == nextFrame) return
+            reader.seekToPcmByte(targetFrame * BYTES_PER_FRAME)
+            nextFrame = targetFrame
+        }
+
         override fun readFrames(
             startFrame: Long,
             destination: ByteArray,
@@ -64,7 +73,9 @@ internal class SourceSeparationFlacStemSourceFactory(
             ) {
                 "Playback source destination is too small."
             }
-            reader.seekToPcmByte(startFrame * BYTES_PER_FRAME)
+            if (startFrame != nextFrame) {
+                seekToFrame(startFrame)
+            }
             var copied = 0
             while (copied < byteCount) {
                 val read = reader.read(
@@ -76,6 +87,7 @@ internal class SourceSeparationFlacStemSourceFactory(
                 }
                 copied += read
             }
+            nextFrame += frameCount
             return frameCount
         }
 
