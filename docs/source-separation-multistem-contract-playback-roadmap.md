@@ -6,12 +6,13 @@ model contracts, imported metadata, cache output shape, and playback data flow.
 Updated: 2026-08-05
 
 Current milestone: Phases 0-2 and the Phase 3 bounded two-stem data-plane
-implementation are complete. The deterministic indexed-WAV/FLAC seek smoke now
-passes on all four ABI rows, and the recent S25 handoff/cleanup fixes have been
-manually checked. Long-form real-song playback, cold/warm seek percentiles, and
-resource qualification remain open release-confidence gates. Phase 4 synthetic
-N-stem work may proceed as the next implementation step; no real multi-stem
-model is admitted until its own pipeline and full-song gates pass.
+implementation are complete. Phase 4A now provides an ordered 2/4/6/8-stem
+engine, list mixer, service session handle, and structural buffer admission.
+The deterministic indexed-WAV/FLAC seek smoke still passes on all four ABI rows,
+and the recent S25 handoff/cleanup fixes have been manually checked. Long-form
+real-song playback, cold/warm seek percentiles, resource qualification, and the
+Phase 4B compressed-source/process-recreation gates remain open. No real
+multi-stem model is admitted until its own pipeline and full-song gates pass.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -779,24 +780,41 @@ mixer. Normal playback creates no persistent full-song PCM.
 
 ### Phase 4: N-stem playback data plane
 
-Status: next implementation phase. Synthetic data-plane work may start after
-the functional Phase 3 exit; the remaining long-form Phase 3 measurements stay
-release gates and do not authorize a real multi-stem model.
+Status: Phase 4A complete; Phase 4B qualification is in progress. The remaining
+long-form Phase 3 measurements stay release gates and do not authorize a real
+multi-stem model.
 
-- [ ] Generalize the engine session, block set, gain snapshot, diagnostics, and
-  playback-service handle from the qualified two-stem adapter to a complete
-  ordered stem set.
-- [ ] Implement the list-based mixer while preserving the Phase 3 realtime and
-  transport invariants.
-- [ ] Add atomic seek, hot-swap, missing-stem rejection, clipping, resampling,
-  unequal-length, EOF, corruption, and process-recreation tests for synthetic
-  2-, 4-, 6-, and 8-stem sources.
+#### Phase 4A: Ordered synthetic data plane
+
+- [x] Generalize the engine session, atomic block set, gain snapshot,
+  diagnostics, and playback-service handle to a complete ordered stem set.
+- [x] Implement the list-based mixer and list-based resampling caches while
+  preserving the Phase 3 realtime and transport invariants.
+- [x] Cover deterministic 2-, 4-, 6-, and 8-stem output, same-frame atomic
+  publication, seek, hot-swap, short/unequal-length rejection, EOF handling,
+  gain ramp, clipping, and sample-rate conversion with synthetic sources.
+- [x] Enforce the current eight-stem contract limit and reject over-budget block
+  pools before worker startup; expose allocated stem count and pool bytes in
+  playback metrics.
+
+Evidence: `6148b589` adds the engine matrix, `a7816b50` adds the list mixer and
+  4/6/8-stem processor coverage, `a92d95e2` carries ordered cache stems through
+  the service session, and `b84894ff` adds structural pool admission.
+
+#### Phase 4B: Compressed-source and device qualification
+
+- [ ] Add indexed-WAV/FLAC corruption, missing-index, frame-CRC, truncation,
+  and explicit failure tests for every required stem; no whole-file fallback
+  may be reintroduced.
+- [ ] Add process-recreation, cache deletion, cancellation, and stale-epoch
+  tests for 4/6/8-stem sessions, including a complete-set recovery barrier.
 - [ ] Measure audio-thread load, decode throughput, underruns, PSS, buffer-pool
   size, file descriptors, seek readiness, and cache size with synthetic
   4- and 6-stem PCM/FLAC fixtures on S25, S10, and available emulators.
-- [ ] Define memory admission from measured stem count and block geometry;
-  unsupported counts fail before session installation rather than degrading
-  into partial playback or a full-song PCM fallback.
+- [ ] Recalibrate memory admission from measured stem count and block geometry;
+  the current 8-stem/4 MiB ceiling is a structural safety bound, not a device
+  qualification result. Unsupported counts must fail before session
+  installation rather than degrading into partial playback or full-song PCM.
 
 **Exit:** N-stem playback is technically stable with synthetic outputs and the
 same bounded engine; this does not yet activate a multi-stem model.
