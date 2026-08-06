@@ -974,67 +974,19 @@ object Pcm16StereoFlacEncoder {
     }
 
     private fun readPcm16StereoWavInfo(wavFile: File): Pcm16StereoWavInfo {
-        require(wavFile.isFile) { "WAV file does not exist: ${wavFile.absolutePath}" }
-        RandomAccessFile(wavFile, "r").use { input ->
-            require(input.readAscii(4) == "RIFF") { "WAV file has no RIFF header." }
-            input.readLittleEndianUInt()
-            require(input.readAscii(4) == "WAVE") { "WAV file has no WAVE header." }
-
-            var sampleRate: Int? = null
-            var channelCount: Int? = null
-            var bitsPerSample: Int? = null
-            var audioFormat: Int? = null
-            var dataOffset: Long? = null
-            var dataSize: Long? = null
-
-            while (input.filePointer + CHUNK_HEADER_BYTES <= input.length()) {
-                val chunkId = input.readAscii(4)
-                val chunkSize = input.readLittleEndianUInt()
-                val chunkDataStart = input.filePointer
-                when (chunkId) {
-                    "fmt " -> {
-                        require(chunkSize >= PCM_FMT_CHUNK_MIN_BYTES) {
-                            "WAV fmt chunk is too small."
-                        }
-                        audioFormat = input.readLittleEndianUShort()
-                        channelCount = input.readLittleEndianUShort()
-                        sampleRate = input.readLittleEndianUInt().toInt()
-                        input.readLittleEndianUInt()
-                        input.readLittleEndianUShort()
-                        bitsPerSample = input.readLittleEndianUShort()
-                    }
-                    "data" -> {
-                        dataOffset = chunkDataStart
-                        dataSize = chunkSize
-                    }
-                }
-                val paddedChunkSize = chunkSize + (chunkSize and 1L)
-                input.seek(chunkDataStart + paddedChunkSize)
-            }
-
-            val resolvedSampleRate = sampleRate ?: error("WAV file has no fmt chunk.")
-            val resolvedChannelCount = channelCount ?: error("WAV file has no channel count.")
-            val resolvedBitsPerSample = bitsPerSample ?: error("WAV file has no bit depth.")
-            val resolvedAudioFormat = audioFormat ?: error("WAV file has no audio format.")
-            val resolvedDataOffset = dataOffset ?: error("WAV file has no data chunk.")
-            val resolvedDataSize = dataSize ?: error("WAV file has no data size.")
-
-            require(resolvedAudioFormat == WAV_FORMAT_PCM) { "Only PCM WAV input is supported." }
-            require(resolvedChannelCount == CHANNEL_COUNT_STEREO) { "Only stereo WAV input is supported." }
-            require(resolvedBitsPerSample == BITS_PER_SAMPLE) { "Only 16-bit WAV input is supported." }
-            require(resolvedDataSize % BYTES_PER_FRAME == 0L) {
-                "WAV data size does not align to stereo 16-bit frames."
-            }
-            require(resolvedDataSize <= Int.MAX_VALUE.toLong() * BYTES_PER_FRAME) {
-                "WAV input is too large."
-            }
-            return Pcm16StereoWavInfo(
-                dataOffset = resolvedDataOffset,
-                dataSize = resolvedDataSize,
-                sampleRate = resolvedSampleRate,
-                frameCount = (resolvedDataSize / BYTES_PER_FRAME).toInt(),
-            )
+        val info = Pcm16WavFileReader.read(wavFile)
+        require(info.channelCount == CHANNEL_COUNT_STEREO) {
+            "Only stereo WAV input is supported."
         }
+        require(info.dataSize <= Int.MAX_VALUE.toLong() * BYTES_PER_FRAME) {
+            "WAV input is too large."
+        }
+        return Pcm16StereoWavInfo(
+            dataOffset = info.dataOffset,
+            dataSize = info.dataSize,
+            sampleRate = info.sampleRate,
+            frameCount = info.frameCount.toInt(),
+        )
     }
 
     private fun File.pcmMd5(
@@ -1828,9 +1780,6 @@ object Pcm16StereoFlacEncoder {
     private const val BYTES_PER_SAMPLE = 2
     private const val BYTES_PER_FRAME = CHANNEL_COUNT_STEREO * BYTES_PER_SAMPLE
     private const val MIN_FLAC_FRAME_BYTES = 8
-    private const val WAV_FORMAT_PCM = 1
-    private const val PCM_FMT_CHUNK_MIN_BYTES = 16L
-    private const val CHUNK_HEADER_BYTES = 8L
     private const val PCM_MD5_BUFFER_BYTES = 256 * 1024
     private const val NANOS_PER_MILLISECOND = 1_000_000L
     private const val TRACE_INDEXED_FRAME_DECODE_TIMING = true

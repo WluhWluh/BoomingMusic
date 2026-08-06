@@ -1,5 +1,6 @@
 package com.mardous.booming.playback
 
+import com.mardous.booming.separation.audio.Pcm16WavFileReader
 import java.io.File
 import java.io.RandomAccessFile
 
@@ -9,13 +10,14 @@ internal class SourceSeparationFileStemSourceFactory(
     sampleRate: Int,
     channelCount: Int = DEFAULT_CHANNEL_COUNT,
 ) : SourceSeparationPlaybackStemSourceFactory {
-    private val dataOffsetBytes = if (file.extension.equals("wav", ignoreCase = true)) {
-        WAV_HEADER_SIZE
+    private val wavInfo = if (file.extension.equals("wav", ignoreCase = true)) {
+        Pcm16WavFileReader.read(file)
     } else {
-        0L
+        null
     }
+    private val dataOffsetBytes = wavInfo?.dataOffset ?: 0L
     private val bytesPerFrame = channelCount * BYTES_PER_SAMPLE
-    private val dataBytes = (file.length() - dataOffsetBytes).coerceAtLeast(0L)
+    private val dataBytes = wavInfo?.dataSize ?: file.length()
 
     override val spec = SourceSeparationPlaybackStemSpec(
         stemId = stemId,
@@ -32,6 +34,14 @@ internal class SourceSeparationFileStemSourceFactory(
                 file.extension.equals("pcm", ignoreCase = true)
         ) {
             "Unsupported file-backed playback stem: ${file.name}"
+        }
+        wavInfo?.let { info ->
+            require(info.sampleRate == sampleRate) {
+                "Playback WAV sample rate does not match the separation contract."
+            }
+            require(info.channelCount == channelCount) {
+                "Playback WAV channel count does not match the separation contract."
+            }
         }
         require(file.length() >= dataOffsetBytes) {
             "Playback stem file is shorter than its header: ${file.absolutePath}"
@@ -99,6 +109,5 @@ internal class SourceSeparationFileStemSourceFactory(
     private companion object {
         const val DEFAULT_CHANNEL_COUNT = 2
         const val BYTES_PER_SAMPLE = 2
-        const val WAV_HEADER_SIZE = 44L
     }
 }

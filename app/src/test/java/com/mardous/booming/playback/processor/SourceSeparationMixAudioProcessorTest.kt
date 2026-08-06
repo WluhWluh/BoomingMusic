@@ -145,6 +145,52 @@ class SourceSeparationMixAudioProcessorTest {
     }
 
     @Test
+    fun malformedWavRejectsTheCompleteTwoFourSixAndEightStemSessions() {
+        listOf(2, 4, 6, 8).forEachIndexed { geometryIndex, stemCount ->
+            val stems = List(stemCount) { stemIndex ->
+                writeWav(
+                    "malformed-$stemCount-stem-$stemIndex.wav",
+                    4_096,
+                    (stemIndex + 1) * 100,
+                )
+            }
+            val malformed = stems[stemCount / 2]
+            RandomAccessFile(malformed, "rw").use { file ->
+                when (geometryIndex) {
+                    0 -> {
+                        file.seek(0L)
+                        file.writeBytes("NOPE")
+                    }
+                    1 -> {
+                        file.seek(24L)
+                        file.writeLittleEndianInt(48_000)
+                    }
+                    2 -> {
+                        file.seek(40L)
+                        file.writeLittleEndianInt(Int.MAX_VALUE)
+                    }
+                    else -> file.setLength(file.length() - 1L)
+                }
+            }
+
+            val processor = SourceSeparationMixAudioProcessor()
+            try {
+                assertThrows(IllegalArgumentException::class.java) {
+                    processor.enable(
+                        stemFiles = stems,
+                        stemIds = List(stemCount) { stemIndex -> "stem-$stemIndex" },
+                        positionMs = 0L,
+                        stemSampleRate = 44_100,
+                        stemChannelCount = 2,
+                    )
+                }
+            } finally {
+                processor.disable()
+            }
+        }
+    }
+
+    @Test
     fun wavStemsPlayThroughBoundedEngineWithExistingBlendLaw() {
         val frames = 65_536
         val vocals = writeWav("vocals.wav", frames, 1_000)
