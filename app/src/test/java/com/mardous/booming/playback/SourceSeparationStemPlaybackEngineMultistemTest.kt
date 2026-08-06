@@ -160,6 +160,36 @@ class SourceSeparationStemPlaybackEngineMultistemTest {
     }
 
     @Test
+    fun recreatedEngineReinstallsTheCompleteSixStemSet() {
+        val stemCount = 6
+        val frameCount = 24
+        val geometry = geometry(frameCount)
+        repeat(2) { recreation ->
+            val engine = SourceSeparationStemPlaybackEngine(
+                blockFrames = 4,
+                resumeWaterlineBlocks = 1,
+                targetWaterlineBlocks = 2,
+                blockCapacity = 3,
+            )
+            try {
+                engine.start(
+                    sessionId = recreation + 1L,
+                    factories = factories(stemCount, geometry, base = recreation * 10_000),
+                )
+                await { engine.hasResumeWaterline() }
+                assertCurrentBlock(
+                    engine = engine,
+                    stemCount = stemCount,
+                    expectedStart = 0,
+                    base = recreation * 10_000,
+                )
+            } finally {
+                engine.close()
+            }
+        }
+    }
+
+    @Test
     fun moreThanEightStemsAreRejectedBeforeWorkerStartup() {
         val geometry = geometry(16)
         val factories = (0 until 9).map { stemIndex ->

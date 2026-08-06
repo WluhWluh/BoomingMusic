@@ -7,7 +7,9 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -286,6 +288,97 @@ class SourceSeparationMixAudioProcessorTest {
     }
 
     @Test
+    fun fourStemIndexedFlacSessionUsesTheCompleteOrderedSet() {
+        val frames = 16_384
+        val stems = List(4) { index ->
+            writeIndexedFlac(
+                name = "four-stem-$index.flac",
+                frames = frames,
+                sample = (index + 1) * 100,
+            )
+        }
+        val traces = CopyOnWriteArrayList<String>()
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.debugTraceSink = traces::add
+            processor.configure(
+                AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT),
+            )
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = stems,
+                stemIds = listOf("vocals", "drums", "bass", "other"),
+                positionMs = 0L,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+
+            processor.queueInput(silentInput(4))
+            val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            repeat(8) { assertEquals(1_000, output.short.toInt()) }
+            assertFalse(traces.any { trace -> "fallbackWholeFileDecode" in trace })
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun missingIndexedFlacSidecarRejectsTheCompleteMultistemSession() {
+        val stems = List(4) { index ->
+            writeIndexedFlac("missing-index-$index.flac", 16_384, (index + 1) * 100)
+        }
+        Pcm16StereoFlacEncoder.frameIndexFileFor(stems[2]).delete()
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            assertThrows(IllegalArgumentException::class.java) {
+                processor.enable(
+                    stemFiles = stems,
+                    stemIds = List(4) { index -> "stem-$index" },
+                    positionMs = 0L,
+                    stemSampleRate = 44_100,
+                    stemChannelCount = 2,
+                )
+            }
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun frameCrcFailureFailsTheCompleteMultistemSessionWithoutFallback() {
+        val stems = List(4) { index ->
+            writeIndexedFlac("crc-failure-$index.flac", 16_384, (index + 1) * 100)
+        }
+        corruptFirstFlacFrame(stems[1])
+        val traces = CopyOnWriteArrayList<String>()
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.debugTraceSink = traces::add
+            processor.configure(
+                AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT),
+            )
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = stems,
+                stemIds = List(4) { index -> "stem-$index" },
+                positionMs = 0L,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await {
+                processor.dataPlaneState() ==
+                        com.mardous.booming.playback.SourceSeparationPlaybackDataState.Failed
+            }
+            assertFalse(traces.any { trace -> "fallbackWholeFileDecode" in trace })
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
     fun pcmHotSwapUsesOneLogicalFrameBarrier() {
         val frames = 16_384
         val vocals = writeWav("initial-vocals.wav", frames, 1_000)
@@ -322,6 +415,45 @@ class SourceSeparationMixAudioProcessorTest {
             processor.queueInput(input)
             val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
             repeat(8) { assertEquals(7_000, output.short.toInt()) }
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun multistemPcmHotSwapReplacesTheCompleteOrderedSet() {
+        val frames = 16_384
+        val initial = List(4) { index ->
+            writeWav("multistem-initial-$index.wav", frames, (index + 1) * 100)
+        }
+        val replacement = List(4) { index ->
+            writePcm("multistem-replacement-$index.pcm", frames, (index + 1) * 1_000)
+        }
+        val stemIds = listOf("vocals", "drums", "bass", "other")
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = initial,
+                stemIds = stemIds,
+                positionMs = 0L,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+            assertTrue(
+                processor.hotSwapToPcmInputs(
+                    stemFiles = replacement,
+                    stemIds = stemIds,
+                ),
+            )
+            await { processor.isDataPlaneReady() }
+
+            processor.queueInput(silentInput(4))
+            val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            repeat(8) { assertEquals(10_000, output.short.toInt()) }
         } finally {
             processor.disable()
         }
@@ -416,6 +548,30 @@ class SourceSeparationMixAudioProcessorTest {
             repeat(frames * 2) { output.writeLittleEndianShort(sample) }
         }
         return file
+    }
+
+    private fun writeIndexedFlac(name: String, frames: Int, sample: Int): File {
+        val wav = writeWav("$name.wav", frames, sample)
+        val flac = temporaryFolder.newFile(name)
+        Pcm16StereoFlacEncoder.encodeWavToFlac(
+            wavFile = wav,
+            flacFile = flac,
+            expectedSampleRate = 44_100,
+            expectedFrameCount = frames,
+        )
+        return flac
+    }
+
+    private fun corruptFirstFlacFrame(flac: File) {
+        val index = Pcm16StereoFlacEncoder.frameIndexFileFor(flac)
+        val firstFrameOffset = index.readLines()
+            .first { line -> line.startsWith("0,") }
+            .split(',')[3]
+            .toLong()
+        RandomAccessFile(flac, "rw").use { file ->
+            file.seek(firstFrameOffset + 8L)
+            file.write(file.read().xor(0x01))
+        }
     }
 
     private fun silentInput(frames: Int): ByteBuffer {
