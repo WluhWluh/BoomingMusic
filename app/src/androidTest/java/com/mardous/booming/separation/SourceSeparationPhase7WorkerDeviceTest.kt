@@ -6437,6 +6437,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val cacheRepository = get<SourceSeparationModelAwareCacheRepository>(
             SourceSeparationModelAwareCacheRepository::class.java,
         )
+        val audioFocusOverride = installPlaybackAudioFocusTestOverride()
         var controller: MediaController? = null
         var sourceUri: Uri? = null
         var testedCacheKey: String? = null
@@ -6569,7 +6570,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     MEDIA_SESSION_SEEK_TOLERANCE_MS
             }
             onMediaControllerThread(mediaController) { mediaController.play() }
-            waitForMediaController(mediaController, "resume") { mediaController.playWhenReady }
+            waitForMediaController(mediaController, "resume") {
+                mediaController.playWhenReady && mediaController.isPlaying
+            }
 
             val blendResultFuture = onMediaControllerThread(mediaController) {
                 mediaController.sendCustomCommand(
@@ -6656,6 +6659,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     "${restoreError::class.java.name}: ${restoreError.message}")
             }
             restorePreferences(preferences, preferenceSnapshot)
+            audioFocusOverride.close()
             if (!preservePlaybackCache) {
                 testedCacheKey?.let { cacheKey ->
                     runCatching { waitForCacheLeaseRelease(cacheRepository, cacheKey) }
