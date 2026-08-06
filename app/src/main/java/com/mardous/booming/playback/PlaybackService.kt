@@ -1646,12 +1646,14 @@ class PlaybackService :
         allowNewSession: Boolean = true,
         preferCompletedCache: Boolean = false,
         expectProcessing: Boolean = false,
+        waitForProcessing: Boolean = true,
     ): SessionResult {
         traceSourceSeparationPlayback(
             "check.request",
             "showMessage=$showUnavailableMessage allowPause=$allowPauseForProcessing " +
                     "resumeWhenReady=$resumeWhenReady allowNewSession=$allowNewSession " +
-                    "preferCompletedCache=$preferCompletedCache expectProcessing=$expectProcessing"
+                    "preferCompletedCache=$preferCompletedCache expectProcessing=$expectProcessing " +
+                    "waitForProcessing=$waitForProcessing"
         )
         return sourceSeparationPlaybackReadinessMutex.withLock {
             val checkId = ++sourceSeparationPlaybackCheckSeq
@@ -1663,6 +1665,7 @@ class PlaybackService :
                 allowNewSession = allowNewSession,
                 preferCompletedCache = preferCompletedCache,
                 expectProcessing = expectProcessing,
+                waitForProcessing = waitForProcessing,
             )
         }
     }
@@ -1675,12 +1678,14 @@ class PlaybackService :
         allowNewSession: Boolean,
         preferCompletedCache: Boolean,
         expectProcessing: Boolean,
+        waitForProcessing: Boolean,
     ): SessionResult {
         traceSourceSeparationPlayback(
             "check.start",
             "id=$checkId showMessage=$showUnavailableMessage allowPause=$allowPauseForProcessing " +
                     "resumeWhenReady=$resumeWhenReady allowNewSession=$allowNewSession " +
-                    "preferCompletedCache=$preferCompletedCache expectProcessing=$expectProcessing"
+                    "preferCompletedCache=$preferCompletedCache expectProcessing=$expectProcessing " +
+                    "waitForProcessing=$waitForProcessing"
         )
         if (!sourceSeparationPlaybackRequested) {
             setSourceSeparationPlaybackExpectProcessing(false)
@@ -1884,6 +1889,15 @@ class PlaybackService :
                 )
             ) {
                 status.closePlayback()
+                return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+            }
+            if (!waitForProcessing) {
+                setSourceSeparationPlaybackExpectProcessing(false)
+                clearSourceSeparationPlaybackProcessing()
+                traceSourceSeparationPlayback(
+                    "check.newSession.processing.skipWait",
+                    "id=$checkId reason=automaticDemandDisabled",
+                )
                 return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
             }
             traceSourceSeparationPlayback("check.newSession.processing", "id=$checkId")
@@ -2513,9 +2527,14 @@ class PlaybackService :
                         "generation=${selection.generation}",
                 )
                 if (sourceSeparationPlaybackRequested) {
-                    val expectProcessing = SourceSeparationBlendDemand.requiresSeparatedOutput(
-                        sourceSeparationMixProcessor.blend,
+                    val automaticDemand = preferences.getBoolean(
+                        SOURCE_SEPARATION_AUTO_START,
+                        DEFAULT_SOURCE_SEPARATION_AUTO_START,
                     )
+                    val expectProcessing = automaticDemand &&
+                            SourceSeparationBlendDemand.requiresSeparatedOutput(
+                                sourceSeparationMixProcessor.blend,
+                            )
                     setSourceSeparationPlaybackExpectProcessing(expectProcessing)
                     ensureSourceSeparationPlaybackReady(
                         showUnavailableMessage = false,
@@ -2523,6 +2542,7 @@ class PlaybackService :
                         resumeWhenReady = shouldResumeSourceSeparationPlaybackWhenReady(),
                         allowNewSession = true,
                         expectProcessing = expectProcessing,
+                        waitForProcessing = automaticDemand,
                     )
                 } else {
                     broadcastSourceSeparationPlaybackChanged()
