@@ -803,18 +803,33 @@ Evidence: `6148b589` adds the engine matrix, `a7816b50` adds the list mixer and
 
 #### Phase 4B: Compressed-source and device qualification
 
-- [ ] Add indexed-WAV/FLAC corruption, missing-index, frame-CRC, truncation,
-  and explicit failure tests for every required stem; no whole-file fallback
-  may be reintroduced.
-- [ ] Add process-recreation, cache deletion, cancellation, and stale-epoch
-  tests for 4/6/8-stem sessions, including a complete-set recovery barrier.
-- [ ] Measure audio-thread load, decode throughput, underruns, PSS, buffer-pool
-  size, file descriptors, seek readiness, and cache size with synthetic
-  4- and 6-stem PCM/FLAC fixtures on S25, S10, and available emulators.
+- [x] Reject a missing FLAC index, frame-CRC failure, or truncated file from any
+  required stem as one complete 4-stem session; no whole-file fallback may be
+  reintroduced.
+- [ ] Extend compressed-source corruption coverage to every 2/4/6/8-stem
+  geometry and explicit indexed-WAV malformed-file cases.
+- [x] Cover 6-stem engine recreation and 8-stem in-flight close/cancellation;
+  existing epoch tests continue to reject stale seek and hot-swap output.
+- [ ] Add cache deletion and service-level process-recreation tests for 4/6/8
+  stems, including a complete-set recovery barrier after file replacement.
+- [x] Run a 4-stem indexed-FLAC smoke with 20 random seeks on S25 and S10.
+  Both devices produced exact PCM with zero underruns, a 786,432-byte pool, and
+  four open descriptors. S25 recorded decode/audio p95 of 3.416/0.136 ms;
+  S10 recorded 3.626/0.415 ms. The test took 13.910 s on S25 and 15.256 s on
+  S10, including fixture generation and codec work.
+- [ ] Measure 6-stem PCM/FLAC and 4/6-stem emulator rows, including PSS, cache
+  size, thermal behavior, and longer seek/throughput percentiles. The current
+  device smoke is correctness and bounded-resource evidence only.
 - [ ] Recalibrate memory admission from measured stem count and block geometry;
   the current 8-stem/4 MiB ceiling is a structural safety bound, not a device
   qualification result. Unsupported counts must fail before session
   installation rather than degrading into partial playback or full-song PCM.
+
+Evidence: `d661340e` adds 4-stem indexed-FLAC and failure coverage,
+`109ae194` adds cancellation/recreation and S25/S10 instrumentation, and
+`28c3b155` adds the truncated-FLAC boundary. The S25/S10 instrumentation ran on
+2026-08-06 and completed both the existing two-stem 100-seek smoke and the new
+four-stem smoke with zero test failures.
 
 **Exit:** N-stem playback is technically stable with synthetic outputs and the
 same bounded engine; this does not yet activate a multi-stem model.
