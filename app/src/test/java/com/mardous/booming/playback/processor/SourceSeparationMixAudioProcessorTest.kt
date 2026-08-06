@@ -372,87 +372,105 @@ class SourceSeparationMixAudioProcessorTest {
 
     @Test
     fun missingIndexedFlacSidecarRejectsTheCompleteMultistemSession() {
-        val stems = List(4) { index ->
-            writeIndexedFlac("missing-index-$index.flac", 16_384, (index + 1) * 100)
-        }
-        Pcm16StereoFlacEncoder.frameIndexFileFor(stems[2]).delete()
-        val processor = SourceSeparationMixAudioProcessor()
-        try {
-            assertThrows(IllegalArgumentException::class.java) {
-                processor.enable(
-                    stemFiles = stems,
-                    stemIds = List(4) { index -> "stem-$index" },
-                    positionMs = 0L,
-                    stemSampleRate = 44_100,
-                    stemChannelCount = 2,
+        STEM_GEOMETRIES.forEach { stemCount ->
+            val stems = List(stemCount) { index ->
+                writeIndexedFlac(
+                    "missing-index-$stemCount-$index.flac",
+                    FLAC_FAILURE_FRAME_COUNT,
+                    (index + 1) * 100,
                 )
             }
-        } finally {
-            processor.disable()
+            Pcm16StereoFlacEncoder.frameIndexFileFor(stems[stemCount / 2]).delete()
+            val processor = SourceSeparationMixAudioProcessor()
+            try {
+                assertThrows(IllegalArgumentException::class.java) {
+                    processor.enable(
+                        stemFiles = stems,
+                        stemIds = List(stemCount) { index -> "stem-$index" },
+                        positionMs = 0L,
+                        stemSampleRate = 44_100,
+                        stemChannelCount = 2,
+                    )
+                }
+            } finally {
+                processor.disable()
+            }
         }
     }
 
     @Test
     fun truncatedIndexedFlacRejectsOrFailsTheCompleteMultistemSession() {
-        val stems = List(4) { index ->
-            writeIndexedFlac("truncated-$index.flac", 16_384, (index + 1) * 100)
-        }
-        RandomAccessFile(stems[3], "rw").use { file ->
-            file.setLength((file.length() - 32L).coerceAtLeast(0L))
-        }
-        val processor = SourceSeparationMixAudioProcessor()
-        try {
-            val installation = runCatching {
-                processor.enable(
-                    stemFiles = stems,
-                    stemIds = List(4) { index -> "stem-$index" },
-                    positionMs = 0L,
-                    stemSampleRate = 44_100,
-                    stemChannelCount = 2,
+        STEM_GEOMETRIES.forEach { stemCount ->
+            val stems = List(stemCount) { index ->
+                writeIndexedFlac(
+                    "truncated-$stemCount-$index.flac",
+                    FLAC_FAILURE_FRAME_COUNT,
+                    (index + 1) * 100,
                 )
             }
-            if (installation.isSuccess) {
-                await {
-                    processor.dataPlaneState() ==
-                            com.mardous.booming.playback.SourceSeparationPlaybackDataState.Failed
-                }
-            } else {
-                assertTrue(installation.exceptionOrNull() is IllegalArgumentException)
+            RandomAccessFile(stems.last(), "rw").use { file ->
+                file.setLength((file.length() - 32L).coerceAtLeast(0L))
             }
-        } finally {
-            processor.disable()
+            val processor = SourceSeparationMixAudioProcessor()
+            try {
+                val installation = runCatching {
+                    processor.enable(
+                        stemFiles = stems,
+                        stemIds = List(stemCount) { index -> "stem-$index" },
+                        positionMs = 0L,
+                        stemSampleRate = 44_100,
+                        stemChannelCount = 2,
+                    )
+                }
+                if (installation.isSuccess) {
+                    await {
+                        processor.dataPlaneState() ==
+                                com.mardous.booming.playback.SourceSeparationPlaybackDataState.Failed
+                    }
+                } else {
+                    assertTrue(installation.exceptionOrNull() is IllegalArgumentException)
+                }
+            } finally {
+                processor.disable()
+            }
         }
     }
 
     @Test
     fun frameCrcFailureFailsTheCompleteMultistemSessionWithoutFallback() {
-        val stems = List(4) { index ->
-            writeIndexedFlac("crc-failure-$index.flac", 16_384, (index + 1) * 100)
-        }
-        corruptFirstFlacFrame(stems[1])
-        val traces = CopyOnWriteArrayList<String>()
-        val processor = SourceSeparationMixAudioProcessor()
-        try {
-            processor.debugTraceSink = traces::add
-            processor.configure(
-                AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT),
-            )
-            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
-            processor.enable(
-                stemFiles = stems,
-                stemIds = List(4) { index -> "stem-$index" },
-                positionMs = 0L,
-                stemSampleRate = 44_100,
-                stemChannelCount = 2,
-                mixedOutputReadyPrerollMs = 0L,
-            )
-            await {
-                processor.dataPlaneState() ==
-                        com.mardous.booming.playback.SourceSeparationPlaybackDataState.Failed
+        STEM_GEOMETRIES.forEach { stemCount ->
+            val stems = List(stemCount) { index ->
+                writeIndexedFlac(
+                    "crc-failure-$stemCount-$index.flac",
+                    FLAC_FAILURE_FRAME_COUNT,
+                    (index + 1) * 100,
+                )
             }
-            assertFalse(traces.any { trace -> "fallbackWholeFileDecode" in trace })
-        } finally {
-            processor.disable()
+            corruptFirstFlacFrame(stems[1])
+            val traces = CopyOnWriteArrayList<String>()
+            val processor = SourceSeparationMixAudioProcessor()
+            try {
+                processor.debugTraceSink = traces::add
+                processor.configure(
+                    AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT),
+                )
+                processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+                processor.enable(
+                    stemFiles = stems,
+                    stemIds = List(stemCount) { index -> "stem-$index" },
+                    positionMs = 0L,
+                    stemSampleRate = 44_100,
+                    stemChannelCount = 2,
+                    mixedOutputReadyPrerollMs = 0L,
+                )
+                await {
+                    processor.dataPlaneState() ==
+                            com.mardous.booming.playback.SourceSeparationPlaybackDataState.Failed
+                }
+                assertFalse(traces.any { trace -> "fallbackWholeFileDecode" in trace })
+            } finally {
+                processor.disable()
+            }
         }
     }
 
@@ -684,5 +702,7 @@ class SourceSeparationMixAudioProcessorTest {
 
     private companion object {
         const val BYTES_PER_FRAME = 4
+        const val FLAC_FAILURE_FRAME_COUNT = 4_096
+        val STEM_GEOMETRIES = listOf(2, 4, 6, 8)
     }
 }
