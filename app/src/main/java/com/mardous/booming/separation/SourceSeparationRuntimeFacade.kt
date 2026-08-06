@@ -84,7 +84,7 @@ interface SourceSeparationRuntimeFacade {
 
     fun cleanCompletedTemporaryFiles(cacheKey: String): Boolean
 
-    fun cleanPendingCompletedTemporaryFiles(): Int
+    fun cleanPendingCompletedTemporaryFiles(): List<String>
 
     fun entries(): List<SourceSeparationModelAwareCacheEntry>
 
@@ -268,8 +268,9 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
     override fun cleanCompletedTemporaryFiles(cacheKey: String): Boolean =
         runCoordinator.cleanCompletedTemporaryFiles(cacheKey)
 
-    override fun cleanPendingCompletedTemporaryFiles(): Int =
-        cacheRepository.completedCleanupKeys().count(runCoordinator::cleanCompletedTemporaryFiles)
+    override fun cleanPendingCompletedTemporaryFiles(): List<String> =
+        cacheRepository.completedCleanupKeys()
+            .filter(runCoordinator::cleanCompletedTemporaryFiles)
 
     override fun entries(): List<SourceSeparationModelAwareCacheEntry> = cacheRepository.entries()
 

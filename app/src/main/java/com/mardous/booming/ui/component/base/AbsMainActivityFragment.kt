@@ -81,7 +81,9 @@ abstract class AbsMainActivityFragment @JvmOverloads constructor(@LayoutRes layo
                                 mainActivity.expandPanel()
                             }
                         }
-                        MediaEvent.SourceSeparationPlaybackChanged -> Unit
+                        MediaEvent.SourceSeparationPlaybackChanged,
+                        MediaEvent.SourceSeparationCacheChanged,
+                        -> Unit
                     }
                 }
             }

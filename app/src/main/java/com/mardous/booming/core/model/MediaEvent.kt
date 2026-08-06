@@ -5,5 +5,6 @@ enum class MediaEvent {
     FavoriteContentChanged,
     PlaybackRestored,
     PlaybackStarted,
-    SourceSeparationPlaybackChanged
+    SourceSeparationPlaybackChanged,
+    SourceSeparationCacheChanged,
 }

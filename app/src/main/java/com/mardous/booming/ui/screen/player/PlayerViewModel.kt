@@ -1274,6 +1274,13 @@ class PlayerViewModel(
         }
     }
 
+    fun onSourceSeparationCacheArtifactsCleaned(cacheKeys: Collection<String>) {
+        val currentCacheKey = _currentSourceSeparationCacheKeyFlow.value ?: return
+        if (currentCacheKey in cacheKeys) {
+            refreshCurrentSourceSeparationCacheAvailable()
+        }
+    }
+
     private fun acceptsCurrentSourceSeparationWorkerState(
         song: Song,
         cacheKey: String? = null,

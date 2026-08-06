@@ -92,6 +92,14 @@ class MainActivity : AbsSlidingMusicPanelActivity(), MediaController.Listener {
                 SessionResult(SessionResult.RESULT_SUCCESS)
             }
 
+            Playback.EVENT_SOURCE_SEPARATION_CACHE_CHANGED -> {
+                playerViewModel.onSourceSeparationCacheArtifactsCleaned(
+                    args.getStringArrayList(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEYS).orEmpty()
+                )
+                playerViewModel.submitEvent(MediaEvent.SourceSeparationCacheChanged)
+                SessionResult(SessionResult.RESULT_SUCCESS)
+            }
+
             else -> SessionResult(SessionError.ERROR_NOT_SUPPORTED)
         }
         return Futures.immediateFuture(sessionResult)

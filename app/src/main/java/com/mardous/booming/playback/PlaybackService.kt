@@ -2352,8 +2352,8 @@ class PlaybackService :
                 reason = "completedCacheUpgrade",
                 resume = shouldPlayAfterSwitch || resumeAfterSwitch,
             )
+            activeSession.closeModelAwareResources()
             broadcastSourceSeparationPlaybackChanged()
-            cleanupCompletedSourceSeparationTemporaryDirs()
             sourceSeparationPlaybackGateJob?.cancel()
             sourceSeparationPlaybackGateJob = null
             updateSourceSeparationProcessingLease("completedCacheUpgrade.ready")
@@ -2361,7 +2361,6 @@ class PlaybackService :
                 "check.end",
                 "id=$checkId result=success completedCacheUpgrade",
             )
-            activeSession.closeModelAwareResources()
             adopted = true
             return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
         } catch (error: Throwable) {
@@ -3768,14 +3767,26 @@ class PlaybackService :
     }
 
     private fun cleanCompletedSourceSeparationTemporaryDirsNow() {
-        val cleanedCount = runCatching {
+        val cleanedCacheKeys = runCatching {
             sourceSeparationRuntime.cleanPendingCompletedTemporaryFiles()
-        }.getOrDefault(0)
-        if (cleanedCount > 0) {
+        }.getOrDefault(emptyList())
+        if (cleanedCacheKeys.isNotEmpty()) {
             traceSourceSeparationPlayback(
                 "cleanup.completedTemporaryDirs",
-                "count=$cleanedCount"
+                "count=${cleanedCacheKeys.size} " +
+                    "keys=${cleanedCacheKeys.joinToString { it.take(12) }}"
             )
+            serviceScope.launch {
+                mediaSession?.broadcastCustomCommand(
+                    SessionCommand(Playback.EVENT_SOURCE_SEPARATION_CACHE_CHANGED, Bundle.EMPTY),
+                    Bundle().apply {
+                        putStringArrayList(
+                            Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEYS,
+                            ArrayList(cleanedCacheKeys),
+                        )
+                    },
+                )
+            }
         }
     }
 

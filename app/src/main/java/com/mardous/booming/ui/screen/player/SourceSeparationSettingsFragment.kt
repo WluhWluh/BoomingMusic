@@ -74,6 +74,7 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.mardous.booming.BuildConfig
 import com.mardous.booming.R
+import com.mardous.booming.core.model.MediaEvent
 import com.mardous.booming.extensions.MIME_TYPE_PLAIN_TEXT
 import com.mardous.booming.extensions.files.getFormattedFileName
 import com.mardous.booming.extensions.isLandscape
@@ -84,6 +85,7 @@ import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
 import com.mardous.booming.ui.component.compose.TitledCard
 import com.mardous.booming.ui.theme.BoomingMusicTheme
 import com.mardous.booming.ui.theme.SliderTokens
+import kotlinx.coroutines.flow.collect
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
 import org.koin.androidx.viewmodel.ext.android.viewModel
 import java.io.File
@@ -251,6 +253,13 @@ private fun SourceSeparationSettingsSheet(
         }
         if (!separatedPlaybackEnabled) {
             blendDragging = false
+        }
+    }
+    LaunchedEffect(viewModel, modelAwareCacheViewModel) {
+        viewModel.mediaEvent.collect { event ->
+            if (event == MediaEvent.SourceSeparationCacheChanged) {
+                modelAwareCacheViewModel.refresh()
+            }
         }
     }
     BottomSheetDialogSurface {

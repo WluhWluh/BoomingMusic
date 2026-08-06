@@ -1,19 +1,41 @@
 package com.mardous.booming.separation.cache.v2
 
+import com.mardous.booming.separation.cache.SourceSeparationCacheRelativePath
+
 class SourceSeparationCacheEntryLeaseRegistry {
     private val states = mutableMapOf<String, LeaseState>()
+    private var nextReaderId = 0L
 
     @Synchronized
-    fun tryAcquireRead(cacheKey: String): SourceSeparationCacheEntryLease? {
+    fun tryAcquireRead(cacheKey: String): SourceSeparationCacheEntryLease? =
+        tryAcquireRead(cacheKey, ReadProtection.WholeEntry)
+
+    @Synchronized
+    fun tryAcquireArtifactRead(
+        cacheKey: String,
+        protectedPaths: Set<String>,
+    ): SourceSeparationCacheEntryLease? {
+        require(protectedPaths.isNotEmpty()) { "A cache artifact read lease protects no paths." }
+        protectedPaths.forEach(SourceSeparationCacheRelativePath::requireValid)
+        return tryAcquireRead(
+            cacheKey = cacheKey,
+            protection = ReadProtection.Paths(protectedPaths.toSet()),
+        )
+    }
+
+    private fun tryAcquireRead(
+        cacheKey: String,
+        protection: ReadProtection,
+    ): SourceSeparationCacheEntryLease? {
         requireCacheKey(cacheKey)
         val current = states.getOrPut(cacheKey, ::LeaseState)
-        if (current.exclusiveActive) {
-            return null
-        }
-        current.readerCount += 1
+        if (current.exclusiveActive) return null
+        val readerId = ++nextReaderId
+        current.readers[readerId] = protection
         return SourceSeparationCacheEntryLease(
             cacheKey = cacheKey,
             mode = SourceSeparationCacheLeaseMode.Read,
+            readerId = readerId,
             release = ::release,
         )
     }
@@ -26,11 +48,7 @@ class SourceSeparationCacheEntryLeaseRegistry {
             return null
         }
         current.runWriterActive = true
-        return SourceSeparationCacheEntryLease(
-            cacheKey = cacheKey,
-            mode = SourceSeparationCacheLeaseMode.RunWrite,
-            release = ::release,
-        )
+        return mutationLease(cacheKey, SourceSeparationCacheLeaseMode.RunWrite)
     }
 
     @Synchronized
@@ -41,11 +59,26 @@ class SourceSeparationCacheEntryLeaseRegistry {
             return null
         }
         current.promotionActive = true
-        return SourceSeparationCacheEntryLease(
-            cacheKey = cacheKey,
-            mode = SourceSeparationCacheLeaseMode.Promotion,
-            release = ::release,
-        )
+        return mutationLease(cacheKey, SourceSeparationCacheLeaseMode.Promotion)
+    }
+
+    @Synchronized
+    fun tryAcquireCleanup(
+        cacheKey: String,
+        cleanupPaths: Set<String>,
+    ): SourceSeparationCacheEntryLease? {
+        requireCacheKey(cacheKey)
+        cleanupPaths.forEach(SourceSeparationCacheRelativePath::requireValid)
+        val current = states.getOrPut(cacheKey, ::LeaseState)
+        if (current.exclusiveActive ||
+            current.runWriterActive ||
+            current.promotionActive ||
+            current.readers.values.any { it.blocks(cleanupPaths) }
+        ) {
+            return null
+        }
+        current.exclusiveActive = true
+        return mutationLease(cacheKey, SourceSeparationCacheLeaseMode.Exclusive)
     }
 
     @Synchronized
@@ -55,16 +88,12 @@ class SourceSeparationCacheEntryLeaseRegistry {
         if (current.exclusiveActive ||
             current.runWriterActive ||
             current.promotionActive ||
-            current.readerCount > 0
+            current.readers.isNotEmpty()
         ) {
             return null
         }
         current.exclusiveActive = true
-        return SourceSeparationCacheEntryLease(
-            cacheKey = cacheKey,
-            mode = SourceSeparationCacheLeaseMode.Exclusive,
-            release = ::release,
-        )
+        return mutationLease(cacheKey, SourceSeparationCacheLeaseMode.Exclusive)
     }
 
     @Synchronized
@@ -72,9 +101,9 @@ class SourceSeparationCacheEntryLeaseRegistry {
         requireCacheKey(cacheKey)
         return states[cacheKey]?.let {
             it.exclusiveActive ||
-                    it.runWriterActive ||
-                    it.promotionActive ||
-                    it.readerCount > 0
+                it.runWriterActive ||
+                it.promotionActive ||
+                it.readers.isNotEmpty()
         } == true
     }
 
@@ -82,7 +111,7 @@ class SourceSeparationCacheEntryLeaseRegistry {
     fun snapshot(): Map<String, SourceSeparationCacheLeaseSnapshot> {
         return states.mapValues { (_, state) ->
             SourceSeparationCacheLeaseSnapshot(
-                readerCount = state.readerCount,
+                readerCount = state.readers.size,
                 runWriterActive = state.runWriterActive,
                 promotionActive = state.promotionActive,
                 exclusiveActive = state.exclusiveActive,
@@ -90,13 +119,28 @@ class SourceSeparationCacheEntryLeaseRegistry {
         }
     }
 
+    private fun mutationLease(
+        cacheKey: String,
+        mode: SourceSeparationCacheLeaseMode,
+    ) = SourceSeparationCacheEntryLease(
+        cacheKey = cacheKey,
+        mode = mode,
+        readerId = null,
+        release = ::release,
+    )
+
     @Synchronized
-    private fun release(cacheKey: String, mode: SourceSeparationCacheLeaseMode) {
+    private fun release(
+        cacheKey: String,
+        mode: SourceSeparationCacheLeaseMode,
+        readerId: Long?,
+    ) {
         val state = states[cacheKey] ?: return
         when (mode) {
             SourceSeparationCacheLeaseMode.Read -> {
-                check(state.readerCount > 0) { "Cache read lease count underflow." }
-                state.readerCount -= 1
+                val id = requireNotNull(readerId) { "Cache read lease has no reader ID." }
+                check(state.readers.containsKey(id)) { "Cache read lease count underflow." }
+                state.readers.remove(id)
             }
             SourceSeparationCacheLeaseMode.RunWrite -> {
                 check(state.runWriterActive) { "Cache run-writer lease was not active." }
@@ -111,7 +155,7 @@ class SourceSeparationCacheEntryLeaseRegistry {
                 state.exclusiveActive = false
             }
         }
-        if (state.readerCount == 0 &&
+        if (state.readers.isEmpty() &&
             !state.runWriterActive &&
             !state.promotionActive &&
             !state.exclusiveActive
@@ -125,11 +169,32 @@ class SourceSeparationCacheEntryLeaseRegistry {
     }
 
     private data class LeaseState(
-        var readerCount: Int = 0,
+        val readers: MutableMap<Long, ReadProtection> = mutableMapOf(),
         var runWriterActive: Boolean = false,
         var promotionActive: Boolean = false,
         var exclusiveActive: Boolean = false,
     )
+
+    private sealed interface ReadProtection {
+        fun blocks(cleanupPaths: Set<String>): Boolean
+
+        data object WholeEntry : ReadProtection {
+            override fun blocks(cleanupPaths: Set<String>): Boolean = true
+        }
+
+        data class Paths(val paths: Set<String>) : ReadProtection {
+            override fun blocks(cleanupPaths: Set<String>): Boolean = paths.any { protectedPath ->
+                cleanupPaths.any { cleanupPath -> pathsOverlap(protectedPath, cleanupPath) }
+            }
+        }
+
+        companion object {
+            private fun pathsOverlap(first: String, second: String): Boolean =
+                first == second ||
+                    first.startsWith("$second/") ||
+                    second.startsWith("$first/")
+        }
+    }
 
     private companion object {
         val CACHE_KEY_PATTERN = Regex("^[0-9a-f]{64}$")
@@ -139,7 +204,8 @@ class SourceSeparationCacheEntryLeaseRegistry {
 class SourceSeparationCacheEntryLease internal constructor(
     val cacheKey: String,
     val mode: SourceSeparationCacheLeaseMode,
-    private val release: (String, SourceSeparationCacheLeaseMode) -> Unit,
+    private val readerId: Long?,
+    private val release: (String, SourceSeparationCacheLeaseMode, Long?) -> Unit,
 ) : AutoCloseable {
     private var closed = false
     private var kernelLease: SourceSeparationCacheEntryKernelLease? = null
@@ -174,7 +240,7 @@ class SourceSeparationCacheEntryLease internal constructor(
             kernelLease.also { kernelLease = null }
         }
         kernel?.close()
-        release(cacheKey, mode)
+        release(cacheKey, mode, readerId)
     }
 }
 

@@ -108,6 +108,30 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `paused run deletes uncommitted running window artifacts immediately`() {
+        val fixture = fixture()
+        val run = fixture.beginReady()
+        val preparation = fixture.preparation(run, SourceSeparationSegmentState.Running)
+        fixture.coordinator.updatePreparation(run, preparation)
+        val segmentPaths = preparation.segmentPlan.segments
+            .flatMap { segment -> segment.stems.map { it.path } }
+        assertTrue(segmentPaths.all { path ->
+            fixture.store.resolveEntryPath(run.identity.cacheKey, path).isFile
+        })
+
+        val retained = requireNotNull(fixture.coordinator.pause(run))
+
+        assertTrue(retained.segmentPlan?.segments?.all {
+            it.state == SourceSeparationSegmentState.Queued
+        } == true)
+        assertTrue(segmentPaths.none { path ->
+            fixture.store.resolveEntryPath(run.identity.cacheKey, path).exists()
+        })
+        assertTrue(preparation.vocalsFile.isFile)
+        assertTrue(preparation.instrumentalFile.isFile)
+    }
+
+    @Test
     fun `completion publishes validated output before releasing the run lease`() {
         val fixture = fixture()
         val run = fixture.beginReady()
@@ -131,10 +155,11 @@ class SourceSeparationCacheRunCoordinatorTest {
         )
 
         val playback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
-        assertFalse(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
-        playback.close()
         assertTrue(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
         assertFalse(fixture.store.resolveEntryPath(completed.cacheKey, "work").exists())
+        assertTrue(playback.vocalsFile.isFile)
+        playback.close()
+        assertFalse(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
         assertEquals(
             SourceSeparationCacheValidationResult.Valid,
             fixture.store.validateCompletedEntry(requireNotNull(fixture.store.readManifest(completed.cacheKey))),

@@ -20,6 +20,7 @@ import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.CancellationException
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -50,23 +51,34 @@ class SourceSeparationCacheFlacPromoterTest {
             SourceSeparationCacheValidationResult.Valid,
             fixture.store.validateCompletedEntry(promoted.manifest),
         )
-        val playback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
-        assertEquals("stem-00.flac", playback.vocalsFile.name)
-        assertEquals("stem-01.flac", playback.instrumentalFile.name)
         assertEquals(
             listOf("completed/stem-00.flac.idx", "completed/stem-01.flac.idx"),
             requireNotNull(promoted.manifest.output).stems.map { it.promotedIndexPath },
         )
-        assertFalse(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
-        playback.close()
+        assertTrue(fixture.store.resolveEntryPath(completed.cacheKey, "completed/stem-00.wav").isFile)
+        fixture.store.recover()
+        assertTrue(fixture.store.resolveEntryPath(completed.cacheKey, "completed/stem-00.wav").isFile)
+        val playback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
+        assertEquals("stem-00.flac", playback.vocalsFile.name)
+        assertEquals("stem-01.flac", playback.instrumentalFile.name)
         assertTrue(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
         assertFalse(fixture.store.resolveEntryPath(completed.cacheKey, "completed/stem-00.wav").exists())
+        assertTrue(playback.vocalsFile.isFile)
+        playback.close()
+        assertFalse(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
         assertEquals(
             SourceSeparationCacheValidationResult.Valid,
             fixture.store.validateCompletedEntry(
                 requireNotNull(fixture.store.readManifest(completed.cacheKey)),
             ),
         )
+        fixture.store.resolveEntryPath(completed.cacheKey, "completed/stem-00.wav")
+            .writeText("orphan")
+        fixture.store.recover()
+        assertFalse(fixture.store.resolveEntryPath(
+            completed.cacheKey,
+            "completed/stem-00.wav",
+        ).exists())
     }
 
     @Test
@@ -93,7 +105,7 @@ class SourceSeparationCacheFlacPromoterTest {
             )
             assertTrue(index.isFile)
 
-            val trace = mutableListOf<String>()
+            val trace = CopyOnWriteArrayList<String>()
             val reader = requireNotNull(
                 Pcm16StereoFlacEncoder.openIndexedPcmReader(flac, trace::add),
             )
@@ -119,7 +131,7 @@ class SourceSeparationCacheFlacPromoterTest {
         }
 
         val playback = requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey))
-        val mixTrace = mutableListOf<String>()
+        val mixTrace = CopyOnWriteArrayList<String>()
         val processor = SourceSeparationMixAudioProcessor().apply {
             debugTraceSink = mixTrace::add
         }
@@ -186,13 +198,18 @@ class SourceSeparationCacheFlacPromoterTest {
         assertEquals("stem-00.flac", flacPlayback.vocalsFile.name)
         assertTrue(flacPlayback.vocalsFile.isFile)
         assertFalse(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
+        assertFalse(fixture.store.resolveEntryPath(completed.cacheKey, "work").exists())
+        assertFalse(fixture.store.resolveEntryPath(completed.cacheKey, "segments").exists())
+        assertEquals(
+            listOf("completed/stem-00.wav", "completed/stem-01.wav"),
+            fixture.store.readManifest(completed.cacheKey)?.cleanup?.paths,
+        )
 
-        flacPlayback.close()
-        assertFalse(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
         wavPlayback.close()
         assertTrue(fixture.coordinator.cleanCompletedTemporaryFiles(completed.cacheKey))
         assertFalse(wavPlayback.vocalsFile.exists())
         assertTrue(flacPlayback.vocalsFile.isFile)
+        flacPlayback.close()
     }
 
     @Test

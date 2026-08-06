@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.cache.SourceSeparationCacheRelativePath
+import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.file.AtomicMoveNotSupportedException
@@ -349,18 +350,20 @@ class SourceSeparationCacheStore(
                 kernelLease.use { lease ->
                     lease.bindEntryDirectory(directory)
                     removedTemporaryFiles += removeTemporaryFiles(directory)
-                    val manifest = readManifestFromDirectory(directory, directory.name)
+                    var manifest = readManifestFromDirectory(directory, directory.name)
                     if (manifest == null) {
                         if (directory.deleteRecursively()) removedInvalidEntries += 1
                     } else {
-                        val journal = readRunJournal(manifest.cacheKey)
+                        var journal = readRunJournal(manifest.cacheKey)
                         if (journal?.lifecycle ==
                             SourceSeparationCacheRunJournalLifecycle.Running
                         ) {
-                            writeRunJournal(journal.reconcileOrphanedOwner(nowEpochMs()))
+                            journal = journal.reconcileOrphanedOwner(nowEpochMs())
+                            writeRunJournal(journal)
                             reconciledOrphanedRuns += 1
                         }
-                        removedDerivedArtifacts += recoverDerivedArtifacts(manifest)
+                        manifest = normalizeOrphanedPartialState(manifest)
+                        removedDerivedArtifacts += recoverDerivedArtifacts(manifest, journal)
                     }
                 }
             }
@@ -374,7 +377,10 @@ class SourceSeparationCacheStore(
         )
     }
 
-    private fun recoverDerivedArtifacts(manifest: SourceSeparationCacheManifest): Int {
+    private fun recoverDerivedArtifacts(
+        manifest: SourceSeparationCacheManifest,
+        journal: SourceSeparationCacheRunJournal?,
+    ): Int {
         var removed = 0
         listOf(SourceSeparationCacheFlacPromoter.PROMOTION_STAGING_DIRECTORY).forEach { path ->
             val directory = resolveEntryPath(manifest.cacheKey, path)
@@ -383,21 +389,87 @@ class SourceSeparationCacheStore(
             }
         }
 
-        val referencedPromotedPaths = manifest.output?.stems.orEmpty()
-            .flatMap { stem -> listOfNotNull(stem.promotedPath, stem.promotedIndexPath) }
-            .toSet()
+        val referencedCompletedPaths = buildSet {
+            manifest.output?.stems.orEmpty().forEach { stem ->
+                listOfNotNull(
+                    stem.playbackPath(),
+                    stem.promotedIndexPath.takeIf { stem.promotionValidated },
+                )
+                    .filterTo(this) { path -> path.startsWith("completed/") }
+            }
+            manifest.output?.timingPath
+                ?.takeIf { path -> path.startsWith("completed/") }
+                ?.let(::add)
+            manifest.cleanup?.paths.orEmpty()
+                .filterTo(this) { path -> path.startsWith("completed/") }
+        }
         val completedDirectory = resolveEntryPath(manifest.cacheKey, "completed")
         completedDirectory.listFiles()
             ?.filter { file ->
                 file.isFile &&
-                    (file.name.endsWith(".flac") ||
-                        file.name.endsWith(".flac.idx")) &&
-                    relativeEntryPath(manifest.cacheKey, file) !in referencedPromotedPaths
+                    relativeEntryPath(manifest.cacheKey, file) !in referencedCompletedPaths
             }
             ?.forEach { file ->
                 if (file.delete()) removed += 1
             }
+
+        if (manifest.state == SourceSeparationCacheManifestState.Partial) {
+            if (manifest.output == null || manifest.segmentPlan == null) {
+                listOf(
+                    SourceSeparationCacheRunCoordinator.WORK_DIRECTORY,
+                    SourceSeparationCacheRunCoordinator.SEGMENTS_DIRECTORY,
+                ).forEach { path ->
+                    val directory = resolveEntryPath(manifest.cacheKey, path)
+                    if (directory.exists() && deleteRelativePath(manifest.cacheKey, path)) {
+                        removed += 1
+                    }
+                }
+                return removed
+            }
+            val committedPaths = journal?.committedSegments.orEmpty()
+                .flatMap(SourceSeparationCacheCommittedSegment::stems)
+                .mapTo(mutableSetOf(), SourceSeparationCacheCommittedStem::path)
+            val segmentsDirectory = resolveEntryPath(manifest.cacheKey, "segments")
+            segmentsDirectory.walkTopDown()
+                .filter(File::isFile)
+                .filter { file ->
+                    relativeEntryPath(manifest.cacheKey, file) !in committedPaths
+                }
+                .toList()
+                .forEach { file ->
+                    if (file.delete()) removed += 1
+                }
+            segmentsDirectory.walkBottomUp()
+                .filter { directory ->
+                    directory != segmentsDirectory &&
+                        directory.isDirectory &&
+                        directory.listFiles()?.isEmpty() == true
+                }
+                .forEach(File::delete)
+        }
         return removed
+    }
+
+    private fun normalizeOrphanedPartialState(
+        manifest: SourceSeparationCacheManifest,
+    ): SourceSeparationCacheManifest {
+        if (manifest.state != SourceSeparationCacheManifestState.Partial) return manifest
+        val plan = manifest.segmentPlan ?: return manifest
+        if (plan.segments.none { it.state == SourceSeparationSegmentState.Running }) {
+            return manifest
+        }
+        return manifest.copy(
+            segmentPlan = plan.copy(
+                segments = plan.segments.map { segment ->
+                    if (segment.state == SourceSeparationSegmentState.Running) {
+                        segment.copy(state = SourceSeparationSegmentState.Queued)
+                    } else {
+                        segment
+                    }
+                }
+            ),
+            updatedAtEpochMs = maxOf(manifest.updatedAtEpochMs, nowEpochMs()),
+        ).also(::writeManifest)
     }
 
     private fun readManifestFromDirectory(

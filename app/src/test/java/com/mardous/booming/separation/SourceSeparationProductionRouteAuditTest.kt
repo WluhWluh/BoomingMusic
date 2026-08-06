@@ -93,6 +93,49 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `successful temporary cleanup publishes an exact cache refresh event`() {
+        val playback = mainSource(
+            "com/mardous/booming/playback/Playback.kt",
+        ).readText()
+        val service = mainSource(
+            "com/mardous/booming/playback/PlaybackService.kt",
+        ).readText()
+        val activity = mainSource(
+            "com/mardous/booming/ui/screen/MainActivity.kt",
+        ).readText()
+        val viewModel = mainSource(
+            "com/mardous/booming/ui/screen/player/PlayerViewModel.kt",
+        ).readText()
+
+        assertTrue(playback.contains("EVENT_SOURCE_SEPARATION_CACHE_CHANGED"))
+        assertTrue(playback.contains("EXTRA_SOURCE_SEPARATION_CACHE_KEYS"))
+        assertTrue(service.contains("if (cleanedCacheKeys.isNotEmpty())"))
+        assertTrue(service.contains("Playback.EVENT_SOURCE_SEPARATION_CACHE_CHANGED"))
+        assertTrue(activity.contains("onSourceSeparationCacheArtifactsCleaned("))
+        assertTrue(viewModel.contains("if (currentCacheKey in cacheKeys)"))
+    }
+
+    @Test
+    fun `completed cache upgrade releases the obsolete playback before cleanup`() {
+        val service = mainSource(
+            "com/mardous/booming/playback/PlaybackService.kt",
+        ).readText()
+        val start = service.indexOf(
+            "private suspend fun switchActiveSourceSeparationSessionToCompletedCache(",
+        )
+        val end = service.indexOf(
+            "private fun setSourceSeparationBlend(",
+            start,
+        )
+        val upgrade = service.substring(start, end)
+
+        val release = upgrade.indexOf("activeSession.closeModelAwareResources()")
+        val cleanupTrigger = upgrade.indexOf("broadcastSourceSeparationPlaybackChanged()")
+        assertTrue(release >= 0)
+        assertTrue(release < cleanupTrigger)
+    }
+
+    @Test
     fun `remote start binds admission to the calling host callback`() {
         val aidl = mainAidl(
             "com/mardous/booming/separation/process/ipc/ISourceSeparationExecutionService.aidl",

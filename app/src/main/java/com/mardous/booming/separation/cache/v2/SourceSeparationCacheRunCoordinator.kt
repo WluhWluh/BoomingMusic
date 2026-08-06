@@ -5,6 +5,7 @@ import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.SourceSeparationGpuFallbackLatch
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
+import com.mardous.booming.separation.cache.SourceSeparationSegment
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.MdxRangePreparation
 import com.mardous.booming.separation.model.MdxRangeResumeState
@@ -484,30 +485,40 @@ class SourceSeparationCacheRunCoordinator(
     }
 
     fun cleanCompletedTemporaryFiles(cacheKey: String): Boolean {
-        val manifest = store.readManifest(cacheKey)
+        val observedManifest = store.readManifest(cacheKey)
             ?.takeIf { it.state == SourceSeparationCacheManifestState.Completed }
             ?: return false
-        val cleanup = manifest.cleanup ?: return false
-        val lease = repository.tryAcquireExclusive(
-            cacheKey,
-            SourceSeparationCacheLockPurpose.Cleanup,
-        ) ?: return false
-        return lease.use {
-            it.bindEntryDirectory(store.entryDirectory(cacheKey))
-            val cleaned = cleanup.paths.all { path ->
-                store.deleteRelativePath(cacheKey, path)
-            }
-            if (cleaned) {
+        val observedCleanup = observedManifest.cleanup ?: return false
+        var completedCleanup = false
+        observedCleanup.paths.forEach { path ->
+            val lease = repository.tryAcquireCleanup(cacheKey, setOf(path))
+                ?: return@forEach
+            lease.use {
+                it.bindEntryDirectory(store.entryDirectory(cacheKey))
+                val manifest = store.readManifest(cacheKey)
+                    ?.takeIf { current ->
+                        current.state == SourceSeparationCacheManifestState.Completed &&
+                            current.cleanup?.paths?.contains(path) == true
+                    }
+                    ?: return@use
+                if (!store.deleteRelativePath(cacheKey, path)) return@use
+                val remainingPaths = requireNotNull(manifest.cleanup).paths
+                    .filterNot { it == path }
                 store.writeManifest(
                     manifest.copy(
-                        cleanup = null,
+                        cleanup = if (remainingPaths.isEmpty()) {
+                            null
+                        } else {
+                            SourceSeparationCacheCleanup(remainingPaths)
+                        },
                         output = manifest.output?.copy(totalBytes = store.entrySize(cacheKey)),
                         updatedAtEpochMs = nowEpochMs(),
                     )
                 )
+                if (remainingPaths.isEmpty()) completedCleanup = true
             }
-            cleaned
         }
+        return completedCleanup
     }
 
     private fun finishIncomplete(
@@ -518,6 +529,8 @@ class SourceSeparationCacheRunCoordinator(
         return try {
             run.requireOpen()
             val current = store.readManifest(run.identity.cacheKey) ?: return null
+            val discardedSegments = current.segmentPlan?.segments.orEmpty()
+                .filter { it.state == SourceSeparationSegmentState.Running }
             val resetPlan = current.segmentPlan?.copy(
                 segments = current.segmentPlan.segments.map { segment ->
                     if (segment.state == SourceSeparationSegmentState.Running) {
@@ -556,6 +569,7 @@ class SourceSeparationCacheRunCoordinator(
                     lifecycle = lifecycle,
                 )
             }
+            deleteSegmentArtifactSets(run.identity.cacheKey, discardedSegments)
             updated
         } finally {
             run.close()
@@ -627,15 +641,29 @@ class SourceSeparationCacheRunCoordinator(
         committedSegments: List<SourceSeparationCacheCommittedSegment>,
     ) {
         val committedIndexes = committedSegments.map { it.segmentIndex }.toSet()
-        plan?.segments.orEmpty()
-            .filterNot { it.index in committedIndexes }
-            .forEach { segment ->
-                segment.deleteArtifactSet(store, cacheKey)
-            }
+        deleteSegmentArtifactSets(
+            cacheKey = cacheKey,
+            segments = plan?.segments.orEmpty().filterNot { it.index in committedIndexes },
+        )
         store.resolveEntryPath(cacheKey, SEGMENTS_DIRECTORY)
             .walkTopDown()
             .filter { file -> file.isFile && file.name.endsWith(".tmp") }
             .forEach(File::delete)
+    }
+
+    private fun deleteSegmentArtifactSets(
+        cacheKey: String,
+        segments: List<SourceSeparationSegment>,
+    ) {
+        segments.forEach { segment ->
+            segment.deleteArtifactSet(store, cacheKey)
+            segment.stems.asSequence()
+                .map { stem -> store.resolveEntryPath(cacheKey, stem.path).parentFile }
+                .filterNotNull()
+                .distinct()
+                .filter { directory -> directory.listFiles()?.isEmpty() == true }
+                .forEach(File::delete)
+        }
     }
 
     private fun SourceSeparationCacheRunRequest.toJournalRequest(

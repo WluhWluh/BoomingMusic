@@ -331,6 +331,16 @@ class SourceSeparationModelAwareCacheRepository(
         return leases.tryAcquireRead(cacheKey)
     }
 
+    fun tryAcquireCleanup(
+        cacheKey: String,
+        cleanupPaths: Set<String>,
+    ): SourceSeparationCacheEntryLease? {
+        return tryAcquireMutation(
+            localLease = leases.tryAcquireCleanup(cacheKey, cleanupPaths),
+            owner = SourceSeparationCacheLockOwner(SourceSeparationCacheLockPurpose.Cleanup),
+        )
+    }
+
     fun tryAcquirePromotion(cacheKey: String): SourceSeparationCacheEntryLease? {
         return tryAcquireMutation(
             localLease = leases.tryAcquirePromotion(cacheKey),
@@ -360,9 +370,19 @@ class SourceSeparationModelAwareCacheRepository(
     private fun openPlayback(
         manifest: SourceSeparationCacheManifest,
     ): SourceSeparationModelAwareCachePlayback? {
-        val lease = leases.tryAcquireRead(manifest.cacheKey) ?: return null
+        val output = manifest.output ?: return null
+        val protectedPaths = buildSet {
+            output.stems.forEach { stem ->
+                add(stem.playbackPath())
+                if (stem.promotionValidated) {
+                    stem.promotedIndexPath?.let(::add)
+                }
+            }
+            output.timingPath?.let(::add)
+        }
+        val lease = leases.tryAcquireArtifactRead(manifest.cacheKey, protectedPaths) ?: return null
         return try {
-            val stems = manifest.output?.stems.orEmpty().map { stem ->
+            val stems = output.stems.map { stem ->
                 SourceSeparationPlaybackStemSource(
                     descriptor = stem.descriptor(),
                     file = store.resolveEntryPath(manifest.cacheKey, stem.playbackPath()),
@@ -378,7 +398,7 @@ class SourceSeparationModelAwareCacheRepository(
             SourceSeparationModelAwareCachePlayback(
                 manifest = manifest,
                 stems = stems,
-                timingFile = manifest.output?.timingPath?.let { path ->
+                timingFile = output.timingPath?.let { path ->
                     store.resolveEntryPath(manifest.cacheKey, path).takeIf(File::isFile)
                 },
                 closeAction = {

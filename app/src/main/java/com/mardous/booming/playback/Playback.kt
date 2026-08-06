@@ -31,6 +31,8 @@ object Playback {
     const val EVENT_PLAYBACK_STARTED = "com.mardous.booming.event.playback_started"
     const val EVENT_SOURCE_SEPARATION_PLAYBACK_CHANGED =
         "com.mardous.booming.event.source_separation.playback_changed"
+    const val EVENT_SOURCE_SEPARATION_CACHE_CHANGED =
+        "com.mardous.booming.event.source_separation.cache_changed"
 
     // Source separation extras
     const val EXTRA_SOURCE_SEPARATION_ENABLED = "source_separation_enabled"
@@ -48,6 +50,7 @@ object Playback {
     const val EXTRA_SOURCE_SEPARATION_PREFER_COMPLETED_CACHE =
         "source_separation_prefer_completed_cache"
     const val EXTRA_SOURCE_SEPARATION_CACHE_KEY = "source_separation_cache_key"
+    const val EXTRA_SOURCE_SEPARATION_CACHE_KEYS = "source_separation_cache_keys"
     const val EXTRA_SOURCE_SEPARATION_PERSIST_BLEND = "source_separation_persist_blend"
     const val EXTRA_SOURCE_SEPARATION_TRACE_MARKER = "source_separation_trace_marker"
 }

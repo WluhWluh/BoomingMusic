@@ -19,6 +19,7 @@ class SourceSeparationCacheEntryLeaseRegistryTest {
         val second = requireNotNull(registry.tryAcquireRead(KEY_A))
 
         assertNull(registry.tryAcquireExclusive(KEY_A))
+        assertNull(registry.tryAcquireCleanup(KEY_A, setOf("work")))
         assertEquals(
             SourceSeparationCacheLeaseSnapshot(
                 readerCount = 2,
@@ -34,6 +35,45 @@ class SourceSeparationCacheEntryLeaseRegistryTest {
         second.close()
         assertNotNull(registry.tryAcquireExclusive(KEY_A)?.also { it.close() })
         assertFalse(registry.isLeased(KEY_A))
+    }
+
+    @Test
+    fun `promoted artifact reader allows cleanup of obsolete wav paths`() {
+        val registry = SourceSeparationCacheEntryLeaseRegistry()
+        val reader = requireNotNull(
+            registry.tryAcquireArtifactRead(
+                KEY_A,
+                setOf("completed/stem-00.flac", "completed/stem-01.flac"),
+            )
+        )
+
+        val cleanup = requireNotNull(
+            registry.tryAcquireCleanup(
+                KEY_A,
+                setOf("work", "segments", "completed/stem-00.wav"),
+            )
+        )
+        assertNull(registry.tryAcquireRead(KEY_A))
+        assertEquals(1, registry.snapshot()[KEY_A]?.readerCount)
+
+        cleanup.close()
+        assertTrue(registry.isLeased(KEY_A))
+        reader.close()
+        assertFalse(registry.isLeased(KEY_A))
+    }
+
+    @Test
+    fun `artifact reader blocks cleanup of its file or parent directory`() {
+        val registry = SourceSeparationCacheEntryLeaseRegistry()
+        val reader = requireNotNull(
+            registry.tryAcquireArtifactRead(KEY_A, setOf("work/vocals.wav"))
+        )
+
+        assertNull(registry.tryAcquireCleanup(KEY_A, setOf("work/vocals.wav")))
+        assertNull(registry.tryAcquireCleanup(KEY_A, setOf("work")))
+
+        reader.close()
+        assertNotNull(registry.tryAcquireCleanup(KEY_A, setOf("work"))?.also { it.close() })
     }
 
     @Test

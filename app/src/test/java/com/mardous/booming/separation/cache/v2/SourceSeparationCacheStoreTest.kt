@@ -1,9 +1,12 @@
 package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
+import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContract
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
+import com.mardous.booming.separation.model.contract.toStemSet
 import java.io.File
 import java.nio.file.Files
 import java.security.MessageDigest
@@ -155,13 +158,15 @@ class SourceSeparationCacheStoreTest {
         ).apply { mkdirs() }.resolve("partial.flac").writeText("partial")
         store.resolveEntryPath(valid.cacheKey, "completed/orphan.flac").writeText("orphan")
         store.resolveEntryPath(valid.cacheKey, "completed/orphan.flac.idx").writeText("orphan")
+        store.resolveEntryPath(valid.cacheKey, "completed/orphan.wav").writeText("orphan")
+        store.resolveEntryPath(valid.cacheKey, "completed/orphan-timing.txt").writeText("orphan")
 
         val result = store.recover()
 
         assertEquals(1, result.removedTemporaryFiles)
         assertEquals(1, result.removedStagingRuns)
         assertEquals(1, result.removedInvalidEntries)
-        assertEquals(3, result.removedDerivedArtifacts)
+        assertEquals(5, result.removedDerivedArtifacts)
         assertNotNull(store.readManifest(valid.cacheKey))
         assertFalse(tempFile.exists())
         assertFalse(invalidEntry.exists())
@@ -194,6 +199,81 @@ class SourceSeparationCacheStoreTest {
         assertTrue(reconciled.transitions.any {
             it.type == SourceSeparationCacheRunTransitionType.ObserverDisconnected
         })
+    }
+
+    @Test
+    fun `recovery removes segment artifacts absent from the committed journal`() {
+        val store = SourceSeparationCacheStore(cacheRoot())
+        val base = completedManifest(store)
+        val plan = SourceSeparationSegmentPlan.build(
+            rangeStartFrame = 0,
+            rangeEndFrame = 44_100,
+            sampleRate = 44_100,
+            generationSize = 44_100,
+            trim = 1_024,
+            chunkSize = 46_148,
+            stemIds = base.contract.stemContract.toStemSet().stems.map { it.stemId },
+            defaultState = SourceSeparationSegmentState.Running,
+        )
+        val partial = base.copy(
+            state = SourceSeparationCacheManifestState.Partial,
+            segmentPlan = plan,
+        )
+        store.writeManifest(partial)
+        store.writeRunJournal(runningJournal(partial))
+        val segmentFiles = plan.segments.flatMap { segment ->
+            segment.stems.map { stem ->
+                store.resolveEntryPath(partial.cacheKey, stem.path).apply {
+                    parentFile?.mkdirs()
+                    writeText("uncommitted")
+                }
+            }
+        }
+
+        val result = store.recover()
+
+        assertEquals(segmentFiles.size, result.removedDerivedArtifacts)
+        assertTrue(segmentFiles.none(File::exists))
+        assertEquals(
+            SourceSeparationCacheRunJournalLifecycle.Paused,
+            store.readRunJournal(partial.cacheKey)?.lifecycle,
+        )
+        assertTrue(
+            store.readManifest(partial.cacheKey)?.segmentPlan?.segments?.all {
+                it.state == SourceSeparationSegmentState.Queued
+            } == true
+        )
+    }
+
+    @Test
+    fun `recovery removes a partial workspace that has no resumable metadata`() {
+        val store = SourceSeparationCacheStore(cacheRoot())
+        val partial = completedManifest(store, createFiles = false).copy(
+            state = SourceSeparationCacheManifestState.Partial,
+            output = null,
+            segmentPlan = null,
+        )
+        store.writeManifest(partial)
+        store.writeRunJournal(runningJournal(partial))
+        val orphanWork = store.resolveEntryPath(partial.cacheKey, "work/orphan.wav").apply {
+            parentFile?.mkdirs()
+            writeText("work")
+        }
+        val orphanSegment = store.resolveEntryPath(
+            partial.cacheKey,
+            "segments/00000/stem-00.wav",
+        ).apply {
+            parentFile?.mkdirs()
+            writeText("segment")
+        }
+
+        val result = store.recover()
+
+        assertEquals(2, result.removedDerivedArtifacts)
+        assertFalse(orphanWork.exists())
+        assertFalse(orphanSegment.exists())
+        assertFalse(store.resolveEntryPath(partial.cacheKey, "work").exists())
+        assertFalse(store.resolveEntryPath(partial.cacheKey, "segments").exists())
     }
 
     @Test
