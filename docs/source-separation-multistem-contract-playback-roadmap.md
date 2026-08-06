@@ -812,24 +812,36 @@ Evidence: `6148b589` adds the engine matrix, `a7816b50` adds the list mixer and
   existing epoch tests continue to reject stale seek and hot-swap output.
 - [ ] Add cache deletion and service-level process-recreation tests for 4/6/8
   stems, including a complete-set recovery barrier after file replacement.
-- [x] Run a 4-stem indexed-FLAC smoke with 20 random seeks on S25 and S10.
-  Both devices produced exact PCM with zero underruns, a 786,432-byte pool, and
-  four open descriptors. S25 recorded decode/audio p95 of 3.416/0.136 ms;
-  S10 recorded 3.626/0.415 ms. The test took 13.910 s on S25 and 15.256 s on
-  S10, including fixture generation and codec work.
-- [ ] Measure 6-stem PCM/FLAC and 4/6-stem emulator rows, including PSS, cache
-  size, thermal behavior, and longer seek/throughput percentiles. The current
-  device smoke is correctness and bounded-resource evidence only.
+- [x] Run 4- and 6-stem indexed-FLAC smokes with 20 random seeks on S25, S10,
+  API 26 x86, and API 37 x86_64. All rows produced exact PCM with zero
+  underruns. The 6-stem pool was 1,179,648 bytes, six descriptors were open,
+  and the FLAC plus index payload was 1,173,999 bytes. The observed 6-stem
+  decode p95 / audio-callback p95 / PSS delta were:
+
+  | row | decode p95 | audio p95 | PSS delta |
+  | --- | ---: | ---: | ---: |
+  | S25 | 4.577 ms | 0.176 ms | 2,928 KiB |
+  | S10 | 4.551 ms | 0.231 ms | 4,003 KiB |
+  | API 26 x86 | 4.986 ms | 0.209 ms | 2,603 KiB |
+  | API 37 x86_64 | 5.796 ms | 0.501 ms | 2,912 KiB |
+
+  The corresponding 4-stem pool was 786,432 bytes and the compressed payload
+  was 782,114 bytes. `Debug.getPss()` is a coarse process snapshot, not a
+  thermal or allocation-trace peak; these results are bounded-resource smoke
+  evidence only.
+- [ ] Collect thermal behavior, sustained 30-minute throughput, longer seek
+  percentiles, and a separately controlled baseline for PSS/cache growth.
 - [ ] Recalibrate memory admission from measured stem count and block geometry;
   the current 8-stem/4 MiB ceiling is a structural safety bound, not a device
   qualification result. Unsupported counts must fail before session
   installation rather than degrading into partial playback or full-song PCM.
 
 Evidence: `d661340e` adds 4-stem indexed-FLAC and failure coverage,
-`109ae194` adds cancellation/recreation and S25/S10 instrumentation, and
-`28c3b155` adds the truncated-FLAC boundary. The S25/S10 instrumentation ran on
-2026-08-06 and completed both the existing two-stem 100-seek smoke and the new
-four-stem smoke with zero test failures.
+`109ae194` adds cancellation/recreation and the first S25/S10 instrumentation,
+`28c3b155` adds the truncated-FLAC boundary, and `fa9176cf` expands the
+instrumentation to 6 stems and both emulator ABI rows. The complete four-row
+matrix ran on 2026-08-06 and completed every 2/4/6-stem test with zero test
+failures.
 
 **Exit:** N-stem playback is technically stable with synthetic outputs and the
 same bounded engine; this does not yet activate a multi-stem model.
