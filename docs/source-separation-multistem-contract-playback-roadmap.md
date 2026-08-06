@@ -806,12 +806,19 @@ Evidence: `6148b589` adds the engine matrix, `a7816b50` adds the list mixer and
 - [x] Reject a missing FLAC index, frame-CRC failure, or truncated file from any
   required stem as one complete 4-stem session; no whole-file fallback may be
   reintroduced.
-- [ ] Extend compressed-source corruption coverage to every 2/4/6/8-stem
-  geometry and explicit indexed-WAV malformed-file cases.
+- [x] Extend compressed-source corruption coverage to every 2/4/6/8-stem
+  geometry and explicit indexed-WAV malformed-file cases. WAV admission now
+  parses and validates RIFF/WAVE chunks, PCM16 geometry, contract sample rate
+  and channel count, and the declared data boundary instead of assuming a
+  fixed 44-byte header.
 - [x] Cover 6-stem engine recreation and 8-stem in-flight close/cancellation;
   existing epoch tests continue to reject stale seek and hot-swap output.
-- [ ] Add cache deletion and service-level process-recreation tests for 4/6/8
-  stems, including a complete-set recovery barrier after file replacement.
+- [x] Cover 4/6/8-stem artifact deletion, path-aware playback leases, engine
+  recreation, and the complete-set recovery barrier after file replacement.
+- [ ] Add repository and `PlaybackService` process-recreation tests using a
+  real 4/6/8-stem cache manifest after Phase 5 provides the multi-tensor
+  contract and cache-snapshot schema. Do not fake this gate by attaching a
+  synthetic stem list to the current MDX-only two-stem snapshot.
 - [x] Run 4- and 6-stem indexed-FLAC smokes with 20 random seeks on S25, S10,
   API 26 x86, and API 37 x86_64. All rows produced exact PCM with zero
   underruns. The 6-stem pool was 1,179,648 bytes, six descriptors were open,
@@ -839,9 +846,12 @@ Evidence: `6148b589` adds the engine matrix, `a7816b50` adds the list mixer and
 Evidence: `d661340e` adds 4-stem indexed-FLAC and failure coverage,
 `109ae194` adds cancellation/recreation and the first S25/S10 instrumentation,
 `28c3b155` adds the truncated-FLAC boundary, and `fa9176cf` expands the
-instrumentation to 6 stems and both emulator ABI rows. The complete four-row
-matrix ran on 2026-08-06 and completed every 2/4/6-stem test with zero test
-failures.
+instrumentation to 6 stems and both emulator ABI rows. `abe33196` adds strict
+WAV parsing and malformed 2/4/6/8-stem admission, `178bf51e` expands missing
+index, truncation, and frame-CRC rejection to all four geometries, and
+`eeb9957e` covers path leases, replacement barriers, and 4/6/8-stem engine
+recreation. The complete four-row device matrix ran on 2026-08-06 and
+completed every 2/4/6-stem test with zero test failures.
 
 **Exit:** N-stem playback is technically stable with synthetic outputs and the
 same bounded engine; this does not yet activate a multi-stem model.
