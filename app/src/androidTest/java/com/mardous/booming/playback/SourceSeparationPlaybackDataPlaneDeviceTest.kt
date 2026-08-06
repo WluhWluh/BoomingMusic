@@ -1,8 +1,9 @@
 package com.mardous.booming.playback
 
+import android.os.Debug
+import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
-import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
@@ -105,12 +106,21 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
 
     @Test
     fun fourStemIndexedFlacSmokeRecordsBoundedResourceMetrics() {
+        runMultistemIndexedFlacSmoke(stemCount = 4)
+    }
+
+    @Test
+    fun sixStemIndexedFlacSmokeRecordsBoundedResourceMetrics() {
+        runMultistemIndexedFlacSmoke(stemCount = 6)
+    }
+
+    private fun runMultistemIndexedFlacSmoke(stemCount: Int) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val root = File(context.cacheDir, "multistem-flac-device-test").apply {
+        val root = File(context.cacheDir, "multistem-$stemCount-flac-device-test").apply {
             deleteRecursively()
             check(mkdirs())
         }
-        val stems = (0 until MULTISTEM_COUNT).map { index ->
+        val stems = (0 until stemCount).map { index ->
             val wav = File(root, "stem-$index.wav")
             val flac = File(root, "stem-$index.flac")
             writeWav(wav, MULTISTEM_FRAME_COUNT) { frame ->
@@ -124,8 +134,13 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
             )
             flac
         }
-        val stemIds = listOf("vocals", "drums", "bass", "other")
+        val stemIds = MULTISTEM_IDS.take(stemCount)
+        val cacheBytes = stems.sumOf { flac ->
+            flac.length() + Pcm16StereoFlacEncoder.frameIndexFileFor(flac).length()
+        }
         val processor = SourceSeparationMixAudioProcessor()
+        val baselinePssKb = Debug.getPss()
+        var peakPssKb = baselinePssKb
         try {
             val prepared = processor.prepareInputs(
                 stemFiles = stems,
@@ -148,8 +163,9 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
                 preparedInputs = prepared,
             )
             awaitReady(processor)
+            peakPssKb = maxOf(peakPssKb, Debug.getPss())
 
-            val random = Random(0x4D53534CL)
+            val random = Random(0x4D53534CL + stemCount)
             repeat(MULTISTEM_SEEK_COUNT) {
                 val positionMs = random.nextInt(MULTISTEM_MAX_SEEK_POSITION_MS + 1).toLong()
                 processor.seekTo(positionMs)
@@ -162,9 +178,10 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
                 repeat(MULTISTEM_READ_FRAMES * CHANNEL_COUNT) { input.putShort(9_000) }
                 input.flip()
                 processor.queueInput(input)
+                peakPssKb = maxOf(peakPssKb, Debug.getPss())
                 val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
                 repeat(MULTISTEM_READ_FRAMES) { frameOffset ->
-                    val expected = (0 until MULTISTEM_COUNT).sumOf { stemIndex ->
+                    val expected = (0 until stemCount).sumOf { stemIndex ->
                         multistemSample(stemIndex, expectedStartFrame + frameOffset)
                     }
                     assertEquals(expected, output.short.toInt())
@@ -173,9 +190,9 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
             }
 
             val metrics = requireNotNull(processor.dataPlaneMetrics())
-            assertEquals(MULTISTEM_COUNT, metrics.activeStemCount)
+            assertEquals(stemCount, metrics.activeStemCount)
             assertTrue(metrics.bufferPoolBytes > 0L)
-            assertTrue(metrics.openFileDescriptors >= MULTISTEM_COUNT)
+            assertTrue(metrics.openFileDescriptors >= stemCount)
             assertEquals(0L, metrics.underruns)
             assertEquals(MULTISTEM_SEEK_COUNT.toLong(), metrics.seekRequests)
             assertTrue(metrics.audioThreadTimeNs.count > 0)
@@ -186,6 +203,9 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
                         "fds=${metrics.openFileDescriptors} " +
                         "decodeP95Ns=${metrics.decodeBlockLatencyNs.p95} " +
                         "audioP95Ns=${metrics.audioThreadTimeNs.p95} " +
+                        "cacheBytes=$cacheBytes baselinePssKb=$baselinePssKb " +
+                        "peakPssKb=$peakPssKb " +
+                        "pssDeltaKb=${(peakPssKb - baselinePssKb).coerceAtLeast(0)} " +
                         "underruns=${metrics.underruns} seeks=${metrics.seekRequests}",
             )
         } finally {
@@ -256,12 +276,12 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
         const val SEEK_COUNT = 100
         const val MILLIS_PER_SECOND = 1_000
         const val MAX_SEEK_POSITION_MS = 11_000
-        const val MULTISTEM_COUNT = 4
         const val MULTISTEM_FRAME_COUNT = SAMPLE_RATE * 5
         const val MULTISTEM_READ_FRAMES = 64
         const val MULTISTEM_SEEK_COUNT = 20
         const val MULTISTEM_MAX_SEEK_POSITION_MS = 4_500
         const val READY_TIMEOUT_MS = 5_000L
         const val METRICS_TAG = "BSSMultistemPlayback"
+        val MULTISTEM_IDS = listOf("vocals", "drums", "bass", "other", "guitar", "piano")
     }
 }
