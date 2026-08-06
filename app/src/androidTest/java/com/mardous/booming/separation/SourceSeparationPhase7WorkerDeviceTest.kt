@@ -6419,10 +6419,12 @@ class SourceSeparationPhase7WorkerDeviceTest {
             ARG_PRESERVE_PLAYBACK_CACHE,
             false,
         )
+        val requestedSecondaryModelId = arguments.getString(ARG_SECONDARY_MODEL_ID)
+            ?.takeIf(String::isNotBlank)
         val preferences = get<SharedPreferences>(SharedPreferences::class.java)
         val preferenceSnapshot = snapshotPreferences(
             preferences,
-            setOf(MINIMUM_SONG_DURATION),
+            setOf(MINIMUM_SONG_DURATION, SOURCE_SEPARATION_AUTO_START),
         )
         val presetRepository = get<SourceSeparationPresetRepository>(
             SourceSeparationPresetRepository::class.java,
@@ -6450,12 +6452,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
             testedCacheKey = cacheKey
             val expectedArtifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
             val store = get<SourceSeparationCacheStore>(SourceSeparationCacheStore::class.java)
-            check(preferences.edit()
+            val preferenceEditor = preferences.edit()
                 .putInt(MINIMUM_SONG_DURATION, 0)
-                .commit()
+            if (requestedSecondaryModelId != null) {
+                preferenceEditor.putBoolean(SOURCE_SEPARATION_AUTO_START, false)
+            }
+            check(preferenceEditor.commit()
             ) { "Could not allow the Phase 7 playback fixture in the media library." }
-            val secondaryModelId = arguments.getString(ARG_SECONDARY_MODEL_ID)
-                ?.takeIf(String::isNotBlank)
+            val secondaryModelId = requestedSecondaryModelId
             val secondaryArtifactSha256 = arguments.getString(
                 ARG_SECONDARY_ARTIFACT_SHA256,
             )?.takeIf(String::isNotBlank)
@@ -6617,6 +6621,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("primaryCacheKey", cacheKey)
                 .put("primaryArtifactSha256", expectedArtifactSha256)
                 .put("secondaryModelId", secondaryModelId ?: JSONObject.NULL)
+                .put("autoStartEnabled", if (switchedModelDuringPlayback) false else JSONObject.NULL)
                 .put(
                     "secondaryArtifactSha256",
                     secondaryArtifactSha256 ?: JSONObject.NULL,
