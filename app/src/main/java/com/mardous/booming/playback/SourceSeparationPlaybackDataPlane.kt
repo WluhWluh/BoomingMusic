@@ -1,5 +1,6 @@
 package com.mardous.booming.playback
 
+import com.mardous.booming.separation.model.contract.StemSet
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicLongArray
 import kotlin.math.min
@@ -116,6 +117,9 @@ internal data class SourceSeparationPlaybackDataSession(
         require(sessionId > 0L) { "Playback session ID must be positive." }
         require(epoch > 0L) { "Playback session epoch must be positive." }
         require(stems.isNotEmpty()) { "Playback session must contain at least one stem." }
+        require(stems.size <= StemSet.MAX_PLAYABLE_STEMS) {
+            "Playback session exceeds the current ${StemSet.MAX_PLAYABLE_STEMS}-stem limit."
+        }
         val stemIds = stems.map(SourceSeparationPlaybackStemSpec::stemId)
         require(stemIds.toSet().size == stemIds.size) {
             "Playback session contains duplicate stem IDs."
@@ -230,6 +234,8 @@ internal class SourceSeparationPlaybackMetrics(
     private val epochChanges = AtomicLong()
     private val audioThreadAllocations = AtomicLong()
     private val openFileDescriptors = AtomicLong()
+    private val activeStemCount = AtomicLong()
+    private val bufferPoolBytes = AtomicLong()
 
     fun recordDecodeBlock(elapsedNs: Long) {
         decodeBlockCount.incrementAndGet()
@@ -260,6 +266,11 @@ internal class SourceSeparationPlaybackMetrics(
         openFileDescriptors.set(count.coerceAtLeast(0L))
     }
 
+    fun setBufferPool(stemCount: Int, byteCount: Long) {
+        activeStemCount.set(stemCount.coerceAtLeast(0).toLong())
+        bufferPoolBytes.set(byteCount.coerceAtLeast(0L))
+    }
+
     fun snapshot(): SourceSeparationPlaybackMetricsSnapshot {
         return SourceSeparationPlaybackMetricsSnapshot(
             decodeBlockCount = decodeBlockCount.get(),
@@ -273,6 +284,8 @@ internal class SourceSeparationPlaybackMetrics(
             epochChanges = epochChanges.get(),
             audioThreadAllocations = audioThreadAllocations.get(),
             openFileDescriptors = openFileDescriptors.get(),
+            activeStemCount = activeStemCount.get().toInt(),
+            bufferPoolBytes = bufferPoolBytes.get(),
         )
     }
 
@@ -293,6 +306,8 @@ internal data class SourceSeparationPlaybackMetricsSnapshot(
     val epochChanges: Long,
     val audioThreadAllocations: Long,
     val openFileDescriptors: Long,
+    val activeStemCount: Int,
+    val bufferPoolBytes: Long,
 )
 
 internal data class SourceSeparationPlaybackLatencySummary(

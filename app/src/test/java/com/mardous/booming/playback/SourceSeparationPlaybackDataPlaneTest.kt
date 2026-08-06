@@ -66,6 +66,7 @@ class SourceSeparationPlaybackDataPlaneTest {
         metrics.recordEpochChange()
         metrics.recordAudioThreadAllocation()
         metrics.setOpenFileDescriptors(2L)
+        metrics.setBufferPool(stemCount = 4, byteCount = 12_288L)
         val snapshot = metrics.snapshot()
         assertEquals(3L, snapshot.decodeBlockCount)
         assertEquals(30L, snapshot.decodeBlockLatencyNs.p50)
@@ -77,6 +78,8 @@ class SourceSeparationPlaybackDataPlaneTest {
         assertEquals(1L, snapshot.epochChanges)
         assertEquals(1L, snapshot.audioThreadAllocations)
         assertEquals(2L, snapshot.openFileDescriptors)
+        assertEquals(4, snapshot.activeStemCount)
+        assertEquals(12_288L, snapshot.bufferPoolBytes)
     }
 
     @Test

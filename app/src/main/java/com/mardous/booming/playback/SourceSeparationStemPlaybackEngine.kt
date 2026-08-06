@@ -1,5 +1,6 @@
 package com.mardous.booming.playback
 
+import com.mardous.booming.separation.model.contract.StemSet
 import java.io.Closeable
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -35,6 +36,7 @@ internal class SourceSeparationStemPlaybackEngine(
     private val seekResumeWaterlineBlocks: Int = DEFAULT_SEEK_RESUME_WATERLINE_BLOCKS,
     private val targetWaterlineBlocks: Int = DEFAULT_TARGET_WATERLINE_BLOCKS,
     private val blockCapacity: Int = DEFAULT_BLOCK_CAPACITY,
+    private val maxBufferPoolBytes: Long = DEFAULT_MAX_BUFFER_POOL_BYTES,
     private val metrics: SourceSeparationPlaybackMetrics = SourceSeparationPlaybackMetrics(),
     private val realtimeAudit: SourceSeparationPlaybackRealtimeAudit =
         SourceSeparationPlaybackRealtimeAudit(),
@@ -88,6 +90,8 @@ internal class SourceSeparationStemPlaybackEngine(
 
     init {
         require(blockFrames > 0) { "Playback block size must be positive." }
+        require(blockCapacity > 0) { "Playback block capacity must be positive." }
+        require(maxBufferPoolBytes > 0L) { "Playback buffer budget must be positive." }
         require(resumeWaterlineBlocks in 1..targetWaterlineBlocks) {
             "Resume waterline must not exceed target waterline."
         }
@@ -371,6 +375,7 @@ internal class SourceSeparationStemPlaybackEngine(
         workerSources = emptyList()
         freeBlocks.clear()
         readyBlocks.clear()
+        metrics.setBufferPool(0, 0L)
         state.set(SourceSeparationPlaybackDataState.Idle)
     }
 
@@ -560,6 +565,7 @@ internal class SourceSeparationStemPlaybackEngine(
     }
 
     private fun ensureBlockPool(stemCount: Int, channelCount: Int) {
+        val poolBytes = calculateBufferPoolBytes(stemCount, channelCount)
         if (poolStemCount == stemCount &&
             poolChannelCount == channelCount &&
             (freeBlocks.isNotEmpty() || readyBlocks.isNotEmpty())
@@ -573,10 +579,46 @@ internal class SourceSeparationStemPlaybackEngine(
         endOfStreamQueued.set(false)
         poolStemCount = stemCount
         poolChannelCount = channelCount
-        val blockBytes = blockFrames * channelCount * BYTES_PER_SAMPLE
+        val blockBytes = calculateBlockBytes(channelCount)
+        metrics.setBufferPool(stemCount, poolBytes)
         repeat(blockCapacity) {
             freeBlocks.offer(StemPcmBlockSet(stemCount, blockBytes))
         }
+    }
+
+    private fun calculateBufferPoolBytes(stemCount: Int, channelCount: Int): Long {
+        require(stemCount in 1..StemSet.MAX_PLAYABLE_STEMS) {
+            "Playback supports at most ${StemSet.MAX_PLAYABLE_STEMS} stems."
+        }
+        val blockBytes = calculateBlockBytes(channelCount).toLong()
+        val poolBytes = runCatching {
+            Math.multiplyExact(blockBytes, stemCount.toLong())
+                .let { bytesPerSet ->
+                    Math.multiplyExact(bytesPerSet, blockCapacity.toLong())
+                }
+        }.getOrElse { error ->
+            throw IllegalArgumentException("Playback buffer size overflows Long.", error)
+        }
+        require(poolBytes <= maxBufferPoolBytes) {
+            "Playback buffer pool requires $poolBytes bytes, budget is $maxBufferPoolBytes."
+        }
+        return poolBytes
+    }
+
+    private fun calculateBlockBytes(channelCount: Int): Int {
+        require(channelCount > 0) { "Playback channel count must be positive." }
+        val blockBytes = runCatching {
+            Math.multiplyExact(blockFrames.toLong(), channelCount.toLong())
+                .let { bytesPerSampleFrame ->
+                    Math.multiplyExact(bytesPerSampleFrame, BYTES_PER_SAMPLE.toLong())
+                }
+        }.getOrElse { error ->
+            throw IllegalArgumentException("Playback block size overflows Long.", error)
+        }
+        require(blockBytes <= Int.MAX_VALUE) {
+            "Playback block is too large for a JVM byte array."
+        }
+        return blockBytes.toInt()
     }
 
     private fun clearConsumerBlock() {
@@ -734,6 +776,7 @@ internal class SourceSeparationStemPlaybackEngine(
         const val DEFAULT_SEEK_RESUME_WATERLINE_BLOCKS = 1
         const val DEFAULT_TARGET_WATERLINE_BLOCKS = 8
         const val DEFAULT_BLOCK_CAPACITY = 12
+        const val DEFAULT_MAX_BUFFER_POOL_BYTES = 4L * 1024L * 1024L
         const val BYTES_PER_SAMPLE = 2
         const val WORKER_IDLE_SLEEP_MS = 2L
         const val WORKER_FULL_SLEEP_MS = 1L

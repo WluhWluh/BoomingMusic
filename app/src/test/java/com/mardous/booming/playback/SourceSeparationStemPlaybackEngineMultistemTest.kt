@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -28,6 +29,15 @@ class SourceSeparationStemPlaybackEngineMultistemTest {
             )
             try {
                 engine.start(sessionId = stemCount.toLong(), factories = factories)
+                if (stemCount == 8) {
+                    await {
+                        engine.metricsSnapshot().activeStemCount == stemCount
+                    }
+                    assertEquals(
+                        8 * 4 * BYTES_PER_FRAME * 3L,
+                        engine.metricsSnapshot().bufferPoolBytes,
+                    )
+                }
                 val output = Array(stemCount) { ByteArray(frameCount * BYTES_PER_FRAME) }
                 var outputFrame = 0
                 while (outputFrame < frameCount) {
@@ -143,6 +153,31 @@ class SourceSeparationStemPlaybackEngineMultistemTest {
                     },
                     frameCount = 4,
                 )
+            }
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun moreThanEightStemsAreRejectedBeforeWorkerStartup() {
+        val geometry = geometry(16)
+        val factories = (0 until 9).map { stemIndex ->
+            testFactory(
+                stemId = "stem-$stemIndex",
+                geometry = geometry,
+                pcm = pcm(stemIndex * 1_000, 16),
+            )
+        }
+        val engine = SourceSeparationStemPlaybackEngine(
+            blockFrames = 4,
+            resumeWaterlineBlocks = 1,
+            targetWaterlineBlocks = 2,
+            blockCapacity = 3,
+        )
+        try {
+            assertThrows(IllegalArgumentException::class.java) {
+                engine.start(1L, factories)
             }
         } finally {
             engine.close()
