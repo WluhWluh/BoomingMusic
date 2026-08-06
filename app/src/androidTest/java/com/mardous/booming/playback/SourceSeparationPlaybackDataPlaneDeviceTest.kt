@@ -273,6 +273,7 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
         )
         try {
             wakeLock.acquire(durationMs + SOAK_WAKE_LOCK_MARGIN_MS)
+            val setupStartedAtMs = SystemClock.elapsedRealtime()
             val stems = (0 until stemCount).map { index ->
                 val wav = File(root, "stem-$index.wav")
                 val flac = File(root, "stem-$index.flac")
@@ -288,6 +289,7 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
                 check(wav.delete()) { "Could not remove the soak WAV staging file." }
                 flac
             }
+            val setupElapsedMs = SystemClock.elapsedRealtime() - setupStartedAtMs
             val cacheBytesBefore = root.directorySize()
             Runtime.getRuntime().gc()
             SystemClock.sleep(SOAK_BASELINE_SETTLE_MS)
@@ -421,6 +423,7 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
                 .put("device", Build.MODEL)
                 .put("sdk", Build.VERSION.SDK_INT)
                 .put("stemCount", stemCount)
+                .put("setupElapsedMs", setupElapsedMs)
                 .put("requestedDurationMs", durationMs)
                 .put("elapsedMs", elapsedMs)
                 .put("callbackCount", callbackCount)
@@ -536,10 +539,19 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
             output.writeLittleEndianShort(16)
             output.writeBytes("data")
             output.writeLittleEndianInt(dataBytes)
-            repeat(frameCount) { frame ->
-                val value = sample(frame)
-                output.writeLittleEndianShort(value)
-                output.writeLittleEndianShort(value)
+            val pcm = ByteBuffer.allocate(WAV_WRITE_BUFFER_FRAMES * BYTES_PER_FRAME)
+                .order(ByteOrder.LITTLE_ENDIAN)
+            var firstFrame = 0
+            while (firstFrame < frameCount) {
+                val frames = minOf(WAV_WRITE_BUFFER_FRAMES, frameCount - firstFrame)
+                pcm.clear()
+                repeat(frames) { frameOffset ->
+                    val value = sample(firstFrame + frameOffset).toShort()
+                    pcm.putShort(value)
+                    pcm.putShort(value)
+                }
+                output.write(pcm.array(), 0, pcm.position())
+                firstFrame += frames
             }
         }
     }
@@ -587,6 +599,7 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
         const val MAX_SOAK_MINUTES = 120
         const val SOAK_FRAME_COUNT = SAMPLE_RATE * 30
         const val SOAK_READ_FRAMES = 2_048
+        const val WAV_WRITE_BUFFER_FRAMES = 16_384
         const val SOAK_TARGET_SEEK_COUNT = 100L
         const val SOAK_MIN_SEEK_INTERVAL_MS = 1_000L
         const val SOAK_RESOURCE_SAMPLE_INTERVAL_MS = 1_000L
