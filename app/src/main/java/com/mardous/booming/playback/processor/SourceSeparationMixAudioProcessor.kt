@@ -165,9 +165,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         mixedOutputReadyPrerollMs: Long = DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS,
         preparedInputs: PreparedSourceSeparationPlaybackInputs? = null,
     ) {
-        require(stemFiles.size > 2) {
-            "Use the two-stem enable overload for two-stem blend playback."
-        }
         enableInternal(
             stemFiles = stemFiles,
             stemIds = stemIds,
@@ -208,7 +205,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         }
         val expectedGainCount = if (useLegacyTwoStemBlendLaw) 2 else stemFiles.size
         val normalizedGains = if (initialGains.isEmpty()) {
-            List(expectedGainCount) { 1f }
+            if (!useLegacyTwoStemBlendLaw && stemFiles.size == 2) {
+                legacyBlendGains(blend)
+            } else {
+                List(expectedGainCount) { 1f }
+            }
         } else {
             require(initialGains.size == expectedGainCount) {
                 "Initial gains must match the active gain count."

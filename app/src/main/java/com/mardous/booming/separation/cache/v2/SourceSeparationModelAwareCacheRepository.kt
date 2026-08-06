@@ -557,6 +557,13 @@ class SourceSeparationModelAwareCachePlayback internal constructor(
         }
     }
 
+    /** Ordered files and stable IDs consumed by the playback data plane. */
+    val stemFiles: List<File>
+        get() = stems.map(SourceSeparationPlaybackStemSource::file)
+
+    val stemIds: List<String>
+        get() = stems.map { stem -> stem.descriptor.stemId.value }
+
     val vocalsFile: File
         get() = requireStemFile(StemSemanticId.Vocals)
 

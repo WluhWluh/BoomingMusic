@@ -892,11 +892,29 @@ class PlaybackService :
                         sourceSeparationRuntime.openCompletedCache(manifest.cacheKey),
                     )
                     playback.use {
+                        val legacyVocals = playback.fileFor(
+                            com.mardous.booming.separation.model.contract.StemSemanticId.Vocals,
+                        )
+                        val legacyInstrumental = playback.fileFor(
+                            com.mardous.booming.separation.model.contract.StemSemanticId.Instrumental,
+                        )
                         SessionResult(
                             SessionResult.RESULT_SUCCESS,
                             Bundle().apply {
-                                putString("vocalsFile", playback.vocalsFile.absolutePath)
-                                putString("instrumentalFile", playback.instrumentalFile.absolutePath)
+                                putStringArrayList(
+                                    "stemFiles",
+                                    ArrayList(playback.stemFiles.map(File::getAbsolutePath)),
+                                )
+                                putStringArrayList(
+                                    "stemIds",
+                                    ArrayList(playback.stemIds),
+                                )
+                                legacyVocals?.let { file ->
+                                    putString("vocalsFile", file.absolutePath)
+                                }
+                                legacyInstrumental?.let { file ->
+                                    putString("instrumentalFile", file.absolutePath)
+                                }
                                 putString("timingFile", playback.timingFile?.absolutePath)
                                 putLong("elapsedMs", playback.manifest.output?.elapsedMs ?: 0L)
                                 putInt("windowCount", playback.manifest.output?.windowCount ?: 0)
@@ -1921,16 +1939,15 @@ class PlaybackService :
                     resultCode = SessionError.ERROR_INVALID_STATE,
                     message = getString(R.string.source_separation_playback_cache_not_found),
                 )
-            val vocalsFile = playback.vocalsFile
-            val instrumentalFile = playback.instrumentalFile
+            val stemFiles = playback.stemFiles
+            val stemIds = playback.stemIds
             val availableFiles = withContext(IO) {
-                vocalsFile.isFile to instrumentalFile.isFile
+                stemFiles.map(File::isFile)
             }
-            if (!availableFiles.first || !availableFiles.second) {
+            if (availableFiles.any { available -> !available }) {
                 traceSourceSeparationPlayback(
                     "check.newSession.missingFiles",
-                    "id=$checkId vocals=${availableFiles.first} " +
-                            "instrumental=${availableFiles.second}"
+                    "id=$checkId available=$availableFiles stems=${stemIds.joinToString()}"
                 )
                 return sourceSeparationPlaybackUnavailable(
                     showMessage = showUnavailableMessage,
@@ -1978,8 +1995,8 @@ class PlaybackService :
             }
             val preparedInputs = withContext(IO) {
                 sourceSeparationMixProcessor.prepareInputs(
-                    vocalsFile = vocalsFile,
-                    instrumentalFile = instrumentalFile,
+                    stemFiles = stemFiles,
+                    stemIds = stemIds,
                     stemSampleRate = output.outputSampleRate,
                     stemChannelCount = channelCount,
                 )
@@ -1989,8 +2006,8 @@ class PlaybackService :
                 sessionId = checkId,
                 selectionGeneration = selection.generation,
                 cacheKey = runtimeSong.cacheKey,
-                vocalsFile = vocalsFile,
-                instrumentalFile = instrumentalFile,
+                stemFiles = stemFiles,
+                stemIds = stemIds,
                 inputMode = InputMode.OriginalSource,
                 stemSampleRate = output.outputSampleRate,
                 stemChannelCount = channelCount,
@@ -2220,8 +2237,7 @@ class PlaybackService :
         if (playback.manifest.state != SourceSeparationCacheManifestState.Completed) return false
         return session.requiresReadinessGate ||
                 session.inputMode != InputMode.OriginalSource ||
-                session.vocalsFile != playback.vocalsFile ||
-                session.instrumentalFile != playback.instrumentalFile
+                session.stemFiles != playback.stemFiles
     }
 
     private fun shouldCheckForDeferredCompletedPlaybackUpgrade(
@@ -2229,8 +2245,9 @@ class PlaybackService :
     ): Boolean {
         return session.requiresReadinessGate ||
                 session.inputMode != InputMode.OriginalSource ||
-                !session.vocalsFile.extension.equals("flac", ignoreCase = true) ||
-                !session.instrumentalFile.extension.equals("flac", ignoreCase = true)
+                session.stemFiles.any { file ->
+                    !file.extension.equals("flac", ignoreCase = true)
+                }
     }
 
     private suspend fun switchActiveSourceSeparationSessionToCompletedCache(
@@ -2249,22 +2266,21 @@ class PlaybackService :
                 resultCode = SessionError.ERROR_INVALID_STATE,
                 message = getString(R.string.source_separation_playback_cache_not_found),
             )
-        val vocalsFile = playback.vocalsFile
-        val instrumentalFile = playback.instrumentalFile
+        val stemFiles = playback.stemFiles
+        val stemIds = playback.stemIds
         traceSourceSeparationPlayback(
             "check.activeSession.upgradeCompleted.start",
             "id=$checkId songId=${song.id} active=${activeSession.traceSummary()} " +
-                    "position=$positionMs outputFormat=${vocalsFile.extension} " +
-                    "vocalsExt=${vocalsFile.extension} instrumentalExt=${instrumentalFile.extension}"
+                    "position=$positionMs outputFormat=${stemFiles.first().extension} " +
+                    "stemExt=${stemFiles.joinToString { file -> file.extension }}"
         )
         val availableFiles = withContext(IO) {
-            vocalsFile.isFile to instrumentalFile.isFile
+            stemFiles.map(File::isFile)
         }
-        if (!availableFiles.first || !availableFiles.second) {
+        if (availableFiles.any { available -> !available }) {
             traceSourceSeparationPlayback(
                 "check.activeSession.completedFilesMissing",
-                "id=$checkId vocals=${availableFiles.first} " +
-                        "instrumental=${availableFiles.second}"
+                "id=$checkId available=$availableFiles stems=${stemIds.joinToString()}"
             )
             return sourceSeparationPlaybackUnavailable(
                 showMessage = showUnavailableMessage,
@@ -2310,8 +2326,8 @@ class PlaybackService :
         }
         val preparedInputs = withContext(IO) {
             sourceSeparationMixProcessor.prepareInputs(
-                vocalsFile = vocalsFile,
-                instrumentalFile = instrumentalFile,
+                stemFiles = stemFiles,
+                stemIds = stemIds,
                 stemSampleRate = output.outputSampleRate,
                 stemChannelCount = channelCount,
             )
@@ -2321,8 +2337,8 @@ class PlaybackService :
             sessionId = checkId,
             selectionGeneration = activeSession.selectionGeneration,
             cacheKey = manifest.cacheKey,
-            vocalsFile = vocalsFile,
-            instrumentalFile = instrumentalFile,
+            stemFiles = stemFiles,
+            stemIds = stemIds,
             inputMode = InputMode.OriginalSource,
             stemSampleRate = output.outputSampleRate,
             stemChannelCount = channelCount,
@@ -2663,14 +2679,9 @@ class PlaybackService :
                     "stemRate=${session.stemSampleRate} gate=${session.requiresReadinessGate}"
         )
         sourceSeparationMixProcessor.enable(
-            vocalsFile = session.vocalsFile,
-            instrumentalFile = if (session.inputMode == InputMode.OriginalSource) {
-                session.instrumentalFile
-            } else {
-                null
-            },
+            stemFiles = session.stemFiles,
+            stemIds = session.stemIds,
             positionMs = positionMs,
-            initialBlend = sourceSeparationMixProcessor.blend,
             inputMode = session.inputMode,
             stemSampleRate = session.stemSampleRate,
             stemChannelCount = session.stemChannelCount,
@@ -4360,8 +4371,8 @@ private data class SourceSeparationPlaybackSession(
     val sessionId: Long,
     val selectionGeneration: Long,
     val cacheKey: String,
-    val vocalsFile: File,
-    val instrumentalFile: File,
+    val stemFiles: List<File>,
+    val stemIds: List<String>,
     val inputMode: InputMode,
     val stemSampleRate: Int,
     val stemChannelCount: Int,
@@ -4370,10 +4381,20 @@ private data class SourceSeparationPlaybackSession(
     val runtimeSong: SourceSeparationRuntimeSong,
     val modelAwareCachePlayback: SourceSeparationModelAwareCachePlayback,
 ) {
+    init {
+        require(stemFiles.isNotEmpty()) { "Playback session requires at least one stem." }
+        require(stemFiles.size == stemIds.size) {
+            "Playback session stem IDs must match its files."
+        }
+        require(stemIds.distinct().size == stemIds.size) {
+            "Playback session stem IDs must be unique."
+        }
+    }
+
     fun traceSummary(): String {
         return "song=$songId id=$sessionId mode=$inputMode gate=$requiresReadinessGate " +
                 "cache=${modelAwareCachePlayback.manifest.cacheKey.take(12)} " +
-                "vocals=${vocalsFile.name} instrumental=${instrumentalFile.name}"
+                "stems=${stemIds.joinToString()}"
     }
 
     fun closeModelAwareResources() {
