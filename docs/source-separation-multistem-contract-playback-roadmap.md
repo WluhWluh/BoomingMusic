@@ -10,9 +10,10 @@ implementation are complete. Phase 4A now provides an ordered 2/4/6/8-stem
 engine, list mixer, service session handle, and structural buffer admission.
 The deterministic indexed-WAV/FLAC seek smoke still passes on all four ABI rows,
 and the synthetic eight-stem engine has completed 30-minute S25/S10 arm64
-throughput, seek, thermal, PSS, and cache-stability qualification. Long-form
-real-song playback and real UI/lifecycle qualification remain open. The real
-multi-stem repository/`PlaybackService` recreation gate stays deferred until
+throughput, seek, thermal, PSS, and cache-stability qualification. Exact-tip
+two-stem real-song playback qualification is also complete; the separate real
+UI/lifecycle product-state gates remain open. The real multi-stem
+repository/`PlaybackService` recreation gate stays deferred until
 Phase 5 supplies its contract and cache snapshot; no real multi-stem model is
 admitted until its own pipeline and full-song gates pass.
 
@@ -595,9 +596,9 @@ Phase 2 evidence:
 
 ### Phase 3: Rebuild the separated-playback data plane
 
-Status: implementation complete; long-form qualification active. The functional
-two-stem data-plane exit is closed, while the real-song and percentile gates
-below remain release-confidence work.
+Status: implementation and long-form playback qualification complete. The
+functional two-stem data-plane, real-song, and percentile exits are closed;
+the separate process/lifecycle product-state gates below remain open.
 
 #### Phase 3A: Freeze the realtime contract and baseline
 
@@ -726,16 +727,22 @@ work, while existing two-stem output remains listening-compatible.
 - [x] Run the deterministic 100-seek indexed-WAV/FLAC smoke on S25, S10
   arm32, API 26 x86, and API 37 x86_64. It compares every emitted PCM sample
   and requires zero underruns.
-- [ ] Run at least 30 minutes of real-song FLAC playback and 100 cold/warm
-  random seeks on S25 and S10, including rapid scrubbing, pause/resume, app
-  recreation, background separation, cache deletion, and active-model changes.
+- [x] Run at least 30 minutes of real-song FLAC playback and 100 cold/warm
+  random seek episodes on S25 and S10. The run includes rapid scrubbing and
+  four explicit pause/resume cycles while the real MediaSession and AudioSink
+  consume the completed FLAC cache.
+- [ ] Run the separate product-state gates for process recreation, background
+  separation, cache deletion, and active-model changes on this exact tip. These
+  operations must remain independently observable rather than being inferred
+  from a long playback run.
 - [x] Require zero normal-path `fallbackWholeFileDecode`, zero mixed-epoch
   output, zero sustained pause/resume loops, and zero audio-thread file/decode
   operations.
-- [ ] Initially target aggregate decode throughput above 3x realtime, two-stem
-  block-group p99 well below 92.9 ms, FLAC seek-readiness p95 below 100 ms on
-  S25 and 200 ms on S10, and bounded memory/file-descriptor counts. Revisit
-  numerical thresholds from the recorded baseline rather than hiding misses.
+- [x] Meet the initial resource targets: aggregate decode throughput above 3x
+  realtime, two-stem block-group p99 well below 92.9 ms, FLAC seek-readiness
+  p95 below 100 ms on S25 and 200 ms on S10, and bounded memory/file-descriptor
+  counts. Revisit numerical thresholds from the recorded baseline rather than
+  hiding misses.
 - [x] Compile and smoke the final engine on arm64-v8a, armeabi-v7a, x86_64, and
   x86. Performance gates belong to S25 and S10; emulators verify portability,
   lifecycle, corruption, and deterministic PCM output.
@@ -771,10 +778,23 @@ work, while existing two-stem output remains listening-compatible.
   cannot repeatedly reset to zero, a later wait begins a fresh episode, and the
   nonblocking 200 ms visual completion may finish without delaying playback or
   suppressing a newer wait.
-- Still open: 30-minute real-song playback, rapid UI scrubbing, pause/resume,
-  app recreation, background separation, cache deletion, active-model changes,
-  and measured decode/seek p95/p99, PSS, and descriptor thresholds on this exact
-  Phase 3 tip. These are qualification work, not silently waived gates.
+- The exact-tip real-song qualification ran Coast Town through the real
+  MediaSession/AudioSink for 30 minutes on each arm64 device. Each row issued
+  100 seek episodes and 120 total requests, including 10 three-request rapid
+  scrub bursts, with four pause/resume cycles, zero audio underruns, zero
+  sustained non-playing samples, stable cache bytes, and thermal peak 0:
+
+  | row | seek p95 | seek p99 | decode block-group p99 | realtime multiple | PSS peak delta | FD baseline/peak/final |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | S25 arm64 | 56 ms | 59 ms | 2.67 ms | 34.7x | 21,105 KiB | 141 / 142 / 140 |
+  | S10 arm64 | 169 ms | 185 ms | 13.61 ms | 6.8x | 25,979 KiB | 110 / 111 / 109 |
+
+  PSS baseline/peak/final was 182,568/203,673/173,343 KiB on S25 and
+  159,451/185,430/180,591 KiB on S10. Decode groups are derived from paired
+  per-stem indexed-FLAC trace records for the exact run; they are qualification
+  evidence, not a new product metric. The remaining process recreation,
+  background separation, cache deletion, and active-model-change gates are
+  still open and must be run separately.
 
 **Phase 3 exit:** stable two-stem WAV and FLAC playback uses one logical clock,
 bounded background decode, atomic transport barriers, and a realtime-safe
@@ -784,8 +804,8 @@ mixer. Normal playback creates no persistent full-song PCM.
 
 Status: Phase 4A and the Phase 4B synthetic/compressed-source device
 qualification are complete. The schema-dependent repository/service recreation
-gate remains explicitly deferred to Phase 5. The remaining long-form Phase 3
-measurements stay release gates and do not authorize a real multi-stem model.
+gate remains explicitly deferred to Phase 5. The remaining Phase 3 product-state
+gates remain release work and do not authorize a real multi-stem model.
 
 #### Phase 4A: Ordered synthetic data plane
 
@@ -841,7 +861,8 @@ Evidence: `6148b589` adds the engine matrix, `a7816b50` adds the list mixer and
   evidence only.
 - [x] Collect synthetic eight-stem thermal behavior, sustained 30-minute
   throughput, full-run seek percentiles, and separately sampled PSS/cache
-  stability on S25 and S10 arm64. Keep the separate real-song Phase 3 gate open.
+  stability on S25 and S10 arm64. This synthetic evidence remains distinct from
+  the exact-tip two-stem real-song qualification recorded in Phase 3.
 - [x] Retain the current eight-stem/4 MiB structural admission ceiling. The
   default eight-stem geometry allocates only 1,572,864 bytes, and the long run
   showed bounded PSS with no cache growth, so lowering the guard would not
