@@ -1,24 +1,31 @@
 # Source-Separation Lifecycle and Cache Correctness Roadmap
 
-Status: active highest-priority correctness and simplification plan. The
-automated/device qualification gate is complete; the final short listening
-check remains open.
+Status: implementation and automated/device qualification complete. This file
+is retained as the correctness contract and regression checklist; only the
+short human handoff-listening check remains open as release-confidence work.
 
-Updated: 2026-08-03
+Updated: 2026-08-05
 
 This roadmap governs active-model changes, separation scheduling, playback
 cache selection, recovery, retention, and deletion. It must reach its focused
 product gate before NPU routing adds more execution states.
 
 The [LiteRT and Multi-Preset Roadmap](litert-multi-preset-roadmap.md) remains
-authoritative for model contracts, catalog tiers, model installation, and
-cache identity. The
+authoritative for catalog tiers, model installation, and release qualification.
+The
+[Source-Separation Contract and Multi-Stem Data-Plane Roadmap](source-separation-multistem-contract-playback-roadmap.md)
+owns portable stem/model data shape and playback transport. The
 [Downloadable Runtime, Quick Setup, and Local Resource Management Roadmap](litert-runtime-setup-roadmap.md)
 remains authoritative for runtime delivery and backend preferences. The
 [LiteRT Inference Process and Background Execution Roadmap](litert-inference-process-roadmap.md)
 is frozen implementation evidence for process isolation and recovery.
 
 When older documents conflict about model-switch behavior, this roadmap wins.
+
+The implementation is now on Booming SS commit `cc8cf075`. The bounded playback
+engine and the cache lifecycle fixes that followed the original coordinator
+work are recorded in the multi-stem playback roadmap; this document remains the
+authority for exact identity, model handoff, retention, deletion, and pruning.
 
 ## Goal and Priorities
 
@@ -78,7 +85,12 @@ trust installed model/runtime records, structure, and byte size without
 rehashing large payloads on every start. Explicit verification and repair
 flows retain full hash checks.
 
-## Confirmed Gaps
+## Historical Failure Inventory (closed)
+
+G1-G8 below are the failure inventory that motivated this roadmap. Phases 1-3
+closed these gaps, and Phase 4 verified the relevant product routes on S25 plus
+CPU lifecycle smoke on the other three ABI rows. The descriptions are retained
+to explain the regression tests; they are not current claims about the code.
 
 ### G1. Selection changes are not observable
 
@@ -461,7 +473,8 @@ GitHub debug Android-test source set compiles successfully.
 - [x] Remove the unused locator index and its manifest-write rebuild/fsync if
   the characterization search confirms no production caller.
 - [x] Remove proven-dead queue-replacement and non-model-aware hydration paths;
-  retain the current v2 hydration path.
+  route all playback callers through the bounded stem engine. Persistent
+  whole-song PCM hydration is no longer a product path.
 - [x] Keep one blend-demand calculation shared by playback and scheduling.
 - [x] Recycle resident execution sessions by their existing complete execution
   session identity before allocation, not after a mismatch failure.
@@ -487,8 +500,9 @@ Suggested commits:
 
 ### Phase 4: Focused product qualification
 
-Status: automated and device qualification complete on 2026-08-03; final
-listening check pending.
+Status: automated and device qualification complete on 2026-08-03 and
+revalidated by the indexed-FLAC and cleanup fixes through `cc8cf075`; final
+handoff listening check pending.
 
 Run broad JVM coverage, but keep device work proportional to product risk.
 
@@ -541,6 +555,27 @@ Historical reports from older commits are retained as debugging evidence but
 are not used to override the current-commit gate. The remaining open item is
 only a short human listening check across a model handoff; the existing window
 decode, DSP, STFT, overlap/join, and MP3 fallback decisions stay frozen.
+
+#### Post-qualification maintenance record (2026-08-05)
+
+- Indexed FLAC promotion and playback now share the `.flac.idx` filename and
+  exact-entry lease handoff; a completed promotion cannot remain presented as a
+  stale partial cache.
+- Automatic WAV-to-FLAC and partial-to-completed upgrades are deferred while an
+  active playback session is running. They are adopted only at an explicit
+  seek, pause, or song transition, so compression completion does not force an
+  in-playback source switch or audible stall.
+- Obsolete staging, temporary, and superseded separation artifacts are cleaned
+  after their exact leases are released. Cleanup events refresh the Current
+  Song `Temporary files are pending cleanup` indicator instead of leaving stale
+  UI state.
+- Normal playback trusts the installed local resource records and no longer
+  repeats large runtime/model/FLAC hashes on every admission. Full verification
+  remains in promotion, repair, and suspicious-recovery paths.
+
+These changes preserve the established source-window and MP3 fallback policy.
+They do not close the remaining long-form FLAC throughput/seek percentile or
+human handoff-listening gates.
 
 ## Required Regression Scenarios
 

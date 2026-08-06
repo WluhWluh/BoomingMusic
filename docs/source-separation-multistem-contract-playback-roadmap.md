@@ -3,12 +3,15 @@
 Status: active implementation roadmap and design authority for stem identity,
 model contracts, imported metadata, cache output shape, and playback data flow.
 
-Updated: 2026-08-04
+Updated: 2026-08-05
 
-Current milestone: Phases 0-2 are complete. The Phase 3 bounded two-stem data
-plane is implemented; long-form S10/S25 playback and measured performance
-qualification remain active. Synthetic N-stem playback in Phase 4 stays
-blocked until those explicit Phase 3 gates pass.
+Current milestone: Phases 0-2 and the Phase 3 bounded two-stem data-plane
+implementation are complete. The deterministic indexed-WAV/FLAC seek smoke now
+passes on all four ABI rows, and the recent S25 handoff/cleanup fixes have been
+manually checked. Long-form real-song playback, cold/warm seek percentiles, and
+resource qualification remain open release-confidence gates. Phase 4 synthetic
+N-stem work may proceed as the next implementation step; no real multi-stem
+model is admitted until its own pipeline and full-song gates pass.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -59,26 +62,40 @@ data is required.
 
 ## Evidence and Decision Boundary
 
-The related MusicSourceSeparation experiments justify preparing the data plane,
-but do not yet justify shipping a Demucs preset:
+The latest `MusicSourceSeparation` branch (`experiment/s10-parallel-istft`, tip
+`7ac9603`) justifies preparing generic N-stem contracts and playback, but it
+does not justify shipping a Demucs preset. The closure matrix is:
 
-- the project-generated HTDemucs 6-stem two-second neural core passed host
-  parity and completed one S25 Compiled CPU run;
-- the same smoke artifact completed a GPU plus CPU hybrid run, but strict GPU
-  creation failed and the run is not strict GPU evidence;
-- QNN produced IR but failed before a usable `CompiledModel` and inference;
-- a third-party 7.8-second neural core ran on S25 CPU, while its complete DSP
-  boundary was not reproduced; and
-- canonical full-window project-owned export, full-song DSP, peak memory,
-  thermal behavior, and listening quality remain open.
+| Candidate or experiment | Evidence | Product decision |
+| --- | --- | --- |
+| Official HTDemucs 6-stem | Host pipeline passed; S25 CPU 180-second E2E RTF `0.555`; peak total PSS about `1.128 GiB`; strict per-stem device gate failed | CPU offline/producer-ahead research only |
+| Official HTDemucs 4-stem | Host pipeline passed; S25 CPU 180-second E2E RTF `0.617`; strict per-stem device gate failed | CPU offline/producer-ahead research only |
+| Official 6/4-stem GPU experiments | Only a small GPU+CPU neural-core hybrid was delegated; no canonical GPU E2E audio batch ran; memory and latency were worse | No Demucs GPU product claim |
+| HTDemucs 6-stem guitar-ft | S25 diagnostic mean E2E RTF `0.6783`; listening showed useful guitar/piano behavior, but the frozen host EOF gate was `79.245 dB` versus `80 dB` and training-data terms need review | Diagnostic/research only, not admitted |
+| Four-stem Batch 4A | Official base selected as the research baseline; the full specialist bag and hybrids had no repeatable listening advantage; Psytrance was clearly worse | Do not add a bag or Psytrance preset |
+| S10 parallel iSTFT | Four outer workers were raw-FP32/PCM-hash equivalent to serial; E2E RTF improved to `1.292`/`1.382`/`1.310` for official 6s/4s/guitar-ft, but stayed above real time | Offline research optimization only |
+| QNN | Non-empty IR was produced, but VTCM scheduling failed before model creation and no NPU inference occurred | Do not retry this unchanged graph or infer NPU support |
+
+The complete reports and provenance limits are maintained in the research
+repository. In particular, the official four-stem report has unresolved
+source/runtime provenance placeholders, the official six-stem report records a
+dirty source tree, and the guitar-ft diagnostic lacks a resolved source
+identity. These bounded research reports must not become release evidence by
+extrapolation. A two-second or neural-core-only result is not a canonical
+full-window or full-song qualification.
 
 The frozen reports are maintained in the
 [`WluhWluh/MusicSourceSeparation`](https://github.com/WluhWluh/MusicSourceSeparation)
 research repository:
 
 - `docs/android-litert-demucs-multistem-feasibility-2026-08-03.md`;
-- `docs/android-litert215-demucs6-s25-2026-08-03.md`; and
-- `docs/android-litert-demucs6-bandbuddy-s25-2026-08-03.md`.
+- `docs/android-litert215-demucs6-s25-2026-08-03.md`;
+- `docs/android-litert215-demucs6-canonical7p8-host-2026-08-04.md`;
+- `docs/android-litert215-demucs6-canonical7p8-s25-2026-08-04.md`;
+- `docs/android-litert215-demucs4-official-s25-2026-08-05.md`;
+- `docs/htdemucs4-batch4a-host-quality-2026-08-05.md`;
+- `docs/htdemucs6-guitar-ft-litert-s25-diagnostic-2026-08-05.md`; and
+- `docs/android-litert215-demucs3-s10-parallel-istft-2026-08-05.md`.
 
 The reports are experimental evidence, not product contracts. In particular,
 the two-second RTF must not be extrapolated to the canonical 7.8-second
@@ -417,9 +434,9 @@ The engine owns one bounded decode worker shared by all stems. A second worker
 is not introduced without S10 evidence. It decodes one logical FLAC block for
 the complete stem set, publishes that block set atomically, and retains
 reusable PCM blocks in a bounded ring. Phase 3 uses a three-block resume
-waterline, an eight-block target, and a twelve-block pool. At 44.1 kHz one
-4096-frame block covers about 92.9 ms, so even twelve six-stem blocks require
-only about 1.125 MiB of PCM.
+waterline, a separate one-block ordinary-seek resume waterline, an eight-block
+target, and a twelve-block pool. At 44.1 kHz one 4096-frame block covers about
+92.9 ms, so even twelve six-stem blocks require only about 1.125 MiB of PCM.
 
 `queueInput()` may only consume an already published block set. It must never
 open files, decode FLAC, wait on a `Future`, grow a buffer, construct tracing
@@ -575,8 +592,9 @@ Phase 2 evidence:
 
 ### Phase 3: Rebuild the separated-playback data plane
 
-Status: implementation complete; qualification active. Complete the remaining
-unchecked S10/S25 gates before enabling N-stem playback.
+Status: implementation complete; long-form qualification active. The functional
+two-stem data-plane exit is closed, while the real-song and percentile gates
+below remain release-confidence work.
 
 #### Phase 3A: Freeze the realtime contract and baseline
 
@@ -616,9 +634,10 @@ and every forbidden realtime operation is observable in tests.
   measurements improve without reordering or excess contention.
 - [x] Publish one complete same-frame block set atomically. Never expose one
   stem from a block before every required stem is decoded and validated.
-- [x] Use an initial resume waterline of two or three blocks and a target
-  waterline of eight to twelve blocks. Make the values measurable and bounded,
-  not user-facing settings in the first implementation.
+- [x] Use a three-block normal resume waterline, a one-block seek-resume
+  waterline, an eight-block target, and a bounded twelve-block pool. Make the
+  values measurable and bounded, not user-facing settings in the first
+  implementation.
 - [x] Convert `SourceSeparationMixAudioProcessor` into a consumer of ready PCM
   blocks. Remove direct `RandomAccessFile`, FLAC-reader, and scratch-growth
   ownership from `queueInput()`.
@@ -701,7 +720,10 @@ work, while existing two-stem output remains listening-compatible.
   pointer-based hot-swap fields.
 - [x] Under the clean-install boundary, delete obsolete persistent Hydration
   schema and recovery paths once all playback callers use the bounded engine.
-- [ ] Run at least 30 minutes of continuous FLAC playback and 100 cold/warm
+- [x] Run the deterministic 100-seek indexed-WAV/FLAC smoke on S25, S10
+  arm32, API 26 x86, and API 37 x86_64. It compares every emitted PCM sample
+  and requires zero underruns.
+- [ ] Run at least 30 minutes of real-song FLAC playback and 100 cold/warm
   random seeks on S25 and S10, including rapid scrubbing, pause/resume, app
   recreation, background separation, cache deletion, and active-model changes.
 - [x] Require zero normal-path `fallbackWholeFileDecode`, zero mixed-epoch
@@ -722,8 +744,9 @@ work, while existing two-stem output remains listening-compatible.
 #### Phase 3 implementation evidence
 
 - The implementation is split across `1ac81924` through `e094a8f2`; persistent
-  Hydration removal is isolated in `1214d168`, and the reusable device smoke is
-  `dd9d18d3`.
+  Hydration removal is isolated in `1214d168`, seek latency and reader reuse in
+  `e31a2bba`/`6db16bf8`, and completed-cache handoff in
+  `8d00ff2d`/`378928d6`.
 - The device smoke generates real WAV and indexed-FLAC stems, performs 100
   deterministic random seeks, compares every emitted PCM sample, and requires
   zero underruns. It passed on S25 arm64-v8a (16.919 s), S10 forced
@@ -732,6 +755,19 @@ work, while existing two-stem output remains listening-compatible.
   post-install instrumentation launch exceeded the emulator's application
   startup watchdog. The test itself then passed; this is portability evidence,
   not an x86_64 startup-performance qualification.
+- The S25 seek path now prefetches before the Media3 seek, reuses the installed
+  reader/index, releases after one complete block set, and then fills the normal
+  target waterline in the background. Completed WAV-to-FLAC and partial-to-
+  completed upgrades are deferred while playback is active and are adopted only
+  at an explicit seek, pause, or song transition, avoiding an in-playback stall.
+- FLAC promotion now has a stable indexed handoff, completion cannot leave a
+  stale `Partial` presentation, and obsolete staging/temporary artifacts are
+  removed after the exact entry leases are released. The Current Song cleanup
+  indicator is refreshed through the same cleanup events.
+- Readiness progress now has one stable wait-episode identity: an initial wait
+  cannot repeatedly reset to zero, a later wait begins a fresh episode, and the
+  nonblocking 200 ms visual completion may finish without delaying playback or
+  suppressing a newer wait.
 - Still open: 30-minute real-song playback, rapid UI scrubbing, pause/resume,
   app recreation, background separation, cache deletion, active-model changes,
   and measured decode/seek p95/p99, PSS, and descriptor thresholds on this exact
@@ -742,6 +778,10 @@ bounded background decode, atomic transport barriers, and a realtime-safe
 mixer. Normal playback creates no persistent full-song PCM.
 
 ### Phase 4: N-stem playback data plane
+
+Status: next implementation phase. Synthetic data-plane work may start after
+the functional Phase 3 exit; the remaining long-form Phase 3 measurements stay
+release gates and do not authorize a real multi-stem model.
 
 - [ ] Generalize the engine session, block set, gain snapshot, diagnostics, and
   playback-service handle from the qualified two-stem adapter to a complete
@@ -763,6 +803,9 @@ same bounded engine; this does not yet activate a multi-stem model.
 
 ### Phase 5: Multi-tensor pipeline contract and neural-core adapter
 
+Status: contract design is ready; product implementation is not started. The
+current MusicSourceSeparation Demucs artifacts are research inputs only.
+
 - [ ] Implement the static multi-input/output contract loader and strict
   tensor-axis validation.
 - [ ] Add a separate HTDemucs pipeline adapter for host DSP and branch
@@ -771,6 +814,9 @@ same bounded engine; this does not yet activate a multi-stem model.
   fixture files in a distinct executable contract.
 - [ ] Run host PyTorch/LiteRT parity before any product device claim.
 - [ ] Run the canonical S25 CPU allocation gate before GPU or QNN experiments.
+- [ ] Keep official 4/6-stem and guitar-ft artifacts behind a separate research
+  catalog until host EOF/per-stem gates, canonical full-song DSP, provenance,
+  licensing, and listening review all pass.
 
 **Exit:** a canonical multi-stem candidate produces verified per-stem PCM on
 the host and one device window without falling back to an undeclared pipeline.
@@ -782,6 +828,9 @@ the host and one device window without falling back to an undeclared pipeline.
   process death, resume, and cache recovery.
 - [ ] Qualify CPU first; qualify GPU/QNN only with explicit delegation and
   per-stem numerical evidence.
+- [ ] Treat a partial neural-core GPU delegation as hybrid evidence, not GPU
+  support; do not claim QNN when graph finalization or `CompiledModel` creation
+  failed.
 - [ ] Perform human listening tests against the host reference.
 - [ ] Keep the model download-only until every required gate passes.
 
@@ -878,9 +927,9 @@ source of model semantics.
    or a string-backed enum adapter. Recommendation: value class plus known
    constants, so unknown reviewed IDs survive parsing.
 2. Final low/high waterlines and whether a second decode worker helps.
-   Recommendation: begin with a 2-3 block resume waterline, an 8-12 block
-   target, and one worker; change them only from S10/S25 block-latency and
-   underflow evidence.
+   Current default: one block for ordinary seek resume, three blocks for normal
+   startup/recovery, eight target blocks, a twelve-block pool, and one worker.
+   Change them only from S10/S25 block-latency and underflow evidence.
 3. Whether all-stem playback should use model sum or original-source bypass when
    gains are neutral. Recommendation: make both explicit states and do not
    silently apply a residual correction.
@@ -897,6 +946,11 @@ source of model semantics.
 7. Whether an imported multi-stem sidecar may declare a custom pipeline.
    Recommendation: only reviewed, app-bundled pipeline IDs may activate;
    unknown pipelines remain installed and inspectable but download-only.
+8. Whether the current HTDemucs candidates should enter the product catalog.
+   Recommendation: no. Keep them in the research repository until an exact
+   artifact passes host and per-stem device gates, canonical full-song DSP,
+   provenance/license review, resource/cancellation tests, and listening. Do not
+   generalize MDX GPU/QNN evidence or a neural-core hybrid to Demucs.
 
 ## Completion Definition
 

@@ -1,15 +1,16 @@
 # LiteRT and Multi-Preset Roadmap
 
-Status: active model, cache, playback, and release-qualification plan.
-Downloadable runtime and setup work continues under its dedicated roadmap on
-successor branches.
+Status: active model-catalog and release-qualification plan. Runtime setup,
+lifecycle/cache ownership, and N-stem playback continue under their dedicated
+roadmaps; completed sections here remain historical implementation evidence.
 
-Updated: 2026-08-03
+Updated: 2026-08-05
 
-Current milestone: the Phase 6 production cutover is implemented and accepted
-on the development branch. Phase 7 is the next stage: full-song playback,
-resource, listening, and device-tier validation before any model is promoted
-or a user release is prepared.
+Current milestone: the Phase 6 production cutover and Phase 8 ONNX retirement
+are complete. Phase 7 qualification remains open, but the development catalog
+now deliberately exposes KARA FP32 and HQ4 FP32 as exact-record experimental
+models for real-song evaluation. Phase 9 Beta readiness and final stable tier
+promotion remain future work.
 
 This document is the plan for the next Booming SS development stage. The
 older `source-separation-roadmap.md` remains the historical record of the
@@ -23,6 +24,9 @@ recorded by the now-frozen
 Runtime downloading, Quick Setup, Runtime Management, backend preferences,
 vendor NPU AOT, and QNN JIT are governed by the active
 [Downloadable Runtime, Quick Setup, and Local Resource Management Roadmap](litert-runtime-setup-roadmap.md).
+Stem identity, normalized model/pipeline data shape, bounded FLAC playback, and
+future N-stem transport are governed by the active
+[Source-Separation Contract and Multi-Stem Data-Plane Roadmap](source-separation-multistem-contract-playback-roadmap.md).
 Active-model transitions, scheduler identity, exact-active-cache playback,
 cache lifecycle truth, retention, and deletion are governed by the
 [Source-Separation Lifecycle and Cache Correctness Roadmap](source-separation-lifecycle-cache-correctness-roadmap.md).
@@ -35,23 +39,54 @@ fallback policy. Completed packaged-runtime and `tryGpu` text later in this
 document is historical implementation evidence when it conflicts with the
 dedicated runtime setup contract.
 
+### Current product snapshot (2026-08-05)
+
+- `experiment/downloadable-litert-core` at `cc8cf075` is the current Booming SS
+  checkpoint. The APK contains the classes-only LiteRT API; native CPU/GPU
+  components are downloaded and managed through the runtime setup contract.
+- `UVR_MDXNET_3_9662` FP32 remains the sole recommended/default candidate. It
+  has the broadest CPU/GPU, lifecycle, and playback evidence, but stable release
+  maturity still waits for the final decision matrix and immutable
+  non-prerelease model Release.
+- KARA FP32 is selectable as an explicitly experimental model. CPU remains
+  available on its recorded ABI rows; bounded FP32 GPU is allowed on qualified
+  arm64 devices. Its S10 GPU path is slower than CPU, FP16 remains rejected,
+  and no backend result promotes KARA to recommended.
+- HQ4 FP32 is selectable as a high-resource experimental model on the exact
+  arm64 CPU/GPU candidate rows. Manual listening across multiple songs found no
+  apparent CPU/GPU quality problem, but formal full-song repetition, memory,
+  cancellation, and lower-device gates remain incomplete. Arm32, x86, and
+  x86_64 remain rejected or unsupported as recorded by the catalog.
+- The other published MDX candidates remain download-only until their own
+  reviewed contracts and full qualification exist. The new HTDemucs 4/6-stem
+  research is not part of this product catalog: CPU is offline-only, GPU is
+  neural-core hybrid evidence rather than E2E GPU execution, and QNN never
+  reached model creation.
+
+Historical implementation sections below retain the vocabulary used by their
+original reports. Current product code has no persistent full-song PCM
+Hydration, no arbitrary `Play cached result` route for an inactive model, and
+no immediate in-playback switch from partial/WAV output to completed/FLAC
+output. The multi-stem playback and lifecycle/cache roadmaps supersede those
+historical behaviors.
+
 ## Direction
 
-Booming SS will migrate from ONNX Runtime to LiteRT and will no longer ship or
-load ONNX models. The app will provide a catalog of converted TFLite presets
-hosted by the companion `bss-tflite` repository. Its first production release
-will have exactly one recommended/default preset: `UVR_MDXNET_3_9662` FP32.
+Booming SS has migrated its unreleased production graph from ONNX Runtime to
+LiteRT and no longer ships or loads ONNX models. The app provides a catalog of
+converted TFLite presets hosted by the companion `bss-tflite` repository. Its
+first production release will have exactly one recommended/default preset:
+`UVR_MDXNET_3_9662` FP32.
 That preset is only a recommended candidate until it passes the Phase 7
 full-song, playback, thermal, and resource gates; it must not be called stable
 before then.
 
-The remaining candidates do not all belong to one selectable "experimental"
-bucket. KARA FP32 is the current candidate for a clearly labelled CPU-only
-experimental tier after its own Phase 7 full-song and listening checks. HQ4 is
-reviewed but resource-gated and remains download-only. Candidates without a
-reviewed contract, a safe stem UI, or sufficient device evidence also remain
-download-only. Download-only still permits acquisition and catalog inspection;
-it never permits normal in-app activation.
+The remaining candidates do not all belong to one undifferentiated
+"experimental" bucket. KARA FP32 and HQ4 FP32 are explicitly selectable
+experiments only on their recorded ABI/backend rows; they are not additional
+recommended models. Candidates without a reviewed contract, a safe stem UI, or
+sufficient device evidence remain download-only. Download-only still permits
+acquisition and catalog inspection; it never permits normal in-app activation.
 
 Downloading or importing a model and selecting the model used for new
 separation work are separate operations. A completed download only makes a
@@ -106,8 +141,8 @@ acceptance requirements for this stage.
 
 ## Baseline
 
-The stable Booming SS implementation is the seven-commit stack on top of the
-rebased upstream branch:
+The following list is the historical Phase 0-6 baseline on top of the rebased
+upstream branch:
 
 - upstream baseline: `3a30569b`
 - structured Booming SS tip: `d6613e7c`
@@ -126,17 +161,25 @@ rebased upstream branch:
 - playback and cache reference project:
   [`WluhWluh/MusicSourceSeparation`](https://github.com/WluhWluh/MusicSourceSeparation)
 
+The active successor checkpoint is
+`experiment/downloadable-litert-core@cc8cf075`. Runtime packaging and Quick
+Setup moved to their dedicated roadmap, lifecycle/cache ownership moved to its
+correctness roadmap, and N-stem contract/playback work moved to
+`source-separation-multistem-contract-playback-roadmap.md`. Historical commit
+IDs below remain evidence identities rather than current branch tips.
+
 The first TFLite artifacts were converted to static batch-1 float32 FlatBuffers
 and validated against ORT desktop output. The Android comparison established
 that LiteRT 2.1.5 is preferable to `tensorflow-lite:2.16.1` on the tested S10
 and S25 devices. The old TFLite runtime is a comparison reference only and
 must not become a second production runtime.
 
-Phase 3 narrows the initial product candidates. Only 9662 FP32 has a GPU
-profile eligible for Phase 7 promotion. KARA FP32 keeps its CPU evidence but
-its GPU profile misses the raw-output gate. HQ4 has a reviewed contract but
-exceeds the present resource gate and has no eligible CPU fallback. FP16
-profiles are rejected for numerical parity and are not official presets.
+Phase 3 originally narrowed the initial product candidates. Subsequent FP32
+requalification and explicit product experiments now allow KARA and HQ4 through
+the candidate-admission path without changing their release maturity. Only
+9662 FP32 is eligible for recommended/stable promotion. KARA FP32 bounded GPU
+is an arm64 experimental profile; HQ4 CPU/GPU remains high-memory and
+experimental; all tested FP16 profiles remain rejected.
 
 ## Product Decisions
 
@@ -320,16 +363,19 @@ activation policy, validation maturity, and runtime-profile evidence are
 independent catalog facts:
 
 - `recommended`: the default intended for ordinary users. The first production
-  catalog has only 9662 FP32 in this tier, and it is not stable or selectable in
-  a release until all Phase 7 promotion gates pass.
+  catalog has only 9662 FP32 in this tier. It is selectable on the development
+  graph but is not assigned stable release maturity until all Phase 7 promotion
+  gates pass.
 - `experimental`: a reviewed specialist or test model. It becomes selectable
-  only with an explicit warning, correct stem UI, desktop parity, full-song and
-  listening validation, and a `known-good` CPU profile for the current ABI. A
-  GPU profile is optional and cannot borrow CPU or another profile's evidence.
+  only with an explicit warning, correct stem UI, desktop parity, and an exact
+  `known-good` or deliberately admitted `candidate` runtime record for the
+  current ABI/backend. Missing full-song, listening, or resource evidence must
+  remain visible. It does not prevent deliberate manual evaluation, but it
+  blocks stable/recommended promotion. One backend cannot
+  borrow another backend or profile's evidence.
 - `download-only`: published for inspection, external testing, or future work,
   but never selectable in normal UI. This includes incomplete contracts and
-  stem semantics as well as reviewed models such as HQ4 that fail a resource or
-  fallback gate.
+  stem semantics and models with no deliberately admitted runtime row.
 
 A reviewed contract must survive demotion from `recommended` to `experimental`
 or `download-only`; contract presence is not a reward for catalog prominence.
@@ -337,8 +383,9 @@ Likewise, assigning `experimental` does not itself grant a `Use` action. A
 separate activation policy records whether the entry is blocked pending review,
 blocked by resources, or selectable with an experimental warning. Runtime
 evidence is keyed by LiteRT version, ABI, backend, and execution-profile ID so
-that 9662 `gpu-auto-fp32-v1`, rejected FP16 profiles, KARA's rejected GPU
-profiles, and a future retest cannot overwrite one another.
+that 9662 `gpu-auto-fp32-v1`, rejected FP16 profiles, KARA's earlier rejected
+profile evidence, its later FP32 requalification, and a future retest cannot
+overwrite one another.
 
 Models such as bass, drums, other, or reverb targets must not be presented as
 vocals or instrumental by filename guesswork. They remain `download-only`
@@ -1668,25 +1715,24 @@ the v1 `runtimeCompatibility` block, while preserving reviewed artifact,
 tensor, DSP, stem, source, conversion, and pipeline facts. The catalog must
 keep that reviewed contract independent from support level and activation
 policy. In particular, KARA and HQ4 retain complete reviewed contracts even
-though KARA becomes experimental and HQ4 becomes resource-gated download-only.
+when later evidence changes either activation policy.
 The catalog revision must represent at least these independent dimensions:
 
 - contract review and the exact contract/artifact identity;
 - product tier: `recommended`, `experimental`, or `download-only`;
-- activation policy: normal selectable, explicitly warned CPU-only
-  experimental, resource-gated download-only, or blocked pending contract/UI;
+- activation policy: normal selectable, explicitly warned experimental,
+  resource-gated download-only, or blocked pending contract/UI;
 - release maturity: candidate, beta-ready, or stable; and
 - runtime evidence keyed by model hash, contract/pipeline identity, LiteRT
   version, ABI, backend, and execution-profile ID, including precision.
 
-Its initial policy is fixed: 9662 FP32 is the only recommended/default
-candidate; KARA FP32 is a CPU-only experimental candidate and has no Auto GPU
-path; HQ4 is reviewed but download-only because it has no eligible fallback and
-exceeds the current resource gate. FP16 has no preset entry. Every other
-candidate remains download-only until it satisfies its own contract, stem-UI,
-desktop, CPU, and full-song promotion requirements. Promotion is per model and
-per execution profile, never a bulk conversion of all candidates into
-experimental models.
+The current policy keeps 9662 FP32 as the only recommended/default candidate.
+KARA FP32 and HQ4 FP32 are explicitly warned experimental candidates only on
+their exact admitted CPU/GPU rows; neither is stable or recommended. FP16 has
+no preset entry. Every other candidate remains download-only until it satisfies
+its own contract, stem-UI, desktop, CPU, and full-song promotion requirements.
+Promotion is per model and per execution profile, never a bulk conversion of
+all candidates into experimental models.
 
 Before production download integration, `bss-tflite` must publish the canonical
 candidate artifacts in an immutable versioned Release. Complete the pinned
@@ -1702,11 +1748,12 @@ DSP or stem semantics remain incomplete may still be published as
 - [x] Add a catalog schema/revision that separates contract review, product
   tier, activation policy, release maturity, and profile-aware runtime evidence;
   retain the Phase 1 catalog as an immutable historical snapshot.
-- [x] Reclassify 9662 FP32 as the sole recommended/default candidate, KARA FP32
-  as CPU-only experimental, and HQ4 as resource-gated download-only without
-  deleting either reviewed contract.
-- [x] Record rejected FP16 and KARA GPU profiles by exact execution-profile ID;
-  permit a future new profile to be tested without overwriting that evidence.
+- [x] Keep 9662 FP32 as the sole recommended/default candidate; reclassify KARA
+  FP32 and HQ4 FP32 as warned experimental models on exact admitted CPU/GPU
+  rows without deleting either reviewed contract.
+- [x] Record rejected FP16 and historical GPU profiles by exact
+  execution-profile ID; retain later KARA/HQ4 FP32 candidate evidence without
+  overwriting the rejected rows.
 - [x] Replace `MdxModelVariant.MDXNET_9482` as the sole active path with a
   catalog-backed model ID in the new repository and selection state, without
   yet changing the feature-gated production worker.
@@ -2240,11 +2287,12 @@ Phase 7 is a promotion-or-decline gate, not a second implementation phase. It
 decides model and runtime tiers from full-song worker, playback, audio,
 resource, and lifecycle evidence. A model that has only window parity remains a
 candidate even if it is downloadable. The phase has five ordered gates. Do not
-change the catalog tier while an earlier gate is open; backup interoperability
-remains part of Phase 9 Beta readiness. Product behavior remains frozen except
-for validation-only injection/observability, fixes found by the matrix, and the
-evidence-driven release-graph/catalog decision in Phase 7E. A product-code fix
-changes the app identity and reruns every affected row.
+assign stable/recommended release maturity while an earlier gate is open.
+Development-only experimental activation may be used to collect missing
+real-song evidence when it is explicitly warned and bound to exact candidate
+runtime rows, as with KARA and HQ4. Backup interoperability remains part of
+Phase 9 Beta readiness. A product-code fix changes the app identity and reruns
+every affected row.
 
 #### Phase 7 progress snapshot (2026-07-24)
 
@@ -2349,6 +2397,37 @@ retains ordinary playback but source separation now fails closed before native
 allocation; x86_64 remains CPU evidence only until a separate GPU qualification
 exists.
 
+#### Superseding research and catalog update (2026-08-05)
+
+The following later evidence supersedes only the candidate-policy statements
+above; it does not retroactively change the historical Phase 7 report
+identities:
+
+- KARA FP32 bounded GPU was requalified on S10/S25 with the bounded OpenCL
+  `N=1` profile. Its output was PCM16-quantization-equivalent to CPU and the
+  desktop reference, and full-song execution completed without fallback. The
+  S10 GPU path is slower than CPU, so KARA remains experimental. The product
+  now permits both CPU and FP32 GPU experiments on exact supported arm64 rows;
+  FP16 remains rejected.
+- HQ4 FP32 was moved from `download-only` to `selectable-experimental` so the
+  user can test both CPU and bounded GPU paths and disable GPU explicitly. The
+  current MusicSourceSeparation short smoke and manual multi-song listening
+  found no immediate audio-quality problem, but its roughly `1.18 GiB` CPU
+  short-smoke PSS, incomplete formal full-song/repetition/resource evidence,
+  and unsupported non-arm64 rows remain visible qualification limits. This is
+  not stable promotion and does not waive the S10 memory gate for a future
+  release tier.
+- Official HTDemucs 4/6-stem, guitar-ft, and the four-stem candidate batch are
+  documented in
+  [`source-separation-multistem-contract-playback-roadmap.md`](source-separation-multistem-contract-playback-roadmap.md)
+  and `MusicSourceSeparation`. They remain research-only/offline candidates;
+  the generic multi-stem playback contract is preparation, not admission.
+- The lifecycle/cache and bounded playback fixes through Booming SS
+  `cc8cf075` are now the product baseline. Completed WAV/FLAC upgrades are
+  deferred during active playback and obsolete artifacts are cleaned only after
+  exact leases release, so catalog qualification must not assume an immediate
+  source-format switch.
+
 #### Phase 7A: Freeze the validation inputs and evidence format
 
 - [x] Freeze the exact app commit, bundled catalog SHA-256, `bss-tflite`
@@ -2421,7 +2500,8 @@ exists.
   ABI: acquisition and explicit selection, full-song separation, partial
   ready-window playback, pause/resume, seek across ready and pending windows,
   background continuation, song transition and next-song prefetch,
-  cancellation, process recreation, FLAC promotion/hydration, blend changes,
+  cancellation, process recreation, FLAC promotion, bounded indexed-FLAC
+  playback, deferred source adoption, blend changes,
   and exact completed-cache playback. Capture digital output joins and
   timestamps on every target; perform representative listening and the full
   gesture-level UI pass on S10 and S25. All listed automated CPU/ABI and arm64
@@ -2487,23 +2567,18 @@ exists.
 
 #### Phase 7D: Experimental and download-only catalog validation
 
-- [ ] Run KARA FP32 CPU full-song, playback, resource, cancellation, and
-  representative listening checks on the ABIs for which it may be selectable.
-  Objective arm64, arm32, and diagnostic x86_64 rows now pass and are recorded
-  in `kara-results-2026-07-24.md`; representative listening and gesture-level
-  UI review remain open. The later
-  `kara-gpu-requalification-2026-07-30.md` diagnostic found bounded FP32 GPU
-  output numerically and structurally correct on S10 and S25, but the S10 GPU
-  path was materially slower than CPU. This removes the earlier FP32 numerical
-  rejection without admitting GPU to the product catalog: KARA remains a
-  CPU-only experimental candidate, and FP16 remains rejected. It can become a
-  warned CPU-only experimental model only after the human review and exact
-  decision-build rerun; otherwise keep it download-only or restrict activation
-  to the qualified ABI set.
-- [x] Keep HQ4 download-only for the current artifact. Use compatibility and
-  preflight tests to confirm rejection without model allocation, including the
-  expanded x86 AVD; do not repeat the known-disqualified full-song allocation
-  merely to fill a matrix.
+- [ ] Complete the remaining KARA FP32 experimental-model review on its
+  qualified ABI rows, including representative listening, gesture-level UI,
+  and the exact decision-build rerun. CPU rows remain available where the
+  catalog says `known-good`; bounded FP32 GPU is available on qualified arm64
+  rows but stays experimental because S10 GPU is slower than CPU. FP16 remains
+  rejected. Do not describe KARA as CPU-only or promote it to recommended.
+- [ ] Complete the HQ4 FP32 experimental-model review. The development graph
+  now permits explicit CPU and bounded FP32 GPU testing on the exact arm64
+  candidate rows, with GPU opt-out and resource warnings. Formal full-song,
+  repeated-session, cancellation, and memory evidence remain open; arm32, x86,
+  and x86_64 remain unsupported/rejected. A user-listening pass does not waive
+  the stable S10 resource gate.
 - [x] For every other published candidate, verify pinned download, contract and
   sidecar inspection, structural/TFLite smoke on a compatible target, and an
   explicit download-only, rejected, or unsupported state. Do not reconvert the
@@ -2532,9 +2607,11 @@ exists.
   `gpu-auto-fp32-v1` independently only if its S10 and S25 rows pass; otherwise
   bind the normal release route to LiteRT CPU and retain `Auto` as an internal
   validation path. FP32 evidence cannot promote FP16.
-- [ ] Promote KARA only as a warned CPU-only experimental model after its own
-  qualified-ABI rows pass. Keep HQ4 and all remaining candidates
-  resource-gated or download-only according to their individual matrices.
+- [ ] Retain KARA as a warned experimental model after its exact CPU and arm64
+  bounded-GPU rows pass the decision build. Retain HQ4 as a high-resource
+  experimental model only on exact qualified arm64 rows unless the decision
+  matrix demotes it. Keep all remaining candidates resource-gated or
+  download-only according to their individual matrices.
 - [ ] Before assigning stable maturity, publish an immutable non-prerelease
   `bss-tflite` Release containing the exact validated 9662 artifact, sidecar,
   full candidate manifest, and checksums. The Release may retain experimental
@@ -2560,11 +2637,13 @@ Acceptance criteria:
 - A GPU profile is an independent qualification. GPU failure never blocks the
   CPU model, and an Auto result cannot be promoted without its own S10/S25
   reports and one-way fallback evidence.
-- KARA is selectable only as an explicitly warned CPU-only experimental model
-  on ABIs with complete evidence; otherwise it remains download-only.
-- HQ4 remains download-only unless a new artifact/runtime passes its resource
-  and fallback gates on S10. FP16, generic target-stem, and unreviewed models
-  remain non-selectable.
+- KARA is selectable only as an explicitly warned experimental model on rows
+  with complete evidence. CPU and bounded FP32 GPU qualifications remain
+  independent; FP16 is rejected.
+- HQ4 may remain selectable as a high-resource experiment on exact arm64 CPU/GPU
+  candidate rows, but it cannot become stable or recommended until its resource,
+  repeated full-song, cancellation, and fallback gates close. Generic
+  target-stem and unreviewed models remain non-selectable.
 - Every report is reproducible from immutable catalog/artifact/fixture hashes,
   and every promoted row is traceable to a report. Full-song performance data
   is not placed in backups.
@@ -2662,9 +2741,10 @@ Acceptance criteria:
   ZIP entry order.
 - [ ] Publish the full candidate catalog with all source records, duplicate
   aliases, pinned artifacts, manifests, and reproducible checksums.
-- [ ] Place only stable 9662 FP32 in the recommended/default section. Place
-  KARA FP32 in the warned CPU-only experimental section only if Phase 7 admits
-  it; otherwise keep it download-only. Keep HQ4 resource-gated download-only.
+- [ ] Place only stable 9662 FP32 in the recommended/default section. Keep KARA
+  FP32 and HQ4 FP32 in clearly warned experimental sections only on exact
+  qualified rows; neither appears as an additional recommendation. Demote either
+  model if the final Phase 7 decision build fails its remaining gates.
 - [ ] Label every other entry from its actual contract, stem-UI, activation,
   runtime-profile, and maturity evidence. Do not describe a downloadable or
   window-tested artifact as stable.
@@ -2682,12 +2762,12 @@ Every runtime or model change should run the narrowest applicable checks:
 | Conversion | Desktop LiteRT/TFLite output versus ORT reference |
 | Evidence | Independently versioned report schema, immutable app/catalog/artifact/fixture identities, cold/warm classification, production worker/player runner, promotion matrix, and report links |
 | Runtime | Runtime-neutral production facade, explicit ORT oracle through Phase 7, cutover graph audit, no ORT fallback, production worker/player instrumentation, NCHW/NHWC conversion, raw parity, output compensation/residual, CPU thread matrix, versioned GPU profiles, eligibility/probe, one-way LiteRT GPU-to-CPU fallback, close/recreate, and cancellation |
-| Playback | Start, pause/resume, seek, song transition, blend update, exact-active cache lookup, explicit completed-cache playback, and no model-output splice during selection changes |
+| Playback | Start, pause/resume, seek, song transition, blend update, exact-active cache lookup, deferred completed/FLAC source adoption, and no model-output splice during selection changes |
 | Audio | Full-length source, digital output joins/timestamps, and representative listening for every model requesting selection; short-fixture or window parity alone is insufficient |
-| Cache | Canonical identity/key determinism, manifest v2 and relative-path validation, multiple models per song, profile revisions, deleted custom profile, partial stale/resume, read-only completed playback, FLAC promotion, entry leases, crash consistency, delete/cleanup, and system clear-cache recovery |
+| Cache | Canonical identity/key determinism, current manifest/journal schemas and relative-path validation, multiple models per song, profile revisions, deleted custom profile, partial stale/resume, retained inactive completed entries, FLAC promotion, entry leases, prompt obsolete-artifact cleanup, crash consistency, delete/cleanup, and system clear-cache recovery |
 | Persistence/Backup | Format/schema v1, key allowlists, pending active model, unknown fork payload, canonical/legacy priority, both package directions, and excluded model/cache/per-song data |
 | Lifecycle | Activity recreation, process restart, background worker continuation, and the companion roadmap's independently qualified host/session/background policy |
-| Device | Galaxy S10/S25 arm64 9662 CPU and eligible GPU evidence, CPU-only KARA promotion evidence, S10 armeabi-v7a CPU, official x86_64 CPU/runtime evidence without GPU promotion, API 26 pure-x86 9662/KARA validation plus an explicit process support tier and emulator-only limitation, actual process-ABI evidence, and explicit HQ4 resource rejection |
+| Device | Galaxy S10/S25 arm64 9662 CPU and eligible GPU evidence, exact-row experimental KARA CPU/GPU and HQ4 CPU/GPU evidence, S10 armeabi-v7a CPU, official x86_64 CPU/runtime evidence without GPU promotion, API 26 pure-x86 validation plus an explicit process support tier and emulator-only limitation, actual process-ABI evidence, and explicit unsupported/rejected HQ4 non-arm64 rows |
 | Resource budgets | Model/runtime install size, peak and summed PSS, graphics/native memory, 32-bit VA gap, tested device/AVD memory scope, thermal behavior, and target/hard-limit decisions |
 | Native supply chain | Pinned source/toolchain, Release hash, ELF/JNI audit, checksums, notices, and GitHub provenance |
 | Packaging | Four ABI splits plus universal APK built separately from AndroidTest, classes-only LiteRT API, no downloadable native payload in the APK, downloaded runtime inventory, and separate APK/download/install size |
@@ -2782,12 +2862,14 @@ Use these initial decisions:
 
 - 9662 FP32 is the only recommended/default candidate. Mark it stable only
   after Phase 7 full-song, playback, device, lifecycle, and resource acceptance.
-- KARA FP32 may become an explicitly warned CPU-only experimental model after
-  its Phase 7 full-song and listening gate. Its Phase 3 GPU profile is rejected
-  and cannot be used by `Auto`.
-- HQ4 retains its reviewed contract but remains resource-gated download-only.
-  Reconsider it only for a materially changed implementation with a safe CPU
-  fallback and new resource evidence.
+- KARA FP32 is an explicitly warned experimental model. CPU and bounded FP32
+  GPU are admitted independently on exact catalog rows; the S10 GPU path is
+  slower than CPU, so this does not make GPU or KARA recommended. FP16 remains
+  rejected.
+- HQ4 retains its reviewed contract and is selectable only as a high-resource
+  experiment on exact arm64 CPU/GPU candidate rows. Stable or recommended
+  promotion still requires repeated full-song, cancellation, fallback, and S10
+  resource evidence; unsupported non-arm64 rows remain blocked.
 - FP16 is rejected by the current numerical evidence and is not an official
   preset or user-facing execution choice.
 - Every other converted candidate remains download-only until its own contract,
@@ -2856,54 +2938,51 @@ alone do not split the cache, while precision or another change to the
 rendering contract does. A song ID or file path alone is never a cache identity.
 
 The contract fingerprint covers tensor, DSP, compensation, stem, and pipeline
-semantics, not display/provenance/runtime evidence. Song ID, URI, and source
-diagnostics may feed a rebuildable candidate index, but exact source
-fingerprint agreement is required before playback use, resume, or append. A
-replacement file under the same locator must resolve to a different entry.
+semantics, not display/provenance/runtime evidence. The removed global locator
+index is not part of current lookup. A bounded process-local successful-preflight
+memo may reuse one exact source fingerprint while URI/path, size, modified time,
+and duration remain unchanged. A replacement file under the same locator must
+resolve to a different entry.
 
-Compute the existing encoded-sample fingerprint in preflight before publishing
-reusable ready windows. Retain a run-scoped staging/atomic-promotion path only
-if measured startup cost requires it. Manifests use independent schema v2,
-contain the complete immutable contract snapshot, and contain only
-entry-relative paths with containment checks. The preferred root is
-`externalCacheDir/source-separation`, with `cacheDir` fallback; a run does not
-span roots. v1/old-layout readers and migration are out of scope under the
-clean-install boundary.
+Compute the encoded-sample fingerprint once on a successful preflight memo miss
+before publishing reusable ready windows. Do not repeatedly hash unchanged
+local runtime/model/cache payloads on normal admission. Cache identity schema 2,
+manifest schema 4, and journal schema 7 contain the complete immutable contract
+and ordered stem snapshots and only entry-relative paths with containment
+checks. The preferred root is `externalCacheDir/source-separation`, with
+`cacheDir` fallback; a run does not span roots. Older unreleased readers and
+migration remain out of scope under the clean-install boundary.
 
 Use process-local `Read`, `RunWrite`, and `Exclusive` exact-entry leases.
-Playback holds shared `Read`; one inference or hydration owner holds
-`RunWrite`, which may coexist with readers of already published output; FLAC
-promotion, deletion, and cleanup require `Exclusive`. Atomic state transitions
-and startup orphan cleanup are required; completed output is playable without
-the model, while partial output is stale until its exact model/profile returns.
-Phase 5 must prove these rules with deterministic key, corruption,
-process-restart, concurrent-operation, and clear-cache tests before Phase 6
-routes the normal worker through LiteRT.
+Playback holds shared `Read`; one inference owner holds `RunWrite`, which may
+coexist with readers of already published output; FLAC promotion, deletion, and
+cleanup require `Exclusive`. Promotion handoff and obsolete-artifact cleanup
+wait for exact leases and publish a cleanup event for UI refresh. Completed
+inactive output remains retained and inspectable but is not a normal playback
+source until its exact model/profile is installed and active. Partial output is
+stale until that exact model/profile returns. Deterministic corruption,
+process-restart, concurrent-operation, clear-cache, and cleanup tests now cover
+these rules.
 
 ### Caches after model or profile deletion
 
-> Superseded playback rule: completed inactive entries remain retained and
-> inspectable, but normal product playback may use them only after their model
-> is installed and made active through the ordinary selection flow. The
-> session-scoped `Play cached result` behavior below is historical.
+Completed inactive entries remain retained and inspectable, and their manifest
+keeps the complete contract, output mapping, playback metadata, and rendered
+WAV/FLAC facts. Normal product playback never bypasses active selection: the
+matching model/profile must be installed and activated through the ordinary
+flow before that exact cache can produce separated output. Cache Management may
+offer `Use this model` when activation is possible; it has no session-scoped
+`Play cached result` command.
 
-Allow a completed cache to remain read-only playable when its model or custom
-profile has been deleted, provided its manifest contains the complete contract
-snapshot, output mapping, playback metadata, and valid rendered WAV/FLAC
-files. Show "model not installed" or "contract unverified" and do not present
-the cache as an official preset.
-
-Normal playback lookup remains bound to the exact active model/profile and
-does not choose another model's completed cache automatically. The cache UI may
-start a session-scoped `Play cached result` action for one validated completed
-entry; that action does not activate a model, permit inference, or affect later
-scheduler work. A playback session already using an entry keeps its lease when
-the active model changes and never splices outputs from two cache identities.
+A real active-model change immediately invalidates the old separated playback
+session and returns to original audio while the new exact cache is resolved.
+The old cache and its committed windows remain retained, but an old session or
+callback cannot continue output under the new selection.
 
 Keep a partial cache stale after profile deletion. It can resume only when the
 exact model hash and matching profile are installed again; no reconstructed or
-guessed contract may continue inference. Phase 5 and Phase 7 tests must cover
-both outcomes.
+guessed contract may continue inference. Completed and partial retention remain
+independent of normal playback eligibility.
 
 ### GPU eligibility and CPU threads
 
@@ -2922,22 +3001,23 @@ known-good CPU fallback, accelerator discovery, successful GPU-only
 compilation, memory gates, and a bounded deterministic probe.
 
 Version GPU options independently from the model contract. Phase 3 tested
-explicit `AUTOMATIC + FP32` and separate `AUTOMATIC + FP16` profiles. Only 9662
-`gpu-auto-fp32-v1` proceeds to Phase 7; KARA's FP32 profile and all tested FP16
-profiles remain rejected. A future option or implementation change receives a
-new profile ID and new evidence rather than overwriting those results. Forced
-OpenCL/OpenGL runs are diagnostic profiles, not silent substitutes. Do not
-expose precision, forced backend, probe controls, or `GPU only` as initial user
-settings.
+explicit `AUTOMATIC + FP32` and separate `AUTOMATIC + FP16` profiles. 9662
+`gpu-auto-fp32-v1` remains the only recommended-candidate GPU profile. Later
+requalification admits KARA FP32 and HQ4 FP32 only through the experimental
+candidate policy on exact arm64 rows; all tested FP16 profiles remain rejected.
+A future option or implementation change receives a new profile ID and new
+evidence rather than overwriting those results. Forced OpenCL/OpenGL runs are
+diagnostic profiles, not silent substitutes. Do not expose precision, forced
+backend, probe controls, or `GPU only` as initial user settings.
 
 After a recoverable setup, probe, invocation, or output-validation failure,
 discard GPU output, close GPU completely, recreate the same contract on CPU,
 and retry the same input once. The controller remains on CPU afterward.
 Cancellation does not trigger fallback; out-of-memory or unconfirmed cleanup
-does not trigger a second large allocation. KARA's possible release path is
-CPU-only. HQ4 remains internally GPU-exploratory and product download-only
-because its current arm64 CPU path cannot satisfy the fallback resource gate.
-Arm32 and x86 skip GPU, while x86_64 library or emulator evidence alone cannot
+does not trigger a second large allocation. KARA and HQ4 may use CPU or bounded
+FP32 GPU only where their exact experimental catalog records allow it; this is
+not stable qualification and never expands to another ABI by inference. Arm32
+and x86 skip GPU, while x86_64 library or emulator evidence alone cannot
 establish a production GPU record.
 
 Use this initial CPU thread formula:
@@ -2955,7 +3035,7 @@ data and are never backed up.
 
 ### HQ4 and runtime resource budgets
 
-Use these provisional targets and hard limits:
+Use these provisional targets and stable/recommended promotion limits:
 
 - HQ4 installed model: 64 MiB target; current artifact about 56.3 MiB.
 - ABI-specific LiteRT runtime increase: 10 MiB target, 16 MiB hard limit.
@@ -2963,9 +3043,12 @@ Use these provisional targets and hard limits:
 
 Record GPU graphics/native allocations separately from Java heap and aggregate
 PSS. S10 is the lower-device constraint; S25 success does not waive an S10
-failure. Exceeding a hard memory limit keeps the model download-only or
-disabled on that device class. Phase 7 may tighten targets, but raising a hard
-limit requires an explicit roadmap revision backed by repeated measurements.
+failure. The unreleased development graph may permit an explicitly selected,
+clearly warned candidate above these limits for manual evaluation on an exact
+device/backend row, as it currently does for HQ4 arm64. Exceeding a limit still
+blocks stable/recommended promotion and blocks unsupported device classes.
+Phase 7 may tighten targets, but raising a promotion limit requires an explicit
+roadmap revision backed by repeated measurements.
 
 ### Deferred F-Droid distribution
 

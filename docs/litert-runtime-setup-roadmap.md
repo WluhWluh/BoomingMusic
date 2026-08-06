@@ -4,7 +4,7 @@ Status: active product and implementation plan. The product and data contracts
 in this document are frozen; phase checklists may be refined only without
 silently changing those contracts.
 
-Updated: 2026-08-03
+Updated: 2026-08-05
 
 This document is authoritative for:
 
@@ -22,14 +22,44 @@ remains historical evidence for process placement, process death, background
 ownership, and bounded-GPU behavior. It is no longer an active location for
 runtime-acquisition or user-facing backend planning. The
 [LiteRT and Multi-Preset Roadmap](litert-multi-preset-roadmap.md) remains
-authoritative for portable model contracts, model tiers, model activation,
-cache identity, playback, and model-specific cache behavior.
+authoritative for model tiers, catalog publication, and release qualification.
+The
+[Source-Separation Contract and Multi-Stem Data-Plane Roadmap](source-separation-multistem-contract-playback-roadmap.md)
+owns stem/model data shape and playback transport, while the lifecycle/cache
+roadmap owns active-model handoff, exact-cache admission, retention, and
+deletion.
 
 If older roadmap text conflicts with this document about runtime packaging,
 the location of backend settings, automatic setup, AOT/JIT ownership, or
 runtime persistence, this document supersedes it. Completed validation records
 remain immutable historical evidence and retain the field names used by their
 test harnesses.
+
+## Current Cross-Roadmap Status (2026-08-05)
+
+- Phases 0-4 are implemented on the downloadable-runtime branch: the
+  classes-only LiteRT API, app-owned CPU/GPU component store, explicit loader,
+  Runtime Management, Quick Setup, persistent GPU intent, and bounded `N=1`
+  fallback path are present. Clean-install downloaded-path UI and the final
+  S10/S25 release matrix remain qualification work.
+- The active model catalog intentionally has one recommended/default candidate,
+  9662 FP32. KARA FP32 and HQ4 FP32 are now selectable experimental candidates
+  for the exact ABI/backend rows recorded by the catalog. KARA's arm64 bounded
+  GPU profile is experimental rather than stable; HQ4 remains heavily
+  resource-gated and is not a stable or recommended path. This product policy
+  is governed by the multi-preset roadmap, not by runtime availability alone.
+- The lifecycle/cache correctness implementation and four-ABI lifecycle smoke
+  are complete. The remaining short human handoff-listening check and final
+  downloaded CPU/GPU baseline remain pre-NPU release-confidence gates.
+- The latest `MusicSourceSeparation` Demucs experiments do not add a runtime
+  support row: official 4/6-stem CPU runs are offline-only research, their GPU
+  measurements are partial neural-core GPU+CPU hybrids with no E2E GPU run, and
+  QNN failed VTCM scheduling before model creation. No Demucs NPU capability,
+  catalog entry, or Quick Setup recommendation may be inferred from them.
+
+The next implementation priority is to close the downloaded CPU/GPU product
+baseline and synthetic N-stem playback work in parallel. Vendor NPU work stays
+scoped to an already qualified MDX model and a named device/runtime tuple.
 
 ## Direction
 
@@ -975,16 +1005,20 @@ native payload in the APK, and CPU remains a complete verified fallback.
 
 ### Pre-Phase 5 gate: close the CPU/GPU product baseline
 
-**Status: release graph, contract, and implementation gates closed; the
-product-qualification gate remains open before any NPU capability is exposed.**
+**Status: release graph, contract, and implementation gates are closed; the
+remaining downloaded-path and short human handoff qualification gates remain
+open before any NPU capability is exposed.**
 
 The
 [Source-Separation Lifecycle and Cache Correctness Roadmap](source-separation-lifecycle-cache-correctness-roadmap.md)
 is an additional hard pre-NPU gate. Its active-model handoff, scheduler,
-playback, cache-state, retention, deletion, simplification, and device
-qualification phases must close before NPU AOT or JIT is exposed. NPU schema
-drafting and offline tooling research may continue, but adding another backend
-to the current song-only coordination model is not permitted.
+playback, cache-state, retention, deletion, simplification, and automated/device
+qualification phases are complete; the remaining short human handoff-listening
+check is still a release-confidence gate. NPU schema drafting and offline
+tooling research may continue, but no NPU route may be added to the product
+catalog until the downloaded CPU/GPU baseline below is closed. The generic
+N-stem data-plane work may proceed independently and does not constitute NPU
+qualification.
 
 The current evidence is recorded in
 [pre-npu-baseline-2026-08-02.md](validation/litert-runtime/pre-npu-baseline-2026-08-02.md).
@@ -1027,6 +1061,10 @@ change the frozen source-separation algorithm:
    ordinary-player rows; an API 29 row remains unqualified unless separately
    tested. NPU work may initially target only a named, qualified arm64 device
    and exact model/runtime combination.
+
+Scope boundary: keep the Demucs research matrix separate from this gate. Its
+CPU, hybrid GPU, and failed QNN rows may inform future adapter work, but cannot
+qualify a vendor runtime or unlock NPU UI/backend routing.
 
 No NPU capability should be added to the catalog, Quick Setup recommendation,
 Runtime Management controls, backup schema, or model guidance until items 1–6
@@ -1111,6 +1149,11 @@ unchanged.
 **Status: not started; product implementation is blocked by the open
 pre-Phase 5 product-baseline gate.**
 
+This phase initially targets only an already qualified MDX two-stem artifact,
+one named Qualcomm device/SoC tuple, and one exact LiteRT/QNN toolchain. Official
+HTDemucs 4/6-stem research artifacts are explicitly out of scope until their
+separate multi-stem pipeline and full-song gates pass.
+
 - [ ] Freeze a vendor-neutral AOT catalog schema and Qualcomm implementation.
 - [ ] Package shared vendor runtime files separately from model-specific AOT
   artifacts.
@@ -1130,6 +1173,11 @@ pre-Phase 5 product-baseline gate.**
 JIT or weakening CPU/GPU fallback.
 
 ### Phase 6: Add QNN JIT as an on-demand runtime
+
+QNN JIT is not a general fallback for an unsupported graph. A provider-ready
+state, non-empty IR, graph finalization, actual delegated execution, and output
+parity are separate gates. The recorded Demucs VTCM allocation failure stopped
+before model creation, so option-only retries of that graph are closed.
 
 - [ ] Publish an immutable QNN JIT component with exact provider, backend, HTP,
   ABI, API, SoC, license, and dependency inventory.
