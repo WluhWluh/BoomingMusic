@@ -161,31 +161,36 @@ class SourceSeparationStemPlaybackEngineMultistemTest {
     }
 
     @Test
-    fun recreatedEngineReinstallsTheCompleteSixStemSet() {
-        val stemCount = 6
-        val frameCount = 24
-        val geometry = geometry(frameCount)
-        repeat(2) { recreation ->
-            val engine = SourceSeparationStemPlaybackEngine(
-                blockFrames = 4,
-                resumeWaterlineBlocks = 1,
-                targetWaterlineBlocks = 2,
-                blockCapacity = 3,
-            )
-            try {
-                engine.start(
-                    sessionId = recreation.toLong() + 1L,
-                    factories = factories(stemCount, geometry, base = recreation * 10_000),
+    fun recreatedEngineReinstallsCompleteFourSixAndEightStemSets() {
+        listOf(4, 6, 8).forEach { stemCount ->
+            val frameCount = 24
+            val geometry = geometry(frameCount)
+            repeat(2) { recreation ->
+                val engine = SourceSeparationStemPlaybackEngine(
+                    blockFrames = 4,
+                    resumeWaterlineBlocks = 1,
+                    targetWaterlineBlocks = 2,
+                    blockCapacity = 3,
                 )
-                await { engine.hasResumeWaterline() }
-                assertCurrentBlock(
-                    engine = engine,
-                    stemCount = stemCount,
-                    expectedStart = 0,
-                    base = recreation * 10_000,
-                )
-            } finally {
-                engine.close()
+                try {
+                    engine.start(
+                        sessionId = recreation.toLong() + 1L,
+                        factories = factories(
+                            stemCount,
+                            geometry,
+                            base = recreation * 10_000,
+                        ),
+                    )
+                    await { engine.hasResumeWaterline() }
+                    assertCurrentBlock(
+                        engine = engine,
+                        stemCount = stemCount,
+                        expectedStart = 0,
+                        base = recreation * 10_000,
+                    )
+                } finally {
+                    engine.close()
+                }
             }
         }
     }

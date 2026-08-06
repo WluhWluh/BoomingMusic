@@ -77,6 +77,39 @@ class SourceSeparationCacheEntryLeaseRegistryTest {
     }
 
     @Test
+    fun `complete multistem playback lease blocks whole entry deletion`() {
+        listOf(4, 6, 8).forEach { stemCount ->
+            val registry = SourceSeparationCacheEntryLeaseRegistry()
+            val protectedPaths = (0 until stemCount).flatMap { order ->
+                listOf(
+                    "completed/stem-%02d.flac".format(order),
+                    "completed/stem-%02d.flac.idx".format(order),
+                )
+            }.toSet()
+            val playback = requireNotNull(
+                registry.tryAcquireArtifactRead(KEY_A, protectedPaths),
+            )
+
+            assertNull(registry.tryAcquireExclusive(KEY_A))
+            assertNull(
+                registry.tryAcquireCleanup(
+                    KEY_A,
+                    setOf("completed/stem-%02d.flac".format(stemCount - 1)),
+                ),
+            )
+            val obsoleteCleanup = requireNotNull(
+                registry.tryAcquireCleanup(KEY_A, setOf("work", "segments")),
+            )
+            obsoleteCleanup.close()
+            assertNull(registry.tryAcquireExclusive(KEY_A))
+
+            playback.close()
+            assertNotNull(registry.tryAcquireExclusive(KEY_A)?.also { it.close() })
+            assertFalse(registry.isLeased(KEY_A))
+        }
+    }
+
+    @Test
     fun `exclusive lease blocks readers but does not protect another model entry`() {
         val registry = SourceSeparationCacheEntryLeaseRegistry()
         val mutation = requireNotNull(registry.tryAcquireExclusive(KEY_A))

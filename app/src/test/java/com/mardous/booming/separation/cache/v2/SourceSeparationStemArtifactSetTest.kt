@@ -27,8 +27,8 @@ class SourceSeparationStemArtifactSetTest {
     }
 
     @Test
-    fun `two four and six stem segment sets commit validate and delete atomically`() {
-        for (stemCount in listOf(2, 4, 6)) {
+    fun `two four six and eight stem segment sets commit validate and delete atomically`() {
+        for (stemCount in STEM_GEOMETRIES) {
             val store = store("cache-$stemCount")
             val cacheKey = stemCount.toString(16).repeat(64)
             val stemIds = stemIds(stemCount)
@@ -74,6 +74,44 @@ class SourceSeparationStemArtifactSetTest {
 
             segment.deleteArtifactSet(store, cacheKey)
             assertTrue(segment.stems.none { store.resolveEntryPath(cacheKey, it.path).exists() })
+        }
+    }
+
+    @Test
+    fun `multistem replacement remains unavailable until the complete set is restored`() {
+        for (stemCount in listOf(4, 6, 8)) {
+            val store = store("replacement-$stemCount")
+            val cacheKey = (stemCount + 1).toString(16).repeat(64)
+            val segment = segmentPlan(stemIds(stemCount)).segments.first()
+            segment.stems.forEach { stem ->
+                store.resolveEntryPath(cacheKey, stem.path).apply {
+                    parentFile?.mkdirs()
+                    writeText("old:${stem.stemId}:${stem.order}")
+                }
+            }
+            val oldCommit = segment.captureCommittedArtifactSet(store, cacheKey)
+
+            segment.deleteArtifactSet(store, cacheKey)
+            segment.stems.dropLast(1).forEach { stem ->
+                store.resolveEntryPath(cacheKey, stem.path).apply {
+                    parentFile?.mkdirs()
+                    writeText("new:${stem.stemId}:${stem.order}")
+                }
+            }
+            assertFalse(segment.hasCompleteReadyArtifactSet(store, cacheKey))
+            assertFalse(oldCommit.hasValidArtifactSet(store, cacheKey))
+            assertThrows(IllegalArgumentException::class.java) {
+                segment.captureCommittedArtifactSet(store, cacheKey)
+            }
+
+            val finalStem = segment.stems.last()
+            store.resolveEntryPath(cacheKey, finalStem.path).writeText(
+                "new:${finalStem.stemId}:${finalStem.order}",
+            )
+            assertTrue(segment.hasCompleteReadyArtifactSet(store, cacheKey))
+            val replacementCommit = segment.captureCommittedArtifactSet(store, cacheKey)
+            assertTrue(replacementCommit.hasValidArtifactSet(store, cacheKey))
+            assertFalse(oldCommit == replacementCommit)
         }
     }
 
@@ -157,4 +195,8 @@ class SourceSeparationStemArtifactSetTest {
                 location = SourceSeparationCacheRootLocation.InternalCache,
             )
         )
+
+    private companion object {
+        val STEM_GEOMETRIES = listOf(2, 4, 6, 8)
+    }
 }
