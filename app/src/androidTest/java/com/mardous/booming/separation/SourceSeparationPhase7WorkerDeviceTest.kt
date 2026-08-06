@@ -143,6 +143,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.Collections
+import java.util.Random
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -6405,6 +6406,15 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredString(ARG_RUN_ID).requireSafeName()
         val report = baseReport(context, runId, arguments)
+        val playbackSoakMinutes = arguments.getString(ARG_PLAYBACK_SOAK_MINUTES)
+            ?.toIntOrNull() ?: 0
+        val playbackSoakSeekCount = arguments.getString(ARG_PLAYBACK_SOAK_SEEK_COUNT)
+            ?.toIntOrNull() ?: 0
+        require(playbackSoakMinutes in 0..MAX_PLAYBACK_SOAK_MINUTES)
+        require(playbackSoakSeekCount in 0..MAX_PLAYBACK_SOAK_SEEK_COUNT)
+        require((playbackSoakMinutes == 0) == (playbackSoakSeekCount == 0)) {
+            "Playback soak duration and seek count must both be zero or positive."
+        }
         val preferences = get<SharedPreferences>(SharedPreferences::class.java)
         val preferenceSnapshot = snapshotPreferences(
             preferences,
@@ -6428,6 +6438,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         var testedCacheKey: String? = null
         var switchedModelDuringPlayback = false
         var cacheLeaseReleaseMs = 0L
+        var playbackSoakReport: JSONObject? = null
 
         try {
             val cacheKey = arguments.requiredString(ARG_CACHE_KEY)
@@ -6513,6 +6524,17 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     mediaController.duration > 0L
             }
 
+            if (playbackSoakMinutes > 0) {
+                playbackSoakReport = runMediaSessionPlaybackSoak(
+                    context = context,
+                    controller = mediaController,
+                    store = store,
+                    cacheKey = cacheKey,
+                    durationMinutes = playbackSoakMinutes,
+                    seekEpisodeCount = playbackSoakSeekCount,
+                )
+            }
+
             if (secondaryModelId != null && secondaryArtifactSha256 != null) {
                 val selected = presetRepository.activate(
                     sha256 = secondaryArtifactSha256,
@@ -6569,6 +6591,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             controller = null
 
             report.put("status", "passed")
+            report.put("playbackSoak", playbackSoakReport ?: JSONObject.NULL)
             report.put("lifecycle", report.getJSONObject("lifecycle")
                 .put("mediaSessionConnected", true)
                 .put("pauseResumePassed", true)
@@ -6638,6 +6661,250 @@ class SourceSeparationPhase7WorkerDeviceTest {
             writeReport(context, runId, "playback", report)
         }
     }
+
+    private fun runMediaSessionPlaybackSoak(
+        context: Context,
+        controller: MediaController,
+        store: SourceSeparationCacheStore,
+        cacheKey: String,
+        durationMinutes: Int,
+        seekEpisodeCount: Int,
+    ): JSONObject {
+        val requestedDurationMs = durationMinutes.toLong() * 60_000L
+        val powerManager = requireNotNull(context.getSystemService(PowerManager::class.java))
+        val wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "BoomingSS:phase7-real-song-playback-soak",
+        )
+        val initialPlayerState = onMediaControllerThread(controller) {
+            PlaybackSoakPlayerState(
+                volume = controller.volume,
+                repeatMode = controller.repeatMode,
+            )
+        }
+        try {
+            wakeLock.acquire(requestedDurationMs + PLAYBACK_SOAK_WAKE_LOCK_MARGIN_MS)
+            onMediaControllerThread(controller) {
+                controller.volume = 0f
+                controller.repeatMode = Player.REPEAT_MODE_ONE
+                controller.play()
+            }
+            waitForMediaController(controller, "playback soak start") {
+                controller.playWhenReady && controller.isPlaying &&
+                    controller.playbackState == Player.STATE_READY
+            }
+
+            val mediaDurationMs = onMediaControllerThread(controller) {
+                controller.duration
+            }
+            require(mediaDurationMs > PLAYBACK_SOAK_SEEK_END_MARGIN_MS) {
+                "Playback soak fixture is too short for random seeking."
+            }
+            val maxSeekPositionMs = mediaDurationMs - PLAYBACK_SOAK_SEEK_END_MARGIN_MS
+            val cacheBytesBefore = store.entrySize(cacheKey)
+            val baselinePssKb = Debug.getPss()
+            var peakPssKb = baselinePssKb
+            val baselineFileDescriptors = File("/proc/self/fd").list()?.size ?: -1
+            var peakFileDescriptors = baselineFileDescriptors
+            val contentionBaseline = PlaybackContentionDiagnostics.snapshot()
+            val startedAtMs = SystemClock.elapsedRealtime()
+            val deadlineMs = startedAtMs + requestedDurationMs
+            val thermalSampler = Phase7ThermalSampler(context, startedAtMs)
+            thermalSampler.sample(startedAtMs, force = true)
+            val random = Random(PLAYBACK_SOAK_RANDOM_SEED)
+            val seekLatenciesMs = mutableListOf<Long>()
+            var seekRequestCount = 0
+            var rapidScrubBurstCount = 0
+            var pauseResumeCount = 0
+            var completedSeekEpisodes = 0
+            var nextResourceSampleAtMs = startedAtMs
+            var unexpectedNotPlayingSamples = 0
+            var consecutiveUnexpectedNotPlayingSamples = 0
+            var maximumUnexpectedNotPlayingSamples = 0
+
+            while (SystemClock.elapsedRealtime() < deadlineMs) {
+                val nowMs = SystemClock.elapsedRealtime()
+                val nextSeekAtMs = if (completedSeekEpisodes < seekEpisodeCount) {
+                    startedAtMs + requestedDurationMs * (completedSeekEpisodes + 1L) /
+                        (seekEpisodeCount + 1L)
+                } else {
+                    Long.MAX_VALUE
+                }
+                if (nowMs >= nextSeekAtMs) {
+                    val seekStartedAtMs = SystemClock.elapsedRealtime()
+                    val isRapidScrub = (completedSeekEpisodes + 1) %
+                        PLAYBACK_SOAK_RAPID_SCRUB_INTERVAL == 0
+                    val requestCount = if (isRapidScrub) {
+                        PLAYBACK_SOAK_RAPID_SCRUB_REQUEST_COUNT
+                    } else {
+                        1
+                    }
+                    var finalTargetPositionMs = 0L
+                    repeat(requestCount) {
+                        finalTargetPositionMs =
+                            (random.nextDouble() * maxSeekPositionMs).toLong()
+                        onMediaControllerThread(controller) {
+                            controller.seekTo(finalTargetPositionMs)
+                        }
+                    }
+                    seekRequestCount += requestCount
+                    if (isRapidScrub) rapidScrubBurstCount += 1
+                    waitForMediaControllerLatency(
+                        controller = controller,
+                        operation = "playback soak seek ${completedSeekEpisodes + 1}",
+                    ) {
+                        controller.playWhenReady && controller.isPlaying &&
+                            abs(controller.currentPosition - finalTargetPositionMs) <=
+                            MEDIA_SESSION_SEEK_TOLERANCE_MS
+                    }
+                    seekLatenciesMs += SystemClock.elapsedRealtime() - seekStartedAtMs
+                    completedSeekEpisodes += 1
+
+                    if (completedSeekEpisodes % PLAYBACK_SOAK_PAUSE_RESUME_INTERVAL == 0) {
+                        onMediaControllerThread(controller) { controller.pause() }
+                        waitForMediaController(controller, "playback soak pause") {
+                            !controller.playWhenReady && !controller.isPlaying
+                        }
+                        onMediaControllerThread(controller) { controller.play() }
+                        waitForMediaController(controller, "playback soak resume") {
+                            controller.playWhenReady && controller.isPlaying
+                        }
+                        pauseResumeCount += 1
+                    }
+                    consecutiveUnexpectedNotPlayingSamples = 0
+                    continue
+                }
+
+                if (nowMs >= nextResourceSampleAtMs) {
+                    peakPssKb = maxOf(peakPssKb, Debug.getPss())
+                    peakFileDescriptors = maxOf(
+                        peakFileDescriptors,
+                        File("/proc/self/fd").list()?.size ?: peakFileDescriptors,
+                    )
+                    thermalSampler.sample(nowMs)
+                    nextResourceSampleAtMs = nowMs + PLAYBACK_SOAK_RESOURCE_SAMPLE_INTERVAL_MS
+                }
+                val state = onMediaControllerThread(controller) {
+                    Triple(controller.playWhenReady, controller.isPlaying, controller.playerError)
+                }
+                check(state.third == null) {
+                    "Playback soak player failed: ${state.third?.errorCodeName}: " +
+                        state.third?.message
+                }
+                if (state.first && !state.second) {
+                    unexpectedNotPlayingSamples += 1
+                    consecutiveUnexpectedNotPlayingSamples += 1
+                    maximumUnexpectedNotPlayingSamples = maxOf(
+                        maximumUnexpectedNotPlayingSamples,
+                        consecutiveUnexpectedNotPlayingSamples,
+                    )
+                } else {
+                    consecutiveUnexpectedNotPlayingSamples = 0
+                }
+                SystemClock.sleep(PLAYBACK_SOAK_STATE_SAMPLE_INTERVAL_MS)
+            }
+
+            check(completedSeekEpisodes == seekEpisodeCount) {
+                "Playback soak completed $completedSeekEpisodes of $seekEpisodeCount seek episodes."
+            }
+            peakPssKb = maxOf(peakPssKb, Debug.getPss())
+            val finalPssKb = Debug.getPss()
+            val finalFileDescriptors = File("/proc/self/fd").list()?.size ?: -1
+            peakFileDescriptors = maxOf(peakFileDescriptors, finalFileDescriptors)
+            thermalSampler.sample(SystemClock.elapsedRealtime(), force = true)
+            val cacheBytesAfter = store.entrySize(cacheKey)
+            val contention = PlaybackContentionDiagnostics.snapshot()
+                .deltaFrom(contentionBaseline)
+            check(contention.available) {
+                "Playback contention counters were unavailable during the soak."
+            }
+            check(contention.audioUnderrunCount == 0L) {
+                "Playback soak recorded ${contention.audioUnderrunCount} audio underruns."
+            }
+            check(maximumUnexpectedNotPlayingSamples <
+                PLAYBACK_SOAK_MAXIMUM_NOT_PLAYING_SAMPLES
+            ) {
+                "Playback soak remained non-playing for " +
+                    "$maximumUnexpectedNotPlayingSamples consecutive samples."
+            }
+            check(cacheBytesAfter == cacheBytesBefore) {
+                "Playback soak changed the completed cache size."
+            }
+
+            return JSONObject()
+                .put("requestedDurationMs", requestedDurationMs)
+                .put("elapsedMs", SystemClock.elapsedRealtime() - startedAtMs)
+                .put("mediaDurationMs", mediaDurationMs)
+                .put("seekEpisodeCount", completedSeekEpisodes)
+                .put("seekRequestCount", seekRequestCount)
+                .put("rapidScrubBurstCount", rapidScrubBurstCount)
+                .put("pauseResumeCount", pauseResumeCount)
+                .put("coldSeekLatencyMs", seekLatenciesMs.first())
+                .put("seekLatencyMs", playbackLatencyJson(seekLatenciesMs))
+                .put("warmSeekLatencyMs", playbackLatencyJson(seekLatenciesMs.drop(1)))
+                .put("unexpectedNotPlayingSamples", unexpectedNotPlayingSamples)
+                .put(
+                    "maximumUnexpectedNotPlayingMs",
+                    maximumUnexpectedNotPlayingSamples *
+                        PLAYBACK_SOAK_STATE_SAMPLE_INTERVAL_MS,
+                )
+                .put("audioUnderrunCount", contention.audioUnderrunCount)
+                .put("playerRunTimeNanos", contention.playerRunTimeNanos)
+                .put("playerRunQueueWaitNanos", contention.playerRunQueueWaitNanos)
+                .put("baselinePssKb", baselinePssKb)
+                .put("peakPssKb", peakPssKb)
+                .put("finalPssKb", finalPssKb)
+                .put("pssDeltaKb", (peakPssKb - baselinePssKb).coerceAtLeast(0))
+                .put("baselineFileDescriptors", baselineFileDescriptors)
+                .put("peakFileDescriptors", peakFileDescriptors)
+                .put("finalFileDescriptors", finalFileDescriptors)
+                .put("cacheBytesBefore", cacheBytesBefore)
+                .put("cacheBytesAfter", cacheBytesAfter)
+                .put("thermal", thermalSampler.toJson())
+        } finally {
+            if (wakeLock.isHeld) wakeLock.release()
+            runCatching {
+                onMediaControllerThread(controller) {
+                    controller.volume = initialPlayerState.volume
+                    controller.repeatMode = initialPlayerState.repeatMode
+                }
+            }
+        }
+    }
+
+    private fun waitForMediaControllerLatency(
+        controller: MediaController,
+        operation: String,
+        predicate: () -> Boolean,
+    ) {
+        val deadline = SystemClock.elapsedRealtime() + MEDIA_SESSION_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (onMediaControllerThread(controller, predicate)) return
+            SystemClock.sleep(PLAYBACK_SOAK_SEEK_POLL_INTERVAL_MS)
+        }
+        error("MediaController did not complete $operation in time.")
+    }
+
+    private fun playbackLatencyJson(values: List<Long>): JSONObject {
+        if (values.isEmpty()) return JSONObject().put("count", 0)
+        val sorted = values.sorted()
+        fun percentile(percent: Int): Long {
+            val index = ((sorted.size * percent + 99) / 100 - 1)
+                .coerceIn(0, sorted.lastIndex)
+            return sorted[index]
+        }
+        return JSONObject()
+            .put("count", sorted.size)
+            .put("p50", percentile(50))
+            .put("p95", percentile(95))
+            .put("p99", percentile(99))
+            .put("max", sorted.last())
+    }
+
+    private data class PlaybackSoakPlayerState(
+        val volume: Float,
+        val repeatMode: Int,
+    )
 
     private fun disableSourceSeparationPlayback(controller: MediaController) {
         val result = onMediaControllerThread(controller) {
@@ -9281,6 +9548,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_PRE_RUN_PROCESS_EXIT_MS = "preRunProcessExitMs"
         const val ARG_STOP_WHEN_CLOSED_FROM_RECENTS = "stopWhenClosedFromRecents"
         const val ARG_PLAYBACK_OWNED_RUN_CLASS = "playbackOwnedRunClass"
+        const val ARG_PLAYBACK_SOAK_MINUTES = "playbackSoakMinutes"
+        const val ARG_PLAYBACK_SOAK_SEEK_COUNT = "playbackSoakSeekCount"
         const val PROCESS_RESOURCE_SAMPLE_INTERVAL_MS = 1_000L
         const val PLAYBACK_RESOURCE_SAMPLE_INTERVAL_MS = 15_000L
         const val PROCESS_REBIND_SETTLE_MS = 250L
@@ -9392,6 +9661,18 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ORIGINAL_PLAYBACK_START_ATTEMPTS = 2
         const val ORIGINAL_PLAYBACK_RETRY_DELAY_MS = 2_000L
         const val MEDIA_SESSION_SEEK_TOLERANCE_MS = 250L
+        const val MAX_PLAYBACK_SOAK_MINUTES = 120
+        const val MAX_PLAYBACK_SOAK_SEEK_COUNT = 1_000
+        const val PLAYBACK_SOAK_WAKE_LOCK_MARGIN_MS = 15 * 60_000L
+        const val PLAYBACK_SOAK_RESOURCE_SAMPLE_INTERVAL_MS = 1_000L
+        const val PLAYBACK_SOAK_STATE_SAMPLE_INTERVAL_MS = 100L
+        const val PLAYBACK_SOAK_SEEK_POLL_INTERVAL_MS = 10L
+        const val PLAYBACK_SOAK_SEEK_END_MARGIN_MS = 2_000L
+        const val PLAYBACK_SOAK_MAXIMUM_NOT_PLAYING_SAMPLES = 10
+        const val PLAYBACK_SOAK_RAPID_SCRUB_INTERVAL = 10
+        const val PLAYBACK_SOAK_RAPID_SCRUB_REQUEST_COUNT = 3
+        const val PLAYBACK_SOAK_PAUSE_RESUME_INTERVAL = 25
+        const val PLAYBACK_SOAK_RANDOM_SEED = 0x504C41594241434BL
         const val PLAYBACK_CONTINUITY_POSITION_TOLERANCE_MS = 1_000L
         const val REPEAT_MODE_CYCLE_LIMIT = 3
         const val MEDIA_SCAN_TIMEOUT_MS = 30_000L

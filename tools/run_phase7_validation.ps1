@@ -47,7 +47,7 @@ param(
     [string]$RunId = "",
     [string]$CacheKey = "",
     [string]$OutputRoot = "",
-    [string]$RunnerRevision = "phase7-runner-v61",
+    [string]$RunnerRevision = "phase7-runner-v62",
     [ValidateSet("cpu", "auto")]
     [string]$BackendMode = "cpu",
     [ValidateSet(
@@ -119,6 +119,10 @@ param(
     [string]$RemoteDeathRecoveryAction = "resume",
     [ValidateRange(5, 300)]
     [int]$SilentObservationSeconds = 30,
+    [ValidateRange(0, 120)]
+    [int]$PlaybackSoakMinutes = 0,
+    [ValidateRange(0, 1000)]
+    [int]$PlaybackSoakSeekCount = 0,
     [switch]$ScreenOffAfterReady,
     [switch]$X86ProcessValidation,
     [switch]$Arm32ResidentProcessValidation
@@ -411,6 +415,13 @@ if ($BackendMode -eq "auto" -and $Stage -eq "lifecycle" -and
 }
 if ($Stage -eq "playback" -and $CacheKey -notmatch '^[0-9a-f]{64}$') {
     throw "Playback stage requires a 64-character lowercase cache key."
+}
+if ($Stage -ne "playback" -and
+        ($PlaybackSoakMinutes -ne 0 -or $PlaybackSoakSeekCount -ne 0)) {
+    throw "PlaybackSoakMinutes and PlaybackSoakSeekCount apply only to playback."
+}
+if (($PlaybackSoakMinutes -eq 0) -ne ($PlaybackSoakSeekCount -eq 0)) {
+    throw "PlaybackSoakMinutes and PlaybackSoakSeekCount must both be zero or positive."
 }
 $requiresSecondaryModel = $Stage -in @(
     "switching",
@@ -1180,7 +1191,11 @@ try {
             "-e", "windowDecodeEnabled", $WindowDecode.ToString().ToLowerInvariant()
         )
         if ($Stage -eq "playback") {
-            $instrumentArguments += @("-e", "cacheKey", $CacheKey)
+            $instrumentArguments += @(
+                "-e", "cacheKey", $CacheKey,
+                "-e", "playbackSoakMinutes", [string]$PlaybackSoakMinutes,
+                "-e", "playbackSoakSeekCount", [string]$PlaybackSoakSeekCount
+            )
         }
         if ($Stage -eq "lifecycle") {
             $instrumentArguments += @(

@@ -267,6 +267,31 @@ It connects to the real `PlaybackService` session and exercises completed-cache
 adoption, pause, seek, resume, and blend commands. The debug-only cache command
 is intentionally not part of the release graph.
 
+For an opt-in sustained real-song playback qualification, add both
+`-PlaybackSoakMinutes` and `-PlaybackSoakSeekCount` to the same playback stage.
+The player remains muted but renders through the real MediaSession and audio
+sink, repeats the completed song, issues deterministic random seeks with
+periodic rapid-scrub bursts and pause/resume cycles, and records seek latency,
+Media3 underruns, PSS, file descriptors, cache size, and thermal status. Both
+arguments default to zero, so ordinary playback validation is unchanged:
+
+```powershell
+.\tools\run_phase7_validation.ps1 `
+  -Serial <serial> `
+  -ProcessAbi arm64-v8a `
+  -Stage playback `
+  -KeepAppData `
+  -CacheKey <completed-cache-key> `
+  -SourcePath <same-full-song-fixture-path> `
+  -FixtureId coast_town_full_wav `
+  -PlaybackSoakMinutes 30 `
+  -PlaybackSoakSeekCount 100
+```
+
+This stage qualifies completed-cache playback only. Process recreation,
+background separation, cache deletion, and active-model switching retain their
+separate product-state stages and must not be inferred from a successful soak.
+
 ## Model and queue lifecycle stages
 
 `switching` downloads a secondary preset without selecting it, changes the
