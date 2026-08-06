@@ -6758,7 +6758,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     if (isRapidScrub) rapidScrubBurstCount += 1
                     waitForMediaControllerLatency(
                         controller = controller,
-                        operation = "playback soak seek ${completedSeekEpisodes + 1}",
+                        operation = "playback soak seek ${completedSeekEpisodes + 1} " +
+                            "to ${finalTargetPositionMs}ms",
                     ) {
                         controller.playWhenReady && controller.isPlaying &&
                             abs(controller.currentPosition - finalTargetPositionMs) <=
@@ -6889,7 +6890,20 @@ class SourceSeparationPhase7WorkerDeviceTest {
             if (onMediaControllerThread(controller, predicate)) return
             SystemClock.sleep(PLAYBACK_SOAK_SEEK_POLL_INTERVAL_MS)
         }
-        error("MediaController did not complete $operation in time.")
+        val state = onMediaControllerThread(controller) {
+            JSONObject()
+                .put("positionMs", controller.currentPosition)
+                .put("bufferedPositionMs", controller.bufferedPosition)
+                .put("durationMs", controller.duration)
+                .put("playWhenReady", controller.playWhenReady)
+                .put("isPlaying", controller.isPlaying)
+                .put("playbackState", controller.playbackState)
+                .put("repeatMode", controller.repeatMode)
+                .put("playerError", controller.playerError?.let { error ->
+                    "${error.errorCodeName}: ${error.message}"
+                } ?: JSONObject.NULL)
+        }
+        error("MediaController did not complete $operation in time: $state")
     }
 
     private fun playbackLatencyJson(values: List<Long>): JSONObject {
