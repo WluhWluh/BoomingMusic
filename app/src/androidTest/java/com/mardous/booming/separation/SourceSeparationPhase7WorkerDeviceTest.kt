@@ -6415,6 +6415,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
         require((playbackSoakMinutes == 0) == (playbackSoakSeekCount == 0)) {
             "Playback soak duration and seek count must both be zero or positive."
         }
+        val preservePlaybackCache = arguments.optionalBoolean(
+            ARG_PRESERVE_PLAYBACK_CACHE,
+            false,
+        )
         val preferences = get<SharedPreferences>(SharedPreferences::class.java)
         val preferenceSnapshot = snapshotPreferences(
             preferences,
@@ -6603,6 +6607,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .put("completedPlayable", true)
                 .put("mediaSessionAdopted", true)
                 .put("mediaSessionSongId", manifest.song.songId)
+                .put("preservedAfterRun", preservePlaybackCache)
             )
             report.put("playbackModelSwitch", JSONObject()
                 .put("performed", switchedModelDuringPlayback)
@@ -6651,12 +6656,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     "${restoreError::class.java.name}: ${restoreError.message}")
             }
             restorePreferences(preferences, preferenceSnapshot)
-            testedCacheKey?.let { cacheKey ->
-                runCatching { waitForCacheLeaseRelease(cacheRepository, cacheKey) }
-                runCatching { clearExactCacheEntry(runtimeFacade, cacheKey) }
-            }
-            sourceUri?.let { uri ->
-                runCatching { context.contentResolver.delete(uri, null, null) }
+            if (!preservePlaybackCache) {
+                testedCacheKey?.let { cacheKey ->
+                    runCatching { waitForCacheLeaseRelease(cacheRepository, cacheKey) }
+                    runCatching { clearExactCacheEntry(runtimeFacade, cacheKey) }
+                }
+                sourceUri?.let { uri ->
+                    runCatching { context.contentResolver.delete(uri, null, null) }
+                }
             }
             writeReport(context, runId, "playback", report)
         }
@@ -9550,6 +9557,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val ARG_PLAYBACK_OWNED_RUN_CLASS = "playbackOwnedRunClass"
         const val ARG_PLAYBACK_SOAK_MINUTES = "playbackSoakMinutes"
         const val ARG_PLAYBACK_SOAK_SEEK_COUNT = "playbackSoakSeekCount"
+        const val ARG_PRESERVE_PLAYBACK_CACHE = "preservePlaybackCache"
         const val PROCESS_RESOURCE_SAMPLE_INTERVAL_MS = 1_000L
         const val PLAYBACK_RESOURCE_SAMPLE_INTERVAL_MS = 15_000L
         const val PROCESS_REBIND_SETTLE_MS = 250L

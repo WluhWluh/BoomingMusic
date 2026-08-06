@@ -123,6 +123,7 @@ param(
     [int]$PlaybackSoakMinutes = 0,
     [ValidateRange(0, 1000)]
     [int]$PlaybackSoakSeekCount = 0,
+    [switch]$PreservePlaybackCache,
     [switch]$ScreenOffAfterReady,
     [switch]$X86ProcessValidation,
     [switch]$Arm32ResidentProcessValidation
@@ -419,6 +420,9 @@ if ($Stage -eq "playback" -and $CacheKey -notmatch '^[0-9a-f]{64}$') {
 if ($Stage -ne "playback" -and
         ($PlaybackSoakMinutes -ne 0 -or $PlaybackSoakSeekCount -ne 0)) {
     throw "PlaybackSoakMinutes and PlaybackSoakSeekCount apply only to playback."
+}
+if ($PreservePlaybackCache -and $Stage -ne "playback") {
+    throw "PreservePlaybackCache applies only to playback."
 }
 if (($PlaybackSoakMinutes -eq 0) -ne ($PlaybackSoakSeekCount -eq 0)) {
     throw "PlaybackSoakMinutes and PlaybackSoakSeekCount must both be zero or positive."
@@ -1194,7 +1198,9 @@ try {
             $instrumentArguments += @(
                 "-e", "cacheKey", $CacheKey,
                 "-e", "playbackSoakMinutes", [string]$PlaybackSoakMinutes,
-                "-e", "playbackSoakSeekCount", [string]$PlaybackSoakSeekCount
+                "-e", "playbackSoakSeekCount", [string]$PlaybackSoakSeekCount,
+                "-e", "preservePlaybackCache",
+                $PreservePlaybackCache.ToString().ToLowerInvariant()
             )
         }
         if ($Stage -eq "lifecycle") {

@@ -288,6 +288,11 @@ arguments default to zero, so ordinary playback validation is unchanged:
   -PlaybackSoakSeekCount 100
 ```
 
+The stage normally removes its cache and temporary MediaStore source in
+`finally`. Add `-PreservePlaybackCache` only to a short dry run that must be
+followed by another playback validation against the same cache; omit it from
+the final qualification run so the normal cleanup path remains covered.
+
 This stage qualifies completed-cache playback only. Process recreation,
 background separation, cache deletion, and active-model switching retain their
 separate product-state stages and must not be inferred from a successful soak.
