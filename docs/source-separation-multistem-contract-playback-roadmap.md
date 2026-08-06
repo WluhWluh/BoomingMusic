@@ -3,16 +3,18 @@
 Status: active implementation roadmap and design authority for stem identity,
 model contracts, imported metadata, cache output shape, and playback data flow.
 
-Updated: 2026-08-05
+Updated: 2026-08-06
 
 Current milestone: Phases 0-2 and the Phase 3 bounded two-stem data-plane
 implementation are complete. Phase 4A now provides an ordered 2/4/6/8-stem
 engine, list mixer, service session handle, and structural buffer admission.
 The deterministic indexed-WAV/FLAC seek smoke still passes on all four ABI rows,
-and the recent S25 handoff/cleanup fixes have been manually checked. Long-form
-real-song playback, cold/warm seek percentiles, resource qualification, and the
-Phase 4B compressed-source/process-recreation gates remain open. No real
-multi-stem model is admitted until its own pipeline and full-song gates pass.
+and the synthetic eight-stem engine has completed 30-minute S25/S10 arm64
+throughput, seek, thermal, PSS, and cache-stability qualification. Long-form
+real-song playback and real UI/lifecycle qualification remain open. The real
+multi-stem repository/`PlaybackService` recreation gate stays deferred until
+Phase 5 supplies its contract and cache snapshot; no real multi-stem model is
+admitted until its own pipeline and full-song gates pass.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -780,9 +782,10 @@ mixer. Normal playback creates no persistent full-song PCM.
 
 ### Phase 4: N-stem playback data plane
 
-Status: Phase 4A complete; Phase 4B qualification is in progress. The remaining
-long-form Phase 3 measurements stay release gates and do not authorize a real
-multi-stem model.
+Status: Phase 4A and the Phase 4B synthetic/compressed-source device
+qualification are complete. The schema-dependent repository/service recreation
+gate remains explicitly deferred to Phase 5. The remaining long-form Phase 3
+measurements stay release gates and do not authorize a real multi-stem model.
 
 #### Phase 4A: Ordered synthetic data plane
 
@@ -836,12 +839,30 @@ Evidence: `6148b589` adds the engine matrix, `a7816b50` adds the list mixer and
   was 782,114 bytes. `Debug.getPss()` is a coarse process snapshot, not a
   thermal or allocation-trace peak; these results are bounded-resource smoke
   evidence only.
-- [ ] Collect thermal behavior, sustained 30-minute throughput, longer seek
-  percentiles, and a separately controlled baseline for PSS/cache growth.
-- [ ] Recalibrate memory admission from measured stem count and block geometry;
-  the current 8-stem/4 MiB ceiling is a structural safety bound, not a device
-  qualification result. Unsupported counts must fail before session
+- [x] Collect synthetic eight-stem thermal behavior, sustained 30-minute
+  throughput, full-run seek percentiles, and separately sampled PSS/cache
+  stability on S25 and S10 arm64. Keep the separate real-song Phase 3 gate open.
+- [x] Retain the current eight-stem/4 MiB structural admission ceiling. The
+  default eight-stem geometry allocates only 1,572,864 bytes, and the long run
+  showed bounded PSS with no cache growth, so lowering the guard would not
+  reduce the actual pool. Unsupported counts continue to fail before session
   installation rather than degrading into partial playback or full-song PCM.
+
+  The opt-in 30-minute indexed-FLAC soak generated eight real compressed stems,
+  played at realtime cadence, and completed 99 deterministic random seeks. Both
+  rows retained eight descriptors, one startup low-water event, zero underruns,
+  a 1,572,864-byte pool, and an unchanged 9,391,312-byte cache payload:
+
+  | row | setup | seek p95 | decode p99 | audio p99 | PSS delta | late callbacks |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | S25 arm64 | 14.203 s | 9 ms | 3.187 ms | 0.514 ms | 20,498 KiB | 0 / 38,743 |
+  | S10 arm64 | 8.344 s | 61 ms | 36.006 ms | 9.579 ms | 9,197 KiB | 25 / 38,676 |
+
+  Thermal status remained `0` throughout both runs. Reported battery temperature
+  ranged from 21.1-23.4 C on S25 and 32.1-37.6 C on S10. Seek percentiles cover
+  the complete run; decoder and audio percentiles are the final 256-sample
+  hot-state windows. These are arm64 measurements even though the separate S10
+  portability smoke also covers forced armeabi-v7a.
 
 Evidence: `d661340e` adds 4-stem indexed-FLAC and failure coverage,
 `109ae194` adds cancellation/recreation and the first S25/S10 instrumentation,
@@ -851,7 +872,9 @@ WAV parsing and malformed 2/4/6/8-stem admission, `178bf51e` expands missing
 index, truncation, and frame-CRC rejection to all four geometries, and
 `eeb9957e` covers path leases, replacement barriers, and 4/6/8-stem engine
 recreation. The complete four-row device matrix ran on 2026-08-06 and
-completed every 2/4/6-stem test with zero test failures.
+completed every 2/4/6-stem test with zero test failures. `ced5ceef`, `8cd928fa`,
+and `a7855686` add the opt-in soak, device-side wake lock, and buffered fixture
+generation used by the successful S25/S10 30-minute runs.
 
 **Exit:** N-stem playback is technically stable with synthetic outputs and the
 same bounded engine; this does not yet activate a multi-stem model.
