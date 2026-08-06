@@ -592,7 +592,7 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
         const val SOAK_RESOURCE_SAMPLE_INTERVAL_MS = 1_000L
         const val SOAK_THERMAL_SAMPLE_INTERVAL_MS = 15_000L
         const val SOAK_BASELINE_SETTLE_MS = 500L
-        const val SOAK_WAKE_LOCK_MARGIN_MS = 60_000L
+        const val SOAK_WAKE_LOCK_MARGIN_MS = 15 * 60_000L
         const val NANOS_PER_SECOND = 1_000_000_000L
         const val NANOS_PER_MILLISECOND = 1_000_000L
         val SOAK_STEM_COUNTS = setOf(4, 6, 8)
