@@ -2,6 +2,7 @@ package com.mardous.booming.playback
 
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
+import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
@@ -102,6 +103,97 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
         }
     }
 
+    @Test
+    fun fourStemIndexedFlacSmokeRecordsBoundedResourceMetrics() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val root = File(context.cacheDir, "multistem-flac-device-test").apply {
+            deleteRecursively()
+            check(mkdirs())
+        }
+        val stems = (0 until MULTISTEM_COUNT).map { index ->
+            val wav = File(root, "stem-$index.wav")
+            val flac = File(root, "stem-$index.flac")
+            writeWav(wav, MULTISTEM_FRAME_COUNT) { frame ->
+                multistemSample(index, frame)
+            }
+            Pcm16StereoFlacEncoder.encodeWavToFlac(
+                wavFile = wav,
+                flacFile = flac,
+                expectedSampleRate = SAMPLE_RATE,
+                expectedFrameCount = MULTISTEM_FRAME_COUNT,
+            )
+            flac
+        }
+        val stemIds = listOf("vocals", "drums", "bass", "other")
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            val prepared = processor.prepareInputs(
+                stemFiles = stems,
+                stemIds = stemIds,
+                stemSampleRate = SAMPLE_RATE,
+                stemChannelCount = CHANNEL_COUNT,
+            )
+            processor.configure(
+                AudioProcessor.AudioFormat(SAMPLE_RATE, CHANNEL_COUNT, C.ENCODING_PCM_16BIT),
+            )
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = stems,
+                stemIds = stemIds,
+                positionMs = 0L,
+                inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
+                stemSampleRate = SAMPLE_RATE,
+                stemChannelCount = CHANNEL_COUNT,
+                mixedOutputReadyPrerollMs = 0L,
+                preparedInputs = prepared,
+            )
+            awaitReady(processor)
+
+            val random = Random(0x4D53534CL)
+            repeat(MULTISTEM_SEEK_COUNT) {
+                val positionMs = random.nextInt(MULTISTEM_MAX_SEEK_POSITION_MS + 1).toLong()
+                processor.seekTo(positionMs)
+                awaitReady(processor)
+                val expectedStartFrame = (
+                    positionMs * SAMPLE_RATE / MILLIS_PER_SECOND.toFloat()
+                ).roundToLong().toInt()
+                val input = ByteBuffer.allocateDirect(MULTISTEM_READ_FRAMES * BYTES_PER_FRAME)
+                    .order(ByteOrder.LITTLE_ENDIAN)
+                repeat(MULTISTEM_READ_FRAMES * CHANNEL_COUNT) { input.putShort(9_000) }
+                input.flip()
+                processor.queueInput(input)
+                val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+                repeat(MULTISTEM_READ_FRAMES) { frameOffset ->
+                    val expected = (0 until MULTISTEM_COUNT).sumOf { stemIndex ->
+                        multistemSample(stemIndex, expectedStartFrame + frameOffset)
+                    }
+                    assertEquals(expected, output.short.toInt())
+                    assertEquals(expected, output.short.toInt())
+                }
+            }
+
+            val metrics = requireNotNull(processor.dataPlaneMetrics())
+            assertEquals(MULTISTEM_COUNT, metrics.activeStemCount)
+            assertTrue(metrics.bufferPoolBytes > 0L)
+            assertTrue(metrics.openFileDescriptors >= MULTISTEM_COUNT)
+            assertEquals(0L, metrics.underruns)
+            assertEquals(MULTISTEM_SEEK_COUNT.toLong(), metrics.seekRequests)
+            assertTrue(metrics.audioThreadTimeNs.count > 0)
+            Log.i(
+                METRICS_TAG,
+                "model=${android.os.Build.MODEL} stems=${metrics.activeStemCount} " +
+                        "poolBytes=${metrics.bufferPoolBytes} " +
+                        "fds=${metrics.openFileDescriptors} " +
+                        "decodeP95Ns=${metrics.decodeBlockLatencyNs.p95} " +
+                        "audioP95Ns=${metrics.audioThreadTimeNs.p95} " +
+                        "underruns=${metrics.underruns} seeks=${metrics.seekRequests}",
+            )
+        } finally {
+            processor.disable()
+            root.deleteRecursively()
+        }
+    }
+
     private fun awaitReady(processor: SourceSeparationMixAudioProcessor) {
         val deadline = System.nanoTime() + READY_TIMEOUT_MS * 1_000_000L
         while (System.nanoTime() < deadline) {
@@ -139,6 +231,10 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
 
     private fun instrumentalSample(frame: Int): Int = 2_000 - frame % 499
 
+    private fun multistemSample(stemIndex: Int, frame: Int): Int {
+        return (stemIndex + 1) * 200 + frame % (37 + stemIndex * 5)
+    }
+
     private fun RandomAccessFile.writeLittleEndianInt(value: Int) {
         write(value and 0xFF)
         write((value ushr 8) and 0xFF)
@@ -160,6 +256,12 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
         const val SEEK_COUNT = 100
         const val MILLIS_PER_SECOND = 1_000
         const val MAX_SEEK_POSITION_MS = 11_000
+        const val MULTISTEM_COUNT = 4
+        const val MULTISTEM_FRAME_COUNT = SAMPLE_RATE * 5
+        const val MULTISTEM_READ_FRAMES = 64
+        const val MULTISTEM_SEEK_COUNT = 20
+        const val MULTISTEM_MAX_SEEK_POSITION_MS = 4_500
         const val READY_TIMEOUT_MS = 5_000L
+        const val METRICS_TAG = "BSSMultistemPlayback"
     }
 }

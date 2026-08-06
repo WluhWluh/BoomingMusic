@@ -2,6 +2,7 @@ package com.mardous.booming.playback
 
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -173,7 +174,7 @@ class SourceSeparationStemPlaybackEngineMultistemTest {
             )
             try {
                 engine.start(
-                    sessionId = recreation + 1L,
+                    sessionId = recreation.toLong() + 1L,
                     factories = factories(stemCount, geometry, base = recreation * 10_000),
                 )
                 await { engine.hasResumeWaterline() }
@@ -186,6 +187,66 @@ class SourceSeparationStemPlaybackEngineMultistemTest {
             } finally {
                 engine.close()
             }
+        }
+    }
+
+    @Test
+    fun closingDuringAnEightStemDecodeStopsTheInFlightSession() {
+        val geometry = geometry(32)
+        val decodeStarted = java.util.concurrent.CountDownLatch(1)
+        val closedSources = AtomicInteger()
+        val releaseDecode = java.util.concurrent.CountDownLatch(1)
+        val factories = (0 until 8).map { stemIndex ->
+            val sourcePcm = pcm(stemIndex * 1_000, 32)
+            object : SourceSeparationPlaybackStemSourceFactory {
+                override val spec = SourceSeparationPlaybackStemSpec("stem-$stemIndex", geometry)
+
+                override fun open(): SourceSeparationPlaybackStemSource {
+                    return object : SourceSeparationPlaybackStemSource {
+                        override val geometry = spec.geometry
+
+                        override fun readFrames(
+                            startFrame: Long,
+                            destination: ByteArray,
+                            destinationOffsetBytes: Int,
+                            frameCount: Int,
+                        ): Int {
+                            if (startFrame == 0L) {
+                                decodeStarted.countDown()
+                                releaseDecode.await()
+                            }
+                            sourcePcm.copyInto(
+                                destination = destination,
+                                destinationOffset = destinationOffsetBytes,
+                                startIndex = startFrame.toInt() * BYTES_PER_FRAME,
+                                endIndex = startFrame.toInt() * BYTES_PER_FRAME +
+                                        frameCount * BYTES_PER_FRAME,
+                            )
+                            return frameCount
+                        }
+
+                        override fun close() {
+                            closedSources.incrementAndGet()
+                        }
+                    }
+                }
+            }
+        }
+        val engine = SourceSeparationStemPlaybackEngine(
+            blockFrames = 4,
+            resumeWaterlineBlocks = 1,
+            targetWaterlineBlocks = 2,
+            blockCapacity = 3,
+        )
+        try {
+            engine.start(1L, factories)
+            assertTrue(decodeStarted.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            engine.close()
+            assertTrue(closedSources.get() >= 1)
+            assertEquals(SourceSeparationPlaybackDataState.Idle, engine.currentState)
+        } finally {
+            releaseDecode.countDown()
+            engine.close()
         }
     }
 
