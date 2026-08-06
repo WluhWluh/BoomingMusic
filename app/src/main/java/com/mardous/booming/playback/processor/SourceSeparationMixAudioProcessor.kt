@@ -23,12 +23,31 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 class PreparedSourceSeparationPlaybackInputs internal constructor(
-    internal val vocalsFile: File,
-    internal val instrumentalFile: File?,
+    stemFiles: List<File>,
+    stemIds: List<String>,
     internal val stemSampleRate: Int,
     internal val stemChannelCount: Int,
     internal val factories: List<SourceSeparationPlaybackStemSourceFactory>,
-)
+) {
+    internal val stemFiles: List<File> = stemFiles.toList()
+    internal val stemIds: List<String> = stemIds.toList()
+
+    init {
+        require(this.stemFiles.isNotEmpty()) { "Prepared playback requires at least one stem." }
+        require(this.stemIds.size == this.stemFiles.size) {
+            "Prepared playback stem IDs must match the stem file count."
+        }
+        require(this.factories.size == this.stemFiles.size) {
+            "Prepared playback factories must match the stem file count."
+        }
+    }
+
+    internal val vocalsFile: File
+        get() = stemFiles.first()
+
+    internal val instrumentalFile: File?
+        get() = stemFiles.getOrNull(1)
+}
 
 @OptIn(UnstableApi::class)
 class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
@@ -52,13 +71,12 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private val gainGeneration = AtomicLong()
     private val gainSnapshot = AtomicReference(GainSnapshot.centered())
     private var appliedGainGeneration = 0L
-    private var currentVocalsGain = 1f
-    private var currentInstrumentalGain = 1f
-    private var targetVocalsGain = 1f
-    private var targetInstrumentalGain = 1f
-    private var vocalsGainStep = 0f
-    private var instrumentalGainStep = 0f
+    private var configuredStemCount = 2
+    private var currentStemGains = FloatArray(configuredStemCount) { 1f }
+    private var targetStemGains = FloatArray(configuredStemCount) { 1f }
+    private var stemGainSteps = FloatArray(configuredStemCount)
     private var gainRampFramesRemaining = 0
+    private var legacyTwoStemBlendLaw = true
 
     @Volatile
     private var inputMode = InputMode.InstrumentalStem
@@ -80,6 +98,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private var instrumentalScratch = ByteArray(0)
     private val vocalsResampleCache = StemResampleCache()
     private val instrumentalResampleCache = StemResampleCache()
+    private var engineResampleCaches: Array<StemResampleCache> = emptyArray()
     private var resampleStemFramePosition = 0.0
     private val debugSessionSeq = AtomicLong()
     private val debugQueueSeq = AtomicLong()
@@ -107,7 +126,95 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         mixedOutputReadyPrerollMs: Long = DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS,
         preparedInputs: PreparedSourceSeparationPlaybackInputs? = null,
     ) {
-        setBlend(initialBlend)
+        val normalizedBlend = initialBlend.coerceIn(0f, 1f)
+        val stemFiles = buildList {
+            add(vocalsFile)
+            instrumentalFile?.let(::add)
+        }
+        val legacyGains = legacyBlendGains(normalizedBlend)
+        enableInternal(
+            stemFiles = stemFiles,
+            stemIds = stemFiles.indices.map { index ->
+                if (index == 0) "vocals" else "instrumental"
+            },
+            positionMs = positionMs,
+            initialGains = legacyGains,
+            initialBlend = normalizedBlend,
+            inputMode = inputMode,
+            stemSampleRate = stemSampleRate,
+            stemChannelCount = stemChannelCount,
+            mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs,
+            preparedInputs = preparedInputs,
+            useLegacyTwoStemBlendLaw = true,
+        )
+    }
+
+    /**
+     * Enables an ordered multi-stem session. The original source remains the
+     * transport clock; every listed stem is mixed with its corresponding gain.
+     * Multi-stem sessions deliberately require the bounded playback engine.
+     */
+    fun enable(
+        stemFiles: List<File>,
+        positionMs: Long,
+        initialGains: List<Float> = emptyList(),
+        stemIds: List<String> = stemFiles.indices.map { index -> "stem-$index" },
+        inputMode: InputMode = InputMode.OriginalSource,
+        stemSampleRate: Int = DEFAULT_SAMPLE_RATE,
+        stemChannelCount: Int = CHANNEL_COUNT_STEREO,
+        mixedOutputReadyPrerollMs: Long = DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS,
+        preparedInputs: PreparedSourceSeparationPlaybackInputs? = null,
+    ) {
+        require(stemFiles.size > 2) {
+            "Use the two-stem enable overload for two-stem blend playback."
+        }
+        enableInternal(
+            stemFiles = stemFiles,
+            stemIds = stemIds,
+            positionMs = positionMs,
+            initialGains = initialGains,
+            initialBlend = blend,
+            inputMode = inputMode,
+            stemSampleRate = stemSampleRate,
+            stemChannelCount = stemChannelCount,
+            mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs,
+            preparedInputs = preparedInputs,
+            useLegacyTwoStemBlendLaw = false,
+        )
+    }
+
+    private fun enableInternal(
+        stemFiles: List<File>,
+        stemIds: List<String>,
+        positionMs: Long,
+        initialGains: List<Float>,
+        initialBlend: Float,
+        inputMode: InputMode,
+        stemSampleRate: Int,
+        stemChannelCount: Int,
+        mixedOutputReadyPrerollMs: Long,
+        preparedInputs: PreparedSourceSeparationPlaybackInputs?,
+        useLegacyTwoStemBlendLaw: Boolean,
+    ) {
+        require(stemFiles.isNotEmpty()) { "Playback requires at least one stem." }
+        require(stemIds.size == stemFiles.size) {
+            "Playback stem IDs must match the stem file count."
+        }
+        require(stemIds.distinct().size == stemIds.size) {
+            "Playback stem IDs must be unique."
+        }
+        require(stemFiles.size <= 2 || inputMode == InputMode.OriginalSource) {
+            "Multi-stem playback requires the original source as its transport input."
+        }
+        val expectedGainCount = if (useLegacyTwoStemBlendLaw) 2 else stemFiles.size
+        val normalizedGains = if (initialGains.isEmpty()) {
+            List(expectedGainCount) { 1f }
+        } else {
+            require(initialGains.size == expectedGainCount) {
+                "Initial gains must match the active gain count."
+            }
+            initialGains.map { gain -> gain.coerceAtLeast(0f) }
+        }
         synchronized(lock) {
             closeLocked()
             debugSessionId = debugSessionSeq.incrementAndGet()
@@ -118,10 +225,14 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             this.stemSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
             this.stemChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
             this.mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs.coerceAtLeast(0L)
+            configuredStemCount = expectedGainCount
+            legacyTwoStemBlendLaw = useLegacyTwoStemBlendLaw
+            blend = initialBlend
+            publishGainSnapshot(normalizedGains)
             applyGainSnapshotImmediately()
             val engineFactories = preparedInputs?.let { prepared ->
-                require(prepared.vocalsFile == vocalsFile &&
-                        prepared.instrumentalFile == instrumentalFile &&
+                require(prepared.stemFiles == stemFiles &&
+                        prepared.stemIds == stemIds &&
                         prepared.stemSampleRate == this.stemSampleRate &&
                         prepared.stemChannelCount == this.stemChannelCount
                 ) {
@@ -129,8 +240,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 }
                 prepared.factories
             } ?: createEngineFactories(
-                vocalsFile = vocalsFile,
-                instrumentalFile = instrumentalFile,
+                stemFiles = stemFiles,
+                stemIds = stemIds,
                 sampleRate = this.stemSampleRate,
                 channelCount = this.stemChannelCount,
             )
@@ -139,22 +250,29 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                     stateChangedSink = { state -> dataPlaneStateChangedSink?.invoke(state) },
                 )
                 playbackEngine = engine
-                engineHasInstrumentalInput = instrumentalFile != null
+                engineHasInstrumentalInput = engineFactories.size > 1
                 engineStemBuffers = Array(engineFactories.size) {
                     ByteArray(engine.blockFrameCapacity * DEFAULT_FRAME_SIZE)
                 }
                 val startFrame = engineFactories.first().spec.geometry
                     .transportPositionToStemFrame(positionMs)
                 resampleStemFramePosition = startFrame.toDouble()
-                prepareEngineResampleCachesLocked(engine.blockFrameCapacity, startFrame)
+                prepareEngineResampleCachesLocked(
+                    blockFrameCapacity = engine.blockFrameCapacity,
+                    startFrame = startFrame,
+                    stemCount = engineFactories.size,
+                )
                 engine.start(
                     sessionId = debugSessionId,
                     factories = engineFactories,
                     startFrame = startFrame,
                 )
             } else {
-                vocalsInput = openStemInput(vocalsFile)
-                instrumentalInput = instrumentalFile?.let(::openStemInput)
+                require(stemFiles.size <= 2) {
+                    "Multi-stem playback requires WAV, PCM, or FLAC engine sources."
+                }
+                vocalsInput = openStemInput(stemFiles.first())
+                instrumentalInput = stemFiles.getOrNull(1)?.let(::openStemInput)
             }
             active = true
             if (playbackEngine == null) seekToLocked(positionMs)
@@ -163,7 +281,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 "session=$debugSessionId mode=$inputMode positionMs=$positionMs " +
                         "blend=$blend stemRate=${this.stemSampleRate} stemChannels=${this.stemChannelCount} " +
                         "mixedPrerollMs=${this.mixedOutputReadyPrerollMs} " +
-                        "vocals=${vocalsFile.name} instrumental=${instrumentalFile?.name}"
+                        "stems=${stemFiles.joinToString { file -> file.name }}"
             )
         }
     }
@@ -174,19 +292,39 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         stemSampleRate: Int,
         stemChannelCount: Int,
     ): PreparedSourceSeparationPlaybackInputs {
+        val stemFiles = buildList {
+            add(vocalsFile)
+            instrumentalFile?.let(::add)
+        }
+        return prepareInputs(
+            stemFiles = stemFiles,
+            stemIds = stemFiles.indices.map { index ->
+                if (index == 0) "vocals" else "instrumental"
+            },
+            stemSampleRate = stemSampleRate,
+            stemChannelCount = stemChannelCount,
+        )
+    }
+
+    internal fun prepareInputs(
+        stemFiles: List<File>,
+        stemIds: List<String>,
+        stemSampleRate: Int,
+        stemChannelCount: Int,
+    ): PreparedSourceSeparationPlaybackInputs {
         val normalizedSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
         val normalizedChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
         val factories = requireNotNull(
             createEngineFactories(
-                vocalsFile = vocalsFile,
-                instrumentalFile = instrumentalFile,
+                stemFiles = stemFiles,
+                stemIds = stemIds,
                 sampleRate = normalizedSampleRate,
                 channelCount = normalizedChannelCount,
             ),
         ) { "Separated playback cache uses unsupported stem files." }
         return PreparedSourceSeparationPlaybackInputs(
-            vocalsFile = vocalsFile,
-            instrumentalFile = instrumentalFile,
+            stemFiles = stemFiles,
+            stemIds = stemIds,
             stemSampleRate = normalizedSampleRate,
             stemChannelCount = normalizedChannelCount,
             factories = factories,
@@ -204,22 +342,27 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     fun setBlend(value: Float) {
         val normalized = value.coerceIn(0f, 1f)
         blend = normalized
-        val vocalsGain = if (normalized <= CENTER_BLEND) 1f else
-            (1f - normalized) / CENTER_BLEND
-        val instrumentalGain = if (normalized >= CENTER_BLEND) 1f else
-            normalized / CENTER_BLEND
-        gainSnapshot.set(
-            GainSnapshot(
-                generation = gainGeneration.incrementAndGet(),
-                blend = normalized,
-                vocalsGain = vocalsGain,
-                instrumentalGain = instrumentalGain,
-            ),
-        )
+        val blendGains = legacyBlendGains(normalized)
+        val gains = List(configuredStemCount) { index ->
+            if (index < blendGains.size) {
+                blendGains[index]
+            } else {
+                gainSnapshot.get().gains.getOrNull(index) ?: 1f
+            }
+        }
+        publishGainSnapshot(gains, normalized)
         traceDebug(
             "setBlend",
-            "session=$debugSessionId blend=$blend vocalsGain=$vocalsGain instrumentalGain=$instrumentalGain"
+            "session=$debugSessionId blend=$blend gains=${gains.joinToString()}"
         )
+    }
+
+    /** Updates all stem gains without rebuilding the playback session. */
+    fun setStemGains(gains: List<Float>) {
+        require(gains.size == configuredStemCount) {
+            "Stem gains must match the active stem count."
+        }
+        publishGainSnapshot(gains.map { gain -> gain.coerceAtLeast(0f) })
     }
 
     fun seekTo(positionMs: Long) {
@@ -237,35 +380,47 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     fun hotSwapToPcmInputs(
         vocalsFile: File,
         instrumentalFile: File,
+    ): Boolean = hotSwapToPcmInputs(
+        stemFiles = listOf(vocalsFile, instrumentalFile),
+        stemIds = listOf("vocals", "instrumental"),
+    )
+
+    fun hotSwapToPcmInputs(
+        stemFiles: List<File>,
+        stemIds: List<String> = stemFiles.indices.map { index -> "stem-$index" },
     ): Boolean {
-        playbackEngine?.let { engine ->
+        val engine = playbackEngine
+        if (engine != null) {
             if (!active || inputMode != InputMode.OriginalSource) return false
             val factories = createEngineFactories(
-                vocalsFile = vocalsFile,
-                instrumentalFile = instrumentalFile,
+                stemFiles = stemFiles,
+                stemIds = stemIds,
                 sampleRate = stemSampleRate,
                 channelCount = stemChannelCount,
             ) ?: return false
-            engineHasInstrumentalInput = true
+            require(factories.size == configuredStemCount) {
+                "Hot-swapped playback must keep the active stem count."
+            }
+            engineHasInstrumentalInput = factories.size > 1
             engineStemBuffers = Array(factories.size) {
                 ByteArray(engine.blockFrameCapacity * DEFAULT_FRAME_SIZE)
             }
-            engine.hotSwap(
-                sessionId = debugSessionId,
-                factories = factories,
-                startFrame = if (inputAudioFormat.sampleRate != stemSampleRate) {
-                    floor(resampleStemFramePosition).toLong().coerceAtLeast(0L)
-                } else {
-                    engine.currentFrame()
-                },
-            )
             val logicalFrame = if (inputAudioFormat.sampleRate != stemSampleRate) {
                 floor(resampleStemFramePosition).toLong().coerceAtLeast(0L)
             } else {
                 engine.currentFrame()
             }
+            engine.hotSwap(
+                sessionId = debugSessionId,
+                factories = factories,
+                startFrame = logicalFrame,
+            )
             resampleStemFramePosition = logicalFrame.toDouble()
-            prepareEngineResampleCachesLocked(engine.blockFrameCapacity, logicalFrame)
+            prepareEngineResampleCachesLocked(
+                blockFrameCapacity = engine.blockFrameCapacity,
+                startFrame = logicalFrame,
+                stemCount = factories.size,
+            )
             resetMixedOutputNotificationLocked()
             traceDebug(
                 "hotSwapPcm",
@@ -273,12 +428,13 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             )
             return true
         }
-        val newVocalsInput = runCatching { RawPcmStemInput(vocalsFile) }
+        if (stemFiles.size != 2) return false
+        val newVocalsInput = runCatching { RawPcmStemInput(stemFiles[0]) }
             .getOrElse { error ->
                 traceDebug("hotSwapPcm.failed", "session=$debugSessionId stem=vocals error=${error.message}")
                 return false
             }
-        val newInstrumentalInput = runCatching { RawPcmStemInput(instrumentalFile) }
+        val newInstrumentalInput = runCatching { RawPcmStemInput(stemFiles[1]) }
             .getOrElse { error ->
                 newVocalsInput.close()
                 traceDebug(
@@ -346,7 +502,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                     engine.currentFrame()
                 }
                 resampleStemFramePosition = logicalFrame.toDouble()
-                prepareEngineResampleCachesLocked(engine.blockFrameCapacity, logicalFrame)
+                prepareEngineResampleCachesLocked(
+                    blockFrameCapacity = engine.blockFrameCapacity,
+                    startFrame = logicalFrame,
+                    stemCount = engineStemBuffers.size,
+                )
             } else {
                 clearResampleCachesLocked()
             }
@@ -535,41 +695,25 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             val chunkBytes = chunkFrames * frameSize
             val readFrames = engine.readInto(engineStemBuffers, chunkFrames)
             if (readFrames == chunkFrames) {
-                val vocals = engineStemBuffers[0]
-                val instrumental = engineStemBuffers.getOrNull(1)
                 var stemOffset = 0
                 repeat(chunkFrames) {
                     advanceGainRamp()
                     val inputLeft = inputBuffer.short.toInt()
                     val inputRight = inputBuffer.short.toInt()
-                    val vocalLeft = readPcm16(stemOffset, vocals, chunkBytes)
-                    val vocalRight = readPcm16(
-                        stemOffset + BYTES_PER_SAMPLE,
-                        vocals,
-                        chunkBytes,
-                    )
-                    val instrumentalLeft = instrumental?.let { bytes ->
-                        readPcm16(stemOffset, bytes, chunkBytes)
-                    } ?: 0
-                    val instrumentalRight = instrumental?.let { bytes ->
-                        readPcm16(stemOffset + BYTES_PER_SAMPLE, bytes, chunkBytes)
-                    } ?: 0
                     outputBuffer.putShort(
-                        mixSample(
+                        mixEngineSample(
                             inputSample = inputLeft,
-                            vocalSample = vocalLeft,
-                            instrumentalSample = instrumentalLeft,
-                            mode = inputMode,
-                            hasInstrumentalStemInput = engineHasInstrumentalInput,
+                            stemOffset = stemOffset,
+                            bytesRead = chunkBytes,
+                            channel = CHANNEL_LEFT,
                         ),
                     )
                     outputBuffer.putShort(
-                        mixSample(
+                        mixEngineSample(
                             inputSample = inputRight,
-                            vocalSample = vocalRight,
-                            instrumentalSample = instrumentalRight,
-                            mode = inputMode,
-                            hasInstrumentalStemInput = engineHasInstrumentalInput,
+                            stemOffset = stemOffset,
+                            bytesRead = chunkBytes,
+                            channel = CHANNEL_RIGHT,
                         ),
                     )
                     stemOffset += frameSize
@@ -607,8 +751,8 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         }
         var handledFrames = 0
         var mixedFrames = 0
-        val mode = inputMode
-        val hasInstrumentalStemInput = engineHasInstrumentalInput
+        val caches = engineResampleCaches
+        if (caches.size != engineStemBuffers.size || caches.isEmpty()) return 0
 
         while (handledFrames < frameCount) {
             val chunkFrames = minOf(frameCount - handledFrames, maxOutputFrames)
@@ -618,9 +762,10 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             val endExclusiveFrame = (floor(
                 startPosition + chunkFrames * ratio,
             ).toLong().coerceAtLeast(startFrame) + 1L).coerceAtMost(sessionEndFrame)
-            val cachedEndFrame = vocalsResampleCache.endExclusiveFrame
+            val cachedEndFrame = caches[0].endExclusiveFrame
             val framesToReadLong = (endExclusiveFrame - cachedEndFrame).coerceAtLeast(0L)
-            if (cachedEndFrame < startFrame ||
+            if (caches.any { cache -> cache.endExclusiveFrame != cachedEndFrame } ||
+                cachedEndFrame < startFrame ||
                 framesToReadLong > engine.blockFrameCapacity
             ) {
                 writeUnmixedInput(
@@ -631,7 +776,10 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 break
             }
             val framesToRead = framesToReadLong.toInt()
-            if (!vocalsResampleCache.canAppend(framesToRead, cacheFrameSize)) {
+            if (caches.any { cache ->
+                    !cache.canAppend(framesToRead, cacheFrameSize)
+                }
+            ) {
                 writeUnmixedInput(
                     inputBuffer = inputBuffer,
                     outputBuffer = outputBuffer,
@@ -641,19 +789,14 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             }
             if (framesToRead > 0) {
                 val readFrames = engine.readInto(engineStemBuffers, framesToRead)
-                if (readFrames != framesToRead ||
-                    !vocalsResampleCache.appendFrom(
-                        source = engineStemBuffers[0],
+                val appended = readFrames == framesToRead && caches.indices.all { stemIndex ->
+                    caches[stemIndex].appendFrom(
+                        source = engineStemBuffers[stemIndex],
                         frameCount = readFrames,
                         frameSize = cacheFrameSize,
-                    ) ||
-                    (engineHasInstrumentalInput &&
-                            !instrumentalResampleCache.appendFrom(
-                                source = engineStemBuffers[1],
-                                frameCount = readFrames,
-                                frameSize = cacheFrameSize,
-                            ))
-                ) {
+                    )
+                }
+                if (!appended) {
                     writeUnmixedInput(
                         inputBuffer = inputBuffer,
                         outputBuffer = outputBuffer,
@@ -670,58 +813,22 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 val sourcePosition = startPosition + outputFrame * ratio
                 val sourceFrame = floor(sourcePosition).toLong().coerceAtLeast(0L)
                 val fraction = sourcePosition - sourceFrame
-                val vocalLeft = interpolatePcm16(
-                    vocalsResampleCache,
-                    sourceFrame,
-                    CHANNEL_LEFT,
-                    fraction,
-                    cacheFrameSize,
-                )
-                val vocalRight = interpolatePcm16(
-                    vocalsResampleCache,
-                    sourceFrame,
-                    CHANNEL_RIGHT,
-                    fraction,
-                    cacheFrameSize,
-                )
-                val instrumentalLeft = if (hasInstrumentalStemInput) {
-                    interpolatePcm16(
-                        instrumentalResampleCache,
-                        sourceFrame,
-                        CHANNEL_LEFT,
-                        fraction,
-                        cacheFrameSize,
-                    )
-                } else {
-                    0
-                }
-                val instrumentalRight = if (hasInstrumentalStemInput) {
-                    interpolatePcm16(
-                        instrumentalResampleCache,
-                        sourceFrame,
-                        CHANNEL_RIGHT,
-                        fraction,
-                        cacheFrameSize,
-                    )
-                } else {
-                    0
-                }
                 outputBuffer.putShort(
-                    mixSample(
+                    mixResampledSample(
                         inputSample = inputLeft,
-                        vocalSample = vocalLeft,
-                        instrumentalSample = instrumentalLeft,
-                        mode = mode,
-                        hasInstrumentalStemInput = hasInstrumentalStemInput,
+                        sourceFrame = sourceFrame,
+                        fraction = fraction,
+                        channel = CHANNEL_LEFT,
+                        frameSize = cacheFrameSize,
                     ),
                 )
                 outputBuffer.putShort(
-                    mixSample(
+                    mixResampledSample(
                         inputSample = inputRight,
-                        vocalSample = vocalRight,
-                        instrumentalSample = instrumentalRight,
-                        mode = mode,
-                        hasInstrumentalStemInput = hasInstrumentalStemInput,
+                        sourceFrame = sourceFrame,
+                        fraction = fraction,
+                        channel = CHANNEL_RIGHT,
+                        frameSize = cacheFrameSize,
                     ),
                 )
             }
@@ -729,8 +836,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             mixedFrames += chunkFrames
             resampleStemFramePosition += chunkFrames * ratio
             val keepFromFrame = floor(resampleStemFramePosition).toLong().coerceAtLeast(0L)
-            vocalsResampleCache.dropBefore(keepFromFrame, cacheFrameSize)
-            instrumentalResampleCache.dropBefore(keepFromFrame, cacheFrameSize)
+            caches.forEach { cache -> cache.dropBefore(keepFromFrame, cacheFrameSize) }
         }
         return mixedFrames
     }
@@ -917,20 +1023,96 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         mode: InputMode,
         hasInstrumentalStemInput: Boolean,
     ): Short {
+        val vocalsGain = currentStemGains.getOrElse(0) { 1f }
+        val instrumentalGain = currentStemGains.getOrElse(1) { 1f }
         val output = when (mode) {
             InputMode.InstrumentalStem ->
-                inputSample * currentInstrumentalGain + vocalSample * currentVocalsGain
+                inputSample * instrumentalGain + vocalSample * vocalsGain
             InputMode.OriginalSource ->
                 if (hasInstrumentalStemInput) {
-                    instrumentalSample * currentInstrumentalGain +
-                            vocalSample * currentVocalsGain
+                    instrumentalSample * instrumentalGain + vocalSample * vocalsGain
                 } else {
-                    inputSample * currentInstrumentalGain +
-                            vocalSample * (currentVocalsGain - currentInstrumentalGain)
+                    inputSample * instrumentalGain +
+                            vocalSample * (vocalsGain - instrumentalGain)
                 }
         }
-        return output
-            .toInt()
+        return clampPcm16(output)
+    }
+
+    private fun mixEngineSample(
+        inputSample: Int,
+        stemOffset: Int,
+        bytesRead: Int,
+        channel: Int,
+    ): Short {
+        val sampleOffset = stemOffset + channel * BYTES_PER_SAMPLE
+        if (legacyTwoStemBlendLaw) {
+            val vocals = readPcm16(sampleOffset, engineStemBuffers[0], bytesRead)
+            val instrumental = engineStemBuffers.getOrNull(1)?.let { bytes ->
+                readPcm16(sampleOffset, bytes, bytesRead)
+            } ?: 0
+            return mixSample(
+                inputSample = inputSample,
+                vocalSample = vocals,
+                instrumentalSample = instrumental,
+                mode = inputMode,
+                hasInstrumentalStemInput = engineHasInstrumentalInput,
+            )
+        }
+
+        var output = 0f
+        for (stemIndex in engineStemBuffers.indices) {
+            output += readPcm16(
+                offset = sampleOffset,
+                bytes = engineStemBuffers[stemIndex],
+                bytesRead = bytesRead,
+            ) * currentStemGains[stemIndex]
+        }
+        return clampPcm16(output)
+    }
+
+    private fun mixResampledSample(
+        inputSample: Int,
+        sourceFrame: Long,
+        fraction: Double,
+        channel: Int,
+        frameSize: Int,
+    ): Short {
+        if (legacyTwoStemBlendLaw) {
+            val vocals = interpolatePcm16(
+                cache = engineResampleCaches[0],
+                sourceFrame = sourceFrame,
+                channel = channel,
+                fraction = fraction,
+                frameSize = frameSize,
+            )
+            val instrumental = engineResampleCaches.getOrNull(1)?.let { cache ->
+                interpolatePcm16(cache, sourceFrame, channel, fraction, frameSize)
+            } ?: 0
+            return mixSample(
+                inputSample = inputSample,
+                vocalSample = vocals,
+                instrumentalSample = instrumental,
+                mode = inputMode,
+                hasInstrumentalStemInput = engineHasInstrumentalInput,
+            )
+        }
+
+        var output = 0f
+        for (stemIndex in engineResampleCaches.indices) {
+            output += interpolatePcm16(
+                cache = engineResampleCaches[stemIndex],
+                sourceFrame = sourceFrame,
+                channel = channel,
+                fraction = fraction,
+                frameSize = frameSize,
+            ) * currentStemGains[stemIndex]
+        }
+        return clampPcm16(output)
+    }
+
+    private fun clampPcm16(value: Float): Short {
+        return value.toInt()
             .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
             .toShort()
     }
@@ -938,38 +1120,59 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private fun prepareGainRamp() {
         val snapshot = gainSnapshot.get()
         if (snapshot.generation == appliedGainGeneration) return
+        check(snapshot.gains.size == currentStemGains.size) {
+            "Gain snapshot does not match the active stem mixer."
+        }
         appliedGainGeneration = snapshot.generation
-        targetVocalsGain = snapshot.vocalsGain
-        targetInstrumentalGain = snapshot.instrumentalGain
+        snapshot.gains.forEachIndexed { index, gain -> targetStemGains[index] = gain }
         val sampleRate = inputAudioFormat.sampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
         gainRampFramesRemaining =
             (sampleRate * GAIN_RAMP_MILLIS / MILLIS_PER_SECOND).coerceAtLeast(1)
-        vocalsGainStep = (targetVocalsGain - currentVocalsGain) / gainRampFramesRemaining
-        instrumentalGainStep =
-            (targetInstrumentalGain - currentInstrumentalGain) / gainRampFramesRemaining
+        for (index in stemGainSteps.indices) {
+            stemGainSteps[index] =
+                (targetStemGains[index] - currentStemGains[index]) / gainRampFramesRemaining
+        }
     }
 
     private fun advanceGainRamp() {
         if (gainRampFramesRemaining <= 0) return
-        currentVocalsGain += vocalsGainStep
-        currentInstrumentalGain += instrumentalGainStep
+        for (index in currentStemGains.indices) {
+            currentStemGains[index] += stemGainSteps[index]
+        }
         gainRampFramesRemaining -= 1
         if (gainRampFramesRemaining == 0) {
-            currentVocalsGain = targetVocalsGain
-            currentInstrumentalGain = targetInstrumentalGain
+            targetStemGains.copyInto(currentStemGains)
         }
     }
 
     private fun applyGainSnapshotImmediately() {
         val snapshot = gainSnapshot.get()
         appliedGainGeneration = snapshot.generation
-        currentVocalsGain = snapshot.vocalsGain
-        currentInstrumentalGain = snapshot.instrumentalGain
-        targetVocalsGain = snapshot.vocalsGain
-        targetInstrumentalGain = snapshot.instrumentalGain
-        vocalsGainStep = 0f
-        instrumentalGainStep = 0f
+        currentStemGains = snapshot.gains.toFloatArray()
+        targetStemGains = snapshot.gains.toFloatArray()
+        stemGainSteps = FloatArray(snapshot.gains.size)
         gainRampFramesRemaining = 0
+    }
+
+    private fun publishGainSnapshot(
+        gains: List<Float>,
+        snapshotBlend: Float = blend,
+    ) {
+        gainSnapshot.set(
+            GainSnapshot(
+                generation = gainGeneration.incrementAndGet(),
+                blend = snapshotBlend,
+                gains = gains.toList(),
+            ),
+        )
+    }
+
+    private fun legacyBlendGains(value: Float): List<Float> {
+        val vocalsGain = if (value <= CENTER_BLEND) 1f else
+            (1f - value) / CENTER_BLEND
+        val instrumentalGain = if (value >= CENTER_BLEND) 1f else
+            value / CENTER_BLEND
+        return listOf(vocalsGain, instrumentalGain)
     }
 
     private fun seekToLocked(positionMs: Long) {
@@ -983,7 +1186,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         if (engine != null) {
             engine.seekTo(frame)
             resampleStemFramePosition = frame.toDouble()
-            prepareEngineResampleCachesLocked(engine.blockFrameCapacity, frame)
+            prepareEngineResampleCachesLocked(
+                blockFrameCapacity = engine.blockFrameCapacity,
+                startFrame = frame,
+                stemCount = engineStemBuffers.size,
+            )
             return
         }
         val bytePosition = frame * frameSize
@@ -996,13 +1203,14 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private fun closeLocked() {
         playbackEngine?.close()
         playbackEngine = null
+        clearResampleCachesLocked()
         engineStemBuffers = emptyArray()
+        engineResampleCaches = emptyArray()
         engineHasInstrumentalInput = false
         vocalsInput?.close()
         vocalsInput = null
         instrumentalInput?.close()
         instrumentalInput = null
-        clearResampleCachesLocked()
         notifyMixedOutputStarted = false
         mixedOutputPrerollFramesRemaining = 0L
     }
@@ -1010,16 +1218,23 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private fun clearResampleCachesLocked() {
         vocalsResampleCache.clear()
         instrumentalResampleCache.clear()
+        engineResampleCaches.forEach(StemResampleCache::clear)
     }
 
     private fun prepareEngineResampleCachesLocked(
         blockFrameCapacity: Int,
         startFrame: Long,
+        stemCount: Int,
     ) {
+        require(stemCount > 0) { "Engine resampling requires at least one stem." }
         val frameSize = stemChannelCount * BYTES_PER_SAMPLE
         val capacityFrames = blockFrameCapacity + 2
-        vocalsResampleCache.prepare(startFrame, capacityFrames, frameSize)
-        instrumentalResampleCache.prepare(startFrame, capacityFrames, frameSize)
+        if (engineResampleCaches.size != stemCount) {
+            engineResampleCaches = Array(stemCount) { StemResampleCache() }
+        }
+        engineResampleCaches.forEach { cache ->
+            cache.prepare(startFrame, capacityFrames, frameSize)
+        }
     }
 
     private fun resetMixedOutputNotificationLocked() {
@@ -1095,22 +1310,27 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     private fun createEngineFactories(
-        vocalsFile: File,
-        instrumentalFile: File?,
+        stemFiles: List<File>,
+        stemIds: List<String>,
         sampleRate: Int,
         channelCount: Int,
     ): List<SourceSeparationPlaybackStemSourceFactory>? {
+        require(stemFiles.isNotEmpty()) { "Playback requires at least one stem file." }
+        require(stemIds.size == stemFiles.size) {
+            "Playback stem IDs must match the stem file count."
+        }
         if (channelCount != CHANNEL_COUNT_STEREO ||
-            !isEngineFile(vocalsFile) ||
-            (instrumentalFile != null && !isEngineFile(instrumentalFile))
+            stemFiles.any { file -> !isEngineFile(file) }
         ) {
             return null
         }
-        val factories = buildList {
-            add(createEngineFactory(vocalsFile, "vocals", sampleRate, channelCount))
-            instrumentalFile?.let { file ->
-                add(createEngineFactory(file, "instrumental", sampleRate, channelCount))
-            }
+        val factories = stemFiles.indices.map { index ->
+            createEngineFactory(
+                file = stemFiles[index],
+                stemId = stemIds[index],
+                sampleRate = sampleRate,
+                channelCount = channelCount,
+            )
         }
         require(factories.all { factory ->
             factory.spec.geometry.sampleRate == sampleRate &&
@@ -1185,15 +1405,13 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private data class GainSnapshot(
         val generation: Long,
         val blend: Float,
-        val vocalsGain: Float,
-        val instrumentalGain: Float,
+        val gains: List<Float>,
     ) {
         companion object {
             fun centered(): GainSnapshot = GainSnapshot(
                 generation = 0L,
                 blend = CENTER_BLEND,
-                vocalsGain = 1f,
-                instrumentalGain = 1f,
+                gains = listOf(1f, 1f),
             )
         }
     }

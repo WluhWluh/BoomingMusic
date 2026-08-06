@@ -19,6 +19,130 @@ class SourceSeparationMixAudioProcessorTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
+    fun fourStemWavSessionUsesOrderedGainsAndClampsOnce() {
+        val frames = 16_384
+        val stems = List(4) { index ->
+            writeWav("four-stem-$index.wav", frames, (index + 1) * 1_000)
+        }
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.configure(
+                AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT),
+            )
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = stems,
+                stemIds = listOf("vocals", "drums", "bass", "other"),
+                initialGains = listOf(1f, 2f, 3f, 4f),
+                positionMs = 0L,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+
+            val initialInput = silentInput(4)
+            processor.queueInput(initialInput)
+            val initialOutput = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            repeat(8) { assertEquals(30_000, initialOutput.short.toInt()) }
+
+            processor.setStemGains(List(4) { 4f })
+            val rampInput = silentInput(512)
+            processor.queueInput(rampInput)
+            val rampOutput = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            rampOutput.position(rampOutput.limit() - 2)
+            assertEquals(Short.MAX_VALUE.toInt(), rampOutput.short.toInt())
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun sixStemEngineResamplingPreservesTheOrderedSum() {
+        val frames = 16_384
+        val stems = List(6) { index ->
+            writeWav("six-stem-$index.wav", frames, (index + 1) * 100)
+        }
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.configure(
+                AudioProcessor.AudioFormat(48_000, 2, C.ENCODING_PCM_16BIT),
+            )
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = stems,
+                stemIds = List(6) { index -> "stem-$index" },
+                initialGains = List(6) { index -> (index + 1).toFloat() },
+                positionMs = 0L,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+
+            processor.queueInput(silentInput(480))
+            val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            repeat(480 * 2) { assertEquals(9_100, output.short.toInt()) }
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun eightStemSessionPreservesOneHotStemSelection() {
+        val frames = 16_384
+        val stems = List(8) { index ->
+            writeWav("eight-stem-$index.wav", frames, (index + 1) * 500)
+        }
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.configure(
+                AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT),
+            )
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = stems,
+                stemIds = List(8) { index -> "stem-$index" },
+                initialGains = List(8) { index -> if (index == 5) 1f else 0f },
+                positionMs = 0L,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+
+            processor.queueInput(silentInput(4))
+            val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            repeat(8) { assertEquals(3_000, output.short.toInt()) }
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun multistemSessionRejectsUnequalLengthsBeforePlayback() {
+        val stems = listOf(
+            writeWav("unequal-stem-0.wav", 16_384, 100),
+            writeWav("unequal-stem-1.wav", 16_384, 200),
+            writeWav("unequal-stem-2.wav", 8_192, 300),
+            writeWav("unequal-stem-3.wav", 16_384, 400),
+        )
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            assertThrows(IllegalArgumentException::class.java) {
+                processor.enable(
+                    stemFiles = stems,
+                    positionMs = 0L,
+                    stemSampleRate = 44_100,
+                    stemChannelCount = 2,
+                )
+            }
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
     fun wavStemsPlayThroughBoundedEngineWithExistingBlendLaw() {
         val frames = 65_536
         val vocals = writeWav("vocals.wav", frames, 1_000)
@@ -292,6 +416,15 @@ class SourceSeparationMixAudioProcessorTest {
             repeat(frames * 2) { output.writeLittleEndianShort(sample) }
         }
         return file
+    }
+
+    private fun silentInput(frames: Int): ByteBuffer {
+        return ByteBuffer.allocateDirect(frames * BYTES_PER_FRAME)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .apply {
+                repeat(frames * 2) { putShort(0) }
+                flip()
+            }
     }
 
     private fun RandomAccessFile.writeLittleEndianInt(value: Int) {
