@@ -13,5 +13,6 @@ class SourceSeparationProductionGraphTest {
         val koin = GlobalContext.get()
 
         assertNotNull(koin.get<SourceSeparationRuntimeFacade>())
+        assertNotNull(koin.get<SourceSeparationMultiStemProductFacade>())
     }
 }
