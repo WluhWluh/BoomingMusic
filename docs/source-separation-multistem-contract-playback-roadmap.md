@@ -1102,6 +1102,12 @@ undeclared pipeline or publishing a partial stem set.
   execution fingerprint includes tensor geometry, output bindings, pipeline,
   stem IDs, semantics, order, and production, while excluding display names and
   canonical labels. Existing MDX manifests retain their original branch.
+- [x] Generalize cache preparation and completion around an exact ordered list
+  of stem files. The existing MDX result is now an adapter to that boundary;
+  multi-stem runs can publish preparation state, segment readiness, runtime
+  evidence, and one complete 4/6-stem result without coordinator conditionals.
+  A completed manifest is published only after every expected stem has been
+  copied and verified.
 - [ ] Download each model and sidecar from the immutable
   `v0.2.0-experimental.1` Release through the production model-delivery path;
   verify the v3 catalog, artifact hash, sidecar hash, contract schema, and

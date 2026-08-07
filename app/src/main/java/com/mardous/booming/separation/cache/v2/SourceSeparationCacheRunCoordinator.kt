@@ -219,6 +219,27 @@ class SourceSeparationCacheRunCoordinator(
     fun updatePreparation(
         run: SourceSeparationModelAwareCacheRun,
         preparation: MdxRangePreparation,
+    ): SourceSeparationCacheManifest = updatePreparation(
+        run = run,
+        preparation = SourceSeparationCacheRunPreparation(
+            stemFiles = run.mdxStemFiles(
+                vocalsFile = preparation.vocalsFile,
+                instrumentalFile = preparation.instrumentalFile,
+            ).map { (descriptor, file) ->
+                SourceSeparationCacheRunStemFile(descriptor.stemId, file)
+            },
+            timingFile = preparation.timingFile,
+            outputFrameCount = preparation.frames,
+            outputSampleRate = preparation.outputSampleRate,
+            windowCount = preparation.windowCount,
+            sourceAudioFingerprint = preparation.sourceAudioFingerprint,
+            segmentPlan = preparation.segmentPlan,
+        ),
+    )
+
+    fun updatePreparation(
+        run: SourceSeparationModelAwareCacheRun,
+        preparation: SourceSeparationCacheRunPreparation,
     ): SourceSeparationCacheManifest {
         run.requireOpen()
         require(preparation.sourceAudioFingerprint == run.identity.source.audioFingerprint) {
@@ -228,20 +249,19 @@ class SourceSeparationCacheRunCoordinator(
             "Cache run manifest disappeared during preparation."
         }
         val output = SourceSeparationCacheOutput(
-            stems = run.mdxStemFiles(
-                vocalsFile = preparation.vocalsFile,
-                instrumentalFile = preparation.instrumentalFile,
-            ).map { (descriptor, file) ->
+            stems = run.resolveStemFiles(preparation.stemFiles).map { (descriptor, file) ->
                 run.renderedStem(
                     descriptor = descriptor,
                     file = file,
-                    frameCount = preparation.frames,
+                    frameCount = preparation.outputFrameCount,
                     sampleRate = preparation.outputSampleRate,
                 )
             },
-            timingPath = store.relativeEntryPath(run.identity.cacheKey, preparation.timingFile),
+            timingPath = preparation.timingFile?.let { timing ->
+                store.relativeEntryPath(run.identity.cacheKey, timing)
+            },
             outputSampleRate = preparation.outputSampleRate,
-            outputFrameCount = preparation.frames,
+            outputFrameCount = preparation.outputFrameCount,
             windowCount = preparation.windowCount,
             elapsedMs = 0L,
             totalBytes = store.entrySize(run.identity.cacheKey),
@@ -355,55 +375,23 @@ class SourceSeparationCacheRunCoordinator(
     fun complete(
         run: SourceSeparationModelAwareCacheRun,
         result: MdxRangeSeparationResult,
-    ): SourceSeparationCacheManifest {
-        run.requireOpen()
-        require(result.sourceAudioFingerprint == run.identity.source.audioFingerprint) {
-            "Completed source fingerprint does not match the cache identity."
-        }
-        val completedStems = run.mdxStemFiles(
-            vocalsFile = result.vocalsFile,
-            instrumentalFile = result.instrumentalFile,
-        ).map { (descriptor, file) ->
-            val path = completedStemPath(descriptor.order)
-            val integrity = store.copyIntoEntryAtomically(
-                cacheKey = run.identity.cacheKey,
-                source = file,
-                relativePath = path,
-            )
-            completedStem(
-                descriptor = descriptor,
-                path = path,
-                integrity = integrity,
-                result = result,
-            )
-        }
-        store.copyIntoEntryAtomically(
-            cacheKey = run.identity.cacheKey,
-            source = result.timingFile,
-            relativePath = COMPLETED_TIMING_PATH,
-        )
-        val current = requireNotNull(store.readManifest(run.identity.cacheKey)) {
-            "Cache run manifest disappeared before completion."
-        }
-        val output = SourceSeparationCacheOutput(
-            stems = completedStems,
-            timingPath = COMPLETED_TIMING_PATH,
+    ): SourceSeparationCacheManifest = complete(
+        run = run,
+        result = SourceSeparationCacheRunCompletion(
+            stemFiles = run.mdxStemFiles(
+                vocalsFile = result.vocalsFile,
+                instrumentalFile = result.instrumentalFile,
+            ).map { (descriptor, file) ->
+                SourceSeparationCacheRunStemFile(descriptor.stemId, file)
+            },
+            timingFile = result.timingFile,
             outputSampleRate = result.outputSampleRate,
             outputFrameCount = result.frames,
             windowCount = result.windowCount,
             elapsedMs = result.elapsedMs,
-            totalBytes = store.entrySize(run.identity.cacheKey),
-        )
-        val completedAt = nowEpochMs()
-        var completed = current.copy(
-            state = SourceSeparationCacheManifestState.Completed,
-            output = output,
+            sourceAudioFingerprint = result.sourceAudioFingerprint,
             segmentPlan = result.segmentPlan,
-            cleanup = SourceSeparationCacheCleanup(
-                paths = listOf(WORK_DIRECTORY, SEGMENTS_DIRECTORY),
-            ),
-            error = null,
-            runtimeRecords = current.runtimeRecords + SourceSeparationCacheRuntimeRecord(
+            runtimeRecord = SourceSeparationCacheRuntimeRecord(
                 backend = result.runtimeDiagnostics.backend.name,
                 runtimeProfileId = result.executionProfile.profileId,
                 precision = "fp32",
@@ -418,11 +406,65 @@ class SourceSeparationCacheRunCoordinator(
                 sourceDecodeChannelCount = result.sourceDecodeDiagnostics.channelCount,
                 sourceDecodeSourceFrameCount = result.sourceDecodeDiagnostics.sourceFrameCount,
                 sourceDecodeOutputFrameCount = result.sourceDecodeDiagnostics.outputFrameCount,
-                sourceDecodeEncoderDelayFrames =
-                    result.sourceDecodeDiagnostics.encoderDelayFrames,
-                sourceDecodeEncoderPaddingFrames =
-                    result.sourceDecodeDiagnostics.encoderPaddingFrames,
+                sourceDecodeEncoderDelayFrames = result.sourceDecodeDiagnostics.encoderDelayFrames,
+                sourceDecodeEncoderPaddingFrames = result.sourceDecodeDiagnostics.encoderPaddingFrames,
             ),
+        ),
+    )
+
+    fun complete(
+        run: SourceSeparationModelAwareCacheRun,
+        result: SourceSeparationCacheRunCompletion,
+    ): SourceSeparationCacheManifest {
+        run.requireOpen()
+        require(result.sourceAudioFingerprint == run.identity.source.audioFingerprint) {
+            "Completed source fingerprint does not match the cache identity."
+        }
+        val completedStems = run.resolveStemFiles(result.stemFiles).map { (descriptor, file) ->
+            val path = completedStemPath(descriptor.order)
+            val integrity = store.copyIntoEntryAtomically(
+                cacheKey = run.identity.cacheKey,
+                source = file,
+                relativePath = path,
+            )
+            completedStem(
+                descriptor = descriptor,
+                path = path,
+                integrity = integrity,
+                channelCount = run.contract.outputChannelCount(),
+                sampleRate = result.outputSampleRate,
+                frameCount = result.outputFrameCount,
+            )
+        }
+        result.timingFile?.let { timingFile ->
+            store.copyIntoEntryAtomically(
+                cacheKey = run.identity.cacheKey,
+                source = timingFile,
+                relativePath = COMPLETED_TIMING_PATH,
+            )
+        }
+        val current = requireNotNull(store.readManifest(run.identity.cacheKey)) {
+            "Cache run manifest disappeared before completion."
+        }
+        val output = SourceSeparationCacheOutput(
+            stems = completedStems,
+            timingPath = result.timingFile?.let { COMPLETED_TIMING_PATH },
+            outputSampleRate = result.outputSampleRate,
+            outputFrameCount = result.outputFrameCount,
+            windowCount = result.windowCount,
+            elapsedMs = result.elapsedMs,
+            totalBytes = store.entrySize(run.identity.cacheKey),
+        )
+        val completedAt = nowEpochMs()
+        var completed = current.copy(
+            state = SourceSeparationCacheManifestState.Completed,
+            output = output,
+            segmentPlan = result.segmentPlan,
+            cleanup = SourceSeparationCacheCleanup(
+                paths = listOf(WORK_DIRECTORY, SEGMENTS_DIRECTORY),
+            ),
+            error = null,
+            runtimeRecords = current.runtimeRecords + result.runtimeRecord,
             updatedAtEpochMs = completedAt,
             lastAccessedAtEpochMs = maxOf(current.lastAccessedAtEpochMs, completedAt),
         )
@@ -703,7 +745,7 @@ class SourceSeparationCacheRunCoordinator(
             order = descriptor.order,
             production = descriptor.production,
             wavPath = store.relativeEntryPath(identity.cacheKey, file),
-            channelCount = 2,
+            channelCount = contract.outputChannelCount(),
             sampleRate = sampleRate,
             frameCount = frameCount,
         )
@@ -713,7 +755,9 @@ class SourceSeparationCacheRunCoordinator(
         descriptor: StemDescriptor,
         path: String,
         integrity: SourceSeparationCacheFileIntegrity,
-        result: MdxRangeSeparationResult,
+        channelCount: Int,
+        sampleRate: Int,
+        frameCount: Int,
     ): SourceSeparationCacheRenderedStem {
         return SourceSeparationCacheRenderedStem(
             stemId = descriptor.stemId,
@@ -722,9 +766,9 @@ class SourceSeparationCacheRunCoordinator(
             order = descriptor.order,
             production = descriptor.production,
             wavPath = path,
-            channelCount = 2,
-            sampleRate = result.outputSampleRate,
-            frameCount = result.frames,
+            channelCount = channelCount,
+            sampleRate = sampleRate,
+            frameCount = frameCount,
             wavIntegrity = integrity,
         )
     }
@@ -744,6 +788,21 @@ class SourceSeparationCacheRunCoordinator(
         }
     }
 
+    private fun SourceSeparationModelAwareCacheRun.resolveStemFiles(
+        stemFiles: List<SourceSeparationCacheRunStemFile>,
+    ): List<Pair<StemDescriptor, File>> {
+        val expected = contract.expectedStemSet().stems
+        require(stemFiles.map { it.stemId } == expected.map { it.stemId }) {
+            "Cache run result does not contain the complete ordered stem set."
+        }
+        return expected.zip(stemFiles).map { (descriptor, stemFile) ->
+            require(stemFile.file.isFile) {
+                "Cache run stem file is unavailable: ${stemFile.stemId}."
+            }
+            descriptor to stemFile.file
+        }
+    }
+
     private fun completedStemPath(order: Int): String =
         "$COMPLETED_DIRECTORY/stem-%02d.wav".format(order)
 
@@ -752,6 +811,47 @@ class SourceSeparationCacheRunCoordinator(
         const val COMPLETED_DIRECTORY = "completed"
         const val SEGMENTS_DIRECTORY = "segments"
         const val COMPLETED_TIMING_PATH = "completed/timing.txt"
+    }
+}
+
+data class SourceSeparationCacheRunStemFile(
+    val stemId: StemId,
+    val file: File,
+)
+
+data class SourceSeparationCacheRunPreparation(
+    val stemFiles: List<SourceSeparationCacheRunStemFile>,
+    val timingFile: File?,
+    val outputFrameCount: Int,
+    val outputSampleRate: Int,
+    val windowCount: Int,
+    val sourceAudioFingerprint: String,
+    val segmentPlan: SourceSeparationSegmentPlan,
+) {
+    init {
+        require(stemFiles.isNotEmpty() && stemFiles.map { it.stemId }.distinct().size == stemFiles.size)
+        require(outputFrameCount > 0 && outputSampleRate > 0 && windowCount > 0)
+        require(sourceAudioFingerprint.isNotBlank())
+        require(segmentPlan.stemIds == stemFiles.map { it.stemId })
+    }
+}
+
+data class SourceSeparationCacheRunCompletion(
+    val stemFiles: List<SourceSeparationCacheRunStemFile>,
+    val timingFile: File?,
+    val outputSampleRate: Int,
+    val outputFrameCount: Int,
+    val windowCount: Int,
+    val elapsedMs: Long,
+    val sourceAudioFingerprint: String,
+    val segmentPlan: SourceSeparationSegmentPlan,
+    val runtimeRecord: SourceSeparationCacheRuntimeRecord,
+) {
+    init {
+        require(stemFiles.isNotEmpty() && stemFiles.map { it.stemId }.distinct().size == stemFiles.size)
+        require(outputSampleRate > 0 && outputFrameCount > 0 && windowCount > 0 && elapsedMs >= 0L)
+        require(sourceAudioFingerprint.isNotBlank())
+        require(segmentPlan.stemIds == stemFiles.map { it.stemId })
     }
 }
 

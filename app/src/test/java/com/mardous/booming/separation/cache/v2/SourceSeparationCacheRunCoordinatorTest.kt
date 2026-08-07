@@ -16,6 +16,7 @@ import com.mardous.booming.separation.model.MdxSourceDecodeDiagnostics
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
 import com.mardous.booming.separation.model.contract.toStemSet
 import com.mardous.booming.separation.model.litert.MdxLiteRtBoundedGpuContract
@@ -164,6 +165,117 @@ class SourceSeparationCacheRunCoordinatorTest {
             SourceSeparationCacheValidationResult.Valid,
             fixture.store.validateCompletedEntry(requireNotNull(fixture.store.readManifest(completed.cacheKey))),
         )
+    }
+
+    @Test
+    fun `generic completion atomically publishes an ordered four stem set`() {
+        val store = SourceSeparationCacheStore(
+            SourceSeparationCacheRoot(
+                directory = temporary.newFolder().absoluteFile,
+                location = SourceSeparationCacheRootLocation.InternalCache,
+            ),
+        )
+        val repository = SourceSeparationModelAwareCacheRepository(
+            store = store,
+            modelAvailability = SourceSeparationCacheModelAvailabilityProvider {
+                SourceSeparationCacheModelAvailability.InstalledExact
+            },
+        )
+        val coordinator = SourceSeparationCacheRunCoordinator(store, repository)
+        val executable = SourceSeparationMultiTensorExecutableContractLoader.load(
+            requireNotNull(
+                javaClass.classLoader?.getResourceAsStream(
+                    "source-separation/research-contracts/htdemucs-4s-official-base-fp32.json",
+                ),
+            ).bufferedReader().use { it.readText() },
+        )
+        val contract = SourceSeparationCacheContractSnapshot.fromMultiTensor(executable)
+        val identity = contract.identity(sourceIdentity('d'), "htdemucs-cpu-fp32-v1")
+        val request = SourceSeparationCacheRunRequest(
+            identity = identity,
+            contract = contract,
+            song = SourceSeparationCacheSongLocator(
+                songId = 42L,
+                mediaUri = "content://media/42",
+                filePath = "/music/song.flac",
+                title = "Song",
+                artist = "Artist",
+                album = "Album",
+            ),
+            sourceDiagnostics = SourceSeparationCacheSourceDiagnostics(1_024L, 50L, 7_800L),
+            runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+            backgroundPolicy = SourceSeparationExecutionRunClass.ManualFullSong.backgroundPolicy,
+            tryGpu = false,
+            gpuRuntimeIdentity = null,
+            gpuFallbackLatch = null,
+        )
+        val run = (coordinator.begin(request) as SourceSeparationCacheRunStart.Ready).run
+        val stemFiles = contract.expectedStemSet().stems.map { stem ->
+            SourceSeparationCacheRunStemFile(
+                stem.stemId,
+                File(run.workDirectory, "stem-%02d.wav".format(stem.order)).apply {
+                    writeText(stem.stemId.value)
+                },
+            )
+        }
+        val plan = SourceSeparationSegmentPlan.build(
+            rangeStartFrame = 0,
+            rangeEndFrame = 343_980,
+            sampleRate = 44_100,
+            generationSize = 343_980,
+            trim = 0,
+            chunkSize = 343_980,
+            stemIds = stemFiles.map { it.stemId },
+            defaultState = SourceSeparationSegmentState.Ready,
+        )
+        plan.segments.single().stems.forEach { stem ->
+            store.resolveEntryPath(identity.cacheKey, stem.path).apply {
+                parentFile?.mkdirs()
+                writeText(stem.stemId.value)
+            }
+        }
+        coordinator.updatePreparation(
+            run,
+            SourceSeparationCacheRunPreparation(
+                stemFiles = stemFiles,
+                timingFile = null,
+                outputFrameCount = 343_980,
+                outputSampleRate = 44_100,
+                windowCount = 1,
+                sourceAudioFingerprint = identity.source.audioFingerprint,
+                segmentPlan = plan,
+            ),
+        )
+
+        val completed = coordinator.complete(
+            run,
+            SourceSeparationCacheRunCompletion(
+                stemFiles = stemFiles,
+                timingFile = null,
+                outputSampleRate = 44_100,
+                outputFrameCount = 343_980,
+                windowCount = 1,
+                elapsedMs = 1_000L,
+                sourceAudioFingerprint = identity.source.audioFingerprint,
+                segmentPlan = plan,
+                runtimeRecord = SourceSeparationCacheRuntimeRecord(
+                    backend = "LiteRtCpu",
+                    runtimeProfileId = "htdemucs-cpu-fp32-v1",
+                    precision = "fp32",
+                    elapsedMs = 1_000L,
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf("drums", "bass", "other", "vocals"),
+            completed.output?.stems?.map { it.stemId.value },
+        )
+        assertEquals(SourceSeparationCacheValidationResult.Valid, store.validateCompletedEntry(completed))
+        assertTrue(completed.output?.stems?.all { stem ->
+            store.resolveEntryPath(completed.cacheKey, stem.wavPath).isFile
+        } == true)
+        assertFalse(repository.isLeased(completed.cacheKey))
     }
 
     @Test
