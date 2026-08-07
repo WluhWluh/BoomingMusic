@@ -1170,6 +1170,12 @@ undeclared pipeline or publishing a partial stem set.
   six-stem after its first ready segment promptly records `Paused` with
   `ActiveModelSuperseded`, retains that partial cache, and completes official
   four-stem under a distinct exact-model cache identity.
+- [x] Verify the multi-stem cache coordinator's process-generation handoff in
+  the product engine. An abandoned `Running` owner can be admitted by a new
+  generation, records `PreviousOwnerDied`, clears the non-resumable partial
+  writer state, and republishes a complete result under the same exact cache
+  identity. This is a durable cache-boundary test, not yet proof of an actual
+  remote Binder/process-death run.
 - [ ] Complete the remaining CPU lifecycle/resource matrix on S25 and S10:
   process death and recovery, independent background ownership and contention,
   and sustained native-memory/thermal observation. Existing product-path runs
@@ -1289,6 +1295,14 @@ and the LiteRT session. The fixed build paused in 8.352 s on S25 and 16.632 s on
 S10, then completed the replacement in 21.555 s and 43.756 s respectively.
 This closes in-process exact-model supersession and retention, not process
 death, background ownership, or real `PlaybackService` adoption.
+
+The multi-stem engine now also has a JVM process-generation handoff test. It
+abandons an admitted `Running` owner without a terminal transition, then
+re-enters the same exact cache with a new generation and owner PID. The
+coordinator records `PreviousOwnerDied`, removes the non-resumable writer
+state, and the HTDemucs engine publishes a complete ordered four-stem result.
+This proves the durable cache handoff contract only; an actual independent
+inference-process death and reconnect remains open.
 
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support

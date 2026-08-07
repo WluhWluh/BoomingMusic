@@ -6,6 +6,8 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRoot
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRootLocation
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCompletion
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunRequest
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunStart
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailabilityProvider
@@ -109,6 +111,34 @@ class HtdemucsSourceSeparationEngineTest {
         assertEquals("drums", oldSegment.readText())
     }
 
+    @Test
+    fun `new process generation recovers an abandoned multistem run`() {
+        val fixture = fixture()
+        fixture.admitAbandonedRun(processGeneration = 1L, ownerPid = 101)
+
+        val result = fixture.engine(processGeneration = 2L, ownerPid = 202)
+            .separate(fixture.input, fixture.model, fixture.preflight)
+
+        assertTrue(result is HtdemucsSourceSeparationEngineResult.Completed)
+        val journal = requireNotNull(fixture.store.readRunJournal(fixture.identity.cacheKey))
+        assertEquals(2L, journal.request.processGeneration)
+        assertEquals(202, journal.request.ownerPid)
+        assertEquals(SourceSeparationCacheRunJournalLifecycle.Completed, journal.lifecycle)
+        assertTrue(
+            journal.transitions.any {
+                it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+            },
+        )
+        assertEquals(
+            SourceSeparationCacheRunTransitionType.Completed,
+            journal.transitions.last().type,
+        )
+        assertEquals(
+            com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState.Completed,
+            requireNotNull(fixture.store.readManifest(fixture.identity.cacheKey)).state,
+        )
+    }
+
     private fun fixture(throwOnSeparate: Throwable? = null): Fixture {
         val root = temporary.newFolder("cache")
         val store = SourceSeparationCacheStore(
@@ -143,9 +173,16 @@ class HtdemucsSourceSeparationEngineTest {
         val identity = com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
             .fromMultiTensor(executable).identity(source, HtdemucsSourceSeparationEngine.HTDEMUCS_CPU_PROFILE_ID)
         return Fixture(
-            store, repository, coordinator, model, input,
-            SourceSeparationCacheSourcePreflight(source, 0L), identity,
-            throwOnSeparate,
+            store = store,
+            repository = repository,
+            coordinator = coordinator,
+            model = model,
+            input = input,
+            preflight = SourceSeparationCacheSourcePreflight(source, 0L),
+            identity = identity,
+            contract = com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
+                .fromMultiTensor(executable),
+            throwOnSeparate = throwOnSeparate,
         )
     }
 
@@ -182,12 +219,35 @@ class HtdemucsSourceSeparationEngineTest {
         val input: SourceSeparationModelAwareSongInput,
         val preflight: SourceSeparationCacheSourcePreflight,
         val identity: com.mardous.booming.separation.cache.v2.SourceSeparationCacheIdentity,
+        val contract: com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot,
         private var throwOnSeparate: Throwable?,
     ) {
         var throwAfterPreparation: Throwable? = null
 
-        fun engine() = HtdemucsSourceSeparationEngine(
+        fun admitAbandonedRun(processGeneration: Long, ownerPid: Int) {
+            val run = (coordinator.begin(
+                SourceSeparationCacheRunRequest(
+                    identity = identity,
+                    contract = contract,
+                    song = input.song,
+                    sourceDiagnostics = input.sourceDiagnostics,
+                    runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+                    backgroundPolicy = SourceSeparationExecutionRunClass.ManualFullSong.backgroundPolicy,
+                    tryGpu = false,
+                    gpuRuntimeIdentity = null,
+                    gpuFallbackLatch = null,
+                    runId = "abandoned-$processGeneration",
+                    processGeneration = processGeneration,
+                    ownerPid = ownerPid,
+                ),
+            ) as SourceSeparationCacheRunStart.Ready).run
+            run.close()
+        }
+
+        fun engine(processGeneration: Long = 1L, ownerPid: Int? = null) = HtdemucsSourceSeparationEngine(
             coordinator = coordinator,
+            processGeneration = processGeneration,
+            ownerPid = ownerPid,
             rangeExecutor = HtdemucsSourceSeparationRangeExecutorContract { request ->
                 throwOnSeparate?.let { throw it }
                 val stemIds = listOf("drums", "bass", "other", "vocals")
