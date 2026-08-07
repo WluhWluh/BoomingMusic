@@ -60,16 +60,20 @@ internal fun interface HtdemucsProductSessionFactory {
     fun create(installed: SourceSeparationInstalledMultiStemModel): HtdemucsTrackInferenceSession
 }
 
+internal fun interface HtdemucsSourceSeparationRangeExecutorContract {
+    fun separate(request: HtdemucsSourceSeparationRangeRequest): HtdemucsSourceSeparationRangeResult
+}
+
 internal class HtdemucsSourceSeparationRangeExecutor(
     private val sourceFactory: HtdemucsProductSourceFactory,
     private val sessionFactory: HtdemucsProductSessionFactory,
-) {
+) : HtdemucsSourceSeparationRangeExecutorContract {
     constructor(context: Context) : this(
         sourceFactory = AndroidHtdemucsProductSourceFactory(context.applicationContext),
         sessionFactory = AndroidHtdemucsProductSessionFactory(context.applicationContext),
     )
 
-    fun separate(
+    override fun separate(
         request: HtdemucsSourceSeparationRangeRequest,
     ): HtdemucsSourceSeparationRangeResult {
         require(request.sourceUri.isNotBlank() && request.displayName.isNotBlank())
@@ -146,7 +150,7 @@ internal class HtdemucsSourceSeparationRangeExecutor(
     )
 
     private companion object {
-        const val HTDEMUCS_CPU_PROFILE_ID = "htdemucs-cpu-fp32-v1"
+        const val HTDEMUCS_CPU_PROFILE_ID = HtdemucsSourceSeparationEngine.HTDEMUCS_CPU_PROFILE_ID
     }
 }
 
