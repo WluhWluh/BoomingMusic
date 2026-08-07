@@ -4,7 +4,33 @@ Status: active product and implementation plan. The product and data contracts
 in this document are frozen; phase checklists may be refined only without
 silently changing those contracts.
 
-Updated: 2026-08-05
+Updated: 2026-08-07
+
+## Current Model-Delivery Baseline (2026-08-07)
+
+`WluhWluh/bss-tflite` now publishes the immutable prerelease
+[`v0.2.0-experimental.1`](https://github.com/WluhWluh/bss-tflite/releases/tag/v0.2.0-experimental.1).
+It contains 33 selectable experimental models: 30 MDX two-stem artifacts and
+three CPU-only HTDemucs multi-stem artifacts. The authoritative download index
+is `model-catalog-v3.json`; each artifact is paired by SHA-256 with its
+exact-name sidecar. `UVR_MDXNET_3_9662` remains the Quick Setup default, but it
+is experimental rather than stable.
+
+All subsequent runtime/model acquisition tests in this roadmap must start from
+a clean app-data state and use the real GitHub Release path:
+
+1. fetch the immutable v3 catalog from the Release;
+2. select a catalog entry and fetch its artifact plus exact-name sidecar;
+3. verify catalog SHA-256, sidecar SHA-256, artifact SHA-256, contract schema,
+   and pipeline/backend policy;
+4. install the model through the production `ModelDeliveryProvider`; and
+5. perform explicit model selection before separation.
+
+Direct local staging is reserved for loader diagnostics and must not be used as
+the primary evidence path for Quick Setup, Runtime Management, model download,
+or product separation tests. Demucs entries remain CPU-only and must enter the
+multi-stem pipeline, cache, and playback gates before any GPU/NPU policy can
+apply.
 
 This document is authoritative for:
 
@@ -42,20 +68,20 @@ test harnesses.
   Runtime Management, Quick Setup, persistent GPU intent, and bounded `N=1`
   fallback path are present. Clean-install downloaded-path UI and the final
   S10/S25 release matrix remain qualification work.
-- The active model catalog intentionally has one recommended/default candidate,
-  9662 FP32. KARA FP32 and HQ4 FP32 are now selectable experimental candidates
-  for the exact ABI/backend rows recorded by the catalog. KARA's arm64 bounded
+- The active release catalog contains 33 selectable experimental candidates.
+  9662 FP32 remains the Quick Setup default; all other MDX candidates and the
+  three HTDemucs candidates require explicit user selection. KARA's arm64 bounded
   GPU profile is experimental rather than stable; HQ4 remains heavily
   resource-gated and is not a stable or recommended path. This product policy
   is governed by the multi-preset roadmap, not by runtime availability alone.
 - The lifecycle/cache correctness implementation and four-ABI lifecycle smoke
   are complete. The remaining short human handoff-listening check and final
   downloaded CPU/GPU baseline remain pre-NPU release-confidence gates.
-- The latest `MusicSourceSeparation` Demucs experiments do not add a runtime
-  support row: official 4/6-stem CPU runs are offline-only research, their GPU
-  measurements are partial neural-core GPU+CPU hybrids with no E2E GPU run, and
-  QNN failed VTCM scheduling before model creation. No Demucs NPU capability,
-  catalog entry, or Quick Setup recommendation may be inferred from them.
+- The three HTDemucs artifacts now have release contracts and are selectable
+  CPU-only experimental catalog entries. Their canonical S25 numerical gate
+  passed, while full-song, cache, playback, lifecycle, and listening gates
+  remain open. Their partial GPU experiments and failed QNN attempt do not
+  create GPU/NPU support rows.
 
 The next implementation priority is to close the downloaded CPU/GPU product
 baseline and synthetic N-stem playback work in parallel. Vendor NPU work stays
@@ -1032,6 +1058,12 @@ exits.
 
 The remaining work is intentionally a product-baseline gate, not a reason to
 change the frozen source-separation algorithm:
+
+0. Replace staged/local model inputs in qualification scripts with the
+   immutable `v0.2.0-experimental.1` GitHub catalog and Release assets. The
+   downloaded artifact and sidecar must be installed through the real model
+   delivery path before any CPU/GPU/Demucs result is counted as product-path
+   evidence. Keep local staging only as a lower-level loader diagnostic.
 
 1. Run a disposable clean-install Quick Setup pass on S10 and S25. Cover CPU
    runtime plus 9662 installation, optional bounded-GPU selection and opt-out,

@@ -24,6 +24,17 @@ reconstruct the exact active entry for cache-management state
 
 Updated: 2026-07-31
 
+## Model Input Baseline Supersession
+
+The model delivery baseline has since moved to the immutable
+`bss-tflite` Release `v0.2.0-experimental.1`, whose v3 catalog contains 33
+selectable experimental models. This frozen process document does not gain new
+implementation tasks, but any future process-recreation or background test
+that needs a model must acquire it through the production GitHub catalog,
+artifact, sidecar, and SHA-256 verification path. Local staged fixtures remain
+diagnostic evidence only. Model selection, cache identity, multistem playback,
+and release qualification remain owned by the active companion roadmaps.
+
 The unchecked tasks below are retained as the evidence gaps and release gates
 that existed when this experiment was frozen. They are not an active product
 backlog and will not be extended here. Runtime downloading, Quick Setup,

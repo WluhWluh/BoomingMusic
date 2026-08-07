@@ -4,7 +4,28 @@ Status: active model-catalog and release-qualification plan. Runtime setup,
 lifecycle/cache ownership, and N-stem playback continue under their dedicated
 roadmaps; completed sections here remain historical implementation evidence.
 
-Updated: 2026-08-05
+Updated: 2026-08-07
+
+## Current Release Baseline (2026-08-07)
+
+The model repository has advanced to immutable Release
+[`v0.2.0-experimental.1`](https://github.com/WluhWluh/bss-tflite/releases/tag/v0.2.0-experimental.1).
+The unified `model-catalog-v3.json` contains 33 selectable experimental
+entries: all 30 MDX candidates plus official HTDemucs 4-stem, official
+HTDemucs 6-stem, and guitar-ft 6-stem. Exact-name sidecars and SHA-256
+checksums are part of the same Release. 9662 remains the default Quick Setup
+entry, but no model is described as stable.
+
+All subsequent qualification must use the production-shaped GitHub path:
+download v3, resolve the exact artifact and sidecar, verify both hashes and
+the contract schema, install through `ModelDeliveryProvider`, explicitly
+select the model, then run separation and cache/playback tests. Local staged
+bundles remain only for narrow loader or tensor diagnostics.
+
+This baseline supersedes older checklist language that called incomplete
+published candidates `download-only`. In the current v3 catalog all 33
+published entries are selectable experimental models. Historical reports retain
+their original state names; they do not reimpose a current activation ban.
 
 Current milestone: the Phase 6 production cutover and Phase 8 ONNX retirement
 are complete. Phase 7 qualification remains open, but the development catalog
@@ -57,11 +78,11 @@ dedicated runtime setup contract.
   apparent CPU/GPU quality problem, but formal full-song repetition, memory,
   cancellation, and lower-device gates remain incomplete. Arm32, x86, and
   x86_64 remain rejected or unsupported as recorded by the catalog.
-- The other published MDX candidates remain download-only until their own
-  reviewed contracts and full qualification exist. The new HTDemucs 4/6-stem
-  research is not part of this product catalog: CPU is offline-only, GPU is
-  neural-core hybrid evidence rather than E2E GPU execution, and QNN never
-  reached model creation.
+- All 30 MDX candidates are now selectable experimental entries with reviewed
+  v2 contracts. Runtime, resource, full-song, and listening evidence remains
+  model-specific. The three HTDemucs candidates are selectable CPU-only
+  experimental entries under the separate multistem contract; their full-song,
+  cache/playback, lifecycle, and listening gates remain open.
 
 Historical implementation sections below retain the vocabulary used by their
 original reports. Current product code has no persistent full-song PCM
@@ -81,12 +102,11 @@ That preset is only a recommended candidate until it passes the Phase 7
 full-song, playback, thermal, and resource gates; it must not be called stable
 before then.
 
-The remaining candidates do not all belong to one undifferentiated
-"experimental" bucket. KARA FP32 and HQ4 FP32 are explicitly selectable
-experiments only on their recorded ABI/backend rows; they are not additional
-recommended models. Candidates without a reviewed contract, a safe stem UI, or
-sufficient device evidence remain download-only. Download-only still permits
-acquisition and catalog inspection; it never permits normal in-app activation.
+All published candidates are selectable experimental entries. 9662 remains the
+default entry, not a stable guarantee. Backend and resource evidence still
+controls warnings and runtime admission, while contract presence permits
+explicit user testing. The three Demucs entries use the separate multi-tensor
+pipeline and remain CPU-only.
 
 Downloading or importing a model and selecting the model used for new
 separation work are separate operations. A completed download only makes a
@@ -194,8 +214,8 @@ experimental; all tested FP16 profiles remain rejected.
 - Automatic GPU-to-CPU fallback for a single separation session.
 - Multiple official TFLite presets installed side by side.
 - One active preset selected for new separation work.
-- A broad candidate catalog with recommended, experimental, and download-only
-  entries whose compatibility state is explicit.
+- A broad candidate catalog with a recommended default and selectable
+  experimental entries whose compatibility state is explicit.
 - Independent download, activation, and manual deletion operations.
 - Release-channel-neutral runtime/model delivery interfaces and an immutable
   product capability policy, with GitHub implementations only in this stage.
@@ -313,9 +333,9 @@ reclassified as follows:
 
 | ID | Product tier | TFLite size | `dimF` | `nFft` | Activation plan |
 | --- | --- | ---: | ---: | ---: | --- |
-| `uvr_mdxnet_3_9662` | Sole recommended/default candidate | 29,700,464 bytes | 2048 | 6144 | FP32 CPU plus eligible FP32 GPU candidate; production activation after Phase 7 |
+| `uvr_mdxnet_3_9662` | Experimental default | 29,700,464 bytes | 2048 | 6144 | FP32 CPU plus eligible FP32 GPU candidate |
 | `uvr_mdxnet_kara` | Reviewed experimental candidate | 29,700,460 bytes | 2048 | 6144 | CPU-only and explicit user choice; activation after full-song and listening validation |
-| `uvr_mdxnet_inst_hq_4` | Reviewed download-only candidate | 59,057,268 bytes | 2560 | 5120 | Resource-gated; no normal `Use` action for the current artifact/profile |
+| `uvr_mdxnet_inst_hq_4` | Experimental high-resource candidate | 59,057,268 bytes | 2560 | 5120 | Resource warning; explicit `Use` action |
 
 All three use 44.1 kHz audio, hop length 1024, `dimTPower=8`, an actual model
 time dimension of 256, and static batch-1 float32 tensors. The exact hashes and
@@ -357,42 +377,30 @@ The catalog should therefore contain:
 - a Booming SS contract only when the DSP and stem semantics are reviewed;
 - conversion, desktop, device, and full-song validation states separately.
 
-Every candidate is downloadable when its artifact is available, but download
-availability does not imply activation support. Contract review, product tier,
-activation policy, validation maturity, and runtime-profile evidence are
-independent catalog facts:
+Every published candidate is selectable for explicit experimental testing.
+Contract review, activation policy, validation maturity, runtime-profile
+evidence, and resource warnings remain independent catalog facts:
 
-- `recommended`: the default intended for ordinary users. The first production
-  catalog has only 9662 FP32 in this tier. It is selectable on the development
-  graph but is not assigned stable release maturity until all Phase 7 promotion
-  gates pass.
-- `experimental`: a reviewed specialist or test model. It becomes selectable
-  only with an explicit warning, correct stem UI, desktop parity, and an exact
-  `known-good` or deliberately admitted `candidate` runtime record for the
-  current ABI/backend. Missing full-song, listening, or resource evidence must
-  remain visible. It does not prevent deliberate manual evaluation, but it
-  blocks stable/recommended promotion. One backend cannot
-  borrow another backend or profile's evidence.
-- `download-only`: published for inspection, external testing, or future work,
-  but never selectable in normal UI. This includes incomplete contracts and
-  stem semantics and models with no deliberately admitted runtime row.
+- `experimental`: the catalog tier for all 33 published models. It is
+  selectable with explicit warnings and does not imply stable/recommended
+  promotion. One backend cannot borrow another backend or profile's evidence.
 
-A reviewed contract must survive demotion from `recommended` to `experimental`
-or `download-only`; contract presence is not a reward for catalog prominence.
-Likewise, assigning `experimental` does not itself grant a `Use` action. A
-separate activation policy records whether the entry is blocked pending review,
-blocked by resources, or selectable with an experimental warning. Runtime
-evidence is keyed by LiteRT version, ABI, backend, and execution-profile ID so
-that 9662 `gpu-auto-fp32-v1`, rejected FP16 profiles, KARA's earlier rejected
-profile evidence, its later FP32 requalification, and a future retest cannot
-overwrite one another.
+A reviewed contract must survive demotion from `recommended` to `experimental`;
+contract presence is not a reward for catalog prominence. All entries in the
+current v3 Release have an explicit `Use` action after contract and artifact
+validation, with an experimental warning where evidence is incomplete. A
+separate capability policy records backend, ABI, memory, and resource warnings;
+it may refuse a run that cannot be admitted safely, but publication alone does
+not create a stable guarantee. Runtime evidence is keyed by LiteRT version,
+ABI, backend, and execution-profile ID so that 9662 `gpu-auto-fp32-v1`, rejected
+FP16 profiles, KARA's earlier rejected profile evidence, its later FP32
+requalification, and a future retest cannot overwrite one another.
 
 Models such as bass, drums, other, or reverb targets must not be presented as
-vocals or instrumental by filename guesswork. They remain `download-only`
-until both the generic primary-stem-plus-residual contract and generic stem UI
-are implemented and validated. They may then become `experimental` with
-neutral labels such as "target stem" and "remaining audio"; they must never be
-opened early through the vocals/instrumental UI.
+vocals or instrumental by filename guesswork. Published candidates use their
+reviewed neutral labels and the generic multi-stem UI, so they may be selected
+as experimental entries while their full-song and listening evidence remains
+visible. They must never be opened through a vocals/instrumental UI.
 
 The full candidate conversion set is expected to contain about 1.36 GiB of
 distinct float32 model data before FlatBuffer overhead. The app must download
@@ -668,22 +676,21 @@ Replace the current single-variant repository with a catalog-aware repository:
   unsupported models;
 - independent presentation of reviewed contracts, product tier, maturity, and
   activation policy; and
-- a distinction between selectable experimental models and download-only
-  candidates, including resource-gated reviewed models.
+- a distinction between selectable experimental models and their
+  model-specific resource/backend warnings.
 
-The app should bundle a reviewed snapshot of the full catalog, including the
-recommended, experimental, and download-only entries. The matching bss-tflite
-Release should publish the catalog and manifests for audit and reproducibility,
-but runtime metadata must not be fetched from a mutable branch or `latest` URL.
+The app should bundle a reviewed snapshot of the full v3 catalog. The matching
+bss-tflite Release publishes the catalog and manifests for audit and
+reproducibility; runtime metadata must not be fetched from a mutable branch or
+`latest` URL.
 The app downloads only the artifact URL pinned by its bundled catalog and
 verifies its size and SHA-256 before installation. A later signed remote
 catalog can add discovery, but it must not change model code, DSP semantics,
 product tier, release maturity, or activation support without an app update and
 a pinned contract review.
 
-The model-management screen should show the sole recommended/default model
-first, selectable experimental models in a separately warned section, and
-download-only entries below them with no normal `Use` action. An installed
+The model-management screen should show the recommended/default model first and
+selectable experimental models in separately warned categories. An installed
 candidate may remain inactive while a different model is used. Switching the
 active model changes only future work; it does not delete, hide, or alter other
 installed models.
@@ -1194,7 +1201,8 @@ does not own GPU or NPU controls.
 - Require an explicit user action to delete an inactive installed model.
 - Protect the active model from deletion until another model is selected or
   source separation is disabled.
-- Show recommended presets above experimental and download-only candidates.
+- Show the recommended preset above selectable experimental candidates, with
+  backend and resource warnings visible before `Use`.
 - Show model size, workload class, contract state, and whether the entry is
   selectable before downloading it.
 - Keep preset and custom import actions visually distinct.
@@ -1719,20 +1727,19 @@ when later evidence changes either activation policy.
 The catalog revision must represent at least these independent dimensions:
 
 - contract review and the exact contract/artifact identity;
-- product tier: `recommended`, `experimental`, or `download-only`;
-- activation policy: normal selectable, explicitly warned experimental,
-  resource-gated download-only, or blocked pending contract/UI;
+- product tier: `recommended` or `experimental`;
+- activation policy: selectable or explicitly warned experimental;
 - release maturity: candidate, beta-ready, or stable; and
 - runtime evidence keyed by model hash, contract/pipeline identity, LiteRT
   version, ABI, backend, and execution-profile ID, including precision.
 
 The current policy keeps 9662 FP32 as the only recommended/default candidate.
-KARA FP32 and HQ4 FP32 are explicitly warned experimental candidates only on
-their exact admitted CPU/GPU rows; neither is stable or recommended. FP16 has
-no preset entry. Every other candidate remains download-only until it satisfies
-its own contract, stem-UI, desktop, CPU, and full-song promotion requirements.
-Promotion is per model and per execution profile, never a bulk conversion of
-all candidates into experimental models.
+KARA FP32, HQ4 FP32, the remaining MDX candidates, and the three HTDemucs
+models are explicitly warned experimental candidates. Backend and resource
+admission remains per model and per execution profile; incomplete evidence
+blocks stable promotion, not deliberate experimental selection. FP16 has no
+preset entry. Promotion is per model and per execution profile, never a bulk
+promotion of all candidates to stable.
 
 Before production download integration, `bss-tflite` must publish the canonical
 candidate artifacts in an immutable versioned Release. Complete the pinned
@@ -1765,14 +1772,13 @@ DSP or stem semantics remain incomplete may still be published as
   operations.
 - [x] Prevent a completed download from changing the active model.
 - [x] Keep inactive downloaded models until the user explicitly deletes them.
-- [x] Display the sole recommended/default model, explicitly warned selectable
-  experimental models, and download-only candidates with distinct activation
-  rules.
+- [x] Display the recommended/default model and all explicitly selectable
+  experimental models with distinct warnings and activation state.
 - [x] Apply tier-specific `Use` gates: a recommended release model requires its
-  Phase 7 stable evidence; an experimental model requires its Phase 7 CPU
-  evidence and manual user confirmation; download-only entries have no normal
-  `Use` action. A window-level `known-good` CPU record alone is not a release
-  promotion.
+  stable evidence; an experimental model requires a reviewed contract,
+  artifact verification, and explicit user confirmation. Incomplete runtime or
+  full-song evidence remains visible and blocks stable promotion, not manual
+  experimental evaluation.
 - [x] Require a matching `known-good` CPU profile for every selectable
   model/ABI. `Auto` may add only an individually approved GPU profile and must
   retain that CPU fallback; `untested`, rejected, missing, and `unsupported`
@@ -2417,11 +2423,11 @@ identities:
   and unsupported non-arm64 rows remain visible qualification limits. This is
   not stable promotion and does not waive the S10 memory gate for a future
   release tier.
-- Official HTDemucs 4/6-stem, guitar-ft, and the four-stem candidate batch are
-  documented in
-  [`source-separation-multistem-contract-playback-roadmap.md`](source-separation-multistem-contract-playback-roadmap.md)
-  and `MusicSourceSeparation`. They remain research-only/offline candidates;
-  the generic multi-stem playback contract is preparation, not admission.
+- Official HTDemucs 4/6-stem and guitar-ft are now published as selectable
+  CPU-only experimental entries in `bss-tflite` v0.2.0. Their product use is
+  still gated by the multistem cache/playback, full-song, lifecycle, resource,
+  and listening checks in
+  [`source-separation-multistem-contract-playback-roadmap.md`](source-separation-multistem-contract-playback-roadmap.md).
 - The lifecycle/cache and bounded playback fixes through Booming SS
   `cc8cf075` are now the product baseline. Completed WAV/FLAC upgrades are
   deferred during active playback and obsolete artifacts are cleaned only after
@@ -2433,7 +2439,7 @@ identities:
 - [x] Freeze the exact app commit, bundled catalog SHA-256, `bss-tflite`
   Release tag, artifact SHA-256, contract ID/schema, pipeline revision, and
   LiteRT runtime revision in every report. The current acquisition baseline is
-  the published prerelease `v0.1.0-candidates.1`; it is not a stable model
+  the published prerelease `v0.2.0-experimental.1`; it is not a stable model
   release and must not be silently replaced by a mutable branch asset.
 - [x] Freeze the digital fixtures and their hashes. Keep the existing 12-second
   Coast Town source and a synthetic mixture as parity/control fixtures, but add
@@ -2565,7 +2571,7 @@ identities:
   as the comparison baseline. It is not final size acceptance while ORT remains;
   Phase 8 owns the post-removal 10/16 MiB runtime gate.
 
-#### Phase 7D: Experimental and download-only catalog validation
+#### Phase 7D: Experimental catalog validation
 
 - [ ] Complete the remaining KARA FP32 experimental-model review on its
   qualified ABI rows, including representative listening, gesture-level UI,
@@ -2579,21 +2585,15 @@ identities:
   repeated-session, cancellation, and memory evidence remain open; arm32, x86,
   and x86_64 remain unsupported/rejected. A user-listening pass does not waive
   the stable S10 resource gate.
-- [x] For every other published candidate, verify pinned download, contract and
-  sidecar inspection, structural/TFLite smoke on a compatible target, and an
-  explicit download-only, rejected, or unsupported state. Do not reconvert the
-  model in this repository or grant activation from conversion success alone;
-  conversion reproducibility belongs to `bss-tflite`. All 27 contract-free
-  artifacts passed on S25 arm64 without tensor-buffer allocation or inference;
-  each remained `DownloadOnly` and was deleted after inspection. The immutable
-  evidence is in `candidate-catalog-2026-07-24/`.
-- [x] Keep target-stem-plus-residual candidates download-only until neutral
-  stem labels and the generic playback/cache UI have passed their own full-song
-  gate. Never expose them as vocals/instrumental based on filename inference.
-  The eight published rows are contract-free
-  `download-only-generic-stem` entries; the S25 catalog audit proved that each
-  remains non-activatable. Generic UI and full-song qualification are future
-  prerequisites, not implied by this guardrail result.
+- [x] For every published candidate, verify the pinned Release download,
+  contract and sidecar inspection, and structural/TFLite smoke on a compatible
+  target. Do not reconvert the model in this repository; conversion
+  reproducibility belongs to `bss-tflite`. The v3 Release records all 33
+  reviewed candidates as selectable experimental entries, while backend,
+  memory, full-song, and listening evidence remains per model.
+- [ ] Complete product-path activation and full-song evidence for the remaining
+  candidates. Neutral labels and generic stem UI are mandatory for target-stem
+  models; filename inference must never map them to vocals/instrumental.
 
 #### Phase 7E: Promotion decision and catalog revision
 
@@ -2607,11 +2607,10 @@ identities:
   `gpu-auto-fp32-v1` independently only if its S10 and S25 rows pass; otherwise
   bind the normal release route to LiteRT CPU and retain `Auto` as an internal
   validation path. FP32 evidence cannot promote FP16.
-- [ ] Retain KARA as a warned experimental model after its exact CPU and arm64
-  bounded-GPU rows pass the decision build. Retain HQ4 as a high-resource
-  experimental model only on exact qualified arm64 rows unless the decision
-  matrix demotes it. Keep all remaining candidates resource-gated or
-  download-only according to their individual matrices.
+- [ ] Retain KARA, HQ4, the other MDX candidates, and the three Demucs models as
+  warned experimental models while their exact backend/resource rows are
+  qualified. Resource or backend refusal remains a per-device admission result
+  and does not change the catalog's selectable experimental status.
 - [ ] Before assigning stable maturity, publish an immutable non-prerelease
   `bss-tflite` Release containing the exact validated 9662 artifact, sidecar,
   full candidate manifest, and checksums. The Release may retain experimental
@@ -2872,23 +2871,24 @@ Use these initial decisions:
   resource evidence; unsupported non-arm64 rows remain blocked.
 - FP16 is rejected by the current numerical evidence and is not an official
   preset or user-facing execution choice.
-- Every other converted candidate remains download-only until its own contract,
-  stem UI, desktop parity, CPU, full-song, and resource gates pass. Promotion is
+- Every published candidate remains experimental until its own stem UI, desktop
+  parity, CPU, full-song, resource, and listening gates pass. Promotion is
   individual and does not happen merely because a broad Release is published.
 
 Runtime evidence must include the exact model hash, contract and pipeline,
 LiteRT version, ABI, backend, profile ID, and precision. A failed profile stays
 recorded even if a future profile succeeds. Tests must prove that a reviewed
-download-only contract resolves for inspection while activation remains
-blocked, and that a window-level CPU pass cannot create stable release maturity.
+experimental contract resolves through the production download path, can be
+explicitly selected, and retains visible warnings until the evidence is
+sufficient for stable release maturity.
 
 ### Generic target-stem models
 
-Keep target-stem-plus-residual models `download-only` until the generic
-contract and neutral-label UI are complete. After end-to-end validation they
-may become `experimental` using labels such as "target stem" and "remaining
-audio". Bass, drums, other, or reverb targets must never pass through a UI that
-labels them as vocals/instrumental.
+Keep target-stem-plus-residual models selectable only through the reviewed
+generic contract and neutral-label UI. They are experimental entries using
+labels such as "target stem" and "remaining audio"; bass, drums, other, or
+reverb targets must never pass through a UI that labels them as
+vocals/instrumental.
 
 The validation gate is a full-song test of DSP, stem mapping, cache playback,
 blend labels, and accessibility/localization for the generic UI. Structural
