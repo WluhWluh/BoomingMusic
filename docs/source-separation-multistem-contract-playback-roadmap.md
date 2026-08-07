@@ -1114,6 +1114,12 @@ undeclared pipeline or publishing a partial stem set.
   triangular overlap-add. The OLA holds one bounded N-stem window and emits each
   finalized stride before accepting more output; it preserves the official
   crop/pad and denormalization rules.
+- [x] Add a platform-neutral HTDemucs range runner over random-access planar
+  stereo input and an ordered window session. It performs the two-pass global
+  normalization/inference flow, writes stable ordinal full-song and segment
+  WAV paths, publishes each segment only after every stem is written, and
+  supports cancellation and workspace-loss checks without depending on Android
+  decoding or LiteRT in deterministic tests.
 - [ ] Download each model and sidecar from the immutable
   `v0.2.0-experimental.1` Release through the production model-delivery path;
   verify the v3 catalog, artifact hash, sidecar hash, contract schema, and
