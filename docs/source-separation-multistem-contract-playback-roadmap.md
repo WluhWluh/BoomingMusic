@@ -1186,6 +1186,10 @@ undeclared pipeline or publishing a partial stem set.
   contract, pipeline, source/cache identity, CPU-only runtime policy, and
   ordered stem paths; preparation, progress, segment-state, and completion
   payloads cannot silently collapse a multi-stem result into two MDX files.
+- [x] Add one manifest-to-wire adapter for multi-stem preparation and
+  completion payloads. Remote code must use the durable ordered WAV paths and
+  segment plan, rather than reconstructing paths from labels or promoted FLAC
+  state.
 - [ ] Complete the remaining CPU lifecycle/resource matrix on S25 and S10:
   process death and recovery, independent background ownership and contention,
   and sustained native-memory/thermal observation. Existing product-path runs

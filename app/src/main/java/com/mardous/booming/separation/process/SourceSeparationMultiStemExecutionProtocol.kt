@@ -45,6 +45,9 @@ internal data class SourceSeparationMultiStemExecutionDescriptor(
         require(contract.identity(source.source, cacheIdentity.renderProfileId) == cacheIdentity) {
             "Multi-stem execution contract does not match its cache identity."
         }
+        require(source.sourceUri == song.mediaUri) {
+            "Multi-stem execution source URI does not match the song locator."
+        }
         model.requireMatches(contract)
     }
 }
