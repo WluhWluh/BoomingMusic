@@ -965,10 +965,11 @@ same bounded engine; this does not yet activate a multi-stem model.
 
 ### Phase 5: Multi-tensor pipeline contract and neural-core adapter
 
-Status: the static contract loader, isolated canonical HTDemucs host pipeline,
-and three CPU-only executable identities are frozen. They are not connected to
-LiteRT sessions, the scheduler, cache publication, the product catalog, or UI.
-The current MusicSourceSeparation Demucs artifacts remain research inputs only.
+Status: the static contract loader, canonical HTDemucs host pipeline, three
+CPU-only executable identities, bounded parallel iSTFT, named LiteRT CPU
+session, and S25 executable fixture gate are complete. They are not connected
+to the scheduler, cache publication, the product catalog, or UI. The current
+MusicSourceSeparation Demucs artifacts remain research inputs only.
 
 - [x] Implement the static multi-input/output contract loader and strict
   tensor-axis validation.
@@ -980,15 +981,15 @@ The current MusicSourceSeparation Demucs artifacts remain research inputs only.
 - [x] Add an immutable license/notices section to every executable contract.
   For guitar-ft, preserve the author's Apache-2.0 statement, the base-model MIT
   attribution, and the MoisesDB training-source and CC BY-NC-SA 4.0 disclosures.
-- [ ] Port the research `parallel-lanes` iSTFT mode behind the HTDemucs adapter;
+- [x] Port the research `parallel-lanes` iSTFT mode behind the HTDemucs adapter;
   keep serial as the parity oracle and prove four/six-stem raw-FP32 equivalence
   before using the parallel implementation in product measurements.
-- [ ] Implement a named two-input/two-output LiteRT CPU session. One forward
+- [x] Implement a named two-input/two-output LiteRT CPU session. One forward
   must publish one complete ordered stem set; cancellation or any branch error
   discards the entire window.
-- [ ] Run the frozen host PyTorch/LiteRT/DSP/OLA fixtures for all three exact
+- [x] Run the frozen host PyTorch/LiteRT/DSP/OLA fixtures for all three exact
   artifacts before making any product device claim.
-- [ ] Keep the three candidates in a non-activatable research catalog until
+- [x] Keep the three candidates in a non-activatable research catalog until
   their product-owned CPU session, cache snapshot, and Phase 6 gates pass.
 
 Evidence: `12534fd0` adds the fail-closed static multi-tensor schema and tensor,
@@ -1003,7 +1004,39 @@ official 6-stem, official 4-stem base, and guitar-ft source revisions,
 conversion recipes, TFLite FlatBuffer identities, tensor indexes, canonical
 fixture identities, CPU-only backend policy, and immutable license notices.
 The fixture files and model weights remain outside the application repository;
-their execution through the product CPU session is still an open gate below.
+the external instrumentation gate resolves them only from an explicitly staged,
+contract-verified test bundle.
+
+`09905504` ports the bounded four-worker `parallel-lanes` iSTFT while retaining
+serial as the oracle; synthetic four/six-stem runs are raw-FP32 bit exact and
+cover cancellation, pool reuse, and thread cleanup. `96369145` adds the atomic
+named two-input/two-output CPU session, and `8576ca67` corrects the LiteRT
+signature binding to use `args_0`/`args_1` and `output_0`/`output_1` while
+retaining the distinct FlatBuffer tensor names as artifact identity.
+`a48085d3` adds the external executable fixture gate without packaging model
+weights or large fixtures in the APK.
+
+The committed `a48085d3b219c017271fbb9442087f4dfa667017` build passed the full
+gate on S25 (`SM-S9310`, API 35, arm64) for all three exact artifacts using
+runtime `2.1.5-bss.2`, library SHA-256
+`ae2b996fde27021b070e88b56eebc9626a5261feb72f09791bdac38b2f09abd2`.
+The app APK SHA-256 was
+`9862c4a6f140b0762f6769cb4f5df7a9908d4ac0ec33f2ba9f6d4c824134e085`;
+the test APK SHA-256 was
+`eb14ffe2ac0a15cef4d2acc9e11d353a400c284cae161f09aebbd531a4f219e8`.
+
+| Candidate | Frequency tensor SNR | Waveform tensor SNR | Frequency iSTFT SNR | Combined SNR | Two-window OLA SNR | Report SHA-256 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Official 6-stem | 81.376 dB | 107.842 dB | 79.712 dB | 82.430 dB | 79.733 dB | `5073d9d5c533aad6b3e3490c656f4c033a65bc3588198036f904e2df171517ec` |
+| Official 4-stem base | 90.443 dB | 107.668 dB | 103.416 dB | 109.068 dB | 80.185 dB | `9666d4dba4fedf190a0ebd715272d1c2cb8d465306a1c069ca9b2589a741c7dc` |
+| Guitar-ft 6-stem | 88.567 dB | 103.084 dB | 87.891 dB | 90.254 dB | 66.628 dB | `3107e7250b0194b443ef58aa60350f17446d178d5e1f111b6167c9d9e62ce85f` |
+
+All layers were finite and used contract-verified artifact/fixture hashes. These
+are executable-path results, not Phase 6 quality admission. In particular, the
+lower guitar-ft OLA SNR must be evaluated by the layered energy-aware and final
+PCM16 gates rather than waived or rejected by one uniform tensor threshold.
+S10 execution, long-song behavior, memory/thermal limits, cancellation across
+the product process, cache publication, and listening remain Phase 6 work.
 
 **Exit:** all three canonical candidates produce verified per-stem PCM through
 the product-owned host pipeline and CPU session without falling back to an
