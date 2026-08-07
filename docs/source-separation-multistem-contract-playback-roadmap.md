@@ -1083,6 +1083,11 @@ undeclared pipeline or publishing a partial stem set.
   the provider-neutral `ModelDeliveryProvider`. This layer is deliberately
   separate from the existing MDX runtime-qualification catalog and does not
   install or activate a multi-stem model by itself.
+- [x] Add an isolated multi-stem model store that acquires the selected
+  artifact and exact-name sidecar into a staging directory, verifies both
+  payload hashes and the executable contract's artifact binding, then publishes
+  one SHA-256-addressed directory atomically. Failed installs leave no visible
+  model, and an existing complete install is reused without another download.
 - [ ] Download each model and sidecar from the immutable
   `v0.2.0-experimental.1` Release through the production model-delivery path;
   verify the v3 catalog, artifact hash, sidecar hash, contract schema, and
