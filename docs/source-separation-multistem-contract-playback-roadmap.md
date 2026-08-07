@@ -1257,6 +1257,17 @@ cross-device FP32 rounding rather than a product-pipeline split. This closes
 the first S10 full-track/resource observation but not the combined Phase 6
 cancellation, process-death, recovery, switching, or contention item.
 
+User cancellation and restart are independently frozen in
+`docs/validation/htdemucs/phase6-cancel-restart-s25-s10-2026-08-07.json`.
+Official six-stem was canceled after the first of six segments became ready on
+S25 and S10. Both runs durably recorded `Canceled`, retained exactly the one
+complete segment, reset the running segment, and exposed no completed cache.
+Re-entry used the same cache identity but deliberately rebuilt the
+non-resumable full-track WAV writer state, completing six stems in 21.254 s on
+S25 and 48.210 s on S10. This closes manual cancellation and clean restart for
+the current in-process product engine; process death, independent background
+ownership, and active-model supersession remain separate gates.
+
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support
 is implied.
