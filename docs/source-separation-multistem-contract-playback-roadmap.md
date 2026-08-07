@@ -1077,6 +1077,12 @@ undeclared pipeline or publishing a partial stem set.
 
 ### Phase 6: Experimental model qualification
 
+- [x] Add the Release acquisition boundary for `model-catalog-v3.json`:
+  pin `v0.2.0-experimental.1`, verify catalog size and SHA-256, validate all
+  artifact/sidecar identities, and resolve the three HTDemucs entries through
+  the provider-neutral `ModelDeliveryProvider`. This layer is deliberately
+  separate from the existing MDX runtime-qualification catalog and does not
+  install or activate a multi-stem model by itself.
 - [ ] Download each model and sidecar from the immutable
   `v0.2.0-experimental.1` Release through the production model-delivery path;
   verify the v3 catalog, artifact hash, sidecar hash, contract schema, and
