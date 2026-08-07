@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -23,7 +24,6 @@ import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseTra
 import com.mardous.booming.separation.process.SourceSeparationForegroundPlatformPolicy
 import com.mardous.booming.separation.process.SourceSeparationForegroundServiceDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationForegroundStartStage
-import com.mardous.booming.separation.process.SOURCE_SEPARATION_MEDIA_PROCESSING_FOREGROUND_SERVICE_TYPE
 import com.mardous.booming.separation.process.isSourceSeparationMediaProcessingForegroundServiceType
 import com.mardous.booming.separation.process.toForegroundExecutionDeferredException
 import com.mardous.booming.ui.screen.MainActivity
@@ -203,7 +203,7 @@ internal class SourceSeparationMediaProcessingForegroundController(
             service.startForeground(
                 NOTIFICATION_ID,
                 notification,
-                SOURCE_SEPARATION_MEDIA_PROCESSING_FOREGROUND_SERVICE_TYPE,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING,
             )
         } else {
             service.startForeground(NOTIFICATION_ID, notification)
