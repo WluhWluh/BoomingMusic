@@ -15,7 +15,7 @@ import java.util.UUID
  */
 class SourceSeparationMultiStemModelStore internal constructor(
     private val rootDirectory: File,
-    private val catalog: SourceSeparationReleaseCatalog,
+    private val catalog: SourceSeparationReleaseCatalog?,
     private val provider: ModelDeliveryProvider,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
@@ -25,7 +25,10 @@ class SourceSeparationMultiStemModelStore internal constructor(
         modelId: String,
         onProgress: (SourceSeparationMultiStemInstallProgress) -> Unit = {},
     ): SourceSeparationInstalledMultiStemModel {
-        val pair = SourceSeparationReleaseCatalogValidator.resolveMultistem(catalog, modelId)
+        val pair = SourceSeparationReleaseCatalogValidator.resolveMultistem(
+            requireNotNull(catalog) { "A Release catalog is required to install a model." },
+            modelId,
+        )
         installed(modelId)?.let { return it }
         require(provider.supports(pair.artifact) && provider.supports(pair.sidecar)) {
             "The configured delivery provider cannot acquire the multi-stem Release pair."

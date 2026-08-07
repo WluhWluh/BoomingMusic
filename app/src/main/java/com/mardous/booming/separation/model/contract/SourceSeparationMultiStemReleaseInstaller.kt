@@ -9,16 +9,32 @@ class SourceSeparationMultiStemReleaseInstaller(
     private val modelRootDirectory: File,
     private val provider: ModelDeliveryProvider,
 ) {
+    private val localStore = SourceSeparationMultiStemModelStore(
+        rootDirectory = modelRootDirectory,
+        catalog = null,
+        provider = provider,
+    )
+
+    private fun store(catalog: SourceSeparationReleaseCatalog) = SourceSeparationMultiStemModelStore(
+        rootDirectory = modelRootDirectory,
+        catalog = catalog,
+        provider = provider,
+    )
+
+    fun catalog(): SourceSeparationReleaseCatalog = catalogRepository.current()
+
+    fun installed(modelId: String): SourceSeparationInstalledMultiStemModel? =
+        localStore.installed(modelId)
+
+    fun installedModels(): List<SourceSeparationInstalledMultiStemModel> =
+        localStore.installedModels()
+
     fun install(
         modelId: String,
         onProgress: (SourceSeparationMultiStemInstallProgress) -> Unit = {},
     ): SourceSeparationInstalledMultiStemModel {
         val catalog = catalogRepository.current()
-        return SourceSeparationMultiStemModelStore(
-            rootDirectory = modelRootDirectory,
-            catalog = catalog,
-            provider = provider,
-        ).install(modelId, onProgress)
+        return store(catalog).install(modelId, onProgress)
     }
 }
 

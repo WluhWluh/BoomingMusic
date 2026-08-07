@@ -64,7 +64,10 @@ import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.separation.AndroidSourceSeparationModelAwarePreflightResolver
 import com.mardous.booming.separation.AndroidSourceSeparationRuntimeCompatibilityResolver
 import com.mardous.booming.separation.DefaultSourceSeparationRuntimeFacade
+import com.mardous.booming.separation.HtdemucsSourceSeparationEngine
+import com.mardous.booming.separation.HtdemucsSourceSeparationRangeExecutor
 import com.mardous.booming.separation.SourceSeparationModelAwareEngine
+import com.mardous.booming.separation.SourceSeparationMultiStemProductFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheEntryLeaseRegistry
@@ -78,6 +81,7 @@ import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportCoordinator
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeCatalogLoader
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeLayout
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeProcessController
@@ -266,6 +270,20 @@ private val mainModule = module {
         )
     }
     single { SourceSeparationCacheRunCoordinator(store = get(), repository = get()) }
+    single {
+        HtdemucsSourceSeparationEngine(
+            coordinator = get(),
+            rangeExecutor = HtdemucsSourceSeparationRangeExecutor(androidContext()),
+            ownerPid = android.os.Process.myPid(),
+        )
+    }
+    single {
+        SourceSeparationMultiStemProductFacade(
+            installer = get<SourceSeparationMultiStemReleaseInstaller>(),
+            engine = get(),
+            preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(androidContext()),
+        )
+    }
     single { SourceSeparationCacheFlacPromoter(store = get(), repository = get()) }
     single {
         SourceSeparationProcessingOwnershipHandoff(
