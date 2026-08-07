@@ -35,7 +35,7 @@ data class SourceSeparationCacheRunJournal(
         require(committedSegments.map { it.segmentIndex }.distinct().size ==
             committedSegments.size
         ) { "Cache run journal contains duplicate segment records." }
-        val expectedStemIds = request.contract.stemContract.toStemSet().stems.map { it.stemId }
+        val expectedStemIds = request.contract.expectedStemSet().stems.map { it.stemId }
         require(committedSegments.all { segment ->
             segment.stems.map(SourceSeparationCacheCommittedStem::stemId) == expectedStemIds
         }) { "Cache run journal contains an incomplete or reordered stem commit." }

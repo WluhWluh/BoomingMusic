@@ -4,6 +4,7 @@ import com.mardous.booming.separation.cache.SourceSeparationCacheRelativePath
 import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContract
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -75,9 +76,9 @@ class SourceSeparationCacheIdentityTest {
         val changedPresentation = original.copy(
             displayName = "Renamed model",
             source = original.source?.copy(url = "https://example.invalid/repacked.onnx"),
-            stemContract = original.stemContract.copy(
-                modelOutput = original.stemContract.modelOutput.copy(displayLabel = "Voice"),
-                residual = original.stemContract.residual.copy(displayLabel = "Music"),
+            stemContract = requireNotNull(original.stemContract).copy(
+                modelOutput = requireNotNull(original.stemContract).modelOutput.copy(displayLabel = "Voice"),
+                residual = requireNotNull(original.stemContract).residual.copy(displayLabel = "Music"),
             ),
         )
 
@@ -88,7 +89,7 @@ class SourceSeparationCacheIdentityTest {
     fun `contract fingerprint changes when rendering semantics change`() {
         val original = officialSnapshot()
         val changedDsp = original.copy(
-            dsp = original.dsp.copy(dimF = original.dsp.dimF + 1),
+            dsp = requireNotNull(original.dsp).copy(dimF = requireNotNull(original.dsp).dimF + 1),
         )
 
         assertNotEquals(original.contractFingerprint, changedDsp.contractFingerprint)
@@ -108,6 +109,110 @@ class SourceSeparationCacheIdentityTest {
 
         assertEquals(manifest, decoded)
         assertEquals(manifest.cacheKey, decoded.identity.cacheKey)
+    }
+
+    @Test
+    fun `multi tensor snapshot preserves ordered stems and independent identity`() {
+        val executable = multiTensorExecutable()
+        val snapshot = SourceSeparationCacheContractSnapshot.fromMultiTensor(executable)
+        val identity = snapshot.identity(
+            source = sourceIdentity(),
+            renderProfileId = "htdemucs-cpu-fp32-v1",
+        )
+
+        assertEquals(
+            listOf("drums", "bass", "other", "vocals"),
+            snapshot.expectedStemSet().stems.map { it.stemId.value },
+        )
+        assertEquals(2, snapshot.outputChannelCount())
+        assertEquals(executable.modelContract, snapshot.multiTensorContract)
+        assertEquals(null, snapshot.tensorContract)
+        assertEquals(identity, snapshot.identity(sourceIdentity(), "htdemucs-cpu-fp32-v1"))
+        assertNotEquals(identity.cacheKey, officialSnapshot().identity(sourceIdentity()).cacheKey)
+    }
+
+    @Test
+    fun `multi tensor fingerprint excludes presentation but includes tensor geometry`() {
+        val executable = multiTensorExecutable()
+        val original = SourceSeparationCacheContractSnapshot.fromMultiTensor(executable)
+        val renamedContract = executable.modelContract.copy(
+            displayName = "Renamed",
+            stemContract = executable.modelContract.stemContract.copy(
+                stems = executable.modelContract.stemContract.stems.map { stem ->
+                    stem.copy(canonicalLabel = "Label ${stem.order}")
+                },
+            ),
+        )
+        val renamed = SourceSeparationCacheContractSnapshot.fromMultiTensor(
+            executable.copy(modelContract = renamedContract),
+        )
+        val changedTensor = executable.modelContract.let { contract ->
+            contract.copy(
+                tensorContract = contract.tensorContract.copy(
+                    inputs = contract.tensorContract.inputs.mapIndexed { index, tensor ->
+                        if (index == 0) tensor.copy(shape = tensor.shape.dropLast(1) + 343_979)
+                        else tensor
+                    },
+                ),
+            )
+        }
+
+        assertEquals(original.contractFingerprint, renamed.contractFingerprint)
+        assertNotEquals(
+            original.contractFingerprint,
+            original.copy(multiTensorContract = changedTensor).contractFingerprint,
+        )
+    }
+
+    @Test
+    fun `four stem completed manifest round trips with the multi tensor snapshot`() {
+        val snapshot = SourceSeparationCacheContractSnapshot.fromMultiTensor(multiTensorExecutable())
+        val identity = snapshot.identity(sourceIdentity(), "htdemucs-cpu-fp32-v1")
+        val integrity = SourceSeparationCacheFileIntegrity(128L, "d".repeat(64))
+        val manifest = SourceSeparationCacheManifest(
+            cacheKey = identity.cacheKey,
+            identity = identity,
+            contract = snapshot,
+            state = SourceSeparationCacheManifestState.Completed,
+            song = SourceSeparationCacheSongLocator(
+                songId = 42L,
+                mediaUri = "content://media/42",
+                filePath = "/music/song.flac",
+                title = "Song",
+                artist = "Artist",
+                album = "Album",
+            ),
+            sourceDiagnostics = SourceSeparationCacheSourceDiagnostics(128L, 20L, 7_800L),
+            output = SourceSeparationCacheOutput(
+                stems = snapshot.expectedStemSet().stems.map { stem ->
+                    SourceSeparationCacheRenderedStem(
+                        stemId = stem.stemId,
+                        semanticId = stem.semanticId,
+                        canonicalLabel = stem.canonicalLabel,
+                        order = stem.order,
+                        production = stem.production,
+                        wavPath = "completed/stem-%02d.wav".format(stem.order),
+                        channelCount = 2,
+                        sampleRate = 44_100,
+                        frameCount = 343_980,
+                        wavIntegrity = integrity,
+                    )
+                },
+                outputSampleRate = 44_100,
+                outputFrameCount = 343_980,
+                windowCount = 1,
+                elapsedMs = 1L,
+                totalBytes = 512L,
+            ),
+            createdAtEpochMs = 1L,
+            updatedAtEpochMs = 2L,
+        )
+        val json = Json { encodeDefaults = true; ignoreUnknownKeys = false }
+
+        assertEquals(
+            manifest,
+            json.decodeFromString<SourceSeparationCacheManifest>(json.encodeToString(manifest)),
+        )
     }
 
     @Test
@@ -242,6 +347,14 @@ class SourceSeparationCacheIdentityTest {
     private fun officialSnapshot(): SourceSeparationCacheContractSnapshot {
         return SourceSeparationCacheContractSnapshot.fromOfficial(contract)
     }
+
+    private fun multiTensorExecutable() = SourceSeparationMultiTensorExecutableContractLoader.load(
+        requireNotNull(
+            javaClass.classLoader?.getResourceAsStream(
+                "source-separation/research-contracts/htdemucs-4s-official-base-fp32.json",
+            ),
+        ).bufferedReader().use { it.readText() },
+    )
 
     companion object {
         private val LOWERCASE_SHA256 = Regex("^[0-9a-f]{64}$")

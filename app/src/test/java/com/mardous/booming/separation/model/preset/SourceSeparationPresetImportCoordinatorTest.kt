@@ -83,8 +83,9 @@ class SourceSeparationPresetImportCoordinatorTest {
         assertEquals("纯伴奏", profile.toManualDraft().modelOutputLabel)
         assertEquals("主唱", profile.toManualDraft().residualLabel)
         val cacheSnapshot = SourceSeparationCacheContractSnapshot.fromCustom(profile)
-        assertEquals("纯伴奏", cacheSnapshot.stemContract.modelOutput.displayLabel)
-        assertEquals("主唱", cacheSnapshot.stemContract.residual.displayLabel)
+        val cacheStemContract = requireNotNull(cacheSnapshot.stemContract)
+        assertEquals("纯伴奏", cacheStemContract.modelOutput.displayLabel)
+        assertEquals("主唱", cacheStemContract.residual.displayLabel)
     }
 
     @Test

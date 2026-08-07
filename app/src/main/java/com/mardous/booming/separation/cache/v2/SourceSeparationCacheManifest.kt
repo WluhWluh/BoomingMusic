@@ -58,8 +58,8 @@ data class SourceSeparationCacheManifest(
         require(createdAtEpochMs >= 0L) { "Cache creation time is invalid." }
         require(updatedAtEpochMs >= createdAtEpochMs) { "Cache update time is invalid." }
         require(lastAccessedAtEpochMs >= createdAtEpochMs) { "Cache access time is invalid." }
-        val expectedStems = contract.stemContract.toStemSet()
-        output?.validate(state, expectedStems, contract.dsp.channelCount)
+        val expectedStems = contract.expectedStemSet()
+        output?.validate(state, expectedStems, contract.outputChannelCount())
         segmentPlan?.let { plan ->
             require(plan.stemIds == expectedStems.stems.map(StemDescriptor::stemId)) {
                 "Cache segment plan does not match the contract stem set."

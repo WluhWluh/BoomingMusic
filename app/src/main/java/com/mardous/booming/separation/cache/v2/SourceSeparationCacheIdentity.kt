@@ -9,13 +9,19 @@ import com.mardous.booming.separation.model.contract.ContractTensor
 import com.mardous.booming.separation.model.contract.ContractTensorLayout
 import com.mardous.booming.separation.model.contract.ContractWindow
 import com.mardous.booming.separation.model.contract.StemDescriptor
+import com.mardous.booming.separation.model.contract.StemId
 import com.mardous.booming.separation.model.contract.StemProduction
+import com.mardous.booming.separation.model.contract.StemSemanticId
+import com.mardous.booming.separation.model.contract.StemSet
 import com.mardous.booming.separation.model.contract.toStemSet
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContract
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractValidator
 import com.mardous.booming.separation.model.contract.StemContract
 import com.mardous.booming.separation.model.contract.TensorContract
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorContract
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContract
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractValidator
 import kotlinx.serialization.Serializable
 import java.security.MessageDigest
 
@@ -120,9 +126,11 @@ data class SourceSeparationCacheContractSnapshot(
     val qualityUnverified: Boolean,
     val source: ContractSource? = null,
     val conversion: ContractConversion? = null,
-    val tensorContract: TensorContract,
-    val dsp: ContractDsp,
-    val stemContract: StemContract,
+    val tensorContract: TensorContract? = null,
+    val dsp: ContractDsp? = null,
+    val stemContract: StemContract? = null,
+    val multiTensorContract: SourceSeparationMultiTensorContract? = null,
+    val multiStemSet: StemSet? = null,
     val pipelineId: String,
     val pipelineVersion: Int,
 ) {
@@ -137,6 +145,24 @@ data class SourceSeparationCacheContractSnapshot(
         require(profileRevisionId.isNotBlank()) { "Cache snapshot profile revision is empty." }
         require(pipelineId.isNotBlank()) { "Cache snapshot pipeline ID is empty." }
         require(pipelineVersion > 0) { "Cache snapshot pipeline version is invalid." }
+        val hasMdxContract = tensorContract != null && dsp != null && stemContract != null &&
+            multiTensorContract == null && multiStemSet == null
+        val hasMultiTensorContract = tensorContract == null && dsp == null && stemContract == null &&
+            multiTensorContract != null && multiStemSet != null
+        require(hasMdxContract || hasMultiTensorContract) {
+            "Cache snapshot must contain exactly one executable contract kind."
+        }
+        multiTensorContract?.let { contract ->
+            require(contract.contractId == contractId && contract.modelId == modelId) {
+                "Cache multi-tensor contract identity is inconsistent."
+            }
+            require(contract.pipelineContract.pipelineId == pipelineId &&
+                contract.pipelineContract.pipelineVersion == pipelineVersion
+            ) { "Cache multi-tensor pipeline identity is inconsistent." }
+            require(multiStemSet?.stems?.map { it.stemId.value } ==
+                contract.stemContract.stems.map { it.stemId }
+            ) { "Cache multi-tensor stem set is inconsistent." }
+        }
     }
 
     val contractFingerprint: String
@@ -157,6 +183,11 @@ data class SourceSeparationCacheContractSnapshot(
         pipelineVersion = pipelineVersion,
         renderProfileId = renderProfileId,
     )
+
+    fun expectedStemSet(): StemSet = multiStemSet ?: requireNotNull(stemContract).toStemSet()
+
+    fun outputChannelCount(): Int = dsp?.channelCount
+        ?: requireNotNull(multiTensorContract).pipelineContract.channelCount
 
     companion object {
         fun fromOfficial(
@@ -222,6 +253,40 @@ data class SourceSeparationCacheContractSnapshot(
                 pipelineVersion = pipelineVersion,
             )
         }
+
+        fun fromMultiTensor(
+            executable: SourceSeparationMultiTensorExecutableContract,
+        ): SourceSeparationCacheContractSnapshot {
+            SourceSeparationMultiTensorExecutableContractValidator.validate(executable)
+            val contract = executable.modelContract
+            val stemSet = StemSet(
+                contract.stemContract.stems.map { stem ->
+                    StemDescriptor(
+                        stemId = StemId(stem.stemId),
+                        semanticId = StemSemanticId(stem.semanticId),
+                        canonicalLabel = stem.canonicalLabel,
+                        order = stem.order,
+                        production = StemProduction.PipelineNative(stem.order),
+                    )
+                },
+            )
+            return SourceSeparationCacheContractSnapshot(
+                modelId = contract.modelId,
+                displayName = contract.displayName,
+                artifactFileName = executable.artifact.fileName,
+                artifactByteSize = executable.artifact.byteSize,
+                artifactSha256 = executable.artifact.sha256,
+                contractId = contract.contractId,
+                contractSchemaVersion = contract.contractSchemaVersion,
+                profileRevisionId = contract.contractId,
+                profileOrigin = SourceSeparationCacheProfileOrigin.Official,
+                qualityUnverified = false,
+                multiTensorContract = contract,
+                multiStemSet = stemSet,
+                pipelineId = contract.pipelineContract.pipelineId,
+                pipelineVersion = contract.pipelineContract.pipelineVersion,
+            )
+        }
     }
 }
 
@@ -234,9 +299,50 @@ enum class SourceSeparationCacheProfileOrigin {
 
 object SourceSeparationCacheContractFingerprint {
     fun from(snapshot: SourceSeparationCacheContractSnapshot): String {
-        val tensor = snapshot.tensorContract
-        val dsp = snapshot.dsp
-        val stems = snapshot.stemContract.toStemSet()
+        snapshot.multiTensorContract?.let { contract ->
+            return SourceSeparationCacheCanonicalEncoding.sha256(
+                namespace = "booming-ss-cache-contract-multitensor-v1",
+                fields = buildList {
+                    contract.tensorContract.inputs.forEach { tensor ->
+                        add("input")
+                        add(tensor.index.toString())
+                        add(tensor.name)
+                        add("float32")
+                        add(tensor.shape.joinToString(","))
+                        add(tensor.axes.joinToString(","))
+                    }
+                    contract.tensorContract.outputs.forEach { tensor ->
+                        add("output")
+                        add(tensor.index.toString())
+                        add(tensor.name)
+                        add("float32")
+                        add(tensor.shape.joinToString(","))
+                        add(tensor.axes.joinToString(","))
+                    }
+                    contract.tensorContract.outputBindings.forEach { binding ->
+                        add("output-binding")
+                        add(binding.tensorIndex.toString())
+                        add(binding.tensorName)
+                        add(binding.stemAxis.toString())
+                        add("stem-axis")
+                        add(binding.stemIds.joinToString(","))
+                    }
+                    val pipeline = contract.pipelineContract
+                    add(pipeline.sampleRate.toString())
+                    add(pipeline.channelCount.toString())
+                    add(pipeline.windowSamples.toString())
+                    add(pipeline.fftSize.toString())
+                    add(pipeline.hopLength.toString())
+                    add("neural-core-waveform-frequency-ola")
+                    snapshot.expectedStemSet().stems.forEach { stem -> addStem(stem) }
+                    add(snapshot.pipelineId)
+                    add(snapshot.pipelineVersion.toString())
+                },
+            )
+        }
+        val tensor = requireNotNull(snapshot.tensorContract)
+        val dsp = requireNotNull(snapshot.dsp)
+        val stems = snapshot.expectedStemSet()
         return SourceSeparationCacheCanonicalEncoding.sha256(
             namespace = "booming-ss-cache-contract-v2",
             fields = buildList {

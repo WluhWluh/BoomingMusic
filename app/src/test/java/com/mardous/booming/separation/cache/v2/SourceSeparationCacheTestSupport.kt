@@ -2,7 +2,6 @@ package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.toSemanticId
-import com.mardous.booming.separation.model.contract.toStemSet
 
 internal fun SourceSeparationCacheContractSnapshot.renderedStemFor(
     semantic: ContractStemSemantic,
@@ -10,7 +9,7 @@ internal fun SourceSeparationCacheContractSnapshot.renderedStemFor(
     integrity: SourceSeparationCacheFileIntegrity?,
     frameCount: Int = 88_200,
 ): SourceSeparationCacheRenderedStem {
-    val descriptor = stemContract.toStemSet().stems.single {
+    val descriptor = expectedStemSet().stems.single {
         it.semanticId == semantic.toSemanticId()
     }
     return SourceSeparationCacheRenderedStem(

@@ -54,7 +54,7 @@ class SourceSeparationModelAwareCacheRepository(
                 sizeBytes = store.entryDirectory(manifest.cacheKey).directorySize(),
                 updatedAtEpochMs = manifest.updatedAtEpochMs,
                 lastAccessedAtEpochMs = manifest.lastAccessedAtEpochMs,
-                stemLabels = manifest.contract.stemContract.toStemSet().stems
+                stemLabels = manifest.contract.expectedStemSet().stems
                     .map { stem -> stem.canonicalLabel },
                 supportsStandardPlayback = manifest.output?.stems
                     ?.map(SourceSeparationCacheRenderedStem::semanticId)
@@ -388,7 +388,7 @@ class SourceSeparationModelAwareCacheRepository(
                     file = store.resolveEntryPath(manifest.cacheKey, stem.playbackPath()),
                 )
             }
-            val expectedStems = manifest.contract.stemContract.toStemSet().stems
+            val expectedStems = manifest.contract.expectedStemSet().stems
             if (stems.map(SourceSeparationPlaybackStemSource::descriptor) != expectedStems ||
                 stems.any { !it.file.isFile }
             ) {

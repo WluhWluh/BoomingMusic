@@ -901,7 +901,7 @@ class SourceSeparationCacheRunCoordinatorTest {
                 generationSize = 44_100,
                 trim = 1_024,
                 chunkSize = 46_148,
-                stemIds = first.contract.stemContract.toStemSet().stems.map { it.stemId },
+                stemIds = first.contract.expectedStemSet().stems.map { it.stemId },
                 defaultState = state,
             )
             plan.segments.forEach { segment ->

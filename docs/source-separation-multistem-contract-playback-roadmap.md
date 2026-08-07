@@ -1096,6 +1096,12 @@ undeclared pipeline or publishing a partial stem set.
   session factory. Reopening trusts the install record and file length rather
   than hashing the large artifact again, while the sidecar contract, model ID,
   contract ID, pipeline ID, filename, size, and SHA binding are revalidated.
+- [x] Extend the cache contract snapshot with an explicit multi-tensor branch.
+  It preserves the complete static multi-tensor model contract and ordered
+  pipeline-native `StemSet` without manufacturing MDX tensor/DSP fields. Its
+  execution fingerprint includes tensor geometry, output bindings, pipeline,
+  stem IDs, semantics, order, and production, while excluding display names and
+  canonical labels. Existing MDX manifests retain their original branch.
 - [ ] Download each model and sidecar from the immutable
   `v0.2.0-experimental.1` Release through the production model-delivery path;
   verify the v3 catalog, artifact hash, sidecar hash, contract schema, and

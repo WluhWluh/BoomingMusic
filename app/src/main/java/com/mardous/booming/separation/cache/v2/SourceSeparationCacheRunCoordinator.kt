@@ -737,7 +737,7 @@ class SourceSeparationCacheRunCoordinator(
             StemSemanticId.Vocals to vocalsFile,
             StemSemanticId.Instrumental to instrumentalFile,
         )
-        return contract.stemContract.toStemSet().stems.map { descriptor ->
+        return contract.expectedStemSet().stems.map { descriptor ->
             descriptor to requireNotNull(files[descriptor.semanticId]) {
                 "The MDX adapter cannot render stem ${descriptor.stemId}."
             }
