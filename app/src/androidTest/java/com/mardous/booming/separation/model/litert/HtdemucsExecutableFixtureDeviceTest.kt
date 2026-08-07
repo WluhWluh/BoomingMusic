@@ -21,8 +21,8 @@ import java.nio.channels.FileChannel
 import java.security.MessageDigest
 import kotlin.math.log10
 import kotlin.math.sqrt
-import org.json.JSONObject
 import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -166,6 +166,9 @@ class HtdemucsExecutableFixtureDeviceTest {
             expected = readFloatFixture(fixtureDirectory, reconstructedFixture),
             actual = reconstructed,
         )
+        require(SourceSeparationMultiTensorQualityGate.passesStrictHost(reconstructedGate)) {
+            "Canonical frequency-to-waveform output failed the strict host quality gate."
+        }
         require(frequencyStats.finite && waveformStats.finite && reconstructedStats.finite) {
             "Canonical HTDemucs branch fixture contains non-finite values."
         }
@@ -216,6 +219,9 @@ class HtdemucsExecutableFixtureDeviceTest {
             actual = stemSet.planarSamples,
             stemCount = contract.modelContract.stemContract.stems.size,
         )
+        require(perStemGate.all { it.passes }) {
+            "Canonical combined output failed the energy-aware per-stem quality gate."
+        }
         require(combinedStats.finite) { "Canonical HTDemucs output contains non-finite values." }
         return JSONObject()
             .put("stftNanos", stftNanos)
