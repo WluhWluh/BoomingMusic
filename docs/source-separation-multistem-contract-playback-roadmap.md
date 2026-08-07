@@ -1181,6 +1181,11 @@ undeclared pipeline or publishing a partial stem set.
   behavior; the request carries the installed executable model, exact source
   preflight, ordered callbacks, pause/cancel policy, and run class so a future
   remote host does not reuse MDX-only request types.
+- [x] Freeze the first multi-stem execution wire contract separately from the
+  MDX IPC protocol. Its descriptor binds the exact artifact, executable
+  contract, pipeline, source/cache identity, CPU-only runtime policy, and
+  ordered stem paths; preparation, progress, segment-state, and completion
+  payloads cannot silently collapse a multi-stem result into two MDX files.
 - [ ] Complete the remaining CPU lifecycle/resource matrix on S25 and S10:
   process death and recovery, independent background ownership and contention,
   and sustained native-memory/thermal observation. Existing product-path runs
