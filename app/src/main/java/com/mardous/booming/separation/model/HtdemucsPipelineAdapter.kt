@@ -5,10 +5,20 @@ import com.mardous.booming.separation.model.contract.MultiTensorDtype
 import com.mardous.booming.separation.model.contract.MultiTensorRenderMode
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorContract
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorContractValidator
+import java.util.concurrent.Callable
+import java.util.concurrent.CancellationException
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import org.jtransforms.fft.FloatFFT_1D
 import kotlin.math.PI
 import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.min
 import kotlin.math.sqrt
 
 data class HtdemucsGlobalNormalization(
@@ -37,10 +47,14 @@ data class HtdemucsWindowStemSet(
 /** Host DSP and branch reconstruction for the reviewed canonical HTDemucs neural core. */
 class HtdemucsPipelineAdapter(
     val contract: SourceSeparationMultiTensorContract,
-) {
-    private val dsp by lazy {
-        HtdemucsHostDsp(contract.pipelineContract.windowSamples)
-    }
+    istftMode: HtdemucsIstftMode = HtdemucsIstftMode.Serial,
+    istftWorkers: Int = 1,
+) : AutoCloseable {
+    private val dsp = HtdemucsHostDsp(
+        windowSamples = contract.pipelineContract.windowSamples,
+        istftMode = istftMode,
+        istftWorkers = istftWorkers,
+    )
 
     val orderedStemIds: List<String> = contract.stemContract.stems.map { it.stemId }
 
@@ -106,7 +120,10 @@ class HtdemucsPipelineAdapter(
         )
     }
 
-    fun reconstructWindow(outputs: HtdemucsNeuralOutputs): HtdemucsWindowStemSet {
+    fun reconstructWindow(
+        outputs: HtdemucsNeuralOutputs,
+        shouldCancel: () -> Boolean = { false },
+    ): HtdemucsWindowStemSet {
         val expectedWaveformElements = orderedStemIds.size * CHANNEL_COUNT * WINDOW_SAMPLES
         require(outputs.waveform.size == expectedWaveformElements) {
             "HTDemucs waveform branch has ${outputs.waveform.size} values; expected " +
@@ -116,6 +133,7 @@ class HtdemucsPipelineAdapter(
             packedFrequency = outputs.frequency,
             timeWaveform = outputs.waveform,
             stemCount = orderedStemIds.size,
+            shouldCancel = shouldCancel,
         )
         return HtdemucsWindowStemSet(
             orderedStemIds = orderedStemIds,
@@ -123,6 +141,8 @@ class HtdemucsPipelineAdapter(
             samplesPerStem = WINDOW_SAMPLES,
         )
     }
+
+    override fun close() = dsp.close()
 
     companion object {
         const val PIPELINE_ID = "booming-ss-htdemucs-neural-core"
@@ -199,9 +219,16 @@ class HtdemucsPipelineAdapter(
     }
 }
 
+enum class HtdemucsIstftMode {
+    Serial,
+    ParallelLanes,
+}
+
 internal class HtdemucsHostDsp(
     private val windowSamples: Int,
-) {
+    val istftMode: HtdemucsIstftMode = HtdemucsIstftMode.Serial,
+    val istftWorkers: Int = 1,
+) : AutoCloseable {
     val frameCount: Int = ceil(windowSamples.toDouble() / HtdemucsPipelineAdapter.HOP_LENGTH).toInt()
 
     private val fft = FloatFFT_1D(HtdemucsPipelineAdapter.FFT_SIZE.toLong())
@@ -221,6 +248,26 @@ internal class HtdemucsHostDsp(
             hann.indices.forEach { sample -> sum[start + sample] += hann[sample] * hann[sample] }
         }
     }
+    private val validatedIstftWorkers = validateIstftConfig(istftMode, istftWorkers)
+    private val inverseWorkspaces = when (istftMode) {
+        HtdemucsIstftMode.Serial -> emptyArray()
+        HtdemucsIstftMode.ParallelLanes ->
+            Array(validatedIstftWorkers) { InverseWorkspace() }
+    }
+    private val inverseExecutor: ExecutorService? = when (istftMode) {
+        HtdemucsIstftMode.Serial -> null
+        HtdemucsIstftMode.ParallelLanes -> Executors.newFixedThreadPool(
+            validatedIstftWorkers,
+        ) { runnable ->
+            Thread(
+                runnable,
+                "booming-htdemucs-istft-${ISTFT_THREAD_SEQUENCE.incrementAndGet()}",
+            )
+        }.also { executor ->
+            (executor as ThreadPoolExecutor).prestartAllCoreThreads()
+        }
+    }
+    private val closed = AtomicBoolean(false)
 
     init {
         require(windowSamples > 0 && outerPadRight >= 0)
@@ -228,6 +275,7 @@ internal class HtdemucsHostDsp(
 
     @Synchronized
     fun waveformToSpectrum(planarStereoWaveform: FloatArray): FloatArray {
+        check(!closed.get()) { "HTDemucs host DSP is closed." }
         require(planarStereoWaveform.size == HtdemucsPipelineAdapter.CHANNEL_COUNT * windowSamples)
         val output = FloatArray(
             HtdemucsPipelineAdapter.FEATURE_COUNT * HtdemucsPipelineAdapter.FREQUENCY_BINS *
@@ -263,7 +311,12 @@ internal class HtdemucsHostDsp(
     }
 
     @Synchronized
-    fun frequencyToWaveform(packedFrequency: FloatArray, stemCount: Int): FloatArray {
+    fun frequencyToWaveform(
+        packedFrequency: FloatArray,
+        stemCount: Int,
+        shouldCancel: () -> Boolean = { false },
+    ): FloatArray {
+        check(!closed.get()) { "HTDemucs host DSP is closed." }
         require(stemCount > 0)
         val expected = stemCount * HtdemucsPipelineAdapter.FEATURE_COUNT *
             HtdemucsPipelineAdapter.FREQUENCY_BINS * frameCount
@@ -271,14 +324,31 @@ internal class HtdemucsHostDsp(
             "Expected packed frequency tensor with $expected values."
         }
         val output = FloatArray(stemCount * HtdemucsPipelineAdapter.CHANNEL_COUNT * windowSamples)
+        val executor = inverseExecutor
+        if (executor == null) {
+            processSerialInverse(packedFrequency, stemCount, output, shouldCancel)
+        } else {
+            processParallelInverse(packedFrequency, stemCount, output, shouldCancel, executor)
+        }
+        return output
+    }
+
+    private fun processSerialInverse(
+        packedFrequency: FloatArray,
+        stemCount: Int,
+        output: FloatArray,
+        shouldCancel: () -> Boolean,
+    ) {
         val fftBuffer = FloatArray(HtdemucsPipelineAdapter.FFT_SIZE * 2)
         val overlap = FloatArray(overlapLength)
         repeat(stemCount) { stem ->
             repeat(HtdemucsPipelineAdapter.CHANNEL_COUNT) { channel ->
+                throwIfCanceled(shouldCancel)
                 overlap.fill(0f)
                 val realFeature = channel * 2
                 val imaginaryFeature = realFeature + 1
                 repeat(frameCount) { frame ->
+                    throwIfCanceled(shouldCancel)
                     fftBuffer.fill(0f)
                     repeat(HtdemucsPipelineAdapter.FREQUENCY_BINS) { frequency ->
                         val real = packedFrequency[frequencyIndex(stem, realFeature, frequency, frame)]
@@ -311,22 +381,163 @@ internal class HtdemucsHostDsp(
                 }
             }
         }
-        return output
+    }
+
+    private fun processParallelInverse(
+        packedFrequency: FloatArray,
+        stemCount: Int,
+        output: FloatArray,
+        shouldCancel: () -> Boolean,
+        executor: ExecutorService,
+    ) {
+        val planeCount = stemCount * HtdemucsPipelineAdapter.CHANNEL_COUNT
+        val activeWorkers = min(validatedIstftWorkers, planeCount)
+        val cancellationRequested = AtomicBoolean(false)
+        val tasks = (0 until activeWorkers).map { workerIndex ->
+            Callable {
+                processInversePlanes(
+                    workerIndex = workerIndex,
+                    workerCount = activeWorkers,
+                    planeCount = planeCount,
+                    packedFrequency = packedFrequency,
+                    output = output,
+                    cancellationRequested = cancellationRequested,
+                    shouldCancel = shouldCancel,
+                )
+            }
+        }
+        try {
+            executor.invokeAll(tasks).forEach { future ->
+                try {
+                    future.get()
+                } catch (error: ExecutionException) {
+                    cancellationRequested.set(true)
+                    throw error.cause ?: error
+                }
+            }
+        } catch (error: InterruptedException) {
+            cancellationRequested.set(true)
+            Thread.currentThread().interrupt()
+            throw CancellationException("Interrupted while running HTDemucs iSTFT.").apply {
+                initCause(error)
+            }
+        }
+    }
+
+    private fun processInversePlanes(
+        workerIndex: Int,
+        workerCount: Int,
+        planeCount: Int,
+        packedFrequency: FloatArray,
+        output: FloatArray,
+        cancellationRequested: AtomicBoolean,
+        shouldCancel: () -> Boolean,
+    ) {
+        val workspace = inverseWorkspaces[workerIndex]
+        var plane = workerIndex
+        while (plane < planeCount) {
+            throwIfCanceled(shouldCancel, cancellationRequested)
+            val stem = plane / HtdemucsPipelineAdapter.CHANNEL_COUNT
+            val channel = plane % HtdemucsPipelineAdapter.CHANNEL_COUNT
+            workspace.overlap.fill(0f)
+            val realFeature = channel * 2
+            val imaginaryFeature = realFeature + 1
+            repeat(frameCount) { frame ->
+                throwIfCanceled(shouldCancel, cancellationRequested)
+                workspace.fftBuffer.fill(0f)
+                repeat(HtdemucsPipelineAdapter.FREQUENCY_BINS) { frequency ->
+                    val real = packedFrequency[
+                        frequencyIndex(stem, realFeature, frequency, frame)
+                    ]
+                    val imaginary = packedFrequency[
+                        frequencyIndex(stem, imaginaryFeature, frequency, frame)
+                    ]
+                    setComplex(workspace.fftBuffer, frequency, real, imaginary)
+                    if (frequency > 0) {
+                        setComplex(
+                            workspace.fftBuffer,
+                            HtdemucsPipelineAdapter.FFT_SIZE - frequency,
+                            real,
+                            -imaginary,
+                        )
+                    }
+                }
+                workspace.fft.complexInverse(workspace.fftBuffer, true)
+                val start = (frame + FRAME_PAD_LEFT) * HtdemucsPipelineAdapter.HOP_LENGTH
+                repeat(HtdemucsPipelineAdapter.FFT_SIZE) { sample ->
+                    workspace.overlap[start + sample] +=
+                        workspace.fftBuffer[sample * 2] * inverseScale * hann[sample]
+                }
+            }
+            val outputOffset = plane * windowSamples
+            repeat(windowSamples) { sample ->
+                val overlapIndex = CENTER_TRIM + OUTER_PAD_LEFT + sample
+                val divisor = windowSquareSum[overlapIndex]
+                check(divisor > 0f)
+                output[outputOffset + sample] = workspace.overlap[overlapIndex] / divisor
+            }
+            plane += workerCount
+        }
     }
 
     fun reconstructBranches(
         packedFrequency: FloatArray,
         timeWaveform: FloatArray,
         stemCount: Int,
+        shouldCancel: () -> Boolean = { false },
     ): FloatArray {
         val expectedWaveformElements = stemCount * HtdemucsPipelineAdapter.CHANNEL_COUNT *
             windowSamples
         require(timeWaveform.size == expectedWaveformElements) {
             "Expected waveform branch with $expectedWaveformElements values."
         }
-        val frequencyWaveform = frequencyToWaveform(packedFrequency, stemCount)
+        val frequencyWaveform = frequencyToWaveform(packedFrequency, stemCount, shouldCancel)
+        throwIfCanceled(shouldCancel)
         return FloatArray(expectedWaveformElements) { index ->
             frequencyWaveform[index] + timeWaveform[index]
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        val executor = inverseExecutor ?: return
+        executor.shutdown()
+        if (!awaitTerminationPreservingInterrupt(executor)) {
+            executor.shutdownNow()
+            check(awaitTerminationPreservingInterrupt(executor)) {
+                "HTDemucs iSTFT executor did not terminate."
+            }
+        }
+    }
+
+    private fun awaitTerminationPreservingInterrupt(executor: ExecutorService): Boolean {
+        var interrupted = Thread.interrupted()
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(EXECUTOR_CLOSE_TIMEOUT_SECONDS)
+        try {
+            while (true) {
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0L) return executor.isTerminated
+                try {
+                    return executor.awaitTermination(remaining, TimeUnit.NANOSECONDS)
+                } catch (_: InterruptedException) {
+                    interrupted = true
+                }
+            }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
+        }
+    }
+
+    private fun throwIfCanceled(
+        shouldCancel: () -> Boolean,
+        sharedCancellation: AtomicBoolean? = null,
+    ) {
+        if (sharedCancellation?.get() == true || Thread.currentThread().isInterrupted ||
+            shouldCancel()
+        ) {
+            sharedCancellation?.set(true)
+            throw CancellationException("HTDemucs host reconstruction was canceled.")
         }
     }
 
@@ -350,10 +561,30 @@ internal class HtdemucsHostDsp(
         return reflected
     }
 
+    private inner class InverseWorkspace {
+        val fft = FloatFFT_1D(HtdemucsPipelineAdapter.FFT_SIZE.toLong())
+        val fftBuffer = FloatArray(HtdemucsPipelineAdapter.FFT_SIZE * 2)
+        val overlap = FloatArray(overlapLength)
+    }
+
     private companion object {
         const val OUTER_PAD_LEFT = 1_536
         const val CENTER_TRIM = HtdemucsPipelineAdapter.FFT_SIZE / 2
         const val FRAME_PAD_LEFT = 2
         const val FRAME_PAD_RIGHT = 2
+        const val MAX_ISTFT_WORKERS = 4
+        const val EXECUTOR_CLOSE_TIMEOUT_SECONDS = 5L
+        val ISTFT_THREAD_SEQUENCE = AtomicInteger()
+
+        fun validateIstftConfig(mode: HtdemucsIstftMode, workers: Int): Int {
+            require(workers in 1..MAX_ISTFT_WORKERS)
+            require(mode != HtdemucsIstftMode.Serial || workers == 1) {
+                "Serial HTDemucs iSTFT requires exactly one worker."
+            }
+            require(mode != HtdemucsIstftMode.ParallelLanes || workers >= 2) {
+                "Parallel HTDemucs iSTFT requires at least two workers."
+            }
+            return workers
+        }
     }
 }

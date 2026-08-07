@@ -15,6 +15,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CancellationException
 
 class HtdemucsPipelineAdapterTest {
     @Test
@@ -82,6 +83,81 @@ class HtdemucsPipelineAdapterTest {
         assertArrayEquals(first, second, 0f)
         assertTrue(first.all(Float::isFinite))
         assertEquals(4 * 2048 * dsp.frameCount, first.size)
+    }
+
+    @Test
+    fun `parallel lanes preserve serial raw float output for four and six stems`() {
+        listOf(4, 6).forEach { stemCount ->
+            val serialDsp = HtdemucsHostDsp(SYNTHETIC_WINDOW_SAMPLES)
+            val frequency = FloatArray(
+                stemCount * HtdemucsPipelineAdapter.FEATURE_COUNT *
+                    HtdemucsPipelineAdapter.FREQUENCY_BINS * serialDsp.frameCount,
+            ) { index ->
+                (((index * 37L + 11L) % 257L).toInt() - 128) * 1e-5f
+            }
+            val serial = serialDsp.use { it.frequencyToWaveform(frequency, stemCount) }
+
+            listOf(2, 4).forEach { workers ->
+                HtdemucsHostDsp(
+                    windowSamples = SYNTHETIC_WINDOW_SAMPLES,
+                    istftMode = HtdemucsIstftMode.ParallelLanes,
+                    istftWorkers = workers,
+                ).use { dsp ->
+                    repeat(2) { repetition ->
+                        assertRawFloatEquals(
+                            serial,
+                            dsp.frequencyToWaveform(frequency, stemCount),
+                            "$stemCount stems, $workers workers, repetition $repetition",
+                        )
+                    }
+                }
+            }
+        }
+
+        assertTrue(
+            Thread.getAllStackTraces().keys.none { thread ->
+                thread.isAlive && thread.name.startsWith("booming-htdemucs-istft-")
+            },
+        )
+    }
+
+    @Test
+    fun `parallel reconstruction rejects invalid worker counts and cancellation`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            HtdemucsHostDsp(
+                SYNTHETIC_WINDOW_SAMPLES,
+                HtdemucsIstftMode.ParallelLanes,
+                1,
+            )
+        }
+        HtdemucsHostDsp(
+            SYNTHETIC_WINDOW_SAMPLES,
+            HtdemucsIstftMode.ParallelLanes,
+            2,
+        ).use { dsp ->
+            assertThrows(CancellationException::class.java) {
+                dsp.frequencyToWaveform(
+                    FloatArray(4 * 4 * 2048 * dsp.frameCount),
+                    stemCount = 4,
+                    shouldCancel = { true },
+                )
+            }
+        }
+    }
+
+    private fun assertRawFloatEquals(
+        expected: FloatArray,
+        actual: FloatArray,
+        label: String,
+    ) {
+        assertEquals("$label element count", expected.size, actual.size)
+        expected.indices.forEach { index ->
+            assertEquals(
+                "$label raw float mismatch at $index",
+                expected[index].toRawBits(),
+                actual[index].toRawBits(),
+            )
+        }
     }
 
     private fun contract(stemCount: Int): SourceSeparationMultiTensorContract {
