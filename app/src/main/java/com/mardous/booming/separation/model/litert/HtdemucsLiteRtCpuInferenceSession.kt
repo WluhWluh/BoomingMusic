@@ -9,6 +9,7 @@ import com.mardous.booming.separation.model.HtdemucsIstftMode
 import com.mardous.booming.separation.model.HtdemucsNeuralInputs
 import com.mardous.booming.separation.model.HtdemucsNeuralOutputs
 import com.mardous.booming.separation.model.HtdemucsPipelineAdapter
+import com.mardous.booming.separation.model.HtdemucsTrackInferenceSession
 import com.mardous.booming.separation.model.HtdemucsWindowStemSet
 import com.mardous.booming.separation.model.contract.MultiTensorFlatBufferBinding
 import com.mardous.booming.separation.model.contract.MultiTensorExecutableBackend
@@ -23,7 +24,7 @@ internal data class HtdemucsVerifiedArtifact(
     val sha256: String,
 )
 
-internal interface HtdemucsCpuInferenceSession : AutoCloseable {
+internal interface HtdemucsCpuInferenceSession : HtdemucsTrackInferenceSession {
     fun run(
         inputs: HtdemucsNeuralInputs,
         shouldCancel: () -> Boolean = { false },
@@ -73,6 +74,8 @@ internal class HtdemucsLiteRtCpuInferenceSessionFactory(
                     validatedOutputObserver,
                 ),
                 reconstruct = adapter::reconstructWindow,
+                prepareNormalizedWindow = adapter::prepareWindow,
+                orderedStemIds = adapter.orderedStemIds,
                 closeResources = { closeAll(activeBackend, adapter) },
             )
         } catch (error: Throwable) {
@@ -196,6 +199,8 @@ internal class AtomicHtdemucsNamedTensorForward(
 internal class AtomicHtdemucsCpuInferenceSession(
     private val forward: AtomicHtdemucsNamedTensorForward,
     private val reconstruct: (HtdemucsNeuralOutputs, () -> Boolean) -> HtdemucsWindowStemSet,
+    private val prepareNormalizedWindow: ((FloatArray) -> HtdemucsNeuralInputs)? = null,
+    override val orderedStemIds: List<String> = emptyList(),
     private val closeResources: () -> Unit,
 ) : HtdemucsCpuInferenceSession {
     private var closed = false
@@ -210,6 +215,19 @@ internal class AtomicHtdemucsCpuInferenceSession(
         val stemSet = reconstruct(outputs, shouldCancel)
         throwIfHtdemucsCanceled(shouldCancel)
         return stemSet
+    }
+
+    @Synchronized
+    override fun runNormalizedWindow(
+        normalizedPlanarStereo: FloatArray,
+        shouldCancel: () -> Boolean,
+    ): HtdemucsWindowStemSet {
+        check(!closed) { "HTDemucs LiteRT CPU session is closed." }
+        val prepare = requireNotNull(prepareNormalizedWindow) {
+            "HTDemucs session has no host input adapter."
+        }
+        throwIfHtdemucsCanceled(shouldCancel)
+        return run(prepare(normalizedPlanarStereo), shouldCancel)
     }
 
     @Synchronized

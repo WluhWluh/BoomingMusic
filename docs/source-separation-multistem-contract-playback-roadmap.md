@@ -1120,6 +1120,12 @@ undeclared pipeline or publishing a partial stem set.
   WAV paths, publishes each segment only after every stem is written, and
   supports cancellation and workspace-loss checks without depending on Android
   decoding or LiteRT in deterministic tests.
+- [x] Connect the range runner to the unchanged `MdxSourceInput` decoder policy,
+  downloaded-model CPU session factory, source-fingerprint gate, and generic
+  cache preparation/completion types. Preparation validates ordered target
+  paths before writers create them; completion alone requires every file to
+  exist. This preserves the early progress callback used by the MDX path while
+  making the same boundary available to HTDemucs.
 - [ ] Download each model and sidecar from the immutable
   `v0.2.0-experimental.1` Release through the production model-delivery path;
   verify the v3 catalog, artifact hash, sidecar hash, contract schema, and

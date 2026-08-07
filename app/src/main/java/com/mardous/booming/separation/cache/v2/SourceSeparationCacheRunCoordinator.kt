@@ -249,7 +249,8 @@ class SourceSeparationCacheRunCoordinator(
             "Cache run manifest disappeared during preparation."
         }
         val output = SourceSeparationCacheOutput(
-            stems = run.resolveStemFiles(preparation.stemFiles).map { (descriptor, file) ->
+            stems = run.resolveStemFiles(preparation.stemFiles, requireFiles = false)
+                .map { (descriptor, file) ->
                 run.renderedStem(
                     descriptor = descriptor,
                     file = file,
@@ -420,7 +421,8 @@ class SourceSeparationCacheRunCoordinator(
         require(result.sourceAudioFingerprint == run.identity.source.audioFingerprint) {
             "Completed source fingerprint does not match the cache identity."
         }
-        val completedStems = run.resolveStemFiles(result.stemFiles).map { (descriptor, file) ->
+        val completedStems = run.resolveStemFiles(result.stemFiles, requireFiles = true)
+            .map { (descriptor, file) ->
             val path = completedStemPath(descriptor.order)
             val integrity = store.copyIntoEntryAtomically(
                 cacheKey = run.identity.cacheKey,
@@ -790,13 +792,14 @@ class SourceSeparationCacheRunCoordinator(
 
     private fun SourceSeparationModelAwareCacheRun.resolveStemFiles(
         stemFiles: List<SourceSeparationCacheRunStemFile>,
+        requireFiles: Boolean,
     ): List<Pair<StemDescriptor, File>> {
         val expected = contract.expectedStemSet().stems
         require(stemFiles.map { it.stemId } == expected.map { it.stemId }) {
             "Cache run result does not contain the complete ordered stem set."
         }
         return expected.zip(stemFiles).map { (descriptor, stemFile) ->
-            require(stemFile.file.isFile) {
+            require(!requireFiles || stemFile.file.isFile) {
                 "Cache run stem file is unavailable: ${stemFile.stemId}."
             }
             descriptor to stemFile.file

@@ -56,6 +56,45 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `preparation accepts complete target paths before wav writers create files`() {
+        val fixture = fixture()
+        val run = fixture.beginReady()
+        val stemFiles = run.contract.expectedStemSet().stems.map { stem ->
+            SourceSeparationCacheRunStemFile(
+                stem.stemId,
+                File(run.workDirectory, "pending-stem-%02d.wav".format(stem.order)),
+            )
+        }
+        val plan = SourceSeparationSegmentPlan.build(
+            rangeStartFrame = 0,
+            rangeEndFrame = 44_100,
+            sampleRate = 44_100,
+            generationSize = 44_100,
+            trim = 1_024,
+            chunkSize = 46_148,
+            stemIds = stemFiles.map { it.stemId },
+            defaultState = SourceSeparationSegmentState.Queued,
+        )
+
+        val manifest = fixture.coordinator.updatePreparation(
+            run,
+            SourceSeparationCacheRunPreparation(
+                stemFiles = stemFiles,
+                timingFile = null,
+                outputFrameCount = 44_100,
+                outputSampleRate = 44_100,
+                windowCount = 1,
+                sourceAudioFingerprint = run.identity.source.audioFingerprint,
+                segmentPlan = plan,
+            ),
+        )
+
+        assertTrue(stemFiles.none { it.file.exists() })
+        assertEquals(stemFiles.map { it.stemId }, manifest.output?.stems?.map { it.stemId })
+        fixture.coordinator.pause(run)
+    }
+
+    @Test
     fun `paused run resumes exact ready segments and resets a missing segment`() {
         val fixture = fixture()
         val first = fixture.beginReady()
