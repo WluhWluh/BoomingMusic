@@ -67,15 +67,16 @@ data is required.
 ## Evidence and Decision Boundary
 
 The latest `MusicSourceSeparation` branch (`experiment/s10-parallel-istft`, tip
-`7ac9603`) justifies preparing generic N-stem contracts and playback, but it
-does not justify shipping a Demucs preset. The closure matrix is:
+`7ac9603`) justifies preparing generic N-stem contracts and playback and
+selecting three exact CPU-only artifacts for simultaneous experimental product
+qualification. It does not by itself qualify a release. The closure matrix is:
 
 | Candidate or experiment | Evidence | Product decision |
 | --- | --- | --- |
-| Official HTDemucs 6-stem | Host pipeline passed; S25 CPU 180-second E2E RTF `0.555`; peak total PSS about `1.128 GiB`; strict per-stem device gate failed | CPU offline/producer-ahead research only |
-| Official HTDemucs 4-stem | Host pipeline passed; S25 CPU 180-second E2E RTF `0.617`; strict per-stem device gate failed | CPU offline/producer-ahead research only |
+| Official HTDemucs 6-stem | Host pipeline passed; S25 CPU 180-second E2E RTF `0.555`; peak total PSS about `1.128 GiB`; strict per-stem device gate failed | First six-stem CPU-only experimental candidate |
+| Official HTDemucs 4-stem base | Host pipeline passed; S25 CPU 180-second E2E RTF `0.617`; strict per-stem device gate failed; Batch 4A found no repeatable advantage from the larger bags or hybrids | Sole four-stem CPU-only experimental candidate |
 | Official 6/4-stem GPU experiments | Only a small GPU+CPU neural-core hybrid was delegated; no canonical GPU E2E audio batch ran; memory and latency were worse | No Demucs GPU product claim |
-| HTDemucs 6-stem guitar-ft | S25 diagnostic mean E2E RTF `0.6783`; listening showed useful guitar/piano behavior, but the frozen host EOF gate was `79.245 dB` versus `80 dB` and training-data terms need review | Diagnostic/research only, not admitted |
+| HTDemucs 6-stem guitar-ft | S25 diagnostic mean E2E RTF `0.6783`; listening showed useful guitar/piano behavior; the frozen host EOF gate was `79.245 dB` versus `80 dB` | Six-stem specialist CPU-only experimental candidate; preserve the author's Apache-2.0 and MoisesDB disclosures |
 | Four-stem Batch 4A | Official base selected as the research baseline; the full specialist bag and hybrids had no repeatable listening advantage; Psytrance was clearly worse | Do not add a bag or Psytrance preset |
 | S10 parallel iSTFT | Four outer workers were raw-FP32/PCM-hash equivalent to serial; E2E RTF improved to `1.292`/`1.382`/`1.310` for official 6s/4s/guitar-ft, but stayed above real time | Offline research optimization only |
 | QNN | Non-empty IR was produced, but VTCM scheduling failed before model creation and no NPU inference occurred | Do not retry this unchanged graph or infer NPU support |
@@ -104,6 +105,42 @@ research repository:
 The reports are experimental evidence, not product contracts. In particular,
 the two-second RTF must not be extrapolated to the canonical 7.8-second
 workload, and a finite or partially delegated output is not a quality pass.
+
+### Frozen first product candidate set
+
+The first multi-stem release batch targets these three exact artifacts together:
+
+- official HTDemucs 6-stem as the representative general six-stem candidate;
+- official HTDemucs 4-stem base as the sole four-stem candidate; and
+- HTDemucs 6-stem guitar-ft as an experimental guitar-specialist candidate.
+
+All three are CPU-only. Their qualification record must expose only `CPU` as an
+allowed backend, and the router must not send them to GPU or NPU even when the
+user enables those backends globally. CPU-only does not imply support for every
+ABI or memory class. Initial product qualification is arm64; arm32 and emulator
+ABIs remain blocked until their address-space, allocation, and sustained-run
+gates pass.
+
+The three artifacts should be published in one model-repository release with
+independent model files, contracts, hashes, and notices. They remain optional
+downloads and Quick Setup must not install all three. The official six-stem
+candidate is the default representative within the experimental multi-stem
+category; the stable two-stem recommendation remains unchanged.
+
+The guitar-ft release record must preserve, without paraphrasing away the
+distinction:
+
+- the author's Apache-2.0 declaration at Hugging Face revision
+  `163ec83135ee06e6f10cb8cd94d2ecef8f3f34ad`;
+- the MIT attribution for the official HTDemucs 6-stem base;
+- the statement that the fine-tune used MoisesDB and redistributes no raw
+  training audio;
+- the MoisesDB CC BY-NC-SA 4.0 identity and attribution; and
+- a prominent notice that Booming SS converted the checkpoint to an FP32
+  LiteRT FlatBuffer and is an open-source, free application.
+
+The converted TFLite, contract sidecar, model details, model-repository release
+notes, and bundled third-party notices must all point to those identities.
 
 ## Frozen Design Principles
 
@@ -937,13 +974,22 @@ MusicSourceSeparation Demucs artifacts remain research inputs only.
   tensor-axis validation.
 - [x] Add a separate HTDemucs pipeline adapter for host DSP and branch
   reconstruction.
-- [ ] Freeze official-weight provenance, converter identity, output order, and
-  fixture files in a distinct executable contract.
-- [ ] Run host PyTorch/LiteRT parity before any product device claim.
-- [ ] Run the canonical S25 CPU allocation gate before GPU or QNN experiments.
-- [ ] Keep official 4/6-stem and guitar-ft artifacts behind a separate research
-  catalog until host EOF/per-stem gates, canonical full-song DSP, provenance,
-  licensing, and listening review all pass.
+- [ ] Freeze separate executable contracts for official 6-stem, official
+  4-stem base, and guitar-ft 6-stem, including exact source weight, converter,
+  FlatBuffer, tensor order, host-DSP revision, and fixture identities.
+- [ ] Add an immutable license/notices section to every executable contract.
+  For guitar-ft, preserve the author's Apache-2.0 statement, the base-model MIT
+  attribution, and the MoisesDB training-source and CC BY-NC-SA 4.0 disclosures.
+- [ ] Port the research `parallel-lanes` iSTFT mode behind the HTDemucs adapter;
+  keep serial as the parity oracle and prove four/six-stem raw-FP32 equivalence
+  before using the parallel implementation in product measurements.
+- [ ] Implement a named two-input/two-output LiteRT CPU session. One forward
+  must publish one complete ordered stem set; cancellation or any branch error
+  discards the entire window.
+- [ ] Run the frozen host PyTorch/LiteRT/DSP/OLA fixtures for all three exact
+  artifacts before making any product device claim.
+- [ ] Keep the three candidates in a non-activatable research catalog until
+  their product-owned CPU session, cache snapshot, and Phase 6 gates pass.
 
 Evidence: `12534fd0` adds the fail-closed static multi-tensor schema and tensor,
 axis, binding, and ordered-stem validation. `47e631b4` adds the product-owned
@@ -953,33 +999,60 @@ adds canonical EOF window planning and triangular FP32 overlap-add. Synthetic
 tests cover deterministic four/six-stem reconstruction without introducing a
 model artifact or large fixture into the application repository.
 
-**Exit:** a canonical multi-stem candidate produces verified per-stem PCM on
-the host and one device window without falling back to an undeclared pipeline.
+**Exit:** all three canonical candidates produce verified per-stem PCM through
+the product-owned host pipeline and CPU session without falling back to an
+undeclared pipeline or publishing a partial stem set.
 
 ### Phase 6: Experimental model qualification
 
-- [ ] Complete canonical 7.8-second and full-song DSP validation.
-- [ ] Measure peak PSS, native/graphics memory, thermal behavior, cancellation,
-  process death, resume, and cache recovery.
-- [ ] Qualify CPU first; qualify GPU/QNN only with explicit delegation and
-  per-stem numerical evidence.
-- [ ] Treat a partial neural-core GPU delegation as hybrid evidence, not GPU
-  support; do not claim QNN when graph finalization or `CompiledModel` creation
-  failed.
-- [ ] Perform human listening tests against the host reference.
-- [ ] Keep the model download-only until every required gate passes.
+- [ ] Re-run the canonical 7.8-second and full-song host/device comparison for
+  all three artifacts from a clean, provenance-bound product build. Do not
+  reuse the official 4-stem report's literal `$rev`, the official 6-stem dirty
+  source identity, or the guitar-ft diagnostic identity as release evidence.
+- [ ] Replace the obsolete single uniform per-stem threshold with a frozen
+  layered gate: strict host FP32 fixture parity, energy-aware per-stem Android
+  tensor checks, and final whole-render PCM16 parity against the same-weight
+  Torch oracle. Low-energy SNR may not hide a large absolute error and may not
+  reject a one/two-LSB equivalent render by itself.
+- [ ] Validate the official 6-stem candidate first, then run the same unchanged
+  pipeline against official 4-stem base and guitar-ft. A shared architecture
+  does not allow one artifact's result to stand in for another.
+- [ ] Measure peak PSS, native memory, thermal behavior, cancellation, process
+  death, resume, cache recovery, model switching, and background contention on
+  S25 and S10 arm64 using CPU only.
+- [ ] Start S25 producer-ahead playback with two ready windows. On devices whose
+  measured production rate cannot sustain the stride, keep separation offline
+  or wait for completion instead of repeatedly pausing playback; S10 results
+  above RTF `1.0` must not be presented as streaming-capable.
+- [ ] Complete the deferred real 4/6-stem repository and `PlaybackService`
+  process-recreation gate, including atomic cache publication, deletion,
+  cancellation, FLAC promotion, seek, and active-model switching.
+- [ ] Perform human listening against the same-weight host reference for every
+  candidate, including guitar/piano-dense material for guitar-ft.
+- [ ] Publish all three only as optional CPU-only experimental candidates after
+  their individual gates pass. GPU and QNN remain explicitly unsupported for
+  this batch and are not Phase 6 follow-ups.
 
-**Exit:** a model-specific catalog decision exists. No broad multi-stem
-promotion is implied by a successful smoke test.
+**Exit:** each of the three exact artifacts has its own CPU-only experimental
+activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support
+is implied.
 
 ### Phase 7: Catalog grouping and controlled activation
 
 - [ ] Add independent family/purpose metadata for all candidate models.
-- [ ] Add representative recommendations and folded category records.
+- [ ] Add the official six-stem candidate as the representative experimental
+  multi-stem recommendation, official four-stem base as the four-stem option,
+  and guitar-ft as the six-stem guitar-specialist option.
+- [ ] Add representative recommendations and folded category records without
+  changing the stable two-stem Quick Setup recommendation.
 - [ ] Keep unsupported generic models inspectable and downloadable but blocked
   from activation.
 - [ ] Expose a model only when its exact contract, pipeline, playback, and
   device evidence support the selected activation policy.
+- [ ] Show model-specific CPU-only compatibility and download/install size;
+  never imply that four stems are the lower-resource choice, because the
+  official four-stem artifact and measured S10 workload are larger/slower than
+  official six-stem.
 
 **Exit:** catalog grouping is presentation over validated metadata, not a new
 source of model semantics.
@@ -1024,7 +1097,12 @@ source of model semantics.
 - exact output order and tensor-axis validation;
 - separate smoke and canonical identities;
 - CPU, GPU, and NPU evidence never merged across artifacts or profiles; and
-- full-song reconstruction before any experimental activation.
+- full-song reconstruction before any experimental activation;
+- same-weight Torch versus product CPU PCM16 parity for official six-stem,
+  official four-stem base, and guitar-ft separately;
+- no partial-cache publication after one neural-output branch fails; and
+- license, attribution, training-source, conversion, and modification notices
+  preserved in the guitar-ft model details and release artifact.
 
 ## Recommended Frozen Decisions
 
@@ -1050,6 +1128,10 @@ source of model semantics.
   and one final clamp to make its implementation realtime-safe.
 - Treat Demucs output as model-native direct stems unless its contract declares
   a specific derivation; never invent a residual automatically.
+- Freeze the first three Demucs candidates as CPU-only. A global GPU or NPU
+  preference cannot override an artifact's backend qualification.
+- Keep official six-stem as the experimental multi-stem representative; do not
+  describe official four-stem base as a low-resource model.
 - Cap the first product playback implementation at eight stems while allowing
   the wire contract to remain extensible.
 - Require generated sidecars for complex imported multi-stem models.
@@ -1081,11 +1163,17 @@ source of model semantics.
 7. Whether an imported multi-stem sidecar may declare a custom pipeline.
    Recommendation: only reviewed, app-bundled pipeline IDs may activate;
    unknown pipelines remain installed and inspectable but download-only.
-8. Whether the current HTDemucs candidates should enter the product catalog.
-   Recommendation: no. Keep them in the research repository until an exact
-   artifact passes host and per-stem device gates, canonical full-song DSP,
-   provenance/license review, resource/cancellation tests, and listening. Do not
+8. Which current HTDemucs candidates should enter the first product catalog.
+   Decision: qualify official six-stem, official four-stem base, and guitar-ft
+   together as exact CPU-only experimental candidates. Keep them
+   non-activatable until their individual executable contract, layered parity,
+   full-song, resource, lifecycle, and listening gates pass. Preserve the
+   guitar-ft author/base-model/MoisesDB notices in every published form. Do not
    generalize MDX GPU/QNN evidence or a neural-core hybrid to Demucs.
+9. Whether CPU-only qualification should imply all-ABI support. Decision: no.
+   Begin with arm64 device qualification. Admit arm32, x86, or x86_64 only from
+   separate allocation, address-space, sustained, and lifecycle evidence for
+   the exact artifact.
 
 ## Completion Definition
 
@@ -1102,10 +1190,12 @@ This roadmap is complete only when:
 - the Media3 audio thread performs no file I/O, FLAC decode, hashing, dynamic
   allocation, or blocking repair work;
 - active-model switching preserves exact cache isolation;
-- at least one 4- or 6-stem pipeline passes host, device, full-song, and
-  listening gates; and
+- the three frozen first-batch artifacts each receive an explicit CPU-only
+  experimental activation or fail-closed decision from host, device,
+  full-song, lifecycle, and listening evidence; and
 - catalog categories and activation policies are derived from validated
   metadata rather than filenames or localized text.
 
-Until then, non-MDX multi-stem candidates remain download-only and the stable
-MDX two-stem path remains the product default.
+Until then, the three frozen HTDemucs candidates remain non-activatable research
+entries and other non-MDX multi-stem candidates remain download-only. The
+stable MDX two-stem path remains the product default.
