@@ -12,6 +12,7 @@ import com.mardous.booming.separation.model.contract.MultiTensorFixtureIdentity
 import com.mardous.booming.separation.model.contract.MultiTensorFixtureRole
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContract
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorQualityGate
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
 import java.io.File
 import java.io.FileInputStream
@@ -21,6 +22,7 @@ import java.security.MessageDigest
 import kotlin.math.log10
 import kotlin.math.sqrt
 import org.json.JSONObject
+import org.json.JSONArray
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -160,6 +162,10 @@ class HtdemucsExecutableFixtureDeviceTest {
             reconstructed,
             File(fixtureDirectory, reconstructedFixture.fileName),
         )
+        val reconstructedGate = SourceSeparationMultiTensorQualityGate.compareFloat(
+            expected = readFloatFixture(fixtureDirectory, reconstructedFixture),
+            actual = reconstructed,
+        )
         require(frequencyStats.finite && waveformStats.finite && reconstructedStats.finite) {
             "Canonical HTDemucs branch fixture contains non-finite values."
         }
@@ -167,6 +173,14 @@ class HtdemucsExecutableFixtureDeviceTest {
             .put("frequencyTensor", frequencyStats.toJson())
             .put("waveformTensor", waveformStats.toJson())
             .put("frequencyWaveform", reconstructedStats.toJson())
+            .put(
+                "frequencyWaveformStrictHostGate",
+                JSONObject()
+                    .put("passes", SourceSeparationMultiTensorQualityGate.passesStrictHost(
+                        reconstructedGate,
+                    ))
+                    .put("metrics", metricsJson(reconstructedGate)),
+            )
     }
 
     private fun runCanonicalWindowGate(
@@ -197,12 +211,18 @@ class HtdemucsExecutableFixtureDeviceTest {
             stemSet.planarSamples,
             File(fixtureDirectory, combinedFixture.fileName),
         )
+        val perStemGate = SourceSeparationMultiTensorQualityGate.comparePerStem(
+            expected = readFloatFixture(fixtureDirectory, combinedFixture),
+            actual = stemSet.planarSamples,
+            stemCount = contract.modelContract.stemContract.stems.size,
+        )
         require(combinedStats.finite) { "Canonical HTDemucs output contains non-finite values." }
         return JSONObject()
             .put("stftNanos", stftNanos)
             .put("inferenceAndReconstructionNanos", inferenceNanos)
             .put("stft", stftStats.toJson())
             .put("combined", combinedStats.toJson())
+            .put("energyAwareStemGate", perStemGate.toJson(contract))
     }
 
     private fun runOverlapAddGate(
@@ -378,6 +398,40 @@ class HtdemucsExecutableFixtureDeviceTest {
             .put("signalToNoiseDb", signalToNoiseDb)
             .put("correlation", correlation)
     }
+
+    private fun List<com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorStemMetrics>.toJson(
+        contract: SourceSeparationMultiTensorExecutableContract,
+    ): JSONObject {
+        val stems = JSONArray()
+        forEach { result ->
+            stems.put(
+                JSONObject()
+                    .put("stemIndex", result.stemIndex)
+                    .put(
+                        "stemId",
+                        contract.modelContract.stemContract.stems[result.stemIndex].stemId,
+                    )
+                    .put("lowEnergy", result.lowEnergy)
+                    .put("passes", result.passes)
+                    .put("metrics", metricsJson(result.metrics)),
+            )
+        }
+        return JSONObject()
+            .put("thresholdRevision", "htdemucs-phase6-thresholds-v1")
+            .put("allPass", all { it.passes })
+            .put("stems", stems)
+    }
+
+    private fun metricsJson(
+        metrics: com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorFloatMetrics,
+    ) = JSONObject()
+        .put("elementCount", metrics.elementCount)
+        .put("finite", metrics.finite)
+        .put("maxAbsoluteError", metrics.maxAbsoluteError)
+        .put("rootMeanSquareError", metrics.rootMeanSquareError)
+        .put("signalToNoiseDb", metrics.signalToNoiseDb)
+        .put("cosineSimilarity", metrics.cosineSimilarity)
+        .put("referenceRms", metrics.referenceRms)
 
     private companion object {
         const val ARG_RUN_ID = "htdemucsRunId"
