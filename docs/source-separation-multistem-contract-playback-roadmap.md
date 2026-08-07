@@ -1126,6 +1126,24 @@ undeclared pipeline or publishing a partial stem set.
   paths before writers create them; completion alone requires every file to
   exist. This preserves the early progress callback used by the MDX path while
   making the same boundary available to HTDemucs.
+- [x] Add a dedicated CPU-only HTDemucs lifecycle engine over the generic cache
+  coordinator. It derives the exact identity from the installed executable
+  sidecar, drives begin/preparation/segment/completion publication, and maps
+  ordinary pause, active-model supersession, user cancellation, and failure to
+  distinct durable journal transitions. The runner checks pause independently
+  from cancellation during normalization and window execution.
+- [x] Freeze partial-run behavior for this engine revision. A paused multi-stem
+  cache remains inspectable until another run is admitted, but the next run
+  clears and rebuilds the incomplete full-track WAV set because the current
+  writer has no qualified append/resume state. The engine rejects any future
+  non-null resumable state until exact N-stem writer restoration is implemented
+  and tested; it never silently combines old and new output.
+- [x] Expose the installed Release store and HTDemucs engine through one
+  product-facing multi-stem facade in the application dependency graph. Model
+  installation still uses the pinned GitHub delivery provider, while listing
+  and opening already installed model records remains available offline and
+  does not reacquire the Release catalog. Existing MDX model selection and
+  playback behavior are unchanged.
 - [ ] Download each model and sidecar from the immutable
   `v0.2.0-experimental.1` Release through the production model-delivery path;
   verify the v3 catalog, artifact hash, sidecar hash, contract schema, and
@@ -1197,6 +1215,14 @@ These are canonical 7.8-second and two-window device checks, not full-song
 qualification. They establish that all three exact CPU artifacts pass the same
 v2 numerical device gate on S25; full-song resource, lifecycle, cache,
 PCM16, and listening gates remain open.
+
+Product integration then advanced in four independently tested steps:
+`34dbc64d` connected Android source decoding and the installed CPU session;
+`8f8c9187` separated pause from cancellation; `660c4f31` added the exact-model
+cache lifecycle engine; and `f25e143a` exposed the installer-to-engine product
+boundary. This is local deterministic lifecycle evidence only. It does not
+satisfy the open real-Release download, independent-process, device resource,
+full-song parity, playback, or listening gates.
 
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support
