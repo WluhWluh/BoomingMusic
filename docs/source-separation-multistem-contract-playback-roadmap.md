@@ -1108,6 +1108,12 @@ undeclared pipeline or publishing a partial stem set.
   evidence, and one complete 4/6-stem result without coordinator conditionals.
   A completed manifest is published only after every expected stem has been
   copied and verified.
+- [x] Implement the canonical full-track HTDemucs framing primitives without
+  whole-song N-stem PCM: streaming mono mean/sample-standard-deviation,
+  343,980-sample centered tail windows, the frozen 257,985-sample stride, and
+  triangular overlap-add. The OLA holds one bounded N-stem window and emits each
+  finalized stride before accepting more output; it preserves the official
+  crop/pad and denormalization rules.
 - [ ] Download each model and sidecar from the immutable
   `v0.2.0-experimental.1` Release through the production model-delivery path;
   verify the v3 catalog, artifact hash, sidecar hash, contract schema, and
