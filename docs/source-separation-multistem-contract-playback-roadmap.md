@@ -1014,7 +1014,12 @@ named two-input/two-output CPU session, and `8576ca67` corrects the LiteRT
 signature binding to use `args_0`/`args_1` and `output_0`/`output_1` while
 retaining the distinct FlatBuffer tensor names as artifact identity.
 `a48085d3` adds the external executable fixture gate without packaging model
-weights or large fixtures in the APK.
+weights or large fixtures in the APK. `6c047f7c` adds the frozen layered host
+and per-stem metrics to the executable report, and `a4a6b761` makes those two
+qualification gates fail closed instead of treating a diagnostic-only report
+as an admission pass. Final PCM16 parity, clean provenance, full-song
+execution, and device lifecycle evidence remain required before any candidate
+can be activated.
 
 The committed `a48085d3b219c017271fbb9442087f4dfa667017` build passed the full
 gate on S25 (`SM-S9310`, API 35, arm64) for all three exact artifacts using
