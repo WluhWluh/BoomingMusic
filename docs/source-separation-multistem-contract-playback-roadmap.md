@@ -1083,6 +1083,21 @@ fixture reports above are intentionally not retroactively evaluated as a
 qualification pass under this revision; the clean full-song and per-stem
 same-weight comparisons remain open below.
 
+The first clean-provenance S25 attempt for official six-stem was run from
+product commit `34c49f7e` with APK SHA-256
+`3892aa4ca7401c571941715d83ba33f68721d1384a9ba889d8925bbc10f512c6`, test APK
+SHA-256 `e0853f1f4d1a37e740797003e647e7dc510ece8c03e9cd354377577ed31c4cea`,
+runtime `2.1.5-bss.2`, and library SHA-256
+`ae2b996fde27021b070e88b56eebc9626a5261feb72f09791bdac38b2f09abd2` on S25
+(`SM-S9310`, API 35, arm64). Artifact and all fixture identities matched. The
+run was correctly rejected by the frozen per-stem gate: `other` was classified
+as energetic under the `1e-4` RMS boundary and measured 57.789 dB SNR,
+`5.42e-6` maximum absolute error, and `0.9999998697` cosine similarity. This
+is retained as a qualification failure, not waived by the small absolute
+error. The host strict gate is diagnostic-only on Android; it remains a host
+qualification gate. The threshold requires a separately reviewed revision
+before more device runs can be used as admission evidence.
+
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support
 is implied.
