@@ -17,12 +17,15 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotio
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLifecycle
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheValidationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONArray
@@ -37,6 +40,117 @@ import org.koin.core.context.GlobalContext
 
 @RunWith(AndroidJUnit4::class)
 class SourceSeparationMultiStemProductExecutionDeviceTest {
+    @Test
+    fun cancelAfterFirstReadySegmentThenRestartCleanly() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
+        val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
+        assumeTrue(modelId.isNotBlank() && relativeSource.isNotBlank())
+        require(modelId in EXPECTED_MODEL_IDS && SAFE_RELATIVE_PATH.matches(relativeSource))
+        val runId = requireNotNull(arguments.getString(ARG_RUN_ID)).also {
+            require(SAFE_NAME.matches(it))
+        }
+        val appCommit = arguments.getString(ARG_APP_COMMIT).orEmpty()
+        val testCommit = arguments.getString(ARG_TEST_COMMIT).orEmpty()
+        require(SHA1.matches(appCommit) && SHA1.matches(testCommit))
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val source = File(context.filesDir, relativeSource).canonicalFile
+        require(source.toPath().startsWith(context.filesDir.canonicalFile.toPath()) && source.isFile)
+        arguments.getString(ARG_SOURCE_SHA256)?.let { expected ->
+            require(SHA256.matches(expected) && source.sha256() == expected)
+        }
+        val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
+            .resolve("$runId.json")
+        var mediaUri: Uri? = null
+        val report = JSONObject()
+            .put("runId", runId)
+            .put("mode", "cancel-then-restart")
+            .put("modelId", modelId)
+            .put("status", "running")
+            .put("deviceModel", android.os.Build.MODEL)
+            .put("sdk", android.os.Build.VERSION.SDK_INT)
+            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+        try {
+            mediaUri = importIntoMediaStore(context, source, runId)
+            val song = stagedSong(mediaUri, source, runId)
+            val koin = GlobalContext.get()
+            val facade = koin.get<SourceSeparationMultiStemProductFacade>()
+            val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
+            val store = koin.get<SourceSeparationCacheStore>()
+            repository.entries()
+                .filter { it.modelId == modelId && it.title.startsWith(SONG_TITLE_PREFIX) }
+                .forEach { repository.delete(it.cacheKey) }
+
+            val cancel = AtomicBoolean(false)
+            val cancelStartedAt = SystemClock.elapsedRealtime()
+            val canceled = try {
+                facade.separate(
+                    song = song,
+                    modelId = modelId,
+                    onProgress = { progress ->
+                        if (progress.completedWindows >= 1) cancel.set(true)
+                    },
+                    shouldCancel = cancel::get,
+                )
+                null
+            } catch (error: CancellationException) {
+                error
+            }
+            requireNotNull(canceled) { "The multi-stem run ignored user cancellation." }
+            val cancelElapsedMs = SystemClock.elapsedRealtime() - cancelStartedAt
+            val canceledEntry = repository.entries().single {
+                it.modelId == modelId && it.title == song.title
+            }
+            assertEquals(SourceSeparationModelAwareCacheEntryState.Canceled, canceledEntry.state)
+            val partial = requireNotNull(store.readManifest(canceledEntry.cacheKey))
+            assertEquals(SourceSeparationCacheManifestState.Partial, partial.state)
+            val plan = requireNotNull(partial.segmentPlan)
+            val readyBeforeRestart = plan.segments.count { it.state.isPlaybackReady }
+            assertTrue(readyBeforeRestart in 1 until plan.segmentCount)
+            assertTrue(plan.segments.none {
+                it.state == com.mardous.booming.separation.cache.SourceSeparationSegmentState.Running
+            })
+            val canceledJournal = requireNotNull(store.readRunJournal(partial.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Canceled, canceledJournal.lifecycle)
+
+            val restartStartedAt = SystemClock.elapsedRealtime()
+            val restarted = facade.separate(song, modelId)
+            val restartElapsedMs = SystemClock.elapsedRealtime() - restartStartedAt
+            require(restarted is HtdemucsSourceSeparationEngineResult.Completed)
+            assertEquals(partial.cacheKey, restarted.manifest.cacheKey)
+            assertTrue(store.validateCompletedEntry(restarted.manifest, verifyHashes = false) ==
+                SourceSeparationCacheValidationResult.Valid)
+            assertEquals(
+                SourceSeparationCacheRunJournalLifecycle.Completed,
+                requireNotNull(store.readRunJournal(partial.cacheKey)).lifecycle,
+            )
+            report.put("status", "complete")
+                .put("build", JSONObject()
+                    .put("appCommit", appCommit)
+                    .put("testCommit", testCommit)
+                    .put("appApkSha256", File(context.applicationInfo.sourceDir).sha256())
+                    .put("testApkSha256", File(instrumentation.context.applicationInfo.sourceDir).sha256())
+                )
+                .put("cacheKey", partial.cacheKey)
+                .put("cancelElapsedMs", cancelElapsedMs)
+                .put("readySegmentsBeforeRestart", readyBeforeRestart)
+                .put("totalSegments", plan.segmentCount)
+                .put("restartElapsedMs", restartElapsedMs)
+                .put("completedStemCount", restarted.manifest.output?.stems?.size)
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+            reportFile.writeText(report.toString(2))
+            throw error
+        } finally {
+            mediaUri?.let { context.contentResolver.delete(it, null, null) }
+        }
+    }
+
     @Test
     fun separateStagedSongThroughInstalledReleaseAndProductCache() {
         val arguments = InstrumentationRegistry.getArguments()
