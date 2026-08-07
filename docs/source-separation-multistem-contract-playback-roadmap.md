@@ -1088,6 +1088,10 @@ undeclared pipeline or publishing a partial stem set.
   payload hashes and the executable contract's artifact binding, then publishes
   one SHA-256-addressed directory atomically. Failed installs leave no visible
   model, and an existing complete install is reused without another download.
+- [x] Add the product-facing Release installer and persistent catalog cache.
+  Catalog bytes are cached only after the same pinned size/SHA/schema checks;
+  corrupted cached bytes are discarded and reacquired from the immutable
+  Release. UI and Quick Setup integration remain a later activation step.
 - [ ] Download each model and sidecar from the immutable
   `v0.2.0-experimental.1` Release through the production model-delivery path;
   verify the v3 catalog, artifact hash, sidecar hash, contract schema, and

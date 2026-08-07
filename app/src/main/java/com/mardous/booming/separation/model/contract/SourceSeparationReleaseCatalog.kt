@@ -163,7 +163,9 @@ object SourceSeparationReleaseCatalogValidator {
 class SourceSeparationReleaseCatalogDownloader(
     private val provider: ModelDeliveryProvider,
 ) {
-    fun download(): SourceSeparationReleaseCatalog {
+    fun download(): SourceSeparationReleaseCatalog = downloadVerified().catalog
+
+    fun downloadVerified(): SourceSeparationDownloadedReleaseCatalog {
         val reference = SourceSeparationReleaseCatalogMetadata.catalogReference()
         provider.acquire(reference).use { payload ->
             require(payload.reference == reference) { "Catalog payload identity changed" }
@@ -177,8 +179,11 @@ class SourceSeparationReleaseCatalogDownloader(
             require(sha256(bytes) == reference.expectedSha256.lowercase()) {
                 "Release catalog SHA-256 does not match the pinned identity"
             }
-            return SourceSeparationReleaseCatalogValidator.validate(
-                SourceSeparationModelMetadata.json.decodeFromString(bytes.toString(Charsets.UTF_8)),
+            return SourceSeparationDownloadedReleaseCatalog(
+                catalog = SourceSeparationReleaseCatalogValidator.validate(
+                    SourceSeparationModelMetadata.json.decodeFromString(bytes.toString(Charsets.UTF_8)),
+                ),
+                bytes = bytes,
             )
         }
     }
@@ -187,6 +192,11 @@ class SourceSeparationReleaseCatalogDownloader(
         .digest(bytes)
         .joinToString("") { "%02x".format(it) }
 }
+
+data class SourceSeparationDownloadedReleaseCatalog(
+    val catalog: SourceSeparationReleaseCatalog,
+    val bytes: ByteArray,
+)
 
 private fun SourceSeparationReleaseArtifact.toReference() = SourceSeparationDeliveryReference(
     providerId = "github",
