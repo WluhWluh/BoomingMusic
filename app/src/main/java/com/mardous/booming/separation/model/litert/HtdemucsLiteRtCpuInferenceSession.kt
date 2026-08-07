@@ -34,6 +34,7 @@ internal class HtdemucsLiteRtCpuInferenceSessionFactory(
     private val backendFactory: HtdemucsNamedTensorBackendFactory =
         HtdemucsNativeLiteRtCpuBackendFactory,
     private val availableProcessors: () -> Int = { Runtime.getRuntime().availableProcessors() },
+    private val validatedOutputObserver: (HtdemucsNeuralOutputs) -> Unit = {},
 ) {
     fun create(
         artifact: HtdemucsVerifiedArtifact,
@@ -65,7 +66,12 @@ internal class HtdemucsLiteRtCpuInferenceSessionFactory(
             )
             backend = activeBackend
             return AtomicHtdemucsCpuInferenceSession(
-                forward = AtomicHtdemucsNamedTensorForward(inputs, outputs, activeBackend),
+                forward = AtomicHtdemucsNamedTensorForward(
+                    inputs,
+                    outputs,
+                    activeBackend,
+                    validatedOutputObserver,
+                ),
                 reconstruct = adapter::reconstructWindow,
                 closeResources = { closeAll(activeBackend, adapter) },
             )
@@ -138,6 +144,7 @@ internal class AtomicHtdemucsNamedTensorForward(
     private val inputBindings: List<HtdemucsTensorBinding>,
     private val outputBindings: List<HtdemucsTensorBinding>,
     private val backend: HtdemucsNamedTensorBackend,
+    private val validatedOutputObserver: (HtdemucsNeuralOutputs) -> Unit = {},
 ) {
     fun run(
         inputs: HtdemucsNeuralInputs,
@@ -171,7 +178,7 @@ internal class AtomicHtdemucsNamedTensorForward(
         return HtdemucsNeuralOutputs(
             frequency = validated[0],
             waveform = validated[1],
-        )
+        ).also(validatedOutputObserver)
     }
 
     private fun requireTensor(

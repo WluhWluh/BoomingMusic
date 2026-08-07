@@ -18,6 +18,7 @@ import org.junit.Test
 class HtdemucsLiteRtCpuInferenceSessionTest {
     @Test
     fun `atomic forward binds both inputs and publishes both validated outputs`() {
+        var observed = 0
         val backend = FakeBackend { inputs ->
             assertEquals(setOf("waveform", "spectrum"), inputs.keys)
             linkedMapOf(
@@ -25,7 +26,9 @@ class HtdemucsLiteRtCpuInferenceSessionTest {
                 "time" to floatArrayOf(7f, 8f),
             )
         }
-        val forward = forward(backend)
+        val forward = AtomicHtdemucsNamedTensorForward(INPUTS, OUTPUTS, backend) {
+            observed += 1
+        }
 
         val outputs = forward.run(
             HtdemucsNeuralInputs(floatArrayOf(1f, 2f), floatArrayOf(3f, 4f)),
@@ -34,10 +37,12 @@ class HtdemucsLiteRtCpuInferenceSessionTest {
 
         assertArrayEquals(floatArrayOf(5f, 6f), outputs.frequency, 0f)
         assertArrayEquals(floatArrayOf(7f, 8f), outputs.waveform, 0f)
+        assertEquals(1, observed)
     }
 
     @Test
     fun `atomic forward rejects missing malformed and non-finite branches`() {
+        var observed = 0
         listOf(
             linkedMapOf("frequency" to floatArrayOf(1f, 2f)),
             linkedMapOf(
@@ -50,9 +55,14 @@ class HtdemucsLiteRtCpuInferenceSessionTest {
             ),
         ).forEach { outputs ->
             assertThrows(IllegalArgumentException::class.java) {
-                forward(FakeBackend { outputs }).run(validInputs(), shouldCancel = { false })
+                AtomicHtdemucsNamedTensorForward(
+                    INPUTS,
+                    OUTPUTS,
+                    FakeBackend { outputs },
+                ) { observed += 1 }.run(validInputs(), shouldCancel = { false })
             }
         }
+        assertEquals(0, observed)
     }
 
     @Test
