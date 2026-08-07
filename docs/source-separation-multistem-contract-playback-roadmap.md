@@ -1243,6 +1243,20 @@ close Release acquisition and same-pipeline product publication on S25; they
 do not close host PCM parity, S10 resources, process lifecycle, actual
 `PlaybackService` multi-stem routing, or listening.
 
+The matching S10 matrix is frozen in
+`docs/validation/htdemucs/phase6-product-path-s10-2026-08-07.json` with the
+same APKs, runtime, downloaded Release pairs, source PCM, cache, and FLAC
+gates. Official six-stem, official four-stem, and guitar-ft took 47.462 s,
+98.258 s, and 56.370 s respectively for the 30-second source, so all three are
+offline-only on this device; official four-stem is decisively the slowest and
+must not be presented as the lower-resource choice. Peak PSS ranged from
+1,236,240 to 1,294,985 KiB, and official four-stem raised thermal status from
+`0` to `1`. The S10/S25 official-six PCM16 comparison found at most one LSB of
+difference per stem and 96.853 dB SNR after summing all stems, consistent with
+cross-device FP32 rounding rather than a product-pipeline split. This closes
+the first S10 full-track/resource observation but not the combined Phase 6
+cancellation, process-death, recovery, switching, or contention item.
+
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support
 is implied.

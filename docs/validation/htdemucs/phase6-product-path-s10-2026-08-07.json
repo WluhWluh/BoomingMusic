@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "status": "passed-offline-only",
+  "device": {
+    "model": "SM-G9730",
+    "sdk": 31,
+    "abi": "arm64-v8a",
+    "memTotalKiB": 7640556
+  },
+  "build": {
+    "commit": "411204b04d00dd1ee768f2de8e690202427ba069",
+    "appApkSha256": "f623735bc68f9d09141882a37e3aaf2b40c2871ed274d9985cb92911e3e7ecb0",
+    "testApkSha256": "79a72fb7b6ee4969a039b207fa1f52026412ae912fad0b3bcfdaaf52897c86b9"
+  },
+  "runtime": {
+    "releaseVersion": "2.1.5-bss.2-exp.2",
+    "runtimeArtifactVersion": "2.1.5-bss.2",
+    "librarySha256": "ae2b996fde27021b070e88b56eebc9626a5261feb72f09791bdac38b2f09abd2"
+  },
+  "source": {
+    "name": "coast-town-30s-canonical.wav",
+    "byteSize": 5292044,
+    "sha256": "940c2ad55fad34a52ba7660706150300cfea84d315c491012e54de41d653aa6b",
+    "sampleRate": 44100,
+    "channelCount": 2,
+    "frameCount": 1323000,
+    "audioFingerprint": "encoded-samples-v1:810e4e81e43cf930f1612ec4acd45a67622e2549e72234fd53af0aa707667153"
+  },
+  "runs": [
+    {
+      "runId": "s10-official6-product30s-flac-v1",
+      "modelId": "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0",
+      "artifactSha256": "8b19e919dd17c6a93d862ca9b1158ed72f09feb4c52745819346369506ba4ed7",
+      "stemCount": 6,
+      "windowCount": 6,
+      "elapsedMs": 47462,
+      "realtimeFactor": 1.5821,
+      "repeatElapsedMs": 118,
+      "promotionElapsedMs": 7811,
+      "pssBaselineKiB": 148564,
+      "pssPeakKiB": 1294985,
+      "pssFinalKiB": 149872,
+      "promotedArtifactBytes": 4712255,
+      "cleanedEntryBytes": 4740127,
+      "thermalBefore": 0,
+      "thermalAfter": 0
+    },
+    {
+      "runId": "s10-official4-product30s-flac-v1",
+      "modelId": "htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0",
+      "artifactSha256": "9855718072ee819bacacdb6b670bd6257feca172bf27ac1d72dff994cdbeed81",
+      "stemCount": 4,
+      "windowCount": 6,
+      "elapsedMs": 98258,
+      "realtimeFactor": 3.2753,
+      "repeatElapsedMs": 183,
+      "promotionElapsedMs": 7459,
+      "pssBaselineKiB": 159512,
+      "pssPeakKiB": 1276970,
+      "pssFinalKiB": 329166,
+      "promotedArtifactBytes": 3853781,
+      "cleanedEntryBytes": 3876463,
+      "thermalBefore": 0,
+      "thermalAfter": 1
+    },
+    {
+      "runId": "s10-guitarft6-product30s-flac-v1",
+      "modelId": "htdemucs_6s_guitar_ft_core_canonical_7p8s_fp32_v1_0_0",
+      "artifactSha256": "ab632a5a024033d557eabb716f8829230532e8e5b4cd7ba146812a301f89b9a5",
+      "stemCount": 6,
+      "windowCount": 6,
+      "elapsedMs": 56370,
+      "realtimeFactor": 1.879,
+      "repeatElapsedMs": 335,
+      "promotionElapsedMs": 14453,
+      "pssBaselineKiB": 149117,
+      "pssPeakKiB": 1236240,
+      "pssFinalKiB": 149638,
+      "promotedArtifactBytes": 7850218,
+      "cleanedEntryBytes": 7878262,
+      "thermalBefore": 1,
+      "thermalAfter": 1
+    }
+  ],
+  "official6CrossDevicePcm16": {
+    "reference": "s25-official6-product30s-flac-v1",
+    "candidate": "s10-official6-product30s-flac-v1",
+    "maximumAbsoluteDifferenceLsbPerStem": 1,
+    "minimumExactSampleFraction": 0.9995253212396069,
+    "summedStemSnrDb": 96.85314010297112,
+    "summedStemRmseLsb": 0.03580939716289661,
+    "summedStemMaximumAbsoluteDifferenceLsb": 1
+  },
+  "decision": {
+    "productExecution": "passed",
+    "producerAheadPlayback": "rejected-on-this-device",
+    "reason": "All three measured inference realtime factors exceed 1.0."
+  },
+  "notProven": [
+    "same-weight-host-pcm16-parity",
+    "human-listening",
+    "cancellation",
+    "process-death-and-recovery",
+    "background-contention",
+    "playback-service-multistem-session"
+  ]
+}
