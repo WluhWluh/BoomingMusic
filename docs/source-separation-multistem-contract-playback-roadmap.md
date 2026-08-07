@@ -928,12 +928,14 @@ same bounded engine; this does not yet activate a multi-stem model.
 
 ### Phase 5: Multi-tensor pipeline contract and neural-core adapter
 
-Status: contract design is ready; product implementation is not started. The
-current MusicSourceSeparation Demucs artifacts are research inputs only.
+Status: the static contract loader and the isolated canonical HTDemucs host
+pipeline are implemented. They are not connected to LiteRT sessions, the
+scheduler, cache publication, the product catalog, or UI. The current
+MusicSourceSeparation Demucs artifacts remain research inputs only.
 
-- [ ] Implement the static multi-input/output contract loader and strict
+- [x] Implement the static multi-input/output contract loader and strict
   tensor-axis validation.
-- [ ] Add a separate HTDemucs pipeline adapter for host DSP and branch
+- [x] Add a separate HTDemucs pipeline adapter for host DSP and branch
   reconstruction.
 - [ ] Freeze official-weight provenance, converter identity, output order, and
   fixture files in a distinct executable contract.
@@ -942,6 +944,14 @@ current MusicSourceSeparation Demucs artifacts are research inputs only.
 - [ ] Keep official 4/6-stem and guitar-ft artifacts behind a separate research
   catalog until host EOF/per-stem gates, canonical full-song DSP, provenance,
   licensing, and listening review all pass.
+
+Evidence: `12534fd0` adds the fail-closed static multi-tensor schema and tensor,
+axis, binding, and ordered-stem validation. `47e631b4` adds the product-owned
+canonical host STFT/iSTFT, global normalization, and atomic frequency/time
+branch reconstruction for reviewed four- and six-stem geometry. `3a0bf4e6`
+adds canonical EOF window planning and triangular FP32 overlap-add. Synthetic
+tests cover deterministic four/six-stem reconstruction without introducing a
+model artifact or large fixture into the application repository.
 
 **Exit:** a canonical multi-stem candidate produces verified per-stem PCM on
 the host and one device window without falling back to an undeclared pipeline.
