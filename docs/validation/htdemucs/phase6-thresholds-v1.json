@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "htdemucs-phase6-thresholds-v1",
+  "frozenBeforePhase6Qualification": true,
+  "revisionReason": "Separate host FP32, energy-aware tensor, and final PCM16 gates; do not let low-energy stems or SNR alone decide quality.",
+  "strictHostFp32": {
+    "finite": true,
+    "maximumAbsoluteError": 0.000001,
+    "maximumRmsError": 0.0000001
+  },
+  "energyAwarePerStem": {
+    "minimumReferenceRms": 0.0001,
+    "minimumSnrDbForEnergeticStem": 60.0,
+    "minimumCosineSimilarityForEnergeticStem": 0.9999,
+    "maximumAbsoluteError": 0.00025,
+    "maximumRmsErrorForLowEnergyStem": 0.00002,
+    "snrRole": "diagnostic-and-energetic-stem-gate"
+  },
+  "finalPcm16": {
+    "requireExactFrameCount": true,
+    "maximumSampleDelta": 1,
+    "maximumAbsoluteError": 0.000030517578125,
+    "snrRole": "diagnostic-only"
+  },
+  "scope": {
+    "models": [
+      "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0",
+      "htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0",
+      "htdemucs_6s_guitar_ft_core_canonical_7p8s_fp32_v1_0_0"
+    ],
+    "backend": "cpu",
+    "gpuAndNpu": "unsupported",
+    "activation": "not-granted"
+  }
+}
