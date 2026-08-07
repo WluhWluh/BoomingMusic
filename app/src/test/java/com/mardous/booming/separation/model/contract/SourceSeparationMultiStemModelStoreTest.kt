@@ -112,6 +112,12 @@ class SourceSeparationMultiStemModelStoreTest {
             modelId = modelId,
             pipelineId = "booming-ss-htdemucs-neural-core",
             supportLevel = "experimental",
+            validation = mapOf(
+                "canonicalDeviceGate" to "passed-s25-phase6-v2",
+                "fullSong" to "pending",
+                "lifecycle" to "pending",
+                "listening" to "pending",
+            ),
         )
         return Fixture(
             catalog = SourceSeparationReleaseCatalog(

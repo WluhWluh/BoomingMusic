@@ -29,6 +29,7 @@ data class SourceSeparationReleaseCatalogEntry(
     val modelId: String,
     val pipelineId: String,
     val supportLevel: String,
+    val validation: Map<String, String>,
 )
 
 @Serializable
@@ -82,6 +83,8 @@ object SourceSeparationReleaseCatalogMetadata {
 object SourceSeparationReleaseCatalogValidator {
     private val sha256Pattern = Regex("^[0-9a-f]{64}$")
     private val releasePattern = Regex("^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[a-z0-9.]+)?$")
+    private val validationKeyPattern = Regex("^[a-z][A-Za-z0-9]*$")
+    private val validationValuePattern = Regex("^[a-z0-9][a-z0-9.-]*$")
 
     fun validate(catalog: SourceSeparationReleaseCatalog): SourceSeparationReleaseCatalog {
         require(catalog.catalogId == SourceSeparationReleaseCatalogMetadata.CATALOG_ID) {
@@ -131,6 +134,9 @@ object SourceSeparationReleaseCatalogValidator {
             "Release entries must be selectable experimental"
         }
         require(entry.modelId.isNotBlank() && entry.displayName.isNotBlank())
+        require(entry.validation.isNotEmpty() && entry.validation.all { (key, value) ->
+            validationKeyPattern.matches(key) && validationValuePattern.matches(value)
+        }) { "Release validation evidence is missing or malformed: ${entry.modelId}" }
         require(entry.artifact.byteSize > 0L && entry.contract.byteSize > 0L)
         requireSha(entry.artifact.sha256, "artifact")
         requireSha(entry.contract.sha256, "sidecar")
@@ -147,6 +153,11 @@ object SourceSeparationReleaseCatalogValidator {
         require(releasePattern.matches(entry.artifact.url.substringAfter("/download/").substringBefore('/'))) {
             "Artifact URL is not pinned to a Release"
         }
+        if (entry.artifactFamily == SourceSeparationReleaseCatalogMetadata.MULTISTEM_ARTIFACT_FAMILY) {
+            require(entry.validation == MULTISTEM_VALIDATION) {
+                "Multi-stem validation evidence differs from the frozen Release: ${entry.modelId}"
+            }
+        }
     }
 
     private fun requireSha(value: String, kind: String) {
@@ -158,6 +169,13 @@ object SourceSeparationReleaseCatalogValidator {
             "Release asset URL is not an immutable GitHub download URL"
         }
     }
+
+    private val MULTISTEM_VALIDATION = mapOf(
+        "canonicalDeviceGate" to "passed-s25-phase6-v2",
+        "fullSong" to "pending",
+        "lifecycle" to "pending",
+        "listening" to "pending",
+    )
 }
 
 class SourceSeparationReleaseCatalogDownloader(

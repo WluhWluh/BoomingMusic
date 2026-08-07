@@ -106,7 +106,13 @@ class SourceSeparationReleaseCatalogTest {
           "isDefault": $isDefault,
           "modelId": "$modelId",
           "pipelineId": "booming-ss-htdemucs-neural-core",
-          "supportLevel": "experimental"
+          "supportLevel": "experimental",
+          "validation": {
+            "canonicalDeviceGate": "passed-s25-phase6-v2",
+            "fullSong": "pending",
+            "lifecycle": "pending",
+            "listening": "pending"
+          }
         }
     """.trimIndent()
 }
