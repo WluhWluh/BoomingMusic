@@ -1092,6 +1092,10 @@ undeclared pipeline or publishing a partial stem set.
   Catalog bytes are cached only after the same pinned size/SHA/schema checks;
   corrupted cached bytes are discarded and reacquired from the immutable
   Release. UI and Quick Setup integration remain a later activation step.
+- [x] Bridge an installed Release pair to the reviewed HTDemucs LiteRT CPU
+  session factory. Reopening trusts the install record and file length rather
+  than hashing the large artifact again, while the sidecar contract, model ID,
+  contract ID, pipeline ID, filename, size, and SHA binding are revalidated.
 - [ ] Download each model and sidecar from the immutable
   `v0.2.0-experimental.1` Release through the production model-delivery path;
   verify the v3 catalog, artifact hash, sidecar hash, contract schema, and
