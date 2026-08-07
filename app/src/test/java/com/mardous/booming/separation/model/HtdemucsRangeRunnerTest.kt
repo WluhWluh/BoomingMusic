@@ -1,8 +1,11 @@
 package com.mardous.booming.separation.model
 
+import com.mardous.booming.separation.SourceSeparationPauseReason
+import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -47,6 +50,40 @@ class HtdemucsRangeRunnerTest {
                 assertEquals(WAV_HEADER_BYTES + TRACK_FRAMES * 4L, file.length())
             }
         }
+    }
+
+    @Test
+    fun `pause raised during window progress interrupts before model execution`() {
+        var pause = false
+        val source = object : HtdemucsTrackSource {
+            override val frameCount = HtdemucsPipelineAdapter.WINDOW_SAMPLES + 1
+
+            override fun readPlanarStereo(
+                startFrame: Int,
+                frameCount: Int,
+                shouldCancel: () -> Boolean,
+            ): FloatArray {
+                shouldCancel()
+                return FloatArray(frameCount * 2)
+            }
+        }
+        val session = FakeSession(listOf("drums", "bass", "other", "vocals"))
+        val root = temporary.newFolder("pause-inside-window")
+
+        val error = assertThrows(SourceSeparationPausedException::class.java) {
+            HtdemucsRangeRunner(source, session).run(
+                outputDirectory = root.resolve("work"),
+                segmentDirectory = root.resolve("segments"),
+                onProgress = { progress ->
+                    if (progress.stage.startsWith("Processing window")) pause = true
+                },
+                shouldPause = { pause },
+                pauseReasonProvider = { SourceSeparationPauseReason.ActiveModelSuperseded },
+            )
+        }
+
+        assertEquals(SourceSeparationPauseReason.ActiveModelSuperseded, error.pauseReason)
+        assertEquals(0, session.runCount)
     }
 
     private class FakeTrackSource(

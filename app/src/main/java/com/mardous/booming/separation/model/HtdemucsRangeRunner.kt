@@ -76,6 +76,11 @@ internal class HtdemucsRangeRunner(
         requireWorkspaceAvailable: () -> Unit = {},
     ): HtdemucsRangeResult {
         val startedAt = System.nanoTime()
+        val shouldInterrupt = interruptProbe(
+            shouldPause,
+            pauseReasonProvider,
+            shouldCancel,
+        )
         require(source.frameCount > 0) { "HTDemucs source is empty." }
         val stemIds = session.orderedStemIds.map(::StemId)
         require(stemIds.isNotEmpty() && stemIds.distinct().size == stemIds.size)
@@ -107,7 +112,11 @@ internal class HtdemucsRangeRunner(
         onPrepared(preparation)
 
         onProgress(HtdemucsRangeProgress(0, plans.size, "Computing global normalization"))
-        val normalization = computeNormalization(shouldPause, pauseReasonProvider, shouldCancel)
+        val normalization = computeNormalization(
+            shouldPause,
+            pauseReasonProvider,
+            shouldInterrupt,
+        )
         throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
         val declaredBytes = source.frameCount.toLong() * HtdemucsPipelineAdapter.CHANNEL_COUNT *
             Short.SIZE_BYTES
@@ -142,10 +151,10 @@ internal class HtdemucsRangeRunner(
                 val padded = source.readPlanarStereo(
                     plan.contextStart,
                     HtdemucsPipelineAdapter.WINDOW_SAMPLES,
-                    shouldCancel,
+                    shouldInterrupt,
                 )
                 normalizeInPlace(padded, normalization)
-                val stemSet = session.runNormalizedWindow(padded, shouldCancel)
+                val stemSet = session.runNormalizedWindow(padded, shouldInterrupt)
                 ola.addWindow(plan, stemSet)?.let { chunk ->
                     publishChunk(
                         chunk = chunk,
@@ -196,14 +205,14 @@ internal class HtdemucsRangeRunner(
     private fun computeNormalization(
         shouldPause: () -> Boolean,
         pauseReasonProvider: () -> SourceSeparationPauseReason,
-        shouldCancel: () -> Boolean,
+        shouldInterrupt: () -> Boolean,
     ): HtdemucsGlobalNormalization {
         val accumulator = HtdemucsGlobalNormalizationAccumulator()
         var start = 0
         while (start < source.frameCount) {
-            throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
+            throwIfStopped(shouldPause, pauseReasonProvider, shouldInterrupt)
             val frames = minOf(NORMALIZATION_READ_FRAMES, source.frameCount - start)
-            accumulator.add(source.readPlanarStereo(start, frames, shouldCancel))
+            accumulator.add(source.readPlanarStereo(start, frames, shouldInterrupt))
             start += frames
         }
         return accumulator.finish()
@@ -288,6 +297,17 @@ internal class HtdemucsRangeRunner(
             throw SourceSeparationPausedException(pauseReason = pauseReasonProvider())
         }
         if (shouldCancel()) throw CancellationException("HTDemucs range run was canceled.")
+    }
+
+    private fun interruptProbe(
+        shouldPause: () -> Boolean,
+        pauseReasonProvider: () -> SourceSeparationPauseReason,
+        shouldCancel: () -> Boolean,
+    ): () -> Boolean = {
+        if (shouldPause()) {
+            throw SourceSeparationPausedException(pauseReason = pauseReasonProvider())
+        }
+        shouldCancel()
     }
 
     private companion object {
