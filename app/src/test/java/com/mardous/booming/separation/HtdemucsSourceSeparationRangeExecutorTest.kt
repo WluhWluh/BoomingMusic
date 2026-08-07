@@ -66,6 +66,31 @@ class HtdemucsSourceSeparationRangeExecutorTest {
         assertTrue(!sessionCreated)
     }
 
+    @Test
+    fun `model supersession pauses the range and closes its session`() {
+        val session = FakeSession()
+        val executor = HtdemucsSourceSeparationRangeExecutor(
+            sourceFactory = HtdemucsProductSourceFactory {
+                HtdemucsPreparedTrackSource(FakeSource(), diagnostics(), FINGERPRINT)
+            },
+            sessionFactory = HtdemucsProductSessionFactory { session },
+        )
+
+        val error = assertThrows(SourceSeparationPausedException::class.java) {
+            executor.separate(
+                request(temporary.newFolder("paused")).copy(
+                    shouldPause = { true },
+                    pauseReasonProvider = {
+                        SourceSeparationPauseReason.ActiveModelSuperseded
+                    },
+                ),
+            )
+        }
+
+        assertEquals(SourceSeparationPauseReason.ActiveModelSuperseded, error.pauseReason)
+        assertTrue(session.closed)
+    }
+
     private fun request(root: java.io.File) = HtdemucsSourceSeparationRangeRequest(
         sourceUri = "content://media/42",
         displayName = "Song",

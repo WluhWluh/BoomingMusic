@@ -1,6 +1,8 @@
 package com.mardous.booming.separation.model
 
 import com.mardous.booming.separation.audio.WavFileWriter
+import com.mardous.booming.separation.SourceSeparationPauseReason
+import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.contract.StemId
@@ -66,6 +68,10 @@ internal class HtdemucsRangeRunner(
         onPrepared: (HtdemucsRangePreparation) -> Unit = {},
         onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit = { _, _ -> },
         onProgress: (HtdemucsRangeProgress) -> Unit = {},
+        shouldPause: () -> Boolean = { false },
+        pauseReasonProvider: () -> SourceSeparationPauseReason = {
+            SourceSeparationPauseReason.Standard
+        },
         shouldCancel: () -> Boolean = { false },
         requireWorkspaceAvailable: () -> Unit = {},
     ): HtdemucsRangeResult {
@@ -101,8 +107,8 @@ internal class HtdemucsRangeRunner(
         onPrepared(preparation)
 
         onProgress(HtdemucsRangeProgress(0, plans.size, "Computing global normalization"))
-        val normalization = computeNormalization(shouldCancel)
-        throwIfCanceled(shouldCancel)
+        val normalization = computeNormalization(shouldPause, pauseReasonProvider, shouldCancel)
+        throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
         val declaredBytes = source.frameCount.toLong() * HtdemucsPipelineAdapter.CHANNEL_COUNT *
             Short.SIZE_BYTES
         val writers = stemFiles.map { stem ->
@@ -122,7 +128,7 @@ internal class HtdemucsRangeRunner(
                 normalization = normalization,
             )
             plans.forEach { plan ->
-                throwIfCanceled(shouldCancel)
+                throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
                 requireWorkspaceAvailable()
                 currentPlan = currentPlan.withSegmentState(plan.index, SourceSeparationSegmentState.Running)
                 onSegmentStateChanged(plan.index, SourceSeparationSegmentState.Running)
@@ -188,12 +194,14 @@ internal class HtdemucsRangeRunner(
     }
 
     private fun computeNormalization(
+        shouldPause: () -> Boolean,
+        pauseReasonProvider: () -> SourceSeparationPauseReason,
         shouldCancel: () -> Boolean,
     ): HtdemucsGlobalNormalization {
         val accumulator = HtdemucsGlobalNormalizationAccumulator()
         var start = 0
         while (start < source.frameCount) {
-            throwIfCanceled(shouldCancel)
+            throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
             val frames = minOf(NORMALIZATION_READ_FRAMES, source.frameCount - start)
             accumulator.add(source.readPlanarStereo(start, frames, shouldCancel))
             start += frames
@@ -271,7 +279,14 @@ internal class HtdemucsRangeRunner(
         failure?.let { throw it }
     }
 
-    private fun throwIfCanceled(shouldCancel: () -> Boolean) {
+    private fun throwIfStopped(
+        shouldPause: () -> Boolean,
+        pauseReasonProvider: () -> SourceSeparationPauseReason,
+        shouldCancel: () -> Boolean,
+    ) {
+        if (shouldPause()) {
+            throw SourceSeparationPausedException(pauseReason = pauseReasonProvider())
+        }
         if (shouldCancel()) throw CancellationException("HTDemucs range run was canceled.")
     }
 

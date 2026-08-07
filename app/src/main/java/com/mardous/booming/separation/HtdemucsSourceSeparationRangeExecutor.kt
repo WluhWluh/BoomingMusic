@@ -33,6 +33,10 @@ internal data class HtdemucsSourceSeparationRangeRequest(
     val onPrepared: (SourceSeparationCacheRunPreparation) -> Unit = {},
     val onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit = { _, _ -> },
     val onProgress: (MdxRangeProgress) -> Unit = {},
+    val shouldPause: () -> Boolean = { false },
+    val pauseReasonProvider: () -> SourceSeparationPauseReason = {
+        SourceSeparationPauseReason.Standard
+    },
     val shouldCancel: () -> Boolean = { false },
     val requireWorkspaceAvailable: () -> Unit = {},
 )
@@ -96,6 +100,8 @@ internal class HtdemucsSourceSeparationRangeExecutor(
                 },
                 onSegmentStateChanged = request.onSegmentStateChanged,
                 onProgress = { progress -> request.onProgress(progress.toMdxProgress()) },
+                shouldPause = request.shouldPause,
+                pauseReasonProvider = request.pauseReasonProvider,
                 shouldCancel = request.shouldCancel,
                 requireWorkspaceAvailable = request.requireWorkspaceAvailable,
             )
