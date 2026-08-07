@@ -19,10 +19,10 @@ class HtdemucsLiteRtCpuInferenceSessionTest {
     @Test
     fun `atomic forward binds both inputs and publishes both validated outputs`() {
         val backend = FakeBackend { inputs ->
-            assertEquals(setOf("waveform_tensor", "spectrum_tensor"), inputs.keys)
+            assertEquals(setOf("waveform", "spectrum"), inputs.keys)
             linkedMapOf(
-                "frequency_tensor" to floatArrayOf(5f, 6f),
-                "time_tensor" to floatArrayOf(7f, 8f),
+                "frequency" to floatArrayOf(5f, 6f),
+                "time" to floatArrayOf(7f, 8f),
             )
         }
         val forward = forward(backend)
@@ -39,14 +39,14 @@ class HtdemucsLiteRtCpuInferenceSessionTest {
     @Test
     fun `atomic forward rejects missing malformed and non-finite branches`() {
         listOf(
-            linkedMapOf("frequency_tensor" to floatArrayOf(1f, 2f)),
+            linkedMapOf("frequency" to floatArrayOf(1f, 2f)),
             linkedMapOf(
-                "frequency_tensor" to floatArrayOf(1f),
-                "time_tensor" to floatArrayOf(2f, 3f),
+                "frequency" to floatArrayOf(1f),
+                "time" to floatArrayOf(2f, 3f),
             ),
             linkedMapOf(
-                "frequency_tensor" to floatArrayOf(1f, 2f),
-                "time_tensor" to floatArrayOf(Float.NaN, 3f),
+                "frequency" to floatArrayOf(1f, 2f),
+                "time" to floatArrayOf(Float.NaN, 3f),
             ),
         ).forEach { outputs ->
             assertThrows(IllegalArgumentException::class.java) {
@@ -117,12 +117,16 @@ class HtdemucsLiteRtCpuInferenceSessionTest {
             assertEquals(4, recordingFactory.cpuThreads)
             assertEquals(contract.flatBuffer.signatureKey, recordingFactory.signatureKey)
             assertEquals(
-                contract.flatBuffer.inputs.map { it.tensorName },
-                recordingFactory.inputs.map { it.tensorName },
+                contract.flatBuffer.inputs.map { it.logicalName },
+                recordingFactory.inputs.map { it.signatureName },
             )
             assertEquals(
-                contract.flatBuffer.outputs.map { it.tensorName },
-                recordingFactory.outputs.map { it.tensorName },
+                contract.flatBuffer.outputs.map { it.logicalName },
+                recordingFactory.outputs.map { it.signatureName },
+            )
+            assertEquals(
+                contract.flatBuffer.inputs.map { it.tensorName },
+                recordingFactory.inputs.map { it.tensorName },
             )
             session.close()
             assertTrue(recordingFactory.backend.closed)
@@ -146,8 +150,8 @@ class HtdemucsLiteRtCpuInferenceSessionTest {
         HtdemucsNeuralInputs(floatArrayOf(1f, 2f), floatArrayOf(3f, 4f))
 
     private fun validOutputs() = linkedMapOf(
-        "frequency_tensor" to floatArrayOf(5f, 6f),
-        "time_tensor" to floatArrayOf(7f, 8f),
+        "frequency" to floatArrayOf(5f, 6f),
+        "time" to floatArrayOf(7f, 8f),
     )
 
     private fun stemSet() = HtdemucsWindowStemSet(
@@ -208,8 +212,8 @@ class HtdemucsLiteRtCpuInferenceSessionTest {
         )
 
         fun validOutputsStatic() = linkedMapOf(
-            "frequency_tensor" to floatArrayOf(5f, 6f),
-            "time_tensor" to floatArrayOf(7f, 8f),
+            "frequency" to floatArrayOf(5f, 6f),
+            "time" to floatArrayOf(7f, 8f),
         )
     }
 }

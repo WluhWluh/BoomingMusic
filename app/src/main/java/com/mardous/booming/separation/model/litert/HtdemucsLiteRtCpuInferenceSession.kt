@@ -102,6 +102,9 @@ internal data class HtdemucsTensorBinding(
     val elementCount: Int,
     val shape: List<Int>,
 ) {
+    val signatureName: String
+        get() = logicalName
+
     companion object {
         fun from(binding: MultiTensorFlatBufferBinding): HtdemucsTensorBinding {
             val count = binding.shape.fold(1L, Math::multiplyExact)
@@ -148,15 +151,15 @@ internal class AtomicHtdemucsNamedTensorForward(
         throwIfHtdemucsCanceled(shouldCancel)
         val rawOutputs = backend.run(
             inputBindings.zip(inputValues).associateTo(linkedMapOf()) { (binding, values) ->
-                binding.tensorName to values
+                binding.signatureName to values
             },
         )
         throwIfHtdemucsCanceled(shouldCancel)
-        require(rawOutputs.keys == outputBindings.map { it.tensorName }.toSet()) {
+        require(rawOutputs.keys == outputBindings.map { it.signatureName }.toSet()) {
             "HTDemucs LiteRT forward did not return the complete named output set."
         }
         val validated = outputBindings.map { binding ->
-            rawOutputs.getValue(binding.tensorName).also { values ->
+            rawOutputs.getValue(binding.signatureName).also { values ->
                 requireTensor(binding, values, "output")
                 val nonFiniteIndex = values.indexOfFirst { !it.isFinite() }
                 require(nonFiniteIndex < 0) {
@@ -236,21 +239,21 @@ private object HtdemucsNativeLiteRtCpuBackendFactory : HtdemucsNamedTensorBacken
             model = activeModel
             inputs.forEach { binding ->
                 validateTensorType(
-                    activeModel.getInputTensorType(binding.tensorName, signatureKey),
+                    activeModel.getInputTensorType(binding.signatureName, signatureKey),
                     binding,
                     "input",
                 )
-                inputBuffers[binding.tensorName] =
-                    activeModel.createInputBuffer(binding.tensorName, signatureKey)
+                inputBuffers[binding.signatureName] =
+                    activeModel.createInputBuffer(binding.signatureName, signatureKey)
             }
             outputs.forEach { binding ->
                 validateTensorType(
-                    activeModel.getOutputTensorType(binding.tensorName, signatureKey),
+                    activeModel.getOutputTensorType(binding.signatureName, signatureKey),
                     binding,
                     "output",
                 )
-                outputBuffers[binding.tensorName] =
-                    activeModel.createOutputBuffer(binding.tensorName, signatureKey)
+                outputBuffers[binding.signatureName] =
+                    activeModel.createOutputBuffer(binding.signatureName, signatureKey)
             }
             return NativeHtdemucsNamedTensorBackend(
                 environment,
@@ -275,13 +278,13 @@ private object HtdemucsNativeLiteRtCpuBackendFactory : HtdemucsNamedTensorBacken
         role: String,
     ) {
         require(actual.elementType == TensorType.ElementType.FLOAT) {
-            "HTDemucs LiteRT $role ${expected.tensorName} is not float32."
+            "HTDemucs LiteRT $role ${expected.signatureName} is not float32."
         }
         val layout = requireNotNull(actual.layout) {
-            "HTDemucs LiteRT $role ${expected.tensorName} has no static layout."
+            "HTDemucs LiteRT $role ${expected.signatureName} has no static layout."
         }
         require(!layout.hasStrides && layout.dimensions == expected.shape) {
-            "HTDemucs LiteRT $role ${expected.tensorName} shape differs from its contract."
+            "HTDemucs LiteRT $role ${expected.signatureName} shape differs from its contract."
         }
     }
 }
