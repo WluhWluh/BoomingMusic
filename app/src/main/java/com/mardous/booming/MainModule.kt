@@ -75,7 +75,9 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
+import com.mardous.booming.separation.cache.v2.SourceSeparationMultiStemCacheAvailabilityProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationPresetCacheAvailabilityProvider
+import com.mardous.booming.separation.cache.v2.SourceSeparationProductCacheAvailabilityProvider
 import com.mardous.booming.separation.cache.v2.resolveTrustedActiveCacheModelResolution
 import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPresetStructuralInspector
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
@@ -263,10 +265,18 @@ private val mainModule = module {
     } bind SourceSeparationIndependentRunRecovery::class
     single { SourceSeparationCacheEntryLeaseRegistry() }
     single {
+        SourceSeparationProductCacheAvailabilityProvider(
+            preset = SourceSeparationPresetCacheAvailabilityProvider(get()),
+            multiStem = SourceSeparationMultiStemCacheAvailabilityProvider(
+                get<SourceSeparationMultiStemReleaseInstaller>(),
+            ),
+        )
+    }
+    single {
         SourceSeparationModelAwareCacheRepository(
             store = get(),
             leases = get(),
-            modelAvailability = SourceSeparationPresetCacheAvailabilityProvider(get()),
+            modelAvailability = get<SourceSeparationProductCacheAvailabilityProvider>(),
         )
     }
     single { SourceSeparationCacheRunCoordinator(store = get(), repository = get()) }
