@@ -12,7 +12,7 @@ import java.util.concurrent.CancellationException
 /** Product boundary for experimental multi-stem Release models. */
 internal class SourceSeparationMultiStemProductFacade(
     private val installer: SourceSeparationMultiStemReleaseInstaller,
-    private val engine: HtdemucsSourceSeparationEngine,
+    private val executionHost: SourceSeparationMultiStemExecutionHost,
     private val preflightResolver: SourceSeparationModelAwarePreflightResolver,
 ) {
     fun catalog(): SourceSeparationReleaseCatalog = installer.catalog()
@@ -46,17 +46,20 @@ internal class SourceSeparationMultiStemProductFacade(
         if (shouldCancel()) throw CancellationException("Multi-stem separation canceled.")
         val input = SourceSeparationModelAwareSongInput.from(song)
         val preflight = preflightResolver.resolve(input.sourceUri, shouldCancel)
-        return engine.separate(
-            input = input,
-            installedModel = installed,
-            preflight = preflight,
-            runClass = runClass,
-            windowDecodeEnabled = windowDecodeEnabled,
-            onProgress = onProgress,
-            onPrepared = onPrepared,
-            shouldPause = shouldPause,
-            pauseReasonProvider = pauseReasonProvider,
-            shouldCancel = shouldCancel,
+        return executionHost.separate(
+            SourceSeparationMultiStemExecutionRequest(
+                input = input,
+                installedModel = installed,
+                preflight = preflight,
+                runClass = runClass,
+                windowDecodeEnabled = windowDecodeEnabled,
+                onProgress = onProgress,
+                onPrepared = onPrepared,
+                onSegmentStateChanged = { _, _ -> },
+                shouldPause = shouldPause,
+                pauseReasonProvider = pauseReasonProvider,
+                shouldCancel = shouldCancel,
+            ),
         )
     }
 }

@@ -1176,6 +1176,11 @@ undeclared pipeline or publishing a partial stem set.
   writer state, and republishes a complete result under the same exact cache
   identity. This is a durable cache-boundary test, not yet proof of an actual
   remote Binder/process-death run.
+- [x] Put the multi-stem product facade behind a dedicated execution-host
+  boundary. The current implementation is an in-process host with unchanged
+  behavior; the request carries the installed executable model, exact source
+  preflight, ordered callbacks, pause/cancel policy, and run class so a future
+  remote host does not reuse MDX-only request types.
 - [ ] Complete the remaining CPU lifecycle/resource matrix on S25 and S10:
   process death and recovery, independent background ownership and contention,
   and sustained native-memory/thermal observation. Existing product-path runs

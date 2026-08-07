@@ -66,8 +66,10 @@ import com.mardous.booming.separation.AndroidSourceSeparationRuntimeCompatibilit
 import com.mardous.booming.separation.DefaultSourceSeparationRuntimeFacade
 import com.mardous.booming.separation.HtdemucsSourceSeparationEngine
 import com.mardous.booming.separation.HtdemucsSourceSeparationRangeExecutor
+import com.mardous.booming.separation.InProcessSourceSeparationMultiStemExecutionHost
 import com.mardous.booming.separation.SourceSeparationModelAwareEngine
 import com.mardous.booming.separation.SourceSeparationMultiStemProductFacade
+import com.mardous.booming.separation.SourceSeparationMultiStemExecutionHost
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheEntryLeaseRegistry
@@ -287,10 +289,13 @@ private val mainModule = module {
             ownerPid = android.os.Process.myPid(),
         )
     }
+    single<SourceSeparationMultiStemExecutionHost> {
+        InProcessSourceSeparationMultiStemExecutionHost(get())
+    }
     single {
         SourceSeparationMultiStemProductFacade(
             installer = get<SourceSeparationMultiStemReleaseInstaller>(),
-            engine = get(),
+            executionHost = get(),
             preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(androidContext()),
         )
     }
