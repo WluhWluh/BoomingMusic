@@ -1,0 +1,487 @@
+{
+  "executableSchemaVersion": 1,
+  "executableKind": "bss-static-multitensor-executable-v1",
+  "modelContract": {
+    "contractSchemaVersion": 1,
+    "contractKind": "bss-static-multitensor-v1",
+    "contractId": "htdemucs_6s_guitar_ft_core_canonical_7p8s_fp32_v1_0_0@1",
+    "modelId": "htdemucs_6s_guitar_ft_core_canonical_7p8s_fp32_v1_0_0",
+    "displayName": "HTDemucs 6-stem Guitar FT FP32",
+    "tensorContract": {
+      "inputs": [
+        {
+          "index": 0,
+          "name": "args_0",
+          "dtype": "float32",
+          "shape": [
+            1,
+            2,
+            343980
+          ],
+          "axes": [
+            "batch",
+            "channel",
+            "sample"
+          ]
+        },
+        {
+          "index": 1,
+          "name": "args_1",
+          "dtype": "float32",
+          "shape": [
+            1,
+            4,
+            2048,
+            336
+          ],
+          "axes": [
+            "batch",
+            "feature",
+            "frequency",
+            "frame"
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "index": 0,
+          "name": "output_0",
+          "dtype": "float32",
+          "shape": [
+            1,
+            6,
+            4,
+            2048,
+            336
+          ],
+          "axes": [
+            "batch",
+            "stem",
+            "feature",
+            "frequency",
+            "frame"
+          ]
+        },
+        {
+          "index": 1,
+          "name": "output_1",
+          "dtype": "float32",
+          "shape": [
+            1,
+            6,
+            2,
+            343980
+          ],
+          "axes": [
+            "batch",
+            "stem",
+            "channel",
+            "sample"
+          ]
+        }
+      ],
+      "outputBindings": [
+        {
+          "tensorIndex": 0,
+          "tensorName": "output_0",
+          "stemAxis": 1,
+          "packing": "stem-axis",
+          "stemIds": [
+            "drums",
+            "bass",
+            "other",
+            "vocals",
+            "guitar",
+            "piano"
+          ]
+        },
+        {
+          "tensorIndex": 1,
+          "tensorName": "output_1",
+          "stemAxis": 1,
+          "packing": "stem-axis",
+          "stemIds": [
+            "drums",
+            "bass",
+            "other",
+            "vocals",
+            "guitar",
+            "piano"
+          ]
+        }
+      ]
+    },
+    "stemContract": {
+      "stems": [
+        {
+          "stemId": "drums",
+          "semanticId": "drums",
+          "canonicalLabel": "Drums",
+          "order": 0
+        },
+        {
+          "stemId": "bass",
+          "semanticId": "bass",
+          "canonicalLabel": "Bass",
+          "order": 1
+        },
+        {
+          "stemId": "other",
+          "semanticId": "other",
+          "canonicalLabel": "Other",
+          "order": 2
+        },
+        {
+          "stemId": "vocals",
+          "semanticId": "vocals",
+          "canonicalLabel": "Vocals",
+          "order": 3
+        },
+        {
+          "stemId": "guitar",
+          "semanticId": "guitar",
+          "canonicalLabel": "Guitar",
+          "order": 4
+        },
+        {
+          "stemId": "piano",
+          "semanticId": "piano",
+          "canonicalLabel": "Piano",
+          "order": 5
+        }
+      ]
+    },
+    "pipelineContract": {
+      "pipelineId": "booming-ss-htdemucs-neural-core",
+      "pipelineVersion": 1,
+      "sampleRate": 44100,
+      "channelCount": 2,
+      "windowSamples": 343980,
+      "fftSize": 4096,
+      "hopLength": 1024,
+      "renderMode": "neural-core-waveform-frequency-ola"
+    }
+  },
+  "artifact": {
+    "fileName": "htdemucs_6s_guitar_ft.core.canonical_7p8s.fp32.tflite",
+    "byteSize": 117729544,
+    "sha256": "ab632a5a024033d557eabb716f8829230532e8e5b4cd7ba146812a301f89b9a5",
+    "format": "tflite-flatbuffer"
+  },
+  "flatBuffer": {
+    "schemaVersion": 3,
+    "minimumRuntimeVersion": "2.16.0",
+    "customOperatorCount": 0,
+    "signatureKey": "serving_default",
+    "inputs": [
+      {
+        "index": 0,
+        "logicalName": "args_0",
+        "tensorName": "serving_default_args_0",
+        "tensorIndex": 0,
+        "dtype": "float32",
+        "shape": [
+          1,
+          2,
+          343980
+        ],
+        "axes": [
+          "batch",
+          "channel",
+          "sample"
+        ]
+      },
+      {
+        "index": 1,
+        "logicalName": "args_1",
+        "tensorName": "serving_default_args_1",
+        "tensorIndex": 1,
+        "dtype": "float32",
+        "shape": [
+          1,
+          4,
+          2048,
+          336
+        ],
+        "axes": [
+          "batch",
+          "feature",
+          "frequency",
+          "frame"
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "logicalName": "output_0",
+        "tensorName": "serving_default_output_0_output",
+        "tensorIndex": 4170,
+        "dtype": "float32",
+        "shape": [
+          1,
+          6,
+          4,
+          2048,
+          336
+        ],
+        "axes": [
+          "batch",
+          "stem",
+          "feature",
+          "frequency",
+          "frame"
+        ]
+      },
+      {
+        "index": 1,
+        "logicalName": "output_1",
+        "tensorName": "serving_default_output_1_output",
+        "tensorIndex": 4175,
+        "dtype": "float32",
+        "shape": [
+          1,
+          6,
+          2,
+          343980
+        ],
+        "axes": [
+          "batch",
+          "stem",
+          "channel",
+          "sample"
+        ]
+      }
+    ]
+  },
+  "provenance": {
+    "sources": [
+      {
+        "role": "source-weight",
+        "fileName": "htdemucs_6s_guitar_ft_fp32.safetensors",
+        "byteSize": 109716096,
+        "sha256": "e83f1e6ae8aaef5a177beaf6c6ff6bc3864c244dca123af7398eb1016a24fc6a",
+        "repository": "adityalakhani/htdemucs-6s-guitar-ft",
+        "revision": "163ec83135ee06e6f10cb8cd94d2ecef8f3f34ad"
+      },
+      {
+        "role": "fine-tune-checkpoint",
+        "fileName": "guitar_htdemucs_6s.pt",
+        "byteSize": 329654071,
+        "sha256": "4fde369e41582ba5c2759b6ab926a44af467c64d4566bf914374ab267b19260e",
+        "repository": "adityalakhani/htdemucs-6s-guitar-ft",
+        "revision": "163ec83135ee06e6f10cb8cd94d2ecef8f3f34ad"
+      },
+      {
+        "role": "model-card",
+        "fileName": "README.md",
+        "byteSize": 8670,
+        "sha256": "22293a8c86f4bf6f83efc0f137e3efef51574ec329e290306ca5a5c61465b868",
+        "repository": "adityalakhani/htdemucs-6s-guitar-ft",
+        "revision": "163ec83135ee06e6f10cb8cd94d2ecef8f3f34ad"
+      },
+      {
+        "role": "base-architecture-weight",
+        "fileName": "5c90dfd2.safetensors",
+        "byteSize": 54885744,
+        "sha256": "d2a1745f0744721f6b8ca5bf469b67c651ea5ed1b52998cab033b2158609d411",
+        "repository": "adefossez/HTDemucs-6s",
+        "revision": "053e1404489b3dc58bf718224fac4b7316de8c93"
+      },
+      {
+        "role": "model-metadata",
+        "fileName": "5c90dfd2.json",
+        "byteSize": 10398,
+        "sha256": "72d7b4739ba40c8ff1d697404232edd335f397cedbf1bb88eec0034bdbab153e",
+        "repository": "adefossez/HTDemucs-6s",
+        "revision": "053e1404489b3dc58bf718224fac4b7316de8c93"
+      },
+      {
+        "role": "bag-manifest",
+        "fileName": "htdemucs_6s.yaml",
+        "byteSize": 21,
+        "sha256": "207405151270af8fd81c2373c25d27950916682ac91dca7884a11ce13dad6f58",
+        "repository": "adefossez/HTDemucs-6s",
+        "revision": "053e1404489b3dc58bf718224fac4b7316de8c93"
+      }
+    ],
+    "loaderRevision": "eeac1d15891af95b1288d2884b95baa3e5baa96c",
+    "neuralCoreReferenceRevision": "9a2a17c7a81843c2ae49674986f9e1e8b5f6915f",
+    "exportScript": {
+      "role": "export-script",
+      "fileName": "export_htdemucs_guitar_ft_litert_candidate.py",
+      "byteSize": 4977,
+      "sha256": "2d0ee2f15cd6e3369a3adb2bde0202aa19311d6ccda1159cf1ac4947e6cfd1c1"
+    },
+    "requirementsLock": {
+      "role": "requirements-lock",
+      "fileName": "requirements-demucs-litert-export.txt",
+      "byteSize": 334,
+      "sha256": "cb6ef5b77262c7d8594735413ecef5e841f3be1a710a48602b0620d229bf1706"
+    }
+  },
+  "conversion": {
+    "exportReport": {
+      "role": "export-report",
+      "fileName": "export-report.json",
+      "byteSize": 71910,
+      "sha256": "482a710f640db368bf335966842f8c026b0c262d2061605b9d4098bd67ffa1ec"
+    },
+    "toolVersions": {
+      "python": "3.12.3",
+      "torch": "2.11.0+cpu",
+      "numpy": "2.5.1",
+      "safetensors": "0.8.0",
+      "litert-torch": "0.9.1",
+      "ai-edge-litert": "2.1.5"
+    },
+    "inputKind": "project-owned-pytorch-neural-core",
+    "onnxRole": "not-generated",
+    "strictExport": true,
+    "deterministicPositionalEmbedding": true,
+    "lightweightConversion": false,
+    "runtimeConstantFolding": false,
+    "enableX64": false
+  },
+  "fixtures": [
+    {
+      "role": "waveform-input",
+      "fileName": "waveform_input.f32le.raw",
+      "byteSize": 2751840,
+      "sha256": "9515d42e72e96036e34f0193d1302e8cccbf80c4e9e7084d1fcba26e17fea40e",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        2,
+        343980
+      ]
+    },
+    {
+      "role": "spectrum-input",
+      "fileName": "spectrum_input.f32le.raw",
+      "byteSize": 11010048,
+      "sha256": "9d01b6cf6943c61724f6bb7edefc8f6156f9749f1ae9bc4f84508a62738ee5e0",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        4,
+        2048,
+        336
+      ]
+    },
+    {
+      "role": "frequency-golden",
+      "fileName": "frequency_golden.f32le.raw",
+      "byteSize": 66060288,
+      "sha256": "85c1e8613930aaeb4024839bb40d527e2119d68f8b5c2a5c2b8b3fb9b67933d1",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        6,
+        4,
+        2048,
+        336
+      ]
+    },
+    {
+      "role": "waveform-golden",
+      "fileName": "waveform_golden.f32le.raw",
+      "byteSize": 16511040,
+      "sha256": "8b9e0085e74c02d629f88c209b740a1d65c04d2d2869c9ce2567805afa5be300",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        6,
+        2,
+        343980
+      ]
+    },
+    {
+      "role": "frequency-waveform-golden",
+      "fileName": "frequency_waveform_golden.f32le.raw",
+      "byteSize": 16511040,
+      "sha256": "5668df113f04bcfead63c27d581c2f353b22fa31b856759b8996c883e09e9d9d",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        6,
+        2,
+        343980
+      ]
+    },
+    {
+      "role": "combined-golden",
+      "fileName": "combined_golden.f32le.raw",
+      "byteSize": 16511040,
+      "sha256": "9e8c1f25811a07bf082157714afd7cac8e5a981bf0406a92ce7ef84e58c01a91",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        6,
+        2,
+        343980
+      ]
+    },
+    {
+      "role": "ola-mix-input",
+      "fileName": "ola_mix_input.f32le.raw",
+      "byteSize": 4127760,
+      "sha256": "dc28161d585169a4ce4661a5e142fe2668ed76e32f6b89a71d24c24522ee1790",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        2,
+        515970
+      ]
+    },
+    {
+      "role": "ola-combined-golden",
+      "fileName": "ola_combined_golden.f32le.raw",
+      "byteSize": 24766560,
+      "sha256": "48ec8bd80d6d84dfb70dea2885af32c2ced878006c73cd14ab76b9ecc4439b21",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        6,
+        2,
+        515970
+      ]
+    }
+  ],
+  "allowedBackends": [
+    "cpu"
+  ],
+  "notices": [
+    {
+      "noticeId": "author-model",
+      "subject": "HTDemucs 6-stem guitar-ft model",
+      "licenseId": "Apache-2.0",
+      "sourceUrl": "https://huggingface.co/adityalakhani/htdemucs-6s-guitar-ft/blob/163ec83135ee06e6f10cb8cd94d2ecef8f3f34ad/README.md",
+      "sourceRevision": "163ec83135ee06e6f10cb8cd94d2ecef8f3f34ad",
+      "statement": "This model is released under the Apache 2.0 license."
+    },
+    {
+      "noticeId": "base-model",
+      "subject": "Official HTDemucs 6-stem base model",
+      "licenseId": "MIT",
+      "sourceUrl": "https://github.com/facebookresearch/demucs/blob/eeac1d15891af95b1288d2884b95baa3e5baa96c/LICENSE",
+      "sourceRevision": "eeac1d15891af95b1288d2884b95baa3e5baa96c",
+      "statement": "The base HTDemucs 6-stem weights and implementation are attributed under MIT."
+    },
+    {
+      "noticeId": "training-data",
+      "subject": "MoisesDB training dataset",
+      "licenseId": "CC-BY-NC-SA-4.0",
+      "sourceUrl": "https://huggingface.co/datasets/wearemusicai/moisesdb/blob/3162378eb0653d9f9831a6051110822ab067b8b6/LICENSE",
+      "sourceRevision": "3162378eb0653d9f9831a6051110822ab067b8b6",
+      "statement": "The fine-tune used MoisesDB in accordance with the author statement; no raw training audio is redistributed."
+    },
+    {
+      "noticeId": "conversion",
+      "subject": "Booming SS LiteRT conversion",
+      "licenseId": "NOASSERTION",
+      "sourceUrl": "https://github.com/WluhWluh/MusicSourceSeparation",
+      "statement": "Booming SS converted the frozen source weight to an FP32 LiteRT FlatBuffer for an open-source, free application."
+    }
+  ]
+}

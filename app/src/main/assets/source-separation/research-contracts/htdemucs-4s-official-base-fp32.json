@@ -1,0 +1,431 @@
+{
+  "executableSchemaVersion": 1,
+  "executableKind": "bss-static-multitensor-executable-v1",
+  "modelContract": {
+    "contractSchemaVersion": 1,
+    "contractKind": "bss-static-multitensor-v1",
+    "contractId": "htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0@1",
+    "modelId": "htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0",
+    "displayName": "Official HTDemucs 4-stem Base FP32",
+    "tensorContract": {
+      "inputs": [
+        {
+          "index": 0,
+          "name": "args_0",
+          "dtype": "float32",
+          "shape": [
+            1,
+            2,
+            343980
+          ],
+          "axes": [
+            "batch",
+            "channel",
+            "sample"
+          ]
+        },
+        {
+          "index": 1,
+          "name": "args_1",
+          "dtype": "float32",
+          "shape": [
+            1,
+            4,
+            2048,
+            336
+          ],
+          "axes": [
+            "batch",
+            "feature",
+            "frequency",
+            "frame"
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "index": 0,
+          "name": "output_0",
+          "dtype": "float32",
+          "shape": [
+            1,
+            4,
+            4,
+            2048,
+            336
+          ],
+          "axes": [
+            "batch",
+            "stem",
+            "feature",
+            "frequency",
+            "frame"
+          ]
+        },
+        {
+          "index": 1,
+          "name": "output_1",
+          "dtype": "float32",
+          "shape": [
+            1,
+            4,
+            2,
+            343980
+          ],
+          "axes": [
+            "batch",
+            "stem",
+            "channel",
+            "sample"
+          ]
+        }
+      ],
+      "outputBindings": [
+        {
+          "tensorIndex": 0,
+          "tensorName": "output_0",
+          "stemAxis": 1,
+          "packing": "stem-axis",
+          "stemIds": [
+            "drums",
+            "bass",
+            "other",
+            "vocals"
+          ]
+        },
+        {
+          "tensorIndex": 1,
+          "tensorName": "output_1",
+          "stemAxis": 1,
+          "packing": "stem-axis",
+          "stemIds": [
+            "drums",
+            "bass",
+            "other",
+            "vocals"
+          ]
+        }
+      ]
+    },
+    "stemContract": {
+      "stems": [
+        {
+          "stemId": "drums",
+          "semanticId": "drums",
+          "canonicalLabel": "Drums",
+          "order": 0
+        },
+        {
+          "stemId": "bass",
+          "semanticId": "bass",
+          "canonicalLabel": "Bass",
+          "order": 1
+        },
+        {
+          "stemId": "other",
+          "semanticId": "other",
+          "canonicalLabel": "Other",
+          "order": 2
+        },
+        {
+          "stemId": "vocals",
+          "semanticId": "vocals",
+          "canonicalLabel": "Vocals",
+          "order": 3
+        }
+      ]
+    },
+    "pipelineContract": {
+      "pipelineId": "booming-ss-htdemucs-neural-core",
+      "pipelineVersion": 1,
+      "sampleRate": 44100,
+      "channelCount": 2,
+      "windowSamples": 343980,
+      "fftSize": 4096,
+      "hopLength": 1024,
+      "renderMode": "neural-core-waveform-frequency-ola"
+    }
+  },
+  "artifact": {
+    "fileName": "htdemucs_4s.core.canonical_7p8s.fp32.tflite",
+    "byteSize": 178042000,
+    "sha256": "9855718072ee819bacacdb6b670bd6257feca172bf27ac1d72dff994cdbeed81",
+    "format": "tflite-flatbuffer"
+  },
+  "flatBuffer": {
+    "schemaVersion": 3,
+    "minimumRuntimeVersion": "2.16.0",
+    "customOperatorCount": 0,
+    "signatureKey": "serving_default",
+    "inputs": [
+      {
+        "index": 0,
+        "logicalName": "args_0",
+        "tensorName": "serving_default_args_0",
+        "tensorIndex": 0,
+        "dtype": "float32",
+        "shape": [
+          1,
+          2,
+          343980
+        ],
+        "axes": [
+          "batch",
+          "channel",
+          "sample"
+        ]
+      },
+      {
+        "index": 1,
+        "logicalName": "args_1",
+        "tensorName": "serving_default_args_1",
+        "tensorIndex": 1,
+        "dtype": "float32",
+        "shape": [
+          1,
+          4,
+          2048,
+          336
+        ],
+        "axes": [
+          "batch",
+          "feature",
+          "frequency",
+          "frame"
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "index": 0,
+        "logicalName": "output_0",
+        "tensorName": "serving_default_output_0_output",
+        "tensorIndex": 4215,
+        "dtype": "float32",
+        "shape": [
+          1,
+          4,
+          4,
+          2048,
+          336
+        ],
+        "axes": [
+          "batch",
+          "stem",
+          "feature",
+          "frequency",
+          "frame"
+        ]
+      },
+      {
+        "index": 1,
+        "logicalName": "output_1",
+        "tensorName": "serving_default_output_1_output",
+        "tensorIndex": 4220,
+        "dtype": "float32",
+        "shape": [
+          1,
+          4,
+          2,
+          343980
+        ],
+        "axes": [
+          "batch",
+          "stem",
+          "channel",
+          "sample"
+        ]
+      }
+    ]
+  },
+  "provenance": {
+    "sources": [
+      {
+        "role": "source-weight",
+        "fileName": "955717e8.safetensors",
+        "byteSize": 84025440,
+        "sha256": "d9fa14133cfcc034a6758923bb3a8ca9f8dfd0b582134643bbf83f72c17576dd",
+        "repository": "adefossez/HTDemucs",
+        "revision": "bf35a81b663819a8255c8fefee17f9d812b786b5"
+      },
+      {
+        "role": "model-metadata",
+        "fileName": "955717e8.json",
+        "byteSize": 12087,
+        "sha256": "12540373de858920b60002ebfbe17738860dbf2e89df625dc3b7875af2d28491",
+        "repository": "adefossez/HTDemucs",
+        "revision": "bf35a81b663819a8255c8fefee17f9d812b786b5"
+      },
+      {
+        "role": "bag-manifest",
+        "fileName": "htdemucs.yaml",
+        "byteSize": 21,
+        "sha256": "239c445d0b14454d541ad8bd9bb271c9e536d267e8a4625208744cbb2e7bb66c",
+        "repository": "adefossez/HTDemucs",
+        "revision": "bf35a81b663819a8255c8fefee17f9d812b786b5"
+      }
+    ],
+    "loaderRevision": "eeac1d15891af95b1288d2884b95baa3e5baa96c",
+    "neuralCoreReferenceRevision": "9a2a17c7a81843c2ae49674986f9e1e8b5f6915f",
+    "exportScript": {
+      "role": "export-script",
+      "fileName": "export_htdemucs_4s_litert_candidate.py",
+      "byteSize": 67392,
+      "sha256": "1ab1a42727ed036bb0fa5ca9c6950000d9d5b4ff3faae37410ef96ad889db3ad"
+    },
+    "requirementsLock": {
+      "role": "requirements-lock",
+      "fileName": "requirements-demucs-litert-export.txt",
+      "byteSize": 334,
+      "sha256": "cb6ef5b77262c7d8594735413ecef5e841f3be1a710a48602b0620d229bf1706"
+    }
+  },
+  "conversion": {
+    "exportReport": {
+      "role": "export-report",
+      "fileName": "export-report.json",
+      "byteSize": 54203,
+      "sha256": "0f2e1b65702aa132f72a9741c1ab2f03ec78afd8ad41fff801e267e318344ba5"
+    },
+    "toolVersions": {
+      "python": "3.12.3",
+      "torch": "2.11.0+cpu",
+      "numpy": "2.5.1",
+      "safetensors": "0.8.0",
+      "litert-torch": "0.9.1",
+      "ai-edge-litert": "2.1.5"
+    },
+    "inputKind": "project-owned-pytorch-neural-core",
+    "onnxRole": "not-generated",
+    "strictExport": true,
+    "deterministicPositionalEmbedding": true,
+    "lightweightConversion": false,
+    "runtimeConstantFolding": false,
+    "enableX64": false
+  },
+  "fixtures": [
+    {
+      "role": "waveform-input",
+      "fileName": "waveform_input.f32le.raw",
+      "byteSize": 2751840,
+      "sha256": "9515d42e72e96036e34f0193d1302e8cccbf80c4e9e7084d1fcba26e17fea40e",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        2,
+        343980
+      ]
+    },
+    {
+      "role": "spectrum-input",
+      "fileName": "spectrum_input.f32le.raw",
+      "byteSize": 11010048,
+      "sha256": "9d01b6cf6943c61724f6bb7edefc8f6156f9749f1ae9bc4f84508a62738ee5e0",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        4,
+        2048,
+        336
+      ]
+    },
+    {
+      "role": "frequency-golden",
+      "fileName": "frequency_golden.f32le.raw",
+      "byteSize": 44040192,
+      "sha256": "0bf5d2ce76c9955d8582fb744e795ace685685c59e2b89e2ec1968d94e74d82a",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        4,
+        4,
+        2048,
+        336
+      ]
+    },
+    {
+      "role": "waveform-golden",
+      "fileName": "waveform_golden.f32le.raw",
+      "byteSize": 11007360,
+      "sha256": "90c1fe5f2b9f65548d3e1f557ecf25067a42dc1b9143e0f03d1c59b7cb647023",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        4,
+        2,
+        343980
+      ]
+    },
+    {
+      "role": "frequency-waveform-golden",
+      "fileName": "frequency_waveform_golden.f32le.raw",
+      "byteSize": 11007360,
+      "sha256": "c2ae20089ce6d0dcea0603d89988600966bc11ae248de3f9a437d1fbaecccd09",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        4,
+        2,
+        343980
+      ]
+    },
+    {
+      "role": "combined-golden",
+      "fileName": "combined_golden.f32le.raw",
+      "byteSize": 11007360,
+      "sha256": "0ba33935d1a21e2b970b3f9231dd43c9de5e85d73afd649b3a8e9f3385f69426",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        4,
+        2,
+        343980
+      ]
+    },
+    {
+      "role": "ola-mix-input",
+      "fileName": "ola_mix_input.f32le.raw",
+      "byteSize": 4127760,
+      "sha256": "dc28161d585169a4ce4661a5e142fe2668ed76e32f6b89a71d24c24522ee1790",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        2,
+        515970
+      ]
+    },
+    {
+      "role": "ola-combined-golden",
+      "fileName": "ola_combined_golden.f32le.raw",
+      "byteSize": 16511040,
+      "sha256": "aacf04a8dbeacc1dbf2bee95cdf99b2dbe53279b74d2dd5a053ff30ee3f3b642",
+      "dtype": "float32-le",
+      "shape": [
+        1,
+        4,
+        2,
+        515970
+      ]
+    }
+  ],
+  "allowedBackends": [
+    "cpu"
+  ],
+  "notices": [
+    {
+      "noticeId": "base-model",
+      "subject": "Official HTDemucs 4-stem Base FP32",
+      "licenseId": "MIT",
+      "sourceUrl": "https://github.com/facebookresearch/demucs/blob/eeac1d15891af95b1288d2884b95baa3e5baa96c/LICENSE",
+      "sourceRevision": "eeac1d15891af95b1288d2884b95baa3e5baa96c",
+      "statement": "The official HTDemucs weights and implementation are attributed under MIT."
+    },
+    {
+      "noticeId": "conversion",
+      "subject": "Booming SS LiteRT conversion",
+      "licenseId": "NOASSERTION",
+      "sourceUrl": "https://github.com/WluhWluh/MusicSourceSeparation",
+      "statement": "Booming SS converted the frozen source weight to an FP32 LiteRT FlatBuffer for an open-source, free application."
+    }
+  ]
+}
