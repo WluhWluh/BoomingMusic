@@ -1044,15 +1044,14 @@ undeclared pipeline or publishing a partial stem set.
 
 ### Phase 6: Experimental model qualification
 
+- [x] Freeze a separate layered numerical gate before qualification runs:
+  strict host FP32 fixture parity, energy-aware per-stem Android tensor checks,
+  and final whole-render PCM16 parity. Low-energy stems use an absolute-error
+  rule; PCM16 SNR remains diagnostic-only.
 - [ ] Re-run the canonical 7.8-second and full-song host/device comparison for
   all three artifacts from a clean, provenance-bound product build. Do not
   reuse the official 4-stem report's literal `$rev`, the official 6-stem dirty
   source identity, or the guitar-ft diagnostic identity as release evidence.
-- [ ] Replace the obsolete single uniform per-stem threshold with a frozen
-  layered gate: strict host FP32 fixture parity, energy-aware per-stem Android
-  tensor checks, and final whole-render PCM16 parity against the same-weight
-  Torch oracle. Low-energy SNR may not hide a large absolute error and may not
-  reject a one/two-LSB equivalent render by itself.
 - [ ] Validate the official 6-stem candidate first, then run the same unchanged
   pipeline against official 4-stem base and guitar-ft. A shared architecture
   does not allow one artifact's result to stand in for another.
@@ -1071,6 +1070,13 @@ undeclared pipeline or publishing a partial stem set.
 - [ ] Publish all three only as optional CPU-only experimental candidates after
   their individual gates pass. GPU and QNN remain explicitly unsupported for
   this batch and are not Phase 6 follow-ups.
+
+Evidence: `d2cd8482` adds `phase6-thresholds-v1.json`, the product-side metric
+implementation, and tests for strict FP32 parity, low-energy stem handling,
+energetic-stem SNR/cosine gates, and one-LSB PCM16 equivalence. The S25 Phase 5
+fixture reports above are intentionally not retroactively evaluated as a
+qualification pass under this revision; the clean full-song and per-stem
+same-weight comparisons remain open below.
 
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support
