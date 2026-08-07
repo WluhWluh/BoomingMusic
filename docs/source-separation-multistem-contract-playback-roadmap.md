@@ -1076,8 +1076,11 @@ undeclared pipeline or publishing a partial stem set.
   their individual gates pass. GPU and QNN remain explicitly unsupported for
   this batch and are not Phase 6 follow-ups.
 
-Evidence: `d2cd8482` adds `phase6-thresholds-v1.json`, the product-side metric
-implementation, and tests for strict FP32 parity, low-energy stem handling,
+Evidence: `d2cd8482` adds `phase6-thresholds-v1.json`, and `e77f73ba` adds the
+reviewed `phase6-thresholds-v2.json` plus product-side metric tests. The v2
+revision raises the low-energy reference RMS boundary from `1e-4` to `1e-3`;
+it does not lower the energetic-stem SNR, cosine, maximum-error, or PCM16
+limits. The gates cover strict FP32 parity, low-energy stem handling,
 energetic-stem SNR/cosine gates, and one-LSB PCM16 equivalence. The S25 Phase 5
 fixture reports above are intentionally not retroactively evaluated as a
 qualification pass under this revision; the clean full-song and per-stem
@@ -1096,7 +1099,23 @@ as energetic under the `1e-4` RMS boundary and measured 57.789 dB SNR,
 is retained as a qualification failure, not waived by the small absolute
 error. The host strict gate is diagnostic-only on Android; it remains a host
 qualification gate. The threshold requires a separately reviewed revision
-before more device runs can be used as admission evidence.
+before more device runs can be used as admission evidence. The threshold was
+then reviewed and superseded by v2 before the unified rerun below.
+
+The v2 unified S25 canonical fixture run used product commit `e77f73ba`, runtime
+`2.1.5-bss.2`, and the same exact artifact/fixture identities for all three
+candidates on `SM-S9310`, API 35, arm64:
+
+| Candidate | Status | Combined SNR | Two-window OLA SNR | Neural core + reconstruction | Per-stem gate |
+| --- | --- | ---: | ---: | ---: | --- |
+| Official 6-stem | pass | 82.430 dB | 79.733 dB | 7.353 s | pass |
+| Official 4-stem base | pass | 109.068 dB | 80.185 dB | 6.033 s | pass |
+| Guitar-ft 6-stem | pass | 90.254 dB | 66.628 dB | 7.354 s | pass |
+
+These are canonical 7.8-second and two-window device checks, not full-song
+qualification. They establish that all three exact CPU artifacts pass the same
+v2 numerical device gate on S25; full-song resource, lifecycle, cache,
+PCM16, and listening gates remain open.
 
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support
