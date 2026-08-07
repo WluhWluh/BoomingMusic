@@ -10,10 +10,10 @@ implementation are complete. Phase 4A now provides an ordered 2/4/6/8-stem
 engine, list mixer, service session handle, and structural buffer admission.
 The deterministic indexed-WAV/FLAC seek smoke still passes on all four ABI rows,
 and the synthetic eight-stem engine has completed 30-minute S25/S10 arm64
-throughput, seek, thermal, PSS, and cache-stability qualification. Exact-tip
-two-stem real-song playback qualification is also complete; the separate real
-UI/lifecycle product-state gates remain open. The real multi-stem
-repository/`PlaybackService` recreation gate stays deferred until
+throughput, seek, thermal, PSS, and cache-stability qualification. Two-stem
+real-song playback and the separate process-recreation, background,
+cache-deletion, and active-model product-state gates are complete. The real
+multi-stem repository/`PlaybackService` recreation gate stays deferred until
 Phase 5 supplies its contract and cache snapshot; no real multi-stem model is
 admitted until its own pipeline and full-song gates pass.
 
@@ -596,9 +596,8 @@ Phase 2 evidence:
 
 ### Phase 3: Rebuild the separated-playback data plane
 
-Status: implementation and long-form playback qualification complete. The
-functional two-stem data-plane, real-song, and percentile exits are closed;
-the separate process/lifecycle product-state gates below remain open.
+Status: complete. The functional two-stem data plane, real-song and percentile
+exits, and separate process/lifecycle product-state gates are closed.
 
 #### Phase 3A: Freeze the realtime contract and baseline
 
@@ -731,8 +730,9 @@ work, while existing two-stem output remains listening-compatible.
   random seek episodes on S25 and S10. The run includes rapid scrubbing and
   four explicit pause/resume cycles while the real MediaSession and AudioSink
   consume the completed FLAC cache.
-- [ ] Run the separate product-state gates for process recreation, background
-  separation, cache deletion, and active-model changes on this exact tip. These
+- [x] Run the separate product-state gates for process recreation, background
+  separation, cache deletion, and active-model changes on the qualified Phase 3
+  builds, then rerun any affected path after a gate-driven fix. These
   operations must remain independently observable rather than being inferred
   from a long playback run.
 - [x] Require zero normal-path `fallbackWholeFileDecode`, zero mixed-epoch
@@ -792,9 +792,35 @@ work, while existing two-stem output remains listening-compatible.
   PSS baseline/peak/final was 182,568/203,673/173,343 KiB on S25 and
   159,451/185,430/180,591 KiB on S10. Decode groups are derived from paired
   per-stem indexed-FLAC trace records for the exact run; they are qualification
-  evidence, not a new product metric. The remaining process recreation,
-  background separation, cache deletion, and active-model-change gates are
-  still open and must be run separately.
+  evidence, not a new product metric.
+- Fresh-process completed-cache recreation passed on S25 and S10. Each new
+  process resolved the same exact 9662 cache and opened completed indexed-FLAC
+  playback at the start and tail without re-running inference.
+- Full Coast Town background continuation passed on S25 and S10 after Home was
+  pressed at the first ready window. First-ready/full-song times were
+  3,639/119,876 ms and 7,772/219,562 ms respectively, process importance stayed
+  at 125, and the exact completed caches remained playable. These rows used the
+  persisted CPU backend, so they qualify background ownership rather than GPU
+  background execution.
+- S25 cache management independently covered inactive deletion, automatic
+  pruning, preservation of the exact current cache, and deleting a running
+  current cache. The latter canceled its producer and the deleted entry did not
+  reappear.
+- Active-model switching with playback demand and automatic start enabled
+  passed on S25 and on a full-song S10 rerun. The S10 run switched
+  9662 -> KARA -> 9662 after the first ready window: the primary retained 2/48
+  segments, KARA retained 1/48, both journals recorded
+  `Paused/ActiveModelSuperseded`, and the reactivated primary resumed to 48/48.
+  A prior 12-second S10 attempt completed naturally before its delayed switch
+  assertion and was rejected as an undersized timing fixture, not counted as a
+  product failure.
+- Completed-cache playback exposed one additional automatic-demand bug: with
+  automatic start disabled, changing from a completed 9662 session to a KARA
+  partial cache incorrectly treated the recoverable journal as work that must
+  block original playback. `13256e6e` limits that active-selection wait to
+  automatic demand. The exact-commit S10 MediaSession rerun released the old
+  playback lease in 251 ms, retained its cache, and passed pause, 5-second seek,
+  resume, and blend while continuing original audio.
 
 **Phase 3 exit:** stable two-stem WAV and FLAC playback uses one logical clock,
 bounded background decode, atomic transport barriers, and a realtime-safe
@@ -804,8 +830,8 @@ mixer. Normal playback creates no persistent full-song PCM.
 
 Status: Phase 4A and the Phase 4B synthetic/compressed-source device
 qualification are complete. The schema-dependent repository/service recreation
-gate remains explicitly deferred to Phase 5. The remaining Phase 3 product-state
-gates remain release work and do not authorize a real multi-stem model.
+gate remains explicitly deferred to Phase 5. Completed Phase 3 product-state
+gates qualify only the two-stem path and do not authorize a real multi-stem model.
 
 #### Phase 4A: Ordered synthetic data plane
 
