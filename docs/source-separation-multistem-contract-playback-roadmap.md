@@ -965,19 +965,19 @@ same bounded engine; this does not yet activate a multi-stem model.
 
 ### Phase 5: Multi-tensor pipeline contract and neural-core adapter
 
-Status: the static contract loader and the isolated canonical HTDemucs host
-pipeline are implemented. They are not connected to LiteRT sessions, the
-scheduler, cache publication, the product catalog, or UI. The current
-MusicSourceSeparation Demucs artifacts remain research inputs only.
+Status: the static contract loader, isolated canonical HTDemucs host pipeline,
+and three CPU-only executable identities are frozen. They are not connected to
+LiteRT sessions, the scheduler, cache publication, the product catalog, or UI.
+The current MusicSourceSeparation Demucs artifacts remain research inputs only.
 
 - [x] Implement the static multi-input/output contract loader and strict
   tensor-axis validation.
 - [x] Add a separate HTDemucs pipeline adapter for host DSP and branch
   reconstruction.
-- [ ] Freeze separate executable contracts for official 6-stem, official
+- [x] Freeze separate executable contracts for official 6-stem, official
   4-stem base, and guitar-ft 6-stem, including exact source weight, converter,
   FlatBuffer, tensor order, host-DSP revision, and fixture identities.
-- [ ] Add an immutable license/notices section to every executable contract.
+- [x] Add an immutable license/notices section to every executable contract.
   For guitar-ft, preserve the author's Apache-2.0 statement, the base-model MIT
   attribution, and the MoisesDB training-source and CC BY-NC-SA 4.0 disclosures.
 - [ ] Port the research `parallel-lanes` iSTFT mode behind the HTDemucs adapter;
@@ -997,7 +997,13 @@ canonical host STFT/iSTFT, global normalization, and atomic frequency/time
 branch reconstruction for reviewed four- and six-stem geometry. `3a0bf4e6`
 adds canonical EOF window planning and triangular FP32 overlap-add. Synthetic
 tests cover deterministic four/six-stem reconstruction without introducing a
-model artifact or large fixture into the application repository.
+model artifact or large fixture into the application repository. `2c36f9eb`
+adds the strict executable schema and validator; `fbccad0d` freezes the exact
+official 6-stem, official 4-stem base, and guitar-ft source revisions,
+conversion recipes, TFLite FlatBuffer identities, tensor indexes, canonical
+fixture identities, CPU-only backend policy, and immutable license notices.
+The fixture files and model weights remain outside the application repository;
+their execution through the product CPU session is still an open gate below.
 
 **Exit:** all three canonical candidates produce verified per-stem PCM through
 the product-owned host pipeline and CPU session without falling back to an
