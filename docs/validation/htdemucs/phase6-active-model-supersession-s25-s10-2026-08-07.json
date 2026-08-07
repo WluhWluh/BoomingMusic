@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "mode": "pause-active-model-after-first-ready-segment-then-complete-replacement",
+  "build": {
+    "commit": "ddfc098a223126501d6a9d534656fd6137133edf",
+    "appApkSha256": "deaa4e6ef690d997765c146b368c110029a5d2baad383451f5aff840ec5bffeb",
+    "testApkSha256": "2a2c3f94331752a82c3846d303ff57d729bb2dcb3adc6b0a9baaac35be3cafe1"
+  },
+  "source": {
+    "name": "coast-town-30s-canonical.wav",
+    "sha256": "940c2ad55fad34a52ba7660706150300cfea84d315c491012e54de41d653aa6b"
+  },
+  "oldModel": {
+    "modelId": "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0",
+    "cacheKey": "1227059621e8596ea33945b7a834c1f733d71097d1f7febc3f57f6312c96c1ac",
+    "stemCount": 6
+  },
+  "replacementModel": {
+    "modelId": "htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0",
+    "cacheKey": "50e773427016fa3795a6ef6c6a23237eb96cec0e72c391ac20f0746fabf11d0a",
+    "stemCount": 4
+  },
+  "requiredInvariants": [
+    "active-model-supersession-interrupts-source-read-or-current-window",
+    "old-journal-lifecycle-paused",
+    "old-journal-transition-active-model-superseded",
+    "exactly-one-complete-old-segment-retained",
+    "old-cache-remains-partial-and-not-completed-playable",
+    "replacement-uses-distinct-exact-model-cache-key",
+    "replacement-publishes-complete-four-stem-cache",
+    "replacement-generic-playback-lease-opens"
+  ],
+  "runs": [
+    {
+      "runId": "s25-official6-to-official4-supersession-fixed-v1",
+      "deviceModel": "SM-S9310",
+      "sdk": 35,
+      "abi": "arm64-v8a",
+      "oldReadySegments": 1,
+      "oldTotalSegments": 6,
+      "pauseElapsedMs": 8352,
+      "replacementElapsedMs": 21555
+    },
+    {
+      "runId": "s10-official6-to-official4-supersession-fixed-v1",
+      "deviceModel": "SM-G9730",
+      "sdk": 31,
+      "abi": "arm64-v8a",
+      "oldReadySegments": 1,
+      "oldTotalSegments": 6,
+      "pauseElapsedMs": 16632,
+      "replacementElapsedMs": 43756
+    }
+  ]
+}

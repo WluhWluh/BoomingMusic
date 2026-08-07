@@ -1162,9 +1162,18 @@ undeclared pipeline or publishing a partial stem set.
   Release artifacts independently completed the same 30-second S25 product
   engine/cache/FLAC gate; numerical parity and listening remain separate open
   items.
-- [ ] Measure peak PSS, native memory, thermal behavior, cancellation, process
-  death, resume, cache recovery, model switching, and background contention on
-  S25 and S10 arm64 using CPU only.
+- [x] Verify user cancellation and clean restart on S25 and S10. The canceled
+  run retains exactly one atomically completed segment, records a durable
+  `Canceled` transition, exposes no completed cache, and cleanly rebuilds the
+  non-resumable writer state under the same exact cache identity.
+- [x] Verify active-model supersession on S25 and S10. Superseding official
+  six-stem after its first ready segment promptly records `Paused` with
+  `ActiveModelSuperseded`, retains that partial cache, and completes official
+  four-stem under a distinct exact-model cache identity.
+- [ ] Complete the remaining CPU lifecycle/resource matrix on S25 and S10:
+  process death and recovery, independent background ownership and contention,
+  and sustained native-memory/thermal observation. Existing product-path runs
+  already record peak PSS and point-in-time thermal status.
 - [ ] Start S25 producer-ahead playback with two ready windows. On devices whose
   measured production rate cannot sustain the stride, keep separation offline
   or wait for completion instead of repeatedly pausing playback; S10 results
@@ -1266,7 +1275,20 @@ Re-entry used the same cache identity but deliberately rebuilt the
 non-resumable full-track WAV writer state, completing six stems in 21.254 s on
 S25 and 48.210 s on S10. This closes manual cancellation and clean restart for
 the current in-process product engine; process death, independent background
-ownership, and active-model supersession remain separate gates.
+ownership, and background contention remain separate gates.
+
+Active-model replacement is independently frozen in
+`docs/validation/htdemucs/phase6-active-model-supersession-s25-s10-2026-08-07.json`.
+On S25 and S10, official six-stem was superseded immediately after its first
+ready segment. Both runs retained exactly `1/6` old segments in a partial cache,
+recorded `Paused` with `ActiveModelSuperseded`, and completed official four-stem
+under a distinct exact-model cache key. The first S10 attempt exposed one extra
+window of work because pause was observed only at HTDemucs window boundaries;
+`ddfc098a` passes the combined pause/cancel interrupt probe into source reads
+and the LiteRT session. The fixed build paused in 8.352 s on S25 and 16.632 s on
+S10, then completed the replacement in 21.555 s and 43.756 s respectively.
+This closes in-process exact-model supersession and retention, not process
+death, background ownership, or real `PlaybackService` adoption.
 
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support
