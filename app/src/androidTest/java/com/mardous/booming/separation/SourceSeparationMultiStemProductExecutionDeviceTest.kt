@@ -12,6 +12,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLifecycle
@@ -85,6 +87,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
             val store = koin.get<SourceSeparationCacheStore>()
             val coordinator = koin.get<SourceSeparationCacheRunCoordinator>()
+            val promoter = koin.get<SourceSeparationCacheFlacPromoter>()
             val runtime = SourceSeparationRuntimeBootstrap.ensureLoaded(context)
             report.put("build", JSONObject()
                 .put("appCommit", appCommit)
@@ -144,6 +147,34 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 assertEquals(output.stems.map { stem -> stem.stemId.value }, it.stemIds)
                 assertTrue(it.stemFiles.all(File::isFile))
             }
+            val promotionStartedAt = SystemClock.elapsedRealtime()
+            val promotedResult = promoter.promote(manifest.cacheKey)
+            val promotionElapsedMs = SystemClock.elapsedRealtime() - promotionStartedAt
+            require(promotedResult is SourceSeparationCacheFlacPromotionResult.Completed)
+            val promotedManifest = promotedResult.manifest
+            val promotedOutput = requireNotNull(promotedManifest.output)
+            assertTrue(promotedOutput.stems.all { stem ->
+                stem.promotionValidated && stem.promotedPath != null &&
+                    stem.promotedIndexPath != null
+            })
+            assertTrue(coordinator.cleanCompletedTemporaryFiles(manifest.cacheKey))
+            val cleanedManifest = requireNotNull(store.readManifest(manifest.cacheKey))
+            assertTrue(cleanedManifest.cleanup == null)
+            requireNotNull(cleanedManifest.output).stems.forEach { stem ->
+                assertFalse(store.resolveEntryPath(manifest.cacheKey, stem.wavPath).exists())
+                assertTrue(store.resolveEntryPath(
+                    manifest.cacheKey,
+                    requireNotNull(stem.promotedPath),
+                ).isFile)
+                assertTrue(store.resolveEntryPath(
+                    manifest.cacheKey,
+                    requireNotNull(stem.promotedIndexPath),
+                ).isFile)
+            }
+            repository.openCompletedCache(manifest.cacheKey)!!.use { promotedPlayback ->
+                assertEquals(output.stems.map { stem -> stem.stemId.value }, promotedPlayback.stemIds)
+                assertTrue(promotedPlayback.stemFiles.all { file -> file.extension == "flac" })
+            }
             val repeatStartedAt = SystemClock.elapsedRealtime()
             val repeated = facade.separate(song, modelId)
             val repeatElapsedMs = SystemClock.elapsedRealtime() - repeatStartedAt
@@ -167,6 +198,12 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("outputFrameCount", output.outputFrameCount)
                 .put("windowCount", output.windowCount)
                 .put("outputBytes", output.totalBytes)
+                .put("promotionElapsedMs", promotionElapsedMs)
+                .put("promotedBytes", promotedOutput.stems.sumOf { stem ->
+                    requireNotNull(stem.promotedIntegrity).byteSize +
+                        requireNotNull(stem.promotedIndexIntegrity).byteSize
+                })
+                .put("cleanedCacheBytes", requireNotNull(cleanedManifest.output).totalBytes)
                 .put("stems", JSONArray().apply {
                     output.stems.forEach { stem ->
                         val integrity = requireNotNull(stem.wavIntegrity)
