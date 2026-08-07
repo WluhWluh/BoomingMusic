@@ -18,6 +18,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLi
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheValidationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
@@ -70,6 +71,11 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .put("sourceFile", stagedSource.name)
             .put("sourceBytes", stagedSource.length())
             .put("sourceSha256", expectedSourceSha ?: stagedSource.sha256())
+        val appCommit = arguments.getString(ARG_APP_COMMIT).orEmpty()
+        val testCommit = arguments.getString(ARG_TEST_COMMIT).orEmpty()
+        require(SHA1.matches(appCommit) && SHA1.matches(testCommit)) {
+            "Exact app and test source commits are required."
+        }
         var mediaUri: Uri? = null
         try {
             mediaUri = importIntoMediaStore(context, stagedSource, runId)
@@ -79,6 +85,19 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
             val store = koin.get<SourceSeparationCacheStore>()
             val coordinator = koin.get<SourceSeparationCacheRunCoordinator>()
+            val runtime = SourceSeparationRuntimeBootstrap.ensureLoaded(context)
+            report.put("build", JSONObject()
+                .put("appCommit", appCommit)
+                .put("testCommit", testCommit)
+                .put("appApkSha256", File(context.applicationInfo.sourceDir).sha256())
+                .put("testApkSha256", File(instrumentation.context.applicationInfo.sourceDir).sha256())
+            ).put("runtime", JSONObject()
+                .put("abi", runtime.identity.abi)
+                .put("contractSchemaVersion", runtime.identity.contractSchemaVersion)
+                .put("runtimeArtifactVersion", runtime.identity.runtimeArtifactVersion)
+                .put("releaseVersion", runtime.identity.releaseVersion)
+                .put("librarySha256", runtime.identity.librarySha256)
+            )
             repository.entries()
                 .filter { it.modelId == modelId && it.title.startsWith(SONG_TITLE_PREFIX) }
                 .forEach { entry ->
@@ -261,10 +280,13 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val ARG_SOURCE_PATH = "bssMultistemSourcePath"
         const val ARG_SOURCE_SHA256 = "bssMultistemSourceSha256"
         const val ARG_RUN_ID = "bssMultistemRunId"
+        const val ARG_APP_COMMIT = "bssAppCommit"
+        const val ARG_TEST_COMMIT = "bssTestCommit"
         const val REPORT_DIRECTORY = "source-separation/multistem-product-device-reports"
         const val SONG_TITLE_PREFIX = "BSS Phase 6 Product"
         const val SOURCE_DURATION_MS = 30_000L
         val SHA256 = Regex("^[0-9a-f]{64}$")
+        val SHA1 = Regex("^[0-9a-f]{40}$")
         val SAFE_NAME = Regex("^[A-Za-z0-9._-]{1,160}$")
         val SAFE_RELATIVE_PATH = Regex("^[A-Za-z0-9._/-]{1,240}$")
         val EXPECTED_MODEL_IDS = setOf(
