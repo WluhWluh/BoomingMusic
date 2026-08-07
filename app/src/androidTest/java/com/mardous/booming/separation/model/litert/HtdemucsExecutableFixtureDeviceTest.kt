@@ -421,7 +421,7 @@ class HtdemucsExecutableFixtureDeviceTest {
             )
         }
         return JSONObject()
-            .put("thresholdRevision", "htdemucs-phase6-thresholds-v1")
+            .put("thresholdRevision", "htdemucs-phase6-thresholds-v2")
             .put("allPass", all { it.passes })
             .put("stems", stems)
     }

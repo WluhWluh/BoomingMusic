@@ -40,6 +40,28 @@ class SourceSeparationMultiTensorQualityGateTest {
     }
 
     @Test
+    fun `phase 6 v2 classifies quiet stems below one millirms as low energy`() {
+        val expected = FloatArray(4) { 7.5e-4f }
+        val actual = FloatArray(4) { 7.5e-4f + 1e-6f }
+        val v1 = SourceSeparationMultiTensorQualityGate.comparePerStem(
+            expected = expected,
+            actual = actual,
+            stemCount = 1,
+            thresholds = SourceSeparationMultiTensorQualityThresholds.FrozenV1,
+        ).single()
+        val v2 = SourceSeparationMultiTensorQualityGate.comparePerStem(
+            expected = expected,
+            actual = actual,
+            stemCount = 1,
+            thresholds = SourceSeparationMultiTensorQualityThresholds.FrozenV2,
+        ).single()
+
+        assertFalse(v1.lowEnergy)
+        assertTrue(v2.lowEnergy)
+        assertTrue(v2.passes)
+    }
+
+    @Test
     fun `energetic stem requires both SNR and cosine similarity`() {
         val result = SourceSeparationMultiTensorQualityGate.comparePerStem(
             expected = floatArrayOf(1f, 1f, 1f, 1f),

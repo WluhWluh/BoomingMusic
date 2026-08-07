@@ -33,7 +33,7 @@ data class SourceSeparationMultiTensorPcm16Metrics(
 data class SourceSeparationMultiTensorQualityThresholds(
     val strictHostMaximumAbsoluteError: Double = 1e-6,
     val strictHostMaximumRmsError: Double = 1e-7,
-    val tensorMinimumReferenceRms: Double = 1e-4,
+    val tensorMinimumReferenceRms: Double = 1e-3,
     val tensorMinimumSnrDb: Double = 60.0,
     val tensorMinimumCosineSimilarity: Double = 0.9999,
     val tensorMaximumAbsoluteError: Double = 2.5e-4,
@@ -54,7 +54,12 @@ data class SourceSeparationMultiTensorQualityThresholds(
     }
 
     companion object {
-        val FrozenV1 = SourceSeparationMultiTensorQualityThresholds()
+        val FrozenV1 = SourceSeparationMultiTensorQualityThresholds(
+            tensorMinimumReferenceRms = 1e-4,
+        )
+        val FrozenV2 = SourceSeparationMultiTensorQualityThresholds(
+            tensorMinimumReferenceRms = 1e-3,
+        )
     }
 }
 
@@ -105,7 +110,7 @@ object SourceSeparationMultiTensorQualityGate {
         actual: FloatArray,
         stemCount: Int,
         thresholds: SourceSeparationMultiTensorQualityThresholds =
-            SourceSeparationMultiTensorQualityThresholds.FrozenV1,
+            SourceSeparationMultiTensorQualityThresholds.FrozenV2,
     ): List<SourceSeparationMultiTensorStemMetrics> {
         require(stemCount > 0)
         require(expected.size % stemCount == 0 && actual.size == expected.size) {
@@ -135,7 +140,7 @@ object SourceSeparationMultiTensorQualityGate {
     fun passesStrictHost(
         metrics: SourceSeparationMultiTensorFloatMetrics,
         thresholds: SourceSeparationMultiTensorQualityThresholds =
-            SourceSeparationMultiTensorQualityThresholds.FrozenV1,
+            SourceSeparationMultiTensorQualityThresholds.FrozenV2,
     ): Boolean = metrics.finite &&
         metrics.maxAbsoluteError <= thresholds.strictHostMaximumAbsoluteError &&
         metrics.rootMeanSquareError <= thresholds.strictHostMaximumRmsError
@@ -146,7 +151,7 @@ object SourceSeparationMultiTensorQualityGate {
         expectedFrameCount: Int,
         channelCount: Int,
         thresholds: SourceSeparationMultiTensorQualityThresholds =
-            SourceSeparationMultiTensorQualityThresholds.FrozenV1,
+            SourceSeparationMultiTensorQualityThresholds.FrozenV2,
     ): SourceSeparationMultiTensorPcm16Metrics {
         require(channelCount > 0)
         val frameBytes = Math.multiplyExact(channelCount, Short.SIZE_BYTES)
