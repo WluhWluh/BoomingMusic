@@ -53,7 +53,7 @@ jobs:
       - name: Run unit tests
         run: ./gradlew testGithubDebugUnitTest
 
-      - name: Verify supplemental x86 LiteRT runtime
+      - name: Verify downloadable LiteRT contract
         run: |
           python -m unittest discover -s tools -p "test_verify_litert_native.py"
           python tools/verify_litert_native.py
@@ -106,13 +106,14 @@ jobs:
         RELEASE_TYPE: "CI"
         EVENT_NAME: ${{ github.event_name }}
 
-    - name: Verify LiteRT APK inventories
+    - name: Verify downloadable LiteRT supply chain
       run: |
         if [ "$EVENT_NAME" = "pull_request" ]; then
           APK_OUTPUT_DIR=app/build/outputs/apk/github/debug
         else
           APK_OUTPUT_DIR=app/build/outputs/apk/github/release
         fi
+        python tools/verify_litert_native.py
         python tools/verify_litert_apks.py "$APK_OUTPUT_DIR"
       env:
         EVENT_NAME: ${{ github.event_name }}
@@ -266,7 +267,7 @@ jobs:
         path: ${{ env.APK_UNIVERSAL }}
         archive: false
 
-  litert-x86-smoke:
+  litert-x86-packaging-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -279,12 +280,7 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Verify supplemental runtime
-        run: |
-          python -m unittest discover -s tools -p "test_verify_litert_native.py"
-          python tools/verify_litert_native.py
-
-      - name: Run app-packaged LiteRT smoke on API 26 x86
+      - name: Verify runtime-free APK on API 26 x86
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 26
@@ -292,4 +288,4 @@ jobs:
           disable-animations: true
           script: >-
             ./gradlew connectedGithubDebugAndroidTest
-            -Pandroid.testInstrumentationRunnerArguments.class=com.mardous.booming.separation.model.LiteRtPackagingSmokeTest
+            -Pandroid.testInstrumentationRunnerArguments.class=com.mardous.booming.separation.model.LiteRtPackagingSmokeTest#appDoesNotPackageLiteRtNativePayload

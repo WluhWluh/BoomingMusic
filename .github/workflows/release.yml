@@ -11,10 +11,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        variant: [ github, fdroid ]
-
     steps:
       - uses: actions/checkout@v6
 
@@ -45,27 +41,22 @@ jobs:
 
       - name: Build app
         env:
-          VARIANT: ${{ matrix.variant }}
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
         run: |
-          CAP_VARIANT="$(echo ${VARIANT:0:1} | tr '[:lower:]' '[:upper:]')${VARIANT:1}"
-          ./gradlew assemble${CAP_VARIANT}Release
+          ./gradlew assembleGithubRelease
 
-      - name: Verify LiteRT native supply chain and APK inventories
-        env:
-          VARIANT: ${{ matrix.variant }}
+      - name: Verify downloadable LiteRT supply chain
         run: |
           python -m unittest discover -s tools -p "test_verify_litert_native.py"
           python tools/verify_litert_native.py
-          python tools/verify_litert_apks.py "app/build/outputs/apk/${VARIANT}/release"
+          python tools/verify_litert_apks.py "app/build/outputs/apk/github/release"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: artifacts-${{ matrix.variant }}-release
-          path: |
-            app/build/outputs/apk/*/release/BoomingSS-*.apk
+          name: artifacts-github-release
+          path: app/build/outputs/apk/github/release/BoomingSS-*.apk
 
   publish-release:
     needs: build
@@ -99,4 +90,4 @@ jobs:
           prerelease: ${{ steps.prerelease.outputs.value }}
           generate_release_notes: true
           files: |
-            release-artifacts/*/release/BoomingSS-*.apk
+            release-artifacts/BoomingSS-*.apk
