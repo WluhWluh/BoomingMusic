@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "device": {
+    "model": "SM-S9310",
+    "sdk": 35,
+    "abi": "arm64-v8a"
+  },
+  "build": {
+    "commit": "411204b04d00dd1ee768f2de8e690202427ba069",
+    "appApkSha256": "f623735bc68f9d09141882a37e3aaf2b40c2871ed274d9985cb92911e3e7ecb0",
+    "testApkSha256": "79a72fb7b6ee4969a039b207fa1f52026412ae912fad0b3bcfdaaf52897c86b9"
+  },
+  "runtime": {
+    "releaseVersion": "2.1.5-bss.2-exp.2",
+    "runtimeArtifactVersion": "2.1.5-bss.2",
+    "librarySha256": "ae2b996fde27021b070e88b56eebc9626a5261feb72f09791bdac38b2f09abd2"
+  },
+  "release": {
+    "tag": "v0.2.0-experimental.1",
+    "catalogSha256": "d9dcb5f80f9ba36f8de436d641500b84d6d13836a77a2e6c37b3b05aa0f42be7",
+    "catalogByteSize": 44006,
+    "installGate": "all-three-exact-artifact-sidecar-pairs-passed"
+  },
+  "source": {
+    "name": "coast-town-30s-canonical.wav",
+    "byteSize": 5292044,
+    "sha256": "940c2ad55fad34a52ba7660706150300cfea84d315c491012e54de41d653aa6b",
+    "sampleRate": 44100,
+    "channelCount": 2,
+    "frameCount": 1323000,
+    "audioFingerprint": "encoded-samples-v1:810e4e81e43cf930f1612ec4acd45a67622e2549e72234fd53af0aa707667153"
+  },
+  "gates": [
+    "production-github-delivery",
+    "exact-name-sidecar",
+    "catalog-validation-evidence",
+    "installed-model-availability",
+    "full-track-product-engine",
+    "ordered-atomic-cache-publication",
+    "generic-playback-lease",
+    "flac-promotion",
+    "wav-and-temporary-cleanup",
+    "promoted-playback-lease",
+    "already-completed-reentry"
+  ],
+  "runs": [
+    {
+      "runId": "s25-official6-product30s-flac-v1",
+      "modelId": "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0",
+      "artifactSha256": "8b19e919dd17c6a93d862ca9b1158ed72f09feb4c52745819346369506ba4ed7",
+      "stemCount": 6,
+      "windowCount": 6,
+      "elapsedMs": 22107,
+      "repeatElapsedMs": 40,
+      "promotionElapsedMs": 8167,
+      "pssBaselineKiB": 136910,
+      "pssPeakKiB": 1230110,
+      "pssFinalKiB": 153604,
+      "wavEntryBytes": 95283645,
+      "promotedArtifactBytes": 4712267,
+      "cleanedEntryBytes": 4740135,
+      "thermalBefore": 0,
+      "thermalAfter": 0
+    },
+    {
+      "runId": "s25-official4-product30s-flac-v1",
+      "modelId": "htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0",
+      "artifactSha256": "9855718072ee819bacacdb6b670bd6257feca172bf27ac1d72dff994cdbeed81",
+      "stemCount": 4,
+      "windowCount": 6,
+      "elapsedMs": 22342,
+      "repeatElapsedMs": 38,
+      "promotionElapsedMs": 5802,
+      "pssBaselineKiB": 136980,
+      "pssPeakKiB": 1298284,
+      "pssFinalKiB": 146474,
+      "wavEntryBytes": 63526449,
+      "promotedArtifactBytes": 3853784,
+      "cleanedEntryBytes": 3876462,
+      "thermalBefore": 0,
+      "thermalAfter": 0
+    },
+    {
+      "runId": "s25-guitarft6-product30s-flac-v1",
+      "modelId": "htdemucs_6s_guitar_ft_core_canonical_7p8s_fp32_v1_0_0",
+      "artifactSha256": "ab632a5a024033d557eabb716f8829230532e8e5b4cd7ba146812a301f89b9a5",
+      "stemCount": 6,
+      "windowCount": 6,
+      "elapsedMs": 22251,
+      "repeatElapsedMs": 40,
+      "promotionElapsedMs": 8882,
+      "pssBaselineKiB": 136997,
+      "pssPeakKiB": 1229923,
+      "pssFinalKiB": 160547,
+      "wavEntryBytes": 95283829,
+      "promotedArtifactBytes": 7850213,
+      "cleanedEntryBytes": 7878269,
+      "thermalBefore": 0,
+      "thermalAfter": 0
+    }
+  ],
+  "notProven": [
+    "same-weight-host-pcm16-parity",
+    "human-listening",
+    "s10-resource-qualification",
+    "cancellation",
+    "process-death-and-recovery",
+    "background-contention",
+    "playback-service-multistem-session",
+    "producer-ahead-playback"
+  ]
+}

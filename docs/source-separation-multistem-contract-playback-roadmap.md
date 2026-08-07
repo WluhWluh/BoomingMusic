@@ -1144,7 +1144,7 @@ undeclared pipeline or publishing a partial stem set.
   and opening already installed model records remains available offline and
   does not reacquire the Release catalog. Existing MDX model selection and
   playback behavior are unchanged.
-- [ ] Download each model and sidecar from the immutable
+- [x] Download each model and sidecar from the immutable
   `v0.2.0-experimental.1` Release through the production model-delivery path;
   verify the v3 catalog, artifact hash, sidecar hash, contract schema, and
   CPU-only backend policy before creating a product cache.
@@ -1156,9 +1156,12 @@ undeclared pipeline or publishing a partial stem set.
   all three artifacts from a clean, provenance-bound product build after
   Release download and installation. The staged fixture runner is diagnostic
   only and cannot satisfy this item by itself.
-- [ ] Validate the official 6-stem candidate first, then run the same unchanged
+- [x] Validate the official 6-stem candidate first, then run the same unchanged
   pipeline against official 4-stem base and guitar-ft. A shared architecture
-  does not allow one artifact's result to stand in for another.
+  does not allow one artifact's result to stand in for another. All three exact
+  Release artifacts independently completed the same 30-second S25 product
+  engine/cache/FLAC gate; numerical parity and listening remain separate open
+  items.
 - [ ] Measure peak PSS, native memory, thermal behavior, cancellation, process
   death, resume, cache recovery, model switching, and background contention on
   S25 and S10 arm64 using CPU only.
@@ -1223,6 +1226,22 @@ cache lifecycle engine; and `f25e143a` exposed the installer-to-engine product
 boundary. This is local deterministic lifecycle evidence only. It does not
 satisfy the open real-Release download, independent-process, device resource,
 full-song parity, playback, or listening gates.
+
+The first real product-path S25 matrix is frozen in
+`docs/validation/htdemucs/phase6-product-path-s25-2026-08-07.json`. It exposed
+and fixed two integration gaps before passing: the published v3 catalog's
+structured `validation` field was absent from the app schema, and the shared
+cache repository recognized only installed MDX presets. At commit `411204b0`,
+all three exact Release pairs then independently completed a 30-second,
+six-window MediaStore-to-product-engine run, published ordered 4/6-stem WAV
+caches, reopened a generic playback lease, promoted every stem to indexed
+FLAC, removed WAV/work/segment temporaries, reopened the promoted lease, and
+returned `AlreadyCompleted` on re-entry in 38-40 ms. Inference took
+22.107-22.342 s and FLAC promotion 5.802-8.882 s. Peak PSS was
+1,229,923-1,298,284 KiB with thermal status `0` before and after. These rows
+close Release acquisition and same-pipeline product publication on S25; they
+do not close host PCM parity, S10 resources, process lifecycle, actual
+`PlaybackService` multi-stem routing, or listening.
 
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support
