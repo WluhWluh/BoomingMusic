@@ -17,6 +17,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotio
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunCoordinator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournalLifecycle
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunTransitionType
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheValidationResult
@@ -40,6 +41,131 @@ import org.koin.core.context.GlobalContext
 
 @RunWith(AndroidJUnit4::class)
 class SourceSeparationMultiStemProductExecutionDeviceTest {
+    @Test
+    fun activeModelSupersessionRetainsOldPartialAndCompletesReplacement() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
+        val replacementModelId = arguments.getString(ARG_REPLACEMENT_MODEL_ID).orEmpty()
+        val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
+        assumeTrue(modelId.isNotBlank() && replacementModelId.isNotBlank() &&
+            relativeSource.isNotBlank())
+        require(modelId in EXPECTED_MODEL_IDS && replacementModelId in EXPECTED_MODEL_IDS &&
+            modelId != replacementModelId && SAFE_RELATIVE_PATH.matches(relativeSource))
+        val runId = requireNotNull(arguments.getString(ARG_RUN_ID)).also {
+            require(SAFE_NAME.matches(it))
+        }
+        val appCommit = arguments.getString(ARG_APP_COMMIT).orEmpty()
+        val testCommit = arguments.getString(ARG_TEST_COMMIT).orEmpty()
+        require(SHA1.matches(appCommit) && SHA1.matches(testCommit))
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val source = File(context.filesDir, relativeSource).canonicalFile
+        require(source.toPath().startsWith(context.filesDir.canonicalFile.toPath()) && source.isFile)
+        arguments.getString(ARG_SOURCE_SHA256)?.let { expected ->
+            require(SHA256.matches(expected) && source.sha256() == expected)
+        }
+        val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
+            .resolve("$runId.json")
+        var mediaUri: Uri? = null
+        val report = JSONObject()
+            .put("runId", runId)
+            .put("mode", "active-model-supersession")
+            .put("modelId", modelId)
+            .put("replacementModelId", replacementModelId)
+            .put("status", "running")
+            .put("deviceModel", android.os.Build.MODEL)
+            .put("sdk", android.os.Build.VERSION.SDK_INT)
+            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+        try {
+            mediaUri = importIntoMediaStore(context, source, runId)
+            val song = stagedSong(mediaUri, source, runId)
+            val koin = GlobalContext.get()
+            val facade = koin.get<SourceSeparationMultiStemProductFacade>()
+            val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
+            val store = koin.get<SourceSeparationCacheStore>()
+            repository.entries()
+                .filter { it.modelId in setOf(modelId, replacementModelId) &&
+                    it.title.startsWith(SONG_TITLE_PREFIX)
+                }
+                .forEach { repository.delete(it.cacheKey) }
+
+            val pause = AtomicBoolean(false)
+            val pauseStartedAt = SystemClock.elapsedRealtime()
+            val paused = try {
+                facade.separate(
+                    song = song,
+                    modelId = modelId,
+                    onProgress = { progress ->
+                        if (progress.completedWindows >= 1) pause.set(true)
+                    },
+                    shouldPause = pause::get,
+                    pauseReasonProvider = { SourceSeparationPauseReason.ActiveModelSuperseded },
+                )
+                null
+            } catch (error: SourceSeparationPausedException) {
+                error
+            }
+            requireNotNull(paused)
+            assertEquals(SourceSeparationPauseReason.ActiveModelSuperseded, paused.pauseReason)
+            val pauseElapsedMs = SystemClock.elapsedRealtime() - pauseStartedAt
+            val oldEntry = repository.entries().single {
+                it.modelId == modelId && it.title == song.title
+            }
+            val oldManifest = requireNotNull(store.readManifest(oldEntry.cacheKey))
+            val oldPlan = requireNotNull(oldManifest.segmentPlan)
+            val oldReady = oldPlan.segments.count { it.state.isPlaybackReady }
+            assertEquals(1, oldReady)
+            val oldJournal = requireNotNull(store.readRunJournal(oldEntry.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Paused, oldJournal.lifecycle)
+            assertEquals(
+                SourceSeparationCacheRunTransitionType.ActiveModelSuperseded,
+                oldJournal.transitions.last().type,
+            )
+
+            val replacementStartedAt = SystemClock.elapsedRealtime()
+            val replacement = facade.separate(song, replacementModelId)
+            val replacementElapsedMs = SystemClock.elapsedRealtime() - replacementStartedAt
+            require(replacement is HtdemucsSourceSeparationEngineResult.Completed)
+            assertTrue(replacement.manifest.cacheKey != oldManifest.cacheKey)
+            assertEquals(replacementModelId, replacement.manifest.identity.modelId)
+            assertTrue(store.validateCompletedEntry(replacement.manifest, verifyHashes = false) ==
+                SourceSeparationCacheValidationResult.Valid)
+            val retainedOld = requireNotNull(store.readManifest(oldManifest.cacheKey))
+            assertEquals(SourceSeparationCacheManifestState.Partial, retainedOld.state)
+            assertEquals(oldReady, retainedOld.segmentPlan?.segments?.count {
+                it.state.isPlaybackReady
+            })
+            assertTrue(repository.openCompletedCache(oldManifest.cacheKey) == null)
+            repository.openCompletedCache(replacement.manifest.cacheKey)!!.use { playback ->
+                assertEquals(replacement.manifest.output?.stems?.size, playback.stems.size)
+            }
+            report.put("status", "complete")
+                .put("build", JSONObject()
+                    .put("appCommit", appCommit)
+                    .put("testCommit", testCommit)
+                    .put("appApkSha256", File(context.applicationInfo.sourceDir).sha256())
+                    .put("testApkSha256", File(instrumentation.context.applicationInfo.sourceDir).sha256())
+                )
+                .put("oldCacheKey", oldManifest.cacheKey)
+                .put("oldReadySegments", oldReady)
+                .put("oldTotalSegments", oldPlan.segmentCount)
+                .put("pauseElapsedMs", pauseElapsedMs)
+                .put("replacementCacheKey", replacement.manifest.cacheKey)
+                .put("replacementElapsedMs", replacementElapsedMs)
+                .put("replacementStemCount", replacement.manifest.output?.stems?.size)
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+            reportFile.writeText(report.toString(2))
+            throw error
+        } finally {
+            mediaUri?.let { context.contentResolver.delete(it, null, null) }
+        }
+    }
+
     @Test
     fun cancelAfterFirstReadySegmentThenRestartCleanly() {
         val arguments = InstrumentationRegistry.getArguments()
@@ -428,6 +554,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
 
     private companion object {
         const val ARG_MODEL_ID = "bssMultistemModelId"
+        const val ARG_REPLACEMENT_MODEL_ID = "bssMultistemReplacementModelId"
         const val ARG_SOURCE_PATH = "bssMultistemSourcePath"
         const val ARG_SOURCE_SHA256 = "bssMultistemSourceSha256"
         const val ARG_RUN_ID = "bssMultistemRunId"
