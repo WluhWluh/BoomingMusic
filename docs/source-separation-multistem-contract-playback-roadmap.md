@@ -1213,10 +1213,13 @@ undeclared pipeline or publishing a partial stem set.
   completed pause, seek, resume, and service recreation; it recorded one seek
   underrun on the resource-constrained device under an explicit diagnostic
   allowance of one. The default test allowance remains zero.
-- [ ] Run the same completed-cache service-recreation gate on S25 with the
-  default zero-underrun allowance, then repeat the S10 run without the
-  diagnostic allowance before declaring the combined gate complete. The S25
-  ADB endpoint was offline during the current batch.
+- [x] Run the completed-cache service-recreation gate on S25 with the default
+  zero-underrun allowance. The run re-adopted the exact official six-stem
+  cache after service restart, preserved ordered
+  `drums,bass,other,vocals,guitar,piano`, and recorded zero seek underruns.
+- [ ] Repeat the S10 service-recreation run without the diagnostic allowance;
+  the prior S10 result recorded one seek underrun under an explicit allowance
+  of one, so the combined gate remains open.
 - [x] Delete an actively adopted completed official six-stem cache on S10.
   The independent product-path mode disables separated playback, waits for the
   data plane and artifact lease to release, deletes the exact cache directory,
@@ -1470,6 +1473,13 @@ the application graph: 117,624,880-byte model, SHA-256
 contract `htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0@1`, and CPU-only backend
 policy. This is catalog/installation evidence; it does not replace separation,
 playback, resource, or listening qualification.
+
+The S25 completed-cache service-recreation rerun is recorded in
+`files/source-separation/multistem-product-device-reports/
+playback-recreate-s25-20260809-r1.json`. It used the same `SM-S9310`, API 35,
+arm64 product path and official six-stem artifact, resolved a completed cache
+without re-running inference, and passed with `serviceRecreated=true`,
+`seekUnderruns=0`, and `allowedSeekUnderruns=0`.
 
 ## Required Tests and Gates
 
