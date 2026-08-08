@@ -1160,10 +1160,19 @@ undeclared pipeline or publishing a partial stem set.
   strict host FP32 fixture parity, energy-aware per-stem Android tensor checks,
   and final whole-render PCM16 parity. Low-energy stems use an absolute-error
   rule; PCM16 SNR remains diagnostic-only.
-- [ ] Re-run the canonical 7.8-second and full-song host/device comparison for
-  all three artifacts from a clean, provenance-bound product build after
-  Release download and installation. The staged fixture runner is diagnostic
-  only and cannot satisfy this item by itself.
+- [ ] Re-run the canonical 7.8-second host/device tensor comparison for all
+  three artifacts from a clean, provenance-bound product build after Release
+  download and installation. Final PCM16 agreement does not replace the
+  stricter per-stem FP32 tensor gate.
+- [x] Compare a complete 30-second product render with the same-weight host
+  reference for all three Release artifacts. Commit `50fcbad7`, app APK
+  `2cad204f...dad8`, and test APK `150fb74d...e55c` processed the identical
+  Athletics II PCM payload `c35318b7...69f3` on S25 through Release install,
+  remote CPU execution, durable cache publication, indexed FLAC promotion,
+  temporary-WAV cleanup, and completed-cache reuse. Every stem in official
+  six-stem, official four-stem, and guitar-ft passed Frozen V2 PCM16 parity
+  with a maximum one-LSB difference. The staged fixture runner without a host
+  reference remains diagnostic-only and cannot satisfy this item.
 - [x] Validate the official 6-stem candidate first, then run the same unchanged
   pipeline against official 4-stem base and guitar-ft. A shared architecture
   does not allow one artifact's result to stand in for another. All three exact
