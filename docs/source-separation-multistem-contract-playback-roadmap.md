@@ -1212,14 +1212,15 @@ undeclared pipeline or publishing a partial stem set.
   cache and ordered `drums,bass,other,vocals,guitar,piano` set. The S10 run
   completed pause, seek, resume, and service recreation; it recorded one seek
   underrun on the resource-constrained device under an explicit diagnostic
-  allowance of one. The default test allowance remains zero.
+  allowance of one. A later strict rerun also passed with the default zero
+  allowance.
 - [x] Run the completed-cache service-recreation gate on S25 with the default
   zero-underrun allowance. The run re-adopted the exact official six-stem
   cache after service restart, preserved ordered
   `drums,bass,other,vocals,guitar,piano`, and recorded zero seek underruns.
-- [ ] Repeat the S10 service-recreation run without the diagnostic allowance;
-  the prior S10 result recorded one seek underrun under an explicit allowance
-  of one, so the combined gate remains open.
+- [x] Repeat the S10 service-recreation run without the diagnostic allowance.
+  The strict rerun passed with zero seek underruns, so the combined S10/S25
+  service-recreation gate is complete.
 - [x] Delete an actively adopted completed official six-stem cache on S10.
   The independent product-path mode disables separated playback, waits for the
   data plane and artifact lease to release, deletes the exact cache directory,
@@ -1480,6 +1481,12 @@ playback-recreate-s25-20260809-r1.json`. It used the same `SM-S9310`, API 35,
 arm64 product path and official six-stem artifact, resolved a completed cache
 without re-running inference, and passed with `serviceRecreated=true`,
 `seekUnderruns=0`, and `allowedSeekUnderruns=0`.
+
+The strict S10 rerun is recorded in
+`files/source-separation/multistem-product-device-reports/
+playback-recreate-s10-strict-20260809-r1.json`. It passed on `SM-G9730`, API
+31, arm64 with the same exact cache identity, six ordered stems, and zero seek
+underruns under the default allowance of zero.
 
 ## Required Tests and Gates
 
