@@ -1,6 +1,7 @@
 package com.mardous.booming.separation
 
 import android.app.ActivityManager
+import android.app.NotificationManager
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.ComponentName
@@ -42,6 +43,8 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRe
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationMultiStemExecutionHost
+import com.mardous.booming.separation.process.ipc.SourceSeparationMediaProcessingForegroundController
+import com.mardous.booming.separation.process.ipc.SourceSeparationMultiStemExecutionService
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorQualityGate
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
@@ -1450,6 +1453,16 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             }
             val activeCacheKey = requireNotNull(cacheKey)
             assertTrue(committedSegments > 0)
+            val foregroundDeadline = SystemClock.elapsedRealtime() + REMOTE_PROCESS_TIMEOUT_MS
+            while ((!isMultiStemForeground(context) || !hasProcessingNotification(context)) &&
+                SystemClock.elapsedRealtime() < foregroundDeadline
+            ) {
+                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+            }
+            assertTrue("Multi-stem service did not own the processing foreground lifetime.",
+                isMultiStemForeground(context))
+            assertTrue("Multi-stem processing notification was not visible.",
+                hasProcessingNotification(context))
             val contentionStartedAt = SystemClock.elapsedRealtime()
             val contention = facade.separate(
                 song = song,
@@ -1474,12 +1487,24 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             val resources = sampler.snapshot()
             assertTrue(resources.sampleCount > 0)
             assertFalse(resources.processMissing)
+            val releaseDeadline = SystemClock.elapsedRealtime() + REMOTE_PROCESS_TIMEOUT_MS
+            while ((isMultiStemForeground(context) || hasProcessingNotification(context)) &&
+                SystemClock.elapsedRealtime() < releaseDeadline
+            ) {
+                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+            }
+            assertFalse("Multi-stem foreground service remained after completion.",
+                isMultiStemForeground(context))
+            assertFalse("Multi-stem processing notification remained after completion.",
+                hasProcessingNotification(context))
             report.put("status", "complete")
                 .put("cacheKey", activeCacheKey)
                 .put("committedSegmentsBeforeContention", committedSegments)
                 .put("contentionStatus", "busy")
                 .put("contentionElapsedMs", contentionElapsedMs)
                 .put("primaryElapsedMs", SystemClock.elapsedRealtime() - startedAt)
+                .put("foregroundOwnedWhileRunning", true)
+                .put("foregroundReleasedAfterCompletion", true)
                 .put("remoteProcess", JSONObject()
                     .put("pid", pid)
                     .put("sampleCount", resources.sampleCount)
@@ -1721,6 +1746,24 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 process.processName == "${context.packageName}:source_separation"
             }
             ?.pid
+
+    @Suppress("DEPRECATION")
+    private fun isMultiStemForeground(context: Context): Boolean =
+        context.getSystemService(ActivityManager::class.java)
+            .getRunningServices(Int.MAX_VALUE)
+            .any { service ->
+                service.service.className ==
+                    SourceSeparationMultiStemExecutionService::class.java.name &&
+                    service.foreground
+            }
+
+    private fun hasProcessingNotification(context: Context): Boolean =
+        context.getSystemService(NotificationManager::class.java)
+            .activeNotifications
+            .any { notification ->
+                notification.id ==
+                    SourceSeparationMediaProcessingForegroundController.NOTIFICATION_ID
+            }
 
     private fun waitForMediaController(
         controller: MediaController,

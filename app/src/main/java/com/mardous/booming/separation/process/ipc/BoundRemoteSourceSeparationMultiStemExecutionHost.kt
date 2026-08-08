@@ -7,6 +7,7 @@ import android.content.ServiceConnection
 import android.os.DeadObjectException
 import android.os.IBinder
 import android.os.RemoteException
+import androidx.core.content.ContextCompat
 import com.mardous.booming.separation.HtdemucsSourceSeparationEngineResult
 import com.mardous.booming.separation.SourceSeparationMultiStemExecutionHost
 import com.mardous.booming.separation.SourceSeparationMultiStemExecutionRequest
@@ -20,11 +21,14 @@ import com.mardous.booming.separation.process.SourceSeparationMultiStemExecution
 import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionEventPayload
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcControlAction
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcControlCommand
+import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStartCommand
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStatus
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.toExecutionDescriptor
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.UUID
 import kotlin.concurrent.thread
 
 /** Bound client for the dedicated multi-stem process. */
@@ -54,6 +58,17 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
         val descriptor = request.toExecutionDescriptor(
             processGeneration = connected.generation,
         )
+        val foregroundLease = descriptor.takeIf { execution ->
+            execution.runtime.runClass ==
+                com.mardous.booming.separation.SourceSeparationExecutionRunClass.ManualFullSong
+        }?.let { execution ->
+            SourceSeparationForegroundLeaseRequest(
+                leaseId = UUID.randomUUID().toString(),
+                runId = execution.runId,
+                processGeneration = execution.processGeneration,
+                displayName = execution.source.displayName,
+            )
+        }
         val terminal = CountDownLatch(1)
         val failure = AtomicReference<Throwable?>(null)
         val service = connected.service
@@ -160,9 +175,23 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             }
         }
         return try {
+            foregroundLease?.let { lease ->
+                ContextCompat.startForegroundService(
+                    applicationContext,
+                    SourceSeparationMultiStemExecutionService.foregroundStartIntent(
+                        applicationContext,
+                        lease,
+                    ),
+                )
+            }
             val response = SourceSeparationMultiStemExecutionCodec.decodeStartResponse(
                 service.start(
-                    SourceSeparationMultiStemExecutionCodec.encodeDescriptor(descriptor),
+                    SourceSeparationMultiStemExecutionCodec.encodeStartCommand(
+                        SourceSeparationMultiStemIpcStartCommand(
+                            descriptor = descriptor,
+                            foregroundLease = foregroundLease,
+                        ),
+                    ),
                     callback,
                 ),
             )

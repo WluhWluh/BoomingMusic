@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.process.ipc
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import android.os.Process
@@ -28,6 +29,11 @@ import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcContro
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcControlResponse
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStartResponse
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStatus
+import com.mardous.booming.separation.process.SourceSeparationForegroundControlAction
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseLifecycle
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseOperationResult
+import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
+import com.mardous.booming.separation.process.SourceSeparationProcessingWakeLockOperationResult
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -45,6 +51,23 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
     }
     private val stateLock = Any()
     private var active: ActiveRun? = null
+    private val foregroundController by lazy {
+        SourceSeparationMediaProcessingForegroundController(
+            service = this,
+            controlIntentFactory = { _, request, commandId, action ->
+                foregroundControlIntent(this, request, commandId, action)
+            },
+        )
+    }
+    private val processingWakeLockController by lazy {
+        SourceSeparationProcessingWakeLockController(this) { request, reason ->
+            Log.e(TAG, "Multi-stem processing wake-lock lease lost: $reason")
+            synchronized(stateLock) {
+                active?.takeIf { run -> run.matches(request) }
+                    ?.requestPause(SourceSeparationPauseReason.Standard)
+            }
+        }
+    }
     private val binder = object : ISourceSeparationMultiStemExecutionService.Stub() {
         override fun connect(): String = SourceSeparationMultiStemExecutionCodec
             .encodeConnectResponse(
@@ -58,16 +81,24 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
             descriptorJson: String,
             callback: ISourceSeparationMultiStemExecutionCallback,
         ): String {
+            var foregroundLease: SourceSeparationForegroundLeaseRequest? = null
+            var reservedRun: ActiveRun? = null
             return try {
-                val descriptor = SourceSeparationMultiStemExecutionCodec
-                    .decodeDescriptor(descriptorJson)
+                val command = SourceSeparationMultiStemExecutionCodec
+                    .decodeStartCommand(descriptorJson)
+                val descriptor = command.descriptor
+                foregroundLease = command.foregroundLease
                 check(descriptor.processGeneration == engine.processGeneration) {
                     "Multi-stem descriptor targets a stale process generation."
                 }
                 val run = synchronized(stateLock) {
                     check(active == null) { "A multi-stem run is already active." }
-                    ActiveRun(descriptor, callback).also { active = it }
+                    ActiveRun(descriptor, callback, foregroundLease).also {
+                        active = it
+                        reservedRun = it
+                    }
                 }
+                attachForegroundOwnership(run)
                 run.emit(SourceSeparationMultiStemExecutionEventPayload.Accepted(descriptor))
                 worker.execute { execute(run) }
                 SourceSeparationMultiStemExecutionCodec.encodeStartResponse(
@@ -78,6 +109,13 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                     ),
                 )
             } catch (error: Throwable) {
+                synchronized(stateLock) {
+                    if (active === reservedRun) active = null
+                }
+                foregroundLease?.let { lease ->
+                    processingWakeLockController.release(lease, "start-rejected")
+                    foregroundController.stop(lease, "start-rejected")
+                }
                 SourceSeparationMultiStemExecutionCodec.encodeStartResponse(
                     SourceSeparationMultiStemIpcStartResponse(
                         status = if (error.message?.contains("already active") == true) {
@@ -141,7 +179,37 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
         return binder
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        foregroundController.observeStartCommand(startId)
+        when (intent?.action) {
+            ACTION_START_MEDIA_PROCESSING -> handleForegroundStart(intent, startId)
+            ACTION_PAUSE_MEDIA_PROCESSING -> handleForegroundControl(
+                intent,
+                startId,
+                SourceSeparationForegroundControlAction.Pause,
+            )
+            ACTION_CANCEL_MEDIA_PROCESSING -> handleForegroundControl(
+                intent,
+                startId,
+                SourceSeparationForegroundControlAction.Cancel,
+            )
+            else -> foregroundController.releaseUnownedStart(startId)
+        }
+        return START_NOT_STICKY
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        val request = foregroundController.onTimeout(startId, fgsType) ?: return
+        synchronized(stateLock) {
+            active?.takeIf { run -> run.matches(request) }
+                ?.requestPause(SourceSeparationPauseReason.Standard)
+        }
+        processingWakeLockController.release(request, "foreground-timeout")
+    }
+
     override fun onDestroy() {
+        processingWakeLockController.releaseActive("service-destroyed")
+        foregroundController.stopActive("service-destroyed")
         synchronized(stateLock) {
             active?.requestCancel()
             active = null
@@ -151,7 +219,14 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
     }
 
     private fun execute(run: ActiveRun) {
+        var terminalReason = "failed"
         try {
+            run.foregroundLease?.let { lease ->
+                val acquired = processingWakeLockController.acquire(lease)
+                require(acquired == SourceSeparationProcessingWakeLockOperationResult.Applied ||
+                    acquired == SourceSeparationProcessingWakeLockOperationResult.AlreadyApplied
+                ) { "The multi-stem processing wake lock could not be acquired." }
+            }
             val descriptor = run.descriptor
             val installed = requireNotNull(installer.installed(descriptor.model.modelId)) {
                 "The selected multi-stem model is not installed."
@@ -204,12 +279,14 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
             )
             when (result) {
                 is HtdemucsSourceSeparationEngineResult.Completed -> {
+                    terminalReason = "completed"
                     run.emit(SourceSeparationMultiStemExecutionEventPayload.Completed(
                         result.manifest.toMultiStemExecutionCompletion(),
                     ))
                     return
                 }
                 is HtdemucsSourceSeparationEngineResult.AlreadyCompleted -> {
+                    terminalReason = "already-completed"
                     run.emit(SourceSeparationMultiStemExecutionEventPayload.AlreadyCompleted(
                         result.manifest.toMultiStemExecutionCompletion(),
                     ))
@@ -219,16 +296,23 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                     error("The multi-stem cache is busy: ${result.cacheKey}")
             }
         } catch (error: SourceSeparationPausedException) {
+            terminalReason = "paused"
             run.emit(SourceSeparationMultiStemExecutionEventPayload.Paused(error.pauseReason))
         } catch (error: java.util.concurrent.CancellationException) {
+            terminalReason = "canceled"
             run.emit(SourceSeparationMultiStemExecutionEventPayload.Canceled(error.message))
         } catch (error: Throwable) {
+            terminalReason = "failed:${error::class.java.simpleName}"
             Log.e(TAG, "Remote multi-stem execution failed", error)
             run.emit(SourceSeparationMultiStemExecutionEventPayload.Failed(
                 error::class.java.name,
                 error.message,
             ))
         } finally {
+            run.foregroundLease?.let { lease ->
+                processingWakeLockController.release(lease, terminalReason)
+                foregroundController.stop(lease, terminalReason)
+            }
             synchronized(stateLock) {
                 if (active === run) active = null
             }
@@ -240,9 +324,80 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
             SourceSeparationMultiStemIpcControlResponse(status = status),
         )
 
+    private fun attachForegroundOwnership(run: ActiveRun) {
+        val lease = run.foregroundLease ?: return
+        val activeLease = foregroundController.diagnostics().activeLease
+        if (activeLease == null) {
+            val started = foregroundController.start(lease, startId = 0)
+            require(started == SourceSeparationForegroundLeaseOperationResult.Applied ||
+                started == SourceSeparationForegroundLeaseOperationResult.AlreadyApplied
+            ) { "The multi-stem foreground lease could not start." }
+        } else {
+            require(activeLease.request == lease) {
+                "Another media-processing foreground lease is active."
+            }
+        }
+        val attached = foregroundController.attach(lease)
+        require(attached == SourceSeparationForegroundLeaseOperationResult.Applied ||
+            attached == SourceSeparationForegroundLeaseOperationResult.AlreadyApplied
+        ) { "The multi-stem foreground lease could not attach." }
+        val controls = foregroundController.diagnostics().activeLease
+            ?.takeIf { record ->
+                record.request == lease &&
+                    record.lifecycle == SourceSeparationForegroundLeaseLifecycle.Active
+            }
+            ?.controls
+            .orEmpty()
+        when {
+            controls.any { it.action == SourceSeparationForegroundControlAction.Cancel } ->
+                run.requestCancel()
+            controls.any { it.action == SourceSeparationForegroundControlAction.Pause } ->
+                run.requestPause(SourceSeparationPauseReason.Standard)
+        }
+    }
+
+    private fun handleForegroundStart(intent: Intent, startId: Int) {
+        runCatching {
+            val lease = intent.requireForegroundLease()
+            require(lease.processGeneration == engine.processGeneration) {
+                "Multi-stem foreground start targets a stale generation."
+            }
+            foregroundController.start(lease, startId)
+        }.onFailure { error ->
+            Log.e(TAG, "Unable to start multi-stem foreground ownership", error)
+            foregroundController.releaseUnownedStart(startId)
+        }
+    }
+
+    private fun handleForegroundControl(
+        intent: Intent,
+        startId: Int,
+        action: SourceSeparationForegroundControlAction,
+    ) {
+        runCatching {
+            val lease = intent.requireForegroundLease()
+            val commandId = requireNotNull(intent.getStringExtra(EXTRA_COMMAND_ID))
+            val result = foregroundController.control(lease, commandId, action, startId)
+            if (result != SourceSeparationForegroundLeaseOperationResult.Applied) return
+            synchronized(stateLock) {
+                active?.takeIf { run -> run.matches(lease) }?.let { run ->
+                    when (action) {
+                        SourceSeparationForegroundControlAction.Pause ->
+                            run.requestPause(SourceSeparationPauseReason.Standard)
+                        SourceSeparationForegroundControlAction.Cancel -> run.requestCancel()
+                    }
+                }
+            }
+        }.onFailure { error ->
+            Log.e(TAG, "Unable to apply multi-stem foreground control", error)
+            foregroundController.releaseUnownedStart(startId)
+        }
+    }
+
     private class ActiveRun(
         val descriptor: SourceSeparationMultiStemExecutionDescriptor,
         private val callback: ISourceSeparationMultiStemExecutionCallback,
+        val foregroundLease: SourceSeparationForegroundLeaseRequest?,
     ) {
         private val sequence = AtomicLong(0L)
         private val pause = AtomicBoolean(false)
@@ -258,6 +413,11 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
             pause.set(false)
             cancel.set(true)
         }
+
+        fun matches(request: SourceSeparationForegroundLeaseRequest): Boolean =
+            descriptor.runId == request.runId &&
+                descriptor.processGeneration == request.processGeneration &&
+                foregroundLease == request
 
         fun shouldPause(): Boolean = pause.get() && !cancel.get()
         fun shouldCancel(): Boolean = cancel.get()
@@ -281,6 +441,50 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
 
     companion object {
         const val ACTION_BIND = "com.wluhwluh.booming.action.BIND_MULTISTEM_EXECUTION"
+        const val ACTION_START_MEDIA_PROCESSING =
+            "com.wluhwluh.booming.action.START_MULTISTEM_MEDIA_PROCESSING"
+        const val ACTION_PAUSE_MEDIA_PROCESSING =
+            "com.wluhwluh.booming.action.PAUSE_MULTISTEM_MEDIA_PROCESSING"
+        const val ACTION_CANCEL_MEDIA_PROCESSING =
+            "com.wluhwluh.booming.action.CANCEL_MULTISTEM_MEDIA_PROCESSING"
+        private const val EXTRA_LEASE_ID = "multistem_foreground_lease_id"
+        private const val EXTRA_RUN_ID = "multistem_foreground_run_id"
+        private const val EXTRA_PROCESS_GENERATION = "multistem_foreground_process_generation"
+        private const val EXTRA_DISPLAY_NAME = "multistem_foreground_display_name"
+        private const val EXTRA_COMMAND_ID = "multistem_foreground_command_id"
         private const val TAG = "BssMultiStemService"
+
+        fun foregroundStartIntent(
+            context: Context,
+            request: SourceSeparationForegroundLeaseRequest,
+        ): Intent = foregroundIntent(context, request).setAction(ACTION_START_MEDIA_PROCESSING)
+
+        fun foregroundControlIntent(
+            context: Context,
+            request: SourceSeparationForegroundLeaseRequest,
+            commandId: String,
+            action: SourceSeparationForegroundControlAction,
+        ): Intent = foregroundIntent(context, request)
+            .setAction(when (action) {
+                SourceSeparationForegroundControlAction.Pause -> ACTION_PAUSE_MEDIA_PROCESSING
+                SourceSeparationForegroundControlAction.Cancel -> ACTION_CANCEL_MEDIA_PROCESSING
+            })
+            .putExtra(EXTRA_COMMAND_ID, commandId)
+
+        private fun foregroundIntent(
+            context: Context,
+            request: SourceSeparationForegroundLeaseRequest,
+        ) = Intent(context, SourceSeparationMultiStemExecutionService::class.java)
+            .putExtra(EXTRA_LEASE_ID, request.leaseId)
+            .putExtra(EXTRA_RUN_ID, request.runId)
+            .putExtra(EXTRA_PROCESS_GENERATION, request.processGeneration)
+            .putExtra(EXTRA_DISPLAY_NAME, request.displayName)
     }
+
+    private fun Intent.requireForegroundLease() = SourceSeparationForegroundLeaseRequest(
+        leaseId = requireNotNull(getStringExtra(EXTRA_LEASE_ID)),
+        runId = requireNotNull(getStringExtra(EXTRA_RUN_ID)),
+        processGeneration = getLongExtra(EXTRA_PROCESS_GENERATION, 0L),
+        displayName = requireNotNull(getStringExtra(EXTRA_DISPLAY_NAME)),
+    )
 }

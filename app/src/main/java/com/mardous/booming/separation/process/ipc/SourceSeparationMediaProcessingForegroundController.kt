@@ -33,6 +33,19 @@ internal class SourceSeparationMediaProcessingForegroundController(
     private val tracker: SourceSeparationForegroundLeaseTracker =
         SourceSeparationForegroundLeaseTracker(SystemClock::elapsedRealtimeNanos),
     private val mainHandler: Handler = Handler(Looper.getMainLooper()),
+    private val controlIntentFactory: (
+        Service,
+        SourceSeparationForegroundLeaseRequest,
+        String,
+        SourceSeparationForegroundControlAction,
+    ) -> Intent = { context, request, commandId, action ->
+        SourceSeparationExecutionService.foregroundControlIntent(
+            context,
+            request,
+            commandId,
+            action,
+        )
+    },
 ) {
     private var latestDeliveredStartId = 0
     private var pendingTimeout: Runnable? = null
@@ -280,7 +293,7 @@ internal class SourceSeparationMediaProcessingForegroundController(
         action: SourceSeparationForegroundControlAction,
     ): PendingIntent {
         val commandId = "notification-${action.name.lowercase()}-${request.leaseId}"
-        val intent = SourceSeparationExecutionService.foregroundControlIntent(
+        val intent = controlIntentFactory(
             service,
             request,
             commandId,
