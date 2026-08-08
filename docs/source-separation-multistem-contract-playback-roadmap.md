@@ -42,9 +42,9 @@ real multi-stem executable contracts, and Phase 6 now routes completed official
 switching with retained inactive caches. S10 now also has completed-cache
 service-recreation and playback-time deletion evidence. The matching S25
 service-recreation and direct active-cache deletion gates, strict S10
-zero-underrun playback resources, and S25 official-six-stem producer-ahead
-playback are complete. Active deletion through the management panel,
-background contention, and listening remain open.
+zero-underrun playback resources, S25 official-six-stem producer-ahead
+playback, and active deletion through the S25 management panel are complete.
+Background contention and listening remain open.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -1235,7 +1235,7 @@ undeclared pipeline or publishing a partial stem set.
   management panel button while the worker is idle. The production Compose
   path removed the exact cache directory and refreshed the visible item list;
   it did not change the installed model selection.
-- [ ] Repeat completed-cache deletion on S25 while that cache is actively
+- [x] Repeat completed-cache deletion on S25 while that cache is actively
   adopted by playback. The panel callback must release the data-plane lease,
   disable separated playback, send the playback-state broadcast, and verify
   that the current-song status is refreshed. The S10 service/repository gate
@@ -1551,6 +1551,15 @@ became playable at `12.500 s`; the producer completed the 30-second source at
 low-water events, underruns, or playback stall transitions. This qualifies the
 two-window policy only for this S25 official-six-stem row. It does not imply
 that S10, official four-stem, or guitar-ft can sustain producer-ahead playback.
+
+The S25 `active-panel-delete-s25-20260808-r1` gate launched the real
+`MainActivity`, adopted the completed official six-stem cache through
+`PlaybackService`, navigated to the production cache-management page, and
+pressed the cache row's delete button. The page removed the entry, the
+repository removed the exact cache, the playback lease was released, separated
+playback was disabled, and the original song retained ready/play intent. The
+selected model remained installed and selected; only the active song cache was
+deleted.
 
 ## Required Tests and Gates
 
