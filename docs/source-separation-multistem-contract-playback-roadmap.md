@@ -1411,8 +1411,14 @@ is implied.
   and guitar-ft as the six-stem guitar-specialist option. Keep 9662 as the
   sole stable Quick Setup representative; the multi-stem representative does
   not alter that stable recommendation.
-- [ ] Add representative recommendations and folded category records without
-  changing the stable two-stem Quick Setup recommendation.
+- [x] Add representative metadata and folded category records to the current
+  preset-management surface without changing the stable two-stem Quick Setup
+  recommendation. Experimental and candidate sections use the reviewed
+  category records; collapsed rows expose only title, summary, and expansion
+  affordance. Unknown records remain visible in an explicit fallback group.
+- [ ] Expose the three HTDemucs Release entries through the same management
+  surface, while preserving their separate multi-stem installer, exact
+  contract, and CPU-only activation boundary.
 - [ ] Keep unsupported generic models inspectable and downloadable but blocked
   from activation.
 - [ ] Expose a model only when its exact contract, pipeline, playback, and
@@ -1433,9 +1439,19 @@ with explicit family, purpose, category, and representative roles. It also
 provides deterministic category grouping and exact-coverage validation. This
 layer is deliberately separate from executable contracts, cache identity,
 activation policy, and localized labels. The remaining Phase 7 work is to
-connect these records to the management screen and render the collapsed
-category rows; that UI work must continue to leave unknown or unsupported
-models inspectable without granting activation.
+connect the three HTDemucs records to the same management surface; that work
+must continue to leave unknown or unsupported models inspectable without
+granting activation.
+
+#### Phase 7B: Folded preset-management categories
+
+Phase 7B is complete for the currently managed MDX catalog. The management
+sheet now carries the reviewed presentation record with each catalog item and
+renders experimental/download candidate items under collapsed category rows.
+The stable recommended row is intentionally unchanged. HTDemucs entries are
+not duplicated into this MDX repository surface; their unified management
+entry remains a separate task because their installer and multi-stem
+activation contract are distinct.
 
 ## Required Tests and Gates
 

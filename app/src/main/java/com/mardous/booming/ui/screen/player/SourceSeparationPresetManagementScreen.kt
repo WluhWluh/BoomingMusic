@@ -49,6 +49,7 @@ import com.mardous.booming.extensions.files.asReadableFileSize
 import com.mardous.booming.separation.model.contract.CatalogActivationPolicy
 import com.mardous.booming.separation.model.contract.CatalogReleaseMaturity
 import com.mardous.booming.separation.model.contract.CatalogSupportLevel
+import com.mardous.booming.separation.model.contract.SourceSeparationModelCategory
 import com.mardous.booming.separation.SourceSeparationStemLabelResolver
 import com.mardous.booming.separation.model.preset.SourceSeparationManualModelProfileDraft
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
@@ -90,6 +91,7 @@ internal fun SourceSeparationPresetManagementSheet(
     var pendingDeleteModelId by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingDeleteImportedSha256 by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingDeleteProfileId by rememberSaveable { mutableStateOf<String?>(null) }
+    var expandedCategories by rememberSaveable { mutableStateOf(setOf<String>()) }
     val pendingDeleteModel = state.entries.singleOrNull { it.modelId == pendingDeleteModelId }
     val pendingDeleteImported = state.importedEntries.singleOrNull {
         it.sha256 == pendingDeleteImportedSha256
@@ -192,6 +194,15 @@ internal fun SourceSeparationPresetManagementSheet(
                     entries = state.entries.filter {
                         it.supportLevel == CatalogSupportLevel.Experimental
                     },
+                    grouped = true,
+                    expandedCategories = expandedCategories,
+                    onToggleCategory = { category ->
+                        expandedCategories = if (category in expandedCategories) {
+                            expandedCategories - category
+                        } else {
+                            expandedCategories + category
+                        }
+                    },
                     onDownload = onDownload,
                     onCancelDownload = onCancelDownload,
                     onUse = onUse,
@@ -203,6 +214,15 @@ internal fun SourceSeparationPresetManagementSheet(
                     titleRes = R.string.source_separation_preset_download_only_section,
                     entries = state.entries.filter {
                         it.supportLevel == CatalogSupportLevel.DownloadOnly
+                    },
+                    grouped = true,
+                    expandedCategories = expandedCategories,
+                    onToggleCategory = { category ->
+                        expandedCategories = if (category in expandedCategories) {
+                            expandedCategories - category
+                        } else {
+                            expandedCategories + category
+                        }
                     },
                     onDownload = onDownload,
                     onCancelDownload = onCancelDownload,
@@ -498,6 +518,9 @@ private fun RestoredModelTargetCard(
 private fun androidx.compose.foundation.lazy.LazyListScope.modelSection(
     titleRes: Int,
     entries: List<SourceSeparationPresetManagementItem>,
+    grouped: Boolean = false,
+    expandedCategories: Set<String> = emptySet(),
+    onToggleCategory: (String) -> Unit = {},
     onDownload: (String) -> Unit,
     onCancelDownload: (String) -> Unit,
     onUse: (String) -> Unit,
@@ -515,21 +538,138 @@ private fun androidx.compose.foundation.lazy.LazyListScope.modelSection(
             modifier = Modifier.padding(top = 4.dp),
         )
     }
-    items(
-        count = entries.size,
-        key = { index -> entries[index].modelId },
-    ) { index ->
-        PresetModelCard(
-            model = entries[index],
-            onDownload = onDownload,
-            onCancelDownload = onCancelDownload,
-            onUse = onUse,
-            onDelete = onDelete,
-            onClearError = onClearError,
-            onDetails = onDetails,
-        )
+    if (!grouped) {
+        items(
+            count = entries.size,
+            key = { index -> entries[index].modelId },
+        ) { index ->
+            PresetModelCard(
+                model = entries[index],
+                onDownload = onDownload,
+                onCancelDownload = onCancelDownload,
+                onUse = onUse,
+                onDelete = onDelete,
+                onClearError = onClearError,
+                onDetails = onDetails,
+            )
+        }
+        return
+    }
+    groupPresetManagementEntries(entries).forEach { group ->
+        val groupKey = group.category?.name ?: UNCLASSIFIED_GROUP_KEY
+        item(key = "category-$titleRes-$groupKey") {
+            PresetCategoryRow(
+                group = group,
+                expanded = groupKey in expandedCategories,
+                onToggle = { onToggleCategory(groupKey) },
+            )
+        }
+        if (groupKey in expandedCategories) {
+            items(
+                count = group.entries.size,
+                key = { index -> "${groupKey}-${group.entries[index].modelId}" },
+            ) { index ->
+                PresetModelCard(
+                    model = group.entries[index],
+                    onDownload = onDownload,
+                    onCancelDownload = onCancelDownload,
+                    onUse = onUse,
+                    onDelete = onDelete,
+                    onClearError = onClearError,
+                    onDetails = onDetails,
+                )
+            }
+        }
     }
 }
+
+@Composable
+private fun PresetCategoryRow(
+    group: SourceSeparationPresetManagementGroup,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    val title = group.category?.titleRes()
+        ?: R.string.source_separation_preset_category_other_title
+    val summary = group.category?.summaryRes()
+        ?: R.string.source_separation_preset_category_other_summary
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        onClick = onToggle,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("source-separation-preset-category:${group.category?.name ?: "other"}"),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = stringResource(summary),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            IconButton(onClick = onToggle) {
+                Icon(
+                    painter = painterResource(
+                        if (expanded) R.drawable.ic_keyboard_arrow_up_24dp
+                        else R.drawable.ic_keyboard_arrow_down_24dp,
+                    ),
+                    contentDescription = stringResource(
+                        if (expanded) {
+                            R.string.source_separation_preset_category_collapse
+                        } else {
+                            R.string.source_separation_preset_category_expand
+                        },
+                    ),
+                )
+            }
+        }
+    }
+}
+
+private fun SourceSeparationModelCategory.titleRes(): Int = when (this) {
+    SourceSeparationModelCategory.GeneralTwoStem ->
+        R.string.source_separation_preset_category_general_two_stem_title
+    SourceSeparationModelCategory.VocalAndInstrumental ->
+        R.string.source_separation_preset_category_vocal_instrumental_title
+    SourceSeparationModelCategory.Karaoke ->
+        R.string.source_separation_preset_category_karaoke_title
+    SourceSeparationModelCategory.TargetStem ->
+        R.string.source_separation_preset_category_target_stem_title
+    SourceSeparationModelCategory.Cleanup ->
+        R.string.source_separation_preset_category_cleanup_title
+    SourceSeparationModelCategory.MultiStem ->
+        R.string.source_separation_preset_category_multi_stem_title
+}
+
+private fun SourceSeparationModelCategory.summaryRes(): Int = when (this) {
+    SourceSeparationModelCategory.GeneralTwoStem ->
+        R.string.source_separation_preset_category_general_two_stem_summary
+    SourceSeparationModelCategory.VocalAndInstrumental ->
+        R.string.source_separation_preset_category_vocal_instrumental_summary
+    SourceSeparationModelCategory.Karaoke ->
+        R.string.source_separation_preset_category_karaoke_summary
+    SourceSeparationModelCategory.TargetStem ->
+        R.string.source_separation_preset_category_target_stem_summary
+    SourceSeparationModelCategory.Cleanup ->
+        R.string.source_separation_preset_category_cleanup_summary
+    SourceSeparationModelCategory.MultiStem ->
+        R.string.source_separation_preset_category_multi_stem_summary
+}
+
+private const val UNCLASSIFIED_GROUP_KEY = "unclassified"
 
 private fun androidx.compose.foundation.lazy.LazyListScope.importedModelSection(
     entries: List<SourceSeparationImportedModelManagementItem>,

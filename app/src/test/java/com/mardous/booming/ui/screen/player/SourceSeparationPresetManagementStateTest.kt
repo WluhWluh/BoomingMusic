@@ -15,7 +15,9 @@ import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.ContractWindow
 import com.mardous.booming.separation.model.contract.PipelineCompatibility
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
+import com.mardous.booming.separation.model.contract.SourceSeparationModelCategory
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
+import com.mardous.booming.separation.model.contract.SourceSeparationModelPresentationCatalog
 import com.mardous.booming.separation.model.contract.StemContract
 import com.mardous.booming.separation.model.contract.TensorContract
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
@@ -30,6 +32,42 @@ import org.junit.Test
 import java.io.File
 
 class SourceSeparationPresetManagementStateTest {
+    @Test
+    fun `candidate entries group by reviewed category and preserve unknown entries`() {
+        val general = item(
+            supportLevel = CatalogSupportLevel.Experimental,
+            activationPolicy = CatalogActivationPolicy.SelectableExperimental,
+        ).copy(
+            modelId = "uvr_mdxnet_kara",
+            presentation = SourceSeparationModelPresentationCatalog.require("uvr_mdxnet_kara"),
+        )
+        val target = item(
+            supportLevel = CatalogSupportLevel.DownloadOnly,
+            activationPolicy = CatalogActivationPolicy.DownloadOnlyResourceGated,
+        ).copy(
+            modelId = "kuielab_a_bass",
+            presentation = SourceSeparationModelPresentationCatalog.require("kuielab_a_bass"),
+        )
+        val unknown = item(
+            supportLevel = CatalogSupportLevel.Experimental,
+            activationPolicy = CatalogActivationPolicy.SelectableExperimental,
+        ).copy(modelId = "future-model")
+
+        val groups = groupPresetManagementEntries(listOf(general, target, unknown))
+
+        assertEquals(
+            listOf(
+                SourceSeparationModelCategory.Karaoke,
+                SourceSeparationModelCategory.TargetStem,
+                null,
+            ),
+            groups.map { it.category },
+        )
+        assertEquals(listOf("uvr_mdxnet_kara"), groups[0].entries.map { it.modelId })
+        assertEquals(listOf("kuielab_a_bass"), groups[1].entries.map { it.modelId })
+        assertEquals(listOf("future-model"), groups[2].entries.map { it.modelId })
+    }
+
     @Test
     fun `download-only entries never offer a use action`() {
         val item = item(

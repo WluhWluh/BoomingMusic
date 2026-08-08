@@ -11,6 +11,9 @@ import com.mardous.booming.separation.model.MdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.contract.CatalogActivationPolicy
 import com.mardous.booming.separation.model.contract.CatalogReleaseMaturity
 import com.mardous.booming.separation.model.contract.CatalogSupportLevel
+import com.mardous.booming.separation.model.contract.SourceSeparationModelCategory
+import com.mardous.booming.separation.model.contract.SourceSeparationModelPresentation
+import com.mardous.booming.separation.model.contract.SourceSeparationModelPresentationCatalog
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
@@ -420,6 +423,7 @@ class SourceSeparationPresetManagementViewModel internal constructor(
             SourceSeparationPresetManagementItem(
                 modelId = entry.modelId,
                 displayName = entry.displayName,
+                presentation = SourceSeparationModelPresentationCatalog.find(entry.modelId),
                 supportLevel = entry.supportLevel,
                 activationPolicy = entry.activationPolicy,
                 releaseMaturity = entry.releaseMaturity,
@@ -684,6 +688,7 @@ data class SourceSeparationRestoredModelTargetUiState(
 data class SourceSeparationPresetManagementItem(
     val modelId: String,
     val displayName: String,
+    val presentation: SourceSeparationModelPresentation? = null,
     val supportLevel: CatalogSupportLevel,
     val activationPolicy: CatalogActivationPolicy,
     val releaseMaturity: CatalogReleaseMaturity,
@@ -704,6 +709,24 @@ data class SourceSeparationPresetManagementItem(
 
     val canDelete: Boolean
         get() = installed != null && !active
+}
+
+internal data class SourceSeparationPresetManagementGroup(
+    val category: SourceSeparationModelCategory?,
+    val entries: List<SourceSeparationPresetManagementItem>,
+)
+
+internal fun groupPresetManagementEntries(
+    entries: List<SourceSeparationPresetManagementItem>,
+): List<SourceSeparationPresetManagementGroup> {
+    val groups = SourceSeparationModelCategory.entries.mapNotNull { category ->
+        entries.filter { it.presentation?.category == category }
+            .takeIf(List<SourceSeparationPresetManagementItem>::isNotEmpty)
+            ?.let { SourceSeparationPresetManagementGroup(category, it) }
+    }
+    val unclassified = entries.filter { it.presentation == null }
+    return if (unclassified.isEmpty()) groups else groups +
+        SourceSeparationPresetManagementGroup(category = null, entries = unclassified)
 }
 
 data class SourceSeparationImportedModelManagementItem(
