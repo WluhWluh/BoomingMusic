@@ -23,6 +23,7 @@ import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.contract.CatalogActivationPolicy
 import com.mardous.booming.separation.model.contract.CatalogReleaseMaturity
 import com.mardous.booming.separation.model.contract.CatalogSupportLevel
+import com.mardous.booming.separation.model.contract.SourceSeparationModelPresentationCatalog
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPresetOrigin
@@ -130,6 +131,7 @@ class SourceSeparationManagementScreenTest {
         val item = SourceSeparationPresetManagementItem(
             modelId = modelId,
             displayName = installed.displayName,
+            presentation = SourceSeparationModelPresentationCatalog.require(modelId),
             supportLevel = CatalogSupportLevel.Experimental,
             activationPolicy = CatalogActivationPolicy.SelectableExperimental,
             releaseMaturity = CatalogReleaseMaturity.Candidate,
@@ -181,6 +183,8 @@ class SourceSeparationManagementScreenTest {
             }
         }
 
+        compose.onNodeWithTag("source-separation-preset-category:Karaoke")
+            .performClick()
         compose.onNodeWithTag("source-separation-preset:$modelId")
             .performScrollTo()
             .assertIsDisplayed()

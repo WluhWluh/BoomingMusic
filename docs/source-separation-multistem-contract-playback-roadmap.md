@@ -1461,6 +1461,16 @@ installer, exact contract, CPU-only activation, and model-specific details
 remain separate. Runtime routing and selected-model supersession are covered
 by facade tests. Device playback/resource/listening gates remain independent.
 
+The first S25 management verification used `SM-S9310`, API 35, arm64. The
+management Compose suite passed after updating its KARA action to expand the
+collapsed category before selecting the model. The production Release install
+gate then reopened the exact official six-stem artifact and sidecar through
+the application graph: 117,624,880-byte model, SHA-256
+`8b19e919dd17c6a93d862ca9b1158ed72f09feb4c52745819346369506ba4ed7`,
+contract `htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0@1`, and CPU-only backend
+policy. This is catalog/installation evidence; it does not replace separation,
+playback, resource, or listening qualification.
+
 ## Required Tests and Gates
 
 ### Contract and serialization

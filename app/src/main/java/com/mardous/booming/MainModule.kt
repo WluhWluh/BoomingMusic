@@ -81,6 +81,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationPresetCacheAvaila
 import com.mardous.booming.separation.cache.v2.SourceSeparationProductCacheAvailabilityProvider
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackResolver
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
+import com.mardous.booming.separation.SourceSeparationMultiStemRuntimeResolver
 import com.mardous.booming.separation.cache.v2.resolveTrustedActiveCacheModelResolution
 import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPresetStructuralInspector
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
@@ -278,7 +279,7 @@ private val mainModule = module {
         )
     }
     single { SourceSeparationMultiStemPlaybackSelectionStore(get()) }
-    single {
+    single<SourceSeparationMultiStemRuntimeResolver> {
         SourceSeparationMultiStemPlaybackResolver(
             selection = get(),
             installer = get(),
