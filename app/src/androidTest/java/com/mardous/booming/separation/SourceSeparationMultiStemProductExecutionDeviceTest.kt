@@ -73,6 +73,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -1695,6 +1696,192 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
     }
 
     @Test
+    fun validateIndependentMultiStemMainDeathRecovery() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val runId = arguments.getString(ARG_RUN_ID)?.takeIf(SAFE_NAME::matches)
+            ?: error("A stable run ID is required for the two-phase main-death gate.")
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val scenarioFile = independentMainDeathScenarioFile(context, runId)
+        val scenario = JSONObject(scenarioFile.readText(Charsets.UTF_8))
+        assertEquals(1, scenario.getInt("schemaVersion"))
+        assertEquals(runId, scenario.getString("runId"))
+        assertTrue("The product coordinator did not record multi-stem recovery.",
+            scenario.optBoolean("productRecoveryObserved", false))
+        val modelId = scenario.getString("modelId")
+        require(modelId == OFFICIAL_SIX_STEM_MODEL_ID)
+        val cacheKey = scenario.getString("cacheKey")
+        val mediaUri = Uri.parse(scenario.getString("sourceMediaUri"))
+        val oldMainPid = scenario.getInt("mainPid")
+        val oldRemotePid = scenario.getInt("remotePid")
+        val koin = GlobalContext.get()
+        val store = koin.get<SourceSeparationCacheStore>()
+        val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
+        val promoter = koin.get<SourceSeparationCacheFlacPromoter>()
+        val selectionStore = koin.get<SourceSeparationMultiStemPlaybackSelectionStore>()
+        val processor = koin.get<SourceSeparationMixAudioProcessor>()
+        val initialSelectedModelId = selectionStore.selectedModelId()
+        var adopted: SourceSeparationMultiStemAdoptedRun? = null
+        var controller: MediaController? = null
+        val observedSequences = java.util.Collections.synchronizedList(mutableListOf<Long>())
+        val terminalEvent = CountDownLatch(1)
+        val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
+            .resolve("$runId.json")
+        val report = JSONObject()
+            .put("runId", runId)
+            .put("mode", "independent-main-death-recovery")
+            .put("modelId", modelId)
+            .put("status", "running")
+        try {
+            assertNotEquals(oldMainPid, android.os.Process.myPid())
+            assertFalse(File("/proc/$oldMainPid").exists())
+            val journalAfterDeath = requireNotNull(store.readRunJournal(cacheKey))
+            assertEquals(oldRemotePid, journalAfterDeath.request.ownerPid)
+            assertTrue(journalAfterDeath.latestSequence >= scenario.getLong("journalSequence"))
+
+            if (journalAfterDeath.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running) {
+                val remote = BoundRemoteSourceSeparationMultiStemExecutionHost(context)
+                val snapshot = requireNotNull(remote.reconnectableRun())
+                assertEquals(cacheKey, snapshot.descriptor.cacheKey)
+                assertEquals(scenario.getLong("remoteProcessGeneration"),
+                    snapshot.descriptor.processGeneration)
+                assertTrue(snapshot.latestEvent.sequence >= scenario.getLong("eventSequence"))
+                adopted = requireNotNull(remote.adoptReconnectableRun { event ->
+                    observedSequences += event.sequence
+                    when (event.payload) {
+                        is SourceSeparationMultiStemExecutionEventPayload.Completed,
+                        is SourceSeparationMultiStemExecutionEventPayload.AlreadyCompleted,
+                        is SourceSeparationMultiStemExecutionEventPayload.Paused,
+                        is SourceSeparationMultiStemExecutionEventPayload.Canceled,
+                        is SourceSeparationMultiStemExecutionEventPayload.Failed ->
+                            terminalEvent.countDown()
+                        else -> Unit
+                    }
+                })
+                if (store.readRunJournal(cacheKey)?.lifecycle ==
+                    SourceSeparationCacheRunJournalLifecycle.Running
+                ) {
+                    assertTrue("The adopted run did not publish a terminal event.",
+                        terminalEvent.await(PRODUCER_AHEAD_READY_TIMEOUT_MS, TimeUnit.MILLISECONDS))
+                }
+            }
+
+            val completionDeadline = SystemClock.elapsedRealtime() + PRODUCER_AHEAD_READY_TIMEOUT_MS
+            var completedManifest = store.readManifest(cacheKey)
+            while (completedManifest?.state != SourceSeparationCacheManifestState.Completed &&
+                SystemClock.elapsedRealtime() < completionDeadline
+            ) {
+                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+                completedManifest = store.readManifest(cacheKey)
+            }
+            val completed = requireNotNull(completedManifest)
+            assertEquals(SourceSeparationCacheManifestState.Completed, completed.state)
+            assertEquals(SourceSeparationCacheValidationResult.Valid,
+                store.validateCompletedEntry(completed, verifyHashes = false))
+            val finalJournal = requireNotNull(store.readRunJournal(cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Completed, finalJournal.lifecycle)
+            assertTrue(observedSequences.zipWithNext().all { (first, second) -> second > first })
+
+            val promoted = promoter.promote(cacheKey)
+            val playbackManifest = when (promoted) {
+                is SourceSeparationCacheFlacPromotionResult.Completed -> promoted.manifest
+                is SourceSeparationCacheFlacPromotionResult.AlreadyPromoted -> promoted.manifest
+                is SourceSeparationCacheFlacPromotionResult.Busy -> error("Unexpected FLAC contention")
+                SourceSeparationCacheFlacPromotionResult.Unavailable -> error("FLAC unavailable")
+            }
+            val expectedStemIds = requireNotNull(playbackManifest.output).stems
+                .sortedBy { it.order }.map { it.stemId.value }
+            selectionStore.select(modelId)
+            val song = stagedSong(mediaUri, File(context.filesDir, "unused"), runId)
+            val mediaController = MediaController.Builder(
+                context,
+                SessionToken(context, ComponentName(context, PlaybackService::class.java)),
+            ).buildAsync().get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            controller = mediaController
+            awaitPlaybackRestoration(mediaController)
+            onMediaControllerThread(mediaController) {
+                mediaController.volume = 0f
+                mediaController.setMediaItem(song.toMediaItem())
+                mediaController.prepare()
+            }
+            waitForMediaController(mediaController, "recovered source preparation") {
+                mediaController.currentMediaItem?.mediaId == song.id.toString() &&
+                    mediaController.duration > 0L
+            }
+            val enableResult = onMediaControllerThread(mediaController) {
+                mediaController.sendCustomCommand(
+                    SessionCommand(Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED, Bundle.EMPTY),
+                    Bundle().apply {
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, true)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
+                    },
+                )
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            assertEquals(SessionResult.RESULT_SUCCESS, enableResult.resultCode)
+            onMediaControllerThread(mediaController) { mediaController.play() }
+            waitForMediaController(mediaController, "recovered multi-stem adoption") {
+                mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == expectedStemIds
+            }
+            val beforeSeek = requireNotNull(processor.dataPlaneMetrics())
+            onMediaControllerThread(mediaController) {
+                mediaController.pause()
+                mediaController.seekTo((mediaController.duration / 3L).coerceAtLeast(1_000L))
+                mediaController.play()
+            }
+            waitForMediaController(mediaController, "recovered seek and resume") {
+                mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == expectedStemIds
+            }
+            val afterSeek = requireNotNull(processor.dataPlaneMetrics())
+            assertTrue(afterSeek.seekRequests > beforeSeek.seekRequests)
+            report.put("status", "complete")
+                .put("cacheKey", cacheKey)
+                .put("oldMainPid", oldMainPid)
+                .put("newMainPid", android.os.Process.myPid())
+                .put("remotePid", oldRemotePid)
+                .put("remoteProcessGeneration", scenario.getLong("remoteProcessGeneration"))
+                .put("journalSequenceBeforeDeath", scenario.getLong("journalSequence"))
+                .put("finalJournalSequence", finalJournal.latestSequence)
+                .put("observedSequences", JSONArray(observedSequences))
+                .put("stemIds", JSONArray(expectedStemIds))
+                .put("playerAdopted", true)
+                .put("seekRequests", afterSeek.seekRequests)
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+            reportFile.writeText(report.toString(2))
+            throw error
+        } finally {
+            adopted?.close()
+            controller?.let { mediaController ->
+                runCatching {
+                    onMediaControllerThread(mediaController) {
+                        mediaController.pause()
+                        mediaController.clearMediaItems()
+                        mediaController.release()
+                    }
+                }
+            }
+            runCatching { context.stopService(Intent(context, PlaybackService::class.java)) }
+            selectionStore.select(initialSelectedModelId)
+            repeat(20) {
+                if (!repository.isLeased(cacheKey)) return@repeat
+                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+            }
+            runCatching { repository.delete(cacheKey) }
+            runCatching { context.contentResolver.delete(mediaUri, null, null) }
+            scenarioFile.delete()
+            scenarioFile.parentFile?.delete()
+        }
+    }
+
+    @Test
     fun remoteProcessDeathLeavesDurableRunAndRecoversOnNewGeneration() {
         val arguments = InstrumentationRegistry.getArguments()
         val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
@@ -1818,6 +2005,9 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             throw error
         }
     }
+
+    private fun independentMainDeathScenarioFile(context: Context, runId: String): File =
+        File(context.filesDir, "$MAIN_DEATH_SCENARIO_DIRECTORY/$runId.json")
 
     private fun stagedSong(uri: Uri, source: File, runId: String): Song = Song(
         id = ContentUris.parseId(uri),
@@ -2134,6 +2324,8 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val ARG_APP_COMMIT = "bssAppCommit"
         const val ARG_TEST_COMMIT = "bssTestCommit"
         const val REPORT_DIRECTORY = "source-separation/multistem-product-device-reports"
+        const val MAIN_DEATH_SCENARIO_DIRECTORY =
+            "source-separation/multistem-main-death-scenarios"
         const val SONG_TITLE_PREFIX = "BSS Phase 6 Product"
         const val SOURCE_DURATION_MS = 30_000L
         const val MEDIA_SESSION_TIMEOUT_SECONDS = 30L

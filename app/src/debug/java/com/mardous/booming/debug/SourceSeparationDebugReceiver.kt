@@ -32,6 +32,15 @@ class SourceSeparationDebugReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         val appContext = context.applicationContext
         val command = intent.getStringExtra(EXTRA_COMMAND).orEmpty()
+        if (SourceSeparationMultiStemMainDeathDebugHarness.handle(
+                appContext,
+                command,
+                intent,
+            )
+        ) {
+            pendingResult.finish()
+            return
+        }
         if (SourceSeparationMainDeathDebugHarness.handle(appContext, command, intent)) {
             pendingResult.finish()
             return
