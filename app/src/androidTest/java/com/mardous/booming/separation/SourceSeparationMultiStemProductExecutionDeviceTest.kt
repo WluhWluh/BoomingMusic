@@ -188,6 +188,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 SessionToken(context, ComponentName(context, PlaybackService::class.java)),
             ).buildAsync().get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             controller = mediaController
+            awaitPlaybackRestoration(mediaController)
             onMediaControllerThread(mediaController) {
                 mediaController.volume = 0f
                 mediaController.setMediaItem(song.toMediaItem())
@@ -307,6 +308,10 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         }
         val runId = arguments.getString(ARG_RUN_ID)?.takeIf(SAFE_NAME::matches)
             ?: "playback-$modelId-${System.currentTimeMillis()}"
+        val allowedSeekUnderruns = arguments.getString(ARG_ALLOWED_SEEK_UNDERRUNS)
+            ?.toLongOrNull()
+            ?.also { require(it >= 0L) }
+            ?: 0L
         val koin = GlobalContext.get()
         val facade = koin.get<SourceSeparationMultiStemProductFacade>()
         val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
@@ -390,6 +395,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 SessionToken(context, ComponentName(context, PlaybackService::class.java)),
             ).buildAsync().get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             controller = mediaController
+            awaitPlaybackRestoration(mediaController)
             onMediaControllerThread(mediaController) {
                 mediaController.volume = 0f
                 mediaController.setMediaItem(song.toMediaItem())
@@ -503,7 +509,11 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             }
             val metricsAfterSeek = requireNotNull(processor.dataPlaneMetrics())
             assertTrue(metricsAfterSeek.seekRequests > metricsBeforeSeek.seekRequests)
-            assertEquals(metricsBeforeSeek.underruns, metricsAfterSeek.underruns)
+            val seekUnderruns = metricsAfterSeek.underruns - metricsBeforeSeek.underruns
+            assertTrue(
+                "Seek added $seekUnderruns underruns; allowed=$allowedSeekUnderruns",
+                seekUnderruns in 0L..allowedSeekUnderruns,
+            )
 
             onMediaControllerThread(mediaController) {
                 mediaController.pause()
@@ -519,6 +529,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 SessionToken(context, ComponentName(context, PlaybackService::class.java)),
             ).buildAsync().get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             controller = recreatedController
+            awaitPlaybackRestoration(recreatedController)
             onMediaControllerThread(recreatedController) {
                 recreatedController.volume = 0f
                 recreatedController.setMediaItem(song.toMediaItem())
@@ -554,6 +565,8 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("seekRequests", metricsAfterSeek.seekRequests)
                 .put("underrunsBeforeSeek", metricsBeforeSeek.underruns)
                 .put("underruns", metricsAfterSeek.underruns)
+                .put("seekUnderruns", seekUnderruns)
+                .put("allowedSeekUnderruns", allowedSeekUnderruns)
                 .put("serviceRecreated", true)
                 .put("transportMediaId", song.id)
                 .put("transportUri", song.uri)
@@ -1209,6 +1222,15 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         error("MediaController did not complete $operation in time.")
     }
 
+    private fun awaitPlaybackRestoration(controller: MediaController) {
+        onMediaControllerThread(controller) {
+            controller.sendCustomCommand(
+                SessionCommand(Playback.AWAIT_PLAYBACK_RESTORATION, Bundle.EMPTY),
+                Bundle.EMPTY,
+            )
+        }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    }
+
     private fun <T> onMediaControllerThread(
         controller: MediaController,
         block: () -> T,
@@ -1297,6 +1319,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val ARG_SOURCE_PATH = "bssMultistemSourcePath"
         const val ARG_SOURCE_SHA256 = "bssMultistemSourceSha256"
         const val ARG_RUN_ID = "bssMultistemRunId"
+        const val ARG_ALLOWED_SEEK_UNDERRUNS = "bssMultistemAllowedSeekUnderruns"
         const val ARG_APP_COMMIT = "bssAppCommit"
         const val ARG_TEST_COMMIT = "bssTestCommit"
         const val REPORT_DIRECTORY = "source-separation/multistem-product-device-reports"
