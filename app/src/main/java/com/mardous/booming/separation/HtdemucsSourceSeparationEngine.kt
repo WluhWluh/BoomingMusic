@@ -20,7 +20,7 @@ internal class HtdemucsSourceSeparationEngine(
     private val coordinator: SourceSeparationCacheRunCoordinator,
     private val rangeExecutor: HtdemucsSourceSeparationRangeExecutorContract,
     private val runIdFactory: () -> String = { UUID.randomUUID().toString() },
-    private val processGeneration: Long = 1L,
+    internal val processGeneration: Long = 1L,
     private val ownerPid: Int? = null,
 ) {
     fun separate(

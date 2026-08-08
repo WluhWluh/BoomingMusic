@@ -200,6 +200,12 @@
             android:exported="false"
             android:foregroundServiceType="mediaProcessing"
             android:process=":source_separation"
+             android:stopWithTask="false"/>
+
+        <service
+            android:name=".separation.process.ipc.SourceSeparationMultiStemExecutionService"
+            android:exported="false"
+            android:process=":source_separation"
             android:stopWithTask="false"/>
 
         <receiver

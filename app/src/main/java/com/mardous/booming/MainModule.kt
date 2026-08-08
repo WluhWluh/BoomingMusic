@@ -66,7 +66,6 @@ import com.mardous.booming.separation.AndroidSourceSeparationRuntimeCompatibilit
 import com.mardous.booming.separation.DefaultSourceSeparationRuntimeFacade
 import com.mardous.booming.separation.HtdemucsSourceSeparationEngine
 import com.mardous.booming.separation.HtdemucsSourceSeparationRangeExecutor
-import com.mardous.booming.separation.InProcessSourceSeparationMultiStemExecutionHost
 import com.mardous.booming.separation.SourceSeparationModelAwareEngine
 import com.mardous.booming.separation.SourceSeparationMultiStemProductFacade
 import com.mardous.booming.separation.SourceSeparationMultiStemExecutionHost
@@ -86,6 +85,8 @@ import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloa
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetImportCoordinator
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
+import com.mardous.booming.separation.process.createSourceSeparationProcessGeneration
+import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationMultiStemExecutionHost
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeCatalogLoader
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeLayout
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeProcessController
@@ -286,11 +287,15 @@ private val mainModule = module {
         HtdemucsSourceSeparationEngine(
             coordinator = get(),
             rangeExecutor = HtdemucsSourceSeparationRangeExecutor(androidContext()),
+            processGeneration = createSourceSeparationProcessGeneration(),
             ownerPid = android.os.Process.myPid(),
         )
     }
     single<SourceSeparationMultiStemExecutionHost> {
-        InProcessSourceSeparationMultiStemExecutionHost(get())
+        get<BoundRemoteSourceSeparationMultiStemExecutionHost>()
+    }
+    single {
+        BoundRemoteSourceSeparationMultiStemExecutionHost(androidContext())
     }
     single {
         SourceSeparationMultiStemProductFacade(

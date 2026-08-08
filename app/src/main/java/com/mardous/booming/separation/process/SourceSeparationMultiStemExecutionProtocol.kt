@@ -13,6 +13,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagno
 import com.mardous.booming.separation.model.contract.StemId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 internal const val SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION = 1
 
@@ -166,6 +167,12 @@ internal data class SourceSeparationMultiStemExecutionCompletion(
 @Serializable
 internal sealed class SourceSeparationMultiStemExecutionEventPayload {
     @Serializable
+    @SerialName("accepted")
+    data class Accepted(
+        val descriptor: SourceSeparationMultiStemExecutionDescriptor,
+    ) : SourceSeparationMultiStemExecutionEventPayload()
+
+    @Serializable
     @SerialName("progress")
     data class Progress(
         val completedWindows: Int,
@@ -198,6 +205,33 @@ internal sealed class SourceSeparationMultiStemExecutionEventPayload {
     data class Completed(
         val completion: SourceSeparationMultiStemExecutionCompletion,
     ) : SourceSeparationMultiStemExecutionEventPayload()
+
+    @Serializable
+    @SerialName("already-completed")
+    data class AlreadyCompleted(
+        val completion: SourceSeparationMultiStemExecutionCompletion,
+    ) : SourceSeparationMultiStemExecutionEventPayload()
+
+    @Serializable
+    @SerialName("paused")
+    data class Paused(
+        val reason: com.mardous.booming.separation.SourceSeparationPauseReason,
+    ) : SourceSeparationMultiStemExecutionEventPayload()
+
+    @Serializable
+    @SerialName("canceled")
+    data class Canceled(
+        val message: String? = null,
+    ) : SourceSeparationMultiStemExecutionEventPayload()
+
+    @Serializable
+    @SerialName("failed")
+    data class Failed(
+        val errorType: String,
+        val message: String? = null,
+    ) : SourceSeparationMultiStemExecutionEventPayload() {
+        init { require(errorType.isNotBlank()) }
+    }
 }
 
 @Serializable
@@ -212,6 +246,128 @@ internal data class SourceSeparationMultiStemExecutionEvent(
         require(protocolVersion == SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION)
         require(runId.isNotBlank() && processGeneration > 0L && sequence > 0L)
     }
+}
+
+@Serializable
+internal data class SourceSeparationMultiStemIpcConnectResponse(
+    val protocolVersion: Int = SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION,
+    val processGeneration: Long,
+    val pid: Int,
+) {
+    init {
+        require(protocolVersion == SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION)
+        require(processGeneration > 0L && pid > 0)
+    }
+}
+
+@Serializable
+internal data class SourceSeparationMultiStemIpcStartResponse(
+    val protocolVersion: Int = SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION,
+    val status: SourceSeparationMultiStemIpcStatus,
+    val runId: String? = null,
+    val processGeneration: Long? = null,
+    val errorType: String? = null,
+    val message: String? = null,
+) {
+    init {
+        require(protocolVersion == SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION)
+        if (status == SourceSeparationMultiStemIpcStatus.Accepted) {
+            require(!runId.isNullOrBlank() && processGeneration != null && processGeneration > 0L)
+            require(errorType == null)
+        }
+        require(errorType == null || errorType.isNotBlank())
+    }
+}
+
+@Serializable
+internal enum class SourceSeparationMultiStemIpcStatus {
+    Accepted,
+    Applied,
+    AlreadyApplied,
+    Busy,
+    NoActiveRun,
+    StaleRun,
+    StaleGeneration,
+    Terminal,
+    Rejected,
+    Failed,
+}
+
+@Serializable
+internal enum class SourceSeparationMultiStemIpcControlAction {
+    Pause,
+    Cancel,
+}
+
+@Serializable
+internal data class SourceSeparationMultiStemIpcControlCommand(
+    val protocolVersion: Int = SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION,
+    val runId: String,
+    val processGeneration: Long,
+    val action: SourceSeparationMultiStemIpcControlAction,
+    val pauseReason: com.mardous.booming.separation.SourceSeparationPauseReason? = null,
+) {
+    init {
+        require(protocolVersion == SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION)
+        require(runId.isNotBlank() && processGeneration > 0L)
+        require((action == SourceSeparationMultiStemIpcControlAction.Pause) ==
+            (pauseReason != null))
+    }
+}
+
+@Serializable
+internal data class SourceSeparationMultiStemIpcControlResponse(
+    val protocolVersion: Int = SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION,
+    val status: SourceSeparationMultiStemIpcStatus,
+) {
+    init {
+        require(protocolVersion == SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION)
+    }
+}
+
+internal object SourceSeparationMultiStemExecutionCodec {
+    private val json = Json {
+        encodeDefaults = true
+        explicitNulls = true
+        ignoreUnknownKeys = false
+        classDiscriminator = "eventType"
+    }
+
+    fun encodeDescriptor(value: SourceSeparationMultiStemExecutionDescriptor): String =
+        json.encodeToString(SourceSeparationMultiStemExecutionDescriptor.serializer(), value)
+
+    fun decodeDescriptor(value: String): SourceSeparationMultiStemExecutionDescriptor =
+        json.decodeFromString(SourceSeparationMultiStemExecutionDescriptor.serializer(), value)
+
+    fun encodeEvent(value: SourceSeparationMultiStemExecutionEvent): String =
+        json.encodeToString(SourceSeparationMultiStemExecutionEvent.serializer(), value)
+
+    fun decodeEvent(value: String): SourceSeparationMultiStemExecutionEvent =
+        json.decodeFromString(SourceSeparationMultiStemExecutionEvent.serializer(), value)
+
+    fun encodeConnectResponse(value: SourceSeparationMultiStemIpcConnectResponse): String =
+        json.encodeToString(SourceSeparationMultiStemIpcConnectResponse.serializer(), value)
+
+    fun decodeConnectResponse(value: String): SourceSeparationMultiStemIpcConnectResponse =
+        json.decodeFromString(SourceSeparationMultiStemIpcConnectResponse.serializer(), value)
+
+    fun encodeStartResponse(value: SourceSeparationMultiStemIpcStartResponse): String =
+        json.encodeToString(SourceSeparationMultiStemIpcStartResponse.serializer(), value)
+
+    fun decodeStartResponse(value: String): SourceSeparationMultiStemIpcStartResponse =
+        json.decodeFromString(SourceSeparationMultiStemIpcStartResponse.serializer(), value)
+
+    fun encodeControlCommand(value: SourceSeparationMultiStemIpcControlCommand): String =
+        json.encodeToString(SourceSeparationMultiStemIpcControlCommand.serializer(), value)
+
+    fun decodeControlCommand(value: String): SourceSeparationMultiStemIpcControlCommand =
+        json.decodeFromString(SourceSeparationMultiStemIpcControlCommand.serializer(), value)
+
+    fun encodeControlResponse(value: SourceSeparationMultiStemIpcControlResponse): String =
+        json.encodeToString(SourceSeparationMultiStemIpcControlResponse.serializer(), value)
+
+    fun decodeControlResponse(value: String): SourceSeparationMultiStemIpcControlResponse =
+        json.decodeFromString(SourceSeparationMultiStemIpcControlResponse.serializer(), value)
 }
 
 private fun requireStemPaths(paths: List<SourceSeparationMultiStemExecutionStemPath>) {
