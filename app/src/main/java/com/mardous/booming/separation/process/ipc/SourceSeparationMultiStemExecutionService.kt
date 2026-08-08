@@ -27,6 +27,9 @@ import com.mardous.booming.separation.process.toMultiStemExecutionPreparation
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcControlAction
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcControlCommand
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcControlResponse
+import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcActiveRunResponse
+import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcActiveRunState
+import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcRunAuthority
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStartResponse
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStatus
 import com.mardous.booming.separation.process.SourceSeparationForegroundControlAction
@@ -109,6 +112,7 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                     ),
                 )
             } catch (error: Throwable) {
+                reservedRun?.observerDisconnected()
                 synchronized(stateLock) {
                     if (active === reservedRun) active = null
                 }
@@ -153,6 +157,40 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
             }
         }
 
+        override fun activeRun(): String = synchronized(stateLock) {
+            val state = active?.snapshot()
+            SourceSeparationMultiStemExecutionCodec.encodeActiveRunResponse(
+                SourceSeparationMultiStemIpcActiveRunResponse(
+                    status = if (state == null) {
+                        SourceSeparationMultiStemIpcStatus.NoActiveRun
+                    } else {
+                        SourceSeparationMultiStemIpcStatus.Active
+                    },
+                    state = state,
+                ),
+            )
+        }
+
+        override fun adopt(
+            callback: ISourceSeparationMultiStemExecutionCallback,
+        ): String = synchronized(stateLock) {
+            val run = active
+                ?: return@synchronized SourceSeparationMultiStemExecutionCodec
+                    .encodeActiveRunResponse(SourceSeparationMultiStemIpcActiveRunResponse(
+                        status = SourceSeparationMultiStemIpcStatus.NoActiveRun,
+                    ))
+            check(run.independentlyOwned) {
+                "A client-bound multi-stem run cannot replace its observer."
+            }
+            run.adopt(callback)
+            SourceSeparationMultiStemExecutionCodec.encodeActiveRunResponse(
+                SourceSeparationMultiStemIpcActiveRunResponse(
+                    status = SourceSeparationMultiStemIpcStatus.Active,
+                    state = requireNotNull(run.snapshot()),
+                ),
+            )
+        }
+
         override fun terminateForValidation() {
             check(BuildConfig.DEBUG) { "Validation process termination is debug-only." }
             Thread({
@@ -177,6 +215,17 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
             "Multi-stem execution service requires an explicit bind action."
         }
         return binder
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        if (intent?.action != ACTION_BIND) return false
+        synchronized(stateLock) {
+            active?.let { run ->
+                run.observerDisconnected()
+                if (!run.independentlyOwned) run.requestCancel()
+            }
+        }
+        return false
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -212,6 +261,7 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
         foregroundController.stopActive("service-destroyed")
         synchronized(stateLock) {
             active?.requestCancel()
+            active?.observerDisconnected()
             active = null
         }
         worker.shutdownNow()
@@ -316,6 +366,7 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
             synchronized(stateLock) {
                 if (active === run) active = null
             }
+            run.observerDisconnected()
         }
     }
 
@@ -396,13 +447,24 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
 
     private class ActiveRun(
         val descriptor: SourceSeparationMultiStemExecutionDescriptor,
-        private val callback: ISourceSeparationMultiStemExecutionCallback,
+        callback: ISourceSeparationMultiStemExecutionCallback,
         val foregroundLease: SourceSeparationForegroundLeaseRequest?,
     ) {
         private val sequence = AtomicLong(0L)
         private val pause = AtomicBoolean(false)
         private val cancel = AtomicBoolean(false)
         private val pauseReason = AtomicReference<SourceSeparationPauseReason?>(null)
+        private var callback: ISourceSeparationMultiStemExecutionCallback? = null
+        private var callbackBinder: IBinder? = null
+        private var callbackDeathRecipient: IBinder.DeathRecipient? = null
+        private var latestEvent: SourceSeparationMultiStemExecutionEvent? = null
+
+        val independentlyOwned: Boolean
+            get() = foregroundLease != null
+
+        init {
+            adopt(callback)
+        }
 
         fun requestPause(reason: SourceSeparationPauseReason) {
             pauseReason.set(reason)
@@ -419,6 +481,49 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                 descriptor.processGeneration == request.processGeneration &&
                 foregroundLease == request
 
+        @Synchronized
+        fun adopt(newCallback: ISourceSeparationMultiStemExecutionCallback) {
+            observerDisconnected()
+            val binder = newCallback.asBinder()
+            val recipient = IBinder.DeathRecipient {
+                synchronized(this) {
+                    if (callbackBinder === binder) observerDisconnected()
+                }
+            }
+            binder.linkToDeath(recipient, 0)
+            callback = newCallback
+            callbackBinder = binder
+            callbackDeathRecipient = recipient
+        }
+
+        @Synchronized
+        fun observerDisconnected() {
+            val binder = callbackBinder
+            val recipient = callbackDeathRecipient
+            if (binder != null && recipient != null) {
+                runCatching { binder.unlinkToDeath(recipient, 0) }
+            }
+            callback = null
+            callbackBinder = null
+            callbackDeathRecipient = null
+        }
+
+        @Synchronized
+        fun snapshot(): SourceSeparationMultiStemIpcActiveRunState? =
+            latestEvent?.let { event ->
+                SourceSeparationMultiStemIpcActiveRunState(
+                    descriptor = descriptor,
+                    authority = if (independentlyOwned) {
+                        SourceSeparationMultiStemIpcRunAuthority.IndependentForeground
+                    } else {
+                        SourceSeparationMultiStemIpcRunAuthority.ClientBound
+                    },
+                    latestEvent = event,
+                    observerConnected = callback != null,
+                    foregroundLease = foregroundLease,
+                )
+            }
+
         fun shouldPause(): Boolean = pause.get() && !cancel.get()
         fun shouldCancel(): Boolean = cancel.get()
         fun pauseReason(): SourceSeparationPauseReason =
@@ -431,9 +536,16 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                 sequence = sequence.incrementAndGet(),
                 payload = payload,
             )
+            val target = synchronized(this) {
+                latestEvent = event
+                callback
+            } ?: return
             runCatching {
-                callback.onEvent(SourceSeparationMultiStemExecutionCodec.encodeEvent(event))
+                target.onEvent(SourceSeparationMultiStemExecutionCodec.encodeEvent(event))
             }.onFailure { error ->
+                synchronized(this) {
+                    if (callback === target) observerDisconnected()
+                }
                 if (error !is RemoteException) Log.w(TAG, "Multi-stem callback failed", error)
             }
         }

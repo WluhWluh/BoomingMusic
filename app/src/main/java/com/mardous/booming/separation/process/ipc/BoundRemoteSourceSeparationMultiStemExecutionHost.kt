@@ -23,6 +23,7 @@ import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcContro
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcControlCommand
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStartCommand
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStatus
+import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcActiveRunState
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.toExecutionDescriptor
 import java.util.concurrent.CountDownLatch
@@ -48,6 +49,61 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             connected.service.terminateForValidation()
         } finally {
             runCatching { applicationContext.unbindService(connected.connection) }
+        }
+    }
+
+    internal fun reconnectableRun(): SourceSeparationMultiStemIpcActiveRunState? {
+        val connected = bind()
+        return try {
+            SourceSeparationMultiStemExecutionCodec.decodeActiveRunResponse(
+                connected.service.activeRun(),
+            ).state
+        } finally {
+            runCatching { applicationContext.unbindService(connected.connection) }
+        }
+    }
+
+    internal fun adoptReconnectableRun(
+        onEvent: (SourceSeparationMultiStemExecutionEvent) -> Unit,
+    ): SourceSeparationMultiStemAdoptedRun? {
+        val connected = bind()
+        var adopted = false
+        val callback = object : ISourceSeparationMultiStemExecutionCallback.Stub() {
+            override fun onEvent(eventJson: String) {
+                onEvent(SourceSeparationMultiStemExecutionCodec.decodeEvent(eventJson))
+            }
+        }
+        return try {
+            val response = SourceSeparationMultiStemExecutionCodec.decodeActiveRunResponse(
+                connected.service.adopt(callback),
+            )
+            val state = response.state ?: return null
+            adopted = true
+            SourceSeparationMultiStemAdoptedRun(
+                state = state,
+                callback = callback,
+                control = { action, reason ->
+                    SourceSeparationMultiStemExecutionCodec.decodeControlResponse(
+                        connected.service.updateControl(
+                            SourceSeparationMultiStemExecutionCodec.encodeControlCommand(
+                                SourceSeparationMultiStemIpcControlCommand(
+                                    runId = state.descriptor.runId,
+                                    processGeneration = state.descriptor.processGeneration,
+                                    action = action,
+                                    pauseReason = reason,
+                                ),
+                            ),
+                        ),
+                    ).status
+                },
+                closeBinding = {
+                    runCatching { applicationContext.unbindService(connected.connection) }
+                },
+            )
+        } finally {
+            if (!adopted) {
+                runCatching { applicationContext.unbindService(connected.connection) }
+            }
         }
     }
 
@@ -282,4 +338,29 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
         const val DEFAULT_CONTROL_POLL_MS = 50L
         val AlreadyCompletedSignal = IllegalStateException("already-completed")
     }
+}
+
+internal class SourceSeparationMultiStemAdoptedRun(
+    val state: SourceSeparationMultiStemIpcActiveRunState,
+    @Suppress("unused")
+    private val callback: ISourceSeparationMultiStemExecutionCallback,
+    private val control: (
+        SourceSeparationMultiStemIpcControlAction,
+        SourceSeparationPauseReason?,
+    ) -> SourceSeparationMultiStemIpcStatus,
+    private val closeBinding: () -> Unit,
+) : AutoCloseable {
+    fun pause(
+        reason: SourceSeparationPauseReason = SourceSeparationPauseReason.Standard,
+    ): SourceSeparationMultiStemIpcStatus = control(
+        SourceSeparationMultiStemIpcControlAction.Pause,
+        reason,
+    )
+
+    fun cancel(): SourceSeparationMultiStemIpcStatus = control(
+        SourceSeparationMultiStemIpcControlAction.Cancel,
+        null,
+    )
+
+    override fun close() = closeBinding()
 }

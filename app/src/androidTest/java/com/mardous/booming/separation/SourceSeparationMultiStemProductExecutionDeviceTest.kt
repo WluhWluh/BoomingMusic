@@ -43,8 +43,12 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRe
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationMultiStemExecutionHost
+import com.mardous.booming.separation.process.ipc.SourceSeparationMultiStemAdoptedRun
 import com.mardous.booming.separation.process.ipc.SourceSeparationMediaProcessingForegroundController
 import com.mardous.booming.separation.process.ipc.SourceSeparationMultiStemExecutionService
+import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionEventPayload
+import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcRunAuthority
+import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStatus
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorQualityGate
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
@@ -1537,6 +1541,155 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 }
                 runCatching { repository.delete(key) }
             }
+            mediaUri?.let { uri -> runCatching { context.contentResolver.delete(uri, null, null) } }
+        }
+    }
+
+    @Test
+    fun independentProductRunReplacesObserverAndRoutesCancel() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
+        val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
+        assumeTrue(modelId.isNotBlank() && relativeSource.isNotBlank())
+        require(modelId == OFFICIAL_SIX_STEM_MODEL_ID && SAFE_RELATIVE_PATH.matches(relativeSource))
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val source = File(context.filesDir, relativeSource).canonicalFile
+        require(source.toPath().startsWith(context.filesDir.canonicalFile.toPath()) && source.isFile)
+        val runId = arguments.getString(ARG_RUN_ID)?.takeIf(SAFE_NAME::matches)
+            ?: "observer-handoff-${System.currentTimeMillis()}"
+        val koin = GlobalContext.get()
+        val facade = koin.get<SourceSeparationMultiStemProductFacade>()
+        val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
+        val store = koin.get<SourceSeparationCacheStore>()
+        val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
+            .resolve("$runId.json")
+        val report = JSONObject()
+            .put("runId", runId)
+            .put("mode", "independent-observer-handoff-cancel")
+            .put("modelId", modelId)
+            .put("status", "running")
+            .put("deviceModel", android.os.Build.MODEL)
+            .put("sdk", android.os.Build.VERSION.SDK_INT)
+        val producerResult = AtomicReference<Result<HtdemucsSourceSeparationEngineResult>?>()
+        val preparedManifest = AtomicReference<com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest?>()
+        val producerFinished = CountDownLatch(1)
+        val terminalEvent = CountDownLatch(1)
+        val observedSequences = java.util.Collections.synchronizedList(mutableListOf<Long>())
+        var producerThread: Thread? = null
+        var adopted: SourceSeparationMultiStemAdoptedRun? = null
+        var mediaUri: Uri? = null
+        var cacheKey: String? = null
+        try {
+            mediaUri = importIntoMediaStore(context, source, runId)
+            val song = stagedSong(mediaUri, source, runId)
+            repository.entries()
+                .filter { it.modelId == modelId && it.title.startsWith(SONG_TITLE_PREFIX) }
+                .forEach { repository.delete(it.cacheKey) }
+            producerThread = Thread({
+                try {
+                    producerResult.set(runCatching {
+                        facade.separate(
+                            song = song,
+                            modelId = modelId,
+                            runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+                            onPrepared = preparedManifest::set,
+                        )
+                    })
+                } finally {
+                    producerFinished.countDown()
+                }
+            }, "BSS-Multistem-Observer-Handoff").apply { start() }
+
+            val readyDeadline = SystemClock.elapsedRealtime() + PRODUCER_AHEAD_READY_TIMEOUT_MS
+            var committedSegments = 0
+            while (SystemClock.elapsedRealtime() < readyDeadline) {
+                preparedManifest.get()?.let { prepared ->
+                    cacheKey = prepared.cacheKey
+                    committedSegments = store.readRunJournal(prepared.cacheKey)
+                        ?.committedSegments?.size ?: 0
+                }
+                if (committedSegments > 0) break
+                producerResult.get()?.exceptionOrNull()?.let { throw it }
+                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+            }
+            val activeCacheKey = requireNotNull(cacheKey)
+            assertTrue(committedSegments > 0)
+            val remote = BoundRemoteSourceSeparationMultiStemExecutionHost(context)
+            val snapshot = requireNotNull(remote.reconnectableRun())
+            assertEquals(activeCacheKey, snapshot.descriptor.cacheKey)
+            assertEquals(SourceSeparationMultiStemIpcRunAuthority.IndependentForeground,
+                snapshot.authority)
+            assertTrue(snapshot.observerConnected)
+            assertTrue(snapshot.foregroundLease != null)
+            val adoptedRun = requireNotNull(remote.adoptReconnectableRun { event ->
+                observedSequences += event.sequence
+                when (event.payload) {
+                    is SourceSeparationMultiStemExecutionEventPayload.Completed,
+                    is SourceSeparationMultiStemExecutionEventPayload.AlreadyCompleted,
+                    is SourceSeparationMultiStemExecutionEventPayload.Paused,
+                    is SourceSeparationMultiStemExecutionEventPayload.Canceled,
+                    is SourceSeparationMultiStemExecutionEventPayload.Failed ->
+                        terminalEvent.countDown()
+                    else -> Unit
+                }
+            })
+            adopted = adoptedRun
+            assertEquals(activeCacheKey, adoptedRun.state.descriptor.cacheKey)
+            assertTrue(adoptedRun.state.observerConnected)
+
+            producerThread.interrupt()
+            check(producerFinished.await(REMOTE_PROCESS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                "The replaced observer did not release its original binding."
+            }
+            assertTrue(producerResult.get()?.isFailure == true)
+            assertTrue(isMultiStemForeground(context))
+            assertTrue(hasProcessingNotification(context))
+
+            assertEquals(SourceSeparationMultiStemIpcStatus.Applied, adoptedRun.cancel())
+            check(terminalEvent.await(PRODUCER_AHEAD_READY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                "The adopted observer did not receive a terminal cancellation event."
+            }
+            val terminalDeadline = SystemClock.elapsedRealtime() + REMOTE_PROCESS_TIMEOUT_MS
+            var journal = store.readRunJournal(activeCacheKey)
+            while (journal?.lifecycle != SourceSeparationCacheRunJournalLifecycle.Canceled &&
+                SystemClock.elapsedRealtime() < terminalDeadline
+            ) {
+                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+                journal = store.readRunJournal(activeCacheKey)
+            }
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Canceled, journal?.lifecycle)
+            assertTrue(observedSequences.zipWithNext().all { (first, second) -> second > first })
+            val releaseDeadline = SystemClock.elapsedRealtime() + REMOTE_PROCESS_TIMEOUT_MS
+            while ((isMultiStemForeground(context) || hasProcessingNotification(context)) &&
+                SystemClock.elapsedRealtime() < releaseDeadline
+            ) {
+                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+            }
+            assertFalse(isMultiStemForeground(context))
+            assertFalse(hasProcessingNotification(context))
+            report.put("status", "complete")
+                .put("cacheKey", activeCacheKey)
+                .put("committedSegmentsBeforeHandoff", committedSegments)
+                .put("snapshotSequence", snapshot.latestEvent.sequence)
+                .put("adoptedSequence", adoptedRun.state.latestEvent.sequence)
+                .put("observedSequences", JSONArray(observedSequences))
+                .put("terminalLifecycle", journal?.lifecycle?.name)
+                .put("foregroundSurvivedOriginalDisconnect", true)
+                .put("foregroundReleasedAfterCancel", true)
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+            reportFile.writeText(report.toString(2))
+            throw error
+        } finally {
+            adopted?.close()
+            producerThread?.interrupt()
+            producerThread?.join(REMOTE_PROCESS_TIMEOUT_MS)
+            cacheKey?.let { key -> runCatching { repository.delete(key) } }
             mediaUri?.let { uri -> runCatching { context.contentResolver.delete(uri, null, null) } }
         }
     }

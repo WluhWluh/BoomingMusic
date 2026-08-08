@@ -9,5 +9,7 @@ interface ISourceSeparationMultiStemExecutionService {
         ISourceSeparationMultiStemExecutionCallback callback
     );
     String updateControl(String commandJson);
+    String activeRun();
+    String adopt(ISourceSeparationMultiStemExecutionCallback callback);
     void terminateForValidation();
 }
