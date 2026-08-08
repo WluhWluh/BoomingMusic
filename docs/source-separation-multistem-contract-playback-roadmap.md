@@ -1207,10 +1207,26 @@ undeclared pipeline or publishing a partial stem set.
   durable `Running` journal without falsely completing the cache, and a new
   service generation completes the same exact cache identity with
   `PreviousOwnerDied`.
-- [ ] Complete the remaining CPU lifecycle/resource matrix on S25 and S10:
-  independent background ownership and contention, and sustained
-  native-memory/thermal observation. Existing product-path runs already record
-  peak PSS and point-in-time thermal status.
+- [x] Reject a concurrent multi-stem product request with a typed `Busy` result
+  without disturbing the accepted remote run. The official six-stem 30-second
+  product run completed on both S25 and S10 after contention was introduced
+  after the first committed segment; the second request returned in 36 ms and
+  143 ms respectively, and the original exact cache identity completed.
+- [x] Add bounded continuous remote-process resource sampling to the contention
+  gate. The S25 and S10 runs sampled PSS/native/Dalvik memory and thermal status
+  every 100 ms while `:source_separation` remained alive. Peak total PSS was
+  about 1.13 GiB on both devices; S10 thermal status rose from 1 to 2 and its
+  final PSS remained about 228 MiB. This is a short product-path smoke, not a
+  long-running memory or thermal qualification.
+- [ ] Verify independent background ownership rather than only a bound call
+  surviving while the app is backgrounded. Cover caller/activity teardown,
+  service reattachment, cancellation, result publication, and player adoption
+  without relying on a live instrumentation owner.
+- [ ] Run the longer CPU lifecycle/resource matrix on S25 and S10, including
+  repeated full songs, cancellation/restart, idle retention and reclamation,
+  native-memory trend, thermal behavior, and process survival. Keep per-device
+  conclusions separate; the short contention smoke above does not close this
+  soak item.
 - [x] Run the new service-recreation segment on S10 from a clean player
   restoration barrier. The test stops the first `PlaybackService`, reconnects
   a fresh `MediaController`, and re-adopts the same exact official six-stem

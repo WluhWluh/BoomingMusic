@@ -166,6 +166,9 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                     callback,
                 ),
             )
+            if (response.status == SourceSeparationMultiStemIpcStatus.Busy) {
+                return HtdemucsSourceSeparationEngineResult.Busy(descriptor.cacheKey)
+            }
             if (response.status != SourceSeparationMultiStemIpcStatus.Accepted) {
                 throw IllegalStateException(
                     "Remote multi-stem start rejected: ${response.status} " +

@@ -1,5 +1,6 @@
 package com.mardous.booming.separation
 
+import android.app.ActivityManager
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.ComponentName
@@ -54,6 +55,7 @@ import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.runBlocking
@@ -1355,6 +1357,151 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
     }
 
     @Test
+    fun concurrentProductRunReturnsBusyAndPreservesRemoteResources() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
+        val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
+        assumeTrue(modelId.isNotBlank() && relativeSource.isNotBlank())
+        require(modelId == OFFICIAL_SIX_STEM_MODEL_ID && SAFE_RELATIVE_PATH.matches(relativeSource))
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val source = File(context.filesDir, relativeSource).canonicalFile
+        require(source.toPath().startsWith(context.filesDir.canonicalFile.toPath()) && source.isFile)
+        val runId = arguments.getString(ARG_RUN_ID)?.takeIf(SAFE_NAME::matches)
+            ?: "contention-${System.currentTimeMillis()}"
+        val koin = GlobalContext.get()
+        val facade = koin.get<SourceSeparationMultiStemProductFacade>()
+        val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
+        val store = koin.get<SourceSeparationCacheStore>()
+        val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
+            .resolve("$runId.json")
+        val report = JSONObject()
+            .put("runId", runId)
+            .put("mode", "remote-contention-resources")
+            .put("modelId", modelId)
+            .put("status", "running")
+            .put("deviceModel", android.os.Build.MODEL)
+            .put("sdk", android.os.Build.VERSION.SDK_INT)
+            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+        val producerResult = AtomicReference<Result<HtdemucsSourceSeparationEngineResult>?>()
+        val preparedManifest = AtomicReference<com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest?>()
+        val producerFinished = CountDownLatch(1)
+        var producerThread: Thread? = null
+        var sampler: RemoteProcessResourceSampler? = null
+        var mediaUri: Uri? = null
+        var cacheKey: String? = null
+        try {
+            mediaUri = importIntoMediaStore(context, source, runId)
+            val song = stagedSong(mediaUri, source, runId)
+            repository.entries()
+                .filter { it.modelId == modelId && it.title.startsWith(SONG_TITLE_PREFIX) }
+                .forEach { repository.delete(it.cacheKey) }
+            val startedAt = SystemClock.elapsedRealtime()
+            producerThread = Thread({
+                try {
+                    producerResult.set(runCatching {
+                        facade.separate(
+                            song = song,
+                            modelId = modelId,
+                            runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+                            onPrepared = preparedManifest::set,
+                        )
+                    })
+                } finally {
+                    producerFinished.countDown()
+                }
+            }, "BSS-Multistem-Contention-Primary").apply { start() }
+
+            val processDeadline = SystemClock.elapsedRealtime() + REMOTE_PROCESS_TIMEOUT_MS
+            var remotePid: Int? = null
+            while (remotePid == null && SystemClock.elapsedRealtime() < processDeadline) {
+                remotePid = sourceSeparationPid(context)
+                if (remotePid == null) SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+            }
+            val pid = requireNotNull(remotePid) { "The remote source-separation process did not start." }
+            sampler = RemoteProcessResourceSampler(context, pid).also { it.start() }
+
+            val readyDeadline = SystemClock.elapsedRealtime() + PRODUCER_AHEAD_READY_TIMEOUT_MS
+            var committedSegments = 0
+            while (SystemClock.elapsedRealtime() < readyDeadline) {
+                preparedManifest.get()?.let { prepared ->
+                    cacheKey = prepared.cacheKey
+                    committedSegments = store.readRunJournal(prepared.cacheKey)
+                        ?.committedSegments?.size ?: 0
+                }
+                if (committedSegments > 0) break
+                producerResult.get()?.exceptionOrNull()?.let { throw it }
+                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+            }
+            val activeCacheKey = requireNotNull(cacheKey)
+            assertTrue(committedSegments > 0)
+            val contentionStartedAt = SystemClock.elapsedRealtime()
+            val contention = facade.separate(
+                song = song,
+                modelId = modelId,
+                runClass = SourceSeparationExecutionRunClass.ManualFullSong,
+            )
+            val contentionElapsedMs = SystemClock.elapsedRealtime() - contentionStartedAt
+            require(contention is HtdemucsSourceSeparationEngineResult.Busy) {
+                "Concurrent request was not reported as busy: $contention"
+            }
+            assertEquals(activeCacheKey, contention.cacheKey)
+            check(producerFinished.await(PRODUCER_AHEAD_READY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                "The primary multi-stem run did not finish."
+            }
+            val completed = producerResult.get()?.getOrThrow()
+            require(completed is HtdemucsSourceSeparationEngineResult.Completed) {
+                "The primary run did not survive contention: $completed"
+            }
+            assertEquals(activeCacheKey, completed.manifest.cacheKey)
+            assertEquals(SourceSeparationCacheManifestState.Completed, completed.manifest.state)
+            sampler.stop()
+            val resources = sampler.snapshot()
+            assertTrue(resources.sampleCount > 0)
+            assertFalse(resources.processMissing)
+            report.put("status", "complete")
+                .put("cacheKey", activeCacheKey)
+                .put("committedSegmentsBeforeContention", committedSegments)
+                .put("contentionStatus", "busy")
+                .put("contentionElapsedMs", contentionElapsedMs)
+                .put("primaryElapsedMs", SystemClock.elapsedRealtime() - startedAt)
+                .put("remoteProcess", JSONObject()
+                    .put("pid", pid)
+                    .put("sampleCount", resources.sampleCount)
+                    .put("totalPssBaselineKiB", resources.totalPssBaselineKiB)
+                    .put("totalPssPeakKiB", resources.totalPssPeakKiB)
+                    .put("totalPssFinalKiB", resources.totalPssFinalKiB)
+                    .put("nativePssBaselineKiB", resources.nativePssBaselineKiB)
+                    .put("nativePssPeakKiB", resources.nativePssPeakKiB)
+                    .put("nativePssFinalKiB", resources.nativePssFinalKiB)
+                    .put("dalvikPssPeakKiB", resources.dalvikPssPeakKiB)
+                    .put("thermalBaseline", resources.thermalBaseline)
+                    .put("thermalPeak", resources.thermalPeak)
+                    .put("thermalFinal", resources.thermalFinal)
+                    .put("processMissing", resources.processMissing))
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+            reportFile.writeText(report.toString(2))
+            throw error
+        } finally {
+            sampler?.stop()
+            producerThread?.join(PRODUCER_AHEAD_READY_TIMEOUT_MS)
+            cacheKey?.let { key ->
+                repeat(20) {
+                    if (!repository.isLeased(key)) return@repeat
+                    SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+                }
+                runCatching { repository.delete(key) }
+            }
+            mediaUri?.let { uri -> runCatching { context.contentResolver.delete(uri, null, null) } }
+        }
+    }
+
+    @Test
     fun remoteProcessDeathLeavesDurableRunAndRecoversOnNewGeneration() {
         val arguments = InstrumentationRegistry.getArguments()
         val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
@@ -1501,6 +1648,14 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
     private fun thermalStatus(context: Context): Int =
         context.getSystemService(PowerManager::class.java).currentThermalStatus
 
+    private fun sourceSeparationPid(context: Context): Int? =
+        context.getSystemService(ActivityManager::class.java)
+            .runningAppProcesses
+            ?.singleOrNull { process ->
+                process.processName == "${context.packageName}:source_separation"
+            }
+            ?.pid
+
     private fun waitForMediaController(
         controller: MediaController,
         operation: String,
@@ -1605,6 +1760,106 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         }
     }
 
+    private class RemoteProcessResourceSampler(
+        private val context: Context,
+        private val pid: Int,
+    ) {
+        private val activityManager = context.getSystemService(ActivityManager::class.java)
+        private val powerManager = context.getSystemService(PowerManager::class.java)
+        private val running = AtomicBoolean(false)
+        private val samples = AtomicInteger(0)
+        private val totalPeak = AtomicInteger(0)
+        private val nativePeak = AtomicInteger(0)
+        private val dalvikPeak = AtomicInteger(0)
+        private val thermalPeak = AtomicInteger(powerManager.currentThermalStatus)
+        private val processMissing = AtomicBoolean(false)
+        private val baseline = AtomicReference<RemoteMemorySample?>()
+        private val latest = AtomicReference<RemoteMemorySample?>()
+        private var thread: Thread? = null
+
+        fun start() {
+            if (!running.compareAndSet(false, true)) return
+            sample()
+            thread = Thread({
+                while (running.get()) {
+                    sample()
+                    SystemClock.sleep(REMOTE_RESOURCE_SAMPLE_INTERVAL_MS)
+                }
+            }, "BSS-Multistem-Remote-Resources").apply { start() }
+        }
+
+        fun stop() {
+            if (!running.getAndSet(false)) return
+            thread?.join(2_000L)
+            sample()
+        }
+
+        fun snapshot(): RemoteResourceSnapshot {
+            val first = requireNotNull(baseline.get())
+            val last = requireNotNull(latest.get())
+            return RemoteResourceSnapshot(
+                sampleCount = samples.get(),
+                totalPssBaselineKiB = first.totalPssKiB,
+                totalPssPeakKiB = totalPeak.get(),
+                totalPssFinalKiB = last.totalPssKiB,
+                nativePssBaselineKiB = first.nativePssKiB,
+                nativePssPeakKiB = nativePeak.get(),
+                nativePssFinalKiB = last.nativePssKiB,
+                dalvikPssPeakKiB = dalvikPeak.get(),
+                thermalBaseline = first.thermalStatus,
+                thermalPeak = thermalPeak.get(),
+                thermalFinal = last.thermalStatus,
+                processMissing = processMissing.get(),
+            )
+        }
+
+        private fun sample() {
+            val processAlive = activityManager.runningAppProcesses
+                ?.any { it.pid == pid } == true
+            if (!processAlive) {
+                processMissing.set(true)
+                return
+            }
+            val memory = activityManager.getProcessMemoryInfo(intArrayOf(pid)).singleOrNull()
+                ?: return
+            val current = RemoteMemorySample(
+                totalPssKiB = memory.totalPss,
+                nativePssKiB = memory.nativePss,
+                dalvikPssKiB = memory.dalvikPss,
+                thermalStatus = powerManager.currentThermalStatus,
+            )
+            baseline.compareAndSet(null, current)
+            latest.set(current)
+            samples.incrementAndGet()
+            totalPeak.accumulateAndGet(current.totalPssKiB, ::maxOf)
+            nativePeak.accumulateAndGet(current.nativePssKiB, ::maxOf)
+            dalvikPeak.accumulateAndGet(current.dalvikPssKiB, ::maxOf)
+            thermalPeak.accumulateAndGet(current.thermalStatus, ::maxOf)
+        }
+    }
+
+    private data class RemoteMemorySample(
+        val totalPssKiB: Int,
+        val nativePssKiB: Int,
+        val dalvikPssKiB: Int,
+        val thermalStatus: Int,
+    )
+
+    private data class RemoteResourceSnapshot(
+        val sampleCount: Int,
+        val totalPssBaselineKiB: Int,
+        val totalPssPeakKiB: Int,
+        val totalPssFinalKiB: Int,
+        val nativePssBaselineKiB: Int,
+        val nativePssPeakKiB: Int,
+        val nativePssFinalKiB: Int,
+        val dalvikPssPeakKiB: Int,
+        val thermalBaseline: Int,
+        val thermalPeak: Int,
+        val thermalFinal: Int,
+        val processMissing: Boolean,
+    )
+
     private companion object {
         const val ARG_MODEL_ID = "bssMultistemModelId"
         const val ARG_REPLACEMENT_MODEL_ID = "bssMultistemReplacementModelId"
@@ -1625,6 +1880,8 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val SERVICE_RECREATION_SETTLE_MS = 500L
         const val PRODUCER_AHEAD_READY_WINDOWS = 2
         const val PRODUCER_AHEAD_READY_TIMEOUT_MS = 10L * 60L * 1_000L
+        const val REMOTE_PROCESS_TIMEOUT_MS = 30_000L
+        const val REMOTE_RESOURCE_SAMPLE_INTERVAL_MS = 100L
         const val OFFICIAL_SIX_STEM_MODEL_ID =
             "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0"
         val SHA256 = Regex("^[0-9a-f]{64}$")
