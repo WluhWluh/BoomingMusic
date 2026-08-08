@@ -1226,10 +1226,16 @@ undeclared pipeline or publishing a partial stem set.
   data plane and artifact lease to release, deletes the exact cache directory,
   notifies `PlaybackService`, and verifies that no old stem remains while the
   original song stays in the active transport.
-- [ ] Repeat active completed-cache deletion on S25 through the real cache
-  management panel button, including playback-state broadcast and visible UI
-  refresh. The S10 service/repository gate proves the data boundary but does
-  not substitute for the user-interaction gate.
+- [x] Delete a completed official six-stem cache on S25 through the real cache
+  management panel button while the worker is idle. The production Compose
+  path removed the exact cache directory and refreshed the visible item list;
+  it did not change the installed model selection.
+- [ ] Repeat completed-cache deletion on S25 while that cache is actively
+  adopted by playback. The panel callback must release the data-plane lease,
+  disable separated playback, send the playback-state broadcast, and verify
+  that the current-song status is refreshed. The S10 service/repository gate
+  proves the data boundary but does not substitute for this user-interaction
+  gate.
 - [ ] Start S25 producer-ahead playback with two ready windows. On devices whose
   measured production rate cannot sustain the stride, keep separation offline
   or wait for completion instead of repeatedly pausing playback; S10 results
@@ -1493,6 +1499,14 @@ The strict S10 rerun is recorded in
 playback-recreate-s10-strict-20260809-r1.json`. It passed on `SM-G9730`, API
 31, arm64 with the same exact cache identity, six ordered stems, and zero seek
 underruns under the default allowance of zero.
+
+The S25 idle-management deletion gate used the production cache-management
+ViewModel and Compose delete button against completed official six-stem cache
+`1227059621e8596ea33945b7a834c1f733d71097d1f7febc3f57f6312c96c1ac`.
+The entry disappeared from both the repository and rendered list, its cache
+directory was removed, and the foreground worker remained idle. Because no
+playback session was active, this evidence does not cover lease release or the
+`PlaybackService` cache-deleted notification.
 
 ## Required Tests and Gates
 
