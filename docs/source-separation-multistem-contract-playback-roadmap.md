@@ -1221,11 +1221,11 @@ undeclared pipeline or publishing a partial stem set.
 - [x] Repeat the S10 service-recreation run without the diagnostic allowance.
   The strict rerun passed with zero seek underruns, so the combined S10/S25
   service-recreation gate is complete.
-- [x] Delete an actively adopted completed official six-stem cache on S10.
-  The independent product-path mode disables separated playback, waits for the
-  data plane and artifact lease to release, deletes the exact cache directory,
-  notifies `PlaybackService`, and verifies that no old stem remains while the
-  original song stays in the active transport.
+- [x] Delete an actively adopted completed official six-stem cache on S10 and
+  S25 through the product `PlaybackService` path. The mode disables separated
+  playback, waits for the data plane and artifact lease to release, deletes the
+  exact cache directory, notifies `PlaybackService`, and verifies that no old
+  stem remains while the original song stays in the active transport.
 - [x] Delete a completed official six-stem cache on S25 through the real cache
   management panel button while the worker is idle. The production Compose
   path removed the exact cache directory and refreshed the visible item list;
@@ -1507,6 +1507,13 @@ The entry disappeared from both the repository and rendered list, its cache
 directory was removed, and the foreground worker remained idle. Because no
 playback session was active, this evidence does not cover lease release or the
 `PlaybackService` cache-deleted notification.
+
+The S25 active product-path rerun `playback-delete-s25-20260809-r2` adopted the
+same exact six-stem cache through `PlaybackService`, disabled separated
+playback, released the lease, deleted the cache, and completed the
+`cache-deleted` notification path while retaining the original transport. The
+test is intentionally separate from the management-panel gate because it
+drives the service command directly.
 
 ## Required Tests and Gates
 

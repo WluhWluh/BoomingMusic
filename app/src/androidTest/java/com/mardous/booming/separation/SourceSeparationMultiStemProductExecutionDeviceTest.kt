@@ -456,7 +456,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                         })
                         .put("openCompleted", repository.openCompletedCache(
                             playbackResolution.song.cacheKey,
-                        ) != null)
+                        )?.use { true } == true)
                         .also { directStatus.closePlaybackForTest() }
                 }
                 is SourceSeparationRuntimeSongResolution.Unavailable -> JSONObject()
