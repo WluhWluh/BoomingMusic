@@ -13,6 +13,7 @@ import com.mardous.booming.separation.model.contract.MultiTensorFixtureRole
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContract
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorQualityGate
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
 import java.io.File
 import java.io.FileInputStream
@@ -25,6 +26,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.koin.core.context.GlobalContext
 
 @RunWith(AndroidJUnit4::class)
 class HtdemucsExecutableFixtureDeviceTest {
@@ -57,22 +59,26 @@ class HtdemucsExecutableFixtureDeviceTest {
                 .put("appApkSha256", appApkSha)
                 .put("testApkSha256", testApkSha)
             )
-            val contractAsset = arguments.requiredSafeName(ARG_CONTRACT_ASSET)
-            val contract = context.assets.open("source-separation/research-contracts/$contractAsset")
-                .bufferedReader().use { reader ->
-                    SourceSeparationMultiTensorExecutableContractLoader.load(reader.readText())
-                }
             val stagingRoot = File(context.filesDir, STAGING_DIRECTORY).canonicalFile
             val bundle = File(stagingRoot, arguments.requiredSafeName(ARG_BUNDLE_DIRECTORY))
                 .canonicalFile.requireInside(stagingRoot)
-            val modelFile = File(bundle, contract.artifact.fileName)
             val fixtureDirectory = File(bundle, FIXTURE_DIRECTORY)
-            require(modelFile.isFile && fixtureDirectory.isDirectory) {
-                "The staged HTDemucs fixture bundle is incomplete."
+            require(fixtureDirectory.isDirectory) { "The staged fixture directory is missing." }
+            val installedModelId = arguments.getString(ARG_INSTALLED_MODEL_ID)
+                ?.takeIf(String::isNotBlank)
+            val executable = if (installedModelId != null) {
+                require(SAFE_NAME.matches(installedModelId)) { "Unsafe installed model ID." }
+                resolveInstalledReleaseExecutable(installedModelId)
+            } else {
+                resolveStagedExecutable(context, arguments, bundle)
             }
-            report.put("contractAsset", contractAsset)
+            val contract = executable.contract
+            val modelFile = executable.modelFile
+            report.put("executableSource", executable.source)
+                .put("contractAsset", executable.contractAsset)
                 .put("contractId", contract.modelContract.contractId)
                 .put("modelId", contract.modelContract.modelId)
+                .put("sidecarSha256", executable.sidecarSha256)
                 .put("artifact", verifyArtifact(modelFile, contract))
                 .put("fixtures", verifyFixtures(fixtureDirectory, contract))
 
@@ -280,6 +286,49 @@ class HtdemucsExecutableFixtureDeviceTest {
             .put("sha256", actualSha)
     }
 
+    private fun resolveInstalledReleaseExecutable(modelId: String): ExecutableUnderTest {
+        val installed = requireNotNull(
+            GlobalContext.get().get<SourceSeparationMultiStemReleaseInstaller>()
+                .installed(modelId),
+        ) { "The requested Release model is not installed." }
+        val contract = installed.sidecarFile.bufferedReader().use { reader ->
+            SourceSeparationMultiTensorExecutableContractLoader.load(reader.readText())
+        }
+        require(contract.modelContract.modelId == installed.modelId &&
+            contract.modelContract.contractId == installed.contractId &&
+            contract.modelContract.pipelineContract.pipelineId == installed.pipelineId &&
+            contract.artifact.fileName == installed.modelFile.name &&
+            contract.artifact.byteSize == installed.modelByteSize &&
+            contract.artifact.sha256.equals(installed.modelSha256, ignoreCase = true)
+        ) { "Installed Release record, sidecar, and artifact identity differ." }
+        return ExecutableUnderTest(
+            source = "installed-release",
+            contractAsset = null,
+            contract = contract,
+            modelFile = installed.modelFile,
+            sidecarSha256 = installed.sidecarFile.sha256(),
+        )
+    }
+
+    private fun resolveStagedExecutable(
+        context: android.content.Context,
+        arguments: android.os.Bundle,
+        bundle: File,
+    ): ExecutableUnderTest {
+        val contractAsset = arguments.requiredSafeName(ARG_CONTRACT_ASSET)
+        val contract = context.assets.open("source-separation/research-contracts/$contractAsset")
+            .bufferedReader().use { reader ->
+                SourceSeparationMultiTensorExecutableContractLoader.load(reader.readText())
+            }
+        return ExecutableUnderTest(
+            source = "staged-diagnostic",
+            contractAsset = contractAsset,
+            contract = contract,
+            modelFile = File(bundle, contract.artifact.fileName),
+            sidecarSha256 = null,
+        )
+    }
+
     private fun verifyFixtures(
         directory: File,
         contract: SourceSeparationMultiTensorExecutableContract,
@@ -403,6 +452,14 @@ class HtdemucsExecutableFixtureDeviceTest {
             .put("correlation", correlation)
     }
 
+    private data class ExecutableUnderTest(
+        val source: String,
+        val contractAsset: String?,
+        val contract: SourceSeparationMultiTensorExecutableContract,
+        val modelFile: File,
+        val sidecarSha256: String?,
+    )
+
     private fun List<com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorStemMetrics>.toJson(
         contract: SourceSeparationMultiTensorExecutableContract,
     ): JSONObject {
@@ -441,6 +498,7 @@ class HtdemucsExecutableFixtureDeviceTest {
         const val ARG_RUN_ID = "htdemucsRunId"
         const val ARG_CONTRACT_ASSET = "htdemucsContractAsset"
         const val ARG_BUNDLE_DIRECTORY = "htdemucsBundleDirectory"
+        const val ARG_INSTALLED_MODEL_ID = "htdemucsInstalledModelId"
         const val ARG_APP_COMMIT = "htdemucsAppCommit"
         const val ARG_APP_APK_SHA256 = "htdemucsAppApkSha256"
         const val ARG_TEST_APK_SHA256 = "htdemucsTestApkSha256"
