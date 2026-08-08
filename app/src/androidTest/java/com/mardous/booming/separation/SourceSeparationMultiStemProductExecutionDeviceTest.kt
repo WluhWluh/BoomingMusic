@@ -67,6 +67,214 @@ import org.koin.core.context.GlobalContext
 @RunWith(AndroidJUnit4::class)
 class SourceSeparationMultiStemProductExecutionDeviceTest {
     @Test
+    fun completedPlaybackSwitchesExactModelAndRetainsOldCache() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
+        val replacementModelId = arguments.getString(ARG_REPLACEMENT_MODEL_ID).orEmpty()
+        val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
+        assumeTrue(
+            modelId.isNotBlank() && replacementModelId.isNotBlank() &&
+                relativeSource.isNotBlank(),
+        )
+        require(
+            modelId in EXPECTED_MODEL_IDS && replacementModelId in EXPECTED_MODEL_IDS &&
+                modelId != replacementModelId && SAFE_RELATIVE_PATH.matches(relativeSource),
+        )
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val source = File(context.filesDir, relativeSource).canonicalFile
+        require(source.toPath().startsWith(context.filesDir.canonicalFile.toPath()) && source.isFile)
+        arguments.getString(ARG_SOURCE_SHA256)?.let { expected ->
+            require(SHA256.matches(expected) && source.sha256() == expected)
+        }
+        val runId = arguments.getString(ARG_RUN_ID)?.takeIf(SAFE_NAME::matches)
+            ?: "playback-switch-${System.currentTimeMillis()}"
+        val koin = GlobalContext.get()
+        val facade = koin.get<SourceSeparationMultiStemProductFacade>()
+        val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
+        val promoter = koin.get<SourceSeparationCacheFlacPromoter>()
+        val selectionStore = koin.get<SourceSeparationMultiStemPlaybackSelectionStore>()
+        val processor = koin.get<SourceSeparationMixAudioProcessor>()
+        val preferences = koin.get<SharedPreferences>()
+        val initialSelectedModelId = selectionStore.selectedModelId()
+        val preferenceSnapshot = snapshotPreferences(
+            preferences,
+            setOf(MINIMUM_SONG_DURATION, SOURCE_SEPARATION_AUTO_START, IGNORE_AUDIO_FOCUS),
+        )
+        val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
+            .resolve("$runId.json")
+        val report = JSONObject()
+            .put("runId", runId)
+            .put("mode", "completed-playback-model-switch")
+            .put("modelId", modelId)
+            .put("replacementModelId", replacementModelId)
+            .put("status", "running")
+            .put("deviceModel", android.os.Build.MODEL)
+            .put("sdk", android.os.Build.VERSION.SDK_INT)
+            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+        val cacheKeys = mutableListOf<String>()
+        var mediaUri: Uri? = null
+        var controller: MediaController? = null
+        try {
+            check(
+                preferences.edit()
+                    .putInt(MINIMUM_SONG_DURATION, 0)
+                    .putBoolean(SOURCE_SEPARATION_AUTO_START, false)
+                    .putBoolean(IGNORE_AUDIO_FOCUS, true)
+                    .commit(),
+            )
+            mediaUri = importIntoMediaStore(context, source, runId)
+            val song = stagedSong(mediaUri, source, runId)
+            repository.entries()
+                .filter {
+                    it.modelId in setOf(modelId, replacementModelId) &&
+                        it.title.startsWith(SONG_TITLE_PREFIX)
+                }
+                .forEach { repository.delete(it.cacheKey) }
+
+            fun prepareCompletedCache(targetModelId: String): Pair<String, List<String>> {
+                val separated = facade.separate(song = song, modelId = targetModelId)
+                val manifest = when (separated) {
+                    is HtdemucsSourceSeparationEngineResult.Completed -> separated.manifest
+                    is HtdemucsSourceSeparationEngineResult.AlreadyCompleted -> separated.manifest
+                    is HtdemucsSourceSeparationEngineResult.Busy -> error("Unexpected busy result")
+                }
+                val promoted = promoter.promote(manifest.cacheKey)
+                val playbackManifest = when (promoted) {
+                    is SourceSeparationCacheFlacPromotionResult.Completed -> promoted.manifest
+                    is SourceSeparationCacheFlacPromotionResult.AlreadyPromoted -> promoted.manifest
+                    is SourceSeparationCacheFlacPromotionResult.Busy ->
+                        error("Unexpected promotion contention")
+                    SourceSeparationCacheFlacPromotionResult.Unavailable ->
+                        error("FLAC promotion was unavailable")
+                }
+                cacheKeys += playbackManifest.cacheKey
+                return playbackManifest.cacheKey to requireNotNull(playbackManifest.output).stems
+                    .sortedBy { stem -> stem.order }
+                    .map { stem -> stem.stemId.value }
+            }
+
+            val (oldCacheKey, oldStemIds) = prepareCompletedCache(modelId)
+            val (replacementCacheKey, replacementStemIds) =
+                prepareCompletedCache(replacementModelId)
+            assertTrue(oldCacheKey != replacementCacheKey)
+            assertTrue(oldStemIds != replacementStemIds)
+            selectionStore.select(modelId)
+
+            val mediaController = MediaController.Builder(
+                context,
+                SessionToken(context, ComponentName(context, PlaybackService::class.java)),
+            ).buildAsync().get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            controller = mediaController
+            onMediaControllerThread(mediaController) {
+                mediaController.volume = 0f
+                mediaController.setMediaItem(
+                    MediaItem.Builder()
+                        .setMediaId(song.id.toString())
+                        .setUri(song.uri)
+                        .build(),
+                )
+                mediaController.prepare()
+            }
+            waitForMediaController(mediaController, "source preparation") {
+                mediaController.currentMediaItem?.mediaId == song.id.toString() &&
+                    mediaController.duration > 0L
+            }
+            val enableResult = onMediaControllerThread(mediaController) {
+                mediaController.sendCustomCommand(
+                    SessionCommand(Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED, Bundle.EMPTY),
+                    Bundle().apply {
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, true)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
+                    },
+                )
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            check(enableResult.resultCode == SessionResult.RESULT_SUCCESS)
+            onMediaControllerThread(mediaController) { mediaController.play() }
+            waitForMediaController(mediaController, "original multi-stem adoption") {
+                mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == oldStemIds
+            }
+            val oldMetrics = requireNotNull(processor.dataPlaneMetrics())
+
+            selectionStore.select(replacementModelId)
+            waitForMediaController(mediaController, "replacement multi-stem adoption") {
+                mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == replacementStemIds
+            }
+            repository.openCompletedCache(oldCacheKey)!!.use { retained ->
+                assertEquals(oldStemIds, retained.stemIds)
+            }
+            repository.openCompletedCache(replacementCacheKey)!!.use { replacement ->
+                assertEquals(replacementStemIds, replacement.stemIds)
+            }
+
+            onMediaControllerThread(mediaController) { mediaController.pause() }
+            waitForMediaController(mediaController, "pause after model switch") {
+                !mediaController.playWhenReady
+            }
+            val seekPositionMs = onMediaControllerThread(mediaController) {
+                (mediaController.duration / 3L).coerceAtLeast(1_000L)
+            }
+            onMediaControllerThread(mediaController) { mediaController.seekTo(seekPositionMs) }
+            waitForMediaController(mediaController, "seek after model switch") {
+                kotlin.math.abs(mediaController.currentPosition - seekPositionMs) <=
+                    MEDIA_SESSION_SEEK_TOLERANCE_MS
+            }
+            onMediaControllerThread(mediaController) { mediaController.play() }
+            waitForMediaController(mediaController, "resume after model switch") {
+                mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == replacementStemIds
+            }
+            val replacementMetrics = requireNotNull(processor.dataPlaneMetrics())
+            assertTrue(replacementMetrics.seekRequests > 0L)
+
+            report.put("status", "complete")
+                .put("oldCacheKey", oldCacheKey)
+                .put("oldStemIds", JSONArray(oldStemIds))
+                .put("oldUnderruns", oldMetrics.underruns)
+                .put("replacementCacheKey", replacementCacheKey)
+                .put("replacementStemIds", JSONArray(replacementStemIds))
+                .put("replacementUnderruns", replacementMetrics.underruns)
+                .put("replacementSeekRequests", replacementMetrics.seekRequests)
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+                .put("processorStemIds", processor.dataPlaneStemIds())
+            reportFile.writeText(report.toString(2))
+            throw error
+        } finally {
+            controller?.let { mediaController ->
+                runCatching {
+                    onMediaControllerThread(mediaController) {
+                        mediaController.pause()
+                        mediaController.clearMediaItems()
+                        mediaController.release()
+                    }
+                }
+            }
+            runCatching { context.stopService(Intent(context, PlaybackService::class.java)) }
+            selectionStore.select(initialSelectedModelId)
+            restorePreferences(preferences, preferenceSnapshot)
+            cacheKeys.forEach { key ->
+                repeat(20) {
+                    if (!repository.isLeased(key)) return@repeat
+                    SystemClock.sleep(100L)
+                }
+                runCatching { repository.delete(key) }
+            }
+            mediaUri?.let { uri -> runCatching { context.contentResolver.delete(uri, null, null) } }
+        }
+    }
+
+    @Test
     fun completedProductCachePlaysThroughMediaSession() {
         val arguments = InstrumentationRegistry.getArguments()
         val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()

@@ -105,6 +105,8 @@ import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
+import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionSnapshot
+import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
@@ -198,6 +200,8 @@ class PlaybackService :
     private val repository: Repository by inject()
     private val sourceSeparationRuntime: SourceSeparationRuntimeFacade by inject()
     private val sourceSeparationPresetRepository: SourceSeparationPresetRepository by inject()
+    private val sourceSeparationMultiStemSelectionStore:
+            SourceSeparationMultiStemPlaybackSelectionStore by inject()
     private val sourceSeparationForegroundWorkerCoordinator:
             SourceSeparationForegroundWorkerCoordinator by inject()
     private val sourceSeparationProcessingOwnershipHandoff:
@@ -259,6 +263,8 @@ class PlaybackService :
     private var sourceSeparationOutputMuteStartedAtMs = 0L
     private var sourceSeparationPlaybackContextGeneration = 0L
     private var sourceSeparationActiveSelection: SourceSeparationActiveSelectionSnapshot? = null
+    private var sourceSeparationMultiStemSelection:
+            SourceSeparationMultiStemPlaybackSelectionSnapshot? = null
     private var sourceSeparationPlaybackPendingResolutionGeneration: Long? = null
     private var sourceSeparationPlaybackExpectProcessingStartedAtMs = 0L
     private var sourceSeparationProcessingWakeLock: PowerManager.WakeLock? = null
@@ -408,6 +414,7 @@ class PlaybackService :
         player.addListener(this)
         observeSourceSeparationForegroundWorker()
         observeSourceSeparationActiveSelection()
+        observeSourceSeparationMultiStemSelection()
         observeSourceSeparationProcessingOwnership()
         mediaSessionPlayer = SourceSeparationMediaSessionPlayer(player) {
             sourceSeparationPlaybackResumeWhenReady = false
@@ -1786,20 +1793,24 @@ class PlaybackService :
         }
 
         val selection = sourceSeparationPresetRepository.activeSelectionFlow.value
+        val multiStemSelection = sourceSeparationMultiStemSelectionStore.selectionFlow.value
         var activeSession = sourceSeparationPlaybackSession
-        if (activeSession != null &&
+        if (activeSession != null && (
+            activeSession.multiStemSelectionGeneration != multiStemSelection.generation ||
             !SourceSeparationExactActivePlaybackPolicy.canReuseSession(
                 activeSelectionGeneration = selection.generation,
                 sessionSelectionGeneration = activeSession.selectionGeneration,
                 sessionCacheKey = activeSession.cacheKey,
                 resolvedSessionCacheKey = activeSession.runtimeSong.cacheKey,
             )
-        ) {
+        )) {
             traceSourceSeparationPlayback(
                 "check.activeSession.selectionMismatch",
-                "id=$checkId sessionGeneration=${activeSession.selectionGeneration} " +
-                    "activeGeneration=${selection.generation} " +
-                    "cache=${activeSession.cacheKey.take(12)}",
+                    "id=$checkId sessionGeneration=${activeSession.selectionGeneration} " +
+                        "activeGeneration=${selection.generation} " +
+                        "sessionMultiStemGeneration=${activeSession.multiStemSelectionGeneration} " +
+                        "activeMultiStemGeneration=${multiStemSelection.generation} " +
+                        "cache=${activeSession.cacheKey.take(12)}",
             )
             clearSourceSeparationPlayback(restoreOriginalItem = true, broadcast = false)
             activeSession = null
@@ -2019,6 +2030,7 @@ class PlaybackService :
                 songId = song.id,
                 sessionId = checkId,
                 selectionGeneration = selection.generation,
+                multiStemSelectionGeneration = multiStemSelection.generation,
                 cacheKey = runtimeSong.cacheKey,
                 stemFiles = stemFiles,
                 stemIds = stemIds,
@@ -2350,6 +2362,7 @@ class PlaybackService :
             songId = song.id,
             sessionId = checkId,
             selectionGeneration = activeSession.selectionGeneration,
+            multiStemSelectionGeneration = activeSession.multiStemSelectionGeneration,
             cacheKey = manifest.cacheKey,
             stemFiles = stemFiles,
             stemIds = stemIds,
@@ -2508,46 +2521,74 @@ class PlaybackService :
                 val previous = sourceSeparationActiveSelection
                 if (selection == previous) return@collect
                 sourceSeparationActiveSelection = selection
-                sourceSeparationPlaybackContextGeneration++
-                sourceSeparationPlaybackPendingResolutionGeneration = null
-                sourceSeparationPlaybackGateJob?.cancel()
-                sourceSeparationPlaybackGateJob = null
-                cancelSourceSeparationPlaybackReadinessMonitor("activeModelChanged")
-                if (sourceSeparationPlaybackSession != null) {
-                    clearSourceSeparationPlayback(
-                        restoreOriginalItem = true,
-                        broadcast = false,
-                    )
-                } else {
-                    clearSourceSeparationPlaybackProcessing(broadcast = false)
-                }
-                traceSourceSeparationPlayback(
-                    "playback.activeModelChanged",
-                    "previousGeneration=${previous?.generation} " +
-                        "generation=${selection.generation}",
+                handleSourceSeparationModelSelectionChanged(
+                    source = "mdx",
+                    previousGeneration = previous?.generation,
+                    generation = selection.generation,
                 )
-                if (sourceSeparationPlaybackRequested) {
-                    val automaticDemand = preferences.getBoolean(
-                        SOURCE_SEPARATION_AUTO_START,
-                        DEFAULT_SOURCE_SEPARATION_AUTO_START,
-                    )
-                    val expectProcessing = automaticDemand &&
-                            SourceSeparationBlendDemand.requiresSeparatedOutput(
-                                sourceSeparationMixProcessor.blend,
-                            )
-                    setSourceSeparationPlaybackExpectProcessing(expectProcessing)
-                    ensureSourceSeparationPlaybackReady(
-                        showUnavailableMessage = false,
-                        allowPauseForProcessing = true,
-                        resumeWhenReady = shouldResumeSourceSeparationPlaybackWhenReady(),
-                        allowNewSession = true,
-                        expectProcessing = expectProcessing,
-                        waitForProcessing = automaticDemand,
-                    )
-                } else {
-                    broadcastSourceSeparationPlaybackChanged()
-                }
             }
+        }
+    }
+
+    private fun observeSourceSeparationMultiStemSelection() {
+        sourceSeparationMultiStemSelection =
+            sourceSeparationMultiStemSelectionStore.selectionFlow.value
+        serviceScope.launch {
+            sourceSeparationMultiStemSelectionStore.selectionFlow.collect { selection ->
+                val previous = sourceSeparationMultiStemSelection
+                if (selection == previous) return@collect
+                sourceSeparationMultiStemSelection = selection
+                handleSourceSeparationModelSelectionChanged(
+                    source = "multistem",
+                    previousGeneration = previous?.generation,
+                    generation = selection.generation,
+                )
+            }
+        }
+    }
+
+    private suspend fun handleSourceSeparationModelSelectionChanged(
+        source: String,
+        previousGeneration: Long?,
+        generation: Long,
+    ) {
+        sourceSeparationPlaybackContextGeneration++
+        sourceSeparationPlaybackPendingResolutionGeneration = null
+        sourceSeparationPlaybackGateJob?.cancel()
+        sourceSeparationPlaybackGateJob = null
+        cancelSourceSeparationPlaybackReadinessMonitor("${source}ModelChanged")
+        if (sourceSeparationPlaybackSession != null) {
+            clearSourceSeparationPlayback(
+                restoreOriginalItem = true,
+                broadcast = false,
+            )
+        } else {
+            clearSourceSeparationPlaybackProcessing(broadcast = false)
+        }
+        traceSourceSeparationPlayback(
+            "playback.activeModelChanged",
+            "source=$source previousGeneration=$previousGeneration generation=$generation",
+        )
+        if (sourceSeparationPlaybackRequested) {
+            val automaticDemand = preferences.getBoolean(
+                SOURCE_SEPARATION_AUTO_START,
+                DEFAULT_SOURCE_SEPARATION_AUTO_START,
+            )
+            val expectProcessing = automaticDemand &&
+                    SourceSeparationBlendDemand.requiresSeparatedOutput(
+                        sourceSeparationMixProcessor.blend,
+                    )
+            setSourceSeparationPlaybackExpectProcessing(expectProcessing)
+            ensureSourceSeparationPlaybackReady(
+                showUnavailableMessage = false,
+                allowPauseForProcessing = true,
+                resumeWhenReady = shouldResumeSourceSeparationPlaybackWhenReady(),
+                allowNewSession = true,
+                expectProcessing = expectProcessing,
+                waitForProcessing = automaticDemand,
+            )
+        } else {
+            broadcastSourceSeparationPlaybackChanged()
         }
     }
 
@@ -4390,6 +4431,7 @@ private data class SourceSeparationPlaybackSession(
     val songId: Long,
     val sessionId: Long,
     val selectionGeneration: Long,
+    val multiStemSelectionGeneration: Long,
     val cacheKey: String,
     val stemFiles: List<File>,
     val stemIds: List<String>,

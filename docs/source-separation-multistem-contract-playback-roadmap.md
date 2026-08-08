@@ -35,11 +35,13 @@ engine, list mixer, service session handle, and structural buffer admission.
 The deterministic indexed-WAV/FLAC seek smoke still passes on all four ABI rows,
 and the synthetic eight-stem engine has completed 30-minute S25/S10 arm64
 throughput, seek, thermal, PSS, and cache-stability qualification. Two-stem
-real-song playback and the separate process-recreation, background,
-cache-deletion, and active-model product-state gates are complete. The real
-multi-stem repository/`PlaybackService` recreation gate stays deferred until
-Phase 5 supplies its contract and cache snapshot; no real multi-stem model is
-admitted until its own pipeline and full-song gates pass.
+real-song playback and its process-recreation, background, cache-deletion, and
+active-model product-state gates are complete. Phase 5 has frozen the three
+real multi-stem executable contracts, and Phase 6 now routes completed official
+4/6-stem product caches through `PlaybackService` on S25, including exact-model
+switching with retained inactive caches. Multi-stem service recreation,
+playback-time cache deletion, S10 playback resources, producer-ahead playback,
+background contention, and listening remain open.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -1210,8 +1212,13 @@ undeclared pipeline or publishing a partial stem set.
 - [x] Complete the first real 4/6-stem repository and `PlaybackService` gate on
   S25: exact Release model selection, remote full-song publication, indexed
   FLAC promotion, original-source transport clock, ordered N-stem adoption,
-  pause, seek, and resume. Process recreation, cache deletion during playback,
-  and active-model switching remain separate follow-ups.
+  pause, seek, and resume. Process recreation and cache deletion during
+  playback remain separate follow-ups.
+- [x] Invalidate a completed multi-stem playback session when the selected
+  exact model changes. The S25 product gate switches an actively playing
+  official six-stem cache to the already completed official four-stem cache,
+  retains and reopens the inactive six-stem cache, adopts only the replacement
+  stem order, and completes pause, seek, and resume without an underrun.
 - [ ] Perform human listening against the same-weight host reference for every
   candidate, including guitar/piano-dense material for guitar-ft.
 - [x] Publish all three as selectable CPU-only experimental candidates with
@@ -1351,8 +1358,21 @@ and preserves the existing MDX scheduling path. Official four-stem adopted
 `drums,bass,other,vocals,guitar,piano`. Both completed pause, one-third-track
 seek, and resume through `MediaController` with zero additional underruns.
 This closes basic completed-cache 4/6-stem routing on S25, not guitar-ft
-listening, producer-ahead playback, service recreation, cache deletion, model
-hot-switch, S10 playback resources, or background contention.
+listening, producer-ahead playback, service recreation, cache deletion during
+playback, S10 playback resources, or background contention.
+
+The completed-cache active-model switch gate then ran on the same S25 product
+path. Playback started from official six-stem
+`drums,bass,other,vocals,guitar,piano`, changed the persisted exact selection,
+and adopted only official four-stem `drums,bass,other,vocals`. The old and new
+caches had distinct cache keys, the inactive six-stem cache remained readable,
+and the replacement session completed pause, one-third-track seek, and resume
+with zero underruns. Selection generations now invalidate both cached session
+reuse and an already installed data-plane session; the change does not delete
+the superseded cache or route either model through the MDX scheduler. This
+closes completed-cache model switching on S25, not switching while production
+is still partial, service recreation, playback-time cache deletion, or S10
+playback resources.
 
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support

@@ -6,22 +6,55 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnap
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
 import java.util.concurrent.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /** Persists the selected experimental multi-stem model independently of MDX presets. */
 class SourceSeparationMultiStemPlaybackSelectionStore(
     private val preferences: SharedPreferences,
 ) {
-    fun selectedModelId(): String? = preferences.getString(KEY, null)
+    private val lock = Any()
+    private val _selectionFlow = MutableStateFlow(
+        SourceSeparationMultiStemPlaybackSelectionSnapshot(
+            modelId = preferences.getString(KEY, null),
+            generation = 0L,
+        ),
+    )
+    val selectionFlow = _selectionFlow.asStateFlow()
 
-    fun select(modelId: String?) {
+    fun selectedModelId(): String? = selectionFlow.value.modelId
+
+    fun select(modelId: String?) = synchronized(lock) {
+        val normalized = modelId?.takeIf(String::isNotBlank)
+        val previous = _selectionFlow.value
+        if (previous.modelId == normalized) return@synchronized
         preferences.edit().let { editor ->
-            if (modelId.isNullOrBlank()) editor.remove(KEY) else editor.putString(KEY, modelId)
+            if (normalized == null) editor.remove(KEY) else editor.putString(KEY, normalized)
             check(editor.commit()) { "Could not persist the multi-stem playback selection." }
         }
+        check(preferences.getString(KEY, null) == normalized) {
+            "The multi-stem playback selection could not be committed."
+        }
+        _selectionFlow.value = SourceSeparationMultiStemPlaybackSelectionSnapshot(
+            modelId = normalized,
+            generation = previous.generation + 1L,
+        )
     }
 
     private companion object {
         const val KEY = "source_separation.multistem_playback_model_id"
+    }
+}
+
+data class SourceSeparationMultiStemPlaybackSelectionSnapshot(
+    val modelId: String?,
+    val generation: Long,
+) {
+    init {
+        require(modelId == null || modelId.isNotBlank()) {
+            "The multi-stem playback model ID is invalid."
+        }
+        require(generation >= 0L) { "The multi-stem selection generation is invalid." }
     }
 }
 
