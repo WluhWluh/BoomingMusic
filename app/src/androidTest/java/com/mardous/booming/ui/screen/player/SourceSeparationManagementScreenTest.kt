@@ -15,6 +15,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.R
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
+import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntry
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
@@ -24,6 +25,7 @@ import com.mardous.booming.separation.model.contract.CatalogActivationPolicy
 import com.mardous.booming.separation.model.contract.CatalogReleaseMaturity
 import com.mardous.booming.separation.model.contract.CatalogSupportLevel
 import com.mardous.booming.separation.model.contract.SourceSeparationModelPresentationCatalog
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPresetOrigin
@@ -193,6 +195,101 @@ class SourceSeparationManagementScreenTest {
             .assertIsEnabled()
             .performClick()
         compose.runOnIdle { assertEquals(modelId, selectedModelId.get()) }
+    }
+
+    @Test
+    fun liveMultistemManagementLoadsReleaseCandidatesAndUsesSixStem() {
+        val arguments = InstrumentationRegistry.getArguments()
+        assumeTrue(arguments.getString("liveMultistemManagement").equals("true", ignoreCase = true))
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val repository = get<SourceSeparationPresetRepository>(
+            SourceSeparationPresetRepository::class.java,
+        )
+        val selection = get<SourceSeparationMultiStemPlaybackSelectionStore>(
+            SourceSeparationMultiStemPlaybackSelectionStore::class.java,
+        )
+        val installer = get<SourceSeparationMultiStemReleaseInstaller>(
+            SourceSeparationMultiStemReleaseInstaller::class.java,
+        )
+        val worker = get<SourceSeparationForegroundWorkerCoordinator>(
+            SourceSeparationForegroundWorkerCoordinator::class.java,
+        )
+        val originalSelection = selection.selectedModelId()
+        val viewModel = SourceSeparationPresetManagementViewModel(
+            contentResolver = context.contentResolver,
+            repository = repository,
+            downloader = get(SourceSeparationPresetDownloader::class.java),
+            importCoordinator = get(SourceSeparationPresetImportCoordinator::class.java),
+            multiStemInstaller = installer,
+            multiStemSelectionStore = selection,
+            modelArtifactInUse = worker::isModelArtifactInUse,
+            pauseForModelSupersession = worker::pauseForActiveModelSupersession,
+        )
+        val modelId = "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0"
+        try {
+            compose.setContent {
+                val state by viewModel.state.collectAsState()
+                MaterialTheme {
+                    SourceSeparationPresetManagementSheet(
+                        state = state,
+                        onDownload = viewModel::download,
+                        onCancelDownload = viewModel::cancelDownload,
+                        onUse = viewModel::requestUse,
+                        onDelete = viewModel::delete,
+                        onConfirmExperimental = viewModel::confirmExperimentalUse,
+                        onDismissExperimental = viewModel::dismissExperimentalUse,
+                        onClearError = viewModel::clearError,
+                        onClearRestoredModelTarget = viewModel::clearRestoredModelTarget,
+                        onRefresh = viewModel::refresh,
+                        onImportModel = {},
+                        onImportSidecar = {},
+                        onStartManualProfile = viewModel::startManualProfile,
+                        onSaveManualProfile = viewModel::saveManualProfile,
+                        onCancelManualProfile = viewModel::cancelManualProfile,
+                        onRetryImport = viewModel::retryImport,
+                        onDiscardImport = viewModel::discardImport,
+                        onDismissImportSuccess = viewModel::dismissImportSuccess,
+                        onUseImported = viewModel::requestUseImported,
+                        onDeleteImported = viewModel::deleteImported,
+                        onShowCatalogDetails = viewModel::showCatalogDetails,
+                        onShowImportedDetails = viewModel::showImportedDetails,
+                        onDismissModelDetails = viewModel::dismissModelDetails,
+                        onEditCustomProfile = viewModel::editCustomProfile,
+                        onSaveCustomProfileRevision = viewModel::saveCustomProfileRevision,
+                        onCancelCustomProfileEdit = viewModel::cancelCustomProfileEdit,
+                        onUseCustomProfile = viewModel::useCustomProfile,
+                        onExportCustomProfile = {},
+                        onDeleteCustomProfile = viewModel::deleteCustomProfile,
+                    )
+                }
+            }
+            compose.waitUntil(timeoutMillis = LIVE_PRESET_TIMEOUT_MS) {
+                viewModel.state.value.entries.count {
+                    it.kind == SourceSeparationManagedModelKind.MultiStem
+                } == 3
+            }
+            compose.onNodeWithTag("source-separation-preset-category:MultiStem")
+                .assertIsDisplayed()
+                .performClick()
+            compose.onNodeWithTag("source-separation-preset:$modelId")
+                .performScrollTo()
+                .assertIsDisplayed()
+            compose.onNodeWithTag("source-separation-preset-use:$modelId")
+                .performScrollTo()
+                .assertIsEnabled()
+                .performClick()
+            compose.onNodeWithTag("source-separation-preset-confirm-experimental")
+                .assertIsDisplayed()
+                .performClick()
+            compose.waitUntil(timeoutMillis = LIVE_PRESET_TIMEOUT_MS) {
+                selection.selectedModelId() == modelId
+            }
+            compose.runOnIdle {
+                assertEquals(modelId, installer.installed(modelId)?.modelId)
+            }
+        } finally {
+            selection.select(originalSelection)
+        }
     }
 
     @Test

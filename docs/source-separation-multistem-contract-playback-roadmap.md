@@ -1463,7 +1463,13 @@ intentionally unchanged. The three HTDemucs entries are supplied by the
 separate Release installer but use the same management surface; their
 installer, exact contract, CPU-only activation, and model-specific details
 remain separate. Runtime routing and selected-model supersession are covered
-by facade tests. Device playback/resource/listening gates remain independent.
+by facade tests. A production-graph AndroidTest now refreshes the real Release
+catalog, expands the `MultiStem` category, selects the official six-stem
+candidate through its experimental confirmation, verifies the exact selection
+store and installed record, and restores the previous selection. The S25 run
+passed with the current `bss-tflite` artifact source; this validates management
+activation only and does not close separation, playback, resource, or listening
+gates. Device playback/resource/listening gates remain independent.
 
 The first S25 management verification used `SM-S9310`, API 35, arm64. The
 management Compose suite passed after updating its KARA action to expand the
