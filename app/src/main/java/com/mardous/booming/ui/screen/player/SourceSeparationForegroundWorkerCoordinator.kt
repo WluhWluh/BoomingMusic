@@ -12,6 +12,7 @@ import com.mardous.booming.separation.SourceSeparationAdmittedGpuRuntimeMismatch
 import com.mardous.booming.separation.SourceSeparationBlendDemand
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
+import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionSnapshot
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.SourceSeparationPerformanceStats
@@ -29,8 +30,12 @@ import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelRe
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveSelectionSnapshot
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEvent
 import com.mardous.booming.separation.process.SourceSeparationExecutionHostEventPayload
+import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionEvent
+import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionEventPayload
 import com.mardous.booming.separation.process.SourceSeparationPlaybackLifecyclePolicy
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
+import com.mardous.booming.separation.process.ipc.SourceSeparationMultiStemIndependentRunRecovery
+import com.mardous.booming.separation.process.ipc.SourceSeparationMultiStemReconnectedSession
 import com.mardous.booming.separation.process.ipc.SourceSeparationReconnectedSession
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteHostDiedException
 import com.mardous.booming.separation.process.toMdxRangeProgress
@@ -75,8 +80,14 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private val preferences: SharedPreferences,
     private val sourceSeparationRuntime: SourceSeparationRuntimeFacade,
     private val independentRunRecovery: SourceSeparationIndependentRunRecovery? = null,
+    private val multiStemIndependentRunRecovery:
+        SourceSeparationMultiStemIndependentRunRecovery? = null,
     private val activeSelectionFlow: StateFlow<SourceSeparationActiveSelectionSnapshot> =
         MutableStateFlow(SourceSeparationActiveSelectionSnapshot(null, 0L)),
+    private val multiStemSelectionFlow:
+        StateFlow<SourceSeparationMultiStemPlaybackSelectionSnapshot> = MutableStateFlow(
+            SourceSeparationMultiStemPlaybackSelectionSnapshot(null, 0L),
+        ),
 ) {
     private val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val performanceStats = SourceSeparationPerformanceStats(preferences)
@@ -95,6 +106,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private var activeWorkerRequest: SourceSeparationWorkerRequest? = null
     private var activeWorkerSong: SourceSeparationRuntimeSong? = null
     private var recoveryJob: Job? = null
+    private var multiStemRecoveryJob: Job? = null
     @Volatile
     private var reconnectedSession: SourceSeparationReconnectedSession? = null
     @Volatile
@@ -102,6 +114,14 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private var reconnectedSelection: SourceSeparationActiveSelectionSnapshot? = null
     @Volatile
     private var reconnectedLatestSequence = 0L
+    @Volatile
+    private var multiStemReconnectedSession: SourceSeparationMultiStemReconnectedSession? = null
+    @Volatile
+    private var multiStemReconnectedSong: Song? = null
+    private var multiStemReconnectedSelection:
+        SourceSeparationMultiStemPlaybackSelectionSnapshot? = null
+    @Volatile
+    private var multiStemReconnectedLatestSequence = 0L
     private var autoStartSuppressedSongId: Long? = null
     private var debugLastWindowSample: SourceSeparationDebugWindowSample? = null
     private val callbackLock = Any()
@@ -128,8 +148,29 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     init {
         trace("init recovery=${independentRunRecovery != null}")
         observeActiveSelection()
+        observeMultiStemSelection()
         observeAutomaticPruneRequests()
         independentRunRecovery?.let(::startIndependentRunRecovery)
+        multiStemIndependentRunRecovery?.let(::startMultiStemIndependentRunRecovery)
+    }
+
+    private fun observeMultiStemSelection() {
+        var observed = multiStemSelectionFlow.value
+        workerScope.launch {
+            multiStemSelectionFlow.collect { selection ->
+                if (selection == observed) return@collect
+                observed = selection
+                multiStemReconnectedSession
+                    ?.takeIf { multiStemReconnectedSelection != selection }
+                    ?.let { session ->
+                        requestMultiStemRecoveredControl(
+                            session,
+                            SourceSeparationRecoveredControl.Pause,
+                            SourceSeparationPauseReason.ActiveModelSuperseded,
+                        )
+                    }
+            }
+        }
     }
 
     private fun observeActiveSelection() {
@@ -327,7 +368,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         trace(
             "requestFull song=${song.id} reason=${reason.name} " +
                     "recovery=${recoveryJob?.isActive == true} " +
-                    "reconnected=${reconnectedSession != null} " +
+                    "reconnected=${reconnectedSession != null || multiStemReconnectedSession != null} " +
                     "worker=${workerJob?.isActive == true} " +
                     "workerSong=${activeWorkerRequest?.song?.id} " +
                     "pending=${pendingStartRequest?.song?.id}",
@@ -337,7 +378,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             workerActivated = true
             autoStartSuppressedSongId = null
             when {
-                recoveryJob?.isActive == true || reconnectedSession != null -> {
+                recoveryJob?.isActive == true || multiStemRecoveryJob?.isActive == true ||
+                    reconnectedSession != null || multiStemReconnectedSession != null -> {
                     setPendingStartLocked(incoming)
                     SourceSeparationRequestAction.PauseRecovered
                 }
@@ -384,8 +426,15 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             }
         }
         when (action) {
-            SourceSeparationRequestAction.PauseRecovered ->
+            SourceSeparationRequestAction.PauseRecovered -> {
                 maybePauseRecoveredRunFor(incoming)
+                multiStemReconnectedSession?.let { session ->
+                    requestMultiStemRecoveredControl(
+                        session,
+                        SourceSeparationRecoveredControl.Pause,
+                    )
+                }
+            }
             SourceSeparationRequestAction.EnsureWorker ->
                 ensureWorkerRunningIfActivated()
             SourceSeparationRequestAction.None -> Unit
@@ -409,7 +458,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             workerActivated = true
             setPendingStartLocked(request)
             when {
-                recoveryJob?.isActive == true || reconnectedSession != null ->
+                recoveryJob?.isActive == true || multiStemRecoveryJob?.isActive == true ||
+                    reconnectedSession != null || multiStemReconnectedSession != null ->
                     SourceSeparationRequestAction.None
                 workerJob?.isActive == true -> SourceSeparationRequestAction.None
                 else -> SourceSeparationRequestAction.EnsureWorker
@@ -434,6 +484,20 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 cacheKey = recovered.cacheKey,
             )
             requestRecoveredControl(recovered, SourceSeparationRecoveredControl.Pause)
+        }
+        val multiStemRecovered = multiStemReconnectedSession
+        val multiStemSong = multiStemReconnectedSong
+        if (multiStemRecovered != null && multiStemSong != null) {
+            _workerStateFlow.value = SourceSeparationUiState.Paused(
+                songId = multiStemSong.id,
+                songTitle = multiStemSong.title,
+                selectionGeneration = multiStemReconnectedSelection?.generation,
+                cacheKey = multiStemRecovered.cacheKey,
+            )
+            requestMultiStemRecoveredControl(
+                multiStemRecovered,
+                SourceSeparationRecoveredControl.Pause,
+            )
         }
         if (workerJob?.isActive == true) {
             _workerStateFlow.value = SourceSeparationUiState.Paused(
@@ -463,6 +527,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 pauseReason = SourceSeparationPauseReason.ActiveModelSuperseded,
             )
         }
+        multiStemReconnectedSession?.let { session ->
+            requestMultiStemRecoveredControl(
+                session,
+                SourceSeparationRecoveredControl.Pause,
+                SourceSeparationPauseReason.ActiveModelSuperseded,
+            )
+        }
     }
 
     fun cancel() {
@@ -474,6 +545,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         cancelRequested.set(true)
         reconnectedSession?.let { session ->
             requestRecoveredControl(session, SourceSeparationRecoveredControl.Cancel)
+        }
+        multiStemReconnectedSession?.let { session ->
+            requestMultiStemRecoveredControl(session, SourceSeparationRecoveredControl.Cancel)
         }
         job?.cancel()
     }
@@ -492,13 +566,18 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 (activeWorkerSong == null && preflightIdentity != null &&
                     activeWorkerRequest?.identity == preflightIdentity)
             val recovered = reconnectedSession?.takeIf { it.cacheKey == cacheKey }
+            val multiStemRecovered = multiStemReconnectedSession
+                ?.takeIf { it.cacheKey == cacheKey }
             val job = workerJob.takeIf { activeMatches }
-            if (!pendingMatches && job == null && recovered == null) {
+            if (!pendingMatches && job == null && recovered == null &&
+                multiStemRecovered == null
+            ) {
                 null
             } else {
                 SourceSeparationCacheDeletionCancellation(
                     job = job,
                     recovered = recovered,
+                    multiStemRecovered = multiStemRecovered,
                     preflightIdentity = preflightIdentity,
                 )
             }
@@ -512,9 +591,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         target.recovered?.let { session ->
             requestRecoveredControl(session, SourceSeparationRecoveredControl.Cancel)
         }
+        target.multiStemRecovered?.let { session ->
+            requestMultiStemRecoveredControl(session, SourceSeparationRecoveredControl.Cancel)
+        }
         while (synchronized(stateLock) {
                 activeWorkerSong?.cacheKey == cacheKey ||
                     reconnectedSession?.cacheKey == cacheKey ||
+                    multiStemReconnectedSession?.cacheKey == cacheKey ||
                     (activeWorkerSong == null && target.preflightIdentity != null &&
                         activeWorkerRequest?.identity == target.preflightIdentity)
             }
@@ -535,6 +618,14 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             ?.let { session ->
                 requestRecoveredControl(session, SourceSeparationRecoveredControl.Pause)
             }
+        multiStemReconnectedSession
+            ?.takeIf { multiStemReconnectedSong?.id == songId }
+            ?.let { session ->
+                requestMultiStemRecoveredControl(
+                    session,
+                    SourceSeparationRecoveredControl.Pause,
+                )
+            }
     }
 
     fun clearAutoStartSuppressionForSong(songId: Long) {
@@ -550,6 +641,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 activeWorkerSong?.song?.id == songId ||
                     activeWorkerRequest?.song?.id == songId ||
                     (reconnectedSong?.id == songId && reconnectedSession != null)
+                    || (multiStemReconnectedSong?.id == songId &&
+                        multiStemReconnectedSession != null)
             }
         ) {
             delay(SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS)
@@ -564,15 +657,17 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
 
     fun isWorkerActive(): Boolean = synchronized(stateLock) {
         workerJob?.isActive == true || recoveryJob?.isActive == true ||
-            reconnectedSession != null
+            multiStemRecoveryJob?.isActive == true || reconnectedSession != null ||
+            multiStemReconnectedSession != null
     }
 
     fun runningSongId(): Long? = synchronized(stateLock) {
-        reconnectedSong?.id ?: activeWorkerRequest?.song?.id
+        reconnectedSong?.id ?: multiStemReconnectedSong?.id ?: activeWorkerRequest?.song?.id
     }
 
     fun runningCacheKey(): String? = synchronized(stateLock) {
-        reconnectedSession?.cacheKey ?: activeWorkerSong?.cacheKey
+        reconnectedSession?.cacheKey ?: multiStemReconnectedSession?.cacheKey ?:
+            activeWorkerSong?.cacheKey
     }
 
     fun pendingSongId(): Long? = synchronized(stateLock) {
@@ -580,7 +675,11 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     }
 
     fun protectedCacheKeys(): Set<String> = synchronized(stateLock) {
-        setOfNotNull(activeWorkerSong?.cacheKey, reconnectedSession?.cacheKey)
+        setOfNotNull(
+            activeWorkerSong?.cacheKey,
+            reconnectedSession?.cacheKey,
+            multiStemReconnectedSession?.cacheKey,
+        )
     }
 
     fun requestAutomaticPrune() {
@@ -593,6 +692,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             pendingStartRequest?.selection?.reference?.artifactSha256?.lowercase() == normalized ||
             activeWorkerSong?.artifactSha256?.lowercase() == normalized ||
             reconnectedSession?.journal?.request?.identity?.artifactSha256?.lowercase() == normalized
+            || multiStemReconnectedSession?.journal?.request?.identity?.artifactSha256
+                ?.lowercase() == normalized
     }
 
     suspend fun autoStartDecision(
@@ -690,8 +791,11 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             append(" workerActive=").append(workerJob?.isActive == true)
             append(" workerSong=").append(activeWorkerRequest?.song?.id)
             append(" recoveryActive=").append(recoveryJob?.isActive == true)
+            append(" multiStemRecoveryActive=").append(multiStemRecoveryJob?.isActive == true)
             append(" reconnectedSong=").append(reconnectedSong?.id)
             append(" reconnectedRun=").append(reconnectedSession?.runId)
+            append(" multiStemReconnectedSong=").append(multiStemReconnectedSong?.id)
+            append(" multiStemReconnectedRun=").append(multiStemReconnectedSession?.runId)
             append(" reconnectedSequence=").append(reconnectedLatestSequence)
             append(" pending=").append(pendingStartRequest?.song?.id)
             append(" pendingReason=").append(pendingStartRequest?.debugReason)
@@ -721,6 +825,213 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     fun clearWindowSamples() {
         debugWindowSamples.clear()
         debugLastWindowSample = null
+    }
+
+    private fun startMultiStemIndependentRunRecovery(
+        recovery: SourceSeparationMultiStemIndependentRunRecovery,
+    ) {
+        val job = workerScope.launch(start = CoroutineStart.LAZY) {
+            runMultiStemIndependentRunRecovery(recovery)
+        }
+        multiStemRecoveryJob = job
+        job.start()
+    }
+
+    private suspend fun runMultiStemIndependentRunRecovery(
+        recovery: SourceSeparationMultiStemIndependentRunRecovery,
+    ) {
+        val activeJob = coroutineContext[Job]
+        val events = Channel<SourceSeparationMultiStemExecutionEvent>(Channel.UNLIMITED)
+        var session: SourceSeparationMultiStemReconnectedSession? = null
+        var terminal = false
+        try {
+            val selection = multiStemSelectionFlow.value
+            val reconnected = recovery.reconnect(selection) { event -> events.trySend(event) }
+                ?: return
+            session = reconnected
+            if (multiStemSelectionFlow.value != selection ||
+                session.journal.request.identity.modelId != selection.modelId
+            ) {
+                runCatching {
+                    session.pause(SourceSeparationPauseReason.ActiveModelSuperseded)
+                }
+                return
+            }
+            synchronized(stateLock) {
+                multiStemReconnectedSession = session
+                multiStemReconnectedSong = session.journal.toRecoveredSong()
+                multiStemReconnectedSelection = selection
+                multiStemReconnectedLatestSequence = 0L
+            }
+            terminal = applyMultiStemRecoveredEvent(session, session.baselineEvent)
+            if (!terminal) {
+                when {
+                    cancelRequested.get() -> requestMultiStemRecoveredControl(
+                        session,
+                        SourceSeparationRecoveredControl.Cancel,
+                    )
+                    pauseRequested.get() -> requestMultiStemRecoveredControl(
+                        session,
+                        SourceSeparationRecoveredControl.Pause,
+                    )
+                }
+            }
+            while (!terminal && activeJob?.isActive == true) {
+                val event = events.receiveCatching().getOrNull() ?: break
+                terminal = applyMultiStemRecoveredEvent(session, event)
+            }
+        } catch (error: Throwable) {
+            val song = multiStemReconnectedSong
+            if (song != null && error !is CancellationException) {
+                _workerStateFlow.value = SourceSeparationUiState.Failed(
+                    songId = song.id,
+                    songTitle = song.title,
+                    message = error.message,
+                )
+            }
+        } finally {
+            events.close()
+            if (!terminal) runCatching { session?.close() }
+            if (multiStemReconnectedSession === session ||
+                multiStemReconnectedSession == null
+            ) {
+                multiStemReconnectedSession = null
+                multiStemReconnectedSong = null
+                multiStemReconnectedSelection = null
+                multiStemReconnectedLatestSequence = 0L
+            }
+            if (multiStemRecoveryJob == activeJob) multiStemRecoveryJob = null
+            cancelRequested.set(false)
+            pauseRequested.set(false)
+            if (pendingStartRequest != null) ensureWorkerRunningIfActivated()
+        }
+    }
+
+    private fun applyMultiStemRecoveredEvent(
+        session: SourceSeparationMultiStemReconnectedSession,
+        event: SourceSeparationMultiStemExecutionEvent,
+    ): Boolean {
+        val selection = multiStemReconnectedSelection
+        if (selection != null && multiStemSelectionFlow.value != selection) {
+            runCatching {
+                session.pause(SourceSeparationPauseReason.ActiveModelSuperseded)
+            }
+            runCatching { session.close() }
+            multiStemReconnectedSession = null
+            return true
+        }
+        require(event.runId == session.runId &&
+            event.processGeneration == session.processGeneration
+        ) { "Recovered multi-stem event has a stale identity." }
+        if (event.sequence <= multiStemReconnectedLatestSequence) return false
+        multiStemReconnectedLatestSequence = event.sequence
+        val song = requireNotNull(multiStemReconnectedSong)
+        val callbackSong = song.callbackSong()
+        return when (val payload = event.payload) {
+            is SourceSeparationMultiStemExecutionEventPayload.Accepted -> {
+                require(payload.descriptor.cacheKey == session.cacheKey)
+                _workerStateFlow.value = SourceSeparationUiState.Running(
+                    songId = song.id,
+                    songTitle = song.title,
+                    selectionGeneration = selection?.generation,
+                    cacheKey = session.cacheKey,
+                )
+                false
+            }
+            is SourceSeparationMultiStemExecutionEventPayload.Progress -> {
+                publishWorkerProgress(
+                    song = song,
+                    progress = MdxRangeProgress(
+                        completedWindows = payload.completedWindows,
+                        totalWindows = payload.totalWindows,
+                        stage = payload.stage,
+                    ),
+                    selectionGeneration = selection?.generation,
+                    cacheKey = session.cacheKey,
+                )
+                false
+            }
+            is SourceSeparationMultiStemExecutionEventPayload.Prepared -> {
+                notifyCallbacks("multiStemPrepared") {
+                    it.onSourceSeparationWorkerPrepared(callbackSong)
+                }
+                false
+            }
+            is SourceSeparationMultiStemExecutionEventPayload.SegmentStateChanged -> false
+            is SourceSeparationMultiStemExecutionEventPayload.Completed,
+            is SourceSeparationMultiStemExecutionEventPayload.AlreadyCompleted,
+            -> {
+                _workerStateFlow.value = SourceSeparationUiState.Completed(
+                    songId = song.id,
+                    songTitle = song.title,
+                    selectionGeneration = selection?.generation,
+                    cacheKey = session.cacheKey,
+                )
+                requestAutomaticPrune()
+                runCatching { session.close() }
+                multiStemReconnectedSession = null
+                dispatchRecoveredTerminal(SourceSeparationRecoveredTerminal.Completed(
+                    song = callbackSong,
+                    cacheKey = session.cacheKey,
+                    shouldPromoteCompletedStems = preferences.getBoolean(
+                        SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION,
+                        true,
+                    ),
+                ))
+                true
+            }
+            is SourceSeparationMultiStemExecutionEventPayload.Paused -> {
+                _workerStateFlow.value = SourceSeparationUiState.Idle
+                runCatching { session.close() }
+                multiStemReconnectedSession = null
+                dispatchRecoveredTerminal(SourceSeparationRecoveredTerminal.Paused(callbackSong))
+                true
+            }
+            is SourceSeparationMultiStemExecutionEventPayload.Canceled -> {
+                _workerStateFlow.value = SourceSeparationUiState.Canceled(
+                    song.id,
+                    song.title,
+                    selection?.generation,
+                    session.cacheKey,
+                )
+                workerActivated = false
+                clearPendingStart()
+                cancelRequested.set(true)
+                runCatching { session.close() }
+                multiStemReconnectedSession = null
+                true
+            }
+            is SourceSeparationMultiStemExecutionEventPayload.Failed -> {
+                _workerStateFlow.value = SourceSeparationUiState.Failed(
+                    songId = song.id,
+                    songTitle = song.title,
+                    message = payload.message,
+                    selectionGeneration = selection?.generation,
+                    cacheKey = session.cacheKey,
+                )
+                workerActivated = false
+                clearPendingStart()
+                cancelRequested.set(true)
+                runCatching { session.close() }
+                multiStemReconnectedSession = null
+                true
+            }
+        }
+    }
+
+    private fun requestMultiStemRecoveredControl(
+        session: SourceSeparationMultiStemReconnectedSession,
+        control: SourceSeparationRecoveredControl,
+        pauseReason: SourceSeparationPauseReason = SourceSeparationPauseReason.Standard,
+    ) {
+        workerScope.launch {
+            runCatching {
+                when (control) {
+                    SourceSeparationRecoveredControl.Pause -> session.pause(pauseReason)
+                    SourceSeparationRecoveredControl.Cancel -> session.cancel()
+                }
+            }
+        }
     }
 
     private fun startIndependentRunRecovery(
@@ -1246,7 +1557,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private fun ensureWorkerRunningIfActivated() {
         val job = synchronized(stateLock) {
             if (!workerActivated || workerJob?.isActive == true ||
-                recoveryJob?.isActive == true || reconnectedSession != null
+                recoveryJob?.isActive == true || multiStemRecoveryJob?.isActive == true ||
+                reconnectedSession != null || multiStemReconnectedSession != null
             ) {
                 null
             } else {
@@ -1262,7 +1574,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 "worker.ensure skipped activated=$workerActivated " +
                         "worker=${workerJob?.isActive == true} " +
                         "recovery=${recoveryJob?.isActive == true} " +
-                        "reconnected=${reconnectedSession != null}",
+                        "multiStemRecovery=${multiStemRecoveryJob?.isActive == true} " +
+                        "reconnected=${reconnectedSession != null || multiStemReconnectedSession != null}",
             )
             return
         }
@@ -2033,6 +2346,7 @@ private enum class SourceSeparationRecoveredControl {
 private data class SourceSeparationCacheDeletionCancellation(
     val job: Job?,
     val recovered: SourceSeparationReconnectedSession?,
+    val multiStemRecovered: SourceSeparationMultiStemReconnectedSession?,
     val preflightIdentity: SourceSeparationWorkerRequestIdentity?,
 )
 

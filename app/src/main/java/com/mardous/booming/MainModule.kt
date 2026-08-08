@@ -100,6 +100,8 @@ import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershi
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecovery
 import com.mardous.booming.separation.process.ipc.SourceSeparationIndependentRunRecoveryClient
+import com.mardous.booming.separation.process.ipc.SourceSeparationMultiStemIndependentRunRecovery
+import com.mardous.booming.separation.process.ipc.SourceSeparationMultiStemIndependentRunRecoveryClient
 import com.mardous.booming.separation.setup.LocalSeparationReadinessEvaluator
 import com.mardous.booming.separation.setup.SourceSeparationQuickSetupExecutor
 import com.mardous.booming.separation.setup.SourceSeparationQuickSetupModelInstaller
@@ -269,6 +271,12 @@ private val mainModule = module {
             store = get(),
         )
     } bind SourceSeparationIndependentRunRecovery::class
+    single {
+        SourceSeparationMultiStemIndependentRunRecoveryClient(
+            context = androidContext(),
+            store = get(),
+        )
+    } bind SourceSeparationMultiStemIndependentRunRecovery::class
     single { SourceSeparationCacheEntryLeaseRegistry() }
     single {
         SourceSeparationProductCacheAvailabilityProvider(
@@ -495,6 +503,9 @@ private val viewModule = module {
             preferences = get(),
             sourceSeparationRuntime = get(),
             independentRunRecovery = get(),
+            multiStemIndependentRunRecovery = get(),
+            multiStemSelectionFlow = get<SourceSeparationMultiStemPlaybackSelectionStore>()
+                .selectionFlow,
             activeSelectionFlow = presetRepository.activeSelectionFlow,
         )
     }
