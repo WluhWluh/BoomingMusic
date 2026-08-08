@@ -1205,6 +1205,12 @@ undeclared pipeline or publishing a partial stem set.
   independent background ownership and contention, and sustained
   native-memory/thermal observation. Existing product-path runs already record
   peak PSS and point-in-time thermal status.
+- [ ] Run `completedProductCachePlaysThroughMediaSession` with its new service
+  recreation segment on S25 and S10. The segment stops the first
+  `PlaybackService`, reconnects a fresh `MediaController`, and requires the
+  same exact selected multi-stem cache and ordered stem set to be adopted
+  again. The test is compiled; device execution remains pending because the
+  S25 ADB endpoint was offline during this batch.
 - [ ] Start S25 producer-ahead playback with two ready windows. On devices whose
   measured production rate cannot sustain the stride, keep separation offline
   or wait for completion instead of repeatedly pausing playback; S10 results

@@ -474,6 +474,52 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             assertTrue(metricsAfterSeek.seekRequests > metricsBeforeSeek.seekRequests)
             assertEquals(metricsBeforeSeek.underruns, metricsAfterSeek.underruns)
 
+            onMediaControllerThread(mediaController) {
+                mediaController.pause()
+                mediaController.clearMediaItems()
+                mediaController.release()
+            }
+            controller = null
+            check(context.stopService(Intent(context, PlaybackService::class.java)))
+            SystemClock.sleep(SERVICE_RECREATION_SETTLE_MS)
+
+            val recreatedController = MediaController.Builder(
+                context,
+                SessionToken(context, ComponentName(context, PlaybackService::class.java)),
+            ).buildAsync().get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            controller = recreatedController
+            onMediaControllerThread(recreatedController) {
+                recreatedController.volume = 0f
+                recreatedController.setMediaItem(
+                    MediaItem.Builder()
+                        .setMediaId(song.id.toString())
+                        .setUri(song.uri)
+                        .build(),
+                )
+                recreatedController.prepare()
+            }
+            waitForMediaController(recreatedController, "recreated source preparation") {
+                recreatedController.currentMediaItem?.mediaId == song.id.toString() &&
+                    recreatedController.duration > 0L
+            }
+            val recreatedEnable = onMediaControllerThread(recreatedController) {
+                recreatedController.sendCustomCommand(
+                    SessionCommand(Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED, Bundle.EMPTY),
+                    Bundle().apply {
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, true)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
+                    },
+                )
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            check(recreatedEnable.resultCode == SessionResult.RESULT_SUCCESS)
+            onMediaControllerThread(recreatedController) { recreatedController.play() }
+            waitForMediaController(recreatedController, "recreated multi-stem adoption") {
+                recreatedController.playWhenReady &&
+                    recreatedController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == expectedStemIds
+            }
+
             report.put("status", "complete")
                 .put("cacheKey", manifest.cacheKey)
                 .put("artifactSha256", manifest.identity.artifactSha256)
@@ -482,6 +528,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("seekRequests", metricsAfterSeek.seekRequests)
                 .put("underrunsBeforeSeek", metricsBeforeSeek.underruns)
                 .put("underruns", metricsAfterSeek.underruns)
+                .put("serviceRecreated", true)
                 .put("transportMediaId", song.id)
                 .put("transportUri", song.uri)
             reportFile.writeText(report.toString(2))
@@ -1212,6 +1259,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val MEDIA_SESSION_TIMEOUT_MS = MEDIA_SESSION_TIMEOUT_SECONDS * 1_000L
         const val MEDIA_SESSION_POLL_INTERVAL_MS = 50L
         const val MEDIA_SESSION_SEEK_TOLERANCE_MS = 750L
+        const val SERVICE_RECREATION_SETTLE_MS = 500L
         val SHA256 = Regex("^[0-9a-f]{64}$")
         val SHA1 = Regex("^[0-9a-f]{40}$")
         val SAFE_NAME = Regex("^[A-Za-z0-9._-]{1,160}$")
