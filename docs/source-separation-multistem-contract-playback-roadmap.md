@@ -1160,10 +1160,12 @@ undeclared pipeline or publishing a partial stem set.
   strict host FP32 fixture parity, energy-aware per-stem Android tensor checks,
   and final whole-render PCM16 parity. Low-energy stems use an absolute-error
   rule; PCM16 SNR remains diagnostic-only.
-- [ ] Re-run the canonical 7.8-second host/device tensor comparison for all
-  three artifacts from a clean, provenance-bound product build after Release
-  download and installation. Final PCM16 agreement does not replace the
-  stricter per-stem FP32 tensor gate.
+- [x] Re-run the canonical 7.8-second host/device tensor comparison for all
+  three exact Release-installed artifacts from a provenance-bound product
+  build. The fixture runner now loads model and sidecar only from the product
+  installation store; staging supplies hash-bound fixture tensors, never an
+  alternate model. All three pass the Frozen V2 energy-aware per-stem FP32
+  gate. Final PCM16 agreement remains a separate gate.
 - [x] Compare a complete 30-second product render with the same-weight host
   reference for all three Release artifacts. Commit `50fcbad7`, app APK
   `2cad204f...dad8`, and test APK `150fb74d...e55c` processed the identical
@@ -1326,6 +1328,18 @@ These are canonical 7.8-second and two-window device checks, not full-song
 qualification. They establish that all three exact CPU artifacts pass the same
 v2 numerical device gate on S25; full-song resource, lifecycle, cache,
 PCM16, and listening gates remain open.
+
+The Release-installed rerun closes the remaining executable-origin gap at
+commit `a7d4ef4d`, app APK SHA-256 `2cad204f7d3c...6cdad8`, and test APK
+SHA-256 `8c1984f0a670...22ea9c`. On the same S25 and runtime `2.1.5-bss.2`, the
+runner loaded the official six-stem, official four-stem, and guitar-ft model
+and exact-name sidecar from the product install store. Artifact SHA-256 values
+were `8b19e919...ba4ed7`, `98557180...ed81`, and `ab632a5a...9b9a5`; sidecar
+SHA-256 values were `c9c288a4...1fcd6`, `6ba70a42...f6fe5c`, and
+`fa18936f...11865`. Every fixture identity matched its installed sidecar, STFT
+maximum error was `4.77e-7` for all three, and every ordered stem passed Frozen
+V2. The Android strict-host projection remains diagnostic-only as frozen above;
+it is not substituted for the energy-aware device gate.
 
 Product integration then advanced in four independently tested steps:
 `34dbc64d` connected Android source decoding and the installed CPU session;
