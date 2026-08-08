@@ -20,6 +20,7 @@ import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelection
 import com.mardous.booming.separation.model.contract.SourceSeparationInstalledMultiStemModel
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemInstallProgressKind
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
+import com.mardous.booming.separation.model.contract.matchesReleaseEntry
 import com.mardous.booming.separation.model.contract.SourceSeparationReleaseCatalog
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
@@ -608,7 +609,7 @@ class SourceSeparationPresetManagementViewModel internal constructor(
                     releaseTag = catalog.releaseTag,
                     installed = null,
                     active = selectedModelId == entry.modelId,
-                    canUseForValidation = installed != null &&
+                    canUseForValidation = installed?.matchesReleaseEntry(entry) == true &&
                         entry.allowedBackends == listOf("cpu") &&
                         entry.activationPolicy == "selectable-experimental",
                     useBlockReason = null,

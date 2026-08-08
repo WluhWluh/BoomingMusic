@@ -56,6 +56,16 @@ data class SourceSeparationReleaseArtifactPair(
     val sidecar: SourceSeparationDeliveryReference,
 )
 
+fun SourceSeparationInstalledMultiStemModel.matchesReleaseEntry(
+    entry: SourceSeparationReleaseCatalogEntry,
+): Boolean = modelId == entry.modelId &&
+    modelFile.name == entry.artifact.fileName &&
+    sidecarFile.name == entry.contract.fileName &&
+    modelByteSize == entry.artifact.byteSize &&
+    modelSha256.equals(entry.artifact.sha256, ignoreCase = true) &&
+    contractId == entry.contract.contractId &&
+    pipelineId == entry.pipelineId
+
 object SourceSeparationReleaseCatalogMetadata {
     const val CATALOG_FILE_NAME = "model-catalog-v3.json"
     const val CATALOG_ID = "booming-ss-model-catalog-v3"

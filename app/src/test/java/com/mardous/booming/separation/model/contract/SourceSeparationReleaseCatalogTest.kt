@@ -1,9 +1,11 @@
 package com.mardous.booming.separation.model.contract
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class SourceSeparationReleaseCatalogTest {
     @Test
@@ -60,6 +62,35 @@ class SourceSeparationReleaseCatalogTest {
                 SourceSeparationModelMetadata.json.decodeFromString(invalid),
             )
         }
+    }
+
+    @Test
+    fun `installed model matches only its exact Release identity`() {
+        val catalog = SourceSeparationReleaseCatalogValidator.validate(
+            SourceSeparationModelMetadata.json.decodeFromString(catalogJson()),
+        )
+        val entry = catalog.entries.single {
+            it.modelId == "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0"
+        }
+        val installed = SourceSeparationInstalledMultiStemModel(
+            modelId = entry.modelId,
+            displayName = entry.displayName,
+            modelFile = File(entry.artifact.fileName),
+            sidecarFile = File(entry.contract.fileName),
+            modelByteSize = entry.artifact.byteSize,
+            modelSha256 = entry.artifact.sha256,
+            contractId = entry.contract.contractId,
+            pipelineId = entry.pipelineId,
+            installedAtEpochMs = 1L,
+        )
+
+        assertTrue(installed.matchesReleaseEntry(entry))
+        assertFalse(installed.copy(modelSha256 = "0".repeat(64)).matchesReleaseEntry(entry))
+        assertFalse(installed.copy(contractId = "stale@1").matchesReleaseEntry(entry))
+        assertFalse(installed.copy(modelByteSize = entry.artifact.byteSize - 1L)
+            .matchesReleaseEntry(entry))
+        assertFalse(installed.copy(sidecarFile = File("stale.tflite.json"))
+            .matchesReleaseEntry(entry))
     }
 
     private fun catalogJson(): String = """

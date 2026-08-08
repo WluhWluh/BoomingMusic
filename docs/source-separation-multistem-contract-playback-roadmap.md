@@ -1441,7 +1441,7 @@ is implied.
   CPU-only and returns a typed multi-stem completion result.
 - [x] Keep unsupported generic models inspectable and downloadable but blocked
   from activation.
-- [ ] Expose a model only when its exact contract, pipeline, playback, and
+- [x] Expose a model only when its exact contract, pipeline, playback, and
   device evidence support the selected activation policy.
 - [x] Show model-specific CPU-only compatibility and download/install size;
   never imply that four stems are the lower-resource choice, because the
@@ -1503,6 +1503,14 @@ The generic-target Compose gate expands the reviewed `TargetStem` category for
 and asserts that no use action is rendered. This matches the catalog validator
 and activation resolver: a generic target/residual model remains blocked until
 it has a reviewed executable contract and neutral playback semantics.
+
+Multi-stem activation now also compares the installed model ID, model and
+sidecar filenames, model byte size and SHA-256, contract ID, and pipeline ID
+against the current immutable Release entry before enabling use. A stale
+same-name installation remains visible and deletable but cannot be activated.
+Unit tests reject mismatched hashes, sizes, contracts, and sidecars; the S25
+production-graph management rerun confirms that each exact installed Release
+pair remains selectable through the experimental confirmation path.
 
 The S25 completed-cache service-recreation rerun is recorded in
 `files/source-separation/multistem-product-device-reports/
