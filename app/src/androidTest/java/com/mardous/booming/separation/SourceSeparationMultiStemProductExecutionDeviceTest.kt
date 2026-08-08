@@ -27,6 +27,7 @@ import com.mardous.booming.data.model.Song
 import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.PlaybackService
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
+import com.mardous.booming.separation.audio.Pcm16WavFileReader
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
@@ -41,6 +42,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRe
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationMultiStemExecutionHost
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorQualityGate
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
@@ -50,6 +52,7 @@ import com.mardous.booming.util.MINIMUM_SONG_DURATION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.WHITELIST_ENABLED
 import java.io.File
+import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
@@ -1178,6 +1181,14 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             ?.lowercase()
             ?.also { require(SHA256.matches(it)) }
         expectedSourceSha?.let { require(stagedSource.sha256() == it) }
+        val referenceRoot = arguments.getString(ARG_REFERENCE_PATH)?.let { relativePath ->
+            require(SAFE_RELATIVE_PATH.matches(relativePath))
+            File(context.filesDir, relativePath).canonicalFile.also { root ->
+                require(root.toPath().startsWith(context.filesDir.canonicalFile.toPath()) &&
+                    root.isDirectory
+                ) { "Staged host reference is unavailable." }
+            }
+        }
         val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
             .resolve("$runId.json")
         val report = JSONObject()
@@ -1272,6 +1283,9 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 assertEquals(output.stems.map { stem -> stem.stemId.value }, it.stemIds)
                 assertTrue(it.stemFiles.all(File::isFile))
             }
+            val hostComparison = referenceRoot?.let { root ->
+                compareProductWavsWithHostReference(store, manifest.cacheKey, output, root)
+            }
             val promotionStartedAt = SystemClock.elapsedRealtime()
             val promotedResult = promoter.promote(manifest.cacheKey)
             val promotionElapsedMs = SystemClock.elapsedRealtime() - promotionStartedAt
@@ -1329,6 +1343,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                         requireNotNull(stem.promotedIndexIntegrity).byteSize
                 })
                 .put("cleanedCacheBytes", requireNotNull(cleanedManifest.output).totalBytes)
+                .put("hostComparison", hostComparison)
                 .put("stems", JSONArray().apply {
                     output.stems.forEach { stem ->
                         val integrity = requireNotNull(stem.wavIntegrity)
@@ -1648,6 +1663,57 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
     private fun thermalStatus(context: Context): Int =
         context.getSystemService(PowerManager::class.java).currentThermalStatus
 
+    private fun compareProductWavsWithHostReference(
+        store: SourceSeparationCacheStore,
+        cacheKey: String,
+        output: com.mardous.booming.separation.cache.v2.SourceSeparationCacheOutput,
+        referenceRoot: File,
+    ): JSONObject = JSONObject()
+        .put("referenceRoot", referenceRoot.name)
+        .put("thresholdProfile", "phase6-frozen-v2-pcm16")
+        .put("passes", true)
+        .put("stems", JSONArray().apply {
+            output.stems.forEach { stem ->
+                val actualFile = store.resolveEntryPath(cacheKey, stem.wavPath)
+                val referenceFile = referenceRoot.resolve("${stem.stemId.value}.wav")
+                val actualInfo = Pcm16WavFileReader.read(actualFile)
+                val referenceInfo = Pcm16WavFileReader.read(referenceFile)
+                require(actualInfo.sampleRate == output.outputSampleRate &&
+                    referenceInfo.sampleRate == output.outputSampleRate &&
+                    actualInfo.channelCount == 2 && referenceInfo.channelCount == 2 &&
+                    actualInfo.frameCount == output.outputFrameCount.toLong() &&
+                    referenceInfo.frameCount == output.outputFrameCount.toLong()
+                ) { "Host reference WAV geometry differs for ${stem.stemId.value}." }
+                val metrics = SourceSeparationMultiTensorQualityGate.comparePcm16(
+                    expected = referenceFile.readPcm16Data(referenceInfo.dataOffset, referenceInfo.dataSize),
+                    actual = actualFile.readPcm16Data(actualInfo.dataOffset, actualInfo.dataSize),
+                    expectedFrameCount = output.outputFrameCount,
+                    channelCount = 2,
+                )
+                require(metrics.passes) {
+                    "Product PCM16 differs from the host reference for ${stem.stemId.value}: $metrics"
+                }
+                put(JSONObject()
+                    .put("stemId", stem.stemId.value)
+                    .put("referenceSha256", referenceFile.sha256())
+                    .put("actualSha256", actualFile.sha256())
+                    .put("frameCount", output.outputFrameCount)
+                    .put("maximumSampleDelta", metrics.maximumSampleDelta)
+                    .put("maximumAbsoluteError", metrics.maximumAbsoluteError)
+                    .put("passes", metrics.passes))
+            }
+        })
+
+    private fun File.readPcm16Data(dataOffset: Long, dataSize: Long): ByteArray {
+        require(dataSize in 0..Int.MAX_VALUE.toLong()) { "WAV PCM payload is too large." }
+        return ByteArray(dataSize.toInt()).also { bytes ->
+            RandomAccessFile(this, "r").use { input ->
+                input.seek(dataOffset)
+                input.readFully(bytes)
+            }
+        }
+    }
+
     private fun sourceSeparationPid(context: Context): Int? =
         context.getSystemService(ActivityManager::class.java)
             .runningAppProcesses
@@ -1865,6 +1931,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val ARG_REPLACEMENT_MODEL_ID = "bssMultistemReplacementModelId"
         const val ARG_SOURCE_PATH = "bssMultistemSourcePath"
         const val ARG_SOURCE_SHA256 = "bssMultistemSourceSha256"
+        const val ARG_REFERENCE_PATH = "bssMultistemReferencePath"
         const val ARG_RUN_ID = "bssMultistemRunId"
         const val ARG_ALLOWED_SEEK_UNDERRUNS = "bssMultistemAllowedSeekUnderruns"
         const val ARG_DELETE_ACTIVE_CACHE = "bssMultistemDeleteActiveCache"
