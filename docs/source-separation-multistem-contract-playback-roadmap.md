@@ -3,7 +3,7 @@
 Status: active implementation roadmap and design authority for stem identity,
 model contracts, imported metadata, cache output shape, and playback data flow.
 
-Updated: 2026-08-07
+Updated: 2026-08-08
 
 ## Current Release and Product-Path Baseline (2026-08-07)
 
@@ -44,7 +44,9 @@ service-recreation and playback-time deletion evidence. The matching S25
 service-recreation and direct active-cache deletion gates, strict S10
 zero-underrun playback resources, S25 official-six-stem producer-ahead
 playback, and active deletion through the S25 management panel are complete.
-Background contention and listening remain open.
+The bounded contention/resource soak and independent main-process-death
+recovery gates are also complete on S25 and S10. Human same-weight listening is
+the only remaining Phase 6 closeout item.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -1179,8 +1181,8 @@ undeclared pipeline or publishing a partial stem set.
   pipeline against official 4-stem base and guitar-ft. A shared architecture
   does not allow one artifact's result to stand in for another. All three exact
   Release artifacts independently completed the same 30-second S25 product
-  engine/cache/FLAC gate; numerical parity and listening remain separate open
-  items.
+  engine/cache/FLAC gate. Numerical parity is closed by the same-weight product
+  render gate above; human listening remains separate and open.
 - [x] Verify user cancellation and clean restart on S25 and S10. The canceled
   run retains exactly one atomically completed segment, records a durable
   `Canceled` transition, exposes no completed cache, and cleanly rebuilds the
@@ -1321,8 +1323,9 @@ it does not lower the energetic-stem SNR, cosine, maximum-error, or PCM16
 limits. The gates cover strict FP32 parity, low-energy stem handling,
 energetic-stem SNR/cosine gates, and one-LSB PCM16 equivalence. The S25 Phase 5
 fixture reports above are intentionally not retroactively evaluated as a
-qualification pass under this revision; the clean full-song and per-stem
-same-weight comparisons remain open below.
+qualification pass under this revision. The later Release-installed
+same-weight product comparisons close the clean full-song and per-stem
+numerical gate without retroactively changing this threshold result.
 
 The first clean-provenance S25 attempt for official six-stem was run from
 product commit `34c49f7e` with APK SHA-256
@@ -1351,9 +1354,10 @@ candidates on `SM-S9310`, API 35, arm64:
 | Guitar-ft 6-stem | pass | 90.254 dB | 66.628 dB | 7.354 s | pass |
 
 These are canonical 7.8-second and two-window device checks, not full-song
-qualification. They establish that all three exact CPU artifacts pass the same
-v2 numerical device gate on S25; full-song resource, lifecycle, cache,
-PCM16, and listening gates remain open.
+qualification. At this checkpoint they established that all three exact CPU
+artifacts passed the same v2 numerical device gate on S25; the later product
+runs below separately close full-song PCM16, resource, lifecycle, and cache
+gates. Human listening remains open.
 
 The Release-installed rerun closes the remaining executable-origin gap at
 commit `a7d4ef4d`, app APK SHA-256 `2cad204f7d3c...6cdad8`, and test APK
@@ -1525,10 +1529,9 @@ presentation table covering every model in the published 33-entry Release,
 with explicit family, purpose, category, and representative roles. It also
 provides deterministic category grouping and exact-coverage validation. This
 layer is deliberately separate from executable contracts, cache identity,
-activation policy, and localized labels. The remaining Phase 7 work is to
-connect the three HTDemucs records to the same management surface; that work
-must continue to leave unknown or unsupported models inspectable without
-granting activation.
+activation policy, and localized labels. The three HTDemucs records are now
+connected to the same management surface while unknown or unsupported models
+remain inspectable without receiving activation.
 
 #### Phase 7B: Folded preset-management categories
 
@@ -1734,12 +1737,13 @@ deleted.
    unknown pipelines remain installed and inspectable but blocked from
    activation.
 8. Which current HTDemucs candidates should enter the first product catalog.
-   Decision: qualify official six-stem, official four-stem base, and guitar-ft
-   together as exact CPU-only experimental candidates. Keep them
-   non-activatable until their individual executable contract, layered parity,
-   full-song, resource, lifecycle, and listening gates pass. Preserve the
-   guitar-ft author/base-model/MoisesDB notices in every published form. Do not
-   generalize MDX GPU/QNN evidence or a neural-core hybrid to Demucs.
+   Decision: official six-stem, official four-stem base, and guitar-ft are exact
+   CPU-only experimental candidates and are selectable for explicit testing.
+   Keep them outside stable recommendation until individual executable
+   contract, layered parity, full-song, resource, lifecycle, and listening
+   gates pass. Preserve the guitar-ft author/base-model/MoisesDB notices in
+   every published form. Do not generalize MDX GPU/QNN evidence or a
+   neural-core hybrid to Demucs.
 9. Whether CPU-only qualification should imply all-ABI support. Decision: no.
    Begin with arm64 device qualification. Admit arm32, x86, or x86_64 only from
    separate allocation, address-space, sustained, and lifecycle evidence for
@@ -1766,8 +1770,9 @@ This roadmap is complete only when:
 - catalog categories and activation policies are derived from validated
   metadata rather than filenames or localized text.
 
-The three frozen HTDemucs candidates are selectable experimental entries, but
-remain outside stable promotion until product-path download, full-song,
-resource, lifecycle, cache/playback, and listening gates pass. The stable MDX
-two-stem path remains the product default, with all other published models
-available for explicit experimental testing.
+The three frozen HTDemucs candidates are selectable experimental entries.
+Product-path download, full-song numerical/resource, lifecycle, and
+cache/playback gates now pass; same-weight human listening remains the final
+stable-promotion blocker. The stable MDX two-stem path remains the product
+default, with all other published models available for explicit experimental
+testing.
