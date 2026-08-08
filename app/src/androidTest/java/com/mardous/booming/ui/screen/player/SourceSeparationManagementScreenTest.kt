@@ -6,7 +6,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -195,6 +197,80 @@ class SourceSeparationManagementScreenTest {
             .assertIsEnabled()
             .performClick()
         compose.runOnIdle { assertEquals(modelId, selectedModelId.get()) }
+    }
+
+    @Test
+    fun genericTargetPresetRemainsInspectableAndDownloadableWithoutUseAction() {
+        val modelId = "kuielab_a_bass"
+        val downloadedModelId = AtomicReference<String?>()
+        val item = SourceSeparationPresetManagementItem(
+            modelId = modelId,
+            displayName = "Kuielab A Bass",
+            presentation = SourceSeparationModelPresentationCatalog.require(modelId),
+            supportLevel = CatalogSupportLevel.DownloadOnly,
+            activationPolicy = CatalogActivationPolicy.DownloadOnlyGenericStem,
+            releaseMaturity = CatalogReleaseMaturity.Candidate,
+            isDefault = false,
+            byteSize = 1_024L,
+            sha256 = "d".repeat(64),
+            releaseTag = "v0.1.0-candidates.1",
+            installed = null,
+            active = false,
+            canUseForValidation = false,
+            useBlockReason = null,
+            transferState = null,
+            operationKey = "catalog:$modelId",
+        )
+
+        compose.setContent {
+            MaterialTheme {
+                SourceSeparationPresetManagementSheet(
+                    state = SourceSeparationPresetManagementUiState(entries = listOf(item)),
+                    onDownload = downloadedModelId::set,
+                    onCancelDownload = {},
+                    onUse = {},
+                    onDelete = {},
+                    onConfirmExperimental = {},
+                    onDismissExperimental = {},
+                    onClearError = {},
+                    onClearRestoredModelTarget = {},
+                    onRefresh = {},
+                    onImportModel = {},
+                    onImportSidecar = {},
+                    onStartManualProfile = {},
+                    onSaveManualProfile = {},
+                    onCancelManualProfile = {},
+                    onRetryImport = {},
+                    onDiscardImport = {},
+                    onDismissImportSuccess = {},
+                    onUseImported = {},
+                    onDeleteImported = {},
+                    onShowCatalogDetails = {},
+                    onShowImportedDetails = { _, _ -> },
+                    onDismissModelDetails = {},
+                    onEditCustomProfile = { _, _ -> },
+                    onSaveCustomProfileRevision = {},
+                    onCancelCustomProfileEdit = {},
+                    onUseCustomProfile = { _, _ -> },
+                    onExportCustomProfile = {},
+                    onDeleteCustomProfile = {},
+                )
+            }
+        }
+
+        compose.onNodeWithTag("source-separation-preset-category:TargetStem")
+            .assertIsDisplayed()
+            .performClick()
+        compose.onNodeWithTag("source-separation-preset:$modelId")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onAllNodesWithTag("source-separation-preset-use:$modelId")
+            .assertCountEquals(0)
+        compose.onNodeWithTag("source-separation-preset-download:$modelId")
+            .performScrollTo()
+            .assertIsEnabled()
+            .performClick()
+        compose.runOnIdle { assertEquals(modelId, downloadedModelId.get()) }
     }
 
     @Test

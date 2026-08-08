@@ -1439,7 +1439,7 @@ is implied.
   multi-stem artifacts fail as `ModelNotInstalled`; they never silently fall
   back to the active MDX model. The dedicated HTDemucs executor remains
   CPU-only and returns a typed multi-stem completion result.
-- [ ] Keep unsupported generic models inspectable and downloadable but blocked
+- [x] Keep unsupported generic models inspectable and downloadable but blocked
   from activation.
 - [ ] Expose a model only when its exact contract, pipeline, playback, and
   device evidence support the selected activation policy.
@@ -1497,6 +1497,12 @@ reports `178,052,690` bytes, and guitar-ft reports `117,742,547` bytes; every
 detail record exposes only `cpu`. The test explicitly asserts that official
 four-stem is larger than official six-stem so the category cannot regress into
 using stem count as a resource estimate.
+
+The generic-target Compose gate expands the reviewed `TargetStem` category for
+`kuielab_a_bass`, verifies that the model remains visible and downloadable,
+and asserts that no use action is rendered. This matches the catalog validator
+and activation resolver: a generic target/residual model remains blocked until
+it has a reviewed executable contract and neutral playback semantics.
 
 The S25 completed-cache service-recreation rerun is recorded in
 `files/source-separation/multistem-product-device-reports/
