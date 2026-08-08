@@ -38,6 +38,11 @@ interface SourceSeparationRuntimeFacade {
         shouldCancel: () -> Boolean = { false },
     ): SourceSeparationRuntimeSongResolution
 
+    fun resolveForPlayback(
+        song: Song,
+        shouldCancel: () -> Boolean = { false },
+    ): SourceSeparationRuntimeSongResolution = resolve(song, shouldCancel)
+
     fun cacheStatus(song: SourceSeparationRuntimeSong): SourceSeparationModelAwareCacheStatus
 
     fun playableStatus(
@@ -105,6 +110,7 @@ interface SourceSeparationRuntimeFacade {
 
 class DefaultSourceSeparationRuntimeFacade internal constructor(
     private val activeModelResolver: () -> SourceSeparationActiveCacheModelResolution,
+    private val multiStemPlaybackResolver: SourceSeparationMultiStemPlaybackResolver? = null,
     private val compatibilityResolver: SourceSeparationRuntimeCompatibilityResolver,
     private val preflightResolver: SourceSeparationModelAwarePreflightResolver,
     private val inputFactory: SourceSeparationRuntimeSongInputFactory =
@@ -180,6 +186,26 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
         )
     }
 
+    override fun resolveForPlayback(
+        song: Song,
+        shouldCancel: () -> Boolean,
+    ): SourceSeparationRuntimeSongResolution {
+        if (song == Song.emptySong) {
+            return SourceSeparationRuntimeSongResolution.Unavailable(
+                SourceSeparationRuntimeUnavailableReason.NoSong,
+            )
+        }
+        runCatching {
+            multiStemPlaybackResolver?.resolve(song, shouldCancel)
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            null
+        }?.let { resolved ->
+            return SourceSeparationRuntimeSongResolution.Ready(resolved)
+        }
+        return resolve(song, shouldCancel)
+    }
+
     override fun cacheStatus(
         song: SourceSeparationRuntimeSong,
     ): SourceSeparationModelAwareCacheStatus = cacheRepository.status(song.identity)
@@ -235,9 +261,12 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
         }
         val selectedEngine = scopedEngine ?: engine
         return try {
+            val model = requireNotNull(song.model) {
+                "Multi-stem playback targets cannot be submitted to the MDX engine."
+            }
             selectedEngine.separateResolved(
                 input = song.input,
-                model = song.model,
+                model = model,
                 preflight = song.preflight,
                 runtimeSettings = runtimeSettings,
                 executionBackendPolicy = if (tryGpu) {
@@ -334,11 +363,12 @@ private class SourceSeparationSourcePreflightMemo(
 
 class SourceSeparationRuntimeSong internal constructor(
     val song: Song,
-    internal val model: SourceSeparationResolvedCacheModel,
+    internal val model: SourceSeparationResolvedCacheModel?,
     internal val input: SourceSeparationModelAwareSongInput,
     internal val preflight: SourceSeparationCacheSourcePreflight,
+    private val identityOverride: SourceSeparationCacheIdentity? = null,
 ) {
-    val identity = model.contract.identity(preflight.identity)
+    val identity = identityOverride ?: requireNotNull(model).contract.identity(preflight.identity)
     val cacheKey: String
         get() = identity.cacheKey
     val modelId: String
@@ -347,6 +377,21 @@ class SourceSeparationRuntimeSong internal constructor(
         get() = identity.artifactSha256
     val profileRevisionId: String
         get() = identity.profileRevisionId
+
+    internal companion object {
+        fun forMultiStem(
+            song: Song,
+            identity: SourceSeparationCacheIdentity,
+            input: SourceSeparationModelAwareSongInput,
+            preflight: SourceSeparationCacheSourcePreflight,
+        ) = SourceSeparationRuntimeSong(
+            song = song,
+            model = null,
+            input = input,
+            preflight = preflight,
+            identityOverride = identity,
+        )
+    }
 }
 
 sealed interface SourceSeparationRuntimeSongResolution {

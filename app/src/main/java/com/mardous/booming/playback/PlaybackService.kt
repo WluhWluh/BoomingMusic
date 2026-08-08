@@ -1831,7 +1831,7 @@ class PlaybackService :
 
         val positionMs = player.currentPosition.coerceAtLeast(0)
         val runtimeSong = when (val resolution = withContext(IO) {
-            sourceSeparationRuntime.resolve(song)
+            sourceSeparationRuntime.resolveForPlayback(song)
         }) {
             is SourceSeparationRuntimeSongResolution.Ready -> resolution.song
             is SourceSeparationRuntimeSongResolution.Unavailable -> {
@@ -2618,7 +2618,7 @@ class PlaybackService :
 
                 val currentCacheCompleted = runCatching {
                     val currentRuntimeSong = when (
-                        val resolution = sourceSeparationRuntime.resolve(currentSong)
+                        val resolution = sourceSeparationRuntime.resolveForPlayback(currentSong)
                     ) {
                         is SourceSeparationRuntimeSongResolution.Ready -> resolution.song
                         is SourceSeparationRuntimeSongResolution.Unavailable -> return@runCatching false

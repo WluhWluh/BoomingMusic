@@ -79,6 +79,8 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRe
 import com.mardous.booming.separation.cache.v2.SourceSeparationMultiStemCacheAvailabilityProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationPresetCacheAvailabilityProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationProductCacheAvailabilityProvider
+import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackResolver
+import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.cache.v2.resolveTrustedActiveCacheModelResolution
 import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPresetStructuralInspector
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
@@ -275,6 +277,14 @@ private val mainModule = module {
             ),
         )
     }
+    single { SourceSeparationMultiStemPlaybackSelectionStore(get()) }
+    single {
+        SourceSeparationMultiStemPlaybackResolver(
+            selection = get(),
+            installer = get(),
+            preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(androidContext()),
+        )
+    }
     single {
         SourceSeparationModelAwareCacheRepository(
             store = get(),
@@ -331,6 +341,7 @@ private val mainModule = module {
         val presetRepository = get<SourceSeparationPresetRepository>()
         DefaultSourceSeparationRuntimeFacade(
             activeModelResolver = presetRepository::resolveTrustedActiveCacheModelResolution,
+            multiStemPlaybackResolver = get(),
             compatibilityResolver = AndroidSourceSeparationRuntimeCompatibilityResolver,
             preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(androidContext()),
             engine = get(),

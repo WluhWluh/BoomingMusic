@@ -1207,9 +1207,11 @@ undeclared pipeline or publishing a partial stem set.
   measured production rate cannot sustain the stride, keep separation offline
   or wait for completion instead of repeatedly pausing playback; S10 results
   above RTF `1.0` must not be presented as streaming-capable.
-- [ ] Complete the deferred real 4/6-stem repository and `PlaybackService`
-  process-recreation gate, including atomic cache publication, deletion,
-  cancellation, FLAC promotion, seek, and active-model switching.
+- [x] Complete the first real 4/6-stem repository and `PlaybackService` gate on
+  S25: exact Release model selection, remote full-song publication, indexed
+  FLAC promotion, original-source transport clock, ordered N-stem adoption,
+  pause, seek, and resume. Process recreation, cache deletion during playback,
+  and active-model switching remain separate follow-ups.
 - [ ] Perform human listening against the same-weight host reference for every
   candidate, including guitar/piano-dense material for guitar-ft.
 - [x] Publish all three as selectable CPU-only experimental candidates with
@@ -1336,6 +1338,21 @@ published a completed cache with a strictly newer process generation and a
 `PreviousOwnerDied` journal transition. This closes remote process death and
 cache recovery for the current in-process-background policy; it does not close
 independent background ownership or real PlaybackService multi-stem adoption.
+
+The first real `PlaybackService` product gate used the installed bss-tflite
+Release pairs and the 30-second Coast Town source on S25. It exposed and fixed
+one missing product boundary: playback resolution only consulted the legacy
+MDX preset selection, and the first multi-stem adapter omitted the
+`htdemucs-cpu-fp32-v1` render profile from the exact cache identity. The fixed
+path persists multi-stem playback selection independently, resolves the exact
+multi-tensor contract for playback without routing it through the MDX engine,
+and preserves the existing MDX scheduling path. Official four-stem adopted
+`drums,bass,other,vocals`; official six-stem adopted
+`drums,bass,other,vocals,guitar,piano`. Both completed pause, one-third-track
+seek, and resume through `MediaController` with zero additional underruns.
+This closes basic completed-cache 4/6-stem routing on S25, not guitar-ft
+listening, producer-ahead playback, service recreation, cache deletion, model
+hot-switch, S10 playback resources, or background contention.
 
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support

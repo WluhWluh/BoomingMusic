@@ -2,15 +2,30 @@ package com.mardous.booming.separation
 
 import android.content.ContentUris
 import android.content.ContentValues
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
+import android.os.Bundle
 import android.os.Debug
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.MediaStore
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import androidx.media3.session.SessionToken
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.data.model.Song
+import com.mardous.booming.playback.Playback
+import com.mardous.booming.playback.PlaybackService
+import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromoter
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
@@ -22,14 +37,20 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestStat
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheValidationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
+import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationMultiStemExecutionHost
+import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
+import com.mardous.booming.util.IGNORE_AUDIO_FOCUS
+import com.mardous.booming.util.MINIMUM_SONG_DURATION
+import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -45,6 +66,270 @@ import org.koin.core.context.GlobalContext
 
 @RunWith(AndroidJUnit4::class)
 class SourceSeparationMultiStemProductExecutionDeviceTest {
+    @Test
+    fun completedProductCachePlaysThroughMediaSession() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
+        val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
+        assumeTrue(modelId.isNotBlank() && relativeSource.isNotBlank())
+        require(modelId in EXPECTED_MODEL_IDS && SAFE_RELATIVE_PATH.matches(relativeSource))
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val source = File(context.filesDir, relativeSource).canonicalFile
+        require(source.toPath().startsWith(context.filesDir.canonicalFile.toPath()) && source.isFile)
+        arguments.getString(ARG_SOURCE_SHA256)?.let { expected ->
+            require(SHA256.matches(expected) && source.sha256() == expected)
+        }
+        val runId = arguments.getString(ARG_RUN_ID)?.takeIf(SAFE_NAME::matches)
+            ?: "playback-$modelId-${System.currentTimeMillis()}"
+        val koin = GlobalContext.get()
+        val facade = koin.get<SourceSeparationMultiStemProductFacade>()
+        val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
+        val store = koin.get<SourceSeparationCacheStore>()
+        val promoter = koin.get<SourceSeparationCacheFlacPromoter>()
+        val selectionStore = koin.get<SourceSeparationMultiStemPlaybackSelectionStore>()
+        val processor = koin.get<SourceSeparationMixAudioProcessor>()
+        val preferences = koin.get<SharedPreferences>()
+        val initialSelectedModelId = selectionStore.selectedModelId()
+        val preferenceSnapshot = snapshotPreferences(
+            preferences,
+            setOf(MINIMUM_SONG_DURATION, SOURCE_SEPARATION_AUTO_START, IGNORE_AUDIO_FOCUS),
+        )
+        val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
+            .resolve("$runId.json")
+        val report = JSONObject()
+            .put("runId", runId)
+            .put("mode", "playback-service")
+            .put("modelId", modelId)
+            .put("status", "running")
+            .put("deviceModel", android.os.Build.MODEL)
+            .put("sdk", android.os.Build.VERSION.SDK_INT)
+            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+        var mediaUri: Uri? = null
+        var cacheKey: String? = null
+        var controller: MediaController? = null
+        try {
+            check(preferences.edit()
+                .putInt(MINIMUM_SONG_DURATION, 0)
+                .putBoolean(SOURCE_SEPARATION_AUTO_START, false)
+                .putBoolean(IGNORE_AUDIO_FOCUS, true)
+                .commit())
+            mediaUri = importIntoMediaStore(context, source, runId)
+            val song = stagedSong(mediaUri, source, runId)
+            repository.entries()
+                .filter { it.modelId == modelId && it.title.startsWith(SONG_TITLE_PREFIX) }
+                .forEach { repository.delete(it.cacheKey) }
+
+            val separated = facade.separate(song = song, modelId = modelId)
+            val manifest = when (separated) {
+                is HtdemucsSourceSeparationEngineResult.Completed -> separated.manifest
+                is HtdemucsSourceSeparationEngineResult.AlreadyCompleted -> separated.manifest
+                is HtdemucsSourceSeparationEngineResult.Busy -> error("Unexpected busy result")
+            }
+            cacheKey = manifest.cacheKey
+            val promoted = promoter.promote(manifest.cacheKey)
+            val playbackManifest = when (promoted) {
+                is SourceSeparationCacheFlacPromotionResult.Completed -> promoted.manifest
+                is SourceSeparationCacheFlacPromotionResult.AlreadyPromoted -> promoted.manifest
+                is SourceSeparationCacheFlacPromotionResult.Busy -> error("Unexpected promotion contention")
+                SourceSeparationCacheFlacPromotionResult.Unavailable ->
+                    error("FLAC promotion was unavailable")
+            }
+            val output = requireNotNull(playbackManifest.output)
+            val expectedStemIds = output.stems.sortedBy { stem -> stem.order }
+                .map { stem -> stem.stemId.value }
+            assertTrue(expectedStemIds.size == 4 || expectedStemIds.size == 6)
+            selectionStore.select(modelId)
+
+            val mediaController = MediaController.Builder(
+                context,
+                SessionToken(context, ComponentName(context, PlaybackService::class.java)),
+            ).buildAsync().get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            controller = mediaController
+            onMediaControllerThread(mediaController) {
+                mediaController.volume = 0f
+                mediaController.setMediaItem(
+                    MediaItem.Builder()
+                        .setMediaId(song.id.toString())
+                        .setUri(song.uri)
+                        .build(),
+                )
+                mediaController.prepare()
+            }
+            waitForMediaController(mediaController, "source preparation") {
+                mediaController.currentMediaItem?.mediaId == song.id.toString() &&
+                    mediaController.duration > 0L
+            }
+            val enableResult = onMediaControllerThread(mediaController) {
+                mediaController.sendCustomCommand(
+                    SessionCommand(Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED, Bundle.EMPTY),
+                    Bundle().apply {
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, true)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
+                    },
+                )
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            report.put("enableResult", JSONObject()
+                .put("code", enableResult.resultCode)
+                .put("enabled", enableResult.extras.getBoolean(
+                    Playback.EXTRA_SOURCE_SEPARATION_ENABLED,
+                ))
+                .put("processing", enableResult.extras.getBoolean(
+                    Playback.EXTRA_SOURCE_SEPARATION_PROCESSING,
+                ))
+                .put("message", enableResult.extras.getString(
+                    Playback.EXTRA_SOURCE_SEPARATION_MESSAGE,
+                )))
+            val playbackResolution = koin.get<SourceSeparationRuntimeFacade>()
+                .resolveForPlayback(song)
+            report.put("playbackResolution", when (playbackResolution) {
+                is SourceSeparationRuntimeSongResolution.Ready -> {
+                    val directStatus = koin.get<SourceSeparationRuntimeFacade>().playableStatus(
+                        playbackResolution.song,
+                        playbackPositionMs = 0L,
+                        readyWindowCount = 2,
+                    )
+                    JSONObject()
+                        .put("cacheKey", playbackResolution.song.cacheKey)
+                        .put("modelId", playbackResolution.song.modelId)
+                        .put("status", directStatus.javaClass.simpleName)
+                        .put("manifestState", store.readManifest(playbackResolution.song.cacheKey)?.state?.name)
+                        .put("validationWithoutHashes", store.readManifest(playbackResolution.song.cacheKey)?.let {
+                            store.validateCompletedEntry(it, verifyHashes = false).toString()
+                        })
+                        .put("entry", repository.entries().singleOrNull {
+                            it.cacheKey == playbackResolution.song.cacheKey
+                        }?.let { entry ->
+                            JSONObject()
+                                .put("modelAvailability", entry.modelAvailability.name)
+                                .put("state", entry.state.name)
+                                .put("stemCount", entry.stemLabels.size)
+                        })
+                        .put("openCompleted", repository.openCompletedCache(
+                            playbackResolution.song.cacheKey,
+                        ) != null)
+                        .also { directStatus.closePlaybackForTest() }
+                }
+                is SourceSeparationRuntimeSongResolution.Unavailable -> JSONObject()
+                    .put("reason", playbackResolution.reason.name)
+                    .put("detail", playbackResolution.detail)
+            })
+            check(enableResult.resultCode == SessionResult.RESULT_SUCCESS) {
+                "PlaybackService rejected multi-stem cache: " +
+                    enableResult.extras.getString(Playback.EXTRA_SOURCE_SEPARATION_MESSAGE).orEmpty()
+            }
+            onMediaControllerThread(mediaController) { mediaController.play() }
+            val syncResult = onMediaControllerThread(mediaController) {
+                mediaController.sendCustomCommand(
+                    SessionCommand(Playback.SYNC_SOURCE_SEPARATION_PLAYBACK, Bundle.EMPTY),
+                    Bundle().apply {
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ALLOW_NEW_SESSION, true)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_PREFER_COMPLETED_CACHE, true)
+                    },
+                )
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            report.put("syncResult", JSONObject()
+                .put("code", syncResult.resultCode)
+                .put("message", syncResult.extras.getString(
+                    Playback.EXTRA_SOURCE_SEPARATION_MESSAGE,
+                )))
+            check(syncResult.resultCode == SessionResult.RESULT_SUCCESS) {
+                "PlaybackService could not synchronize the multi-stem cache: " +
+                    syncResult.extras.getString(Playback.EXTRA_SOURCE_SEPARATION_MESSAGE).orEmpty()
+            }
+            waitForMediaController(mediaController, "multi-stem playback adoption") {
+                mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == expectedStemIds
+            }
+            val metricsBeforeSeek = requireNotNull(processor.dataPlaneMetrics())
+            assertEquals(expectedStemIds.size, metricsBeforeSeek.activeStemCount)
+
+            onMediaControllerThread(mediaController) { mediaController.pause() }
+            waitForMediaController(mediaController, "pause") { !mediaController.playWhenReady }
+            val seekPositionMs = onMediaControllerThread(mediaController) {
+                (mediaController.duration / 3L).coerceAtLeast(1_000L)
+            }
+            onMediaControllerThread(mediaController) { mediaController.seekTo(seekPositionMs) }
+            waitForMediaController(mediaController, "seek") {
+                kotlin.math.abs(mediaController.currentPosition - seekPositionMs) <=
+                    MEDIA_SESSION_SEEK_TOLERANCE_MS
+            }
+            onMediaControllerThread(mediaController) { mediaController.play() }
+            waitForMediaController(mediaController, "resume after seek") {
+                mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == expectedStemIds
+            }
+            val metricsAfterSeek = requireNotNull(processor.dataPlaneMetrics())
+            assertTrue(metricsAfterSeek.seekRequests > metricsBeforeSeek.seekRequests)
+            assertEquals(metricsBeforeSeek.underruns, metricsAfterSeek.underruns)
+
+            report.put("status", "complete")
+                .put("cacheKey", manifest.cacheKey)
+                .put("artifactSha256", manifest.identity.artifactSha256)
+                .put("stemIds", JSONArray(expectedStemIds))
+                .put("activeStemCount", metricsAfterSeek.activeStemCount)
+                .put("seekRequests", metricsAfterSeek.seekRequests)
+                .put("underrunsBeforeSeek", metricsBeforeSeek.underruns)
+                .put("underruns", metricsAfterSeek.underruns)
+                .put("transportMediaId", song.id)
+                .put("transportUri", song.uri)
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+            controller?.let { mediaController ->
+                report.put("controllerState", onMediaControllerThread(mediaController) {
+                    JSONObject()
+                        .put("mediaId", mediaController.currentMediaItem?.mediaId)
+                        .put("duration", mediaController.duration)
+                        .put("playbackState", mediaController.playbackState)
+                        .put("isPlaying", mediaController.isPlaying)
+                        .put("playWhenReady", mediaController.playWhenReady)
+                        .put("playerError", mediaController.playerError?.message)
+                })
+            }
+            report.put("processorStemIds", processor.dataPlaneStemIds())
+            reportFile.writeText(report.toString(2))
+            throw error
+        } finally {
+            controller?.let { mediaController ->
+                runCatching {
+                    onMediaControllerThread(mediaController) {
+                        mediaController.sendCustomCommand(
+                            SessionCommand(
+                                Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+                                Bundle.EMPTY,
+                            ),
+                            Bundle().apply {
+                                putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, false)
+                                putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                            },
+                        ).get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                        mediaController.pause()
+                        mediaController.clearMediaItems()
+                        mediaController.release()
+                    }
+                }
+            }
+            runCatching { context.stopService(Intent(context, PlaybackService::class.java)) }
+            selectionStore.select(initialSelectedModelId)
+            restorePreferences(preferences, preferenceSnapshot)
+            cacheKey?.let { key ->
+                repeat(20) {
+                    if (!repository.isLeased(key)) return@repeat
+                    SystemClock.sleep(100L)
+                }
+                runCatching { repository.delete(key) }
+            }
+            mediaUri?.let { uri -> runCatching { context.contentResolver.delete(uri, null, null) } }
+        }
+    }
+
     @Test
     fun activeModelSupersessionRetainsOldPartialAndCompletesReplacement() {
         val arguments = InstrumentationRegistry.getArguments()
@@ -609,6 +894,67 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
     private fun thermalStatus(context: Context): Int =
         context.getSystemService(PowerManager::class.java).currentThermalStatus
 
+    private fun waitForMediaController(
+        controller: MediaController,
+        operation: String,
+        predicate: () -> Boolean,
+    ) {
+        val deadline = SystemClock.elapsedRealtime() + MEDIA_SESSION_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (onMediaControllerThread(controller, predicate)) return
+            SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+        }
+        error("MediaController did not complete $operation in time.")
+    }
+
+    private fun <T> onMediaControllerThread(
+        controller: MediaController,
+        block: () -> T,
+    ): T {
+        if (Looper.myLooper() == controller.applicationLooper) return block()
+        val result = AtomicReference<T?>()
+        val error = AtomicReference<Throwable?>()
+        val completed = CountDownLatch(1)
+        Handler(controller.applicationLooper).post {
+            try {
+                result.set(block())
+            } catch (throwable: Throwable) {
+                error.set(throwable)
+            } finally {
+                completed.countDown()
+            }
+        }
+        assertTrue(completed.await(MEDIA_SESSION_TIMEOUT_MS, TimeUnit.MILLISECONDS))
+        error.get()?.let { throw it }
+        @Suppress("UNCHECKED_CAST")
+        return result.get() as T
+    }
+
+    private fun snapshotPreferences(
+        preferences: SharedPreferences,
+        keys: Set<String>,
+    ): Map<String, Any?> = keys.associateWith(preferences.all::get)
+
+    private fun restorePreferences(
+        preferences: SharedPreferences,
+        snapshot: Map<String, Any?>,
+    ) {
+        val editor = preferences.edit()
+        snapshot.forEach { (key, value) ->
+            when (value) {
+                null -> editor.remove(key)
+                is Boolean -> editor.putBoolean(key, value)
+                is Int -> editor.putInt(key, value)
+                else -> error("Unsupported test preference value for $key")
+            }
+        }
+        check(editor.commit())
+    }
+
+    private fun SourceSeparationModelAwarePlayableStatus.closePlaybackForTest() {
+        (this as? SourceSeparationModelAwarePlayableStatus.Ready)?.playback?.close()
+    }
+
     private fun File.sha256(): String = inputStream().use { input ->
         val digest = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(256 * 1024)
@@ -654,6 +1000,10 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val REPORT_DIRECTORY = "source-separation/multistem-product-device-reports"
         const val SONG_TITLE_PREFIX = "BSS Phase 6 Product"
         const val SOURCE_DURATION_MS = 30_000L
+        const val MEDIA_SESSION_TIMEOUT_SECONDS = 30L
+        const val MEDIA_SESSION_TIMEOUT_MS = MEDIA_SESSION_TIMEOUT_SECONDS * 1_000L
+        const val MEDIA_SESSION_POLL_INTERVAL_MS = 50L
+        const val MEDIA_SESSION_SEEK_TOLERANCE_MS = 750L
         val SHA256 = Regex("^[0-9a-f]{64}$")
         val SHA1 = Regex("^[0-9a-f]{40}$")
         val SAFE_NAME = Regex("^[A-Za-z0-9._-]{1,160}$")

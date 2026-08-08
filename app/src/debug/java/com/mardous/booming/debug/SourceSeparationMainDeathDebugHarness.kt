@@ -1237,7 +1237,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                     SourceSeparationModelAwareCacheStatus.Missing)
 
                 val platform = AndroidMdxRuntimePlatformProvider.current()
-                val secondaryProfile = secondaryRuntimeSong.model.executionProfile
+                val secondaryProfile = requireNotNull(secondaryRuntimeSong.model).executionProfile
                 val cpuCompatibility = MdxLiteRtCompatibilityResolver.resolve(
                     profile = secondaryProfile,
                     backend = MdxInferenceBackend.LiteRtCpu,

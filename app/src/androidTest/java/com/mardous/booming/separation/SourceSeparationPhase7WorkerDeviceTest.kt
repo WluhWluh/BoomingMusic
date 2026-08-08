@@ -221,7 +221,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
 
             val completed = remoteEngine.separateResolved(
                 input = runtimeSong.input,
-                model = runtimeSong.model,
+                model = requireNotNull(runtimeSong.model),
                 preflight = runtimeSong.preflight,
                 executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Cpu,
                 runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
@@ -241,7 +241,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             clearExactCacheEntry(resolver, runtimeSong.cacheKey)
             val autoCompleted = remoteEngine.separateResolved(
                 input = runtimeSong.input,
-                model = runtimeSong.model,
+                model = requireNotNull(runtimeSong.model),
                 preflight = runtimeSong.preflight,
                 executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Auto,
                 runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
@@ -272,7 +272,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             clearExactCacheEntry(resolver, runtimeSong.cacheKey)
             val finalCpuCompleted = remoteEngine.separateResolved(
                 input = runtimeSong.input,
-                model = runtimeSong.model,
+                model = requireNotNull(runtimeSong.model),
                 preflight = runtimeSong.preflight,
                 executionBackendPolicy = SourceSeparationExecutionBackendPolicy.Cpu,
                 runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,

@@ -867,6 +867,12 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
     internal fun dataPlaneMetrics() = playbackEngine?.metricsSnapshot()
 
+    internal fun dataPlaneStemIds(): List<String> = playbackEngine
+        ?.currentSession
+        ?.stems
+        ?.map { stem -> stem.stemId }
+        .orEmpty()
+
     internal fun consumeDataPlaneReadyNotification(): Boolean {
         return playbackEngine?.pollReadyNotification() == true
     }
