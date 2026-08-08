@@ -1401,10 +1401,16 @@ is implied.
 
 ### Phase 7: Catalog grouping and controlled activation
 
-- [ ] Add independent family/purpose metadata for all candidate models.
-- [ ] Add the official six-stem candidate as the representative experimental
+- [x] Add independent, app-owned family/purpose/category metadata for all 33
+  candidates in the published `bss-tflite` v0.2.0 experimental catalog. The
+  reviewed table is keyed by exact `modelId`; it does not infer semantics from
+  filenames, localized display names, or artifact families at runtime. Unknown
+  IDs remain inspectable but unclassified.
+- [x] Record the official six-stem candidate as the representative experimental
   multi-stem recommendation, official four-stem base as the four-stem option,
-  and guitar-ft as the six-stem guitar-specialist option.
+  and guitar-ft as the six-stem guitar-specialist option. Keep 9662 as the
+  sole stable Quick Setup representative; the multi-stem representative does
+  not alter that stable recommendation.
 - [ ] Add representative recommendations and folded category records without
   changing the stable two-stem Quick Setup recommendation.
 - [ ] Keep unsupported generic models inspectable and downloadable but blocked
@@ -1418,6 +1424,18 @@ is implied.
 
 **Exit:** catalog grouping is presentation over validated metadata, not a new
 source of model semantics.
+
+#### Phase 7A: Reviewed presentation metadata
+
+Phase 7A is complete for the domain layer. The app now has an independent
+presentation table covering every model in the published 33-entry Release,
+with explicit family, purpose, category, and representative roles. It also
+provides deterministic category grouping and exact-coverage validation. This
+layer is deliberately separate from executable contracts, cache identity,
+activation policy, and localized labels. The remaining Phase 7 work is to
+connect these records to the management screen and render the collapsed
+category rows; that UI work must continue to leave unknown or unsupported
+models inspectable without granting activation.
 
 ## Required Tests and Gates
 
