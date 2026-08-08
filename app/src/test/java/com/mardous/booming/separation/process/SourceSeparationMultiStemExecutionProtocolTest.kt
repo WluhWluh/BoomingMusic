@@ -41,6 +41,84 @@ class SourceSeparationMultiStemExecutionProtocolTest {
         }
     }
 
+    @Test
+    fun `manual full song command requires an exact foreground lease`() {
+        val descriptor = fixture()
+        val lease = SourceSeparationForegroundLeaseRequest(
+            leaseId = "multistem-protocol-lease-0001",
+            runId = descriptor.runId,
+            processGeneration = descriptor.processGeneration,
+            displayName = descriptor.source.displayName,
+        )
+        val command = SourceSeparationMultiStemIpcStartCommand(
+            descriptor = descriptor,
+            foregroundLease = lease,
+        )
+
+        assertEquals(
+            command,
+            SourceSeparationMultiStemExecutionCodec.decodeStartCommand(
+                SourceSeparationMultiStemExecutionCodec.encodeStartCommand(command),
+            ),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            SourceSeparationMultiStemIpcStartCommand(
+                descriptor = descriptor,
+                foregroundLease = null,
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            SourceSeparationMultiStemIpcStartCommand(
+                descriptor = descriptor,
+                foregroundLease = lease.copy(runId = "another-run"),
+            )
+        }
+    }
+
+    @Test
+    fun `active snapshot binds authority observer and latest event`() {
+        val descriptor = fixture()
+        val lease = SourceSeparationForegroundLeaseRequest(
+            leaseId = "multistem-protocol-lease-0002",
+            runId = descriptor.runId,
+            processGeneration = descriptor.processGeneration,
+            displayName = descriptor.source.displayName,
+        )
+        val event = SourceSeparationMultiStemExecutionEvent(
+            runId = descriptor.runId,
+            processGeneration = descriptor.processGeneration,
+            sequence = 1L,
+            payload = SourceSeparationMultiStemExecutionEventPayload.Accepted(descriptor),
+        )
+        val state = SourceSeparationMultiStemIpcActiveRunState(
+            descriptor = descriptor,
+            authority = SourceSeparationMultiStemIpcRunAuthority.IndependentForeground,
+            latestEvent = event,
+            observerConnected = false,
+            foregroundLease = lease,
+        )
+        val response = SourceSeparationMultiStemIpcActiveRunResponse(
+            status = SourceSeparationMultiStemIpcStatus.Active,
+            state = state,
+        )
+
+        assertEquals(
+            response,
+            SourceSeparationMultiStemExecutionCodec.decodeActiveRunResponse(
+                SourceSeparationMultiStemExecutionCodec.encodeActiveRunResponse(response),
+            ),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            state.copy(authority = SourceSeparationMultiStemIpcRunAuthority.ClientBound)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            SourceSeparationMultiStemIpcActiveRunResponse(
+                status = SourceSeparationMultiStemIpcStatus.NoActiveRun,
+                state = state,
+            )
+        }
+    }
+
     private fun fixture(): SourceSeparationMultiStemExecutionDescriptor {
         val text = requireNotNull(javaClass.classLoader?.getResourceAsStream(
             "source-separation/research-contracts/htdemucs-4s-official-base-fp32.json",

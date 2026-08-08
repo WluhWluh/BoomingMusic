@@ -15,7 +15,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-internal const val SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION = 1
+internal const val SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION = 2
 
 /** Wire descriptor for the multi-stem worker; it intentionally has no MDX fields. */
 @Serializable
@@ -118,6 +118,30 @@ internal data class SourceSeparationMultiStemExecutionRuntime(
         }
         require(backgroundPolicy == runClass.backgroundPolicy) {
             "Multi-stem execution background policy does not match its run class."
+        }
+    }
+}
+
+@Serializable
+internal data class SourceSeparationMultiStemIpcStartCommand(
+    val protocolVersion: Int = SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION,
+    val descriptor: SourceSeparationMultiStemExecutionDescriptor,
+    val foregroundLease: SourceSeparationForegroundLeaseRequest? = null,
+) {
+    init {
+        require(protocolVersion == SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION)
+        val independentlyOwned = descriptor.runtime.runClass ==
+            SourceSeparationExecutionRunClass.ManualFullSong &&
+            descriptor.runtime.backgroundPolicy ==
+            SourceSeparationBackgroundPolicy.IndependentForegroundEligible
+        require((foregroundLease != null) == independentlyOwned) {
+            "Multi-stem foreground ownership does not match the admitted run class."
+        }
+        foregroundLease?.let { lease ->
+            require(lease.runId == descriptor.runId &&
+                lease.processGeneration == descriptor.processGeneration &&
+                lease.displayName == descriptor.source.displayName
+            ) { "Multi-stem foreground lease does not match its descriptor." }
         }
     }
 }
@@ -282,6 +306,7 @@ internal data class SourceSeparationMultiStemIpcStartResponse(
 @Serializable
 internal enum class SourceSeparationMultiStemIpcStatus {
     Accepted,
+    Active,
     Applied,
     AlreadyApplied,
     Busy,
@@ -291,6 +316,58 @@ internal enum class SourceSeparationMultiStemIpcStatus {
     Terminal,
     Rejected,
     Failed,
+}
+
+@Serializable
+internal enum class SourceSeparationMultiStemIpcRunAuthority {
+    ClientBound,
+    IndependentForeground,
+}
+
+@Serializable
+internal data class SourceSeparationMultiStemIpcActiveRunState(
+    val descriptor: SourceSeparationMultiStemExecutionDescriptor,
+    val authority: SourceSeparationMultiStemIpcRunAuthority,
+    val latestEvent: SourceSeparationMultiStemExecutionEvent,
+    val observerConnected: Boolean,
+    val foregroundLease: SourceSeparationForegroundLeaseRequest? = null,
+) {
+    init {
+        require(latestEvent.runId == descriptor.runId &&
+            latestEvent.processGeneration == descriptor.processGeneration
+        ) { "Multi-stem active snapshot contains a stale event." }
+        val independentlyOwned = authority ==
+            SourceSeparationMultiStemIpcRunAuthority.IndependentForeground
+        require(independentlyOwned ==
+            (descriptor.runtime.backgroundPolicy ==
+                SourceSeparationBackgroundPolicy.IndependentForegroundEligible)
+        ) { "Multi-stem active snapshot authority differs from its descriptor." }
+        require((foregroundLease != null) == independentlyOwned) {
+            "Multi-stem active snapshot foreground lease is inconsistent."
+        }
+        foregroundLease?.let { lease ->
+            require(lease.runId == descriptor.runId &&
+                lease.processGeneration == descriptor.processGeneration
+            ) { "Multi-stem active snapshot foreground lease is stale." }
+        }
+    }
+}
+
+@Serializable
+internal data class SourceSeparationMultiStemIpcActiveRunResponse(
+    val protocolVersion: Int = SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION,
+    val status: SourceSeparationMultiStemIpcStatus,
+    val state: SourceSeparationMultiStemIpcActiveRunState? = null,
+) {
+    init {
+        require(protocolVersion == SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION)
+        require((status == SourceSeparationMultiStemIpcStatus.Active) == (state != null)) {
+            "Multi-stem active-run response is inconsistent."
+        }
+        require(status == SourceSeparationMultiStemIpcStatus.Active ||
+            status == SourceSeparationMultiStemIpcStatus.NoActiveRun
+        ) { "Unsupported multi-stem active-run response status: $status" }
+    }
 }
 
 @Serializable
@@ -339,6 +416,12 @@ internal object SourceSeparationMultiStemExecutionCodec {
     fun decodeDescriptor(value: String): SourceSeparationMultiStemExecutionDescriptor =
         json.decodeFromString(SourceSeparationMultiStemExecutionDescriptor.serializer(), value)
 
+    fun encodeStartCommand(value: SourceSeparationMultiStemIpcStartCommand): String =
+        json.encodeToString(SourceSeparationMultiStemIpcStartCommand.serializer(), value)
+
+    fun decodeStartCommand(value: String): SourceSeparationMultiStemIpcStartCommand =
+        json.decodeFromString(SourceSeparationMultiStemIpcStartCommand.serializer(), value)
+
     fun encodeEvent(value: SourceSeparationMultiStemExecutionEvent): String =
         json.encodeToString(SourceSeparationMultiStemExecutionEvent.serializer(), value)
 
@@ -368,6 +451,12 @@ internal object SourceSeparationMultiStemExecutionCodec {
 
     fun decodeControlResponse(value: String): SourceSeparationMultiStemIpcControlResponse =
         json.decodeFromString(SourceSeparationMultiStemIpcControlResponse.serializer(), value)
+
+    fun encodeActiveRunResponse(value: SourceSeparationMultiStemIpcActiveRunResponse): String =
+        json.encodeToString(SourceSeparationMultiStemIpcActiveRunResponse.serializer(), value)
+
+    fun decodeActiveRunResponse(value: String): SourceSeparationMultiStemIpcActiveRunResponse =
+        json.decodeFromString(SourceSeparationMultiStemIpcActiveRunResponse.serializer(), value)
 }
 
 private fun requireStemPaths(paths: List<SourceSeparationMultiStemExecutionStemPath>) {
