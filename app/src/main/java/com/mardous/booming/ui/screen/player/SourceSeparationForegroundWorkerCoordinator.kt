@@ -67,6 +67,7 @@ import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.coroutineContext
 
 class SourceSeparationForegroundWorkerCoordinator internal constructor(
@@ -81,6 +82,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private val performanceStats = SourceSeparationPerformanceStats(preferences)
     private val cancelRequested = AtomicBoolean(false)
     private val pauseRequested = AtomicBoolean(false)
+    private val pauseReasonOverride = AtomicReference<SourceSeparationPauseReason?>(null)
     private val playbackOwnerActive = AtomicBoolean(true)
     private val requestGeneration = AtomicLong()
     private val debugWindowSamples = ArrayDeque<SourceSeparationDebugWindowSample>()
@@ -446,6 +448,21 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             ?.id
         clearPendingStart()
         pauseRequested.set(true)
+    }
+
+    fun pauseForActiveModelSupersession() {
+        pauseReasonOverride.set(SourceSeparationPauseReason.ActiveModelSuperseded)
+        synchronized(stateLock) {
+            pendingStartRequest = null
+        }
+        pauseRequested.set(true)
+        reconnectedSession?.let { session ->
+            requestRecoveredControl(
+                session = session,
+                control = SourceSeparationRecoveredControl.Pause,
+                pauseReason = SourceSeparationPauseReason.ActiveModelSuperseded,
+            )
+        }
     }
 
     fun cancel() {
@@ -1411,6 +1428,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                             activeJob?.isActive != true
                 },
                 pauseReasonProvider = {
+                    pauseReasonOverride.getAndSet(null) ?:
                     if (activeSelectionFlow.value != request.selection) {
                         SourceSeparationPauseReason.ActiveModelSuperseded
                     } else {
@@ -1551,6 +1569,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 }
             }
             pauseRequested.set(false)
+            pauseReasonOverride.set(null)
             trace("worker.song end song=${song.id} worker=${workerJob?.isActive == true}")
         }
     }

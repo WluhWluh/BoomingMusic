@@ -2,10 +2,14 @@ package com.mardous.booming.ui.screen.player
 
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContract
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
+import com.mardous.booming.separation.model.contract.SourceSeparationReleaseCatalog
 import com.mardous.booming.separation.model.contract.canonicalLabel
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import java.io.File
 
 internal fun SourceSeparationPresetRepository.catalogModelDetails(
     modelId: String,
@@ -139,6 +143,73 @@ internal fun SourceSeparationPresetRepository.importedModelDetails(
     )
 }
 
+internal fun SourceSeparationMultiStemReleaseInstaller.multiStemCatalogModelDetails(
+    catalog: SourceSeparationReleaseCatalog?,
+    modelId: String,
+): SourceSeparationModelDetailsUiState? {
+    val entry = catalog?.entries?.singleOrNull { it.modelId == modelId } ?: return null
+    val installed = installed(modelId)
+    val executable = installed?.sidecarFile?.takeIf(File::isFile)?.let { sidecar ->
+        runCatching {
+            SourceSeparationMultiTensorExecutableContractLoader.load(sidecar.readText())
+        }.getOrNull()
+    }
+    val modelContract = executable?.modelContract
+    return SourceSeparationModelDetailsUiState(
+        displayName = entry.displayName,
+        modelId = entry.modelId,
+        metadataOrigin = SourceSeparationModelMetadataOrigin.BuiltInCatalog,
+        installed = installed != null,
+        fileName = entry.artifact.fileName,
+        byteSize = entry.artifact.byteSize + entry.contract.byteSize,
+        artifactSha256 = entry.artifact.sha256,
+        contract = null,
+        profileRevisionId = entry.contract.contractId,
+        qualityUnverified = false,
+        source = executable?.provenance?.sources?.firstOrNull()?.let { source ->
+            SourceSeparationModelSourceDetails(
+                fileName = source.fileName,
+                url = source.repository,
+                sha256 = source.sha256,
+                attribution = executable.notices.map { it.subject },
+            )
+        },
+        conversion = executable?.conversion?.let { conversion ->
+            SourceSeparationModelConversionDetails(
+                repository = conversion.exportReport.repository.orEmpty(),
+                revision = conversion.exportReport.revision.orEmpty(),
+                pipelineVersion = modelContract?.pipelineContract?.pipelineVersion ?: 0,
+                toolVersions = conversion.toolVersions,
+            )
+        },
+        runtimeQualifications = listOf(
+            SourceSeparationModelRuntimeDetails(
+                abi = "arm64-v8a",
+                backend = entry.allowedBackends.joinToString(),
+                profileId = "htdemucs-cpu-fp32-v1",
+                precision = "float32",
+                status = entry.supportLevel,
+                evidence = entry.validation.entries.joinToString { "${it.key}=${it.value}" },
+            ),
+        ),
+        multiStemContract = SourceSeparationMultiStemContractDetails(
+            identity = entry.contract.contractId,
+            schemaId = entry.contract.schemaId,
+            pipelineId = modelContract?.pipelineContract?.pipelineId ?: entry.pipelineId,
+            sampleRate = modelContract?.pipelineContract?.sampleRate,
+            channelCount = modelContract?.pipelineContract?.channelCount,
+            canonicalLabels = modelContract?.stemContract?.stems
+                ?.sortedBy { it.order }
+                ?.map { it.canonicalLabel }
+                .orEmpty(),
+            allowedBackends = entry.allowedBackends,
+            notices = executable?.notices?.map { notice ->
+                "${notice.subject}: ${notice.licenseId} - ${notice.statement}"
+            }.orEmpty(),
+        ),
+    )
+}
+
 private fun SourceSeparationModelContract.toDetails() = SourceSeparationModelContractDetails(
     identity = contractId,
     schemaVersion = contractSchemaVersion,
@@ -197,6 +268,18 @@ data class SourceSeparationModelDetailsUiState(
     val source: SourceSeparationModelSourceDetails?,
     val conversion: SourceSeparationModelConversionDetails?,
     val runtimeQualifications: List<SourceSeparationModelRuntimeDetails>,
+    val multiStemContract: SourceSeparationMultiStemContractDetails? = null,
+)
+
+data class SourceSeparationMultiStemContractDetails(
+    val identity: String,
+    val schemaId: String,
+    val pipelineId: String,
+    val sampleRate: Int?,
+    val channelCount: Int?,
+    val canonicalLabels: List<String>,
+    val allowedBackends: List<String>,
+    val notices: List<String>,
 )
 
 enum class SourceSeparationModelMetadataOrigin {

@@ -1416,9 +1416,11 @@ is implied.
   recommendation. Experimental and candidate sections use the reviewed
   category records; collapsed rows expose only title, summary, and expansion
   affordance. Unknown records remain visible in an explicit fallback group.
-- [ ] Expose the three HTDemucs Release entries through the same management
+- [x] Expose the three HTDemucs Release entries through the same management
   surface, while preserving their separate multi-stem installer, exact
-  contract, and CPU-only activation boundary.
+  contract, and CPU-only activation boundary. Their download, selection,
+  deletion, details, and supersession paths remain distinct from the MDX
+  repository implementation.
 - [x] Route a selected, installed multi-stem model through the runtime facade
   for both ordinary separation and playback resolution. Missing selected
   multi-stem artifacts fail as `ModelNotInstalled`; they never silently fall
@@ -1450,14 +1452,14 @@ granting activation.
 
 #### Phase 7B: Folded preset-management categories
 
-Phase 7B is complete for the currently managed MDX catalog. The management
-sheet now carries the reviewed presentation record with each catalog item and
-renders experimental/download candidate items under collapsed category rows.
-The stable recommended row is intentionally unchanged. HTDemucs entries are
-not duplicated into this MDX repository surface; their unified management
-entry remains a separate task because their installer and multi-stem
-activation contract are distinct. The runtime routing prerequisite for that
-entry is now complete and covered by facade tests.
+Phase 7B is complete. The management sheet carries the reviewed presentation
+record with each catalog item and renders experimental/download candidate
+items under collapsed category rows. The stable recommended row is
+intentionally unchanged. The three HTDemucs entries are supplied by the
+separate Release installer but use the same management surface; their
+installer, exact contract, CPU-only activation, and model-specific details
+remain separate. Runtime routing and selected-model supersession are covered
+by facade tests. Device playback/resource/listening gates remain independent.
 
 ## Required Tests and Gates
 

@@ -10,8 +10,8 @@ import java.util.UUID
 
 /**
  * Installs a verified multi-stem Release pair without exposing it to the
- * existing two-stem preset repository. Product execution can adopt this store
- * after the Demucs scheduler/cache/playback gates are complete.
+ * existing two-stem preset repository. Product execution uses this store
+ * while keeping scheduler, cache, and playback policy multi-stem-aware.
  */
 class SourceSeparationMultiStemModelStore internal constructor(
     private val rootDirectory: File,
@@ -126,6 +126,23 @@ class SourceSeparationMultiStemModelStore internal constructor(
             ?.sortedBy(SourceSeparationInstalledMultiStemModel::modelId)
             ?.toList()
             .orEmpty()
+    }
+
+    fun delete(modelId: String): Boolean = synchronized(lock) {
+        val installed = installed(modelId) ?: return@synchronized false
+        val directory = installed.modelFile.parentFile?.canonicalFile
+            ?: throw SourceSeparationMultiStemInstallException(
+                "Installed multi-stem model directory is unavailable.",
+            )
+        require(directory.parentFile == modelRoot().canonicalFile) {
+            "Installed multi-stem model is outside the managed root."
+        }
+        if (!directory.deleteRecursively()) {
+            throw SourceSeparationMultiStemInstallException(
+                "Unable to delete the installed multi-stem model.",
+            )
+        }
+        true
     }
 
     private fun acquireToFile(

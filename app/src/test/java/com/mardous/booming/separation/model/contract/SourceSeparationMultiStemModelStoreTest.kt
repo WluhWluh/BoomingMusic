@@ -73,6 +73,29 @@ class SourceSeparationMultiStemModelStoreTest {
         }
     }
 
+    @Test
+    fun `delete removes only the exact installed model`() {
+        val fixture = fixture()
+        val root = Files.createTempDirectory("bss-multistem-models-delete").toFile()
+        try {
+            val store = SourceSeparationMultiStemModelStore(
+                root,
+                fixture.catalog,
+                FixtureProvider(fixture.artifactBytes, fixture.sidecarBytes),
+            )
+            val installed = store.install(fixture.modelId)
+            val unrelated = File(root, "unrelated").apply { mkdirs() }
+
+            assertTrue(store.delete(fixture.modelId))
+            assertFalse(installed.modelFile.exists())
+            assertFalse(installed.sidecarFile.exists())
+            assertTrue(unrelated.isDirectory)
+            assertFalse(store.delete(fixture.modelId))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     private fun fixture(): Fixture {
         val modelId = "htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0"
         val baseline = loadContract("htdemucs-4s-official-base-fp32.json")

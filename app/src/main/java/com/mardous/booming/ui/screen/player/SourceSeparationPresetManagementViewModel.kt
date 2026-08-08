@@ -16,6 +16,11 @@ import com.mardous.booming.separation.model.contract.SourceSeparationModelPresen
 import com.mardous.booming.separation.model.contract.SourceSeparationModelPresentationCatalog
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
+import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
+import com.mardous.booming.separation.model.contract.SourceSeparationInstalledMultiStemModel
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemInstallProgressKind
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
+import com.mardous.booming.separation.model.contract.SourceSeparationReleaseCatalog
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
@@ -36,9 +41,11 @@ import com.mardous.booming.separation.model.preset.toManualDraft
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import kotlinx.serialization.encodeToString
 import java.util.concurrent.ConcurrentHashMap
 import java.util.Locale
@@ -50,10 +57,16 @@ class SourceSeparationPresetManagementViewModel internal constructor(
     private val importCoordinator: SourceSeparationPresetImportCoordinator,
     private val platformProvider: MdxRuntimePlatformProvider = AndroidMdxRuntimePlatformProvider,
     private val modelArtifactInUse: (String) -> Boolean = { false },
+    private val multiStemInstaller: SourceSeparationMultiStemReleaseInstaller? = null,
+    private val multiStemSelectionStore: SourceSeparationMultiStemPlaybackSelectionStore? = null,
+    private val pauseForModelSupersession: () -> Unit = {},
 ) : ViewModel() {
     private val downloadJobs = ConcurrentHashMap<String, Job>()
     private val transferStates = ConcurrentHashMap<String, SourceSeparationPresetTransferState>()
     private var importJob: Job? = null
+    private var multiStemCatalogJob: Job? = null
+    @Volatile
+    private var multiStemCatalog: SourceSeparationReleaseCatalog? = null
     private val _state = MutableStateFlow(
         buildState().copy(
             importState = importCoordinator.pending()
@@ -64,8 +77,18 @@ class SourceSeparationPresetManagementViewModel internal constructor(
 
     val state = _state.asStateFlow()
 
+    init {
+        multiStemSelectionStore?.let { selectionStore ->
+            viewModelScope.launch {
+                selectionStore.selectionFlow.collect { publishState() }
+            }
+        }
+        loadMultiStemCatalog(refresh = false)
+    }
+
     fun refresh() {
         publishState()
+        loadMultiStemCatalog(refresh = true)
     }
 
     fun clearRestoredModelTarget() {
@@ -74,6 +97,10 @@ class SourceSeparationPresetManagementViewModel internal constructor(
     }
 
     fun download(modelId: String) {
+        if (_state.value.entries.any { it.modelId == modelId && it.kind == SourceSeparationManagedModelKind.MultiStem }) {
+            downloadMultiStem(modelId)
+            return
+        }
         if (downloadJobs[modelId]?.isActive == true) return
         val operationKey = catalogOperationKey(modelId)
         transferStates[operationKey] = SourceSeparationPresetTransferState.Downloading(
@@ -111,6 +138,12 @@ class SourceSeparationPresetManagementViewModel internal constructor(
     }
 
     fun cancelDownload(modelId: String) {
+        if (_state.value.entries.any { it.modelId == modelId && it.kind == SourceSeparationManagedModelKind.MultiStem }) {
+            downloadJobs.remove(modelId)?.cancel()
+            transferStates.remove(catalogOperationKey(modelId))
+            publishState()
+            return
+        }
         downloader.cancel(modelId)
         downloadJobs.remove(modelId)?.cancel()
         transferStates.remove(catalogOperationKey(modelId))
@@ -141,11 +174,29 @@ class SourceSeparationPresetManagementViewModel internal constructor(
 
     fun delete(modelId: String) {
         val item = _state.value.entries.singleOrNull { it.modelId == modelId } ?: return
+        if (item.kind == SourceSeparationManagedModelKind.MultiStem) {
+            deleteMultiStem(item)
+            return
+        }
         deleteInstalled(item.installed ?: return, item.operationKey)
     }
 
     private fun use(modelId: String, experimentalConfirmed: Boolean) {
         val item = _state.value.entries.singleOrNull { it.modelId == modelId } ?: return
+        if (item.kind == SourceSeparationManagedModelKind.MultiStem) {
+            if (experimentalConfirmed && item.multiStemInstalled != null) {
+                transferStates[item.operationKey] = SourceSeparationPresetTransferState.Activating
+                _state.value = _state.value.copy(
+                    confirmationModelId = null,
+                    errorMessage = null,
+                )
+                pauseForModelSupersession()
+                multiStemSelectionStore?.select(modelId)
+                transferStates.remove(item.operationKey)
+                publishState()
+            }
+            return
+        }
         useInstalled(
             installed = item.installed ?: return,
             operationKey = item.operationKey,
@@ -165,7 +216,18 @@ class SourceSeparationPresetManagementViewModel internal constructor(
     }
 
     fun showCatalogDetails(modelId: String) {
-        _state.value = _state.value.copy(modelDetails = repository.catalogModelDetails(modelId))
+        _state.value = _state.value.copy(
+            modelDetails = if (_state.value.entries.any {
+                it.modelId == modelId && it.kind == SourceSeparationManagedModelKind.MultiStem
+            }) {
+                multiStemInstaller?.multiStemCatalogModelDetails(
+                    catalog = multiStemCatalog,
+                    modelId = modelId,
+                )
+            } else {
+                repository.catalogModelDetails(modelId)
+            },
+        )
     }
 
     fun showImportedDetails(sha256: String, profileId: String? = null) {
@@ -409,7 +471,8 @@ class SourceSeparationPresetManagementViewModel internal constructor(
         val activeReference = (active as? SourceSeparationActivePresetState.Reference)?.reference
         val customProfiles = repository.customProfiles()
         val installedByHash = repository.installedModels().associateBy { it.sha256.lowercase() }
-        val entries = repository.catalogEntries().map { entry ->
+        val selectedMultiStemModelId = multiStemSelectionStore?.selectedModelId()
+        val mdxEntries = repository.catalogEntries().map { entry ->
             val officialPreset = runCatching { repository.officialPreset(entry.modelId) }.getOrNull()
             val installed = officialPreset?.sha256?.lowercase()?.let(installedByHash::get)
             val eligibility = platform?.let { currentPlatform ->
@@ -432,16 +495,23 @@ class SourceSeparationPresetManagementViewModel internal constructor(
                 sha256 = officialPreset?.sha256,
                 releaseTag = officialPreset?.releaseTag,
                 installed = installed,
-                active = activeReference?.modelId == entry.modelId &&
+                active = selectedMultiStemModelId == null &&
+                    activeReference?.modelId == entry.modelId &&
                     activeReference.artifactSha256.equals(officialPreset?.sha256, ignoreCase = true),
                 canUseForValidation = installed != null && eligibility?.allowed == true,
                 useBlockReason = eligibility?.blockReason,
                 transferState = transferStates[catalogOperationKey(entry.modelId)],
                 operationKey = catalogOperationKey(entry.modelId),
             )
-        }.sortedWith(
+        }
+        val multiStemEntries = buildMultiStemEntries(
+            catalog = multiStemCatalog,
+            selectedModelId = selectedMultiStemModelId,
+        )
+        val entries = (mdxEntries + multiStemEntries).sortedWith(
             compareBy<SourceSeparationPresetManagementItem> { it.supportLevel.sortOrder }
                 .thenByDescending(SourceSeparationPresetManagementItem::isDefault)
+                .thenByDescending { it.presentation?.representative != null }
                 .thenBy(SourceSeparationPresetManagementItem::displayName),
         )
         val importedEntries = installedByHash.values
@@ -509,13 +579,135 @@ class SourceSeparationPresetManagementViewModel internal constructor(
         )
     }
 
+    private fun buildMultiStemEntries(
+        catalog: SourceSeparationReleaseCatalog?,
+        selectedModelId: String?,
+    ): List<SourceSeparationPresetManagementItem> {
+        val installer = multiStemInstaller ?: return emptyList()
+        catalog ?: return emptyList()
+        val installedByModelId = installer.installedModels()
+            .associateBy(SourceSeparationInstalledMultiStemModel::modelId)
+        return catalog.entries
+            .filter { entry ->
+                entry.artifactFamily ==
+                    com.mardous.booming.separation.model.contract
+                        .SourceSeparationReleaseCatalogMetadata.MULTISTEM_ARTIFACT_FAMILY
+            }
+            .map { entry ->
+                val installed = installedByModelId[entry.modelId]
+                SourceSeparationPresetManagementItem(
+                    modelId = entry.modelId,
+                    displayName = entry.displayName,
+                    presentation = SourceSeparationModelPresentationCatalog.find(entry.modelId),
+                    supportLevel = CatalogSupportLevel.Experimental,
+                    activationPolicy = CatalogActivationPolicy.SelectableExperimental,
+                    releaseMaturity = CatalogReleaseMaturity.Candidate,
+                    isDefault = false,
+                    byteSize = entry.artifact.byteSize + entry.contract.byteSize,
+                    sha256 = entry.artifact.sha256,
+                    releaseTag = catalog.releaseTag,
+                    installed = null,
+                    active = selectedModelId == entry.modelId,
+                    canUseForValidation = installed != null &&
+                        entry.allowedBackends == listOf("cpu") &&
+                        entry.activationPolicy == "selectable-experimental",
+                    useBlockReason = null,
+                    transferState = transferStates[catalogOperationKey(entry.modelId)],
+                    operationKey = catalogOperationKey(entry.modelId),
+                    multiStemInstalled = installed,
+                    kind = SourceSeparationManagedModelKind.MultiStem,
+                )
+            }
+    }
+
     override fun onCleared() {
+        downloadJobs.values.forEach(Job::cancel)
         downloadJobs.keys.toList().forEach(downloader::cancel)
+        multiStemCatalogJob?.cancel()
         importJob?.let { job ->
             job.cancel()
             job.invokeOnCompletion { importCoordinator.discard() }
         } ?: importCoordinator.discard()
         super.onCleared()
+    }
+
+    private fun loadMultiStemCatalog(refresh: Boolean) {
+        val installer = multiStemInstaller ?: return
+        if (multiStemCatalogJob?.isActive == true) return
+        multiStemCatalogJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                if (refresh) installer.refreshCatalog() else installer.catalog()
+            }.onSuccess { catalog ->
+                multiStemCatalog = catalog
+                publishState()
+            }.onFailure { error ->
+                _state.value = _state.value.copy(errorMessage = error.message.orEmpty())
+            }
+            multiStemCatalogJob = null
+        }
+    }
+
+    private fun downloadMultiStem(modelId: String) {
+        val installer = multiStemInstaller ?: return
+        val entry = multiStemCatalog?.entries?.singleOrNull { it.modelId == modelId } ?: return
+        if (downloadJobs[modelId]?.isActive == true) return
+        val operationKey = catalogOperationKey(modelId)
+        transferStates[operationKey] = SourceSeparationPresetTransferState.Downloading(
+            downloadedBytes = 0L,
+            totalBytes = entry.artifact.byteSize + entry.contract.byteSize,
+            usingMirror = false,
+        )
+        publishState()
+        downloadJobs[modelId] = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                installer.install(modelId) { progress ->
+                    if (!isActive) throw CancellationException("Multi-stem download canceled.")
+                    val artifactSize = entry.artifact.byteSize
+                    val downloaded = when (progress.kind) {
+                        SourceSeparationMultiStemInstallProgressKind.Model -> progress.downloadedBytes
+                        SourceSeparationMultiStemInstallProgressKind.Sidecar ->
+                            artifactSize + progress.downloadedBytes
+                    }
+                    transferStates[operationKey] = SourceSeparationPresetTransferState.Downloading(
+                        downloadedBytes = downloaded,
+                        totalBytes = entry.artifact.byteSize + entry.contract.byteSize,
+                        usingMirror = false,
+                    )
+                    publishState()
+                }
+                transferStates.remove(operationKey)
+            } catch (_: CancellationException) {
+                transferStates.remove(operationKey)
+                throw CancellationException()
+            } catch (error: Throwable) {
+                transferStates[operationKey] = SourceSeparationPresetTransferState.Failed(
+                    error.message.orEmpty(),
+                )
+            } finally {
+                downloadJobs.remove(modelId)
+                publishState()
+            }
+        }
+    }
+
+    private fun deleteMultiStem(item: SourceSeparationPresetManagementItem) {
+        val installed = item.multiStemInstalled ?: return
+        if (item.active || item.operationInProgress) return
+        transferStates[item.operationKey] = SourceSeparationPresetTransferState.Deleting
+        publishState()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                if (modelArtifactInUse(installed.modelSha256)) {
+                    throw SourceSeparationPresetDeletionException(
+                        "The model is still used by source-separation work.",
+                    )
+                }
+                multiStemInstaller?.delete(item.modelId)
+            }
+                .onFailure { error -> _state.value = _state.value.copy(errorMessage = error.message.orEmpty()) }
+            transferStates.remove(item.operationKey)
+            publishState()
+        }
     }
 
     private fun useInstalled(
@@ -533,12 +725,16 @@ class SourceSeparationPresetManagementViewModel internal constructor(
         )
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
+                if (multiStemSelectionStore?.selectedModelId() != null) {
+                    pauseForModelSupersession()
+                }
                 repository.activate(
                     sha256 = installed.sha256,
                     platform = platformProvider.current(),
                     scope = SourceSeparationPresetSelectionScope.InternalValidation,
                     experimentalConfirmed = experimentalConfirmed,
                 )
+                multiStemSelectionStore?.select(null)
             }.onFailure { error ->
                 _state.value = _state.value.copy(errorMessage = error.message)
             }
@@ -702,13 +898,23 @@ data class SourceSeparationPresetManagementItem(
     val useBlockReason: SourceSeparationPresetSelectionBlockReason?,
     val transferState: SourceSeparationPresetTransferState?,
     val operationKey: String,
+    val multiStemInstalled: SourceSeparationInstalledMultiStemModel? = null,
+    val kind: SourceSeparationManagedModelKind = SourceSeparationManagedModelKind.Mdx,
 ) {
     val offersUseForValidation: Boolean
         get() = activationPolicy == CatalogActivationPolicy.SelectableWhenQualified ||
             activationPolicy == CatalogActivationPolicy.SelectableExperimental
 
     val canDelete: Boolean
-        get() = installed != null && !active
+        get() = isInstalled && !active
+
+    val isInstalled: Boolean
+        get() = installed != null || multiStemInstalled != null
+}
+
+enum class SourceSeparationManagedModelKind {
+    Mdx,
+    MultiStem,
 }
 
 internal data class SourceSeparationPresetManagementGroup(

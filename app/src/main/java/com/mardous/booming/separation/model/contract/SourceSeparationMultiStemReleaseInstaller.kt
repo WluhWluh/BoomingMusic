@@ -23,6 +23,8 @@ class SourceSeparationMultiStemReleaseInstaller(
 
     fun catalog(): SourceSeparationReleaseCatalog = catalogRepository.current()
 
+    fun refreshCatalog(): SourceSeparationReleaseCatalog = catalogRepository.refresh()
+
     fun installed(modelId: String): SourceSeparationInstalledMultiStemModel? =
         localStore.installed(modelId)
 
@@ -36,6 +38,8 @@ class SourceSeparationMultiStemReleaseInstaller(
         val catalog = catalogRepository.current()
         return store(catalog).install(modelId, onProgress)
     }
+
+    fun delete(modelId: String): Boolean = localStore.delete(modelId)
 }
 
 class SourceSeparationReleaseCatalogRepository internal constructor(

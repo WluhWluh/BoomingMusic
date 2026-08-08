@@ -518,13 +518,16 @@ private val viewModule = module {
     }
 
     viewModel {
+        val worker = get<SourceSeparationForegroundWorkerCoordinator>()
         SourceSeparationPresetManagementViewModel(
             contentResolver = get(),
             repository = get(),
             downloader = get(),
             importCoordinator = get(),
-            modelArtifactInUse =
-                get<SourceSeparationForegroundWorkerCoordinator>()::isModelArtifactInUse,
+            modelArtifactInUse = worker::isModelArtifactInUse,
+            multiStemInstaller = get(),
+            multiStemSelectionStore = get(),
+            pauseForModelSupersession = worker::pauseForActiveModelSupersession,
         )
     }
 

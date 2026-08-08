@@ -206,6 +206,10 @@
     <string name="source_separation_preset_category_other_summary">Models without reviewed presentation metadata.</string>
     <string name="source_separation_preset_category_expand">Expand category</string>
     <string name="source_separation_preset_category_collapse">Collapse category</string>
+    <string name="source_separation_model_details_backends">Allowed backends</string>
+    <string name="source_separation_model_details_channels">Channels</string>
+    <string name="source_separation_model_details_stem_number">Stem</string>
+    <string name="source_separation_model_details_notices">License and training-data notices</string>
     <string name="source_separation_preset_active_missing">The selected development model is not installed.</string>
     <string name="source_separation_preset_restored_target_title">Restored model target</string>
     <string name="source_separation_preset_restored_target_identity">Model ID: %1$s\nSHA-256: %2$s</string>

@@ -862,7 +862,7 @@ private fun PresetModelCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    if (model.installed == null) {
+                    if (!model.isInstalled) {
                         Button(
                             onClick = { onDownload(model.modelId) },
                             modifier = Modifier
@@ -1363,6 +1363,71 @@ private fun SourceSeparationModelDetailsDialog(
                         }
                     }
                 }
+                details.multiStemContract?.let { contract ->
+                    item {
+                        ModelDetailSection(R.string.source_separation_model_details_contract) {
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_contract_id,
+                                contract.identity,
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_schema,
+                                contract.schemaId,
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_pipeline,
+                                contract.pipelineId,
+                            )
+                            ModelDetailValue(
+                                R.string.source_separation_model_details_backends,
+                                contract.allowedBackends.joinToString(),
+                            )
+                        }
+                    }
+                    if (contract.sampleRate != null || contract.channelCount != null) {
+                        item {
+                            ModelDetailSection(R.string.source_separation_model_details_dsp) {
+                                contract.sampleRate?.let { sampleRate ->
+                                    ModelDetailValue(
+                                        R.string.source_separation_preset_import_sample_rate,
+                                        sampleRate.toString(),
+                                    )
+                                }
+                                contract.channelCount?.let { channelCount ->
+                                    ModelDetailValue(
+                                        R.string.source_separation_model_details_channels,
+                                        channelCount.toString(),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (contract.canonicalLabels.isNotEmpty()) {
+                        item {
+                            ModelDetailSection(R.string.source_separation_model_details_stems) {
+                                contract.canonicalLabels.forEachIndexed { index, label ->
+                                    ModelDetailValue(
+                                        R.string.source_separation_model_details_stem_number,
+                                        "${index + 1}: ${SourceSeparationStemLabelResolver.resolve(context, label)}",
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (contract.notices.isNotEmpty()) {
+                        item {
+                            ModelDetailSection(R.string.source_separation_model_details_notices) {
+                                contract.notices.forEach { notice ->
+                                    Text(
+                                        text = notice,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 details.source?.let { source ->
                     item {
                         ModelDetailSection(R.string.source_separation_model_details_provenance) {
@@ -1514,7 +1579,7 @@ private fun ModelOperationError(message: String, onDismiss: () -> Unit) {
 @Composable
 private fun SourceSeparationPresetManagementItem.statusText(): String = when {
     active -> stringResource(R.string.source_separation_preset_selected_for_validation)
-    installed != null -> stringResource(R.string.source_separation_preset_installed)
+    isInstalled -> stringResource(R.string.source_separation_preset_installed)
     else -> stringResource(R.string.source_separation_preset_not_installed)
 }
 
