@@ -14,7 +14,6 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.MediaStore
-import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
@@ -22,6 +21,7 @@ import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.mardous.booming.data.local.repository.Repository
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.PlaybackService
@@ -43,9 +43,11 @@ import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationMul
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
+import com.mardous.booming.util.BLACKLIST_ENABLED
 import com.mardous.booming.util.IGNORE_AUDIO_FOCUS
 import com.mardous.booming.util.MINIMUM_SONG_DURATION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
+import com.mardous.booming.util.WHITELIST_ENABLED
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.CancellationException
@@ -54,6 +56,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -99,7 +102,13 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         val initialSelectedModelId = selectionStore.selectedModelId()
         val preferenceSnapshot = snapshotPreferences(
             preferences,
-            setOf(MINIMUM_SONG_DURATION, SOURCE_SEPARATION_AUTO_START, IGNORE_AUDIO_FOCUS),
+            setOf(
+                MINIMUM_SONG_DURATION,
+                SOURCE_SEPARATION_AUTO_START,
+                IGNORE_AUDIO_FOCUS,
+                WHITELIST_ENABLED,
+                BLACKLIST_ENABLED,
+            ),
         )
         val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
             .resolve("$runId.json")
@@ -121,10 +130,23 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                     .putInt(MINIMUM_SONG_DURATION, 0)
                     .putBoolean(SOURCE_SEPARATION_AUTO_START, false)
                     .putBoolean(IGNORE_AUDIO_FOCUS, true)
+                    .putBoolean(WHITELIST_ENABLED, false)
+                    .putBoolean(BLACKLIST_ENABLED, false)
                     .commit(),
             )
             mediaUri = importIntoMediaStore(context, source, runId)
             val song = stagedSong(mediaUri, source, runId)
+            val repositorySong = runBlocking {
+                koin.get<Repository>().songByMediaItem(song.toMediaItem())
+            }
+            report.put("repositorySong", JSONObject()
+                .put("requestedId", song.id)
+                .put("resolvedId", repositorySong.id)
+                .put("resolvedUri", repositorySong.uri.toString())
+                .put("resolvedTitle", repositorySong.title))
+            check(repositorySong.id == song.id) {
+                "The product repository did not resolve the staged MediaStore song."
+            }
             repository.entries()
                 .filter {
                     it.modelId in setOf(modelId, replacementModelId) &&
@@ -168,12 +190,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             controller = mediaController
             onMediaControllerThread(mediaController) {
                 mediaController.volume = 0f
-                mediaController.setMediaItem(
-                    MediaItem.Builder()
-                        .setMediaId(song.id.toString())
-                        .setUri(song.uri)
-                        .build(),
-                )
+                mediaController.setMediaItem(song.toMediaItem())
                 mediaController.prepare()
             }
             waitForMediaController(mediaController, "source preparation") {
@@ -301,7 +318,13 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         val initialSelectedModelId = selectionStore.selectedModelId()
         val preferenceSnapshot = snapshotPreferences(
             preferences,
-            setOf(MINIMUM_SONG_DURATION, SOURCE_SEPARATION_AUTO_START, IGNORE_AUDIO_FOCUS),
+            setOf(
+                MINIMUM_SONG_DURATION,
+                SOURCE_SEPARATION_AUTO_START,
+                IGNORE_AUDIO_FOCUS,
+                WHITELIST_ENABLED,
+                BLACKLIST_ENABLED,
+            ),
         )
         val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
             .resolve("$runId.json")
@@ -321,9 +344,22 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .putInt(MINIMUM_SONG_DURATION, 0)
                 .putBoolean(SOURCE_SEPARATION_AUTO_START, false)
                 .putBoolean(IGNORE_AUDIO_FOCUS, true)
+                .putBoolean(WHITELIST_ENABLED, false)
+                .putBoolean(BLACKLIST_ENABLED, false)
                 .commit())
             mediaUri = importIntoMediaStore(context, source, runId)
             val song = stagedSong(mediaUri, source, runId)
+            val repositorySong = runBlocking {
+                koin.get<Repository>().songByMediaItem(song.toMediaItem())
+            }
+            report.put("repositorySong", JSONObject()
+                .put("requestedId", song.id)
+                .put("resolvedId", repositorySong.id)
+                .put("resolvedUri", repositorySong.uri.toString())
+                .put("resolvedTitle", repositorySong.title))
+            check(repositorySong.id == song.id) {
+                "The product repository did not resolve the staged MediaStore song."
+            }
             repository.entries()
                 .filter { it.modelId == modelId && it.title.startsWith(SONG_TITLE_PREFIX) }
                 .forEach { repository.delete(it.cacheKey) }
@@ -356,12 +392,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             controller = mediaController
             onMediaControllerThread(mediaController) {
                 mediaController.volume = 0f
-                mediaController.setMediaItem(
-                    MediaItem.Builder()
-                        .setMediaId(song.id.toString())
-                        .setUri(song.uri)
-                        .build(),
-                )
+                mediaController.setMediaItem(song.toMediaItem())
                 mediaController.prepare()
             }
             waitForMediaController(mediaController, "source preparation") {
@@ -490,12 +521,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             controller = recreatedController
             onMediaControllerThread(recreatedController) {
                 recreatedController.volume = 0f
-                recreatedController.setMediaItem(
-                    MediaItem.Builder()
-                        .setMediaId(song.id.toString())
-                        .setUri(song.uri)
-                        .build(),
-                )
+                recreatedController.setMediaItem(song.toMediaItem())
                 recreatedController.prepare()
             }
             waitForMediaController(recreatedController, "recreated source preparation") {
@@ -1105,7 +1131,11 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
     private fun importIntoMediaStore(context: Context, source: File, runId: String): Uri {
         val values = ContentValues().apply {
             put(MediaStore.Audio.Media.DISPLAY_NAME, "$runId.wav")
+            put(MediaStore.Audio.Media.TITLE, "$SONG_TITLE_PREFIX $runId")
+            put(MediaStore.Audio.Media.ARTIST, "Scott Buckley")
+            put(MediaStore.Audio.Media.ALBUM, "Phase 6 Validation")
             put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
+            put(MediaStore.Audio.Media.IS_MUSIC, 1)
             put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/BoomingSS Validation")
             put(MediaStore.Audio.Media.IS_PENDING, 1)
         }
@@ -1117,9 +1147,26 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             context.contentResolver.openOutputStream(uri, "w")!!.use { output ->
                 source.inputStream().use { input -> input.copyTo(output, 256 * 1024) }
             }
-            context.contentResolver.update(uri, ContentValues().apply {
+            val updated = context.contentResolver.update(uri, ContentValues().apply {
                 put(MediaStore.Audio.Media.IS_PENDING, 0)
+                put(MediaStore.Audio.Media.TITLE, "$SONG_TITLE_PREFIX $runId")
+                put(MediaStore.Audio.Media.ARTIST, "Scott Buckley")
+                put(MediaStore.Audio.Media.ALBUM, "Phase 6 Validation")
+                put(MediaStore.Audio.Media.IS_MUSIC, 1)
             }, null, null)
+            check(updated == 1) { "The staged MediaStore row was not finalized." }
+            context.contentResolver.query(
+                uri,
+                arrayOf(MediaStore.Audio.Media.TITLE, MediaStore.Audio.Media.IS_MUSIC),
+                null,
+                null,
+                null,
+            )!!.use { cursor ->
+                check(cursor.moveToFirst()) { "The staged MediaStore row is unavailable." }
+                check(cursor.getString(0).isNotBlank() && cursor.getInt(1) == 1) {
+                    "The staged MediaStore row is not classified as music."
+                }
+            }
             return uri
         } catch (error: Throwable) {
             context.contentResolver.delete(uri, null, null)
