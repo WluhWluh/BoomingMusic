@@ -1209,8 +1209,16 @@ undeclared pipeline or publishing a partial stem set.
   recreation segment on S25 and S10. The segment stops the first
   `PlaybackService`, reconnects a fresh `MediaController`, and requires the
   same exact selected multi-stem cache and ordered stem set to be adopted
-  again. The test is compiled; device execution remains pending because the
-  S25 ADB endpoint was offline during this batch.
+  again. The test is compiled. The S25 ADB endpoint was offline during this
+  batch. On S10, the independent Release-to-product-cache gate passed with the
+  same official six-stem artifact, including FLAC promotion and reopening the
+  completed cache. Two subsequent PlaybackService attempts did not reach the
+  recreation segment: one exposed `playableStatus=Processing` while the
+  completed manifest itself validated, and one timed out preparing the
+  original MediaStore clock after a preceding instrumentation run. These are
+  retained as unresolved initial-adoption/test-isolation results, not evidence
+  for or against service recreation. Re-run from a clean player/service state
+  on both devices before closing this item.
 - [ ] Start S25 producer-ahead playback with two ready windows. On devices whose
   measured production rate cannot sustain the stride, keep separation offline
   or wait for completion instead of repeatedly pausing playback; S10 results
