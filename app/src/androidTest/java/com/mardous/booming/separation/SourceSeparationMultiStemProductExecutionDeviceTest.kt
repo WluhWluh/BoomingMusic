@@ -312,6 +312,9 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             ?.toLongOrNull()
             ?.also { require(it >= 0L) }
             ?: 0L
+        val deleteActiveCache = arguments.getString(ARG_DELETE_ACTIVE_CACHE)
+            ?.toBooleanStrictOrNull()
+            ?: false
         val koin = GlobalContext.get()
         val facade = koin.get<SourceSeparationMultiStemProductFacade>()
         val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
@@ -490,6 +493,59 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             }
             val metricsBeforeSeek = requireNotNull(processor.dataPlaneMetrics())
             assertEquals(expectedStemIds.size, metricsBeforeSeek.activeStemCount)
+
+            if (deleteActiveCache) {
+                val disableResult = onMediaControllerThread(mediaController) {
+                    mediaController.sendCustomCommand(
+                        SessionCommand(
+                            Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+                            Bundle.EMPTY,
+                        ),
+                        Bundle().apply {
+                            putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, false)
+                            putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                        },
+                    )
+                }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                assertEquals(SessionResult.RESULT_SUCCESS, disableResult.resultCode)
+                waitForMediaController(mediaController, "multi-stem playback release") {
+                    mediaController.currentMediaItem?.mediaId == song.id.toString() &&
+                        mediaController.playWhenReady &&
+                        mediaController.playbackState == Player.STATE_READY &&
+                        processor.dataPlaneStemIds().isEmpty()
+                }
+                assertFalse(repository.isLeased(manifest.cacheKey))
+                assertEquals(
+                    SourceSeparationCacheMutationResult.Completed,
+                    repository.delete(manifest.cacheKey),
+                )
+                assertFalse(store.entryDirectory(manifest.cacheKey).exists())
+                assertTrue(repository.entries().none { entry ->
+                    entry.cacheKey == manifest.cacheKey
+                })
+                val notifyResult = onMediaControllerThread(mediaController) {
+                    mediaController.sendCustomCommand(
+                        SessionCommand(
+                            Playback.NOTIFY_SOURCE_SEPARATION_CACHE_DELETED,
+                            Bundle.EMPTY,
+                        ),
+                        Bundle.EMPTY,
+                    )
+                }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                assertEquals(SessionResult.RESULT_SUCCESS, notifyResult.resultCode)
+                assertTrue(processor.dataPlaneStemIds().isEmpty())
+                report.put("status", "complete")
+                    .put("mode", "active-completed-cache-deletion")
+                    .put("cacheKey", manifest.cacheKey)
+                    .put("stemIdsBeforeDelete", JSONArray(expectedStemIds))
+                    .put("activeStemCountBeforeDelete", metricsBeforeSeek.activeStemCount)
+                    .put("playbackReleased", true)
+                    .put("cacheDeleted", true)
+                    .put("originalTransportRetained", true)
+                    .put("notifyResultCode", notifyResult.resultCode)
+                reportFile.writeText(report.toString(2))
+                return
+            }
 
             onMediaControllerThread(mediaController) { mediaController.pause() }
             waitForMediaController(mediaController, "pause") { !mediaController.playWhenReady }
@@ -1320,6 +1376,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val ARG_SOURCE_SHA256 = "bssMultistemSourceSha256"
         const val ARG_RUN_ID = "bssMultistemRunId"
         const val ARG_ALLOWED_SEEK_UNDERRUNS = "bssMultistemAllowedSeekUnderruns"
+        const val ARG_DELETE_ACTIVE_CACHE = "bssMultistemDeleteActiveCache"
         const val ARG_APP_COMMIT = "bssAppCommit"
         const val ARG_TEST_COMMIT = "bssTestCommit"
         const val REPORT_DIRECTORY = "source-separation/multistem-product-device-reports"

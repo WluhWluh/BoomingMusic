@@ -39,8 +39,9 @@ real-song playback and its process-recreation, background, cache-deletion, and
 active-model product-state gates are complete. Phase 5 has frozen the three
 real multi-stem executable contracts, and Phase 6 now routes completed official
 4/6-stem product caches through `PlaybackService` on S25, including exact-model
-switching with retained inactive caches. Multi-stem service recreation,
-playback-time cache deletion, S10 playback resources, producer-ahead playback,
+switching with retained inactive caches. S10 now also has completed-cache
+service-recreation and playback-time deletion evidence. The matching S25
+gates, strict S10 zero-underrun playback resources, producer-ahead playback,
 background contention, and listening remain open.
 
 This roadmap prepares Booming SS for more than two rendered stems while
@@ -1216,6 +1217,15 @@ undeclared pipeline or publishing a partial stem set.
   default zero-underrun allowance, then repeat the S10 run without the
   diagnostic allowance before declaring the combined gate complete. The S25
   ADB endpoint was offline during the current batch.
+- [x] Delete an actively adopted completed official six-stem cache on S10.
+  The independent product-path mode disables separated playback, waits for the
+  data plane and artifact lease to release, deletes the exact cache directory,
+  notifies `PlaybackService`, and verifies that no old stem remains while the
+  original song stays in the active transport.
+- [ ] Repeat active completed-cache deletion on S25 through the real cache
+  management panel button, including playback-state broadcast and visible UI
+  refresh. The S10 service/repository gate proves the data boundary but does
+  not substitute for the user-interaction gate.
 - [ ] Start S25 producer-ahead playback with two ready windows. On devices whose
   measured production rate cannot sustain the stride, keep separation offline
   or wait for completion instead of repeatedly pausing playback; S10 results
@@ -1369,8 +1379,8 @@ and preserves the existing MDX scheduling path. Official four-stem adopted
 `drums,bass,other,vocals,guitar,piano`. Both completed pause, one-third-track
 seek, and resume through `MediaController` with zero additional underruns.
 This closes basic completed-cache 4/6-stem routing on S25, not guitar-ft
-listening, producer-ahead playback, service recreation, cache deletion during
-playback, S10 playback resources, or background contention.
+listening, producer-ahead playback, the remaining service-recreation and cache
+deletion rows above, S10 playback resources, or background contention.
 
 The completed-cache active-model switch gate then ran on the same S25 product
 path. Playback started from official six-stem
@@ -1382,8 +1392,8 @@ with zero underruns. Selection generations now invalidate both cached session
 reuse and an already installed data-plane session; the change does not delete
 the superseded cache or route either model through the MDX scheduler. This
 closes completed-cache model switching on S25, not switching while production
-is still partial, service recreation, playback-time cache deletion, or S10
-playback resources.
+is still partial, the remaining service-recreation and cache-deletion rows, or
+S10 playback resources.
 
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support
