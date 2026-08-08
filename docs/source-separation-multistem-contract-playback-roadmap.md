@@ -1190,10 +1190,19 @@ undeclared pipeline or publishing a partial stem set.
   completion payloads. Remote code must use the durable ordered WAV paths and
   segment plan, rather than reconstructing paths from labels or promoted FLAC
   state.
+- [x] Execute the product multi-stem facade through the dedicated
+  `:source_separation` Binder service. The service owns the HTDemucs engine and
+  runtime lease, while the app process receives only bounded progress/events
+  and reads the durable cache manifest.
+- [x] Run the real remote process-death recovery gate on S25 and S10. Killing
+  the service after the first ready window releases the caller, leaves a
+  durable `Running` journal without falsely completing the cache, and a new
+  service generation completes the same exact cache identity with
+  `PreviousOwnerDied`.
 - [ ] Complete the remaining CPU lifecycle/resource matrix on S25 and S10:
-  process death and recovery, independent background ownership and contention,
-  and sustained native-memory/thermal observation. Existing product-path runs
-  already record peak PSS and point-in-time thermal status.
+  independent background ownership and contention, and sustained
+  native-memory/thermal observation. Existing product-path runs already record
+  peak PSS and point-in-time thermal status.
 - [ ] Start S25 producer-ahead playback with two ready windows. On devices whose
   measured production rate cannot sustain the stride, keep separation offline
   or wait for completion instead of repeatedly pausing playback; S10 results
@@ -1308,7 +1317,7 @@ window of work because pause was observed only at HTDemucs window boundaries;
 and the LiteRT session. The fixed build paused in 8.352 s on S25 and 16.632 s on
 S10, then completed the replacement in 21.555 s and 43.756 s respectively.
 This closes in-process exact-model supersession and retention, not process
-death, background ownership, or real `PlaybackService` adoption.
+background ownership, or real `PlaybackService` adoption.
 
 The multi-stem engine now also has a JVM process-generation handoff test. It
 abandons an admitted `Running` owner without a terminal transition, then
@@ -1316,7 +1325,17 @@ re-enters the same exact cache with a new generation and owner PID. The
 coordinator records `PreviousOwnerDied`, removes the non-resumable writer
 state, and the HTDemucs engine publishes a complete ordered four-stem result.
 This proves the durable cache handoff contract only; an actual independent
-inference-process death and reconnect remains open.
+background owner and real `PlaybackService` adoption remain open.
+
+The first production-shaped remote multi-stem process-death gate is recorded in
+`docs/validation/htdemucs/phase6-remote-process-death-s25-s10-2026-08-08.json`.
+On both arm64 devices, the test killed the dedicated `:source_separation`
+service after the first ready window, observed the caller return from the dead
+Binder, and retried through the normal product facade. The replacement process
+published a completed cache with a strictly newer process generation and a
+`PreviousOwnerDied` journal transition. This closes remote process death and
+cache recovery for the current in-process-background policy; it does not close
+independent background ownership or real PlaybackService multi-stem adoption.
 
 **Exit:** each of the three exact artifacts has its own CPU-only experimental
 activation decision. No broad Demucs, GPU, NPU, or unrelated multi-stem support

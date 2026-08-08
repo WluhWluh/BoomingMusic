@@ -23,12 +23,16 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheValidationResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRepository
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
-import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
+import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationMultiStemExecutionHost
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
+import com.mardous.booming.separation.runtime.SourceSeparationRuntimeStore
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.CancellationException
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -328,7 +332,15 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             val store = koin.get<SourceSeparationCacheStore>()
             val coordinator = koin.get<SourceSeparationCacheRunCoordinator>()
             val promoter = koin.get<SourceSeparationCacheFlacPromoter>()
-            val runtime = SourceSeparationRuntimeBootstrap.ensureLoaded(context)
+            val runtime = requireNotNull(
+                koin.get<SourceSeparationRuntimeStore>()
+                    .trustedInventory()
+                    .singleOrNull { item ->
+                        item.state == SourceSeparationRuntimeState.Installed &&
+                            item.catalogEntry.abi == android.os.Build.SUPPORTED_ABIS.first()
+                    }
+                    ?.installation,
+            ) { "The trusted CPU runtime installation is unavailable." }
             report.put("build", JSONObject()
                 .put("appCommit", appCommit)
                 .put("testCommit", testCommit)
@@ -466,6 +478,85 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("stackTrace", error.stackTraceToString())
             reportFile.writeText(report.toString(2))
             throw error
+        } finally {
+            mediaUri?.let { context.contentResolver.delete(it, null, null) }
+        }
+    }
+
+    @Test
+    fun remoteProcessDeathLeavesDurableRunAndRecoversOnNewGeneration() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
+        val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
+        assumeTrue(modelId.isNotBlank() && relativeSource.isNotBlank())
+        require(modelId in EXPECTED_MODEL_IDS && SAFE_RELATIVE_PATH.matches(relativeSource))
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val source = File(context.filesDir, relativeSource).canonicalFile
+        require(source.isFile)
+        arguments.getString(ARG_SOURCE_SHA256)?.let { expected ->
+            require(SHA256.matches(expected) && source.sha256() == expected)
+        }
+        val runId = arguments.getString(ARG_RUN_ID)?.takeIf(SAFE_NAME::matches)
+            ?: "remote-death-${System.currentTimeMillis()}"
+        var mediaUri: Uri? = null
+        try {
+            mediaUri = importIntoMediaStore(context, source, runId)
+            val song = stagedSong(mediaUri, source, runId)
+            val koin = GlobalContext.get()
+            val facade = koin.get<SourceSeparationMultiStemProductFacade>()
+            val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
+            val store = koin.get<SourceSeparationCacheStore>()
+            val remote = koin.get<BoundRemoteSourceSeparationMultiStemExecutionHost>()
+            repository.entries()
+                .filter { it.modelId == modelId && it.title.startsWith(SONG_TITLE_PREFIX) }
+                .forEach { repository.delete(it.cacheKey) }
+
+            val firstReady = CountDownLatch(1)
+            val workerError = AtomicReference<Throwable?>(null)
+            val worker = Thread({
+                try {
+                    facade.separate(
+                        song = song,
+                        modelId = modelId,
+                        onProgress = { progress ->
+                            if (progress.completedWindows >= 1) firstReady.countDown()
+                        },
+                    )
+                } catch (error: Throwable) {
+                    workerError.set(error)
+                }
+            }, "BSS-MultiStem-DeathProbe").apply { start() }
+            assertTrue("The remote run did not reach its first window.",
+                firstReady.await(120L, java.util.concurrent.TimeUnit.SECONDS))
+            remote.terminateRemoteProcessForValidation()
+            worker.join(30_000L)
+            assertFalse("The caller remained blocked after remote process death.", worker.isAlive)
+            assertTrue("Remote process death did not reach the caller.", workerError.get() != null)
+
+            val partial = repository.entries()
+                .single { it.modelId == modelId && it.title == song.title }
+            val partialJournal = requireNotNull(store.readRunJournal(partial.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Running,
+                partialJournal.lifecycle)
+
+            val recovered = facade.separate(song = song, modelId = modelId)
+            assertTrue(
+                recovered is HtdemucsSourceSeparationEngineResult.Completed ||
+                    recovered is HtdemucsSourceSeparationEngineResult.AlreadyCompleted,
+            )
+            val recoveredManifest = when (recovered) {
+                is HtdemucsSourceSeparationEngineResult.Completed -> recovered.manifest
+                is HtdemucsSourceSeparationEngineResult.AlreadyCompleted -> recovered.manifest
+                is HtdemucsSourceSeparationEngineResult.Busy -> error("Unexpected busy result")
+            }
+            val finalJournal = requireNotNull(store.readRunJournal(recoveredManifest.cacheKey))
+            assertEquals(SourceSeparationCacheRunJournalLifecycle.Completed,
+                finalJournal.lifecycle)
+            assertTrue(finalJournal.transitions.any {
+                it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+            })
+            assertTrue(finalJournal.request.processGeneration > partialJournal.request.processGeneration)
         } finally {
             mediaUri?.let { context.contentResolver.delete(it, null, null) }
         }
