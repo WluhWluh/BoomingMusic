@@ -268,6 +268,35 @@ class SourceSeparationManagementScreenTest {
                     it.kind == SourceSeparationManagedModelKind.MultiStem
                 } == 3
             }
+            val expectedDownloadBytes = mapOf(
+                "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0" to 117_635_940L,
+                "htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0" to 178_052_690L,
+                "htdemucs_6s_guitar_ft_core_canonical_7p8s_fp32_v1_0_0" to 117_742_547L,
+            )
+            compose.runOnIdle {
+                val entries = viewModel.state.value.entries
+                    .filter { it.kind == SourceSeparationManagedModelKind.MultiStem }
+                    .associateBy(SourceSeparationPresetManagementItem::modelId)
+                assertEquals(expectedDownloadBytes.keys, entries.keys)
+                expectedDownloadBytes.forEach { (candidateId, byteSize) ->
+                    assertEquals(byteSize, entries.getValue(candidateId).byteSize)
+                }
+                assertTrue(
+                    entries.getValue("htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0")
+                        .byteSize!! >
+                        entries.getValue("htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0")
+                            .byteSize!!,
+                )
+            }
+            expectedDownloadBytes.forEach { (candidateId, byteSize) ->
+                compose.runOnIdle { viewModel.showCatalogDetails(candidateId) }
+                compose.runOnIdle {
+                    val details = requireNotNull(viewModel.state.value.modelDetails)
+                    assertEquals(byteSize, details.byteSize)
+                    assertEquals(listOf("cpu"), details.multiStemContract?.allowedBackends)
+                    viewModel.dismissModelDetails()
+                }
+            }
             compose.onNodeWithTag("source-separation-preset-category:MultiStem")
                 .assertIsDisplayed()
                 .performClick()

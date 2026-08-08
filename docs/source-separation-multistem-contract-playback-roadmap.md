@@ -1443,7 +1443,7 @@ is implied.
   from activation.
 - [ ] Expose a model only when its exact contract, pipeline, playback, and
   device evidence support the selected activation policy.
-- [ ] Show model-specific CPU-only compatibility and download/install size;
+- [x] Show model-specific CPU-only compatibility and download/install size;
   never imply that four stems are the lower-resource choice, because the
   official four-stem artifact and measured S10 workload are larger/slower than
   official six-stem.
@@ -1489,6 +1489,14 @@ the application graph: 117,624,880-byte model, SHA-256
 contract `htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0@1`, and CPU-only backend
 policy. This is catalog/installation evidence; it does not replace separation,
 playback, resource, or listening qualification.
+
+The follow-up production-graph management test verifies the exact displayed
+download/install payload and pre-activation backend details for all three
+entries. Official six-stem reports `117,635,940` bytes, official four-stem
+reports `178,052,690` bytes, and guitar-ft reports `117,742,547` bytes; every
+detail record exposes only `cpu`. The test explicitly asserts that official
+four-stem is larger than official six-stem so the category cannot regress into
+using stem count as a resource estimate.
 
 The S25 completed-cache service-recreation rerun is recorded in
 `files/source-separation/multistem-product-device-reports/
