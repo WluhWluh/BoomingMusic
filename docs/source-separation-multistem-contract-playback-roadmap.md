@@ -41,7 +41,9 @@ real multi-stem executable contracts, and Phase 6 now routes completed official
 4/6-stem product caches through `PlaybackService` on S25, including exact-model
 switching with retained inactive caches. S10 now also has completed-cache
 service-recreation and playback-time deletion evidence. The matching S25
-gates, strict S10 zero-underrun playback resources, producer-ahead playback,
+service-recreation and direct active-cache deletion gates, strict S10
+zero-underrun playback resources, and S25 official-six-stem producer-ahead
+playback are complete. Active deletion through the management panel,
 background contention, and listening remain open.
 
 This roadmap prepares Booming SS for more than two rendered stems while
@@ -1239,7 +1241,7 @@ undeclared pipeline or publishing a partial stem set.
   that the current-song status is refreshed. The S10 service/repository gate
   proves the data boundary but does not substitute for this user-interaction
   gate.
-- [ ] Start S25 producer-ahead playback with two ready windows. On devices whose
+- [x] Start S25 producer-ahead playback with two ready windows. On devices whose
   measured production rate cannot sustain the stride, keep separation offline
   or wait for completion instead of repeatedly pausing playback; S10 results
   above RTF `1.0` must not be presented as streaming-capable.
@@ -1539,6 +1541,16 @@ playback, released the lease, deleted the cache, and completed the
 `cache-deleted` notification path while retaining the original transport. The
 test is intentionally separate from the management-panel gate because it
 drives the service command directly.
+
+The S25 producer-ahead gate `producer-ahead-s25-20260808-r1` started a fresh
+official six-stem `PlaybackDemandWindow` run and waited for two complete
+ordered stem block sets before enabling separated playback. The partial cache
+became playable at `12.500 s`; the producer completed the 30-second source at
+`22.870 s`. Media3 retained the ordered
+`drums,bass,other,vocals,guitar,piano` session throughout, with zero added
+low-water events, underruns, or playback stall transitions. This qualifies the
+two-window policy only for this S25 official-six-stem row. It does not imply
+that S10, official four-stem, or guitar-ft can sustain producer-ahead playback.
 
 ## Required Tests and Gates
 

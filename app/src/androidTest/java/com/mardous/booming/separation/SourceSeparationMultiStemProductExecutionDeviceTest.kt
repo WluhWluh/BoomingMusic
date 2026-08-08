@@ -681,6 +681,242 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
     }
 
     @Test
+    fun producerAheadPlaybackStartsFromTwoReadyWindows() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
+        val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
+        assumeTrue(modelId.isNotBlank() && relativeSource.isNotBlank())
+        require(modelId == OFFICIAL_SIX_STEM_MODEL_ID)
+        require(SAFE_RELATIVE_PATH.matches(relativeSource))
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val source = File(context.filesDir, relativeSource).canonicalFile
+        require(source.toPath().startsWith(context.filesDir.canonicalFile.toPath()) && source.isFile)
+        arguments.getString(ARG_SOURCE_SHA256)?.let { expected ->
+            require(SHA256.matches(expected) && source.sha256() == expected)
+        }
+        val runId = arguments.getString(ARG_RUN_ID)?.takeIf(SAFE_NAME::matches)
+            ?: "producer-ahead-${System.currentTimeMillis()}"
+        val koin = GlobalContext.get()
+        val facade = koin.get<SourceSeparationMultiStemProductFacade>()
+        val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
+        val store = koin.get<SourceSeparationCacheStore>()
+        val selectionStore = koin.get<SourceSeparationMultiStemPlaybackSelectionStore>()
+        val processor = koin.get<SourceSeparationMixAudioProcessor>()
+        val preferences = koin.get<SharedPreferences>()
+        val initialSelectedModelId = selectionStore.selectedModelId()
+        val preferenceSnapshot = snapshotPreferences(
+            preferences,
+            setOf(
+                MINIMUM_SONG_DURATION,
+                SOURCE_SEPARATION_AUTO_START,
+                IGNORE_AUDIO_FOCUS,
+                WHITELIST_ENABLED,
+                BLACKLIST_ENABLED,
+            ),
+        )
+        val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
+            .resolve("$runId.json")
+        val report = JSONObject()
+            .put("runId", runId)
+            .put("mode", "producer-ahead-playback")
+            .put("modelId", modelId)
+            .put("status", "running")
+            .put("deviceModel", android.os.Build.MODEL)
+            .put("sdk", android.os.Build.VERSION.SDK_INT)
+            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+        val producerResult = AtomicReference<Result<HtdemucsSourceSeparationEngineResult>?>()
+        val preparedManifest = AtomicReference<com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest?>()
+        val producerFinished = CountDownLatch(1)
+        var producerThread: Thread? = null
+        var mediaUri: Uri? = null
+        var cacheKey: String? = null
+        var controller: MediaController? = null
+        try {
+            check(
+                preferences.edit()
+                    .putInt(MINIMUM_SONG_DURATION, 0)
+                    .putBoolean(SOURCE_SEPARATION_AUTO_START, false)
+                    .putBoolean(IGNORE_AUDIO_FOCUS, true)
+                    .putBoolean(WHITELIST_ENABLED, false)
+                    .putBoolean(BLACKLIST_ENABLED, false)
+                    .commit(),
+            )
+            mediaUri = importIntoMediaStore(context, source, runId)
+            val song = stagedSong(mediaUri, source, runId)
+            repository.entries()
+                .filter { it.modelId == modelId && it.title.startsWith(SONG_TITLE_PREFIX) }
+                .forEach { repository.delete(it.cacheKey) }
+            selectionStore.select(modelId)
+
+            val mediaController = MediaController.Builder(
+                context,
+                SessionToken(context, ComponentName(context, PlaybackService::class.java)),
+            ).buildAsync().get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            controller = mediaController
+            awaitPlaybackRestoration(mediaController)
+            onMediaControllerThread(mediaController) {
+                mediaController.volume = 0f
+                mediaController.setMediaItem(song.toMediaItem())
+                mediaController.prepare()
+            }
+            waitForMediaController(mediaController, "producer-ahead source preparation") {
+                mediaController.currentMediaItem?.mediaId == song.id.toString() &&
+                    mediaController.duration > 0L &&
+                    mediaController.playbackState == Player.STATE_READY
+            }
+
+            val producerStartedAt = SystemClock.elapsedRealtime()
+            producerThread = Thread({
+                try {
+                    producerResult.set(runCatching {
+                        facade.separate(
+                            song = song,
+                            modelId = modelId,
+                            runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+                            onPrepared = preparedManifest::set,
+                        )
+                    })
+                } finally {
+                    producerFinished.countDown()
+                }
+            }, "BSS-Multistem-ProducerAhead").apply { start() }
+
+            val readyDeadline = SystemClock.elapsedRealtime() + PRODUCER_AHEAD_READY_TIMEOUT_MS
+            var readyManifest: com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest? = null
+            while (SystemClock.elapsedRealtime() < readyDeadline) {
+                val prepared = preparedManifest.get()
+                if (prepared != null) {
+                    cacheKey = prepared.cacheKey
+                    val current = store.readManifest(prepared.cacheKey)
+                    if (current != null) {
+                        when (val status = repository.playableStatus(
+                            identity = current.identity,
+                            playbackPositionMs = 0L,
+                            readyWindowCount = PRODUCER_AHEAD_READY_WINDOWS,
+                        )) {
+                            is SourceSeparationModelAwarePlayableStatus.Ready -> {
+                                status.playback.close()
+                                readyManifest = current
+                                break
+                            }
+                            SourceSeparationModelAwarePlayableStatus.Processing,
+                            SourceSeparationModelAwarePlayableStatus.Unavailable,
+                            -> Unit
+                        }
+                    }
+                }
+                producerResult.get()?.exceptionOrNull()?.let { throw it }
+                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+            }
+            val partialManifest = requireNotNull(readyManifest) {
+                "Producer did not publish two playable windows before the timeout."
+            }
+            assertEquals(SourceSeparationCacheManifestState.Partial, partialManifest.state)
+            val expectedStemIds = requireNotNull(partialManifest.output).stems
+                .sortedBy { stem -> stem.order }
+                .map { stem -> stem.stemId.value }
+            assertEquals(6, expectedStemIds.size)
+            val readyAtMs = SystemClock.elapsedRealtime() - producerStartedAt
+
+            val enableResult = onMediaControllerThread(mediaController) {
+                mediaController.sendCustomCommand(
+                    SessionCommand(Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED, Bundle.EMPTY),
+                    Bundle().apply {
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, true)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING, true)
+                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
+                    },
+                )
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            assertEquals(SessionResult.RESULT_SUCCESS, enableResult.resultCode)
+            val syncResult = onMediaControllerThread(mediaController) {
+                mediaController.sendCustomCommand(
+                    SessionCommand(Playback.SYNC_SOURCE_SEPARATION_PLAYBACK, Bundle.EMPTY),
+                    Bundle().apply {
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ALLOW_NEW_SESSION, true)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING, true)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_PREFER_COMPLETED_CACHE, false)
+                    },
+                )
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            assertEquals(SessionResult.RESULT_SUCCESS, syncResult.resultCode)
+            onMediaControllerThread(mediaController) { mediaController.play() }
+            waitForMediaController(mediaController, "producer-ahead partial adoption") {
+                mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == expectedStemIds
+            }
+            val metricsAtAdoption = requireNotNull(processor.dataPlaneMetrics())
+            var stallTransitions = 0
+            var stalled = false
+            while (!producerFinished.await(MEDIA_SESSION_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS)) {
+                val nowStalled = onMediaControllerThread(mediaController) {
+                    mediaController.playWhenReady &&
+                        mediaController.playbackState != Player.STATE_READY
+                }
+                if (nowStalled && !stalled) stallTransitions++
+                stalled = nowStalled
+            }
+            val completed = producerResult.get()?.getOrThrow()
+            require(completed is HtdemucsSourceSeparationEngineResult.Completed) {
+                "Producer-ahead run did not complete: $completed"
+            }
+            waitForMediaController(mediaController, "producer-ahead completion") {
+                mediaController.playWhenReady &&
+                    mediaController.playbackState == Player.STATE_READY &&
+                    processor.dataPlaneStemIds() == expectedStemIds
+            }
+            val metricsAfterCompletion = requireNotNull(processor.dataPlaneMetrics())
+            val addedUnderruns = metricsAfterCompletion.underruns - metricsAtAdoption.underruns
+            assertEquals(0L, addedUnderruns)
+            assertEquals(0, stallTransitions)
+            report.put("status", "complete")
+                .put("cacheKey", completed.manifest.cacheKey)
+                .put("readyWindowCount", PRODUCER_AHEAD_READY_WINDOWS)
+                .put("readyAtMs", readyAtMs)
+                .put("completedAtMs", SystemClock.elapsedRealtime() - producerStartedAt)
+                .put("stemIds", JSONArray(expectedStemIds))
+                .put("stallTransitions", stallTransitions)
+                .put("addedLowWaterEvents",
+                    metricsAfterCompletion.lowWaterEvents - metricsAtAdoption.lowWaterEvents)
+                .put("addedUnderruns", addedUnderruns)
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+                .put("processorStemIds", processor.dataPlaneStemIds())
+            reportFile.writeText(report.toString(2))
+            throw error
+        } finally {
+            producerThread?.join(PRODUCER_AHEAD_READY_TIMEOUT_MS)
+            controller?.let { mediaController ->
+                runCatching {
+                    onMediaControllerThread(mediaController) {
+                        mediaController.pause()
+                        mediaController.clearMediaItems()
+                        mediaController.release()
+                    }
+                }
+            }
+            runCatching { context.stopService(Intent(context, PlaybackService::class.java)) }
+            selectionStore.select(initialSelectedModelId)
+            restorePreferences(preferences, preferenceSnapshot)
+            cacheKey?.let { key ->
+                repeat(20) {
+                    if (!repository.isLeased(key)) return@repeat
+                    SystemClock.sleep(100L)
+                }
+                runCatching { repository.delete(key) }
+            }
+            mediaUri?.let { uri -> runCatching { context.contentResolver.delete(uri, null, null) } }
+        }
+    }
+
+    @Test
     fun activeModelSupersessionRetainsOldPartialAndCompletesReplacement() {
         val arguments = InstrumentationRegistry.getArguments()
         val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
@@ -1387,6 +1623,10 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val MEDIA_SESSION_POLL_INTERVAL_MS = 50L
         const val MEDIA_SESSION_SEEK_TOLERANCE_MS = 750L
         const val SERVICE_RECREATION_SETTLE_MS = 500L
+        const val PRODUCER_AHEAD_READY_WINDOWS = 2
+        const val PRODUCER_AHEAD_READY_TIMEOUT_MS = 10L * 60L * 1_000L
+        const val OFFICIAL_SIX_STEM_MODEL_ID =
+            "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0"
         val SHA256 = Regex("^[0-9a-f]{64}$")
         val SHA1 = Regex("^[0-9a-f]{40}$")
         val SAFE_NAME = Regex("^[A-Za-z0-9._-]{1,160}$")
