@@ -1233,11 +1233,19 @@ undeclared pipeline or publishing a partial stem set.
   surviving while the app is backgrounded. Cover caller/activity teardown,
   service reattachment, cancellation, result publication, and player adoption
   without relying on a live instrumentation owner.
-- [ ] Run the longer CPU lifecycle/resource matrix on S25 and S10, including
-  repeated full songs, cancellation/restart, idle retention and reclamation,
-  native-memory trend, thermal behavior, and process survival. Keep per-device
-  conclusions separate; the short contention smoke above does not close this
-  soak item.
+- [x] Run a bounded repeated-run CPU lifecycle/resource soak on S25 and S10,
+  combined with the independently completed cancellation/restart and process-
+  death gates above. Each device completed five consecutive official six-stem
+  30-second product runs with first-segment contention, 100 ms remote PSS/native/
+  Dalvik/thermal sampling, cache cleanup, and a five-second idle boundary.
+  S25 took 22.908-35.852 s with peak total PSS 1,158,452-1,165,064 KiB and
+  native final PSS 9,036-9,312 KiB. S10 took 51.005-96.057 s with peak total
+  PSS 1,146,895-1,223,901 KiB; some runs ended with high retained PSS, but all
+  five used distinct worker PIDs and every old process was reclaimed before the
+  next run. Both devices reported `processMissing=false` while active, thermal
+  status remained `0` throughout this batch, and no worker service/PID remained
+  after the final idle boundary. These are per-device bounded soak results, not
+  an hours-long endurance or energy qualification.
 - [x] Run the new service-recreation segment on S10 from a clean player
   restoration barrier. The test stops the first `PlaybackService`, reconnects
   a fresh `MediaController`, and re-adopts the same exact official six-stem
