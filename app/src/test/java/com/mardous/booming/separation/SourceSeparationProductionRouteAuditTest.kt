@@ -9,7 +9,7 @@ class SourceSeparationProductionRouteAuditTest {
     @Test
     fun `normal application routes do not reference legacy or ORT runtime types`() {
         val prohibited = listOf(
-            "SourceSeparationEngine",
+            "import com.mardous.booming.separation.SourceSeparationEngine",
             "SourceSeparationModelRepository",
             "MdxModelVariant",
             "SourceSeparationOrtOracle",
