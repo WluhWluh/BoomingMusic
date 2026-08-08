@@ -1229,10 +1229,28 @@ undeclared pipeline or publishing a partial stem set.
   about 1.13 GiB on both devices; S10 thermal status rose from 1 to 2 and its
   final PSS remained about 228 MiB. This is a short product-path smoke, not a
   long-running memory or thermal qualification.
-- [ ] Verify independent background ownership rather than only a bound call
+- [x] Verify independent background ownership rather than only a bound call
   surviving while the app is backgrounded. Cover caller/activity teardown,
   service reattachment, cancellation, result publication, and player adoption
   without relying on a live instrumentation owner.
+  The debug-only non-instrumentation gate now starts an official six-stem
+  manual run from the real app process, durably freezes its exact descriptor
+  and journal, kills only that main PID, and lets the independently owned
+  `:source_separation` foreground service continue. A new product coordinator
+  instance selects the active multi-tensor journal separately from MDX,
+  adopts the exact multi-stem event stream, and routes pause/cancel, model
+  supersession, cache deletion, progress, and terminal publication without
+  projecting six stems into the two-stem protocol. On S25, the old main PID
+  died after one committed segment at journal sequence 5; the same remote PID
+  and generation completed all six segments at sequence 15. On S10, the old
+  main PID died before the first segment at sequence 2; the same remote PID
+  and generation likewise completed all six segments at sequence 15. Both
+  completed caches then passed indexed-FLAC promotion, ordered
+  `drums,bass,other,vocals,guitar,piano` adoption through the real
+  `PlaybackService`, and pause/seek/resume. Notification Pause/Cancel and
+  observer replacement remain independently covered by the preceding control
+  gate; these process-death runs do not infer immediate process reclamation
+  from an idle cached worker PID.
 - [x] Run a bounded repeated-run CPU lifecycle/resource soak on S25 and S10,
   combined with the independently completed cancellation/restart and process-
   death gates above. Each device completed five consecutive official six-stem
