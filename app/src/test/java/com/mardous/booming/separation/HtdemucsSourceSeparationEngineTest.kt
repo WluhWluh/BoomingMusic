@@ -50,6 +50,22 @@ class HtdemucsSourceSeparationEngineTest {
     }
 
     @Test
+    fun `engine preserves execution boundary run identity in journal`() {
+        val fixture = fixture()
+
+        fixture.engine().separate(
+            input = fixture.input,
+            installedModel = fixture.model,
+            preflight = fixture.preflight,
+            runId = "multistem-wire-run",
+        )
+
+        val journal = requireNotNull(fixture.store.readRunJournal(fixture.identity.cacheKey))
+        assertEquals("multistem-wire-run", journal.request.runId)
+        assertTrue(journal.transitions.all { it.runId == "multistem-wire-run" })
+    }
+
+    @Test
     fun `active model supersession pauses and records the specific lifecycle reason`() {
         val fixture = fixture(throwOnSeparate = SourceSeparationPausedException(
             pauseReason = SourceSeparationPauseReason.ActiveModelSuperseded,

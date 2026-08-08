@@ -6,11 +6,9 @@ import com.mardous.booming.separation.process.SourceSeparationMultiStemExecution
 import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionModelIdentity
 import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionRuntime
 import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionSourceIdentity
-import java.util.UUID
 
 internal fun SourceSeparationMultiStemExecutionRequest.toExecutionDescriptor(
     processGeneration: Long,
-    runId: String = "multistem-${UUID.randomUUID()}",
 ): SourceSeparationMultiStemExecutionDescriptor {
     require(processGeneration > 0L)
     val serialized = installedModel.sidecarFile.bufferedReader().use { it.readText() }

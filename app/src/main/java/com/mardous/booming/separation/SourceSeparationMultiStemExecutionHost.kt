@@ -5,6 +5,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourcePreflight
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.contract.SourceSeparationInstalledMultiStemModel
+import java.util.UUID
 
 /** Execution boundary for the product's multi-stem separation worker. */
 internal fun interface SourceSeparationMultiStemExecutionHost {
@@ -13,6 +14,7 @@ internal fun interface SourceSeparationMultiStemExecutionHost {
 }
 
 internal data class SourceSeparationMultiStemExecutionRequest(
+    val runId: String = "multistem-${UUID.randomUUID()}",
     val input: SourceSeparationModelAwareSongInput,
     val installedModel: SourceSeparationInstalledMultiStemModel,
     val preflight: SourceSeparationCacheSourcePreflight,
@@ -24,7 +26,11 @@ internal data class SourceSeparationMultiStemExecutionRequest(
     val shouldPause: () -> Boolean,
     val pauseReasonProvider: () -> SourceSeparationPauseReason,
     val shouldCancel: () -> Boolean,
-)
+) {
+    init {
+        require(runId.isNotBlank()) { "Multi-stem execution run ID is empty." }
+    }
+}
 
 /** Current product implementation; a remote implementation can use the same request. */
 internal class InProcessSourceSeparationMultiStemExecutionHost(
@@ -33,6 +39,7 @@ internal class InProcessSourceSeparationMultiStemExecutionHost(
     override fun separate(
         request: SourceSeparationMultiStemExecutionRequest,
     ): HtdemucsSourceSeparationEngineResult = engine.separate(
+        runId = request.runId,
         input = request.input,
         installedModel = request.installedModel,
         preflight = request.preflight,

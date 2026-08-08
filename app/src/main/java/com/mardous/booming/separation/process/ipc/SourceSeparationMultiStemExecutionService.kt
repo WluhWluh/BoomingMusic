@@ -297,6 +297,7 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
             )
             val result = host.separate(
                 SourceSeparationMultiStemExecutionRequest(
+                    runId = descriptor.runId,
                     input = input,
                     installedModel = installed,
                     preflight = preflight,

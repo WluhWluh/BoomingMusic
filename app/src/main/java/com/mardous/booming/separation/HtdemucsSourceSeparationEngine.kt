@@ -27,6 +27,7 @@ internal class HtdemucsSourceSeparationEngine(
         input: SourceSeparationModelAwareSongInput,
         installedModel: SourceSeparationInstalledMultiStemModel,
         preflight: SourceSeparationCacheSourcePreflight,
+        runId: String = runIdFactory(),
         runClass: SourceSeparationExecutionRunClass =
             SourceSeparationExecutionRunClass.ManualFullSong,
         windowDecodeEnabled: Boolean = true,
@@ -58,7 +59,7 @@ internal class HtdemucsSourceSeparationEngine(
         ) { "Installed HTDemucs model no longer matches its executable contract." }
         val contract = SourceSeparationCacheContractSnapshot.fromMultiTensor(executable)
         val identity = contract.identity(preflight.identity, HTDEMUCS_CPU_PROFILE_ID)
-        val runId = runIdFactory().also { require(it.isNotBlank()) }
+        require(runId.isNotBlank()) { "Multi-stem execution run ID is empty." }
         val request = SourceSeparationCacheRunRequest(
             identity = identity,
             contract = contract,
