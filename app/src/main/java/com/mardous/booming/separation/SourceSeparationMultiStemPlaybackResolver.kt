@@ -58,16 +58,27 @@ data class SourceSeparationMultiStemPlaybackSelectionSnapshot(
     }
 }
 
+internal interface SourceSeparationMultiStemRuntimeResolver {
+    fun selectedModelId(): String?
+
+    fun resolve(
+        song: Song,
+        shouldCancel: () -> Boolean,
+    ): SourceSeparationRuntimeSong?
+}
+
 internal class SourceSeparationMultiStemPlaybackResolver(
     private val selection: SourceSeparationMultiStemPlaybackSelectionStore,
     private val installer: SourceSeparationMultiStemReleaseInstaller,
     private val preflightResolver: SourceSeparationModelAwarePreflightResolver,
-) {
-    fun resolve(
+) : SourceSeparationMultiStemRuntimeResolver {
+    override fun selectedModelId(): String? = selection.selectedModelId()
+
+    override fun resolve(
         song: Song,
         shouldCancel: () -> Boolean,
     ): SourceSeparationRuntimeSong? {
-        val modelId = selection.selectedModelId() ?: return null
+        val modelId = selectedModelId() ?: return null
         val installed = installer.installed(modelId) ?: return null
         if (shouldCancel()) throw CancellationException("Multi-stem playback resolution canceled.")
         val input = SourceSeparationModelAwareSongInput.from(song)

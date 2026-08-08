@@ -1419,6 +1419,11 @@ is implied.
 - [ ] Expose the three HTDemucs Release entries through the same management
   surface, while preserving their separate multi-stem installer, exact
   contract, and CPU-only activation boundary.
+- [x] Route a selected, installed multi-stem model through the runtime facade
+  for both ordinary separation and playback resolution. Missing selected
+  multi-stem artifacts fail as `ModelNotInstalled`; they never silently fall
+  back to the active MDX model. The dedicated HTDemucs executor remains
+  CPU-only and returns a typed multi-stem completion result.
 - [ ] Keep unsupported generic models inspectable and downloadable but blocked
   from activation.
 - [ ] Expose a model only when its exact contract, pipeline, playback, and
@@ -1451,7 +1456,8 @@ renders experimental/download candidate items under collapsed category rows.
 The stable recommended row is intentionally unchanged. HTDemucs entries are
 not duplicated into this MDX repository surface; their unified management
 entry remains a separate task because their installer and multi-stem
-activation contract are distinct.
+activation contract are distinct. The runtime routing prerequisite for that
+entry is now complete and covered by facade tests.
 
 ## Required Tests and Gates
 

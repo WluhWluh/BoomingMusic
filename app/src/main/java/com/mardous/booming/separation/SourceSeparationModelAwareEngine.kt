@@ -876,6 +876,10 @@ sealed class SourceSeparationModelAwareEngineResult {
         val preflightElapsedMs: Long,
     ) : SourceSeparationModelAwareEngineResult()
 
+    data class MultiStemCompleted(
+        val manifest: SourceSeparationCacheManifest,
+    ) : SourceSeparationModelAwareEngineResult()
+
     data class Busy(
         val cacheKey: String,
         val preflightElapsedMs: Long,

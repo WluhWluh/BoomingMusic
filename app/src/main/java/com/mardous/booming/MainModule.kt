@@ -342,6 +342,7 @@ private val mainModule = module {
         DefaultSourceSeparationRuntimeFacade(
             activeModelResolver = presetRepository::resolveTrustedActiveCacheModelResolution,
             multiStemPlaybackResolver = get(),
+            multiStemExecutor = get<SourceSeparationMultiStemProductFacade>(),
             compatibilityResolver = AndroidSourceSeparationRuntimeCompatibilityResolver,
             preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(androidContext()),
             engine = get(),

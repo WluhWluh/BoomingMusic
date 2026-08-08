@@ -883,6 +883,8 @@ class PlaybackService :
                     )
                     val manifest = when (result) {
                         is SourceSeparationModelAwareEngineResult.Completed -> result.manifest
+                        is SourceSeparationModelAwareEngineResult.MultiStemCompleted ->
+                            result.manifest
                         is SourceSeparationModelAwareEngineResult.AlreadyCompleted -> result.manifest
                         is SourceSeparationModelAwareEngineResult.Busy ->
                             throw IllegalStateException("The exact cache entry is busy.")

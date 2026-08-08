@@ -110,7 +110,8 @@ interface SourceSeparationRuntimeFacade {
 
 class DefaultSourceSeparationRuntimeFacade internal constructor(
     private val activeModelResolver: () -> SourceSeparationActiveCacheModelResolution,
-    private val multiStemPlaybackResolver: SourceSeparationMultiStemPlaybackResolver? = null,
+    private val multiStemPlaybackResolver: SourceSeparationMultiStemRuntimeResolver? = null,
+    private val multiStemExecutor: SourceSeparationMultiStemRuntimeExecutor? = null,
     private val compatibilityResolver: SourceSeparationRuntimeCompatibilityResolver,
     private val preflightResolver: SourceSeparationModelAwarePreflightResolver,
     private val inputFactory: SourceSeparationRuntimeSongInputFactory =
@@ -134,6 +135,26 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
             return SourceSeparationRuntimeSongResolution.Unavailable(
                 SourceSeparationRuntimeUnavailableReason.NoSong,
             )
+        }
+        multiStemPlaybackResolver?.selectedModelId()?.let { selectedModelId ->
+            val resolved = try {
+                multiStemPlaybackResolver.resolve(song, shouldCancel)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                return SourceSeparationRuntimeSongResolution.Unavailable(
+                    reason = SourceSeparationRuntimeUnavailableReason.ContractInvalid,
+                    detail = error.message,
+                )
+            }
+            return if (resolved != null) {
+                SourceSeparationRuntimeSongResolution.Ready(resolved)
+            } else {
+                SourceSeparationRuntimeSongResolution.Unavailable(
+                    reason = SourceSeparationRuntimeUnavailableReason.ModelNotInstalled,
+                    detail = "The selected multi-stem model is not installed: $selectedModelId",
+                )
+            }
         }
         val model = when (val active = activeModelResolver()) {
             is SourceSeparationActiveCacheModelResolution.Ready -> active.model
@@ -189,22 +210,7 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
     override fun resolveForPlayback(
         song: Song,
         shouldCancel: () -> Boolean,
-    ): SourceSeparationRuntimeSongResolution {
-        if (song == Song.emptySong) {
-            return SourceSeparationRuntimeSongResolution.Unavailable(
-                SourceSeparationRuntimeUnavailableReason.NoSong,
-            )
-        }
-        runCatching {
-            multiStemPlaybackResolver?.resolve(song, shouldCancel)
-        }.getOrElse { error ->
-            if (error is CancellationException) throw error
-            null
-        }?.let { resolved ->
-            return SourceSeparationRuntimeSongResolution.Ready(resolved)
-        }
-        return resolve(song, shouldCancel)
-    }
+    ): SourceSeparationRuntimeSongResolution = resolve(song, shouldCancel)
 
     override fun cacheStatus(
         song: SourceSeparationRuntimeSong,
@@ -254,6 +260,35 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
         pauseReasonProvider: () -> SourceSeparationPauseReason,
         shouldCancel: () -> Boolean,
     ): SourceSeparationModelAwareEngineResult {
+        if (song.model == null) {
+            val executor = multiStemExecutor
+                ?: return SourceSeparationModelAwareEngineResult.ActiveModelUnavailable
+            return when (val result = executor.execute(
+                SourceSeparationMultiStemRuntimeExecutionRequest(
+                    song = song,
+                    runClass = runClass,
+                    windowDecodeEnabled = windowDecodeEnabled,
+                    onProgress = onProgress,
+                    onPrepared = onPrepared,
+                    shouldPause = shouldPause,
+                    pauseReasonProvider = pauseReasonProvider,
+                    shouldCancel = shouldCancel,
+                ),
+            )) {
+                is HtdemucsSourceSeparationEngineResult.Completed ->
+                    SourceSeparationModelAwareEngineResult.MultiStemCompleted(result.manifest)
+                is HtdemucsSourceSeparationEngineResult.AlreadyCompleted ->
+                    SourceSeparationModelAwareEngineResult.AlreadyCompleted(
+                        result.manifest,
+                        song.preflight.elapsedMs,
+                    )
+                is HtdemucsSourceSeparationEngineResult.Busy ->
+                    SourceSeparationModelAwareEngineResult.Busy(
+                        result.cacheKey,
+                        song.preflight.elapsedMs,
+                    )
+            }
+        }
         val scopedEngine = if (runClass == SourceSeparationExecutionRunClass.ManualFullSong) {
             manualFullSongEngineFactory?.invoke()
         } else {
@@ -261,9 +296,7 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
         }
         val selectedEngine = scopedEngine ?: engine
         return try {
-            val model = requireNotNull(song.model) {
-                "Multi-stem playback targets cannot be submitted to the MDX engine."
-            }
+            val model = requireNotNull(song.model)
             selectedEngine.separateResolved(
                 input = song.input,
                 model = model,

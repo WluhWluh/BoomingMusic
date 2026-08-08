@@ -21,6 +21,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationResolvedCacheMode
 import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
@@ -41,6 +42,62 @@ import org.junit.rules.TemporaryFolder
 class SourceSeparationRuntimeFacadeTest {
     @get:Rule
     val temporary = TemporaryFolder()
+
+    @Test
+    fun `selected multistem model routes resolve and separation without MDX fallback`() {
+        val fixture = fixture()
+        fixture.activeResolution = SourceSeparationActiveCacheModelResolution.Ready(
+            fixture.resolvedModel("uvr_mdxnet_3_9662"),
+        )
+        val multiSong = fixture.multiStemSong()
+        var executed = false
+        val facade = fixture.facade(
+            multiStemResolver = object : SourceSeparationMultiStemRuntimeResolver {
+                override fun selectedModelId() = multiSong.modelId
+
+                override fun resolve(
+                    song: Song,
+                    shouldCancel: () -> Boolean,
+                ) = multiSong
+            },
+            multiStemExecutor = SourceSeparationMultiStemRuntimeExecutor {
+                executed = true
+                HtdemucsSourceSeparationEngineResult.Busy("multistem-cache")
+            },
+        )
+
+        val resolved = facade.resolve(fixture.song) as SourceSeparationRuntimeSongResolution.Ready
+        assertEquals(multiSong.modelId, resolved.song.modelId)
+        assertTrue(resolved.song.model == null)
+
+        val result = facade.separate(resolved.song)
+        assertTrue(result is SourceSeparationModelAwareEngineResult.Busy)
+        assertEquals("multistem-cache", (result as SourceSeparationModelAwareEngineResult.Busy).cacheKey)
+        assertTrue(executed)
+    }
+
+    @Test
+    fun `selected missing multistem model does not silently fall back to MDX`() {
+        val fixture = fixture()
+        fixture.activeResolution = SourceSeparationActiveCacheModelResolution.Ready(
+            fixture.resolvedModel("uvr_mdxnet_3_9662"),
+        )
+        val facade = fixture.facade(
+            multiStemResolver = object : SourceSeparationMultiStemRuntimeResolver {
+                override fun selectedModelId() = "missing-htdemucs"
+
+                override fun resolve(
+                    song: Song,
+                    shouldCancel: () -> Boolean,
+                ): SourceSeparationRuntimeSong? = null
+            },
+        )
+
+        val result = facade.resolve(fixture.song)
+            as SourceSeparationRuntimeSongResolution.Unavailable
+        assertEquals(SourceSeparationRuntimeUnavailableReason.ModelNotInstalled, result.reason)
+        assertEquals(0, fixture.preflightCount)
+    }
 
     @Test
     fun `unavailable active model reasons stop before source preflight`() {
@@ -304,10 +361,14 @@ class SourceSeparationRuntimeFacadeTest {
                     throw IllegalStateException("executor should not run")
                 },
             manualFullSongEngineFactory: (() -> SourceSeparationModelAwareEngine)? = null,
+            multiStemResolver: SourceSeparationMultiStemRuntimeResolver? = null,
+            multiStemExecutor: SourceSeparationMultiStemRuntimeExecutor? = null,
         ): SourceSeparationRuntimeFacade {
             val engine = engine(executor)
             return DefaultSourceSeparationRuntimeFacade(
                 activeModelResolver = { activeResolution },
+                multiStemPlaybackResolver = multiStemResolver,
+                multiStemExecutor = multiStemExecutor,
                 compatibilityResolver = compatibilityResolver,
                 preflightResolver = preflightResolver,
                 inputFactory = SourceSeparationRuntimeSongInputFactory {
@@ -334,6 +395,46 @@ class SourceSeparationRuntimeFacadeTest {
                 cacheRepository = repository,
                 runCoordinator = coordinator,
                 flacPromoter = SourceSeparationCacheFlacPromoter(store, repository),
+            )
+        }
+
+        fun multiStemSong(): SourceSeparationRuntimeSong {
+            val contract = javaClass.classLoader
+                ?.getResourceAsStream(
+                    "source-separation/research-contracts/htdemucs-4s-official-base-fp32.json",
+                )
+                ?.bufferedReader()
+                ?.use { reader ->
+                    SourceSeparationMultiTensorExecutableContractLoader.load(reader.readText())
+                }
+                ?: error("Missing HTDemucs fixture contract")
+            val input = SourceSeparationModelAwareSongInput(
+                sourceUri = "content://media/42",
+                displayName = "song.flac",
+                song = SourceSeparationCacheSongLocator(
+                    songId = 42L,
+                    mediaUri = "content://media/42",
+                    filePath = "/music/song.flac",
+                    title = "Song",
+                    artist = "Artist",
+                    album = "Album",
+                ),
+                sourceDiagnostics = SourceSeparationCacheSourceDiagnostics(
+                    fileSize = 1_024L,
+                    rawDateModified = 2L,
+                    durationMs = 2_000L,
+                ),
+            )
+            val preflight = SourceSeparationCacheSourcePreflight(
+                sourceIdentity(),
+                elapsedMs = 7L,
+            )
+            return SourceSeparationRuntimeSong.forMultiStem(
+                song = song,
+                identity = SourceSeparationCacheContractSnapshot.fromMultiTensor(contract)
+                    .identity(preflight.identity, HtdemucsSourceSeparationEngine.HTDEMUCS_CPU_PROFILE_ID),
+                input = input,
+                preflight = preflight,
             )
         }
 
