@@ -930,10 +930,11 @@ Evidence: `6148b589` adds the engine matrix, `a7816b50` adds the list mixer and
   existing epoch tests continue to reject stale seek and hot-swap output.
 - [x] Cover 4/6/8-stem artifact deletion, path-aware playback leases, engine
   recreation, and the complete-set recovery barrier after file replacement.
-- [ ] Add repository and `PlaybackService` process-recreation tests using a
-  real 4/6/8-stem cache manifest after Phase 5 provides the multi-tensor
-  contract and cache-snapshot schema. Do not fake this gate by attaching a
-  synthetic stem list to the current MDX-only two-stem snapshot.
+- [x] Add repository and `PlaybackService` process-recreation tests using real
+  4/6-stem cache manifests after Phase 5 provided the multi-tensor contract
+  and cache-snapshot schema. The S10/S25 product gates use the exact Release
+  manifests and do not attach synthetic stems to an MDX snapshot; an 8-stem
+  real-product manifest remains outside the current model batch.
 - [x] Run 4- and 6-stem indexed-FLAC smokes with 20 random seeks on S25, S10,
   API 26 x86, and API 37 x86_64. All rows produced exact PCM with zero
   underruns. The 6-stem pool was 1,179,648 bytes, six descriptors were open,
@@ -996,10 +997,12 @@ same bounded engine; this does not yet activate a multi-stem model.
 
 Status: the static contract loader, canonical HTDemucs host pipeline, three
 CPU-only executable identities, bounded parallel iSTFT, named LiteRT CPU
-session, and S25 executable fixture gate are complete. They are now represented
-by the bss-tflite v0.2.0 experimental catalog and exact-name Release sidecars.
-They are not yet connected to the scheduler, cache publication,
-PlaybackService, or UI through the real product download path.
+session, S25 executable fixture gate, scheduler/cache publication,
+PlaybackService integration, and management UI activation are complete for the
+current 4/6-stem candidate batch. They are represented by the bss-tflite
+v0.2.0 experimental catalog and exact-name Release sidecars. Full numerical,
+resource, and listening qualification remains separate from this integration
+status.
 
 - [x] Implement the static multi-input/output contract loader and strict
   tensor-axis validation.
