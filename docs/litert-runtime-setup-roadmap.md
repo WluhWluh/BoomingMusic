@@ -4,7 +4,7 @@ Status: active product and implementation plan. The product and data contracts
 in this document are frozen; phase checklists may be refined only without
 silently changing those contracts.
 
-Updated: 2026-08-07
+Updated: 2026-08-08
 
 ## Current Model-Delivery Baseline (2026-08-07)
 
@@ -61,7 +61,7 @@ runtime persistence, this document supersedes it. Completed validation records
 remain immutable historical evidence and retain the field names used by their
 test harnesses.
 
-## Current Cross-Roadmap Status (2026-08-05)
+## Current Cross-Roadmap Status (2026-08-08)
 
 - Phases 0-4 are implemented on the downloadable-runtime branch: the
   classes-only LiteRT API, app-owned CPU/GPU component store, explicit loader,
@@ -78,14 +78,17 @@ test harnesses.
   are complete. The remaining short human handoff-listening check and final
   downloaded CPU/GPU baseline remain pre-NPU release-confidence gates.
 - The three HTDemucs artifacts now have release contracts and are selectable
-  CPU-only experimental catalog entries. Their canonical S25 numerical gate
-  passed, while full-song, cache, playback, lifecycle, and listening gates
-  remain open. Their partial GPU experiments and failed QNN attempt do not
-  create GPU/NPU support rows.
+  CPU-only experimental catalog entries. Their product full-song, cache,
+  playback, lifecycle, and same-weight human-listening gates pass. A separate
+  representative-content PCM16 attribution item remains open after an
+  inaudible blind sample exceeded the frozen one-LSB objective bound. Their
+  partial GPU experiments and failed QNN attempt do not create GPU/NPU support
+  rows.
 
-The next implementation priority is to close the downloaded CPU/GPU product
-baseline and synthetic N-stem playback work in parallel. Vendor NPU work stays
-scoped to an already qualified MDX model and a named device/runtime tuple.
+The next implementation priority is to close the narrow multi-stem PCM16
+attribution item, then finish the downloaded CPU/GPU product baseline. Vendor
+NPU work stays scoped to an already qualified MDX model and a named
+device/runtime tuple.
 
 ## Direction
 
@@ -1182,9 +1185,11 @@ unchanged.
 pre-Phase 5 product-baseline gate.**
 
 This phase initially targets only an already qualified MDX two-stem artifact,
-one named Qualcomm device/SoC tuple, and one exact LiteRT/QNN toolchain. Official
-HTDemucs 4/6-stem research artifacts are explicitly out of scope until their
-separate multi-stem pipeline and full-song gates pass.
+one named Qualcomm device/SoC tuple, and one exact LiteRT/QNN toolchain. The
+official HTDemucs 4/6-stem and guitar-ft artifacts remain outside this phase:
+their completed CPU-only multi-stem product path does not grant vendor NPU
+support, and their representative-content PCM16 attribution remains owned by
+the multi-stem roadmap.
 
 - [ ] Freeze a vendor-neutral AOT catalog schema and Qualcomm implementation.
 - [ ] Package shared vendor runtime files separately from model-specific AOT

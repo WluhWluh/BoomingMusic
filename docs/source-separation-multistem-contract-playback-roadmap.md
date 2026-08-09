@@ -1,11 +1,13 @@
 # Source-Separation Contract and Multi-Stem Data-Plane Roadmap
 
-Status: active implementation roadmap and design authority for stem identity,
-model contracts, imported metadata, cache output shape, and playback data flow.
+Status: implementation and device/listening qualification complete except for
+one representative-content PCM16 attribution gate. This remains the design
+authority for stem identity, model contracts, imported metadata, cache output
+shape, and playback data flow.
 
 Updated: 2026-08-08
 
-## Current Release and Product-Path Baseline (2026-08-07)
+## Current Release and Product-Path Baseline (2026-08-08)
 
 The three frozen HTDemucs artifacts are now published in
 [`bss-tflite v0.2.0-experimental.1`](https://github.com/WluhWluh/bss-tflite/releases/tag/v0.2.0-experimental.1)
@@ -45,8 +47,10 @@ service-recreation and direct active-cache deletion gates, strict S10
 zero-underrun playback resources, S25 official-six-stem producer-ahead
 playback, and active deletion through the S25 management panel are complete.
 The bounded contention/resource soak and independent main-process-death
-recovery gates are also complete on S25 and S10. Human same-weight listening is
-the only remaining Phase 6 closeout item.
+recovery gates are also complete on S25 and S10. Same-weight human listening
+now passes for all three candidates. The only remaining Phase 6 closeout is to
+attribute the wider-than-frozen PCM16 deltas exposed by that representative
+listening sample without silently weakening the numerical gate.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -1181,8 +1185,9 @@ undeclared pipeline or publishing a partial stem set.
   pipeline against official 4-stem base and guitar-ft. A shared architecture
   does not allow one artifact's result to stand in for another. All three exact
   Release artifacts independently completed the same 30-second S25 product
-  engine/cache/FLAC gate. Numerical parity is closed by the same-weight product
-  render gate above; human listening remains separate and open.
+  engine/cache/FLAC gate. The frozen Athletics II numerical row remains closed
+  by the same-weight product render gate above; the later representative-content
+  numerical follow-up and human listening are recorded separately below.
 - [x] Verify user cancellation and clean restart on S25 and S10. The canceled
   run retains exactly one atomically completed segment, records a durable
   `Canceled` transition, exposes no completed cache, and cleanly rebuilds the
@@ -1310,8 +1315,23 @@ undeclared pipeline or publishing a partial stem set.
   official six-stem cache to the already completed official four-stem cache,
   retains and reopens the inactive six-stem cache, adopts only the replacement
   stem order, and completes pause, seek, and resume without an underrun.
-- [ ] Perform human listening against the same-weight host reference for every
-  candidate, including guitar/piano-dense material for guitar-ft.
+- [x] Perform human listening against the same-weight host reference for every
+  candidate, including guitar/piano-dense material for guitar-ft. A blind A/B
+  handoff used the same 90-120 second excerpt of YOASOBI - Yoru ni Kakeru for
+  official six-stem, official four-stem base, and guitar-ft. The 44.1 kHz
+  stereo PCM16 source was 1,323,000 frames with file SHA-256
+  `c8b30daa9d16ab33c805714d702974caa8090c18b31aadc29f06bd7093fa4ec0`
+  and payload SHA-256
+  `5e50e0c341a5b72ba66eaf597a3c307ea07332ce85000f85fedc82b0236a5e98`.
+  The user found no discernible product-versus-host difference for any of the
+  three exact Release weights.
+- [ ] Reproduce and attribute the representative-content PCM16 deltas on one
+  provenance-bound current build before declaring the numerical closeout
+  complete. The exploratory listening render measured maximum per-sample
+  deltas of 7 LSB for official six-stem, 8 LSB for official four-stem, and
+  2 LSB for guitar-ft, while the frozen final PCM16 gate is one LSB. Separate
+  neural-core, STFT/iSTFT, OLA, normalization, and PCM quantization effects;
+  do not raise the threshold from an inaudible listening result alone.
 - [x] Publish all three as selectable CPU-only experimental candidates with
   explicit incomplete-validation status. GPU and QNN remain unsupported for
   this batch and are not Phase 6 follow-ups.
@@ -1357,7 +1377,8 @@ These are canonical 7.8-second and two-window device checks, not full-song
 qualification. At this checkpoint they established that all three exact CPU
 artifacts passed the same v2 numerical device gate on S25; the later product
 runs below separately close full-song PCM16, resource, lifecycle, and cache
-gates. Human listening remains open.
+gates. Human listening was still open at this checkpoint and is closed by the
+later blind representative-content pass above.
 
 The Release-installed rerun closes the remaining executable-origin gap at
 commit `a7d4ef4d`, app APK SHA-256 `2cad204f7d3c...6cdad8`, and test APK
@@ -1764,6 +1785,8 @@ This roadmap is complete only when:
 - the Media3 audio thread performs no file I/O, FLAC decode, hashing, dynamic
   allocation, or blocking repair work;
 - active-model switching preserves exact cache isolation;
+- the representative-content PCM16 delta is reproduced and attributed without
+  silently weakening the frozen numerical gate;
 - the three frozen first-batch artifacts each receive an explicit CPU-only
   experimental activation or fail-closed decision from host, device,
   full-song, lifecycle, and listening evidence; and
@@ -1771,8 +1794,9 @@ This roadmap is complete only when:
   metadata rather than filenames or localized text.
 
 The three frozen HTDemucs candidates are selectable experimental entries.
-Product-path download, full-song numerical/resource, lifecycle, and
-cache/playback gates now pass; same-weight human listening remains the final
-stable-promotion blocker. The stable MDX two-stem path remains the product
-default, with all other published models available for explicit experimental
-testing.
+Product-path download, the frozen Athletics II full-song numerical/resource
+row, lifecycle, cache/playback, and same-weight human listening pass. They
+remain experimental while the broader-content PCM16 discrepancy is attributed;
+passing this listening gate does not by itself assign a stable catalog tier.
+The stable MDX two-stem path remains the product default, with all other
+published models available for explicit experimental testing.

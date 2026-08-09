@@ -4,7 +4,7 @@ Status: implementation and automated/device qualification complete. This file
 is retained as the correctness contract and regression checklist; only the
 short human handoff-listening check remains open as release-confidence work.
 
-Updated: 2026-08-05
+Updated: 2026-08-08
 
 This roadmap governs active-model changes, separation scheduling, playback
 cache selection, recovery, retention, and deletion. It must reach its focused
@@ -22,10 +22,16 @@ is frozen implementation evidence for process isolation and recovery.
 
 When older documents conflict about model-switch behavior, this roadmap wins.
 
-The implementation is now on Booming SS commit `cc8cf075`. The bounded playback
-engine and the cache lifecycle fixes that followed the original coordinator
-work are recorded in the multi-stem playback roadmap; this document remains the
-authority for exact identity, model handoff, retention, deletion, and pruning.
+The 2026-08-08 multi-stem same-weight blind comparison found no discernible
+product-versus-host difference, but it did not perform a live model handoff or
+listen across a playback-session replacement. It therefore does not close this
+roadmap's separate handoff-artifact listening item.
+
+The focused implementation baseline began at Booming SS commit `cc8cf075` and
+has since advanced through the bounded playback and multi-stem work. Those
+later cache lifecycle fixes are recorded in the multi-stem playback roadmap;
+this document remains the authority for exact identity, model handoff,
+retention, deletion, and pruning.
 
 ## Goal and Priorities
 

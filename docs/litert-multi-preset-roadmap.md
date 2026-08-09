@@ -4,7 +4,7 @@ Status: active model-catalog and release-qualification plan. Runtime setup,
 lifecycle/cache ownership, and N-stem playback continue under their dedicated
 roadmaps; completed sections here remain historical implementation evidence.
 
-Updated: 2026-08-07
+Updated: 2026-08-08
 
 ## Current Release Baseline (2026-08-07)
 
@@ -46,7 +46,7 @@ Runtime downloading, Quick Setup, Runtime Management, backend preferences,
 vendor NPU AOT, and QNN JIT are governed by the active
 [Downloadable Runtime, Quick Setup, and Local Resource Management Roadmap](litert-runtime-setup-roadmap.md).
 Stem identity, normalized model/pipeline data shape, bounded FLAC playback, and
-future N-stem transport are governed by the active
+N-stem transport are governed by the qualification-closeout
 [Source-Separation Contract and Multi-Stem Data-Plane Roadmap](source-separation-multistem-contract-playback-roadmap.md).
 Active-model transitions, scheduler identity, exact-active-cache playback,
 cache lifecycle truth, retention, and deletion are governed by the
@@ -60,10 +60,10 @@ fallback policy. Completed packaged-runtime and `tryGpu` text later in this
 document is historical implementation evidence when it conflicts with the
 dedicated runtime setup contract.
 
-### Current product snapshot (2026-08-05)
+### Current product snapshot (2026-08-08)
 
-- `experiment/downloadable-litert-core` at `cc8cf075` is the current Booming SS
-  checkpoint. The APK contains the classes-only LiteRT API; native CPU/GPU
+- `experiment/downloadable-litert-core` is the current Booming SS integration
+  branch. The APK contains the classes-only LiteRT API; native CPU/GPU
   components are downloaded and managed through the runtime setup contract.
 - `UVR_MDXNET_3_9662` FP32 remains the sole recommended/default candidate. It
   has the broadest CPU/GPU, lifecycle, and playback evidence, but stable release
@@ -81,8 +81,10 @@ dedicated runtime setup contract.
 - All 30 MDX candidates are now selectable experimental entries with reviewed
   v2 contracts. Runtime, resource, full-song, and listening evidence remains
   model-specific. The three HTDemucs candidates are selectable CPU-only
-  experimental entries under the separate multistem contract; their full-song,
-  cache/playback, lifecycle, and listening gates remain open.
+  experimental entries under the separate multistem contract. Their product
+  full-song, cache/playback, lifecycle, and same-weight listening gates pass;
+  a representative-content PCM16 attribution item remains open and prevents
+  treating the listening result as automatic stable promotion.
 
 Historical implementation sections below retain the vocabulary used by their
 original reports. Current product code has no persistent full-song PCM
@@ -2424,9 +2426,10 @@ identities:
   not stable promotion and does not waive the S10 memory gate for a future
   release tier.
 - Official HTDemucs 4/6-stem and guitar-ft are now published as selectable
-  CPU-only experimental entries in `bss-tflite` v0.2.0. Their product use is
-  still gated by the multistem cache/playback, full-song, lifecycle, resource,
-  and listening checks in
+  CPU-only experimental entries in `bss-tflite` v0.2.0. Their product
+  full-song, cache/playback, lifecycle, resource, and same-weight listening
+  checks now pass. They remain experimental while the representative-content
+  PCM16 discrepancy is attributed under
   [`source-separation-multistem-contract-playback-roadmap.md`](source-separation-multistem-contract-playback-roadmap.md).
 - The lifecycle/cache and bounded playback fixes through Booming SS
   `cc8cf075` are now the product baseline. Completed WAV/FLAC upgrades are
