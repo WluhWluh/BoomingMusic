@@ -20,20 +20,23 @@ class SourceSeparationModelContractTest {
         assertEquals(48, validated.sources.size)
         assertEquals(30, validated.artifacts.size)
         assertEquals(30, validated.entries.size)
-        assertEquals(3, validated.contracts.size)
+        assertEquals(30, validated.contracts.size)
         assertEquals(18, validated.sources.count { it.aliasOfSourceId != null })
     }
 
     @Test
-    fun `only 9662 is the recommended default candidate`() {
+    fun `9662 remains the default among selectable experimental models`() {
         val recommended = catalog.entries.filter {
             it.supportLevel == CatalogSupportLevel.Recommended
         }
+        val default = catalog.entries.single(CatalogEntry::isDefault)
 
-        assertEquals(1, recommended.size)
-        assertEquals("uvr_mdxnet_3_9662", recommended.single().modelId)
-        assertEquals(CatalogReleaseMaturity.Candidate, recommended.single().releaseMaturity)
-        recommended.forEach { entry ->
+        assertTrue(recommended.isEmpty())
+        assertEquals("uvr_mdxnet_3_9662", default.modelId)
+        assertEquals(CatalogSupportLevel.Experimental, default.supportLevel)
+        assertEquals(CatalogActivationPolicy.SelectableExperimental, default.activationPolicy)
+        assertEquals(CatalogReleaseMaturity.Candidate, default.releaseMaturity)
+        catalog.entries.forEach { entry ->
             val contract = SourceSeparationModelContractValidator.resolveActivationContract(
                 catalog,
                 entry.modelId,
@@ -97,12 +100,16 @@ class SourceSeparationModelContractTest {
     }
 
     @Test
-    fun `unreviewed candidate cannot activate`() {
-        val entry = catalog.entries.single { it.modelId == "uvr_mdxnet_1_9703" }
-        assertEquals(CatalogSupportLevel.DownloadOnly, entry.supportLevel)
-        assertEquals(CatalogActivationPolicy.BlockedUntilReviewedContract, entry.activationPolicy)
-        assertThrows(SourceSeparationModelContractException::class.java) {
-            SourceSeparationModelContractValidator.resolveActivationContract(catalog, entry.modelId)
+    fun `every published MDX candidate has an activatable reviewed contract`() {
+        catalog.entries.forEach { entry ->
+            assertEquals(CatalogSupportLevel.Experimental, entry.supportLevel)
+            assertEquals(CatalogActivationPolicy.SelectableExperimental, entry.activationPolicy)
+            assertEquals(
+                entry.modelId,
+                SourceSeparationModelContractValidator
+                    .resolveActivationContract(catalog, entry.modelId)
+                    .modelId,
+            )
         }
     }
 
@@ -142,16 +149,16 @@ class SourceSeparationModelContractTest {
     }
 
     @Test
-    fun `generic target models remain download only`() {
+    fun `generic target models use the selectable experimental policy`() {
         val genericEntries = catalog.entries.filter {
             it.stemUi == CatalogStemUi.GenericTargetResidualRequired
         }
 
         assertEquals(8, genericEntries.size)
-        assertTrue(genericEntries.all { it.supportLevel == CatalogSupportLevel.DownloadOnly })
+        assertTrue(genericEntries.all { it.supportLevel == CatalogSupportLevel.Experimental })
         assertTrue(
             genericEntries.all {
-                it.activationPolicy == CatalogActivationPolicy.DownloadOnlyGenericStem
+                it.activationPolicy == CatalogActivationPolicy.SelectableExperimental
             }
         )
         assertTrue(catalog.entries.all { !it.downloadActivatesModel })

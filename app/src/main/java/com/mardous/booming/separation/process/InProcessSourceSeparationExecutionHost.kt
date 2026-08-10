@@ -17,6 +17,7 @@ import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxSegmentSchedulerProgress
 import com.mardous.booming.separation.model.MdxSourceDecodeDiagnostics
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
+import com.mardous.booming.separation.model.toMdxPhysicalStemIds
 import com.mardous.booming.separation.model.contract.StemId
 import java.io.File
 import java.util.concurrent.CancellationException
@@ -663,13 +664,11 @@ private fun mdxExecutionStemPaths(
     instrumentalFile: File,
     stemIds: List<StemId>,
 ): List<SourceSeparationExecutionStemPath> {
+    val physicalStemIds = stemIds.toMdxPhysicalStemIds()
     val filesByStemId = mapOf(
-        StemId.Vocals to vocalsFile,
-        StemId.Instrumental to instrumentalFile,
+        physicalStemIds.vocals to vocalsFile,
+        physicalStemIds.instrumental to instrumentalFile,
     )
-    require(stemIds.size == filesByStemId.size && stemIds.toSet() == filesByStemId.keys) {
-        "MDX execution requires exactly vocals and instrumental stem IDs."
-    }
     return stemIds.mapIndexed { order, stemId ->
         SourceSeparationExecutionStemPath(
             stemId = stemId,
@@ -694,21 +693,20 @@ private fun List<SourceSeparationExecutionStemPath>.requireMdxStemFiles(
     require(map(SourceSeparationExecutionStemPath::stemId).distinct().size == size) {
         "MDX execution stem IDs must be unique."
     }
-    val expectedIds = setOf(StemId.Vocals, StemId.Instrumental)
-    require(size == expectedIds.size &&
-        map(SourceSeparationExecutionStemPath::stemId).toSet() == expectedIds
-    ) {
-        "MDX execution requires exactly vocals and instrumental stem paths."
+    require(map(SourceSeparationExecutionStemPath::order) == indices.toList()) {
+        "MDX execution stem path order must be contiguous."
     }
     val pathsByStem = associateBy(SourceSeparationExecutionStemPath::stemId)
+    val physicalStemIds = map(SourceSeparationExecutionStemPath::stemId)
+        .toMdxPhysicalStemIds()
     return MdxExecutionStemFiles(
         vocals = resolveEntryPath(
             entryDirectory,
-            requireNotNull(pathsByStem[StemId.Vocals]).path,
+            requireNotNull(pathsByStem[physicalStemIds.vocals]).path,
         ),
         instrumental = resolveEntryPath(
             entryDirectory,
-            requireNotNull(pathsByStem[StemId.Instrumental]).path,
+            requireNotNull(pathsByStem[physicalStemIds.instrumental]).path,
         ),
     )
 }

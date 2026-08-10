@@ -87,7 +87,26 @@ object SourceSeparationPresetActivationResolver {
                 it.profileId == MdxRuntimeProfiles.CPU_DEFAULT_FP32 &&
                 it.precision == ContractRuntimePrecision.Fp32 &&
                 it.abi.matches(platform.runtimeAbi)
-        } ?: return blocked(SourceSeparationPresetSelectionBlockReason.MissingKnownGoodCpuProfile)
+        }
+
+        if (qualification == null) {
+            if (platform.androidApi < MINIMUM_UNQUALIFIED_ANDROID_API) {
+                return blocked(SourceSeparationPresetSelectionBlockReason.AndroidApiTooLow)
+            }
+            val unqualifiedExperimentalCpuAllowed =
+                entry.supportLevel == CatalogSupportLevel.Experimental &&
+                    platform.runtimeAbi != MdxRuntimeAbi.X86
+            if (!unqualifiedExperimentalCpuAllowed) {
+                return blocked(
+                    SourceSeparationPresetSelectionBlockReason.MissingKnownGoodCpuProfile
+                )
+            }
+            return if (scope == SourceSeparationPresetSelectionScope.InternalValidation) {
+                allowed(null, requiresExperimentalConfirmation = false)
+            } else {
+                allowed(null, requiresExperimentalConfirmation = true)
+            }
+        }
 
         if (platform.androidApi < qualification.minimumAndroidApi) {
             return blocked(
@@ -142,7 +161,7 @@ object SourceSeparationPresetActivationResolver {
     }
 
     private fun allowed(
-        qualification: CatalogRuntimeQualification,
+        qualification: CatalogRuntimeQualification?,
         requiresExperimentalConfirmation: Boolean,
     ) = SourceSeparationPresetSelectionEligibility(
         allowed = true,
@@ -159,6 +178,8 @@ object SourceSeparationPresetActivationResolver {
         blockReason = reason,
         cpuQualification = qualification,
     )
+
+    private const val MINIMUM_UNQUALIFIED_ANDROID_API = 26
 }
 
 private fun ContractAbi.matches(runtimeAbi: MdxRuntimeAbi): Boolean = when (this) {

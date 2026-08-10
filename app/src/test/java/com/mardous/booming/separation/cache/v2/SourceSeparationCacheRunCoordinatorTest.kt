@@ -341,6 +341,29 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `generic target output maps the physical MDX slots without losing stem identity`() {
+        val fixture = fixture(modelId = "kuielab_a_bass")
+        val run = fixture.beginReady()
+        val preparation = fixture.preparation(run, SourceSeparationSegmentState.Ready)
+        fixture.coordinator.updatePreparation(run, preparation)
+
+        val completed = fixture.coordinator.complete(run, fixture.result(preparation))
+
+        assertEquals(
+            listOf("bass", "remaining_audio"),
+            completed.output!!.stems.map { it.stemId.value },
+        )
+        requireNotNull(fixture.repository.openCompletedCache(completed.cacheKey)).use { playback ->
+            assertEquals(
+                listOf("bass", "remaining_audio"),
+                playback.stemIds,
+            )
+            assertEquals("instrumental", playback.stems[0].file.readText())
+            assertEquals("vocals", playback.stems[1].file.readText())
+        }
+    }
+
+    @Test
     fun `completion preserves the concrete backend and auto fallback diagnostics`() {
         val fixture = fixture()
         val run = fixture.beginReady()

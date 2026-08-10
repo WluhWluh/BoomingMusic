@@ -469,7 +469,8 @@ class SourceSeparationPresetRepository internal constructor(
                 }
                 val isExperimental = catalog.entries.single { it.modelId == installed.modelId }
                     .supportLevel == CatalogSupportLevel.Experimental
-                if ((eligibility.requiresExperimentalConfirmation || isExperimental) &&
+                if (scope == SourceSeparationPresetSelectionScope.User &&
+                    (eligibility.requiresExperimentalConfirmation || isExperimental) &&
                     !experimentalConfirmed
                 ) {
                     throw SourceSeparationPresetActivationException(

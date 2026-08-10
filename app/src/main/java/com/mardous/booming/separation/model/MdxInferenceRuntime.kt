@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.model
 
+import com.mardous.booming.separation.model.contract.StemId
 import java.io.File
 import java.util.Locale
 
@@ -43,6 +44,8 @@ data class MdxExecutionProfile(
     val dspConfig: MdxDspConfig,
     val modelOutputScale: Float,
     val modelOutputStem: MdxStem,
+    val modelOutputStemId: StemId = modelOutputStem.defaultStemId(),
+    val residualStemId: StemId = modelOutputStem.residual().defaultStemId(),
     val modelOutputCanonicalLabel: String = modelOutputStem.defaultCanonicalLabel(),
     val residualCanonicalLabel: String = modelOutputStem.residual().defaultCanonicalLabel(),
     val pipelineId: String,
@@ -52,11 +55,19 @@ data class MdxExecutionProfile(
     val expectedSha256: String? = null,
     val minimumAndroidApi: Int? = null,
     val runtimeCompatibility: List<MdxRuntimeCompatibilityRecord> = emptyList(),
+    val allowUnqualifiedExperimentalCpu: Boolean = false,
 ) {
     fun canonicalLabelFor(stem: MdxStem): String = when (stem) {
         modelOutputStem -> modelOutputCanonicalLabel
         else -> residualCanonicalLabel
     }
+
+    val orderedStemIds: List<StemId> = listOf(modelOutputStemId, residualStemId)
+    val physicalStemIds: MdxPhysicalStemIds = orderedStemIds.toMdxPhysicalStemIds()
+
+    fun stemIdFor(stem: MdxStem): StemId = physicalStemIds.stemIdFor(stem)
+
+    fun physicalStemFor(stemId: StemId): MdxStem = physicalStemIds.physicalStemFor(stemId)
 
     val sessionIdentity: String = buildString {
         append(profileId)
@@ -71,6 +82,8 @@ data class MdxExecutionProfile(
         append('|').append(outputTensor.shape.joinToString("x"))
         append('|').append(outputTensor.layout)
         append('|').append(outputTensor.dataType)
+        append('|').append(modelOutputStemId.value)
+        append('|').append(residualStemId.value)
     }
 
     init {
@@ -86,6 +99,9 @@ data class MdxExecutionProfile(
         require(residualCanonicalLabel.isNotBlank() &&
             residualCanonicalLabel == residualCanonicalLabel.trim()
         ) { "Residual stem label is invalid." }
+        require(physicalStemIds.stemIdFor(modelOutputStem) == modelOutputStemId) {
+            "Model output stem ID does not match its MDX physical slot."
+        }
         require(pipelineId.isNotBlank() && pipelineVersion > 0) {
             "Execution profile pipeline identity is invalid."
         }
@@ -133,6 +149,11 @@ private fun MdxStem.residual(): MdxStem = when (this) {
 private fun MdxStem.defaultCanonicalLabel(): String = when (this) {
     MdxStem.VOCALS -> "Vocals"
     MdxStem.INSTRUMENTAL -> "Instrumental"
+}
+
+private fun MdxStem.defaultStemId(): StemId = when (this) {
+    MdxStem.VOCALS -> StemId.Vocals
+    MdxStem.INSTRUMENTAL -> StemId.Instrumental
 }
 
 data class MdxModelArtifact(

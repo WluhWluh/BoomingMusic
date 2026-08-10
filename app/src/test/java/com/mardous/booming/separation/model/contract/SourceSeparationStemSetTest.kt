@@ -37,7 +37,7 @@ class SourceSeparationStemSetTest {
     }
 
     @Test
-    fun `MDX playback labels follow semantics instead of model output order`() {
+    fun `MDX playback labels follow physical blend endpoints instead of contract order`() {
         for (modelId in listOf("uvr_mdxnet_3_9662", "uvr_mdxnet_kara")) {
             assertEquals(
                 SourceSeparationMdxStemLabels("Vocals", "Instrumental"),
@@ -47,6 +47,14 @@ class SourceSeparationStemSetTest {
         assertEquals(
             SourceSeparationMdxStemLabels("Vocals", "Instrumental"),
             contract("uvr_mdxnet_inst_hq_4").stemContract.toMdxStemLabels(),
+        )
+        assertEquals(
+            SourceSeparationMdxStemLabels("Remaining Audio", "Bass"),
+            contract("kuielab_a_bass").stemContract.toMdxStemLabels(),
+        )
+        assertEquals(
+            SourceSeparationMdxStemLabels("Crowd", "No Crowd"),
+            contract("uvr_mdxnet_crowd_hq_1").stemContract.toMdxStemLabels(),
         )
     }
 

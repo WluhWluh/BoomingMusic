@@ -128,9 +128,13 @@ object MdxLiteRtCompatibilityResolver {
                 it.backend == backend &&
                 it.profileId == profileId &&
                 it.precision == precision
-        } ?: return unsupported(
-            "No ${backend.name} compatibility record exists for " +
-                "${platform.runtimeAbi.androidName}, profile=$profileId, precision=$precision."
+        } ?: return resolveUnqualifiedReviewedCpu(
+            profile = profile,
+            backend = backend,
+            platform = platform,
+            policy = policy,
+            profileId = profileId,
+            precision = precision,
         )
         return when (record.status) {
             MdxRuntimeSupportStatus.KnownGood -> MdxCompatibilityDecision(
@@ -179,6 +183,38 @@ object MdxLiteRtCompatibilityResolver {
             MdxRuntimeSupportStatus.Unsupported -> unsupported(
                 "The runtime target is explicitly unsupported.",
                 record.evidence,
+            )
+        }
+    }
+
+    private fun resolveUnqualifiedReviewedCpu(
+        profile: MdxExecutionProfile,
+        backend: MdxInferenceBackend,
+        platform: MdxRuntimePlatform,
+        policy: MdxCompatibilityPolicy,
+        profileId: String,
+        precision: MdxRuntimePrecision,
+    ): MdxCompatibilityDecision {
+        val missingRecordReason =
+            "No ${backend.name} compatibility record exists for " +
+                "${platform.runtimeAbi.androidName}, profile=$profileId, precision=$precision."
+        if (!profile.allowUnqualifiedExperimentalCpu ||
+            backend != MdxInferenceBackend.LiteRtCpu ||
+            platform.runtimeAbi == MdxRuntimeAbi.X86
+        ) {
+            return unsupported(missingRecordReason)
+        }
+        return when (policy) {
+            MdxCompatibilityPolicy.KnownGoodOnly -> unsupported(missingRecordReason)
+            MdxCompatibilityPolicy.AllowCandidates -> MdxCompatibilityDecision(
+                outcome = MdxCompatibilityOutcome.Experimental,
+                reason = "The reviewed model is admitted to the unqualified experimental CPU path.",
+                evidence = missingRecordReason,
+            )
+            MdxCompatibilityPolicy.AllowUntestedInternal -> MdxCompatibilityDecision(
+                outcome = MdxCompatibilityOutcome.InternalValidationOnly,
+                reason = "The reviewed model is admitted to the internal unqualified CPU path.",
+                evidence = missingRecordReason,
             )
         }
     }

@@ -15,7 +15,6 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultInjection
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultRuntimeDiagnostics
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultStage
-import com.mardous.booming.separation.model.contract.StemId
 import java.io.File
 import java.util.LinkedHashMap
 import java.util.Locale
@@ -115,11 +114,7 @@ class MdxRangeSeparator(
             generationSize = config.generationSize,
             trim = config.trim,
             chunkSize = config.chunkSize,
-            stemIds = if (executionProfile.modelOutputStem == MdxStem.VOCALS) {
-                StemId.MdxOrdered
-            } else {
-                StemId.MdxOrdered.reversed()
-            },
+            stemIds = executionProfile.orderedStemIds,
             defaultState = if (segmentOutputDir != null) {
                 SourceSeparationSegmentState.Queued
             } else {
@@ -131,9 +126,10 @@ class MdxRangeSeparator(
             ?.takeIf { existing ->
                 existing.rangeStartFrame == segmentPlan.rangeStartFrame &&
                         existing.rangeEndFrame == segmentPlan.rangeEndFrame &&
-                        existing.sampleRate == segmentPlan.sampleRate &&
+                existing.sampleRate == segmentPlan.sampleRate &&
                         existing.generationSize == segmentPlan.generationSize &&
-                        existing.segmentCount == segmentPlan.segmentCount
+                        existing.segmentCount == segmentPlan.segmentCount &&
+                        existing.stemIds == segmentPlan.stemIds
             }
             ?: segmentPlan
         requireWorkspaceAvailable()
@@ -416,10 +412,11 @@ class MdxRangeSeparator(
                                 SourceSeparationStemChunk(
                                     stemId = stem.stemId,
                                     order = stem.order,
-                                    pcm16 = when (stem.stemId) {
-                                        StemId.Vocals -> vocalsPcm
-                                        StemId.Instrumental -> instrumentalPcm
-                                        else -> error("MDX cannot render stem ${stem.stemId}.")
+                                    pcm16 = when (
+                                        executionProfile.physicalStemFor(stem.stemId)
+                                    ) {
+                                        MdxStem.VOCALS -> vocalsPcm
+                                        MdxStem.INSTRUMENTAL -> instrumentalPcm
                                     },
                                 )
                             },
@@ -427,10 +424,11 @@ class MdxRangeSeparator(
                         measureElapsed(timing, "WAV write") {
                             val writeFrameOffset = generationStartFrame - startFrame
                             windowResult.stems.forEach { stem ->
-                                val writer = when (stem.stemId) {
-                                    StemId.Vocals -> vocalsWriter
-                                    StemId.Instrumental -> instrumentalWriter
-                                    else -> error("MDX cannot write stem ${stem.stemId}.")
+                                val writer = when (
+                                    executionProfile.physicalStemFor(stem.stemId)
+                                ) {
+                                    MdxStem.VOCALS -> vocalsWriter
+                                    MdxStem.INSTRUMENTAL -> instrumentalWriter
                                 }
                                 requireWorkspaceAvailable()
                                 if (declaredOutputDataSizeBytes != null) {

@@ -202,6 +202,15 @@ class SourceSeparationExecutionStemPathTest {
             assertEquals("instrumental.wav", restored.instrumentalFile.name)
             assertEquals("timing.json", restored.timingFile?.name)
 
+            val genericIds = listOf(StemId("bass"), StemId("remaining_audio"))
+            val generic = SourceSeparationExecutionResumeState(
+                stemPaths = stemPaths(genericIds),
+                timingPath = null,
+                segmentPlan = segmentPlan(genericIds),
+            ).toMdxRangeResumeState(entryDirectory)
+            assertEquals("01-remaining_audio.wav", generic.vocalsFile.name)
+            assertEquals("00-bass.wav", generic.instrumentalFile.name)
+
             val incomplete = SourceSeparationExecutionResumeState(
                 stemPaths = listOf(
                     SourceSeparationExecutionStemPath(StemId.Vocals, 0, "stems/vocals.wav"),

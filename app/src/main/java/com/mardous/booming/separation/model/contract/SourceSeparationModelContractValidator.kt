@@ -157,17 +157,25 @@ object SourceSeparationModelContractValidator {
 
         val defaults = catalog.entries.filter(CatalogEntry::isDefault)
         requireContract(defaults.size == 1) { "Catalog must have exactly one default model" }
-        requireContract(defaults.single().supportLevel == CatalogSupportLevel.Recommended) {
-            "Default model must be recommended"
+        requireContract(
+            defaults.single().supportLevel == CatalogSupportLevel.Recommended ||
+                defaults.single().supportLevel == CatalogSupportLevel.Experimental
+        ) {
+            "Default model must be activatable"
         }
         requireContract(
-            defaults.single().activationPolicy == CatalogActivationPolicy.SelectableWhenQualified
+            defaults.single().activationPolicy == CatalogActivationPolicy.SelectableWhenQualified ||
+                defaults.single().activationPolicy == CatalogActivationPolicy.SelectableExperimental
         ) {
             "Default model must be selectable"
         }
-        requireContract(
-            catalog.entries.count { it.supportLevel == CatalogSupportLevel.Recommended } == 1
-        ) { "Catalog must have exactly one recommended model" }
+        val recommended = catalog.entries.filter {
+            it.supportLevel == CatalogSupportLevel.Recommended
+        }
+        requireContract(recommended.size <= 1) { "Catalog has multiple recommended models" }
+        recommended.singleOrNull()?.let { entry ->
+            requireContract(entry.isDefault) { "The recommended model must be the default" }
+        }
         val contractReferences = catalog.entries.mapNotNull(CatalogEntry::contractId)
         requireContract(contractReferences.size == contractReferences.toSet().size) {
             "A reviewed contract cannot be shared by multiple catalog entries"
@@ -461,8 +469,11 @@ object SourceSeparationModelContractValidator {
                 requireContract(entry.contractId in contracts) {
                     "Selectable model ${entry.modelId} has no complete contract"
                 }
-                requireContract(entry.stemUi == CatalogStemUi.VocalsInstrumental) {
-                    "The current selectable UI only supports vocals/instrumental contracts"
+                requireContract(
+                    entry.stemUi == CatalogStemUi.VocalsInstrumental ||
+                        entry.stemUi == CatalogStemUi.GenericTargetResidualRequired
+                ) {
+                    "Selectable model ${entry.modelId} has an unsupported stem UI"
                 }
             }
 

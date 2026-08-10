@@ -618,7 +618,7 @@ class SourceSeparationPresetRepositoryTest {
     }
 
     @Test
-    fun `experimental official model requires confirmation during internal validation`() {
+    fun `experimental official model requires user confirmation but allows internal setup`() {
         val payload = "experimental-model".encodeToByteArray()
         fixture(
             officialPayload = payload,
@@ -644,7 +644,7 @@ class SourceSeparationPresetRepositoryTest {
                 fixture.repository.activate(
                     sha256 = installed.sha256,
                     platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
-                    scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                    scope = SourceSeparationPresetSelectionScope.User,
                 )
             }
             assertEquals(
@@ -657,7 +657,6 @@ class SourceSeparationPresetRepositoryTest {
                 sha256 = installed.sha256,
                 platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
                 scope = SourceSeparationPresetSelectionScope.InternalValidation,
-                experimentalConfirmed = true,
             )
             assertTrue(fixture.repository.activeModel() is SourceSeparationActivePresetState.Reference)
             assertEquals(null, fixture.repository.pendingActiveModel())

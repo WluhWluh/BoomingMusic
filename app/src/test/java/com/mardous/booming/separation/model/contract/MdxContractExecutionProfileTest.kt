@@ -7,6 +7,7 @@ import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxStem
 import com.mardous.booming.separation.model.MdxTensorLayout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Test
 
@@ -54,6 +55,37 @@ class MdxContractExecutionProfileTest {
                     it.abi == abi && it.backend == MdxInferenceBackend.LiteRtCpu
                 }.status,
             )
+        }
+    }
+
+    @Test
+    fun `generic target contracts retain exact ordered stem identities`() {
+        val bass = catalog.contracts.single { it.modelId == "kuielab_a_bass" }
+            .toMdxExecutionProfile(catalog.runtimeQualifications)
+        val crowd = catalog.contracts.single { it.modelId == "uvr_mdxnet_crowd_hq_1" }
+            .toMdxExecutionProfile(catalog.runtimeQualifications)
+
+        assertEquals(MdxStem.INSTRUMENTAL, bass.modelOutputStem)
+        assertEquals(listOf("bass", "remaining_audio"), bass.orderedStemIds.map { it.value })
+        assertEquals("Remaining Audio", bass.canonicalLabelFor(MdxStem.VOCALS))
+        assertEquals("Bass", bass.canonicalLabelFor(MdxStem.INSTRUMENTAL))
+        assertEquals(
+            listOf("no_crowd", "remaining_audio"),
+            crowd.orderedStemIds.map { it.value },
+        )
+        assertEquals("Crowd", crowd.canonicalLabelFor(MdxStem.VOCALS))
+        assertEquals("No Crowd", crowd.canonicalLabelFor(MdxStem.INSTRUMENTAL))
+    }
+
+    @Test
+    fun `all published MDX contracts create experimental CPU profiles`() {
+        assertEquals(30, catalog.contracts.size)
+        catalog.contracts.forEach { contract ->
+            val profile = contract.toMdxExecutionProfile(catalog.runtimeQualifications)
+
+            assertEquals(contract.stemContract.toStemSet().stems.map { it.stemId }, profile.orderedStemIds)
+            assertEquals(26, profile.minimumAndroidApi)
+            assertTrue(profile.allowUnqualifiedExperimentalCpu)
         }
     }
 

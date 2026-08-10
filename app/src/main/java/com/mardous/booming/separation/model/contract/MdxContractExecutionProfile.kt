@@ -29,6 +29,7 @@ fun SourceSeparationModelContract.toMdxExecutionProfile(
         dimF = validated.dsp.dimF,
         dimTPower = validated.dsp.dimTPower,
     )
+    val stemSet = validated.stemContract.toStemSet()
     return MdxExecutionProfile(
         profileId = validated.contractId,
         displayName = validated.displayName,
@@ -39,6 +40,8 @@ fun SourceSeparationModelContract.toMdxExecutionProfile(
         dspConfig = dspConfig,
         modelOutputScale = validated.dsp.modelOutputScale.toFloat(),
         modelOutputStem = validated.stemContract.modelOutput.semantic.toMdxStem(),
+        modelOutputStemId = stemSet.stems[0].stemId,
+        residualStemId = stemSet.stems[1].stemId,
         modelOutputCanonicalLabel = validated.stemContract.modelOutput.canonicalLabel,
         residualCanonicalLabel = validated.stemContract.residual.canonicalLabel,
         pipelineId = validated.pipelineCompatibility.pipelineId,
@@ -46,7 +49,8 @@ fun SourceSeparationModelContract.toMdxExecutionProfile(
         expectedFileName = validated.artifact.fileName,
         expectedByteSize = validated.artifact.byteSize,
         expectedSha256 = validated.artifact.sha256,
-        minimumAndroidApi = qualifications.maxOfOrNull(CatalogRuntimeQualification::minimumAndroidApi),
+        minimumAndroidApi = qualifications
+            .maxOfOrNull(CatalogRuntimeQualification::minimumAndroidApi) ?: 26,
         runtimeCompatibility = qualifications.map { status ->
             MdxRuntimeCompatibilityRecord(
                 abi = status.abi.toMdxRuntimeAbi(),
@@ -57,6 +61,7 @@ fun SourceSeparationModelContract.toMdxExecutionProfile(
                 evidence = status.evidence,
             )
         },
+        allowUnqualifiedExperimentalCpu = true,
     )
 }
 
@@ -76,6 +81,7 @@ fun SourceSeparationCustomModelProfile.toMdxExecutionProfile(
         dimF = validated.dsp.dimF,
         dimTPower = validated.dsp.dimTPower,
     )
+    val stemSet = validated.stemContract.toStemSet()
     return MdxExecutionProfile(
         profileId = validated.profileId,
         displayName = validated.displayName,
@@ -86,6 +92,8 @@ fun SourceSeparationCustomModelProfile.toMdxExecutionProfile(
         dspConfig = dspConfig,
         modelOutputScale = validated.dsp.modelOutputScale.toFloat(),
         modelOutputStem = validated.stemContract.modelOutput.semantic.toMdxStem(),
+        modelOutputStemId = stemSet.stems[0].stemId,
+        residualStemId = stemSet.stems[1].stemId,
         modelOutputCanonicalLabel = validated.stemContract.modelOutput.canonicalLabel,
         residualCanonicalLabel = validated.stemContract.residual.canonicalLabel,
         pipelineId = validated.pipelineCompatibility.pipelineId,
@@ -120,10 +128,15 @@ private fun ContractTensor.toMdxTensorSpec() = MdxTensorSpec(
 
 private fun ContractStemSemantic.toMdxStem() = when (this) {
     ContractStemSemantic.Vocals -> MdxStem.VOCALS
-    ContractStemSemantic.Instrumental -> MdxStem.INSTRUMENTAL
-    else -> throw SourceSeparationModelContractException(
-        "The current execution profile supports only vocals/instrumental stem semantics"
-    )
+    ContractStemSemantic.Instrumental,
+    ContractStemSemantic.Bass,
+    ContractStemSemantic.Drums,
+    ContractStemSemantic.Other,
+    ContractStemSemantic.Reverb,
+    ContractStemSemantic.NoCrowd,
+    ContractStemSemantic.TargetStem,
+    ContractStemSemantic.RemainingAudio,
+    -> MdxStem.INSTRUMENTAL
 }
 
 private fun ContractAbi.toMdxRuntimeAbi() = when (this) {

@@ -104,6 +104,36 @@ class MdxLiteRtCompatibilityTest {
     }
 
     @Test
+    fun `reviewed model without qualification uses CPU only as an experiment`() {
+        val profile = profile("kuielab_a_bass")
+        val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a)
+
+        val strictCpu = MdxLiteRtCompatibilityResolver.resolve(
+            profile,
+            MdxInferenceBackend.LiteRtCpu,
+            platform,
+            MdxCompatibilityPolicy.KnownGoodOnly,
+        )
+        val experimentalCpu = MdxLiteRtCompatibilityResolver.resolve(
+            profile,
+            MdxInferenceBackend.LiteRtCpu,
+            platform,
+            MdxCompatibilityPolicy.AllowCandidates,
+        )
+        val gpu = MdxLiteRtCompatibilityResolver.resolve(
+            profile,
+            MdxInferenceBackend.LiteRtGpu,
+            platform,
+            MdxCompatibilityPolicy.AllowCandidates,
+            profileId = "gpu-auto-fp32-v1",
+        )
+
+        assertEquals(MdxCompatibilityOutcome.Unsupported, strictCpu.outcome)
+        assertEquals(MdxCompatibilityOutcome.Experimental, experimentalCpu.outcome)
+        assertEquals(MdxCompatibilityOutcome.Unsupported, gpu.outcome)
+    }
+
+    @Test
     fun `explicitly unsupported catalog targets and missing targets remain blocked internally`() {
         val lifecycleUnsafeX86 = listOf("uvr_mdxnet_3_9662", "uvr_mdxnet_kara").map { modelId ->
             decision(

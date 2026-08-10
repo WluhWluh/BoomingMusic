@@ -7,9 +7,9 @@ import java.security.MessageDigest
 object SourceSeparationModelMetadata {
     const val CATALOG_ASSET_PATH = "source-separation/model-catalog-v2.json"
     const val CATALOG_SOURCE_REPOSITORY = "https://github.com/WluhWluh/bss-tflite"
-    const val CATALOG_SOURCE_REVISION = "98357ac19db6e53e16f0658428663b5d146c8fc6"
+    const val CATALOG_SOURCE_REVISION = "fd04eeaf3c434830233c43cbc42f84e13b79e943"
     const val CATALOG_SHA256 =
-        "12c47be09380f423d9b80abb91e3e42f6d6b265db13bceb9d0b93917e7694414"
+        "ef2fb4cab58d238bcae10e963203de43edeffd8f0228515450e944aed94cf6ce"
 
     val json = Json {
         ignoreUnknownKeys = false

@@ -10,9 +10,9 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.MdxRangePreparation
 import com.mardous.booming.separation.model.MdxRangeResumeState
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
+import com.mardous.booming.separation.model.toMdxPhysicalStemIds
 import com.mardous.booming.separation.model.contract.StemDescriptor
 import com.mardous.booming.separation.model.contract.StemId
-import com.mardous.booming.separation.model.contract.StemSemanticId
 import com.mardous.booming.separation.model.contract.toStemSet
 import java.io.File
 
@@ -625,9 +625,12 @@ class SourceSeparationCacheRunCoordinator(
     ): MdxRangeResumeState? {
         if (state == SourceSeparationCacheManifestState.Completed) return null
         val plan = segmentPlan ?: return null
-        val stems = output?.stems.orEmpty().associateBy { it.semanticId }
-        val vocals = stems[StemSemanticId.Vocals] ?: return null
-        val instrumental = stems[StemSemanticId.Instrumental] ?: return null
+        val expectedStems = contract.expectedStemSet().stems
+        val physicalStemIds = expectedStems.map(StemDescriptor::stemId)
+            .toMdxPhysicalStemIds()
+        val stems = output?.stems.orEmpty().associateBy { it.stemId }
+        val vocals = stems[physicalStemIds.vocals] ?: return null
+        val instrumental = stems[physicalStemIds.instrumental] ?: return null
         val vocalsFile = store.resolveEntryPath(cacheKey, vocals.wavPath)
         val instrumentalFile = store.resolveEntryPath(cacheKey, instrumental.wavPath)
         if (!vocalsFile.isFile || !instrumentalFile.isFile) return null
@@ -779,12 +782,15 @@ class SourceSeparationCacheRunCoordinator(
         vocalsFile: File,
         instrumentalFile: File,
     ): List<Pair<StemDescriptor, File>> {
+        val expectedStems = contract.expectedStemSet().stems
+        val physicalStemIds = expectedStems.map(StemDescriptor::stemId)
+            .toMdxPhysicalStemIds()
         val files = mapOf(
-            StemSemanticId.Vocals to vocalsFile,
-            StemSemanticId.Instrumental to instrumentalFile,
+            physicalStemIds.vocals to vocalsFile,
+            physicalStemIds.instrumental to instrumentalFile,
         )
-        return contract.expectedStemSet().stems.map { descriptor ->
-            descriptor to requireNotNull(files[descriptor.semanticId]) {
+        return expectedStems.map { descriptor ->
+            descriptor to requireNotNull(files[descriptor.stemId]) {
                 "The MDX adapter cannot render stem ${descriptor.stemId}."
             }
         }
