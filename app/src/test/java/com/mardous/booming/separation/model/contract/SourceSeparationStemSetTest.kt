@@ -56,6 +56,24 @@ class SourceSeparationStemSetTest {
             SourceSeparationMdxStemLabels("Crowd", "No Crowd"),
             contract("uvr_mdxnet_crowd_hq_1").stemContract.toMdxStemLabels(),
         )
+        assertEquals(
+            listOf("vocals", "instrumental"),
+            contract("uvr_mdxnet_inst_hq_4").stemContract
+                .toMdxBlendEndpointStemIds()
+                .map { it.value },
+        )
+        assertEquals(
+            listOf("remaining_audio", "bass"),
+            contract("kuielab_a_bass").stemContract
+                .toMdxBlendEndpointStemIds()
+                .map { it.value },
+        )
+        assertEquals(
+            listOf("remaining_audio", "no_crowd"),
+            contract("uvr_mdxnet_crowd_hq_1").stemContract
+                .toMdxBlendEndpointStemIds()
+                .map { it.value },
+        )
     }
 
     @Test

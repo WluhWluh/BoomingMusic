@@ -16,10 +16,17 @@ data class SourceSeparationMdxStemLabels(
 
 fun StemContract.toMdxStemLabels(): SourceSeparationMdxStemLabels {
     val stems = toStemSet().stems.associateBy { it.stemId }
-    val physicalStemIds = stems.keys.toList().toMdxPhysicalStemIds()
+    val endpointStemIds = toMdxBlendEndpointStemIds()
     return SourceSeparationMdxStemLabels(
-        vocalsCanonicalLabel = requireNotNull(stems[physicalStemIds.vocals]).canonicalLabel,
+        vocalsCanonicalLabel = requireNotNull(stems[endpointStemIds[0]]).canonicalLabel,
         instrumentalCanonicalLabel =
-            requireNotNull(stems[physicalStemIds.instrumental]).canonicalLabel,
+            requireNotNull(stems[endpointStemIds[1]]).canonicalLabel,
     )
+}
+
+/** Left/top then right/bottom endpoint IDs for the legacy MDX blend control. */
+fun StemContract.toMdxBlendEndpointStemIds(): List<StemId> {
+    val orderedStemIds = toStemSet().stems.map(StemDescriptor::stemId)
+    val physicalStemIds = orderedStemIds.toMdxPhysicalStemIds()
+    return listOf(physicalStemIds.vocals, physicalStemIds.instrumental)
 }

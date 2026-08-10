@@ -118,6 +118,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayabl
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareReadyHorizonStatus
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveSelectionSnapshot
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
+import com.mardous.booming.separation.model.contract.toMdxBlendEndpointStemIds
 import com.mardous.booming.separation.process.SourceSeparationProcessingLeasePolicy
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipHandoff
 import com.mardous.booming.playback.processor.SourceSeparationMixAudioProcessor.InputMode
@@ -2036,6 +2037,7 @@ class PlaybackService :
                 cacheKey = runtimeSong.cacheKey,
                 stemFiles = stemFiles,
                 stemIds = stemIds,
+                blendEndpointStemIds = manifest.mdxBlendEndpointStemIds(),
                 inputMode = InputMode.OriginalSource,
                 stemSampleRate = output.outputSampleRate,
                 stemChannelCount = channelCount,
@@ -2368,6 +2370,7 @@ class PlaybackService :
             cacheKey = manifest.cacheKey,
             stemFiles = stemFiles,
             stemIds = stemIds,
+            blendEndpointStemIds = manifest.mdxBlendEndpointStemIds(),
             inputMode = InputMode.OriginalSource,
             stemSampleRate = output.outputSampleRate,
             stemChannelCount = channelCount,
@@ -2744,6 +2747,7 @@ class PlaybackService :
         sourceSeparationMixProcessor.enable(
             stemFiles = session.stemFiles,
             stemIds = session.stemIds,
+            blendEndpointStemIds = session.blendEndpointStemIds,
             positionMs = positionMs,
             inputMode = session.inputMode,
             stemSampleRate = session.stemSampleRate,
@@ -4437,6 +4441,7 @@ private data class SourceSeparationPlaybackSession(
     val cacheKey: String,
     val stemFiles: List<File>,
     val stemIds: List<String>,
+    val blendEndpointStemIds: List<String>?,
     val inputMode: InputMode,
     val stemSampleRate: Int,
     val stemChannelCount: Int,
@@ -4453,6 +4458,14 @@ private data class SourceSeparationPlaybackSession(
         require(stemIds.distinct().size == stemIds.size) {
             "Playback session stem IDs must be unique."
         }
+        blendEndpointStemIds?.let { endpointIds ->
+            require(endpointIds.size == 2 && endpointIds.distinct().size == endpointIds.size) {
+                "Playback session blend endpoints must be two unique stem IDs."
+            }
+            require(endpointIds.all(stemIds::contains)) {
+                "Playback session blend endpoints must belong to the stem set."
+            }
+        }
     }
 
     fun traceSummary(): String {
@@ -4464,6 +4477,11 @@ private data class SourceSeparationPlaybackSession(
     fun closeModelAwareResources() {
         modelAwareCachePlayback.close()
     }
+}
+
+private fun SourceSeparationCacheManifest.mdxBlendEndpointStemIds(): List<String>? {
+    val mdxStemContract = contract.stemContract ?: return null
+    return mdxStemContract.toMdxBlendEndpointStemIds().map { stemId -> stemId.value }
 }
 
 @OptIn(UnstableApi::class)

@@ -60,6 +60,100 @@ class SourceSeparationMixAudioProcessorTest {
     }
 
     @Test
+    fun reversedMdxContractAppliesBlendToStemIdsInsteadOfFileOrder() {
+        val frames = 16_384
+        val instrumental = writeWav("reversed-instrumental.wav", frames, 2_000)
+        val vocals = writeWav("reversed-vocals.wav", frames, 1_000)
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = listOf(instrumental, vocals),
+                stemIds = listOf("instrumental", "vocals"),
+                blendEndpointStemIds = listOf("vocals", "instrumental"),
+                positionMs = 0L,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+
+            processor.setBlend(0f)
+            processor.queueInput(silentInput(512))
+            assertLastSample(processor.output, 1_000)
+
+            processor.setBlend(1f)
+            processor.queueInput(silentInput(512))
+            assertLastSample(processor.output, 2_000)
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun genericMdxContractBlendsFromResidualToTargetStem() {
+        val frames = 16_384
+        val bass = writeWav("generic-bass.wav", frames, 2_000)
+        val remaining = writeWav("generic-remaining.wav", frames, 1_000)
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = listOf(bass, remaining),
+                stemIds = listOf("bass", "remaining_audio"),
+                blendEndpointStemIds = listOf("remaining_audio", "bass"),
+                positionMs = 0L,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+
+            processor.setBlend(0f)
+            processor.queueInput(silentInput(512))
+            assertLastSample(processor.output, 1_000)
+
+            processor.setBlend(1f)
+            processor.queueInput(silentInput(512))
+            assertLastSample(processor.output, 2_000)
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
+    fun blendCommandDoesNotRewriteMultistemGainsWithoutMdxEndpoints() {
+        val frames = 16_384
+        val stems = List(4) { index ->
+            writeWav("blend-independent-$index.wav", frames, (index + 1) * 100)
+        }
+        val processor = SourceSeparationMixAudioProcessor()
+        try {
+            processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = stems,
+                stemIds = listOf("drums", "bass", "other", "vocals"),
+                initialGains = listOf(0f, 1f, 0f, 0f),
+                positionMs = 0L,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+            await { processor.isDataPlaneReady() }
+
+            processor.setBlend(0f)
+            processor.queueInput(silentInput(4))
+            val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+            repeat(8) { assertEquals(200, output.short.toInt()) }
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
     fun sixStemEngineResamplingPreservesTheOrderedSum() {
         val frames = 16_384
         val stems = List(6) { index ->
@@ -636,6 +730,12 @@ class SourceSeparationMixAudioProcessorTest {
             }
         }
         return file
+    }
+
+    private fun assertLastSample(buffer: ByteBuffer, expected: Int) {
+        val output = buffer.order(ByteOrder.LITTLE_ENDIAN)
+        output.position(output.limit() - Short.SIZE_BYTES)
+        assertEquals(expected, output.short.toInt())
     }
 
     private fun writePcm(name: String, frames: Int, sample: Int): File {

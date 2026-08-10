@@ -79,6 +79,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private var legacyTwoStemBlendLaw = true
 
     @Volatile
+    private var blendEndpointStemIndexes: IntArray? = intArrayOf(0, 1)
+
+    @Volatile
     private var inputMode = InputMode.InstrumentalStem
 
     @Volatile
@@ -146,6 +149,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs,
             preparedInputs = preparedInputs,
             useLegacyTwoStemBlendLaw = true,
+            blendEndpointStemIds = listOf("vocals", "instrumental"),
         )
     }
 
@@ -164,6 +168,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         stemChannelCount: Int = CHANNEL_COUNT_STEREO,
         mixedOutputReadyPrerollMs: Long = DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS,
         preparedInputs: PreparedSourceSeparationPlaybackInputs? = null,
+        blendEndpointStemIds: List<String>? = null,
     ) {
         enableInternal(
             stemFiles = stemFiles,
@@ -177,6 +182,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs,
             preparedInputs = preparedInputs,
             useLegacyTwoStemBlendLaw = false,
+            blendEndpointStemIds = blendEndpointStemIds,
         )
     }
 
@@ -192,6 +198,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         mixedOutputReadyPrerollMs: Long,
         preparedInputs: PreparedSourceSeparationPlaybackInputs?,
         useLegacyTwoStemBlendLaw: Boolean,
+        blendEndpointStemIds: List<String>?,
     ) {
         require(stemFiles.isNotEmpty()) { "Playback requires at least one stem." }
         require(stemIds.size == stemFiles.size) {
@@ -203,10 +210,24 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         require(stemFiles.size <= 2 || inputMode == InputMode.OriginalSource) {
             "Multi-stem playback requires the original source as its transport input."
         }
-        val expectedGainCount = if (useLegacyTwoStemBlendLaw) 2 else stemFiles.size
+        val blendEndpointIndexes = blendEndpointStemIds?.let { endpointIds ->
+            require(endpointIds.size == 2 && endpointIds.distinct().size == endpointIds.size) {
+                "Blend endpoints must contain exactly two unique stem IDs."
+            }
+            endpointIds.map { endpointId ->
+                stemIds.indexOf(endpointId).also { index ->
+                    require(index >= 0) { "Blend endpoint $endpointId is not in the stem session." }
+                }
+            }.toIntArray()
+        }
+        val expectedGainCount = stemFiles.size
         val normalizedGains = if (initialGains.isEmpty()) {
-            if (!useLegacyTwoStemBlendLaw && stemFiles.size == 2) {
-                legacyBlendGains(blend)
+            if (blendEndpointIndexes != null) {
+                legacyBlendGainsForStemOrder(
+                    value = initialBlend,
+                    stemCount = expectedGainCount,
+                    endpointIndexes = blendEndpointIndexes,
+                )
             } else {
                 List(expectedGainCount) { 1f }
             }
@@ -228,6 +249,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             this.mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs.coerceAtLeast(0L)
             configuredStemCount = expectedGainCount
             legacyTwoStemBlendLaw = useLegacyTwoStemBlendLaw
+            this.blendEndpointStemIndexes = blendEndpointIndexes
             blend = initialBlend
             publishGainSnapshot(normalizedGains)
             applyGainSnapshotImmediately()
@@ -343,14 +365,15 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     fun setBlend(value: Float) {
         val normalized = value.coerceIn(0f, 1f)
         blend = normalized
-        val blendGains = legacyBlendGains(normalized)
-        val gains = List(configuredStemCount) { index ->
-            if (index < blendGains.size) {
-                blendGains[index]
-            } else {
-                gainSnapshot.get().gains.getOrNull(index) ?: 1f
-            }
+        val endpointIndexes = blendEndpointStemIndexes
+        if (endpointIndexes == null) {
+            traceDebug("setBlend", "session=$debugSessionId blend=$blend endpoints=none")
+            return
         }
+        val gains = gainSnapshot.get().gains.toMutableList()
+        val blendGains = legacyBlendGains(normalized)
+        gains[endpointIndexes[0]] = blendGains[0]
+        gains[endpointIndexes[1]] = blendGains[1]
         publishGainSnapshot(gains, normalized)
         traceDebug(
             "setBlend",
@@ -1182,6 +1205,18 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         return listOf(vocalsGain, instrumentalGain)
     }
 
+    private fun legacyBlendGainsForStemOrder(
+        value: Float,
+        stemCount: Int,
+        endpointIndexes: IntArray,
+    ): List<Float> {
+        val endpointGains = legacyBlendGains(value)
+        return MutableList(stemCount) { 1f }.apply {
+            this[endpointIndexes[0]] = endpointGains[0]
+            this[endpointIndexes[1]] = endpointGains[1]
+        }
+    }
+
     private fun seekToLocked(positionMs: Long) {
         val sampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
         val frameSize = stemChannelCount
@@ -1218,6 +1253,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         vocalsInput = null
         instrumentalInput?.close()
         instrumentalInput = null
+        blendEndpointStemIndexes = null
         notifyMixedOutputStarted = false
         mixedOutputPrerollFramesRemaining = 0L
     }
