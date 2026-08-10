@@ -2,6 +2,7 @@ package com.mardous.booming.ui.screen.lyrics
 
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDp
@@ -99,6 +100,7 @@ import com.mardous.booming.data.model.Song
 import com.mardous.booming.data.model.lyrics.SyncedLyrics
 import com.mardous.booming.extensions.isPowerSaveMode
 import com.mardous.booming.extensions.resolveColor
+import com.mardous.booming.separation.SourceSeparationStemIconResolver
 import com.mardous.booming.ui.component.compose.AnimatedEqBars
 import com.mardous.booming.ui.component.compose.color.extractGradientColors
 import com.mardous.booming.ui.component.compose.decoration.FadingEdges
@@ -327,6 +329,9 @@ fun CoverLyricsScreen(
         val sourceSeparationPlaybackProcessingProgressState by playerViewModel
             .sourceSeparationPlaybackProcessingProgressStateFlow
             .collectAsStateWithLifecycle()
+        val sourceSeparationBlendStemLabels by playerViewModel
+            .sourceSeparationBlendStemLabelsFlow
+            .collectAsStateWithLifecycle()
         val quickBlendExpanded = showSourceSeparationQuickControls &&
                 sourceSeparationBlendMode != SourceSeparationBlendMode.Off
         val quickBlendProcessingProgressState =
@@ -393,6 +398,12 @@ fun CoverLyricsScreen(
                         expanded = quickBlendExpanded,
                         blend = sourceSeparationPlaybackState.blend,
                         processingProgressState = quickBlendProcessingProgressState,
+                        topStemIconRes = SourceSeparationStemIconResolver.resourceId(
+                            sourceSeparationBlendStemLabels.vocalsCanonicalLabel,
+                        ),
+                        bottomStemIconRes = SourceSeparationStemIconResolver.resourceId(
+                            sourceSeparationBlendStemLabels.instrumentalCanonicalLabel,
+                        ),
                         onEnableSeparatedPlayback = {
                             playerViewModel.setSourceSeparationPlaybackEnabled(
                                 enabled = true,
@@ -451,6 +462,8 @@ private fun CoverLyricsQuickBlendControl(
     expanded: Boolean,
     blend: Float,
     processingProgressState: SourceSeparationPlaybackProcessingProgressState?,
+    @DrawableRes topStemIconRes: Int,
+    @DrawableRes bottomStemIconRes: Int,
     onEnableSeparatedPlayback: () -> Unit,
     onDisableSeparatedPlayback: () -> Unit,
     onBlendPreview: (Float) -> Unit,
@@ -768,7 +781,7 @@ private fun CoverLyricsQuickBlendControl(
             )
 
             CoverLyricsQuickBlendEndpointIcon(
-                painter = painterResource(R.drawable.ic_person_24dp),
+                painter = painterResource(topStemIconRes),
                 unfilledColor = progressColor,
                 filledColor = colorScheme.surface,
                 filledHeight = topIconFillHeight,
@@ -780,7 +793,7 @@ private fun CoverLyricsQuickBlendControl(
             )
 
             CoverLyricsQuickBlendEndpointIcon(
-                painter = painterResource(R.drawable.ic_speaker_24dp),
+                painter = painterResource(bottomStemIconRes),
                 unfilledColor = progressColor,
                 filledColor = colorScheme.surface,
                 filledHeight = bottomIconFillHeight,

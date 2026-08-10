@@ -26,6 +26,7 @@ object SourceSeparationStemLabelResolver {
         "other" to R.string.source_separation_stem_other,
         "reverb" to R.string.source_separation_stem_reverb,
         "no crowd" to R.string.source_separation_stem_no_crowd,
+        "crowd" to R.string.source_separation_stem_crowd,
         "guitar" to R.string.source_separation_stem_guitar,
         "piano" to R.string.source_separation_stem_piano,
         "target stem" to R.string.source_separation_stem_target,

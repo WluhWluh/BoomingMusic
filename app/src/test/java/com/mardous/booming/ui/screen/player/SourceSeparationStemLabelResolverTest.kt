@@ -17,6 +17,7 @@ class SourceSeparationStemLabelResolverTest {
             "Other" to R.string.source_separation_stem_other,
             "Reverb" to R.string.source_separation_stem_reverb,
             "No Crowd" to R.string.source_separation_stem_no_crowd,
+            "Crowd" to R.string.source_separation_stem_crowd,
             "Guitar" to R.string.source_separation_stem_guitar,
             "Piano" to R.string.source_separation_stem_piano,
             "Target Stem" to R.string.source_separation_stem_target,

@@ -20,6 +20,7 @@
     <string name="source_separation_stem_other">Other</string>
     <string name="source_separation_stem_reverb">Reverb</string>
     <string name="source_separation_stem_no_crowd">No Crowd</string>
+    <string name="source_separation_stem_crowd">Crowd</string>
     <string name="source_separation_stem_guitar">Guitar</string>
     <string name="source_separation_stem_piano">Piano</string>
     <string name="source_separation_stem_target">Target Stem</string>
