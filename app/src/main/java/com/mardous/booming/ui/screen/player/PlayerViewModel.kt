@@ -555,7 +555,6 @@ class PlayerViewModel(
         _durationFlow.value = durationMs
         _isPlayingFlow.value = isPlaying
         updateSourceSeparationBlendState(sourceSeparationBlend)
-        syncSourceSeparationPlaybackIfRequested(force = true)
         maybeAutoStartSourceSeparationForCurrentSong()
     }
 
@@ -714,7 +713,7 @@ class PlayerViewModel(
             if (_sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.PerSong ||
                 !events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)
             ) {
-                syncSourceSeparationPlaybackIfRequested(force = true)
+                syncSourceSeparationPlaybackIfRequested()
             }
             if (!player.playWhenReady) {
                 _progressFlow.value = player.contentPosition
@@ -778,7 +777,6 @@ class PlayerViewModel(
     fun seekTo(positionMillis: Long) {
         _progressFlow.value = positionMillis
         mediaController?.seekTo(positionMillis)
-        syncSourceSeparationPlaybackIfRequested(force = true)
     }
 
     fun generateExtraInfo() {
@@ -1427,8 +1425,7 @@ class PlayerViewModel(
             )
             updateSourceSeparationPlaybackState(result)
             if (result.resultCode == SessionResult.RESULT_SUCCESS) {
-                requestImmediateSourceSeparationPlaybackGate(normalizedBlend)
-                    ?.let(::updateSourceSeparationPlaybackState)
+                publishSourceSeparationProcessingIntent(currentSong, normalizedBlend)
             }
             maybeAutoStartSourceSeparationForCurrentSong(
                 blend = normalizedBlend,
@@ -1525,6 +1522,12 @@ class PlayerViewModel(
                 )
             }.onSuccess { result ->
                 updateSourceSeparationPlaybackState(result)
+                if (expectProcessing) {
+                    publishSourceSeparationProcessingIntent(
+                        song = currentSong,
+                        blend = _sourceSeparationPlaybackStateFlow.value.blend,
+                    )
+                }
             }.onFailure { error ->
                 Log.w(TAG, "Failed to sync source separation playback", error)
             }
@@ -1700,7 +1703,9 @@ class PlayerViewModel(
                 expectProcessing = expectProcessingImmediately,
             )
             updateSourceSeparationPlaybackState(immediateResult)
-            if (!expectProcessingImmediately) {
+            if (expectProcessingImmediately) {
+                publishSourceSeparationProcessingIntent(song, blend)
+            } else {
                 maybeAutoStartSourceSeparationForCurrentSong(blend)
             }
         }
@@ -2175,30 +2180,6 @@ class PlayerViewModel(
                 }
             }
         }
-    }
-
-    private suspend fun requestImmediateSourceSeparationPlaybackGate(
-        blend: Float,
-    ): SessionResult? {
-        if (!_sourceSeparationAutoStartFlow.value ||
-            _sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
-            SourceSeparationBlendDemand.isCentered(blend)
-        ) {
-            return null
-        }
-        return sendSourceSeparationPlaybackCommand(
-            action = Playback.SYNC_SOURCE_SEPARATION_PLAYBACK,
-            args = Bundle().apply {
-                putBoolean(
-                    Playback.EXTRA_SOURCE_SEPARATION_ALLOW_NEW_SESSION,
-                    true,
-                )
-                putBoolean(
-                    Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING,
-                    true,
-                )
-            },
-        )
     }
 
     private fun sourceSeparationBlendMode(

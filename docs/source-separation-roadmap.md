@@ -889,9 +889,9 @@ Status: in progress
 
 Goals:
 
-- Start separated playback once the current segment and the next segment are ready.
-- Pause or visually gate separated output when the requested position is not ready.
-- Automatically resume when enough data is available.
+- Start separated playback as soon as the segment under the playback head is ready.
+- Keep original playback running during initial setup; pause only after playback actually reaches an unready separated-cache segment.
+- After that concrete miss, automatically resume when the configured consecutive-window recovery waterline is ready.
 - Switch scheduler priority immediately when the current song changes.
 - Read ready stems from the sample-accurate segment timeline.
 - Avoid disruptive playback jumps when segment boundaries become ready.
@@ -910,15 +910,15 @@ Done criteria:
 
 Implementation notes:
 
-- Added a playable-cache lookup that can return a `Running` cache only when the current playback segment and the following segment are already marked `Ready`.
+- A normal playback probe requires only the segment under the playback head. The configurable consecutive-window count is reserved for recovery after a concrete cache miss.
 - The playback service now tries to use the running full-duration stem WAV timeline, guarded by segment readiness, before falling back to the original source.
-- Added a MediaSession sync command so the UI can request a non-disruptive retry after each separation progress update.
-- If the user has enabled separated playback before the current ready window is available, playback now enters a processing gate, pauses, and retries automatically as windows complete.
+- Worker progress performs non-blocking one-window probes so a partial session is adopted as soon as its current window becomes ready.
+- Enabling separated playback, changing blend, changing songs or models, and ordinary position updates never enter the cache gate.
 - Verified `:app:assembleNormalDebug` succeeds after the first play-while-processing experiment.
-- Seeks during running separated playback now re-check current and next segment readiness. If the target window is not ready, playback restores the original media item, pauses, reports a processing state, and automatically switches back to separated playback when the window becomes ready.
-- Starting a separation while separated playback is requested now uses the same processing gate: playback pauses while the initial playable window is unavailable instead of continuing with the original audio.
-- Automatic separation now runs earlier during song changes when separated playback is enabled and the active blend requires separated output, preventing a short original-audio leak before the processing gate pauses for cache readiness.
-- Running separated playback now uses a configurable ready horizon instead of trusting only the immediate segment, reducing repeat pause/resume loops when playback is close to the edge of the ready cache.
+- Seeks to a ready target continue without a cache gate. A seek to an unready target, or natural playback crossing into an unready window, pauses and reports processing; recovery then requires the configured consecutive-window count.
+- A seek made while recovery is already waiting resets that recovery waterline from the new target, even when the target window itself is ready; this prevents an immediate resume into a still-unready following window.
+- Starting a separation while separated playback is requested continues with original audio until the current separated window is ready.
+- The partial-cache monitor no longer predicts a miss near the ready horizon. `Ready` continues, transient `Busy` retries, and only authoritative `Processing` pauses playback.
 - Partial running caches are preserved across lifecycle changes and resumed from verified ready segment state, avoiding unnecessary restarts after repeated seeking or task recreation.
 - Processing progress is shared by the settings sheet and the cover-lyrics quick control's circular indicator. The estimator starts cleanly for each wait session, pre-runs from 0% with a conservative prediction, and uses recent per-window timing when available.
 - Completed separated playback uses the instrumental stem WAV as the ExoPlayer media item and mixes the vocals stem from the same completed stem timeline.

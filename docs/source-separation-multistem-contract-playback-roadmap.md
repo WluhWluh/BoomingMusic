@@ -1301,7 +1301,8 @@ undeclared pipeline or publishing a partial stem set.
   that the current-song status is refreshed. The S10 service/repository gate
   proves the data boundary but does not substitute for this user-interaction
   gate.
-- [x] Start S25 producer-ahead playback with two ready windows. On devices whose
+- [x] Validate S25 producer-ahead playback with the historical two-ready-window
+  startup policy. On devices whose
   measured production rate cannot sustain the stride, keep separation offline
   or wait for completion instead of repeatedly pausing playback; S10 results
   above RTF `1.0` must not be presented as streaming-capable.
@@ -1640,6 +1641,10 @@ became playable at `12.500 s`; the producer completed the 30-second source at
 low-water events, underruns, or playback stall transitions. This qualifies the
 two-window policy only for this S25 official-six-stem row. It does not imply
 that S10, official four-stem, or guitar-ft can sustain producer-ahead playback.
+The current product contract no longer waits for two windows at startup: it
+adopts a partial session when the current window is ready, pauses only after
+the playback head actually enters an unready window, and applies the configured
+window count only as the recovery waterline after that miss.
 
 The S25 `active-panel-delete-s25-20260808-r1` gate launched the real
 `MainActivity`, adopted the completed official six-stem cache through

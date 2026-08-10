@@ -132,15 +132,34 @@ class SourceSeparationModelAwareCacheRepositoryTest {
         assertTrue(ready is SourceSeparationModelAwarePlayableStatus.Ready)
         (ready as SourceSeparationModelAwarePlayableStatus.Ready).playback.close()
 
-        store.resolveEntryPath(
+        val missingFollowingStem = store.resolveEntryPath(
             running.cacheKey,
             running.segmentPlan!!.segments[1].stems.first().path,
         )
-            .delete()
+        missingFollowingStem.delete()
+        val targetOnly = repository.playableStatus(running.identity, 0L, 1)
+        assertTrue(targetOnly is SourceSeparationModelAwarePlayableStatus.Ready)
+        (targetOnly as SourceSeparationModelAwarePlayableStatus.Ready).playback.close()
+        val currentHorizon = repository.readyHorizon(running.identity, 0L)
+            as SourceSeparationModelAwareReadyHorizonStatus.Ready
+        assertEquals(0, currentHorizon.segmentIndex)
+        assertEquals(0, currentHorizon.readyThroughSegmentIndex)
+        assertFalse(currentHorizon.readyThroughEnd)
         assertEquals(
             SourceSeparationModelAwarePlayableStatus.Processing,
             repository.playableStatus(running.identity, 0L, 2),
         )
+        val plan = requireNotNull(running.segmentPlan)
+        val nextWindowPositionMs =
+            plan.segments[1].playbackStartFrame.toLong() * 1_000L / plan.sampleRate
+        assertEquals(
+            SourceSeparationModelAwareReadyHorizonStatus.Processing,
+            repository.readyHorizon(running.identity, nextWindowPositionMs),
+        )
+        missingFollowingStem.writeText("restored")
+        val recovered = repository.playableStatus(running.identity, 0L, 2)
+        assertTrue(recovered is SourceSeparationModelAwarePlayableStatus.Ready)
+        (recovered as SourceSeparationModelAwarePlayableStatus.Ready).playback.close()
     }
 
     @Test
