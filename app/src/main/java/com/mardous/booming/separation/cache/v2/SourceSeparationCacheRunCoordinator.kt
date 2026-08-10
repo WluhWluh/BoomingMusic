@@ -624,6 +624,7 @@ class SourceSeparationCacheRunCoordinator(
         store: SourceSeparationCacheStore,
     ): MdxRangeResumeState? {
         if (state == SourceSeparationCacheManifestState.Completed) return null
+        if (contract.stemContract == null) return null
         val plan = segmentPlan ?: return null
         val expectedStems = contract.expectedStemSet().stems
         val physicalStemIds = expectedStems.map(StemDescriptor::stemId)
