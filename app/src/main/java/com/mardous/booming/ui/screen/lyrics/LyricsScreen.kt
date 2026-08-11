@@ -51,7 +51,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -348,7 +347,6 @@ fun CoverLyricsScreen(
         var reserveLyricsEndSpace by remember {
             mutableStateOf(quickBlendExpanded)
         }
-        var lyricsViewportLayoutRevision by remember { mutableIntStateOf(0) }
         LaunchedEffect(showSourceSeparationQuickControls, quickBlendExpanded) {
             val shouldReserveEndSpace = when {
                 !showSourceSeparationQuickControls -> false
@@ -360,7 +358,6 @@ fun CoverLyricsScreen(
             }
             if (reserveLyricsEndSpace != shouldReserveEndSpace) {
                 reserveLyricsEndSpace = shouldReserveEndSpace
-                lyricsViewportLayoutRevision++
             }
         }
         val reserveExpandedControls = showSourceSeparationQuickControls &&
@@ -401,7 +398,6 @@ fun CoverLyricsScreen(
                         playerViewModel.play()
                     }
                 },
-                viewportLayoutRevision = lyricsViewportLayoutRevision,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(end = animatedLyricsEndClearance),
@@ -941,7 +937,6 @@ private fun LyricsSurface(
     isPowerSaveMode: Boolean,
     hasBackgroundEffects: Boolean,
     onSeekToLine: (SyncedLyrics.Line) -> Unit,
-    viewportLayoutRevision: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -1033,7 +1028,6 @@ private fun LyricsSurface(
                     contentColor = contentColor,
                     isPowerSaveMode = isPowerSaveMode,
                     hasBackgroundEffects = hasBackgroundEffects,
-                    viewportLayoutRevision = viewportLayoutRevision,
                     onLineClick = { onSeekToLine(it) }
                 )
             }
