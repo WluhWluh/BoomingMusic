@@ -93,6 +93,125 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `media transition bookkeeping uses a main-thread playback snapshot`() {
+        val service = mainSource(
+            "com/mardous/booming/playback/PlaybackService.kt",
+        ).readText()
+        val transitionStart = service.indexOf("override fun onMediaItemTransition(")
+        val ioStart = service.indexOf("serviceScope.launch(IO)", transitionStart)
+        val ioEnd = service.indexOf(
+            "if (player.currentMediaItemIndex == stopIndex)",
+            ioStart,
+        )
+        require(transitionStart >= 0 && ioStart > transitionStart && ioEnd > ioStart)
+
+        val callbackSetup = service.substring(transitionStart, ioStart)
+        val ioBookkeeping = service.substring(ioStart, ioEnd)
+        assertTrue(callbackSetup.contains("val isPlayingAtTransition = player.isPlaying"))
+        assertTrue(ioBookkeeping.contains("isPlayingAtTransition"))
+        assertFalse(ioBookkeeping.contains("player.isPlaying"))
+    }
+
+    @Test
+    fun `user seek retargets an unready wait while internal flush preserves it`() {
+        val service = mainSource(
+            "com/mardous/booming/playback/PlaybackService.kt",
+        ).readText()
+        val seekStart = service.indexOf("override fun onPositionDiscontinuity(")
+        val seekEnd = service.indexOf("override fun onPlayerError(", seekStart)
+        require(seekStart >= 0 && seekEnd > seekStart)
+
+        val seek = service.substring(seekStart, seekEnd)
+        assertTrue(seek.contains("sourceSeparationPlaybackWindowWaitTracker.current"))
+        assertTrue(seek.contains("wasWaitingForUnreadyWindow && !isInternalRecoveryFlushSeek"))
+        assertTrue(seek.contains("sourceSeparationPlaybackWindowWaitTracker.retarget("))
+        assertTrue(seek.contains("anchorPositionMs = newPosition.positionMs"))
+        assertTrue(seek.contains("wasWaitingForUnreadyWindow && isInternalRecoveryFlushSeek"))
+        assertTrue(seek.contains("playback.seek.preserveRecoveryWaterline"))
+        assertTrue(seek.contains("scheduleSourceSeparationPlaybackGateRetry()"))
+        assertTrue(
+            seek.contains(
+                "wasWaitingForUnreadyWindow ||\n" +
+                        "                                shouldGateCurrentSourceSeparationWindow()",
+            ),
+        )
+        assertTrue(
+            seek.contains("activeWindowWait?.requiredReadyWindowCount ?: 1"),
+        )
+    }
+
+    @Test
+    fun `active playback entry points gate the current unready window`() {
+        val service = mainSource(
+            "com/mardous/booming/playback/PlaybackService.kt",
+        ).readText()
+
+        fun section(startToken: String, endToken: String): String {
+            val start = service.indexOf(startToken)
+            val end = service.indexOf(endToken, start)
+            require(start >= 0 && end > start) {
+                "Could not locate playback section $startToken"
+            }
+            return service.substring(start, end)
+        }
+
+        assertTrue(
+            section(
+                "private suspend fun setSourceSeparationPlaybackEnabled(",
+                "private suspend fun syncSourceSeparationPlayback(",
+            ).contains("gateOnUnreadyWindow = shouldGateCurrentSourceSeparationWindow()"),
+        )
+        assertTrue(
+            section(
+                "private suspend fun syncSourceSeparationPlayback(",
+                "private suspend fun handleSourceSeparationCacheDeleted(",
+            ).contains("gateOnUnreadyWindow = shouldGateCurrentSourceSeparationWindow()"),
+        )
+        assertTrue(
+            section(
+                "private suspend fun probeSourceSeparationPlaybackFromWorker(",
+                "private fun onSourceSeparationSeekRequested(",
+            ).contains("gateOnUnreadyWindow = shouldGateCurrentSourceSeparationWindow()"),
+        )
+        assertTrue(
+            section(
+                "private suspend fun handleSourceSeparationModelSelectionChanged(",
+                "private fun observeSourceSeparationProcessingOwnership(",
+            ).contains("gateOnUnreadyWindow = shouldGateCurrentSourceSeparationWindow()"),
+        )
+        val committedBlend = section(
+            "private suspend fun setSourceSeparationBlend(",
+            "private suspend fun probeSourceSeparationPlaybackFromWorker(",
+        )
+        assertTrue(committedBlend.contains("if (persist &&"))
+        assertTrue(committedBlend.contains("sourceSeparationPlaybackRequested"))
+        assertTrue(
+            committedBlend.contains(
+                "SourceSeparationBlendDemand.requiresSeparatedOutput(blend)",
+            ),
+        )
+        assertTrue(
+            section(
+                "private suspend fun ensureSourceSeparationPlaybackReadyLocked(",
+                "private fun shouldUpgradeActiveSourceSeparationSession(",
+            ).contains("preserveExpectedProcessing = effectiveExpectProcessing"),
+        )
+        assertTrue(
+            service.contains(
+                "sourceSeparationPlaybackSession == null ||\n" +
+                        "                    sourceSeparationPlaybackSession?.requiresReadinessGate == true",
+            ),
+        )
+        val dataPlaneResume = section(
+            "private fun resumeSourceSeparationDataPlaneIfRequested(",
+            "private fun handleSourceSeparationDataPlaneFailure(",
+        )
+        assertTrue(dataPlaneResume.contains("sourceSeparationPlaybackIsProcessing"))
+        assertTrue(dataPlaneResume.contains("sourceSeparationPlaybackWindowWaitTracker.current"))
+        assertTrue(dataPlaneResume.contains("playback.dataPlaneMonitor.readyDeferred"))
+    }
+
+    @Test
     fun `successful temporary cleanup publishes an exact cache refresh event`() {
         val playback = mainSource(
             "com/mardous/booming/playback/Playback.kt",
@@ -124,7 +243,7 @@ class SourceSeparationProductionRouteAuditTest {
             "private suspend fun switchActiveSourceSeparationSessionToCompletedCache(",
         )
         val end = service.indexOf(
-            "private fun setSourceSeparationBlend(",
+            "private suspend fun setSourceSeparationBlend(",
             start,
         )
         val upgrade = service.substring(start, end)

@@ -57,6 +57,7 @@ import com.mardous.booming.util.BLACKLIST_ENABLED
 import com.mardous.booming.util.IGNORE_AUDIO_FOCUS
 import com.mardous.booming.util.MINIMUM_SONG_DURATION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
+import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.WHITELIST_ENABLED
 import java.io.File
 import java.io.RandomAccessFile
@@ -908,6 +909,671 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             producerThread?.join(PRODUCER_AHEAD_READY_TIMEOUT_MS)
             controller?.let { mediaController ->
                 runCatching {
+                    onMediaControllerThread(mediaController) {
+                        mediaController.pause()
+                        mediaController.clearMediaItems()
+                        mediaController.release()
+                    }
+                }
+            }
+            runCatching { context.stopService(Intent(context, PlaybackService::class.java)) }
+            selectionStore.select(initialSelectedModelId)
+            restorePreferences(preferences, preferenceSnapshot)
+            cacheKey?.let { key ->
+                repeat(20) {
+                    if (!repository.isLeased(key)) return@repeat
+                    SystemClock.sleep(100L)
+                }
+                runCatching { repository.delete(key) }
+            }
+            mediaUri?.let { uri -> runCatching { context.contentResolver.delete(uri, null, null) } }
+        }
+    }
+
+    @Test
+    fun unreadyWindowGateStartsAtOneAndRetargetsRecoveryAfterSeek() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
+        val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
+        assumeTrue(modelId.isNotBlank() && relativeSource.isNotBlank())
+        require(modelId == OFFICIAL_SIX_STEM_MODEL_ID)
+        require(SAFE_RELATIVE_PATH.matches(relativeSource))
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val source = File(context.filesDir, relativeSource).canonicalFile
+        require(source.toPath().startsWith(context.filesDir.canonicalFile.toPath()) && source.isFile)
+        arguments.getString(ARG_SOURCE_SHA256)?.let { expected ->
+            require(SHA256.matches(expected) && source.sha256() == expected)
+        }
+        val runId = arguments.getString(ARG_RUN_ID)?.takeIf(SAFE_NAME::matches)
+            ?: "unready-gate-${System.currentTimeMillis()}"
+        val koin = GlobalContext.get()
+        val facade = koin.get<SourceSeparationMultiStemProductFacade>()
+        val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
+        val store = koin.get<SourceSeparationCacheStore>()
+        val selectionStore = koin.get<SourceSeparationMultiStemPlaybackSelectionStore>()
+        val processor = koin.get<SourceSeparationMixAudioProcessor>()
+        val preferences = koin.get<SharedPreferences>()
+        val initialSelectedModelId = selectionStore.selectedModelId()
+        val preferenceSnapshot = snapshotPreferences(
+            preferences,
+            setOf(
+                MINIMUM_SONG_DURATION,
+                SOURCE_SEPARATION_AUTO_START,
+                SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+                IGNORE_AUDIO_FOCUS,
+                WHITELIST_ENABLED,
+                BLACKLIST_ENABLED,
+            ),
+        )
+        val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
+            .resolve("$runId.json")
+        val report = JSONObject()
+            .put("runId", runId)
+            .put("mode", "unready-window-gate")
+            .put("modelId", modelId)
+            .put("status", "running")
+            .put("deviceModel", android.os.Build.MODEL)
+            .put("sdk", android.os.Build.VERSION.SDK_INT)
+            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+        val oneReadyReached = CountDownLatch(1)
+        val releaseOneReady = CountDownLatch(1)
+        val twoReadyReached = CountDownLatch(1)
+        val releaseTwoReady = CountDownLatch(1)
+        val threeReadyReached = CountDownLatch(1)
+        val releaseThreeReady = CountDownLatch(1)
+        val fourReadyReached = CountDownLatch(1)
+        val releaseFourReady = CountDownLatch(1)
+        val blockedAtOne = AtomicBoolean(false)
+        val blockedAtTwo = AtomicBoolean(false)
+        val blockedAtThree = AtomicBoolean(false)
+        val blockedAtFour = AtomicBoolean(false)
+        val observeBoundaryTransitions = AtomicBoolean(false)
+        val boundaryPauseCount = AtomicInteger(0)
+        val boundaryResumeCount = AtomicInteger(0)
+        val preparedManifest = AtomicReference<
+            com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest?
+        >()
+        val producerResult = AtomicReference<Result<HtdemucsSourceSeparationEngineResult>?>()
+        val producerFinished = CountDownLatch(1)
+        var producerThread: Thread? = null
+        var mediaUri: Uri? = null
+        var cacheKey: String? = null
+        var controller: MediaController? = null
+        var boundaryListener: Player.Listener? = null
+        try {
+            check(
+                preferences.edit()
+                    .putInt(MINIMUM_SONG_DURATION, 0)
+                    .putBoolean(SOURCE_SEPARATION_AUTO_START, false)
+                    .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 2)
+                    .putBoolean(IGNORE_AUDIO_FOCUS, true)
+                    .putBoolean(WHITELIST_ENABLED, false)
+                    .putBoolean(BLACKLIST_ENABLED, false)
+                    .commit(),
+            )
+            mediaUri = importIntoMediaStore(context, source, runId)
+            val song = stagedSong(mediaUri, source, runId)
+            repository.entries()
+                .filter { it.modelId == modelId && it.title.startsWith(SONG_TITLE_PREFIX) }
+                .forEach { repository.delete(it.cacheKey) }
+            selectionStore.select(modelId)
+
+            val producerStartedAt = SystemClock.elapsedRealtime()
+            producerThread = Thread({
+                try {
+                    producerResult.set(runCatching {
+                        facade.separate(
+                            song = song,
+                            modelId = modelId,
+                            runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+                            onPrepared = preparedManifest::set,
+                            onProgress = { progress ->
+                                if (progress.completedWindows == 1 &&
+                                    blockedAtOne.compareAndSet(false, true)
+                                ) {
+                                    oneReadyReached.countDown()
+                                    check(releaseOneReady.await(
+                                        PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                                        TimeUnit.MILLISECONDS,
+                                    )) { "Timed out at the one-window producer waterline." }
+                                }
+                                if (progress.completedWindows == 2 &&
+                                    blockedAtTwo.compareAndSet(false, true)
+                                ) {
+                                    twoReadyReached.countDown()
+                                    check(releaseTwoReady.await(
+                                        PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                                        TimeUnit.MILLISECONDS,
+                                    )) { "Timed out at the two-window producer waterline." }
+                                }
+                                if (progress.completedWindows == 3 &&
+                                    blockedAtThree.compareAndSet(false, true)
+                                ) {
+                                    threeReadyReached.countDown()
+                                    check(releaseThreeReady.await(
+                                        PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                                        TimeUnit.MILLISECONDS,
+                                    )) { "Timed out at the three-window producer waterline." }
+                                }
+                                if (progress.completedWindows == 4 &&
+                                    blockedAtFour.compareAndSet(false, true)
+                                ) {
+                                    fourReadyReached.countDown()
+                                    check(releaseFourReady.await(
+                                        PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                                        TimeUnit.MILLISECONDS,
+                                    )) { "Timed out at the four-window producer waterline." }
+                                }
+                            },
+                        )
+                    })
+                } finally {
+                    producerFinished.countDown()
+                }
+            }, "BSS-Multistem-UnreadyGate").apply { start() }
+
+            check(oneReadyReached.await(
+                PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS,
+            )) { "The producer did not reach the one-window waterline." }
+            val oneReadyManifest = requireNotNull(preparedManifest.get()).let { prepared ->
+                cacheKey = prepared.cacheKey
+                requireNotNull(store.readManifest(prepared.cacheKey))
+            }
+            val plan = requireNotNull(oneReadyManifest.segmentPlan)
+            require(plan.segmentCount >= 4)
+            assertEquals(SourceSeparationCacheManifestState.Partial, oneReadyManifest.state)
+            assertEquals(1, plan.segments.count { it.state.isPlaybackReady })
+            val expectedStemIds = requireNotNull(oneReadyManifest.output).stems
+                .sortedBy { stem -> stem.order }
+                .map { stem -> stem.stemId.value }
+            assertEquals(6, expectedStemIds.size)
+            val firstPositionMs = plan.segments[0].playbackStartFrame.toLong() * 1_000L /
+                plan.sampleRate + 250L
+            val secondPositionMs = plan.segments[1].playbackStartFrame.toLong() * 1_000L /
+                plan.sampleRate + 250L
+            when (val status = repository.playableStatus(
+                identity = oneReadyManifest.identity,
+                playbackPositionMs = firstPositionMs,
+                readyWindowCount = 1,
+            )) {
+                is SourceSeparationModelAwarePlayableStatus.Ready -> status.playback.close()
+                else -> error("One ready window was not playable: $status")
+            }
+            assertEquals(
+                SourceSeparationModelAwarePlayableStatus.Processing,
+                repository.playableStatus(
+                    identity = oneReadyManifest.identity,
+                    playbackPositionMs = firstPositionMs,
+                    readyWindowCount = 2,
+                ),
+            )
+
+            val mediaController = MediaController.Builder(
+                context,
+                SessionToken(context, ComponentName(context, PlaybackService::class.java)),
+            ).buildAsync().get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            controller = mediaController
+            boundaryListener = object : Player.Listener {
+                override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                    if (!observeBoundaryTransitions.get()) return
+                    if (playWhenReady) {
+                        boundaryResumeCount.incrementAndGet()
+                    } else {
+                        boundaryPauseCount.incrementAndGet()
+                    }
+                }
+            }.also { listener ->
+                onMediaControllerThread(mediaController) {
+                    mediaController.addListener(listener)
+                }
+            }
+            awaitPlaybackRestoration(mediaController)
+            onMediaControllerThread(mediaController) {
+                mediaController.volume = 0f
+                mediaController.setMediaItem(song.toMediaItem())
+                mediaController.prepare()
+                mediaController.seekTo(firstPositionMs)
+            }
+            waitForMediaController(mediaController, "one-window source preparation") {
+                mediaController.currentMediaItem?.mediaId == song.id.toString() &&
+                    mediaController.duration > 0L &&
+                    kotlin.math.abs(mediaController.currentPosition - firstPositionMs) <=
+                    MEDIA_SESSION_SEEK_TOLERANCE_MS
+            }
+            val enableResult = onMediaControllerThread(mediaController) {
+                mediaController.sendCustomCommand(
+                    SessionCommand(Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED, Bundle.EMPTY),
+                    Bundle().apply {
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, true)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING, true)
+                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
+                    },
+                )
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            assertEquals(SessionResult.RESULT_SUCCESS, enableResult.resultCode)
+            onMediaControllerThread(mediaController) { mediaController.play() }
+            waitForMediaController(mediaController, "one-window playback adoption") {
+                mediaController.playWhenReady &&
+                    mediaController.isPlaying &&
+                    processor.dataPlaneStemIds() == expectedStemIds
+            }
+            val oneWindowPlaybackStartedAtMs =
+                SystemClock.elapsedRealtime() - producerStartedAt
+
+            tracePlaybackMarker(mediaController, "$runId:seek-unready")
+            onMediaControllerThread(mediaController) { mediaController.seekTo(secondPositionMs) }
+            waitForMediaController(mediaController, "unready-window automatic pause") {
+                !mediaController.playWhenReady &&
+                    kotlin.math.abs(mediaController.currentPosition - secondPositionMs) <=
+                    MEDIA_SESSION_SEEK_TOLERANCE_MS
+            }
+            val unreadyPauseAtMs = SystemClock.elapsedRealtime() - producerStartedAt
+
+            tracePlaybackMarker(mediaController, "$runId:seek-ready-during-recovery")
+            onMediaControllerThread(mediaController) { mediaController.seekTo(firstPositionMs) }
+            waitForMediaController(mediaController, "waiting seek retarget") {
+                kotlin.math.abs(mediaController.currentPosition - firstPositionMs) <=
+                    MEDIA_SESSION_SEEK_TOLERANCE_MS
+            }
+            SystemClock.sleep(1_500L)
+            assertFalse(
+                "Playback resumed from one ready window while recovery required two.",
+                onMediaControllerThread(mediaController) { mediaController.playWhenReady },
+            )
+
+            releaseOneReady.countDown()
+            check(twoReadyReached.await(
+                PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS,
+            )) { "The producer did not reach the two-window recovery waterline." }
+            val twoReadyManifest = requireNotNull(store.readManifest(oneReadyManifest.cacheKey))
+            assertEquals(SourceSeparationCacheManifestState.Partial, twoReadyManifest.state)
+            assertEquals(2, requireNotNull(twoReadyManifest.segmentPlan).segments.count {
+                it.state.isPlaybackReady
+            })
+            when (val status = repository.playableStatus(
+                identity = twoReadyManifest.identity,
+                playbackPositionMs = firstPositionMs,
+                readyWindowCount = 2,
+            )) {
+                is SourceSeparationModelAwarePlayableStatus.Ready -> status.playback.close()
+                else -> error("Two ready windows did not satisfy recovery: $status")
+            }
+            waitForMediaController(mediaController, "two-window automatic recovery") {
+                mediaController.playWhenReady &&
+                    mediaController.isPlaying &&
+                    processor.dataPlaneStemIds() == expectedStemIds
+            }
+            val recoveredAtMs = SystemClock.elapsedRealtime() - producerStartedAt
+
+            val boundaryProbePositionMs =
+                (plan.segments[1].playbackEndFrame.toLong() * 1_000L / plan.sampleRate - 500L)
+                    .coerceAtLeast(secondPositionMs)
+            tracePlaybackMarker(mediaController, "$runId:boundary-catch-up")
+            onMediaControllerThread(mediaController) {
+                mediaController.seekTo(boundaryProbePositionMs)
+            }
+            waitForMediaController(mediaController, "ready boundary probe playback") {
+                mediaController.playWhenReady &&
+                    mediaController.isPlaying &&
+                    kotlin.math.abs(mediaController.currentPosition - boundaryProbePositionMs) <=
+                    MEDIA_SESSION_SEEK_TOLERANCE_MS
+            }
+            observeBoundaryTransitions.set(true)
+            waitForMediaController(mediaController, "cache boundary automatic pause") {
+                !mediaController.playWhenReady && !mediaController.isPlaying
+            }
+            val boundaryPausedAtMs = SystemClock.elapsedRealtime() - producerStartedAt
+            assertEquals(1, boundaryPauseCount.get())
+            assertEquals(0, boundaryResumeCount.get())
+
+            releaseTwoReady.countDown()
+            check(threeReadyReached.await(
+                PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS,
+            )) { "The producer did not reach the three-window recovery waterline." }
+            SystemClock.sleep(1_000L)
+            assertFalse(
+                "Playback resumed with only one new window after the boundary miss.",
+                onMediaControllerThread(mediaController) { mediaController.playWhenReady },
+            )
+            assertEquals(1, boundaryPauseCount.get())
+            assertEquals(0, boundaryResumeCount.get())
+
+            releaseThreeReady.countDown()
+            check(fourReadyReached.await(
+                PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS,
+            )) { "The producer did not reach the four-window recovery waterline." }
+            waitForMediaController(mediaController, "cache boundary stable recovery") {
+                mediaController.playWhenReady && mediaController.isPlaying
+            }
+            val boundaryRecoveredAtMs = SystemClock.elapsedRealtime() - producerStartedAt
+            SystemClock.sleep(1_000L)
+            assertTrue(onMediaControllerThread(mediaController) { mediaController.playWhenReady })
+            assertEquals(1, boundaryPauseCount.get())
+            assertEquals(1, boundaryResumeCount.get())
+            observeBoundaryTransitions.set(false)
+
+            releaseFourReady.countDown()
+            check(producerFinished.await(
+                PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS,
+            )) { "The producer did not complete after the recovery check." }
+            val completed = producerResult.get()?.getOrThrow()
+            require(completed is HtdemucsSourceSeparationEngineResult.Completed) {
+                "The controlled producer did not complete: $completed"
+            }
+            report.put("status", "complete")
+                .put("cacheKey", completed.manifest.cacheKey)
+                .put("readyWindowCount", 2)
+                .put("firstPositionMs", firstPositionMs)
+                .put("secondPositionMs", secondPositionMs)
+                .put("oneWindowPlaybackStartedAtMs", oneWindowPlaybackStartedAtMs)
+                .put("unreadyPauseAtMs", unreadyPauseAtMs)
+                .put("recoveredAtMs", recoveredAtMs)
+                .put("boundaryProbePositionMs", boundaryProbePositionMs)
+                .put("boundaryPausedAtMs", boundaryPausedAtMs)
+                .put("boundaryRecoveredAtMs", boundaryRecoveredAtMs)
+                .put("boundaryPauseCount", boundaryPauseCount.get())
+                .put("boundaryResumeCount", boundaryResumeCount.get())
+                .put("completedAtMs", SystemClock.elapsedRealtime() - producerStartedAt)
+                .put("stemIds", JSONArray(expectedStemIds))
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+                .put("processorStemIds", processor.dataPlaneStemIds())
+            reportFile.writeText(report.toString(2))
+            throw error
+        } finally {
+            releaseOneReady.countDown()
+            releaseTwoReady.countDown()
+            releaseThreeReady.countDown()
+            releaseFourReady.countDown()
+            producerThread?.join(PRODUCER_AHEAD_READY_TIMEOUT_MS)
+            controller?.let { mediaController ->
+                runCatching {
+                    boundaryListener?.let { listener ->
+                        onMediaControllerThread(mediaController) {
+                            mediaController.removeListener(listener)
+                        }
+                    }
+                    val disable = onMediaControllerThread(mediaController) {
+                        mediaController.sendCustomCommand(
+                            SessionCommand(
+                                Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+                                Bundle.EMPTY,
+                            ),
+                            Bundle().apply {
+                                putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, false)
+                                putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                            },
+                        )
+                    }
+                    disable.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    onMediaControllerThread(mediaController) {
+                        mediaController.pause()
+                        mediaController.clearMediaItems()
+                        mediaController.release()
+                    }
+                }
+            }
+            runCatching { context.stopService(Intent(context, PlaybackService::class.java)) }
+            selectionStore.select(initialSelectedModelId)
+            restorePreferences(preferences, preferenceSnapshot)
+            cacheKey?.let { key ->
+                repeat(20) {
+                    if (!repository.isLeased(key)) return@repeat
+                    SystemClock.sleep(100L)
+                }
+                runCatching { repository.delete(key) }
+            }
+            mediaUri?.let { uri -> runCatching { context.contentResolver.delete(uri, null, null) } }
+        }
+    }
+
+    @Test
+    fun automaticDemandWithNoReadyWindowPausesAndRecovers() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
+        val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
+        assumeTrue(modelId.isNotBlank() && relativeSource.isNotBlank())
+        require(modelId == OFFICIAL_SIX_STEM_MODEL_ID)
+        require(SAFE_RELATIVE_PATH.matches(relativeSource))
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val source = File(context.filesDir, relativeSource).canonicalFile
+        require(source.toPath().startsWith(context.filesDir.canonicalFile.toPath()) && source.isFile)
+        arguments.getString(ARG_SOURCE_SHA256)?.let { expected ->
+            require(SHA256.matches(expected) && source.sha256() == expected)
+        }
+        val runId = arguments.getString(ARG_RUN_ID)?.takeIf(SAFE_NAME::matches)
+            ?: "automatic-demand-gate-${System.currentTimeMillis()}"
+        val koin = GlobalContext.get()
+        val facade = koin.get<SourceSeparationMultiStemProductFacade>()
+        val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
+        val store = koin.get<SourceSeparationCacheStore>()
+        val selectionStore = koin.get<SourceSeparationMultiStemPlaybackSelectionStore>()
+        val processor = koin.get<SourceSeparationMixAudioProcessor>()
+        val preferences = koin.get<SharedPreferences>()
+        val initialSelectedModelId = selectionStore.selectedModelId()
+        val preferenceSnapshot = snapshotPreferences(
+            preferences,
+            setOf(
+                MINIMUM_SONG_DURATION,
+                SOURCE_SEPARATION_AUTO_START,
+                SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
+                IGNORE_AUDIO_FOCUS,
+                WHITELIST_ENABLED,
+                BLACKLIST_ENABLED,
+            ),
+        )
+        val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
+            .resolve("$runId.json")
+        val report = JSONObject()
+            .put("runId", runId)
+            .put("mode", "automatic-demand-zero-ready-gate")
+            .put("modelId", modelId)
+            .put("status", "running")
+            .put("deviceModel", android.os.Build.MODEL)
+            .put("sdk", android.os.Build.VERSION.SDK_INT)
+            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+        val oneReadyReached = CountDownLatch(1)
+        val releaseOneReady = CountDownLatch(1)
+        val twoReadyReached = CountDownLatch(1)
+        val releaseTwoReady = CountDownLatch(1)
+        val blockedAtOne = AtomicBoolean(false)
+        val blockedAtTwo = AtomicBoolean(false)
+        val preparedManifest = AtomicReference<
+            com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest?
+        >()
+        val producerResult = AtomicReference<Result<HtdemucsSourceSeparationEngineResult>?>()
+        val producerFinished = CountDownLatch(1)
+        var producerThread: Thread? = null
+        var mediaUri: Uri? = null
+        var cacheKey: String? = null
+        var controller: MediaController? = null
+        try {
+            check(
+                preferences.edit()
+                    .putInt(MINIMUM_SONG_DURATION, 0)
+                    .putBoolean(SOURCE_SEPARATION_AUTO_START, true)
+                    .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, 2)
+                    .putBoolean(IGNORE_AUDIO_FOCUS, true)
+                    .putBoolean(WHITELIST_ENABLED, false)
+                    .putBoolean(BLACKLIST_ENABLED, false)
+                    .commit(),
+            )
+            mediaUri = importIntoMediaStore(context, source, runId)
+            val song = stagedSong(mediaUri, source, runId)
+            repository.entries()
+                .filter { it.modelId == modelId && it.title.startsWith(SONG_TITLE_PREFIX) }
+                .forEach { repository.delete(it.cacheKey) }
+            selectionStore.select(modelId)
+
+            val mediaController = MediaController.Builder(
+                context,
+                SessionToken(context, ComponentName(context, PlaybackService::class.java)),
+            ).buildAsync().get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            controller = mediaController
+            awaitPlaybackRestoration(mediaController)
+            onMediaControllerThread(mediaController) {
+                mediaController.volume = 0f
+                mediaController.setMediaItem(song.toMediaItem())
+                mediaController.prepare()
+            }
+            waitForMediaController(mediaController, "automatic-demand source preparation") {
+                mediaController.currentMediaItem?.mediaId == song.id.toString() &&
+                    mediaController.duration > 0L &&
+                    mediaController.playbackState == Player.STATE_READY
+            }
+            onMediaControllerThread(mediaController) { mediaController.play() }
+            waitForMediaController(mediaController, "original playback before demand") {
+                mediaController.isPlaying && mediaController.playWhenReady
+            }
+
+            val enableRequestedAtMs = SystemClock.elapsedRealtime()
+            val enableResult = onMediaControllerThread(mediaController) {
+                mediaController.sendCustomCommand(
+                    SessionCommand(Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED, Bundle.EMPTY),
+                    Bundle().apply {
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, true)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                        putBoolean(Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING, true)
+                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, 0.7f)
+                    },
+                )
+            }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            assertEquals(SessionResult.RESULT_SUCCESS, enableResult.resultCode)
+            assertTrue(
+                "The automatic-demand gate did not publish processing state.",
+                enableResult.extras.getBoolean(Playback.EXTRA_SOURCE_SEPARATION_PROCESSING, false),
+            )
+            waitForMediaController(mediaController, "automatic-demand zero-ready pause") {
+                !mediaController.playWhenReady &&
+                    !mediaController.isPlaying
+            }
+            val pausedAtMs = SystemClock.elapsedRealtime() - enableRequestedAtMs
+            onMediaControllerThread(mediaController) { mediaController.play() }
+            waitForMediaController(mediaController, "automatic-demand waiting play guard") {
+                !mediaController.playWhenReady &&
+                    !mediaController.isPlaying
+            }
+
+            producerThread = Thread({
+                try {
+                    producerResult.set(runCatching {
+                        facade.separate(
+                            song = song,
+                            modelId = modelId,
+                            runClass = SourceSeparationExecutionRunClass.PlaybackDemandWindow,
+                            onPrepared = preparedManifest::set,
+                            onProgress = { progress ->
+                                if (progress.completedWindows == 1 &&
+                                    blockedAtOne.compareAndSet(false, true)
+                                ) {
+                                    oneReadyReached.countDown()
+                                    check(releaseOneReady.await(
+                                        PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                                        TimeUnit.MILLISECONDS,
+                                    )) { "Timed out at the one-window automatic-demand waterline." }
+                                }
+                                if (progress.completedWindows == 2 &&
+                                    blockedAtTwo.compareAndSet(false, true)
+                                ) {
+                                    twoReadyReached.countDown()
+                                    check(releaseTwoReady.await(
+                                        PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                                        TimeUnit.MILLISECONDS,
+                                    )) { "Timed out at the two-window automatic-demand waterline." }
+                                }
+                            },
+                        )
+                    })
+                } finally {
+                    producerFinished.countDown()
+                }
+            }, "BSS-AutomaticDemandGate").apply { start() }
+
+            check(oneReadyReached.await(
+                PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS,
+            )) { "The automatic-demand producer did not reach the first window." }
+            val oneReadyManifest = requireNotNull(preparedManifest.get()).let { prepared ->
+                cacheKey = prepared.cacheKey
+                requireNotNull(store.readManifest(prepared.cacheKey))
+            }
+            val plan = requireNotNull(oneReadyManifest.segmentPlan)
+            assertEquals(SourceSeparationCacheManifestState.Partial, oneReadyManifest.state)
+            assertEquals(1, plan.segments.count { it.state.isPlaybackReady })
+            assertFalse(
+                "Playback resumed after only one recovery window.",
+                onMediaControllerThread(mediaController) { mediaController.playWhenReady },
+            )
+            val oneReadyAtMs = SystemClock.elapsedRealtime() - enableRequestedAtMs
+
+            releaseOneReady.countDown()
+            check(twoReadyReached.await(
+                PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS,
+            )) { "The automatic-demand producer did not reach the second window." }
+            waitForMediaController(mediaController, "automatic-demand recovery") {
+                mediaController.playWhenReady &&
+                    mediaController.isPlaying &&
+                    processor.dataPlaneStemIds().isNotEmpty()
+            }
+            val recoveredAtMs = SystemClock.elapsedRealtime() - enableRequestedAtMs
+
+            releaseTwoReady.countDown()
+            check(producerFinished.await(
+                PRODUCER_AHEAD_READY_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS,
+            )) { "The automatic-demand producer did not complete." }
+            val completed = producerResult.get()?.getOrThrow()
+            require(completed is HtdemucsSourceSeparationEngineResult.Completed) {
+                "The automatic-demand producer did not complete: $completed"
+            }
+            report.put("status", "complete")
+                .put("cacheKey", completed.manifest.cacheKey)
+                .put("pausedAtMs", pausedAtMs)
+                .put("oneReadyAtMs", oneReadyAtMs)
+                .put("recoveredAtMs", recoveredAtMs)
+                .put("completedAtMs", SystemClock.elapsedRealtime() - enableRequestedAtMs)
+                .put("stemIds", JSONArray(processor.dataPlaneStemIds()))
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+                .put("processorStemIds", processor.dataPlaneStemIds())
+            reportFile.writeText(report.toString(2))
+            throw error
+        } finally {
+            releaseOneReady.countDown()
+            releaseTwoReady.countDown()
+            producerThread?.join(PRODUCER_AHEAD_READY_TIMEOUT_MS)
+            controller?.let { mediaController ->
+                runCatching {
+                    val disable = onMediaControllerThread(mediaController) {
+                        mediaController.sendCustomCommand(
+                            SessionCommand(
+                                Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+                                Bundle.EMPTY,
+                            ),
+                            Bundle().apply {
+                                putBoolean(Playback.EXTRA_SOURCE_SEPARATION_ENABLED, false)
+                                putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
+                            },
+                        )
+                    }
+                    disable.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                     onMediaControllerThread(mediaController) {
                         mediaController.pause()
                         mediaController.clearMediaItems()
@@ -2151,6 +2817,21 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         error.get()?.let { throw it }
         @Suppress("UNCHECKED_CAST")
         return result.get() as T
+    }
+
+    private fun tracePlaybackMarker(controller: MediaController, marker: String) {
+        val result = onMediaControllerThread(controller) {
+            controller.sendCustomCommand(
+                SessionCommand(
+                    Playback.TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER,
+                    Bundle.EMPTY,
+                ),
+                Bundle().apply {
+                    putString(Playback.EXTRA_SOURCE_SEPARATION_TRACE_MARKER, marker)
+                },
+            )
+        }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        assertEquals(SessionResult.RESULT_SUCCESS, result.resultCode)
     }
 
     private fun snapshotPreferences(
