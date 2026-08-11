@@ -14,6 +14,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +42,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -75,9 +77,18 @@ import com.mardous.booming.extensions.hasS
 import com.mardous.booming.extensions.utilities.isRtl
 import com.mardous.booming.ui.component.compose.decoration.FadingEdges
 import com.mardous.booming.ui.component.compose.decoration.fadingEdges
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
+
+private const val LyricsViewportTransitionDurationMillis = 260
+
+private data class LyricsScrollAnchor(
+    val index: Int,
+    val lineId: Long,
+    val offset: Int,
+)
 
 @Composable
 fun LyricsView(
@@ -97,7 +108,9 @@ fun LyricsView(
 
     val listState = rememberLazyListState()
     val isScrollInProgress = listState.isScrollInProgress
-    val isInDragGesture by listState.interactionSource.collectIsDraggedAsState()
+    val isInDragGestureState = listState.interactionSource.collectIsDraggedAsState()
+    val isInDragGesture by isInDragGestureState
+    val latestLyrics by rememberUpdatedState(state.lyrics)
 
     val lineSpacing = settings.lineSpacing.dp
 
@@ -107,11 +120,8 @@ fun LyricsView(
         disableBlurEffect = true
     }
 
-    LaunchedEffect(state.currentLineIndex, viewportLayoutRevision) {
+    LaunchedEffect(state.currentLineIndex) {
         if (state.currentLineIndex >= 0) {
-            if (viewportLayoutRevision > 0) {
-                withFrameNanos { }
-            }
             if (!isInDragGesture && !isScrollInProgress) {
                 val layoutInfo = listState.layoutInfo
                 val viewportHeight = with(layoutInfo) { viewportEndOffset - viewportStartOffset }
@@ -150,6 +160,63 @@ fun LyricsView(
                 }
                 disableBlurEffect = disableAdvancedEffects
             }
+        }
+    }
+
+    LaunchedEffect(viewportLayoutRevision) {
+        if (viewportLayoutRevision == 0) return@LaunchedEffect
+
+        val lyrics = latestLyrics ?: return@LaunchedEffect
+        val layoutInfo = listState.layoutInfo
+        val bottomPadding = with(density) {
+            contentPadding.calculateBottomPadding().toPx()
+        }
+        val targetY = if (settings.isCenterCurrentLine) {
+            (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset) / 2f - bottomPadding
+        } else {
+            0f
+        }
+        val anchor = layoutInfo.visibleItemsInfo
+            .asSequence()
+            .filter { it.index in lyrics.lines.indices }
+            .minByOrNull { itemInfo ->
+                val itemY = if (settings.isCenterCurrentLine) {
+                    itemInfo.offset + itemInfo.size / 2f
+                } else {
+                    itemInfo.offset.toFloat()
+                }
+                abs(itemY - targetY)
+            }
+            ?.let { itemInfo ->
+                LyricsScrollAnchor(
+                    index = itemInfo.index,
+                    lineId = lyrics.lines[itemInfo.index].id,
+                    offset = itemInfo.offset,
+                )
+            }
+            ?: return@LaunchedEffect
+
+        // Let the width animation and LazyColumn remeasurement finish before restoring
+        // the same lyric line at the same screen position.
+        delay(LyricsViewportTransitionDurationMillis.toLong())
+        withFrameNanos { }
+
+        if (isInDragGestureState.value) return@LaunchedEffect
+        val currentLyrics = latestLyrics ?: return@LaunchedEffect
+        if (currentLyrics.lines.getOrNull(anchor.index)?.id != anchor.lineId) {
+            return@LaunchedEffect
+        }
+
+        var anchorItem = listState.layoutInfo.visibleItemsInfo
+            .firstOrNull { it.index == anchor.index }
+        if (anchorItem == null) {
+            listState.scrollToItem(anchor.index)
+            withFrameNanos { }
+            anchorItem = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.index == anchor.index }
+        }
+        anchorItem?.let {
+            listState.scrollBy((it.offset - anchor.offset).toFloat())
         }
     }
 
