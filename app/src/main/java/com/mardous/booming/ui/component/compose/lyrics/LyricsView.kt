@@ -42,6 +42,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -87,6 +88,7 @@ fun LyricsView(
     contentColor: Color,
     isPowerSaveMode: Boolean,
     hasBackgroundEffects: Boolean,
+    viewportLayoutRevision: Int = 0,
     modifier: Modifier = Modifier,
     onLineClick: (SyncedLyrics.Line) -> Unit
 ) {
@@ -105,8 +107,11 @@ fun LyricsView(
         disableBlurEffect = true
     }
 
-    LaunchedEffect(state.currentLineIndex) {
+    LaunchedEffect(state.currentLineIndex, viewportLayoutRevision) {
         if (state.currentLineIndex >= 0) {
+            if (viewportLayoutRevision > 0) {
+                withFrameNanos { }
+            }
             if (!isInDragGesture && !isScrollInProgress) {
                 val layoutInfo = listState.layoutInfo
                 val viewportHeight = with(layoutInfo) { viewportEndOffset - viewportStartOffset }
