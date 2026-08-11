@@ -216,7 +216,7 @@ class PlayerViewModel(
     private var sourceSeparationBlendPreviewJob: Job? = null
     private var sourceSeparationBlendPreviewPending: Float? = null
     private var sourceSeparationStemGainPreviewJob: Job? = null
-    private var sourceSeparationStemGainPreviewPending: SourceSeparationMultiStemMixUiState? = null
+    private var sourceSeparationStemGainPreviewPending: SourceSeparationStemGainPreview? = null
     private var sourceSeparationFlacPromotionJob: Job? = null
     private var sourceSeparationFlacPromotionRunningRequest: SourceSeparationFlacPromotionRequest? = null
     private val sourceSeparationFlacPromotionCancelGeneration = AtomicLong(0L)
@@ -2234,23 +2234,36 @@ class PlayerViewModel(
 
     fun previewSourceSeparationStemGain(stemId: String, gain: Float) {
         if (sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off) return
-        val updated = _sourceSeparationMultiStemMixStateFlow.value
-            ?.withGain(stemId, gain)
-            ?: return
-        _sourceSeparationMultiStemMixStateFlow.value = updated
-        sourceSeparationStemGainPreviewPending = updated
+        val state = _sourceSeparationMultiStemMixStateFlow.value ?: return
+        if (state.stems.none { stem -> stem.stemId == stemId }) return
+        sourceSeparationStemGainPreviewPending = SourceSeparationStemGainPreview(
+            modelId = state.modelId,
+            songId = state.songId,
+            cacheKey = state.cacheKey,
+            stemId = stemId,
+            gain = SourceSeparationStemGainPolicy.normalize(gain),
+        )
         if (sourceSeparationStemGainPreviewJob?.isActive == true) return
 
         sourceSeparationStemGainPreviewJob = viewModelScope.launch {
             while (true) {
-                val preview = sourceSeparationStemGainPreviewPending ?: break
+                val pending = sourceSeparationStemGainPreviewPending ?: break
                 sourceSeparationStemGainPreviewPending = null
+                val current = _sourceSeparationMultiStemMixStateFlow.value
+                val preview = current?.takeIf { state ->
+                    state.modelId == pending.modelId &&
+                            state.songId == pending.songId &&
+                            state.cacheKey == pending.cacheKey
+                }?.withGain(pending.stemId, pending.gain)
+                if (preview == null) {
+                    delay(SOURCE_SEPARATION_BLEND_PREVIEW_THROTTLE_MS)
+                    continue
+                }
                 runCatching {
                     sendSourceSeparationStemGainsCommand(preview, persist = false)
-                }.onSuccess(::updateSourceSeparationPlaybackState)
-                    .onFailure { error ->
-                        Log.w(TAG, "Failed to preview source separation stem gains", error)
-                    }
+                }.onFailure { error ->
+                    Log.w(TAG, "Failed to preview source separation stem gains", error)
+                }
                 delay(SOURCE_SEPARATION_BLEND_PREVIEW_THROTTLE_MS)
             }
             sourceSeparationStemGainPreviewJob = null
@@ -3095,6 +3108,14 @@ data class SourceSeparationPlaybackUiState(
     val blend: Float = 0.5f,
     val songId: Long? = null,
     val message: String? = null,
+)
+
+private data class SourceSeparationStemGainPreview(
+    val modelId: String,
+    val songId: Long?,
+    val cacheKey: String?,
+    val stemId: String,
+    val gain: Float,
 )
 
 data class SourceSeparationStemGainUiState(

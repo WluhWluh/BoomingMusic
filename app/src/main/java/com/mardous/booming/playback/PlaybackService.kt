@@ -259,6 +259,7 @@ class PlaybackService :
     private var sourceSeparationPlaybackReadinessMonitorJob: Job? = null
     private var sourceSeparationPlaybackReadinessMonitorSessionId: Long? = null
     private var sourceSeparationDataPlaneMonitorJob: Job? = null
+    private var sourceSeparationCompletedCleanupJob: Job? = null
     private var sourceSeparationDataPlaneMonitorSessionId: Long? = null
     private var sourceSeparationDataPlaneResumeWhenReady = false
     private var sourceSeparationPlaybackTraceFile: File? = null
@@ -1009,20 +1010,23 @@ class PlaybackService :
                 val gains = args.getFloatArray(
                     Playback.EXTRA_SOURCE_SEPARATION_STEM_GAINS,
                 )?.toList().orEmpty()
-                traceSourceSeparationPlayback(
-                    "command.setStemGains",
-                    "cache=${cacheKey.take(12)} stems=${stemIds.joinToString()} " +
-                            "gains=${gains.joinToString()}",
+                val commit = args.getBoolean(
+                    Playback.EXTRA_SOURCE_SEPARATION_PERSIST_STEM_GAINS,
+                    true,
                 )
+                if (commit) {
+                    traceSourceSeparationPlayback(
+                        "command.setStemGains",
+                        "cache=${cacheKey.take(12)} stems=${stemIds.joinToString()} " +
+                                "gains=${gains.joinToString()}",
+                    )
+                }
                 serviceScope.future {
                     setSourceSeparationStemGains(
                         cacheKey = cacheKey,
                         stemIds = stemIds,
                         gains = gains,
-                        commit = args.getBoolean(
-                            Playback.EXTRA_SOURCE_SEPARATION_PERSIST_STEM_GAINS,
-                            true,
-                        ),
+                        commit = commit,
                     )
                 }
             }
@@ -2712,12 +2716,15 @@ class PlaybackService :
 
         val appliesToActiveSession = activeSession != null && targetsActiveSession
         val affectsCurrentPlayback = activeSession == null || targetsActiveSession
-        if (affectsCurrentPlayback) {
+        if (commit && affectsCurrentPlayback) {
             sourceSeparationMixProcessor.setBlend(demandBlend)
         }
         if (appliesToActiveSession) {
             activeSession.stemGains = normalizedGains
             sourceSeparationMixProcessor.setStemGains(normalizedGains)
+        }
+        if (!commit) {
+            return SessionResult(SessionResult.RESULT_SUCCESS)
         }
 
         if (affectsCurrentPlayback) {
@@ -4294,7 +4301,8 @@ class PlaybackService :
     }
 
     private fun cleanupCompletedSourceSeparationTemporaryDirs() {
-        serviceScope.launch(IO) {
+        if (sourceSeparationCompletedCleanupJob?.isActive == true) return
+        sourceSeparationCompletedCleanupJob = serviceScope.launch(IO) {
             cleanCompletedSourceSeparationTemporaryDirsNow()
         }
     }

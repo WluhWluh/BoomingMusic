@@ -307,6 +307,58 @@ class SourceSeparationProductionRouteAuditTest {
         assertFalse(versionCatalogFile.readText().contains("onnxruntime", ignoreCase = true))
     }
 
+    @Test
+    fun `multi-stem gain previews avoid full playback and UI state work`() {
+        val service = mainSource(
+            "com/mardous/booming/playback/PlaybackService.kt",
+        ).readText()
+        val serviceStart = service.indexOf("private suspend fun setSourceSeparationStemGains(")
+        val serviceEnd = service.indexOf("private fun applySourceSeparationBlend(", serviceStart)
+        require(serviceStart >= 0 && serviceEnd > serviceStart)
+        val gainCommand = service.substring(serviceStart, serviceEnd)
+        val previewExit = gainCommand.indexOf("if (!commit)")
+        val liveGainApply = gainCommand.indexOf(
+            "sourceSeparationMixProcessor.setStemGains(normalizedGains)",
+        )
+        val committedStateWork = gainCommand.indexOf(
+            "if (affectsCurrentPlayback)",
+            previewExit,
+        )
+        val broadcast = gainCommand.indexOf("broadcastSourceSeparationPlaybackChanged()")
+
+        assertTrue(previewExit >= 0)
+        assertTrue(liveGainApply in 0 until previewExit)
+        assertTrue(committedStateWork > previewExit)
+        assertTrue(broadcast > committedStateWork)
+        assertTrue(
+            gainCommand.substring(previewExit, committedStateWork)
+                .contains("return SessionResult(SessionResult.RESULT_SUCCESS)"),
+        )
+
+        val viewModel = mainSource(
+            "com/mardous/booming/ui/screen/player/PlayerViewModel.kt",
+        ).readText()
+        val viewModelStart = viewModel.indexOf("fun previewSourceSeparationStemGain(")
+        val viewModelEnd = viewModel.indexOf("fun setSourceSeparationStemGain(", viewModelStart)
+        require(viewModelStart >= 0 && viewModelEnd > viewModelStart)
+        val preview = viewModel.substring(viewModelStart, viewModelEnd)
+
+        assertFalse(preview.contains("_sourceSeparationMultiStemMixStateFlow.value ="))
+        assertFalse(preview.contains("updateSourceSeparationPlaybackState"))
+
+        val cleanupStart = service.indexOf(
+            "private fun cleanupCompletedSourceSeparationTemporaryDirs()",
+        )
+        val cleanupEnd = service.indexOf(
+            "private fun cleanCompletedSourceSeparationTemporaryDirsNow()",
+            cleanupStart,
+        )
+        require(cleanupStart >= 0 && cleanupEnd > cleanupStart)
+        val cleanup = service.substring(cleanupStart, cleanupEnd)
+        assertTrue(cleanup.contains("sourceSeparationCompletedCleanupJob?.isActive == true"))
+        assertTrue(cleanup.contains("sourceSeparationCompletedCleanupJob = serviceScope.launch(IO)"))
+    }
+
     private fun mainSource(relativePath: String): File =
         File(mainKotlinRoot, relativePath).also { source ->
             require(source.isFile) { "Missing production source: $relativePath" }
