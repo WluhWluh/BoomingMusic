@@ -104,7 +104,7 @@ class MdxLiteRtCompatibilityTest {
     }
 
     @Test
-    fun `reviewed model without qualification uses CPU only as an experiment`() {
+    fun `reviewed model without qualification uses CPU and bounded arm64 GPU as experiments`() {
         val profile = profile("kuielab_a_bass")
         val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a)
 
@@ -120,17 +120,78 @@ class MdxLiteRtCompatibilityTest {
             platform,
             MdxCompatibilityPolicy.AllowCandidates,
         )
-        val gpu = MdxLiteRtCompatibilityResolver.resolve(
+        val strictGpu = MdxLiteRtCompatibilityResolver.resolve(
+            profile,
+            MdxInferenceBackend.LiteRtGpu,
+            platform,
+            MdxCompatibilityPolicy.KnownGoodOnly,
+            profileId = MdxRuntimeProfiles.GPU_AUTO_FP32,
+        )
+        val experimentalGpu = MdxLiteRtCompatibilityResolver.resolve(
             profile,
             MdxInferenceBackend.LiteRtGpu,
             platform,
             MdxCompatibilityPolicy.AllowCandidates,
-            profileId = "gpu-auto-fp32-v1",
+            profileId = MdxRuntimeProfiles.GPU_AUTO_FP32,
         )
 
         assertEquals(MdxCompatibilityOutcome.Unsupported, strictCpu.outcome)
         assertEquals(MdxCompatibilityOutcome.Experimental, experimentalCpu.outcome)
-        assertEquals(MdxCompatibilityOutcome.Unsupported, gpu.outcome)
+        assertEquals(MdxCompatibilityOutcome.Unsupported, strictGpu.outcome)
+        assertEquals(MdxCompatibilityOutcome.Experimental, experimentalGpu.outcome)
+    }
+
+    @Test
+    fun `unqualified GPU admission does not extend beyond reviewed arm64 FP32`() {
+        val reviewed = profile("kuielab_a_bass")
+        val customLike = reviewed.copy(allowUnqualifiedExperimentalGpu = false)
+
+        val decisions = listOf(
+            MdxLiteRtCompatibilityResolver.resolve(
+                reviewed,
+                MdxInferenceBackend.LiteRtGpu,
+                MdxRuntimePlatform(35, MdxRuntimeAbi.X86_64),
+                MdxCompatibilityPolicy.AllowCandidates,
+                profileId = MdxRuntimeProfiles.GPU_AUTO_FP32,
+            ),
+            MdxLiteRtCompatibilityResolver.resolve(
+                reviewed,
+                MdxInferenceBackend.LiteRtGpu,
+                MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                MdxCompatibilityPolicy.AllowCandidates,
+                profileId = "gpu-auto-fp16-v1",
+                precision = MdxRuntimePrecision.Fp16,
+            ),
+            MdxLiteRtCompatibilityResolver.resolve(
+                customLike,
+                MdxInferenceBackend.LiteRtGpu,
+                MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                MdxCompatibilityPolicy.AllowCandidates,
+                profileId = MdxRuntimeProfiles.GPU_AUTO_FP32,
+            ),
+        )
+
+        decisions.forEach { decision ->
+            assertEquals(MdxCompatibilityOutcome.Unsupported, decision.outcome)
+        }
+    }
+
+    @Test
+    fun `all published MDX models admit the bounded arm64 GPU product path`() {
+        assertEquals(30, catalog.contracts.size)
+
+        catalog.contracts.forEach { contract ->
+            val decision = MdxLiteRtCompatibilityResolver.resolve(
+                profile = contract.toMdxExecutionProfile(catalog.runtimeQualifications),
+                backend = MdxInferenceBackend.LiteRtGpu,
+                platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+                policy = MdxCompatibilityPolicy.AllowCandidates,
+                profileId = MdxRuntimeProfiles.GPU_AUTO_FP32,
+                precision = MdxRuntimePrecision.Fp32,
+            )
+
+            assertTrue("GPU was blocked for ${contract.modelId}: ${decision.reason}", decision.isAllowed)
+        }
     }
 
     @Test

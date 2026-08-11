@@ -1117,8 +1117,13 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val promotion = runtimeFacade.promote(cacheKey)
             assertTrue(promotion is SourceSeparationCacheFlacPromotionResult.Completed)
             val promotedPlayback = requireNotNull(runtimeFacade.openCompletedCache(cacheKey))
-            assertEquals("flac", promotedPlayback.vocalsFile.extension.lowercase())
-            assertEquals("flac", promotedPlayback.instrumentalFile.extension.lowercase())
+            assertEquals(
+                output.stems.map { stem -> stem.semanticId.value },
+                promotedPlayback.stemIds,
+            )
+            assertTrue(promotedPlayback.stemFiles.all { stem ->
+                stem.isFile && stem.extension.equals("flac", ignoreCase = true)
+            })
             promotedPlayback.close()
 
             val completedAfter = runtimeFacade.entries().single { it.cacheKey == cacheKey }

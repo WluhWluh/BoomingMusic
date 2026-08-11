@@ -56,6 +56,7 @@ data class MdxExecutionProfile(
     val minimumAndroidApi: Int? = null,
     val runtimeCompatibility: List<MdxRuntimeCompatibilityRecord> = emptyList(),
     val allowUnqualifiedExperimentalCpu: Boolean = false,
+    val allowUnqualifiedExperimentalGpu: Boolean = false,
 ) {
     fun canonicalLabelFor(stem: MdxStem): String = when (stem) {
         modelOutputStem -> modelOutputCanonicalLabel

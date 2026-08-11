@@ -62,6 +62,7 @@ fun SourceSeparationModelContract.toMdxExecutionProfile(
             )
         },
         allowUnqualifiedExperimentalCpu = true,
+        allowUnqualifiedExperimentalGpu = true,
     )
 }
 

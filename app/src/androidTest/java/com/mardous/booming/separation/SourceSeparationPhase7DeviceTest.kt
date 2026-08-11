@@ -14,6 +14,9 @@ import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetS
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetSelectionScope
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeCatalog
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeState
+import com.mardous.booming.separation.runtime.SourceSeparationGpuRuntimeStore
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeCatalog
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
@@ -144,6 +147,44 @@ class SourceSeparationPhase7DeviceTest {
             assertEquals(runtimeEntry.innerLibrary.sha256, runtimeInstallation.libraryFile.sha256())
             assertTrue(runtimeInstallation.manifestFile.isFile)
 
+            val gpuRuntime = if (arguments.getString(ARG_BACKEND_MODE) == "auto") {
+                val gpuCatalog = get<SourceSeparationGpuRuntimeCatalog>(
+                    SourceSeparationGpuRuntimeCatalog::class.java,
+                )
+                val gpuEntry = requireNotNull(
+                    gpuCatalog.entries.singleOrNull { it.abi == processAbi },
+                ) {
+                    "No pinned LiteRT GPU runtime exists for $processAbi."
+                }
+                val gpuStore = get<SourceSeparationGpuRuntimeStore>(
+                    SourceSeparationGpuRuntimeStore::class.java,
+                )
+                assertEquals(
+                    SourceSeparationGpuRuntimeState.Missing,
+                    gpuStore.inventory(gpuEntry.componentId).state,
+                )
+                val gpuInstallStartedAt = SystemClock.elapsedRealtime()
+                val installedGpu = gpuStore.install(gpuEntry.componentId)
+                val gpuInstallElapsedMs =
+                    SystemClock.elapsedRealtime() - gpuInstallStartedAt
+                assertEquals(SourceSeparationGpuRuntimeState.Installed, installedGpu.state)
+                val gpuInstallation = requireNotNull(installedGpu.installation)
+                gpuEntry.files.forEach { expected ->
+                    val installedFile = requireNotNull(gpuInstallation.libraryFiles[expected.path])
+                    assertEquals(expected.byteSize, installedFile.length())
+                    assertEquals(expected.sha256, installedFile.sha256())
+                }
+                JSONObject()
+                    .put("componentId", gpuEntry.componentId)
+                    .put("abi", processAbi)
+                    .put("profileId", gpuEntry.capability.profileId)
+                    .put("downloadBytes", gpuEntry.delivery.expectedByteSize)
+                    .put("installedBytes", installedGpu.installedBytes)
+                    .put("installMs", gpuInstallElapsedMs)
+            } else {
+                null
+            }
+
             val modelId = arguments.requiredString(ARG_MODEL_ID)
             val downloadStartedAt = SystemClock.elapsedRealtime()
             val installed = downloader.download(modelId)
@@ -186,6 +227,7 @@ class SourceSeparationPhase7DeviceTest {
                     .put("libraryBytes", runtimeInstallation.libraryFile.length())
                     .put("librarySha256", runtimeInstallation.libraryFile.sha256())
                 )
+                .put("gpuRuntime", gpuRuntime ?: JSONObject.NULL)
                 .put("downloadActivatesModel", false)
                 .put("explicitUseCompleted", true)
                 .put("installedFileBytes", installed.file.length())

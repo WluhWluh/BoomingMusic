@@ -78,7 +78,7 @@ class MdxContractExecutionProfileTest {
     }
 
     @Test
-    fun `all published MDX contracts create experimental CPU profiles`() {
+    fun `all published MDX contracts create experimental CPU and GPU profiles`() {
         assertEquals(30, catalog.contracts.size)
         catalog.contracts.forEach { contract ->
             val profile = contract.toMdxExecutionProfile(catalog.runtimeQualifications)
@@ -86,6 +86,7 @@ class MdxContractExecutionProfileTest {
             assertEquals(contract.stemContract.toStemSet().stems.map { it.stemId }, profile.orderedStemIds)
             assertEquals(26, profile.minimumAndroidApi)
             assertTrue(profile.allowUnqualifiedExperimentalCpu)
+            assertTrue(profile.allowUnqualifiedExperimentalGpu)
         }
     }
 
