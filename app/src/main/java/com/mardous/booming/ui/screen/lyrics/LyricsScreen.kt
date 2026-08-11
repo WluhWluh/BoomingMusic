@@ -6,6 +6,7 @@ import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.core.tween
@@ -368,6 +369,14 @@ fun CoverLyricsScreen(
             showSourceSeparationQuickControls = showSourceSeparationQuickControls,
             reserveExpandedControls = reserveExpandedControls,
         )
+        val animatedLyricsEndClearance by animateDpAsState(
+            targetValue = overlayAvoidance.endClearance,
+            animationSpec = tween(
+                durationMillis = CoverLyricsQuickControlsTransitionDurationMillis,
+                easing = FastOutSlowInEasing,
+            ),
+            label = "lyricsEndClearance",
+        )
         val baseLyricsContentPadding = PaddingValues(
             vertical = CoverLyricsBaseVerticalPadding,
             horizontal = CoverLyricsBaseHorizontalPadding,
@@ -395,7 +404,7 @@ fun CoverLyricsScreen(
                 viewportLayoutRevision = lyricsViewportLayoutRevision,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(end = overlayAvoidance.endClearance),
+                    .padding(end = animatedLyricsEndClearance),
             )
 
             Column(
