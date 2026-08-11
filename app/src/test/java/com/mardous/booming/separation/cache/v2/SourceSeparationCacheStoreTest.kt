@@ -118,6 +118,9 @@ class SourceSeparationCacheStoreTest {
             cacheKey = manifest.cacheKey,
             audioFingerprint = manifest.identity.source.audioFingerprint,
             blend = 0.75f,
+            stemGains = manifest.output!!.stems.associate { stem ->
+                stem.stemId.value to 0.75f
+            },
             updatedAtEpochMs = 5L,
         )
 

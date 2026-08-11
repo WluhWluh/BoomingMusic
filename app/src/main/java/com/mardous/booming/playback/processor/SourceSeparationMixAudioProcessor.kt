@@ -56,6 +56,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     var blend: Float = CENTER_BLEND
         private set
 
+    val stemGains: List<Float>
+        get() = gainSnapshot.get().gains
+
     @Volatile
     var debugTraceSink: ((String) -> Unit)? = null
 

@@ -2375,9 +2375,10 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val report = baseReport(context, runId, arguments)
             .put("stage", "playback-owner-stop")
         val preferences = get<SharedPreferences>(SharedPreferences::class.java)
+        val globalBlendKey = testGlobalBlendKey(arguments.requiredString(ARG_MODEL_ID))
         val preferenceSnapshot = snapshotPreferences(
             preferences,
-            PLAYBACK_OWNER_TEST_PREFERENCE_KEYS,
+            PLAYBACK_OWNER_TEST_PREFERENCE_KEYS + globalBlendKey,
         )
         var targetUri: Uri? = null
         var currentUri: Uri? = null
@@ -2400,7 +2401,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .putInt(SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT, REQUIRED_READY_WINDOWS)
                 .putBoolean(TEST_KEY_PLAYBACK_ENABLED, true)
                 .putBoolean(TEST_KEY_REMEMBER_PER_SONG, false)
-                .putFloat(TEST_KEY_GLOBAL_BLEND, TEST_BLEND)
+                .putFloat(globalBlendKey, TEST_BLEND)
                 .commit()
             ) { "Could not configure the playback-owned shutdown test." }
             assertExpectedActivePreset(arguments)
@@ -5131,6 +5132,14 @@ class SourceSeparationPhase7WorkerDeviceTest {
         require(executionHostMode == Phase7ExecutionHostMode.IndependentForeground) {
             "Model-switch validation requires the production independent foreground host."
         }
+        val primaryModelId = arguments.requiredString(ARG_MODEL_ID)
+        val primaryArtifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
+        val secondaryModelId = arguments.requiredString(ARG_SECONDARY_MODEL_ID)
+        val secondaryArtifactSha256 = arguments.requiredString(
+            ARG_SECONDARY_ARTIFACT_SHA256,
+        )
+        val primaryGlobalBlendKey = testGlobalBlendKey(primaryModelId)
+        val secondaryGlobalBlendKey = testGlobalBlendKey(secondaryModelId)
         val report = baseReport(context, runId, arguments)
         val preferences = get<SharedPreferences>(SharedPreferences::class.java)
         val preferenceSnapshot = snapshotPreferences(
@@ -5144,7 +5153,8 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 MINIMUM_SONG_DURATION,
                 TEST_PLAYBACK_ENABLED_KEY,
                 TEST_REMEMBER_PER_SONG_KEY,
-                TEST_KEY_GLOBAL_BLEND,
+                primaryGlobalBlendKey,
+                secondaryGlobalBlendKey,
             ),
         )
         val presetRepository = get<SourceSeparationPresetRepository>(
@@ -5173,16 +5183,11 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .putInt(MINIMUM_SONG_DURATION, 0)
                 .putBoolean(TEST_PLAYBACK_ENABLED_KEY, true)
                 .putBoolean(TEST_REMEMBER_PER_SONG_KEY, false)
-                .putFloat(TEST_KEY_GLOBAL_BLEND, TEST_BLEND)
+                .putFloat(primaryGlobalBlendKey, TEST_BLEND)
+                .putFloat(secondaryGlobalBlendKey, TEST_BLEND)
                 .commit()
             ) { "Could not persist model-switch test preferences." }
 
-            val primaryModelId = arguments.requiredString(ARG_MODEL_ID)
-            val primaryArtifactSha256 = arguments.requiredString(ARG_ARTIFACT_SHA256)
-            val secondaryModelId = arguments.requiredString(ARG_SECONDARY_MODEL_ID)
-            val secondaryArtifactSha256 = arguments.requiredString(
-                ARG_SECONDARY_ARTIFACT_SHA256,
-            )
             val initial = presetRepository.activeModel()
             assertTrue(initial is SourceSeparationActivePresetState.Reference)
             val initialReference = (initial as SourceSeparationActivePresetState.Reference)
@@ -6085,6 +6090,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
         require(executionHostMode == Phase7ExecutionHostMode.IndependentForeground) {
             "Next-song prefetch validation requires the production independent foreground host."
         }
+        val globalBlendKey = testGlobalBlendKey(arguments.requiredString(ARG_MODEL_ID))
         val report = baseReport(context, runId, arguments)
         val preferences = get<SharedPreferences>(SharedPreferences::class.java)
         val preferenceSnapshot = snapshotPreferences(
@@ -6096,7 +6102,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 SOURCE_SEPARATION_GPU_ENABLED,
                 TEST_KEY_PLAYBACK_ENABLED,
                 TEST_KEY_REMEMBER_PER_SONG,
-                TEST_KEY_GLOBAL_BLEND,
+                globalBlendKey,
                 SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
                 MINIMUM_SONG_DURATION,
             ),
@@ -6127,7 +6133,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 .putSourceSeparationGpuEnabled(backendMode == BackendMode.Auto)
                 .putBoolean(TEST_KEY_PLAYBACK_ENABLED, true)
                 .putBoolean(TEST_KEY_REMEMBER_PER_SONG, false)
-                .putFloat(TEST_KEY_GLOBAL_BLEND, TEST_BLEND)
+                .putFloat(globalBlendKey, TEST_BLEND)
                 .putInt(
                     SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
                     REQUIRED_READY_WINDOWS,
@@ -9667,6 +9673,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
         const val TEST_KEY_PLAYBACK_ENABLED = "source_separation.playback_enabled"
         const val TEST_KEY_REMEMBER_PER_SONG = "source_separation.remember_per_song"
         const val TEST_KEY_GLOBAL_BLEND = "source_separation.global_blend"
+        fun testGlobalBlendKey(modelId: String): String =
+            "$TEST_KEY_GLOBAL_BLEND.mdx.$modelId"
+
         val PLAYBACK_OWNER_TEST_PREFERENCE_KEYS = setOf(
             MINIMUM_SONG_DURATION,
             SOURCE_SEPARATION_AUTO_CACHE_CLEANUP,
@@ -9677,7 +9686,6 @@ class SourceSeparationPhase7WorkerDeviceTest {
             SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT,
             TEST_KEY_PLAYBACK_ENABLED,
             TEST_KEY_REMEMBER_PER_SONG,
-            TEST_KEY_GLOBAL_BLEND,
         )
         const val SEEK_FROM_END_MS = 1_000L
         const val POLL_INTERVAL_MS = 250L

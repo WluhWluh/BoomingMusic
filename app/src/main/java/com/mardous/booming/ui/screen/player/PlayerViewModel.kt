@@ -47,10 +47,17 @@ import com.mardous.booming.playback.shuffle.ShuffleManager
 import com.mardous.booming.playback.toMediaItems
 import com.mardous.booming.BuildConfig
 import com.mardous.booming.separation.SourceSeparationBlendDemand
+import com.mardous.booming.separation.SourceSeparationMixModelKey
+import com.mardous.booming.separation.SourceSeparationModelMixSettingsStore
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
+import com.mardous.booming.separation.SourceSeparationStemGainPolicy
+import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
+import com.mardous.booming.separation.toMixModelKey
 import com.mardous.booming.separation.model.contract.SourceSeparationMdxStemLabels
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
 import com.mardous.booming.separation.model.contract.toMdxStemLabels
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFlacPromotionResult
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
@@ -115,7 +122,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
-import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicLong
 
 const val QUEUE_DEBOUNCE = 100L
@@ -129,6 +135,10 @@ class PlayerViewModel(
     private val sourceSeparationRuntime: SourceSeparationRuntimeFacade,
     private val sourceSeparationForegroundWorkerCoordinator:
     SourceSeparationForegroundWorkerCoordinator,
+    private val sourceSeparationMultiStemSelectionStore:
+    SourceSeparationMultiStemPlaybackSelectionStore,
+    private val sourceSeparationMultiStemInstaller: SourceSeparationMultiStemReleaseInstaller,
+    private val sourceSeparationMixSettings: SourceSeparationModelMixSettingsStore,
     private val localSeparationPathReadiness: () -> Boolean,
 ) : ViewModel(), Player.Listener, SourceSeparationForegroundWorkerCallbacks {
 
@@ -205,6 +215,8 @@ class PlayerViewModel(
     private val sourceSeparationCacheRefreshGate = SourceSeparationCacheRefreshGate()
     private var sourceSeparationBlendPreviewJob: Job? = null
     private var sourceSeparationBlendPreviewPending: Float? = null
+    private var sourceSeparationStemGainPreviewJob: Job? = null
+    private var sourceSeparationStemGainPreviewPending: SourceSeparationMultiStemMixUiState? = null
     private var sourceSeparationFlacPromotionJob: Job? = null
     private var sourceSeparationFlacPromotionRunningRequest: SourceSeparationFlacPromotionRequest? = null
     private val sourceSeparationFlacPromotionCancelGeneration = AtomicLong(0L)
@@ -238,6 +250,11 @@ class PlayerViewModel(
             SharingStarted.Eagerly,
             SourceSeparationMdxStemLabels.Default,
         )
+
+    private val _sourceSeparationMultiStemMixStateFlow =
+        MutableStateFlow<SourceSeparationMultiStemMixUiState?>(null)
+    val sourceSeparationMultiStemMixStateFlow =
+        _sourceSeparationMultiStemMixStateFlow.asStateFlow()
 
     private val _currentSourceSeparationCacheAvailableFlow = MutableStateFlow(false)
     val currentSourceSeparationCacheAvailableFlow =
@@ -386,6 +403,28 @@ class PlayerViewModel(
                     SourceSeparationCacheUiState.NotStarted
                 _currentSourceSeparationCacheAvailableFlow.value = false
                 refreshCurrentSourceSeparationCacheAvailable()
+                if (sourceSeparationMultiStemSelectionStore.selectionFlow.value.modelId == null) {
+                    applySourceSeparationSettingsForSong(
+                        song = currentSong,
+                        showMessage = false,
+                    )
+                }
+            }
+            .launchIn(viewModelScope)
+        sourceSeparationMultiStemSelectionStore.selectionFlow
+            .drop(1)
+            .onEach {
+                sourceSeparationPlaybackProcessingSessionGeneration.invalidate()
+                _sourceSeparationMultiStemMixStateFlow.value = null
+                _currentSourceSeparationCacheKeyFlow.value = null
+                _currentSourceSeparationCacheStateFlow.value =
+                    SourceSeparationCacheUiState.NotStarted
+                _currentSourceSeparationCacheAvailableFlow.value = false
+                refreshCurrentSourceSeparationCacheAvailable()
+                applySourceSeparationSettingsForSong(
+                    song = currentSong,
+                    showMessage = false,
+                )
             }
             .launchIn(viewModelScope)
     }
@@ -402,6 +441,7 @@ class PlayerViewModel(
         sourceSeparationPreStartJob?.cancel()
         sourceSeparationReadinessCheckJob?.cancel()
         sourceSeparationBlendPreviewJob?.cancel()
+        sourceSeparationStemGainPreviewJob?.cancel()
         sourceSeparationFlacPromotionJob?.cancel()
         synchronized(sourceSeparationFlacPromotionLock) {
             sourceSeparationFlacPromotionRequests.clear()
@@ -710,7 +750,7 @@ class PlayerViewModel(
             }
             _progressFlow.value = player.contentPosition
             _durationFlow.value = player.contentDuration
-            if (_sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.PerSong ||
+            if (sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.PerSong ||
                 !events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)
             ) {
                 syncSourceSeparationPlaybackIfRequested()
@@ -1314,9 +1354,12 @@ class PlayerViewModel(
         val rememberPerSong = _sourceSeparationRememberPerSongFlow.value
         preferences.edit {
             putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, enabled)
-            if (normalizedBlend != null && !rememberPerSong) {
-                putFloat(KEY_SOURCE_SEPARATION_GLOBAL_BLEND, normalizedBlend)
-            }
+        }
+        if (normalizedBlend != null && !rememberPerSong) {
+            sourceSeparationMixSettings.writeGlobalBlend(
+                currentSourceSeparationMixModelKey(),
+                normalizedBlend,
+            )
         }
 
         val mode = sourceSeparationBlendMode(
@@ -1398,7 +1441,7 @@ class PlayerViewModel(
         sourceSeparationBlendPreviewPending = null
         updateSourceSeparationBlendState(normalizedBlend)
         publishSourceSeparationProcessingIntent(currentSong, normalizedBlend)
-        when (_sourceSeparationBlendModeFlow.value) {
+        when (configuredSourceSeparationMixMode()) {
             SourceSeparationBlendMode.PerSong -> {
                 val song = currentSong
                 if (song != Song.emptySong) {
@@ -1408,12 +1451,11 @@ class PlayerViewModel(
                     }
                 }
             }
-            SourceSeparationBlendMode.Global,
-            SourceSeparationBlendMode.Off -> {
-                preferences.edit {
-                    putFloat(KEY_SOURCE_SEPARATION_GLOBAL_BLEND, normalizedBlend)
-                }
-            }
+            SourceSeparationBlendMode.Global -> sourceSeparationMixSettings.writeGlobalBlend(
+                currentSourceSeparationMixModelKey(),
+                normalizedBlend,
+            )
+            SourceSeparationBlendMode.Off -> Unit
         }
         viewModelScope.launch {
             val args = Bundle().apply {
@@ -1436,7 +1478,7 @@ class PlayerViewModel(
     }
 
     fun previewSourceSeparationBlend(blend: Float) {
-        if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off) return
+        if (sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off) return
         sourceSeparationBlendPreviewPending = blend.coerceIn(0f, 1f)
         if (sourceSeparationBlendPreviewJob?.isActive == true) return
 
@@ -1476,7 +1518,7 @@ class PlayerViewModel(
             playbackState.enabled &&
                     !playbackState.processing &&
                     playbackState.songId == currentSongId
-        if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
+        if (sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
             (!force && currentSongPlaybackReady) ||
             sourceSeparationPlaybackSyncJob?.isActive == true
         ) {
@@ -1489,7 +1531,7 @@ class PlayerViewModel(
                 latestPlaybackState.enabled &&
                         !latestPlaybackState.processing &&
                         latestPlaybackState.songId == latestSongId
-            if (_sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
+            if (sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
                 (!force && latestSongPlaybackReady)
             ) {
                 return@launch
@@ -1538,7 +1580,7 @@ class PlayerViewModel(
         if (!_sourceSeparationAutoStartFlow.value) {
             return false
         }
-        val mode = _sourceSeparationBlendModeFlow.value
+        val mode = sourceSeparationBlendModeFlow.value
         if (mode == SourceSeparationBlendMode.Off) {
             return false
         }
@@ -1672,13 +1714,43 @@ class PlayerViewModel(
         trustFallbackBlend: Boolean = false,
     ) {
         sourceSeparationSettingsApplyJob?.cancel()
-        val mode = _sourceSeparationBlendModeFlow.value
-        if (mode == SourceSeparationBlendMode.Off || song == Song.emptySong) {
-            sourceSeparationSettingsApplyJob = null
-            sourceSeparationAutoStartJob?.cancel()
-            return
+        val mode = sourceSeparationBlendModeFlow.value
+        val configuredMode = if (mode == SourceSeparationBlendMode.Off) {
+            configuredSourceSeparationMixMode()
+        } else {
+            mode
         }
+        val multiStemSelection = sourceSeparationMultiStemSelectionStore.selectionFlow.value
         sourceSeparationSettingsApplyJob = viewModelScope.launch {
+            val multiStemState = multiStemSelection.modelId?.let {
+                withContext(IO) {
+                    resolveSourceSeparationMultiStemMixState(
+                        song = song,
+                        modelId = it,
+                        mode = configuredMode,
+                    )
+                }
+            }
+            if (currentSong.id != song.id ||
+                sourceSeparationMultiStemSelectionStore.selectionFlow.value != multiStemSelection
+            ) {
+                return@launch
+            }
+            _sourceSeparationMultiStemMixStateFlow.value = multiStemState
+            if (mode == SourceSeparationBlendMode.Off || song == Song.emptySong) {
+                sourceSeparationAutoStartJob?.cancel()
+                return@launch
+            }
+            if (multiStemSelection.modelId != null) {
+                multiStemState?.let { state ->
+                    applySourceSeparationMultiStemSettingsForSong(
+                        song = song,
+                        state = state,
+                        showMessage = showMessage,
+                    )
+                }
+                return@launch
+            }
             val blend = sourceSeparationForegroundWorkerCoordinator.blendForSong(
                 mode = mode,
                 song = song,
@@ -1728,7 +1800,7 @@ class PlayerViewModel(
         knownBlend: Float? = null,
         trustKnownBlend: Boolean = false,
     ) {
-        val mode = _sourceSeparationBlendModeFlow.value
+        val mode = sourceSeparationBlendModeFlow.value
         if (!_sourceSeparationAutoStartFlow.value ||
             mode == SourceSeparationBlendMode.Off ||
             song == Song.emptySong
@@ -1767,7 +1839,7 @@ class PlayerViewModel(
     private fun maybePreStartNextSourceSeparation() {
         val current = currentSong
         val next = nextSongForSourceSeparationPreStart(current)
-        val mode = _sourceSeparationBlendModeFlow.value
+        val mode = sourceSeparationBlendModeFlow.value
         val readyWindowCount = _sourceSeparationPlaybackReadyWindowCountFlow.value
         if (!_sourceSeparationAutoStartFlow.value ||
             mode == SourceSeparationBlendMode.Off ||
@@ -1787,7 +1859,7 @@ class PlayerViewModel(
 
         sourceSeparationPreStartJob?.cancel()
         sourceSeparationPreStartJob = viewModelScope.launch(IO) {
-            val latestMode = _sourceSeparationBlendModeFlow.value
+            val latestMode = sourceSeparationBlendModeFlow.value
             if (!_sourceSeparationAutoStartFlow.value ||
                 latestMode == SourceSeparationBlendMode.Off ||
                     currentSong.id != current.id ||
@@ -1926,7 +1998,7 @@ class PlayerViewModel(
             putBoolean(Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING, expectProcessing)
             putBoolean(
                 Playback.EXTRA_SOURCE_SEPARATION_AUTO_SYNC_ON_TRANSITION,
-                _sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.PerSong,
+                sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.PerSong,
             )
             if (blend != null) {
                 putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, blend.coerceIn(0f, 1f))
@@ -1935,6 +2007,32 @@ class PlayerViewModel(
         return sendSourceSeparationPlaybackCommand(
             action = Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
             args = args,
+        )
+    }
+
+    private suspend fun sendSourceSeparationStemGainsCommand(
+        state: SourceSeparationMultiStemMixUiState,
+        persist: Boolean,
+    ): SessionResult {
+        val cacheKey = state.cacheKey
+            ?: return SessionResult(SessionError.ERROR_INVALID_STATE)
+        return sendSourceSeparationPlaybackCommand(
+            action = Playback.SET_SOURCE_SEPARATION_STEM_GAINS,
+            args = Bundle().apply {
+                putString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY, cacheKey)
+                putStringArrayList(
+                    Playback.EXTRA_SOURCE_SEPARATION_STEM_IDS,
+                    ArrayList(state.stemIds),
+                )
+                putFloatArray(
+                    Playback.EXTRA_SOURCE_SEPARATION_STEM_GAINS,
+                    state.gains.toFloatArray(),
+                )
+                putBoolean(
+                    Playback.EXTRA_SOURCE_SEPARATION_PERSIST_STEM_GAINS,
+                    persist,
+                )
+            },
         )
     }
 
@@ -1953,35 +2051,31 @@ class PlayerViewModel(
         val saved = runCatching {
             val runtimeSong = resolveSourceSeparationRuntimeSong(song)
                 ?: return@runCatching false
-            sourceSeparationRuntime.writeBlend(runtimeSong, normalizedBlend)
+            val written = sourceSeparationRuntime.writeBlend(runtimeSong, normalizedBlend)
+            if (written) {
+                removeTemporaryPerSongSourceSeparationBlend(
+                    song,
+                    runtimeSong.toMixModelKey(),
+                )
+            }
+            written
         }.getOrDefault(false)
-        if (saved) {
-            removeTemporaryPerSongSourceSeparationBlend(song)
-        }
         return saved
     }
 
     private fun writeTemporaryPerSongSourceSeparationBlend(song: Song, blend: Float) {
-        preferences.edit {
-            putFloat(temporaryPerSongSourceSeparationBlendKey(song), blend.coerceIn(0f, 1f))
-        }
+        sourceSeparationMixSettings.writePendingSongBlend(
+            currentSourceSeparationMixModelKey(),
+            song,
+            blend,
+        )
     }
 
-    private fun removeTemporaryPerSongSourceSeparationBlend(song: Song) {
-        preferences.edit {
-            remove(temporaryPerSongSourceSeparationBlendKey(song))
-        }
-    }
-
-    private fun temporaryPerSongSourceSeparationBlendKey(song: Song): String {
-        val identity = "${song.id}|${song.uri}|${song.data}"
-        return "$KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND.${sha256Hex(identity)}"
-    }
-
-    private fun sha256Hex(value: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(value.encodeToByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
+    private fun removeTemporaryPerSongSourceSeparationBlend(
+        song: Song,
+        model: SourceSeparationMixModelKey? = currentSourceSeparationMixModelKey(),
+    ) {
+        sourceSeparationMixSettings.removePendingSongBlend(model, song)
     }
 
     private fun readSourceSeparationBlendMode(): SourceSeparationBlendMode {
@@ -2000,10 +2094,25 @@ class PlayerViewModel(
     }
 
     private fun readSourceSeparationGlobalBlend(): Float {
-        return preferences.getFloat(
-            KEY_SOURCE_SEPARATION_GLOBAL_BLEND,
-            SourceSeparationBlendDemand.CENTER_BLEND,
-        ).coerceIn(0f, 1f)
+        return sourceSeparationMixSettings.readGlobalBlend(
+            currentSourceSeparationMixModelKey(),
+        )
+    }
+
+    private fun configuredSourceSeparationMixMode(): SourceSeparationBlendMode =
+        if (_sourceSeparationRememberPerSongFlow.value) {
+            SourceSeparationBlendMode.PerSong
+        } else {
+            SourceSeparationBlendMode.Global
+        }
+
+    private fun currentSourceSeparationMixModelKey(): SourceSeparationMixModelKey? {
+        return sourceSeparationMultiStemSelectionStore.selectionFlow.value.modelId
+            ?.let(SourceSeparationMixModelKey::multiStem)
+            ?: sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value
+                .reference
+                ?.modelId
+                ?.let(SourceSeparationMixModelKey::mdx)
     }
 
     private fun readSourceSeparationAutoStart(): Boolean {
@@ -2096,7 +2205,7 @@ class PlayerViewModel(
 
     private fun publishSourceSeparationProcessingIntent(song: Song, blend: Float) {
         if (!_sourceSeparationAutoStartFlow.value ||
-            _sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
+            sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off ||
             song == Song.emptySong ||
             SourceSeparationBlendDemand.isCentered(blend)
         ) {
@@ -2121,6 +2230,145 @@ class PlayerViewModel(
         if (startsNewGeneration) {
             verifySourceSeparationPathInBackground(song.id)
         }
+    }
+
+    fun previewSourceSeparationStemGain(stemId: String, gain: Float) {
+        if (sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off) return
+        val updated = _sourceSeparationMultiStemMixStateFlow.value
+            ?.withGain(stemId, gain)
+            ?: return
+        _sourceSeparationMultiStemMixStateFlow.value = updated
+        sourceSeparationStemGainPreviewPending = updated
+        if (sourceSeparationStemGainPreviewJob?.isActive == true) return
+
+        sourceSeparationStemGainPreviewJob = viewModelScope.launch {
+            while (true) {
+                val preview = sourceSeparationStemGainPreviewPending ?: break
+                sourceSeparationStemGainPreviewPending = null
+                runCatching {
+                    sendSourceSeparationStemGainsCommand(preview, persist = false)
+                }.onSuccess(::updateSourceSeparationPlaybackState)
+                    .onFailure { error ->
+                        Log.w(TAG, "Failed to preview source separation stem gains", error)
+                    }
+                delay(SOURCE_SEPARATION_BLEND_PREVIEW_THROTTLE_MS)
+            }
+            sourceSeparationStemGainPreviewJob = null
+        }
+    }
+
+    fun setSourceSeparationStemGain(stemId: String, gain: Float) {
+        val updated = _sourceSeparationMultiStemMixStateFlow.value
+            ?.withGain(stemId, gain)
+            ?: return
+        commitSourceSeparationStemMix(updated)
+    }
+
+    fun resetSourceSeparationStemGains() {
+        val neutral = _sourceSeparationMultiStemMixStateFlow.value?.neutralized() ?: return
+        commitSourceSeparationStemMix(neutral)
+    }
+
+    private fun commitSourceSeparationStemMix(state: SourceSeparationMultiStemMixUiState) {
+        val mode = sourceSeparationBlendModeFlow.value
+        if (mode == SourceSeparationBlendMode.Off ||
+            sourceSeparationMultiStemSelectionStore.selectionFlow.value.modelId != state.modelId
+        ) {
+            return
+        }
+        sourceSeparationStemGainPreviewJob?.cancel()
+        sourceSeparationStemGainPreviewJob = null
+        sourceSeparationStemGainPreviewPending = null
+        _sourceSeparationMultiStemMixStateFlow.value = state
+        updateSourceSeparationBlendState(state.demandBlend)
+        val song = currentSong
+        when (mode) {
+            SourceSeparationBlendMode.PerSong -> if (song != Song.emptySong) {
+                state.cacheKey?.let { cacheKey ->
+                    writePendingSourceSeparationStemGains(cacheKey, state)
+                }
+                writeTemporaryPerSongSourceSeparationBlend(song, state.demandBlend)
+            }
+            SourceSeparationBlendMode.Global -> {
+                sourceSeparationMixSettings.writeGlobalStemGains(
+                    model = SourceSeparationMixModelKey.multiStem(state.modelId),
+                    stemIds = state.stemIds,
+                    gains = state.gains,
+                )
+            }
+            SourceSeparationBlendMode.Off -> Unit
+        }
+        publishSourceSeparationProcessingIntent(song, state.demandBlend)
+        if (mode == SourceSeparationBlendMode.PerSong) {
+            viewModelScope.launch(IO) {
+                persistSourceSeparationStemGains(song, state)
+            }
+        }
+        viewModelScope.launch {
+            val result = sendSourceSeparationStemGainsCommand(
+                state,
+                persist = true,
+            )
+            updateSourceSeparationPlaybackState(result)
+            if (result.resultCode == SessionResult.RESULT_SUCCESS) {
+                publishSourceSeparationProcessingIntent(song, state.demandBlend)
+            }
+            maybeAutoStartSourceSeparationForCurrentSong(
+                blend = state.demandBlend,
+                trustKnownBlend = true,
+            )
+            maybePreStartNextSourceSeparation()
+        }
+    }
+
+    private fun persistSourceSeparationStemGains(
+        song: Song,
+        state: SourceSeparationMultiStemMixUiState,
+    ): Boolean {
+        if (song == Song.emptySong || state.cacheKey == null) return false
+        var persistedModel: SourceSeparationMixModelKey? = null
+        val saved = runCatching {
+            val runtimeSong = resolveSourceSeparationRuntimeSong(song)
+                ?.takeIf { resolved -> resolved.cacheKey == state.cacheKey }
+                ?: return@runCatching false
+            val written = sourceSeparationRuntime.writeStemGains(
+                runtimeSong,
+                SourceSeparationStemGainPolicy.orderedMap(state.stemIds, state.gains),
+            )
+            if (written) persistedModel = runtimeSong.toMixModelKey()
+            written
+        }.getOrDefault(false)
+        if (saved) {
+            removePendingSourceSeparationStemGains(state.cacheKey)
+            removeTemporaryPerSongSourceSeparationBlend(
+                song,
+                persistedModel,
+            )
+        }
+        return saved
+    }
+
+    private fun readPendingSourceSeparationStemGains(
+        cacheKey: String,
+        stemIds: List<String>,
+    ): Map<String, Float>? = sourceSeparationMixSettings.readPendingStemGains(
+        cacheKey,
+        stemIds,
+    )
+
+    private fun writePendingSourceSeparationStemGains(
+        cacheKey: String,
+        state: SourceSeparationMultiStemMixUiState,
+    ) {
+        sourceSeparationMixSettings.writePendingStemGains(
+            cacheKey = cacheKey,
+            stemIds = state.stemIds,
+            gains = state.gains,
+        )
+    }
+
+    private fun removePendingSourceSeparationStemGains(cacheKey: String) {
+        sourceSeparationMixSettings.removePendingStemGains(cacheKey)
     }
 
     private fun syncCompletedSourceSeparationPlaybackIfPaused(song: Song) {
@@ -2151,6 +2399,111 @@ class PlayerViewModel(
         }
     }
 
+    private fun resolveSourceSeparationMultiStemMixState(
+        song: Song,
+        modelId: String,
+        mode: SourceSeparationBlendMode,
+    ): SourceSeparationMultiStemMixUiState? {
+        val installed = sourceSeparationMultiStemInstaller.installed(modelId) ?: return null
+        val executable = runCatching {
+            installed.sidecarFile.bufferedReader().use { reader ->
+                SourceSeparationMultiTensorExecutableContractLoader.load(reader.readText())
+            }
+        }.getOrNull() ?: return null
+        val descriptors = executable.modelContract.stemContract.stems.sortedBy { it.order }
+        if (descriptors.isEmpty()) return null
+        val runtimeSong = song.takeUnless { it == Song.emptySong }
+            ?.let(::resolveSourceSeparationRuntimeSong)
+        val cacheKey = runtimeSong?.cacheKey
+        val stemIds = descriptors.map { descriptor -> descriptor.stemId }
+        val globalGains = if (mode == SourceSeparationBlendMode.Global) {
+            sourceSeparationMixSettings.readGlobalStemGains(
+                SourceSeparationMixModelKey.multiStem(modelId),
+                stemIds,
+            )
+        } else {
+            null
+        }
+        val storedGains = if (mode == SourceSeparationBlendMode.PerSong) {
+            runtimeSong?.let { resolved ->
+                runCatching { sourceSeparationRuntime.readStemGains(resolved) }.getOrNull()
+            }
+        } else {
+            null
+        }
+        val pendingGains = if (mode == SourceSeparationBlendMode.PerSong) {
+            cacheKey?.let { key -> readPendingSourceSeparationStemGains(key, stemIds) }
+        } else {
+            null
+        }
+        val pendingOrderedGains = pendingGains?.let { gainsByStemId ->
+            SourceSeparationStemGainPolicy.orderedGains(stemIds, gainsByStemId)
+        }
+        if (pendingOrderedGains != null && runtimeSong != null && cacheKey != null) {
+            val migrated = runCatching {
+                sourceSeparationRuntime.writeStemGains(
+                    runtimeSong,
+                    SourceSeparationStemGainPolicy.orderedMap(stemIds, pendingOrderedGains),
+                )
+            }.getOrDefault(false)
+            if (migrated) removePendingSourceSeparationStemGains(cacheKey)
+        }
+        val storedOrderedGains = storedGains?.let { gainsByStemId ->
+            SourceSeparationStemGainPolicy.orderedGains(stemIds, gainsByStemId)
+        }
+        val globalOrderedGains = globalGains?.let { gainsByStemId ->
+            SourceSeparationStemGainPolicy.orderedGains(stemIds, gainsByStemId)
+        }
+        val orderedGains = globalOrderedGains
+            ?: pendingOrderedGains
+            ?: storedOrderedGains
+            ?: List(stemIds.size) { SourceSeparationStemGainPolicy.NEUTRAL_GAIN }
+        return SourceSeparationMultiStemMixUiState(
+            modelId = modelId,
+            songId = song.id.takeUnless { song == Song.emptySong },
+            cacheKey = cacheKey,
+            stems = descriptors.mapIndexed { index, descriptor ->
+                SourceSeparationStemGainUiState(
+                    stemId = descriptor.stemId,
+                    semanticId = descriptor.semanticId,
+                    canonicalLabel = descriptor.canonicalLabel,
+                    gain = orderedGains[index],
+                )
+            },
+        )
+    }
+
+    private suspend fun applySourceSeparationMultiStemSettingsForSong(
+        song: Song,
+        state: SourceSeparationMultiStemMixUiState,
+        showMessage: Boolean,
+    ) {
+        val blend = state.demandBlend
+        updateSourceSeparationBlendState(blend)
+        sendSourceSeparationStemGainsCommand(state, persist = false)
+        val expectProcessingImmediately = _sourceSeparationAutoStartFlow.value &&
+                state.requiresSeparatedOutput
+        if (expectProcessingImmediately) {
+            publishSourceSeparationProcessingIntent(song, blend)
+            sourceSeparationForegroundWorkerCoordinator.requestPlaybackDemandSong(song)
+        }
+        val immediateResult = sendSourceSeparationPlaybackEnabledCommand(
+            enabled = true,
+            blend = blend,
+            showMessage = showMessage,
+            expectProcessing = expectProcessingImmediately,
+        )
+        updateSourceSeparationPlaybackState(immediateResult)
+        if (expectProcessingImmediately) {
+            publishSourceSeparationProcessingIntent(song, blend)
+        } else {
+            maybeAutoStartSourceSeparationForCurrentSong(
+                blend = blend,
+                trustKnownBlend = true,
+            )
+        }
+    }
+
     private fun sourceSeparationPlaybackHasPlayIntent(): Boolean =
         mediaController?.playWhenReady ?: _isPlayingFlow.value
 
@@ -2165,7 +2518,7 @@ class PlayerViewModel(
             }
             val processingIntentStillActive =
                 _sourceSeparationPlaybackStateFlow.value.processing &&
-                        _sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.Off
+                        sourceSeparationBlendModeFlow.value != SourceSeparationBlendMode.Off
             if (!ready &&
                 currentSong.id == songId &&
                 (!requireProcessingIntent || processingIntentStillActive)
@@ -2268,6 +2621,26 @@ class PlayerViewModel(
             songId = songId,
             message = message,
         )
+
+        val stemMixState = _sourceSeparationMultiStemMixStateFlow.value
+        val cacheKey = extras.getString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY)
+        val stemIds = extras.getStringArrayList(
+            Playback.EXTRA_SOURCE_SEPARATION_STEM_IDS,
+        ).orEmpty()
+        val stemGains = extras.getFloatArray(
+            Playback.EXTRA_SOURCE_SEPARATION_STEM_GAINS,
+        )?.toList().orEmpty()
+        if (stemMixState != null &&
+            cacheKey == stemMixState.cacheKey &&
+            stemIds == stemMixState.stemIds &&
+            stemGains.size == stemIds.size
+        ) {
+            _sourceSeparationMultiStemMixStateFlow.value = stemMixState.copy(
+                stems = stemMixState.stems.mapIndexed { index, stem ->
+                    stem.copy(gain = SourceSeparationStemGainPolicy.normalize(stemGains[index]))
+                },
+            )
+        }
     }
 
     fun playSongAt(newPosition: Int) {
@@ -2591,10 +2964,6 @@ class PlayerViewModel(
             "source_separation.playback_enabled"
         private const val KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG =
             "source_separation.remember_per_song"
-        private const val KEY_SOURCE_SEPARATION_GLOBAL_BLEND =
-            "source_separation.global_blend"
-        private const val KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND =
-            "source_separation.per_song_blend.pending"
         private const val SOURCE_SEPARATION_BLEND_PREVIEW_THROTTLE_MS = 33L
     }
 }
@@ -2727,6 +3096,64 @@ data class SourceSeparationPlaybackUiState(
     val songId: Long? = null,
     val message: String? = null,
 )
+
+data class SourceSeparationStemGainUiState(
+    val stemId: String,
+    val semanticId: String,
+    val canonicalLabel: String,
+    val gain: Float,
+) {
+    init {
+        require(stemId.isNotBlank()) { "Stem gain UI ID is empty." }
+        require(canonicalLabel.isNotBlank()) { "Stem gain UI label is empty." }
+        require(gain.isFinite() && gain in
+                SourceSeparationStemGainPolicy.MIN_GAIN..SourceSeparationStemGainPolicy.MAX_GAIN
+        ) { "Stem gain UI value is invalid." }
+    }
+}
+
+data class SourceSeparationMultiStemMixUiState(
+    val modelId: String,
+    val songId: Long?,
+    val cacheKey: String?,
+    val stems: List<SourceSeparationStemGainUiState>,
+) {
+    init {
+        require(modelId.isNotBlank()) { "Multi-stem mix model ID is empty." }
+        require(stems.isNotEmpty()) { "Multi-stem mix has no stems." }
+        require(stems.map(SourceSeparationStemGainUiState::stemId).distinct().size == stems.size) {
+            "Multi-stem mix IDs must be unique."
+        }
+    }
+
+    val stemIds: List<String>
+        get() = stems.map(SourceSeparationStemGainUiState::stemId)
+
+    val gains: List<Float>
+        get() = stems.map(SourceSeparationStemGainUiState::gain)
+
+    val requiresSeparatedOutput: Boolean
+        get() = SourceSeparationStemGainPolicy.requiresSeparatedOutput(gains)
+
+    val demandBlend: Float
+        get() = SourceSeparationStemGainPolicy.demandBlend(gains)
+
+    fun withGain(stemId: String, gain: Float): SourceSeparationMultiStemMixUiState? {
+        if (stems.none { stem -> stem.stemId == stemId }) return null
+        val normalized = SourceSeparationStemGainPolicy.normalize(gain)
+        return copy(
+            stems = stems.map { stem ->
+                if (stem.stemId == stemId) stem.copy(gain = normalized) else stem
+            },
+        )
+    }
+
+    fun neutralized(): SourceSeparationMultiStemMixUiState = copy(
+        stems = stems.map { stem ->
+            stem.copy(gain = SourceSeparationStemGainPolicy.NEUTRAL_GAIN)
+        },
+    )
+}
 
 enum class SourceSeparationDecodeModeUiState {
     FullSong,

@@ -332,8 +332,12 @@ fun CoverLyricsScreen(
         val sourceSeparationBlendStemLabels by playerViewModel
             .sourceSeparationBlendStemLabelsFlow
             .collectAsStateWithLifecycle()
+        val sourceSeparationMultiStemMixState by playerViewModel
+            .sourceSeparationMultiStemMixStateFlow
+            .collectAsStateWithLifecycle()
         val quickBlendExpanded = showSourceSeparationQuickControls &&
-                sourceSeparationBlendMode != SourceSeparationBlendMode.Off
+                sourceSeparationBlendMode != SourceSeparationBlendMode.Off &&
+                sourceSeparationMultiStemMixState == null
         val quickBlendProcessingProgressState =
             sourceSeparationPlaybackProcessingProgressState.takeIf {
                 quickBlendExpanded
@@ -405,10 +409,14 @@ fun CoverLyricsScreen(
                             sourceSeparationBlendStemLabels.instrumentalCanonicalLabel,
                         ),
                         onEnableSeparatedPlayback = {
-                            playerViewModel.setSourceSeparationPlaybackEnabled(
-                                enabled = true,
-                                blend = sourceSeparationPlaybackState.blend
-                            )
+                            if (sourceSeparationMultiStemMixState != null) {
+                                onSourceSeparationPanelLongClick()
+                            } else {
+                                playerViewModel.setSourceSeparationPlaybackEnabled(
+                                    enabled = true,
+                                    blend = sourceSeparationPlaybackState.blend
+                                )
+                            }
                         },
                         onDisableSeparatedPlayback = {
                             playerViewModel.setSourceSeparationPlaybackEnabled(false)

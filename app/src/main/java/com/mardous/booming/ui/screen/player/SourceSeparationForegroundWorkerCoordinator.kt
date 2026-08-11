@@ -12,6 +12,8 @@ import com.mardous.booming.separation.SourceSeparationAdmittedGpuRuntimeMismatch
 import com.mardous.booming.separation.SourceSeparationBlendDemand
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
+import com.mardous.booming.separation.SourceSeparationMixModelKey
+import com.mardous.booming.separation.SourceSeparationModelMixSettingsStore
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionSnapshot
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPauseReason
@@ -20,6 +22,7 @@ import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
 import com.mardous.booming.separation.SourceSeparationRuntimeUnavailableReason
+import com.mardous.booming.separation.toMixModelKey
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunJournal
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheStatus
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
@@ -69,7 +72,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -79,6 +81,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private val context: Context,
     private val preferences: SharedPreferences,
     private val sourceSeparationRuntime: SourceSeparationRuntimeFacade,
+    private val sourceSeparationMixSettings: SourceSeparationModelMixSettingsStore =
+        SourceSeparationModelMixSettingsStore(preferences),
     private val independentRunRecovery: SourceSeparationIndependentRunRecovery? = null,
     private val multiStemIndependentRunRecovery:
         SourceSeparationMultiStemIndependentRunRecovery? = null,
@@ -756,18 +760,28 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         trustFallbackBlend: Boolean = false,
     ): Float {
         return when (mode) {
-            SourceSeparationBlendMode.Off,
+            SourceSeparationBlendMode.Off ->
+                fallbackBlend ?: SourceSeparationBlendDemand.CENTER_BLEND
             SourceSeparationBlendMode.Global -> {
-                fallbackBlend ?: readGlobalBlend()
+                fallbackBlend?.takeIf { trustFallbackBlend } ?: readGlobalBlend()
             }
             SourceSeparationBlendMode.PerSong -> {
                 fallbackBlend?.takeIf { trustFallbackBlend } ?: withContext(Dispatchers.IO) {
-                    readTemporaryPerSongBlend(song)
-                        ?.also { blend -> migrateTemporaryPerSongBlend(song, blend) }
-                        ?: resolveSong(song)?.let { resolved ->
-                            runCatching { sourceSeparationRuntime.readBlend(resolved) }.getOrNull()
-                        }
-                        ?: SourceSeparationBlendDemand.CENTER_BLEND
+                    val resolved = resolveSong(song)
+                    val pending = readTemporaryPerSongBlend(
+                        song,
+                        resolved?.toMixModelKey() ?: currentMixModelKey(),
+                    )
+                    if (pending != null) {
+                        if (resolved != null) savePerSongBlend(song, resolved, pending)
+                        pending
+                    } else {
+                        resolved?.let { runtimeSong ->
+                            runCatching {
+                                sourceSeparationRuntime.readBlend(runtimeSong)
+                            }.getOrNull()
+                        } ?: SourceSeparationBlendDemand.CENTER_BLEND
+                    }
                 }
             }
         }.coerceIn(0f, 1f)
@@ -776,8 +790,12 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     suspend fun recordedBlendForSong(song: Song): Float? {
         if (song == Song.emptySong) return null
         return withContext(Dispatchers.IO) {
-            readTemporaryPerSongBlend(song) ?: runCatching {
-                resolveSong(song)?.let(sourceSeparationRuntime::readBlend)
+            val resolved = resolveSong(song)
+            readTemporaryPerSongBlend(
+                song,
+                resolved?.toMixModelKey() ?: currentMixModelKey(),
+            ) ?: runCatching {
+                resolved?.let(sourceSeparationRuntime::readBlend)
             }.getOrNull()
         }?.coerceIn(0f, 1f)
     }
@@ -2106,10 +2124,14 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     }
 
     private fun readGlobalBlend(): Float {
-        return preferences.getFloat(
-            KEY_SOURCE_SEPARATION_GLOBAL_BLEND,
-            SourceSeparationBlendDemand.CENTER_BLEND,
-        ).coerceIn(0f, 1f)
+        return sourceSeparationMixSettings.readGlobalBlend(currentMixModelKey())
+    }
+
+    private fun currentMixModelKey(): SourceSeparationMixModelKey? {
+        return multiStemSelectionFlow.value.modelId
+            ?.let(SourceSeparationMixModelKey::multiStem)
+            ?: activeSelectionFlow.value.reference?.modelId
+                ?.let(SourceSeparationMixModelKey::mdx)
     }
 
     private fun songNeedsSeparatedOutputForCurrentMode(song: Song): Boolean {
@@ -2125,10 +2147,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
 
     private fun recordedBlendForSongBlocking(song: Song): Float? {
         if (song == Song.emptySong) return null
-        return runCatching {
-            resolveSong(song)?.let(sourceSeparationRuntime::readBlend)
+        val resolved = runCatching { resolveSong(song) }.getOrNull()
+        return readTemporaryPerSongBlend(
+            song,
+            resolved?.toMixModelKey() ?: currentMixModelKey(),
+        ) ?: runCatching {
+            resolved?.let(sourceSeparationRuntime::readBlend)
         }.getOrNull()
-            ?: readTemporaryPerSongBlend(song)
     }
 
     private fun savePerSongBlend(song: Song, blend: Float): Boolean {
@@ -2145,63 +2170,29 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             sourceSeparationRuntime.writeBlend(resolved, blend.coerceIn(0f, 1f))
         }.getOrDefault(false)
         if (saved) {
-            removeTemporaryPerSongBlend(song)
+            removeTemporaryPerSongBlend(song, resolved.toMixModelKey())
         }
         return saved
-    }
-
-    private fun migrateTemporaryPerSongBlend(song: Song): Boolean {
-        val blend = readTemporaryPerSongBlend(song) ?: return false
-        return migrateTemporaryPerSongBlend(song, blend)
     }
 
     private fun migrateTemporaryPerSongBlend(
         song: Song,
         resolved: SourceSeparationRuntimeSong,
     ): Boolean {
-        val blend = readTemporaryPerSongBlend(song) ?: return false
+        val blend = readTemporaryPerSongBlend(song, resolved.toMixModelKey()) ?: return false
         return savePerSongBlend(song, resolved, blend)
     }
 
-    private fun migrateTemporaryPerSongBlend(song: Song, blend: Float): Boolean {
-        val saved = runCatching {
-            resolveSong(song)?.let { resolved ->
-                sourceSeparationRuntime.writeBlend(resolved, blend.coerceIn(0f, 1f))
-            } ?: false
-        }.getOrDefault(false)
-        if (saved) {
-            removeTemporaryPerSongBlend(song)
-        }
-        return saved
-    }
+    private fun readTemporaryPerSongBlend(
+        song: Song,
+        model: SourceSeparationMixModelKey?,
+    ): Float? = sourceSeparationMixSettings.readPendingSongBlend(model, song)
 
-    private fun readTemporaryPerSongBlend(song: Song): Float? {
-        val key = temporaryPerSongBlendKey(song)
-        return if (preferences.contains(key)) {
-            preferences.getFloat(
-                key,
-                SourceSeparationBlendDemand.CENTER_BLEND,
-            ).coerceIn(0f, 1f)
-        } else {
-            null
-        }
-    }
-
-    private fun removeTemporaryPerSongBlend(song: Song) {
-        preferences.edit {
-            remove(temporaryPerSongBlendKey(song))
-        }
-    }
-
-    private fun temporaryPerSongBlendKey(song: Song): String {
-        val identity = "${song.id}|${song.uri}|${song.data}"
-        return "$KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND.${sha256Hex(identity)}"
-    }
-
-    private fun sha256Hex(value: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(value.encodeToByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
+    private fun removeTemporaryPerSongBlend(
+        song: Song,
+        model: SourceSeparationMixModelKey?,
+    ) {
+        sourceSeparationMixSettings.removePendingSongBlend(model, song)
     }
 
     private fun newFullRequest(
@@ -2535,10 +2526,6 @@ private const val KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED =
     "source_separation.playback_enabled"
 private const val KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG =
     "source_separation.remember_per_song"
-private const val KEY_SOURCE_SEPARATION_GLOBAL_BLEND =
-    "source_separation.global_blend"
-private const val KEY_SOURCE_SEPARATION_TEMP_PER_SONG_BLEND =
-    "source_separation.per_song_blend.pending"
 private const val SOURCE_SEPARATION_FOREGROUND_WORKER_IDLE_MS = 250L
 private const val SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS = 50L
 private const val SOURCE_SEPARATION_DEBUG_WINDOW_SAMPLE_LIMIT = 128

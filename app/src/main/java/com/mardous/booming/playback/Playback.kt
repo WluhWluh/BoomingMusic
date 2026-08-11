@@ -19,6 +19,8 @@ object Playback {
     const val CLEAN_SOURCE_SEPARATION_TEMPORARY_CACHE =
         "com.mardous.booming.command.source_separation.clean_temporary_cache"
     const val SET_SOURCE_SEPARATION_BLEND = "com.mardous.booming.command.source_separation.blend"
+    const val SET_SOURCE_SEPARATION_STEM_GAINS =
+        "com.mardous.booming.command.source_separation.stem_gains"
     const val NOTIFY_SOURCE_SEPARATION_CACHE_DELETED =
         "com.mardous.booming.command.source_separation.cache_deleted"
     const val TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER =
@@ -52,5 +54,10 @@ object Playback {
     const val EXTRA_SOURCE_SEPARATION_CACHE_KEY = "source_separation_cache_key"
     const val EXTRA_SOURCE_SEPARATION_CACHE_KEYS = "source_separation_cache_keys"
     const val EXTRA_SOURCE_SEPARATION_PERSIST_BLEND = "source_separation_persist_blend"
+    const val EXTRA_SOURCE_SEPARATION_STEM_IDS = "source_separation_stem_ids"
+    const val EXTRA_SOURCE_SEPARATION_STEM_LABELS = "source_separation_stem_labels"
+    const val EXTRA_SOURCE_SEPARATION_STEM_GAINS = "source_separation_stem_gains"
+    const val EXTRA_SOURCE_SEPARATION_PERSIST_STEM_GAINS =
+        "source_separation_persist_stem_gains"
     const val EXTRA_SOURCE_SEPARATION_TRACE_MARKER = "source_separation_trace_marker"
 }

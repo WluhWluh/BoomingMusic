@@ -101,10 +101,13 @@ import com.mardous.booming.playback.renderer.AlacWorkaroundCodecSelector
 import com.mardous.booming.playback.renderer.BoomingMusicRenderersFactory
 import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
 import com.mardous.booming.separation.SourceSeparationBlendDemand
+import com.mardous.booming.separation.SourceSeparationMixModelKey
+import com.mardous.booming.separation.SourceSeparationModelMixSettingsStore
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
+import com.mardous.booming.separation.SourceSeparationStemGainPolicy
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionSnapshot
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
@@ -200,6 +203,7 @@ class PlaybackService :
     private val audioOutputObserver: AudioOutputObserver by inject()
     private val repository: Repository by inject()
     private val sourceSeparationRuntime: SourceSeparationRuntimeFacade by inject()
+    private val sourceSeparationMixSettings: SourceSeparationModelMixSettingsStore by inject()
     private val sourceSeparationPresetRepository: SourceSeparationPresetRepository by inject()
     private val sourceSeparationMultiStemSelectionStore:
             SourceSeparationMultiStemPlaybackSelectionStore by inject()
@@ -236,6 +240,7 @@ class PlaybackService :
     private var hasSetUnshuffledOrder = false
     private var stopIndex = -1
     private var sourceSeparationPlaybackSession: SourceSeparationPlaybackSession? = null
+    private var sourceSeparationRequestedStemMix: SourceSeparationRequestedStemMix? = null
     private var sourceSeparationPlaybackRequested = false
     private var sourceSeparationPlaybackAutoSyncOnTransition = true
     private var sourceSeparationPlaybackIsProcessing = false
@@ -566,6 +571,7 @@ class PlaybackService :
         availableCommands.add(SessionCommand(Playback.SYNC_SOURCE_SEPARATION_PLAYBACK, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.CLEAN_SOURCE_SEPARATION_TEMPORARY_CACHE, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.SET_SOURCE_SEPARATION_BLEND, Bundle.EMPTY))
+        availableCommands.add(SessionCommand(Playback.SET_SOURCE_SEPARATION_STEM_GAINS, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.NOTIFY_SOURCE_SEPARATION_CACHE_DELETED, Bundle.EMPTY))
         availableCommands.add(SessionCommand(Playback.TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER, Bundle.EMPTY))
         if (BuildConfig.DEBUG) {
@@ -989,6 +995,32 @@ class PlaybackService :
                         blend = blend,
                         persist = args.getBoolean(
                             Playback.EXTRA_SOURCE_SEPARATION_PERSIST_BLEND,
+                            true,
+                        ),
+                    )
+                }
+            }
+
+            Playback.SET_SOURCE_SEPARATION_STEM_GAINS -> {
+                val cacheKey = args.getString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY).orEmpty()
+                val stemIds = args.getStringArrayList(
+                    Playback.EXTRA_SOURCE_SEPARATION_STEM_IDS,
+                ).orEmpty()
+                val gains = args.getFloatArray(
+                    Playback.EXTRA_SOURCE_SEPARATION_STEM_GAINS,
+                )?.toList().orEmpty()
+                traceSourceSeparationPlayback(
+                    "command.setStemGains",
+                    "cache=${cacheKey.take(12)} stems=${stemIds.joinToString()} " +
+                            "gains=${gains.joinToString()}",
+                )
+                serviceScope.future {
+                    setSourceSeparationStemGains(
+                        cacheKey = cacheKey,
+                        stemIds = stemIds,
+                        gains = gains,
+                        commit = args.getBoolean(
+                            Playback.EXTRA_SOURCE_SEPARATION_PERSIST_STEM_GAINS,
                             true,
                         ),
                     )
@@ -2118,6 +2150,12 @@ class PlaybackService :
                     stemChannelCount = channelCount,
                 )
             }
+            val blendEndpointStemIds = manifest.mdxBlendEndpointStemIds()
+            val stemGains = resolveSourceSeparationSessionStemGains(
+                runtimeSong = runtimeSong,
+                stemIds = stemIds,
+                blendEndpointStemIds = blendEndpointStemIds,
+            )
             val session = SourceSeparationPlaybackSession(
                 songId = song.id,
                 sessionId = checkId,
@@ -2126,7 +2164,9 @@ class PlaybackService :
                 cacheKey = runtimeSong.cacheKey,
                 stemFiles = stemFiles,
                 stemIds = stemIds,
-                blendEndpointStemIds = manifest.mdxBlendEndpointStemIds(),
+                stemCanonicalLabels = output.stems.map { stem -> stem.canonicalLabel },
+                stemGains = stemGains,
+                blendEndpointStemIds = blendEndpointStemIds,
                 inputMode = InputMode.OriginalSource,
                 stemSampleRate = output.outputSampleRate,
                 stemChannelCount = channelCount,
@@ -2485,6 +2525,13 @@ class PlaybackService :
                 stemChannelCount = channelCount,
             )
         }
+        val blendEndpointStemIds = manifest.mdxBlendEndpointStemIds()
+        val stemGains = resolveSourceSeparationSessionStemGains(
+            runtimeSong = activeSession.runtimeSong,
+            stemIds = stemIds,
+            blendEndpointStemIds = blendEndpointStemIds,
+            fallback = activeSession.stemGains,
+        )
         val session = SourceSeparationPlaybackSession(
             songId = song.id,
             sessionId = checkId,
@@ -2493,7 +2540,9 @@ class PlaybackService :
             cacheKey = manifest.cacheKey,
             stemFiles = stemFiles,
             stemIds = stemIds,
-            blendEndpointStemIds = manifest.mdxBlendEndpointStemIds(),
+            stemCanonicalLabels = output.stems.map { stem -> stem.canonicalLabel },
+            stemGains = stemGains,
+            blendEndpointStemIds = blendEndpointStemIds,
             inputMode = InputMode.OriginalSource,
             stemSampleRate = output.outputSampleRate,
             stemChannelCount = channelCount,
@@ -2619,9 +2668,164 @@ class PlaybackService :
         return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
     }
 
+    private suspend fun setSourceSeparationStemGains(
+        cacheKey: String,
+        stemIds: List<String>,
+        gains: List<Float>,
+        commit: Boolean,
+    ): SessionResult {
+        val normalizedByStemId = runCatching {
+            require(cacheKey.isNotBlank()) { "The stem gain cache key is empty." }
+            SourceSeparationStemGainPolicy.orderedMap(stemIds, gains)
+        }.getOrElse { error ->
+            traceSourceSeparationPlayback(
+                "playback.setStemGains.rejected",
+                error.message.orEmpty(),
+            )
+            return sourceSeparationPlaybackResult(SessionError.ERROR_BAD_VALUE)
+        }
+        val normalizedGains = stemIds.map(normalizedByStemId::getValue)
+        val demandBlend = SourceSeparationStemGainPolicy.demandBlend(normalizedGains)
+        val previousBlend = sourceSeparationMixProcessor.blend
+        val persistPerSong = commit && preferences.getBoolean(
+            KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG,
+            true,
+        )
+        val request = SourceSeparationRequestedStemMix(
+            cacheKey = cacheKey,
+            stemIds = stemIds,
+            gains = normalizedGains,
+            persist = persistPerSong,
+        )
+        val activeSession = sourceSeparationPlaybackSession
+        val targetsActiveSession = activeSession?.cacheKey == cacheKey
+        if (activeSession != null && targetsActiveSession &&
+            (activeSession.blendEndpointStemIds != null || activeSession.stemIds != stemIds)
+        ) {
+            traceSourceSeparationPlayback(
+                "playback.setStemGains.rejected",
+                "The active session does not expose the requested independent stem set.",
+            )
+            return sourceSeparationPlaybackResult(SessionError.ERROR_BAD_VALUE)
+        }
+        sourceSeparationRequestedStemMix = request
+
+        val appliesToActiveSession = activeSession != null && targetsActiveSession
+        val affectsCurrentPlayback = activeSession == null || targetsActiveSession
+        if (affectsCurrentPlayback) {
+            sourceSeparationMixProcessor.setBlend(demandBlend)
+        }
+        if (appliesToActiveSession) {
+            activeSession.stemGains = normalizedGains
+            sourceSeparationMixProcessor.setStemGains(normalizedGains)
+        }
+
+        if (affectsCurrentPlayback) {
+            if (SourceSeparationBlendDemand.isCentered(demandBlend)) {
+                setSourceSeparationPlaybackExpectProcessing(false)
+                cancelSourceSeparationPlaybackReadinessMonitor("neutralStemGains")
+                if (sourceSeparationPlaybackIsProcessing &&
+                    sourceSeparationPlaybackProcessingCacheKey == null
+                ) {
+                    clearSourceSeparationPlaybackProcessing(broadcast = false)
+                }
+            } else {
+                updateSourceSeparationPlaybackReadinessMonitor(activeSession)
+            }
+        }
+
+        if (persistPerSong && appliesToActiveSession) {
+            val identity = activeSession.modelAwareCachePlayback.manifest.identity
+            serviceScope.launch(IO) {
+                sourceSeparationRuntime.writeStemGains(identity, normalizedByStemId)
+            }
+        }
+        if (affectsCurrentPlayback && activeSession != null &&
+            !player.playWhenReady &&
+            !player.isPlaying &&
+            player.playbackState != Player.STATE_BUFFERING
+        ) {
+            sourceSeparationPausedBlendFlushPending = true
+        }
+        broadcastSourceSeparationPlaybackChanged()
+        if (affectsCurrentPlayback &&
+            SourceSeparationBlendDemand.requiresSeparatedOutput(previousBlend) !=
+            SourceSeparationBlendDemand.requiresSeparatedOutput(demandBlend)
+        ) {
+            maybePreStartNextSourceSeparation("stemGainDemandChanged")
+        }
+        if (commit &&
+            sourceSeparationPlaybackRequested &&
+            SourceSeparationStemGainPolicy.requiresSeparatedOutput(normalizedGains)
+        ) {
+            val expectProcessing = preferences.getBoolean(
+                SOURCE_SEPARATION_AUTO_START,
+                DEFAULT_SOURCE_SEPARATION_AUTO_START,
+            )
+            setSourceSeparationPlaybackExpectProcessing(expectProcessing)
+            return ensureSourceSeparationPlaybackReady(
+                showUnavailableMessage = false,
+                resumeWhenReady = false,
+                allowNewSession = true,
+                expectProcessing = expectProcessing,
+                gateOnUnreadyWindow = shouldGateCurrentSourceSeparationWindow(),
+                requiredReadyWindowCount = 1,
+            )
+        }
+        return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+    }
+
     private fun applySourceSeparationBlend(blend: Float) {
         val normalizedBlend = blend.coerceIn(0f, 1f)
         sourceSeparationMixProcessor.setBlend(normalizedBlend)
+    }
+
+    private suspend fun resolveSourceSeparationSessionStemGains(
+        runtimeSong: SourceSeparationRuntimeSong,
+        stemIds: List<String>,
+        blendEndpointStemIds: List<String>?,
+        fallback: List<Float>? = null,
+    ): List<Float> {
+        if (blendEndpointStemIds != null) return emptyList()
+        val requestedMix = sourceSeparationRequestedStemMix
+            ?.takeIf { request -> request.cacheKey == runtimeSong.cacheKey }
+        val requested = requestedMix?.orderedGains(stemIds)
+        if (requested != null) {
+            if (requestedMix.persist) {
+                val saved = withContext(IO) {
+                    sourceSeparationRuntime.writeStemGains(
+                        runtimeSong,
+                        SourceSeparationStemGainPolicy.orderedMap(stemIds, requested),
+                    )
+                }
+                if (saved && sourceSeparationRequestedStemMix === requestedMix) {
+                    sourceSeparationRequestedStemMix = requestedMix.copy(persist = false)
+                }
+            }
+            return requested
+        }
+        fallback?.takeIf { gains -> gains.size == stemIds.size }?.let {
+            return SourceSeparationStemGainPolicy.normalize(it)
+        }
+        if (!preferences.getBoolean(KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG, true)) {
+            val global = sourceSeparationMixSettings.readGlobalStemGains(
+                model = SourceSeparationMixModelKey.multiStem(runtimeSong.modelId),
+                stemIds = stemIds,
+            )
+            if (global != null) {
+                return SourceSeparationStemGainPolicy.orderedGains(stemIds, global)
+                    ?: List(stemIds.size) {
+                        SourceSeparationStemGainPolicy.NEUTRAL_GAIN
+                    }
+            }
+            return List(stemIds.size) { SourceSeparationStemGainPolicy.NEUTRAL_GAIN }
+        }
+        val persisted = withContext(IO) {
+            sourceSeparationRuntime.readStemGains(runtimeSong)
+        }
+        return persisted?.let { gainsByStemId ->
+            SourceSeparationStemGainPolicy.orderedGains(stemIds, gainsByStemId)
+        } ?: List(stemIds.size) { SourceSeparationStemGainPolicy.NEUTRAL_GAIN }
     }
 
     private fun observeSourceSeparationForegroundWorker() {
@@ -2916,6 +3120,11 @@ class PlaybackService :
         session: SourceSeparationPlaybackSession,
         positionMs: Long,
     ) {
+        if (session.blendEndpointStemIds == null) {
+            sourceSeparationMixProcessor.setBlend(
+                SourceSeparationStemGainPolicy.demandBlend(session.stemGains),
+            )
+        }
         traceSourceSeparationPlayback(
             "processor.enable.request",
             "songId=${session.songId} position=$positionMs mode=${session.inputMode} " +
@@ -2924,6 +3133,7 @@ class PlaybackService :
         sourceSeparationMixProcessor.enable(
             stemFiles = session.stemFiles,
             stemIds = session.stemIds,
+            initialGains = session.stemGains,
             blendEndpointStemIds = session.blendEndpointStemIds,
             positionMs = positionMs,
             inputMode = session.inputMode,
@@ -4040,6 +4250,35 @@ class PlaybackService :
             sourceSeparationPlaybackSession?.let { session ->
                 putLong(Playback.EXTRA_SOURCE_SEPARATION_SONG_ID, session.songId)
             }
+            val activeStemMix = sourceSeparationPlaybackSession
+                ?.takeIf { session -> session.blendEndpointStemIds == null }
+            if (activeStemMix != null) {
+                putString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY, activeStemMix.cacheKey)
+                putStringArrayList(
+                    Playback.EXTRA_SOURCE_SEPARATION_STEM_IDS,
+                    ArrayList(activeStemMix.stemIds),
+                )
+                putStringArrayList(
+                    Playback.EXTRA_SOURCE_SEPARATION_STEM_LABELS,
+                    ArrayList(activeStemMix.stemCanonicalLabels),
+                )
+                putFloatArray(
+                    Playback.EXTRA_SOURCE_SEPARATION_STEM_GAINS,
+                    activeStemMix.stemGains.toFloatArray(),
+                )
+            } else {
+                sourceSeparationRequestedStemMix?.let { request ->
+                    putString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY, request.cacheKey)
+                    putStringArrayList(
+                        Playback.EXTRA_SOURCE_SEPARATION_STEM_IDS,
+                        ArrayList(request.stemIds),
+                    )
+                    putFloatArray(
+                        Playback.EXTRA_SOURCE_SEPARATION_STEM_GAINS,
+                        request.gains.toFloatArray(),
+                    )
+                }
+            }
             if (!message.isNullOrEmpty()) {
                 putString(Playback.EXTRA_SOURCE_SEPARATION_MESSAGE, message)
             }
@@ -4664,6 +4903,8 @@ private data class SourceSeparationPlaybackSession(
     val cacheKey: String,
     val stemFiles: List<File>,
     val stemIds: List<String>,
+    val stemCanonicalLabels: List<String>,
+    var stemGains: List<Float>,
     val blendEndpointStemIds: List<String>?,
     val inputMode: InputMode,
     val stemSampleRate: Int,
@@ -4681,12 +4922,27 @@ private data class SourceSeparationPlaybackSession(
         require(stemIds.distinct().size == stemIds.size) {
             "Playback session stem IDs must be unique."
         }
+        require(stemCanonicalLabels.size == stemIds.size &&
+                stemCanonicalLabels.all(String::isNotBlank)
+        ) {
+            "Playback session stem labels must match its stem IDs."
+        }
         blendEndpointStemIds?.let { endpointIds ->
             require(endpointIds.size == 2 && endpointIds.distinct().size == endpointIds.size) {
                 "Playback session blend endpoints must be two unique stem IDs."
             }
             require(endpointIds.all(stemIds::contains)) {
                 "Playback session blend endpoints must belong to the stem set."
+            }
+        }
+        if (blendEndpointStemIds == null) {
+            require(stemGains.size == stemIds.size) {
+                "Multi-stem playback gains must match the complete stem set."
+            }
+            stemGains = SourceSeparationStemGainPolicy.normalize(stemGains)
+        } else {
+            require(stemGains.isEmpty()) {
+                "Legacy blend sessions must not carry independent stem gains."
             }
         }
     }
@@ -4702,10 +4958,30 @@ private data class SourceSeparationPlaybackSession(
     }
 }
 
+private data class SourceSeparationRequestedStemMix(
+    val cacheKey: String,
+    val stemIds: List<String>,
+    val gains: List<Float>,
+    val persist: Boolean,
+) {
+    init {
+        require(cacheKey.isNotBlank()) { "Requested stem mix cache key is empty." }
+        SourceSeparationStemGainPolicy.orderedMap(stemIds, gains)
+    }
+
+    fun orderedGains(expectedStemIds: List<String>): List<Float>? {
+        if (stemIds != expectedStemIds) return null
+        return SourceSeparationStemGainPolicy.normalize(gains)
+    }
+}
+
 private fun SourceSeparationCacheManifest.mdxBlendEndpointStemIds(): List<String>? {
     val mdxStemContract = contract.stemContract ?: return null
     return mdxStemContract.toMdxBlendEndpointStemIds().map { stemId -> stemId.value }
 }
+
+private const val KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG =
+    "source_separation.remember_per_song"
 
 @OptIn(UnstableApi::class)
 private fun musicMediaSourceFactory(

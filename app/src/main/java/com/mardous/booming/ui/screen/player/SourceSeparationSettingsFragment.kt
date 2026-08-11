@@ -44,6 +44,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -81,7 +82,10 @@ import com.mardous.booming.extensions.isLandscape
 import com.mardous.booming.extensions.showToast
 import com.mardous.booming.separation.cache.SourceSeparationCacheDirectories
 import com.mardous.booming.separation.SourceSeparationStemLabelResolver
+import com.mardous.booming.separation.SourceSeparationStemIconResolver
+import com.mardous.booming.separation.SourceSeparationStemGainPolicy
 import com.mardous.booming.ui.component.compose.BottomSheetDialogSurface
+import com.mardous.booming.ui.component.compose.IconifiedSliderTrack
 import com.mardous.booming.ui.component.compose.TitledCard
 import com.mardous.booming.ui.theme.BoomingMusicTheme
 import com.mardous.booming.ui.theme.SliderTokens
@@ -89,6 +93,7 @@ import kotlinx.coroutines.flow.collect
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
 import org.koin.androidx.viewmodel.ext.android.viewModel
 import java.io.File
+import kotlin.math.roundToInt
 
 class SourceSeparationSettingsFragment : BottomSheetDialogFragment() {
 
@@ -184,6 +189,7 @@ private fun SourceSeparationSettingsSheet(
         .sourceSeparationPlaybackProcessingProgressStateFlow
         .collectAsState()
     val blendStemLabels by viewModel.sourceSeparationBlendStemLabelsFlow.collectAsState()
+    val multiStemMixState by viewModel.sourceSeparationMultiStemMixStateFlow.collectAsState()
     val blendMode by viewModel.sourceSeparationBlendModeFlow.collectAsState()
     val rememberPerSong by viewModel.sourceSeparationRememberPerSongFlow.collectAsState()
     val separationState by viewModel.sourceSeparationStateFlow.collectAsState()
@@ -347,7 +353,10 @@ private fun SourceSeparationSettingsSheet(
                                 title = stringResource(R.string.source_separation_playback_title),
                                 description = stringResource(R.string.source_separation_playback_description)
                             ) { checked ->
-                                viewModel.setSourceSeparationPlaybackEnabled(checked, blend)
+                                viewModel.setSourceSeparationPlaybackEnabled(
+                                    checked,
+                                    blend.takeIf { multiStemMixState == null },
+                                )
                             }
 
                             LabeledSwitch(
@@ -373,38 +382,49 @@ private fun SourceSeparationSettingsSheet(
                 }
 
                 item {
-                    TitledCard(
-                        title = stringResource(R.string.source_separation_blend_title),
-                        titleEndContent = {
-                            IconButton(
-                                onClick = {
-                                    hapticFeedback.performHapticFeedback(
-                                        HapticFeedbackType.Confirm
+                    val currentMultiStemMixState = multiStemMixState
+                    if (currentMultiStemMixState != null) {
+                        SourceSeparationMultiStemMixCard(
+                            state = currentMultiStemMixState,
+                            enabled = separatedPlaybackEnabled &&
+                                    currentMultiStemMixState.cacheKey != null,
+                            onGainPreview = viewModel::previewSourceSeparationStemGain,
+                            onGainCommit = viewModel::setSourceSeparationStemGain,
+                            onReset = viewModel::resetSourceSeparationStemGains,
+                        )
+                    } else {
+                        TitledCard(
+                            title = stringResource(R.string.source_separation_blend_title),
+                            titleEndContent = {
+                                IconButton(
+                                    onClick = {
+                                        hapticFeedback.performHapticFeedback(
+                                            HapticFeedbackType.Confirm
+                                        )
+                                        blend = 0.5f
+                                        blendDragging = false
+                                        viewModel.setSourceSeparationBlend(0.5f)
+                                    },
+                                    enabled = separatedPlaybackEnabled,
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_restart_alt_24dp),
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        contentDescription = stringResource(
+                                            R.string.source_separation_reset_blend
+                                        ),
+                                        modifier = Modifier.size(16.dp)
                                     )
-                                    blend = 0.5f
-                                    blendDragging = false
-                                    viewModel.setSourceSeparationBlend(0.5f)
-                                },
-                                enabled = separatedPlaybackEnabled,
-                                modifier = Modifier.size(30.dp)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { cardContentPadding ->
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(cardContentPadding)
                             ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_restart_alt_24dp),
-                                    tint = MaterialTheme.colorScheme.secondary,
-                                    contentDescription = stringResource(
-                                        R.string.source_separation_reset_blend
-                                    ),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { cardContentPadding ->
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(cardContentPadding)
-                        ) {
                             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                                 Slider(
                                     value = blend,
@@ -467,6 +487,7 @@ private fun SourceSeparationSettingsSheet(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.bodySmall
                                 )
+                            }
                             }
                         }
                     }
@@ -824,6 +845,128 @@ private fun SourceSeparationSettingsSheet(
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun SourceSeparationMultiStemMixCard(
+    state: SourceSeparationMultiStemMixUiState,
+    enabled: Boolean,
+    onGainPreview: (String, Float) -> Unit,
+    onGainCommit: (String, Float) -> Unit,
+    onReset: () -> Unit,
+) {
+    val hapticFeedback = LocalHapticFeedback.current
+    TitledCard(
+        title = stringResource(R.string.source_separation_blend_title),
+        titleEndContent = {
+            IconButton(
+                onClick = {
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
+                    onReset()
+                },
+                enabled = enabled && state.requiresSeparatedOutput,
+                modifier = Modifier.size(30.dp),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_restart_alt_24dp),
+                    tint = MaterialTheme.colorScheme.secondary,
+                    contentDescription = stringResource(R.string.source_separation_reset_blend),
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) { cardContentPadding ->
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(cardContentPadding),
+        ) {
+            state.stems.forEach { stem ->
+                key(state.modelId, state.songId, state.cacheKey, stem.stemId) {
+                    SourceSeparationStemGainSlider(
+                        stem = stem,
+                        enabled = enabled,
+                        onGainPreview = onGainPreview,
+                        onGainCommit = onGainCommit,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun SourceSeparationStemGainSlider(
+    stem: SourceSeparationStemGainUiState,
+    enabled: Boolean,
+    onGainPreview: (String, Float) -> Unit,
+    onGainCommit: (String, Float) -> Unit,
+) {
+    val context = LocalContext.current
+    val hapticFeedback = LocalHapticFeedback.current
+    var sliderGain by remember(stem.stemId) { mutableFloatStateOf(stem.gain) }
+    var dragging by remember(stem.stemId) { mutableStateOf(false) }
+    LaunchedEffect(stem.gain, enabled) {
+        if (!dragging) sliderGain = stem.gain
+        if (!enabled) dragging = false
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+        ) {
+            Text(
+                text = SourceSeparationStemLabelResolver.resolve(
+                    context,
+                    stem.canonicalLabel,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "${(sliderGain * 100f).roundToInt()}%",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Slider(
+            value = sliderGain,
+            valueRange = SourceSeparationStemGainPolicy.MIN_GAIN..
+                    SourceSeparationStemGainPolicy.MAX_GAIN,
+            enabled = enabled,
+            onValueChange = { value ->
+                sliderGain = SourceSeparationStemGainPolicy.normalize(value)
+                dragging = true
+                onGainPreview(stem.stemId, sliderGain)
+            },
+            onValueChangeFinished = {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+                dragging = false
+                onGainCommit(stem.stemId, sliderGain)
+            },
+            track = { sliderState ->
+                IconifiedSliderTrack(
+                    state = sliderState,
+                    icon = painterResource(
+                        SourceSeparationStemIconResolver.resourceId(stem.semanticId),
+                    ),
+                    enabled = enabled,
+                    modifier = Modifier.height(SliderTokens.LargeTrackHeight),
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

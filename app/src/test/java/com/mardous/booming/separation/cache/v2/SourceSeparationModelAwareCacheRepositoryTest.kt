@@ -121,6 +121,24 @@ class SourceSeparationModelAwareCacheRepositoryTest {
     }
 
     @Test
+    fun `stem gains retain exact order and survive a later blend write`() {
+        val store = store()
+        val manifest = completedManifest(store, "uvr_mdxnet_3_9662", 'a')
+        store.writeManifest(manifest)
+        val repository = repository(store)
+        val stemIds = manifest.output!!.stems.map { stem -> stem.stemId.value }
+        val gains = linkedMapOf(stemIds[0] to 0.25f, stemIds[1] to 1f)
+
+        assertTrue(repository.writeStemGains(manifest.identity, gains))
+        assertEquals(gains, repository.readStemGains(manifest.identity))
+        assertEquals(0f, repository.readBlend(manifest.identity))
+
+        assertTrue(repository.writeBlend(manifest.identity, 0.7f))
+        assertEquals(gains, repository.readStemGains(manifest.identity))
+        assertEquals(0.7f, repository.readBlend(manifest.identity))
+    }
+
+    @Test
     fun `running cache requires consecutive ready segment files`() {
         val store = store()
         val running = runningManifest(store, "uvr_mdxnet_3_9662", 'a')

@@ -275,6 +275,7 @@ data class SourceSeparationCachePlaybackSettings(
     val cacheKey: String,
     val audioFingerprint: String,
     val blend: Float,
+    val stemGains: Map<String, Float> = emptyMap(),
     val updatedAtEpochMs: Long,
 ) {
     init {
@@ -284,6 +285,12 @@ data class SourceSeparationCachePlaybackSettings(
         require(CACHE_KEY_PATTERN.matches(cacheKey)) { "Playback cache key is invalid." }
         require(audioFingerprint.isNotBlank()) { "Playback source fingerprint is empty." }
         require(blend in 0f..1f) { "Playback blend is invalid." }
+        require(stemGains.keys.all(String::isNotBlank)) {
+            "Playback stem gain ID is empty."
+        }
+        require(stemGains.values.all { gain -> gain.isFinite() && gain in 0f..1f }) {
+            "Playback stem gain is invalid."
+        }
         require(updatedAtEpochMs >= 0L) { "Playback settings time is invalid." }
     }
 
@@ -293,7 +300,7 @@ data class SourceSeparationCachePlaybackSettings(
     }
 
     companion object {
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
         private val CACHE_KEY_PATTERN = Regex("^[0-9a-f]{64}$")
     }
 }

@@ -81,6 +81,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationPresetCacheAvaila
 import com.mardous.booming.separation.cache.v2.SourceSeparationProductCacheAvailabilityProvider
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackResolver
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
+import com.mardous.booming.separation.SourceSeparationModelMixSettingsStore
 import com.mardous.booming.separation.SourceSeparationMultiStemRuntimeResolver
 import com.mardous.booming.separation.cache.v2.resolveTrustedActiveCacheModelResolution
 import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPresetStructuralInspector
@@ -287,6 +288,7 @@ private val mainModule = module {
         )
     }
     single { SourceSeparationMultiStemPlaybackSelectionStore(get()) }
+    single { SourceSeparationModelMixSettingsStore(get()) }
     single<SourceSeparationMultiStemRuntimeResolver> {
         SourceSeparationMultiStemPlaybackResolver(
             selection = get(),
@@ -502,6 +504,7 @@ private val viewModule = module {
             context = androidContext(),
             preferences = get(),
             sourceSeparationRuntime = get(),
+            sourceSeparationMixSettings = get(),
             independentRunRecovery = get(),
             multiStemIndependentRunRecovery = get(),
             multiStemSelectionFlow = get<SourceSeparationMultiStemPlaybackSelectionStore>()
@@ -521,6 +524,9 @@ private val viewModule = module {
             repository = get(),
             sourceSeparationRuntime = get(),
             sourceSeparationForegroundWorkerCoordinator = get(),
+            sourceSeparationMultiStemSelectionStore = get(),
+            sourceSeparationMultiStemInstaller = get(),
+            sourceSeparationMixSettings = get(),
             localSeparationPathReadiness = {
                 get<LocalSeparationReadinessEvaluator>()
                     .evaluate(verifyPayloadHashes = false)

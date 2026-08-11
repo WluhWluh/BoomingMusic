@@ -64,6 +64,20 @@ interface SourceSeparationRuntimeFacade {
 
     fun writeBlend(identity: SourceSeparationCacheIdentity, blend: Float): Boolean
 
+    fun readStemGains(song: SourceSeparationRuntimeSong): Map<String, Float>?
+
+    fun writeStemGains(
+        song: SourceSeparationRuntimeSong,
+        gainsByStemId: Map<String, Float>,
+    ): Boolean
+
+    fun readStemGains(identity: SourceSeparationCacheIdentity): Map<String, Float>?
+
+    fun writeStemGains(
+        identity: SourceSeparationCacheIdentity,
+        gainsByStemId: Map<String, Float>,
+    ): Boolean
+
     fun separate(
         song: SourceSeparationRuntimeSong,
         runtimeSettings: MdxRuntimeSettings = MdxRuntimeSettings(),
@@ -245,6 +259,22 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
 
     override fun writeBlend(identity: SourceSeparationCacheIdentity, blend: Float): Boolean =
         cacheRepository.writeBlend(identity, blend.coerceIn(0f, 1f))
+
+    override fun readStemGains(song: SourceSeparationRuntimeSong): Map<String, Float>? =
+        cacheRepository.readStemGains(song.identity)
+
+    override fun writeStemGains(
+        song: SourceSeparationRuntimeSong,
+        gainsByStemId: Map<String, Float>,
+    ): Boolean = cacheRepository.writeStemGains(song.identity, gainsByStemId)
+
+    override fun readStemGains(identity: SourceSeparationCacheIdentity): Map<String, Float>? =
+        cacheRepository.readStemGains(identity)
+
+    override fun writeStemGains(
+        identity: SourceSeparationCacheIdentity,
+        gainsByStemId: Map<String, Float>,
+    ): Boolean = cacheRepository.writeStemGains(identity, gainsByStemId)
 
     override fun separate(
         song: SourceSeparationRuntimeSong,

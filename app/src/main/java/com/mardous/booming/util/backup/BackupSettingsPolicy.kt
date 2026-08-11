@@ -197,6 +197,7 @@ object BackupSettingsPolicy {
 
     val nonBackupPreferencePrefixes: Set<String> = setOf(
         "source_separation.per_song_blend.pending.",
+        "source_separation.stem_gains.pending.",
         "source_separation.download.",
         "source_separation.worker.",
         "source_separation.runtime.",
@@ -224,7 +225,9 @@ object BackupSettingsPolicy {
         NonBackupRule(
             id = "per-song-blend",
             dataClass = NonBackupDataClass.PerSongBlend,
-            storagePattern = "**/playback-settings.json; source_separation.per_song_blend.pending.*",
+            storagePattern = "**/playback-settings.json; " +
+                    "source_separation.per_song_blend.pending.*; " +
+                    "source_separation.stem_gains.pending.*",
             reason = "Per-song blend belongs to its disposable model-aware cache entry",
         ),
         NonBackupRule(

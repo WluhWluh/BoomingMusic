@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.cache.v2
 
+import com.mardous.booming.separation.SourceSeparationStemGainPolicy
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.contract.StemDescriptor
 import com.mardous.booming.separation.model.contract.StemSemanticId
@@ -238,8 +239,49 @@ class SourceSeparationModelAwareCacheRepository(
         return lease.use { store.readPlaybackSettings(manifest)?.blend }
     }
 
+    fun readStemGains(identity: SourceSeparationCacheIdentity): Map<String, Float>? {
+        val manifest = manifest(identity) ?: return null
+        val stemIds = manifest.output?.stems?.map { stem -> stem.stemId.value } ?: return null
+        val lease = leases.tryAcquireRead(manifest.cacheKey) ?: return null
+        val stored = lease.use { store.readPlaybackSettings(manifest)?.stemGains }.orEmpty()
+        val ordered = SourceSeparationStemGainPolicy.orderedGains(stemIds, stored) ?: return null
+        return SourceSeparationStemGainPolicy.orderedMap(stemIds, ordered)
+    }
+
     fun writeBlend(identity: SourceSeparationCacheIdentity, blend: Float): Boolean {
         val manifest = manifest(identity) ?: return false
+        val lease = tryAcquireExclusive(
+            manifest.cacheKey,
+            SourceSeparationCacheLockPurpose.PlaybackSettings,
+        ) ?: return false
+        return lease.use {
+            it.bindEntryDirectory(store.entryDirectory(manifest.cacheKey))
+            val existing = store.readPlaybackSettings(manifest)
+            store.writePlaybackSettings(
+                manifest = manifest,
+                settings = SourceSeparationCachePlaybackSettings(
+                    cacheKey = manifest.cacheKey,
+                    audioFingerprint = manifest.identity.source.audioFingerprint,
+                    blend = blend,
+                    stemGains = existing?.stemGains.orEmpty(),
+                    updatedAtEpochMs = nowEpochMs(),
+                ),
+            )
+            true
+        }
+    }
+
+    fun writeStemGains(
+        identity: SourceSeparationCacheIdentity,
+        gainsByStemId: Map<String, Float>,
+    ): Boolean {
+        val manifest = manifest(identity) ?: return false
+        val stemIds = manifest.output?.stems?.map { stem -> stem.stemId.value } ?: return false
+        val orderedGains = SourceSeparationStemGainPolicy.orderedGains(
+            stemIds = stemIds,
+            gainsByStemId = gainsByStemId,
+        ) ?: return false
+        val normalized = SourceSeparationStemGainPolicy.orderedMap(stemIds, orderedGains)
         val lease = tryAcquireExclusive(
             manifest.cacheKey,
             SourceSeparationCacheLockPurpose.PlaybackSettings,
@@ -251,7 +293,8 @@ class SourceSeparationModelAwareCacheRepository(
                 settings = SourceSeparationCachePlaybackSettings(
                     cacheKey = manifest.cacheKey,
                     audioFingerprint = manifest.identity.source.audioFingerprint,
-                    blend = blend,
+                    blend = SourceSeparationStemGainPolicy.demandBlend(orderedGains),
+                    stemGains = normalized,
                     updatedAtEpochMs = nowEpochMs(),
                 ),
             )
