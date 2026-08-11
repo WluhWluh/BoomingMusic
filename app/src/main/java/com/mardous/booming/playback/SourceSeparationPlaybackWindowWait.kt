@@ -59,6 +59,19 @@ internal class SourceSeparationPlaybackWindowWaitTracker {
     fun forCache(cacheKey: String): SourceSeparationPlaybackWindowWait? =
         current?.takeIf { wait -> wait.cacheKey == cacheKey }
 
+    fun rebind(
+        cacheKey: String,
+        anchorPositionMs: Long,
+    ): SourceSeparationPlaybackWindowWait? {
+        val existing = current ?: return null
+        if (existing.cacheKey == cacheKey) return existing
+        return existing.copy(
+            epoch = newEpoch(),
+            cacheKey = cacheKey,
+            anchorPositionMs = anchorPositionMs.coerceAtLeast(0L),
+        ).also { current = it }
+    }
+
     fun isCurrent(epoch: Long?): Boolean = current?.epoch == epoch
 
     fun clear(expectedEpoch: Long? = null): SourceSeparationPlaybackWindowWait? {

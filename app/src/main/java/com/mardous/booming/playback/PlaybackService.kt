@@ -1918,8 +1918,10 @@ class PlaybackService :
                 )
             }
         }
-        val activeWindowWait = sourceSeparationPlaybackWindowWaitTracker
-            .forCache(runtimeSong.cacheKey)
+        val activeWindowWait = alignSourceSeparationPlaybackWindowWait(
+            cacheKey = runtimeSong.cacheKey,
+            fallbackPositionMs = player.currentPosition.coerceAtLeast(0),
+        )
         val windowWaitEpoch = activeWindowWait?.epoch
         val positionMs = activeWindowWait?.anchorPositionMs
             ?: player.currentPosition.coerceAtLeast(0)
@@ -2217,8 +2219,10 @@ class PlaybackService :
         gateOnUnreadyWindow: Boolean,
     ): SessionResult {
         val runtimeSong = session.runtimeSong
-        val activeWindowWait = sourceSeparationPlaybackWindowWaitTracker
-            .forCache(runtimeSong.cacheKey)
+        val activeWindowWait = alignSourceSeparationPlaybackWindowWait(
+            cacheKey = runtimeSong.cacheKey,
+            fallbackPositionMs = player.currentPosition.coerceAtLeast(0),
+        )
         val windowWaitEpoch = activeWindowWait?.epoch
         val positionMs = activeWindowWait?.anchorPositionMs
             ?: player.currentPosition.coerceAtLeast(0)
@@ -3072,6 +3076,30 @@ class PlaybackService :
             resultCode = SessionResult.RESULT_SUCCESS,
             message = message,
         )
+    }
+
+    private fun alignSourceSeparationPlaybackWindowWait(
+        cacheKey: String,
+        fallbackPositionMs: Long,
+    ): SourceSeparationPlaybackWindowWait? {
+        val existing = sourceSeparationPlaybackWindowWaitTracker.current ?: return null
+        sourceSeparationPlaybackWindowWaitTracker.forCache(cacheKey)?.let { return it }
+        val rebound = requireNotNull(
+            sourceSeparationPlaybackWindowWaitTracker.rebind(
+                cacheKey = cacheKey,
+                anchorPositionMs = fallbackPositionMs,
+            ),
+        )
+        setSourceSeparationPlaybackProcessing(cacheKey)
+        sourceSeparationPlaybackResumeWhenReady = rebound.resumeWhenReady
+        traceSourceSeparationPlayback(
+            "playback.windowWait.rebind",
+            "oldCache=${existing.cacheKey.take(12)} newCache=${cacheKey.take(12)} " +
+                    "oldEpoch=${existing.epoch} waitEpoch=${rebound.epoch} " +
+                    "anchor=${rebound.anchorPositionMs} " +
+                    "requiredReadyWindows=${rebound.requiredReadyWindowCount}",
+        )
+        return rebound
     }
 
     private fun updateSourceSeparationPlaybackReadinessMonitor(

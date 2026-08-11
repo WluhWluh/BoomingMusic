@@ -46,6 +46,33 @@ class SourceSeparationPlaybackWindowWaitTrackerTest {
     }
 
     @Test
+    fun `resolved cache change rebinds recovery without weakening its waterline`() {
+        val tracker = SourceSeparationPlaybackWindowWaitTracker()
+        val first = tracker.begin("old-song-cache", 326_937L, 2, true)
+
+        val rebound = requireNotNull(tracker.rebind("new-song-cache", 0L))
+
+        assertTrue(rebound.epoch > first.epoch)
+        assertEquals("new-song-cache", rebound.cacheKey)
+        assertEquals(0L, rebound.anchorPositionMs)
+        assertEquals(2, rebound.requiredReadyWindowCount)
+        assertTrue(rebound.resumeWhenReady)
+        assertFalse(tracker.isCurrent(first.epoch))
+        assertTrue(tracker.isCurrent(rebound.epoch))
+    }
+
+    @Test
+    fun `rebind to the current cache keeps the active recovery epoch`() {
+        val tracker = SourceSeparationPlaybackWindowWaitTracker()
+        val first = tracker.begin("cache-a", 5_850L, 2, true)
+
+        val unchanged = tracker.rebind("cache-a", 12_000L)
+
+        assertSame(first, unchanged)
+        assertSame(first, tracker.current)
+    }
+
+    @Test
     fun `stale completion cannot clear a newer wait`() {
         val tracker = SourceSeparationPlaybackWindowWaitTracker()
         val first = tracker.begin("cache-a", 0L, 2, true)
