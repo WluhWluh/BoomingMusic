@@ -32,7 +32,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -426,7 +426,12 @@ fun CoverLyricsScreen(
                             expanded = multiStemQuickExpanded,
                             state = multiStemMixState,
                             processingProgressState = quickControlProcessingProgressState,
-                            onEnableSeparatedPlayback = onSourceSeparationPanelLongClick,
+                            onEnableSeparatedPlayback = {
+                                playerViewModel.setSourceSeparationPlaybackEnabled(
+                                    enabled = true,
+                                    blend = multiStemMixState.demandBlend,
+                                )
+                            },
                             onDisableSeparatedPlayback = {
                                 playerViewModel.setSourceSeparationPlaybackEnabled(false)
                             },
@@ -885,7 +890,6 @@ private fun CoverLyricsMultiStemControl(
     onLongClick: () -> Unit,
 ) {
     val stemCount = state.stems.size
-    val expandedStackHeight = coverLyricsMultiStemExpandedHeight(stemCount)
     var draggingStemId by remember { mutableStateOf<String?>(null) }
     var dragGain by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(state.modelId, state.songId, state.cacheKey, expanded) {
@@ -908,6 +912,34 @@ private fun CoverLyricsMultiStemControl(
         } else {
             CoverLyricsButtonSize
         }
+    }
+    val endpointSegmentHeight by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "endpointSegmentHeight",
+    ) { target ->
+        if (target.expanded) {
+            CoverLyricsMultiStemSegmentSize
+        } else {
+            CoverLyricsButtonSize / 2
+        }
+    }
+    val stemSegmentHeight by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "stemSegmentHeight",
+    ) { target ->
+        if (target.expanded) CoverLyricsMultiStemSegmentSize else 0.dp
+    }
+    val segmentGap by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "segmentGap",
+    ) { target ->
+        if (target.expanded) CoverLyricsMultiStemSegmentGap else 0.dp
+    }
+    val innerCornerRadius by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "innerCornerRadius",
+    ) { target ->
+        if (target.expanded) CoverLyricsMultiStemInnerCornerRadius else 0.dp
     }
     val buttonBackgroundAlpha by transition.animateFloat(
         transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
@@ -1119,29 +1151,30 @@ private fun CoverLyricsMultiStemControl(
             )
 
             Column(
-                verticalArrangement = Arrangement.spacedBy(CoverLyricsMultiStemSegmentGap),
+                verticalArrangement = Arrangement.spacedBy(segmentGap),
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .requiredHeight(expandedStackHeight)
-                    .offset(y = height - expandedStackHeight)
                     .alpha(endpointIconAlpha),
             ) {
                 CoverLyricsMultiStemFixedSegment(
                     iconRes = R.drawable.ic_swap_vert_24dp,
                     background = progressColor,
                     iconTint = colorScheme.surface,
+                    height = endpointSegmentHeight,
                     shape = RoundedCornerShape(
                         topStart = CoverLyricsButtonSize / 2,
                         topEnd = CoverLyricsButtonSize / 2,
-                        bottomStart = CoverLyricsMultiStemInnerCornerRadius,
-                        bottomEnd = CoverLyricsMultiStemInnerCornerRadius,
+                        bottomStart = innerCornerRadius,
+                        bottomEnd = innerCornerRadius,
                     ),
                 )
                 state.stems.forEach { stem ->
                     CoverLyricsMultiStemGainSegment(
                         iconRes = SourceSeparationStemIconResolver.resourceId(stem.semanticId),
                         gain = if (draggingStemId == stem.stemId) dragGain else stem.gain,
+                        height = stemSegmentHeight,
+                        cornerRadius = innerCornerRadius,
                         trackAlpha = trackAlpha,
                         progressColor = progressColor,
                         filledColor = colorScheme.surface,
@@ -1151,9 +1184,10 @@ private fun CoverLyricsMultiStemControl(
                     iconRes = R.drawable.ic_close_24dp,
                     background = progressColor.copy(alpha = 0.1f),
                     iconTint = progressColor,
+                    height = endpointSegmentHeight,
                     shape = RoundedCornerShape(
-                        topStart = CoverLyricsMultiStemInnerCornerRadius,
-                        topEnd = CoverLyricsMultiStemInnerCornerRadius,
+                        topStart = innerCornerRadius,
+                        topEnd = innerCornerRadius,
                         bottomStart = CoverLyricsButtonSize / 2,
                         bottomEnd = CoverLyricsButtonSize / 2,
                     ),
@@ -1193,13 +1227,14 @@ private fun CoverLyricsMultiStemFixedSegment(
     iconRes: Int,
     background: Color,
     iconTint: Color,
+    height: Dp,
     shape: RoundedCornerShape,
 ) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxWidth()
-            .size(CoverLyricsMultiStemSegmentSize)
+            .height(height)
             .clip(shape),
     ) {
         Box(
@@ -1211,7 +1246,7 @@ private fun CoverLyricsMultiStemFixedSegment(
             painter = painterResource(iconRes),
             contentDescription = null,
             tint = iconTint,
-            modifier = Modifier.size(CoverLyricsQuickBlendIconSize),
+            modifier = Modifier.requiredSize(CoverLyricsQuickBlendIconSize),
         )
     }
 }
@@ -1220,33 +1255,40 @@ private fun CoverLyricsMultiStemFixedSegment(
 private fun CoverLyricsMultiStemGainSegment(
     iconRes: Int,
     gain: Float,
+    height: Dp,
+    cornerRadius: Dp,
     trackAlpha: Float,
     progressColor: Color,
     filledColor: Color,
 ) {
     val normalizedGain = SourceSeparationStemGainPolicy.normalize(gain)
+    val fillHeight = height * normalizedGain
+    val iconBottomInset =
+        (height - CoverLyricsQuickBlendIconSize) / 2
+    val iconFillHeight = (fillHeight - iconBottomInset)
+        .coerceIn(0.dp, CoverLyricsQuickBlendIconSize)
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxWidth()
-            .size(CoverLyricsMultiStemSegmentSize)
-            .clip(CoverLyricsMultiStemMiddleSegmentShape)
+            .height(height)
+            .clip(RoundedCornerShape(cornerRadius))
             .background(progressColor.copy(alpha = trackAlpha)),
     ) {
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(CoverLyricsMultiStemSegmentSize * normalizedGain)
+                .height(fillHeight)
                 .background(progressColor),
         )
         CoverLyricsQuickBlendEndpointIcon(
             painter = painterResource(iconRes),
             unfilledColor = progressColor,
             filledColor = filledColor,
-            filledHeight = CoverLyricsQuickBlendIconSize * normalizedGain,
+            filledHeight = iconFillHeight,
             fillFromTop = false,
-            modifier = Modifier.size(CoverLyricsQuickBlendIconSize),
+            modifier = Modifier.requiredSize(CoverLyricsQuickBlendIconSize),
         )
     }
 }
@@ -1507,13 +1549,10 @@ private val CoverLyricsButtonSpacing = 12.dp
 private val CoverLyricsOverlayPadding = 16.dp
 private val CoverLyricsBaseVerticalPadding = 72.dp
 private val CoverLyricsBaseHorizontalPadding = 12.dp
-private val CoverLyricsQuickBlendInnerCornerRadius = 2.dp
+private val CoverLyricsQuickBlendInnerCornerRadius = 6.dp
 private val CoverLyricsMultiStemSegmentSize = 40.dp
 private val CoverLyricsMultiStemSegmentGap = 4.dp
-private val CoverLyricsMultiStemInnerCornerRadius = 2.dp
-private val CoverLyricsMultiStemMiddleSegmentShape = RoundedCornerShape(
-    CoverLyricsMultiStemInnerCornerRadius,
-)
+private val CoverLyricsMultiStemInnerCornerRadius = 6.dp
 private const val CoverLyricsQuickBlendNeutralBlend = 0.5f
 private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.10f
 private const val CoverLyricsQuickControlsTransitionDurationMillis = 260
