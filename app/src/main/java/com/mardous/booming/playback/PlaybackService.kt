@@ -589,6 +589,9 @@ class PlaybackService :
             availableCommands.add(
                 SessionCommand(Playback.AWAIT_PLAYBACK_RESTORATION, Bundle.EMPTY)
             )
+            availableCommands.add(
+                SessionCommand(Playback.GET_SOURCE_SEPARATION_DEBUG_STATE, Bundle.EMPTY)
+            )
         }
 
         return MediaSession.ConnectionResult.accept(
@@ -1089,6 +1092,56 @@ class PlaybackService :
                     args.getString(Playback.EXTRA_SOURCE_SEPARATION_TRACE_MARKER).orEmpty()
                 )
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+
+            Playback.GET_SOURCE_SEPARATION_DEBUG_STATE -> {
+                if (!BuildConfig.DEBUG) {
+                    Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
+                } else {
+                    Futures.immediateFuture(
+                        SessionResult(
+                            SessionResult.RESULT_SUCCESS,
+                            sourceSeparationPlaybackBundle().apply {
+                                putBoolean(
+                                    Playback.EXTRA_DEBUG_OUTPUT_MUTED,
+                                    sourceSeparationOutputMuted,
+                                )
+                                putBoolean(
+                                    Playback.EXTRA_DEBUG_OUTPUT_WAITING_FOR_MIXED,
+                                    sourceSeparationOutputWaitingForMixedOutput,
+                                )
+                                putLong(
+                                    Playback.EXTRA_DEBUG_OUTPUT_FLUSH_BARRIER,
+                                    sourceSeparationPendingOutputFlush?.barrierId ?: -1L,
+                                )
+                                putLong(
+                                    Playback.EXTRA_DEBUG_OUTPUT_GENERATION,
+                                    sourceSeparationPendingMixedOutputGeneration ?: -1L,
+                                )
+                                putBoolean(
+                                    Playback.EXTRA_DEBUG_PLAYBACK_REQUESTED,
+                                    sourceSeparationPlaybackRequested,
+                                )
+                                putBoolean(
+                                    Playback.EXTRA_DEBUG_PLAYBACK_PLAY_INTENT,
+                                    sourceSeparationPlaybackPlayIntent,
+                                )
+                                putString(
+                                    Playback.EXTRA_DEBUG_WINDOW_WAIT,
+                                    sourceSeparationPlaybackWindowWaitTracker.current?.toString(),
+                                )
+                                putBoolean(
+                                    Playback.EXTRA_DEBUG_DATA_PLANE_READY,
+                                    sourceSeparationMixProcessor.isDataPlaneReady(),
+                                )
+                                putString(
+                                    Playback.EXTRA_DEBUG_WORKER_STATUS,
+                                    sourceSeparationForegroundWorkerCoordinator.debugStatus(),
+                                )
+                            },
+                        )
+                    )
+                }
             }
 
             else -> Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))

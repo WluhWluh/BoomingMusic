@@ -17,17 +17,36 @@ object SourceSeparationForegroundWorkerDebugBridge {
     }
 
     fun startCurrentSong(): Boolean {
-        return viewModelRef?.get()?.run {
-            startSourceSeparationForCurrentSong()
-            true
-        } == true
+        viewModelRef?.get()?.let { viewModel ->
+            viewModel.startSourceSeparationForCurrentSong()
+            return true
+        }
+        return runCatching {
+            worker().startCurrentSong()
+        }.getOrDefault(false)
     }
 
     fun pause(): Boolean {
-        return viewModelRef?.get()?.run {
-            pauseSourceSeparation()
+        viewModelRef?.get()?.let { viewModel ->
+            viewModel.pauseSourceSeparation()
+            return true
+        }
+        return runCatching {
+            val worker = worker()
+            worker.pauseCurrentSong(worker.playbackStateFlow.value.song)
             true
-        } == true
+        }.getOrDefault(false)
+    }
+
+    fun cancel(): Boolean {
+        viewModelRef?.get()?.let { viewModel ->
+            viewModel.cancelSourceSeparation()
+            return true
+        }
+        return runCatching {
+            worker().cancel()
+            true
+        }.getOrDefault(false)
     }
 
     fun configure(
@@ -44,9 +63,7 @@ object SourceSeparationForegroundWorkerDebugBridge {
 
     fun status(): String {
         return runCatching {
-            val workerStatus = get<SourceSeparationForegroundWorkerCoordinator>(
-                SourceSeparationForegroundWorkerCoordinator::class.java,
-            ).debugStatus()
+            val workerStatus = worker().debugStatus()
             val viewModelStatus = viewModelRef?.get()?.sourceSeparationDebugStatus()
             if (viewModelStatus == null) {
                 "$workerStatus viewModel=null"
@@ -60,9 +77,7 @@ object SourceSeparationForegroundWorkerDebugBridge {
 
     fun windowSamples(): String {
         return runCatching {
-            get<SourceSeparationForegroundWorkerCoordinator>(
-                SourceSeparationForegroundWorkerCoordinator::class.java,
-            ).windowSamples()
+            worker().windowSamples()
         }.getOrElse { error ->
             "workerSamplesError=${error::class.java.simpleName}:${error.message}"
         }
@@ -70,9 +85,7 @@ object SourceSeparationForegroundWorkerDebugBridge {
 
     fun clearWindowSamples(): Boolean {
         return runCatching {
-            get<SourceSeparationForegroundWorkerCoordinator>(
-                SourceSeparationForegroundWorkerCoordinator::class.java,
-            ).clearWindowSamples()
+            worker().clearWindowSamples()
             true
         }.getOrDefault(false)
     }
@@ -85,4 +98,7 @@ object SourceSeparationForegroundWorkerDebugBridge {
             else -> null
         }
     }
+
+    private fun worker(): SourceSeparationForegroundWorkerCoordinator =
+        get(SourceSeparationForegroundWorkerCoordinator::class.java)
 }

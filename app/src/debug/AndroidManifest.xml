@@ -39,5 +39,12 @@
                 <action android:name="com.mardous.booming.debug.SOURCE_SEPARATION" />
             </intent-filter>
         </receiver>
+
+        <provider
+            android:name=".debug.SourceSeparationDebugControlProvider"
+            android:authorities="${applicationId}.debug-control"
+            android:enabled="true"
+            android:exported="true"
+            android:grantUriPermissions="false" />
     </application>
 </manifest>

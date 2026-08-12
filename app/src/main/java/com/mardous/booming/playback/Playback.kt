@@ -25,6 +25,8 @@ object Playback {
         "com.mardous.booming.command.source_separation.cache_deleted"
     const val TRACE_SOURCE_SEPARATION_PLAYBACK_MARKER =
         "com.mardous.booming.command.source_separation.trace_marker"
+    const val GET_SOURCE_SEPARATION_DEBUG_STATE =
+        "com.mardous.booming.command.source_separation.debug_state"
 
     // Custom events
     const val EVENT_MEDIA_CONTENT_CHANGED = "com.mardous.booming.event.media_content_changed"
@@ -60,4 +62,15 @@ object Playback {
     const val EXTRA_SOURCE_SEPARATION_PERSIST_STEM_GAINS =
         "source_separation_persist_stem_gains"
     const val EXTRA_SOURCE_SEPARATION_TRACE_MARKER = "source_separation_trace_marker"
+
+    // Debug-state extras. The command exposing these is only registered by debug builds.
+    const val EXTRA_DEBUG_OUTPUT_MUTED = "debug_output_muted"
+    const val EXTRA_DEBUG_OUTPUT_WAITING_FOR_MIXED = "debug_output_waiting_for_mixed"
+    const val EXTRA_DEBUG_OUTPUT_FLUSH_BARRIER = "debug_output_flush_barrier"
+    const val EXTRA_DEBUG_OUTPUT_GENERATION = "debug_output_generation"
+    const val EXTRA_DEBUG_PLAYBACK_REQUESTED = "debug_playback_requested"
+    const val EXTRA_DEBUG_PLAYBACK_PLAY_INTENT = "debug_playback_play_intent"
+    const val EXTRA_DEBUG_WINDOW_WAIT = "debug_window_wait"
+    const val EXTRA_DEBUG_DATA_PLANE_READY = "debug_data_plane_ready"
+    const val EXTRA_DEBUG_WORKER_STATUS = "debug_worker_status"
 }
