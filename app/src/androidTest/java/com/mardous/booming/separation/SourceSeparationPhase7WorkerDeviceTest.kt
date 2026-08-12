@@ -2475,10 +2475,12 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     coordinator.requestPlaybackDemandSong(targetSource)
                 PlaybackOwnedStopScenario.NextSongPrefetch -> assertTrue(
                     "The live PlaybackService owner rejected next-song prefetch.",
-                    coordinator.preStartSong(
-                        targetSource,
-                        PLAYBACK_OWNER_ACTIVE_PREFETCH_READY_WINDOWS,
-                    ),
+                    runBlocking {
+                        coordinator.preStartSong(
+                            targetSource,
+                            PLAYBACK_OWNER_ACTIVE_PREFETCH_READY_WINDOWS,
+                        )
+                    },
                 )
             }
             waitForReady(coordinator, minimumReadyWindows = 1)
@@ -2611,10 +2613,12 @@ class SourceSeparationPhase7WorkerDeviceTest {
             coordinator.requestPlaybackDemandSong(targetSource)
             assertFalse(
                 "A stale playback owner admitted new prefetch work.",
-                coordinator.preStartSong(
-                    targetSource,
-                    PLAYBACK_OWNER_ACTIVE_PREFETCH_READY_WINDOWS,
-                ),
+                runBlocking {
+                    coordinator.preStartSong(
+                        targetSource,
+                        PLAYBACK_OWNER_ACTIVE_PREFETCH_READY_WINDOWS,
+                    )
+                },
             )
             SystemClock.sleep(PLAYBACK_OWNER_STALE_OBSERVATION_MS)
             assertFalse(coordinator.isWorkerActive())
@@ -6182,7 +6186,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
             val startedAtMs = SystemClock.elapsedRealtime()
             assertTrue(
                 "The uncached next song was not admitted for prefetch.",
-                coordinator.preStartSong(nextSource, REQUIRED_READY_WINDOWS),
+                runBlocking {
+                    coordinator.preStartSong(nextSource, REQUIRED_READY_WINDOWS)
+                },
             )
             val prefetchedPlayback = waitForPlayable(
                 runtimeFacade = runtime,

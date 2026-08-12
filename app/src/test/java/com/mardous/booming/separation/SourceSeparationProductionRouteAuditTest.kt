@@ -113,6 +113,32 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `next song prestart checks its model and cache off the main thread`() {
+        val coordinator = mainSource(
+            "com/mardous/booming/ui/screen/player/SourceSeparationForegroundWorkerCoordinator.kt",
+        ).readText()
+        val preStart = coordinator.substring(
+            coordinator.indexOf("suspend fun preStartSong("),
+            coordinator.indexOf("fun pauseCurrentSong(", coordinator.indexOf("suspend fun preStartSong(")),
+        )
+
+        assertTrue(preStart.contains("withContext(Dispatchers.IO)"))
+        assertTrue(preStart.contains("hasReadyPlaybackStartCache(song, readyWindowCount)"))
+        assertTrue(
+            preStart.indexOf("withContext(Dispatchers.IO)") <
+                    preStart.indexOf("hasReadyPlaybackStartCache(song, readyWindowCount)"),
+        )
+        assertTrue(preStart.contains("requestGeneration.get() != request.requestGeneration"))
+        assertTrue(preStart.contains("activeSelectionFlow.value != request.selection"))
+        assertTrue(preStart.contains("val multiStemSelection = multiStemSelectionFlow.value"))
+        assertTrue(preStart.contains("multiStemSelectionFlow.value != multiStemSelection"))
+        assertTrue(
+            preStart.substring(preStart.indexOf("val action = synchronized(stateLock)"))
+                .contains("!playbackOwnerActive.get()"),
+        )
+    }
+
+    @Test
     fun `user seek retargets an unready wait while internal flush preserves it`() {
         val service = mainSource(
             "com/mardous/booming/playback/PlaybackService.kt",

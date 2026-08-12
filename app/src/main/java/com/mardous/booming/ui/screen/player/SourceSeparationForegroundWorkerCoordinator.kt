@@ -445,9 +445,10 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         }
     }
 
-    fun preStartSong(song: Song, readyWindowCount: Int): Boolean {
+    suspend fun preStartSong(song: Song, readyWindowCount: Int): Boolean {
         if (!playbackOwnerActive.get()) return false
         if (song == Song.emptySong || readyWindowCount <= 0) return false
+        val multiStemSelection = multiStemSelectionFlow.value
         val request = newPreStartRequest(
             song = song,
             readyWindowCount = readyWindowCount,
@@ -456,9 +457,25 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 activeWorkerRequest?.identity == request.identity
             }
         ) return false
-        if (hasReadyPlaybackStartCache(song, readyWindowCount)) return false
+        if (withContext(Dispatchers.IO) {
+                hasReadyPlaybackStartCache(song, readyWindowCount)
+            }
+        ) return false
+        if (!playbackOwnerActive.get() ||
+            requestGeneration.get() != request.requestGeneration ||
+            activeSelectionFlow.value != request.selection ||
+            multiStemSelectionFlow.value != multiStemSelection
+        ) return false
 
         val action = synchronized(stateLock) {
+            if (!playbackOwnerActive.get() ||
+                requestGeneration.get() != request.requestGeneration ||
+                activeSelectionFlow.value != request.selection ||
+                multiStemSelectionFlow.value != multiStemSelection ||
+                activeWorkerRequest?.identity == request.identity
+            ) {
+                return false
+            }
             workerActivated = true
             setPendingStartLocked(request)
             when {
