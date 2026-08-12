@@ -86,7 +86,9 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIM
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
+import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_ENABLED
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.SOURCE_SEPARATION_REMEMBER_PER_SONG
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_MESSAGES
 import com.mardous.booming.util.SOURCE_SEPARATION_SHOW_SNACKBAR_PROGRESS
 import com.mardous.booming.util.SOURCE_SEPARATION_GPU_ENABLED
@@ -864,7 +866,7 @@ class PlayerViewModel(
         sourceSeparationPlaybackSyncJob?.cancel()
         sourceSeparationPlaybackSyncJob = null
         preferences.edit {
-            putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
+            putBoolean(SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
         }
         _sourceSeparationBlendModeFlow.value = SourceSeparationBlendMode.Off
         val result = sendSourceSeparationPlaybackEnabledCommand(
@@ -901,7 +903,7 @@ class PlayerViewModel(
         sourceSeparationPlaybackSyncJob = null
         sourceSeparationForegroundWorkerCoordinator.suppressAndPauseSong(songId)
         preferences.edit {
-            putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
+            putBoolean(SOURCE_SEPARATION_PLAYBACK_ENABLED, false)
         }
         _sourceSeparationBlendModeFlow.value = SourceSeparationBlendMode.Off
         val result = sendSourceSeparationPlaybackEnabledCommand(
@@ -1353,7 +1355,7 @@ class PlayerViewModel(
         val normalizedBlend = blend?.coerceIn(0f, 1f)
         val rememberPerSong = _sourceSeparationRememberPerSongFlow.value
         preferences.edit {
-            putBoolean(KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED, enabled)
+            putBoolean(SOURCE_SEPARATION_PLAYBACK_ENABLED, enabled)
         }
         if (normalizedBlend != null && !rememberPerSong) {
             sourceSeparationMixSettings.writeGlobalBlend(
@@ -1409,12 +1411,12 @@ class PlayerViewModel(
 
     fun setSourceSeparationRememberPerSongEnabled(enabled: Boolean) {
         preferences.edit {
-            putBoolean(KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG, enabled)
+            putBoolean(SOURCE_SEPARATION_REMEMBER_PER_SONG, enabled)
         }
         _sourceSeparationRememberPerSongFlow.value = enabled
 
         val playbackEnabled = preferences.getBoolean(
-            KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+            SOURCE_SEPARATION_PLAYBACK_ENABLED,
             false,
         )
         val mode = sourceSeparationBlendMode(
@@ -2080,7 +2082,7 @@ class PlayerViewModel(
 
     private fun readSourceSeparationBlendMode(): SourceSeparationBlendMode {
         val playbackEnabled = preferences.getBoolean(
-            KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+            SOURCE_SEPARATION_PLAYBACK_ENABLED,
             false,
         )
         return sourceSeparationBlendMode(
@@ -2090,7 +2092,7 @@ class PlayerViewModel(
     }
 
     private fun readSourceSeparationRememberPerSong(): Boolean {
-        return preferences.getBoolean(KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG, true)
+        return preferences.getBoolean(SOURCE_SEPARATION_REMEMBER_PER_SONG, true)
     }
 
     private fun readSourceSeparationGlobalBlend(): Float {
@@ -2275,6 +2277,48 @@ class PlayerViewModel(
             ?.withGain(stemId, gain)
             ?: return
         commitSourceSeparationStemMix(updated)
+    }
+
+    fun setSourceSeparationStemGains(gainsByStemId: Map<String, Float>): Boolean {
+        val current = _sourceSeparationMultiStemMixStateFlow.value ?: return false
+        if (gainsByStemId.keys != current.stemIds.toSet()) return false
+        val updated = current.copy(
+            stems = current.stems.map { stem ->
+                stem.copy(
+                    gain = SourceSeparationStemGainPolicy.normalize(
+                        gainsByStemId.getValue(stem.stemId),
+                    ),
+                )
+            },
+        )
+        commitSourceSeparationStemMix(updated)
+        return true
+    }
+
+    fun previewSourceSeparationStemGains(gainsByStemId: Map<String, Float>): Boolean {
+        if (sourceSeparationBlendModeFlow.value == SourceSeparationBlendMode.Off) return false
+        val current = _sourceSeparationMultiStemMixStateFlow.value ?: return false
+        if (gainsByStemId.keys != current.stemIds.toSet()) return false
+        val preview = current.copy(
+            stems = current.stems.map { stem ->
+                stem.copy(
+                    gain = SourceSeparationStemGainPolicy.normalize(
+                        gainsByStemId.getValue(stem.stemId),
+                    ),
+                )
+            },
+        )
+        sourceSeparationStemGainPreviewJob?.cancel()
+        sourceSeparationStemGainPreviewJob = null
+        sourceSeparationStemGainPreviewPending = null
+        viewModelScope.launch {
+            runCatching {
+                sendSourceSeparationStemGainsCommand(preview, persist = false)
+            }.onFailure { error ->
+                Log.w(TAG, "Failed to preview source separation stem gains", error)
+            }
+        }
+        return true
     }
 
     fun invertSourceSeparationStemGains() {
@@ -2985,10 +3029,6 @@ class PlayerViewModel(
 
     companion object {
         private const val TAG = "PlayerViewModel"
-        private const val KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED =
-            "source_separation.playback_enabled"
-        private const val KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG =
-            "source_separation.remember_per_song"
         private const val SOURCE_SEPARATION_BLEND_PREVIEW_THROTTLE_MS = 33L
     }
 }

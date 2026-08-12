@@ -1,5 +1,7 @@
 package com.mardous.booming.ui.screen.player
 
+import com.mardous.booming.data.model.Song
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheMutationResult
 import org.koin.java.KoinJavaComponent.get
 import java.lang.ref.WeakReference
 
@@ -50,15 +52,115 @@ object SourceSeparationForegroundWorkerDebugBridge {
     }
 
     fun configure(
-        autoStart: Boolean?,
-        modeName: String?,
-        blend: Float?,
+        autoStart: Boolean? = null,
+        modeName: String? = null,
+        blend: Float? = null,
+        autoFlac: Boolean? = null,
+        gpuEnabled: Boolean? = null,
+        windowDecode: Boolean? = null,
+        snackbarProgress: Boolean? = null,
+        snackbarMessages: Boolean? = null,
+        mixedOutputPrerollMs: Long? = null,
+        readyWindowCount: Int? = null,
+        autoCacheCleanup: Boolean? = null,
+        partialCacheLimit: Int? = null,
+        completedCacheLimit: Int? = null,
     ): Boolean {
+        val mode = modeName?.let { name ->
+            requireNotNull(blendModeFromName(name)) { "Unknown source-separation mix mode '$name'." }
+        }
         val viewModel = viewModelRef?.get() ?: return false
         autoStart?.let(viewModel::setSourceSeparationAutoStartEnabled)
-        modeName?.let(::blendModeFromName)?.let(viewModel::setSourceSeparationBlendMode)
+        mode?.let(viewModel::setSourceSeparationBlendMode)
         blend?.let(viewModel::setSourceSeparationBlend)
+        autoFlac?.let(viewModel::setSourceSeparationAutoFlacCompressionEnabled)
+        gpuEnabled?.let(viewModel::setSourceSeparationGpuEnabled)
+        windowDecode?.let(viewModel::setSourceSeparationWindowDecodeEnabled)
+        snackbarProgress?.let(viewModel::setSourceSeparationShowSnackbarProgressEnabled)
+        snackbarMessages?.let(viewModel::setSourceSeparationShowSnackbarMessagesEnabled)
+        mixedOutputPrerollMs?.let(viewModel::setSourceSeparationMixedOutputPrerollMs)
+        readyWindowCount?.let(viewModel::setSourceSeparationPlaybackReadyWindowCount)
+        autoCacheCleanup?.let(viewModel::setSourceSeparationAutoCacheCleanupEnabled)
+        partialCacheLimit?.let(viewModel::setSourceSeparationAutoCacheCleanupPartialLimit)
+        completedCacheLimit?.let(viewModel::setSourceSeparationAutoCacheCleanupCompletedLimit)
         return true
+    }
+
+    fun setBlend(blend: Float, persist: Boolean): Boolean {
+        val viewModel = viewModelRef?.get() ?: return false
+        if (persist) {
+            viewModel.setSourceSeparationBlend(blend)
+        } else {
+            viewModel.previewSourceSeparationBlend(blend)
+        }
+        return true
+    }
+
+    fun setStemGains(gainsByStemId: Map<String, Float>, persist: Boolean): Boolean {
+        val viewModel = viewModelRef?.get() ?: return false
+        return if (persist) {
+            viewModel.setSourceSeparationStemGains(gainsByStemId)
+        } else {
+            viewModel.previewSourceSeparationStemGains(gainsByStemId)
+        }
+    }
+
+    suspend fun prepareCacheForManualDelete(cacheKey: String): Boolean {
+        val viewModel = viewModelRef?.get() ?: return false
+        viewModel.prepareSourceSeparationCacheForManualDelete(cacheKey)
+        return true
+    }
+
+    suspend fun handleCacheManualDeleteResult(
+        cacheKey: String,
+        result: SourceSeparationCacheMutationResult,
+    ): Boolean {
+        val viewModel = viewModelRef?.get() ?: return false
+        viewModel.handleSourceSeparationCacheManualDeleteResult(cacheKey, result)
+        return true
+    }
+
+    suspend fun prepareCacheForManualDeleteFallback(
+        cacheKey: String,
+        isCurrentCache: Boolean,
+    ) {
+        val worker = worker()
+        val song = worker.playbackStateFlow.value.song
+        if (isCurrentCache) {
+            worker.suppressAndPauseSong(song.id)
+        }
+        val preflightIdentity = if (isCurrentCache && song != Song.emptySong) {
+            SourceSeparationWorkerRequestIdentity.from(
+                song,
+                worker.activeSelectionStateFlow.value,
+            )
+        } else {
+            null
+        }
+        val canceled = worker.cancelForCacheDeletion(
+            cacheKey = cacheKey,
+            preflightIdentity = preflightIdentity,
+        )
+        if (isCurrentCache && !canceled) {
+            worker.cancel()
+        }
+    }
+
+    fun pauseForModelSupersession() {
+        worker().pauseForActiveModelSupersession()
+    }
+
+    fun isModelArtifactInUse(sha256: String): Boolean =
+        worker().isModelArtifactInUse(sha256)
+
+    fun requestAutomaticPrune() {
+        worker().requestAutomaticPrune()
+    }
+
+    fun currentSong(): Song = worker().playbackStateFlow.value.song
+
+    fun clearStatusIfNotRunning() {
+        worker().clearStatusIfNotRunning()
     }
 
     fun status(): String {

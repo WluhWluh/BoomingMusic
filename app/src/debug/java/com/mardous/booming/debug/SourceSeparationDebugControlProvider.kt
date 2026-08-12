@@ -21,8 +21,24 @@ import org.koin.java.KoinJavaComponent.get
 class SourceSeparationDebugControlProvider : ContentProvider() {
     private val mediaClientLock = Any()
     private var mediaClient: SourceSeparationDebugMediaClient? = null
+    private val operations = SourceSeparationDebugOperationRegistry()
+    private val resources by lazy {
+        SourceSeparationDebugResourceController(operations, ::requireMediaClient)
+    }
+    private val modelRuntimes by lazy {
+        SourceSeparationDebugModelRuntimeController(operations)
+    }
 
     override fun onCreate(): Boolean = true
+
+    override fun shutdown() {
+        operations.close()
+        synchronized(mediaClientLock) {
+            mediaClient?.close()
+            mediaClient = null
+        }
+        super.shutdown()
+    }
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         enforceDebugCaller()
@@ -138,20 +154,93 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
             sessionResult(result.resultCode, result.extras)
         }
         "separation.blend" -> withMediaClient { client ->
+            val blend = args.requireFloat("blend").coerceIn(0f, 1f)
+            val persist = args.boolean("persist", true)
+            if (SourceSeparationForegroundWorkerDebugBridge.setBlend(blend, persist)) {
+                return@withMediaClient SourceSeparationDebugProtocol.success(
+                    JSONObject()
+                        .put("blend", blend)
+                        .put("persist", persist)
+                        .put("uiPath", true),
+                )
+            }
+            val persistence = if (persist) resources.persistBlendFallback(blend) else null
             val result = client.send(
                 Playback.SET_SOURCE_SEPARATION_BLEND,
                 Bundle().apply {
-                    putFloat(
-                        Playback.EXTRA_SOURCE_SEPARATION_BLEND,
-                        args.requireFloat("blend").coerceIn(0f, 1f),
-                    )
+                    putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, blend)
                     putBoolean(
                         Playback.EXTRA_SOURCE_SEPARATION_PERSIST_BLEND,
-                        args.boolean("persist", true),
+                        persist,
                     )
                 },
             )
-            sessionResult(result.resultCode, result.extras)
+            sessionResult(
+                result.resultCode,
+                Bundle(result.extras).apply {
+                    putBoolean("uiPath", false)
+                    persistence?.let { putString("persistence", it.toString()) }
+                },
+            )
+        }
+        "separation.stem_gains" -> withMediaClient { client ->
+            val state = client.debugState()
+            val cacheKey = state.getString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY).orEmpty()
+            require(cacheKey.isNotBlank()) { "There is no active source-separation cache." }
+            val expectedStemIds = state.getStringArrayList(
+                Playback.EXTRA_SOURCE_SEPARATION_STEM_IDS,
+            ).orEmpty()
+            require(expectedStemIds.isNotEmpty()) {
+                "The active source-separation session has no independent stem gains."
+            }
+            val gainsByStemId = parseStemGains(args.requireString("gains"))
+            require(gainsByStemId.keys == expectedStemIds.toSet()) {
+                "Stem gain IDs must exactly match: ${expectedStemIds.joinToString()}."
+            }
+            val persist = args.boolean("persist", true)
+            if (SourceSeparationForegroundWorkerDebugBridge.setStemGains(
+                    gainsByStemId,
+                    persist,
+                )
+            ) {
+                return@withMediaClient SourceSeparationDebugProtocol.success(
+                    JSONObject()
+                        .put("cacheKey", cacheKey)
+                        .put("gains", JSONObject(gainsByStemId))
+                        .put("persist", persist)
+                        .put("uiPath", true),
+                )
+            }
+            val persistence = if (persist) {
+                resources.persistStemGainsFallback(cacheKey, expectedStemIds, gainsByStemId)
+            } else {
+                null
+            }
+            val result = client.send(
+                Playback.SET_SOURCE_SEPARATION_STEM_GAINS,
+                Bundle().apply {
+                    putString(Playback.EXTRA_SOURCE_SEPARATION_CACHE_KEY, cacheKey)
+                    putStringArrayList(
+                        Playback.EXTRA_SOURCE_SEPARATION_STEM_IDS,
+                        ArrayList(expectedStemIds),
+                    )
+                    putFloatArray(
+                        Playback.EXTRA_SOURCE_SEPARATION_STEM_GAINS,
+                        expectedStemIds.map(gainsByStemId::getValue).toFloatArray(),
+                    )
+                    putBoolean(
+                        Playback.EXTRA_SOURCE_SEPARATION_PERSIST_STEM_GAINS,
+                        persist,
+                    )
+                },
+            )
+            sessionResult(
+                result.resultCode,
+                Bundle(result.extras).apply {
+                    putBoolean("uiPath", false)
+                    persistence?.let { putString("persistence", it.toString()) }
+                },
+            )
         }
         "separation.marker" -> withMediaClient { client ->
             val result = client.send(
@@ -187,6 +276,56 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
             SourceSeparationForegroundWorkerDebugBridge.clearWindowSamples(),
             "worker_unavailable",
             "Unable to clear worker samples.",
+        )
+        "settings.get" -> SourceSeparationDebugProtocol.success(resources.settings())
+        "settings.set" -> SourceSeparationDebugProtocol.success(resources.updateSettings(args))
+        "cache.list" -> SourceSeparationDebugProtocol.success(resources.caches())
+        "cache.delete" -> accepted(
+            resources.submitCacheDelete(resolveCacheKey(args)),
+        )
+        "cache.delete_all" -> accepted(resources.submitCacheDeleteAll())
+        "cache.promote" -> accepted(
+            resources.submitCachePromotion(resolveCacheKey(args)),
+        )
+        "cache.cleanup" -> accepted(resources.submitCacheCleanup())
+        "model.list" -> SourceSeparationDebugProtocol.success(
+            modelRuntimes.models(refresh = args.boolean("refresh", false)),
+        )
+        "model.install" -> accepted(
+            modelRuntimes.submitModelInstall(args.requireString("model_id")),
+        )
+        "model.select" -> accepted(
+            modelRuntimes.submitModelSelect(
+                modelId = args.optionalString("model_id"),
+                sha256 = args.optionalString("sha256"),
+                profileId = args.optionalString("profile_id"),
+            ),
+        )
+        "model.delete" -> accepted(
+            modelRuntimes.submitModelDelete(
+                modelId = args.optionalString("model_id"),
+                sha256 = args.optionalString("sha256"),
+            ),
+        )
+        "runtime.list" -> SourceSeparationDebugProtocol.success(
+            modelRuntimes.runtimes(verify = args.boolean("verify", false)),
+        )
+        "runtime.install", "runtime.repair", "runtime.activate", "runtime.remove" ->
+            accepted(
+                modelRuntimes.submitRuntimeMutation(
+                    action = command.substringAfter('.'),
+                    requestedKind = args.optionalString("runtime_kind"),
+                    componentId = args.optionalString("component_id"),
+                ),
+            )
+        "operation.get" -> SourceSeparationDebugProtocol.success(
+            operations.snapshot(args.requireString("operation_id")).toJson(),
+        )
+        "operation.list" -> SourceSeparationDebugProtocol.success(
+            JSONObject().put("operations", operations.snapshots().toJson()),
+        )
+        "operation.cancel" -> SourceSeparationDebugProtocol.success(
+            operations.cancel(args.requireString("operation_id")).toJson(),
         )
         "ui.launch" -> {
             providerContext().startActivity(
@@ -289,14 +428,33 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
         if (value) SourceSeparationDebugProtocol.success()
         else SourceSeparationDebugProtocol.failure(code, message)
 
+    private fun accepted(operation: SourceSeparationDebugOperationSnapshot): Bundle =
+        SourceSeparationDebugProtocol.success(
+            data = operation.toJson(),
+            message = "Operation accepted.",
+            operationId = operation.id,
+        )
+
+    private fun resolveCacheKey(args: DebugArguments): String {
+        args.optionalString("cache_key")?.let { return it }
+        require(args.boolean("current", false)) {
+            "cache_key is required unless current=true."
+        }
+        return requireNotNull(
+            resources.currentCacheKey(),
+        ) { "The current song has no cache for the selected model." }
+    }
+
     private inline fun withMediaClient(
         block: (SourceSeparationDebugMediaClient) -> Bundle,
-    ): Bundle = synchronized(mediaClientLock) {
-        val client = mediaClient ?: SourceSeparationDebugMediaClient(providerContext()).also {
-            mediaClient = it
+    ): Bundle = block(requireMediaClient())
+
+    private fun requireMediaClient(): SourceSeparationDebugMediaClient =
+        synchronized(mediaClientLock) {
+            mediaClient ?: SourceSeparationDebugMediaClient(providerContext()).also {
+                mediaClient = it
+            }
         }
-        block(client)
-    }
 
     private fun providerContext() = checkNotNull(context) { "Provider context is unavailable." }
 
@@ -334,6 +492,8 @@ internal class DebugArguments(
     private val arg: String?,
     private val extras: Bundle,
 ) {
+    fun has(key: String): Boolean = extras.containsKey(key)
+
     fun optionalString(key: String): String? = extras.getString(key)
         ?.takeIf(String::isNotBlank)
         ?: if (key == "value") arg?.takeIf(String::isNotBlank) else null
@@ -362,6 +522,17 @@ internal class DebugArguments(
         "Missing or invalid float argument '$key'."
     }
 
+    fun optionalInt(key: String): Int? = optionalLong(key)?.let { value ->
+        require(value in Int.MIN_VALUE..Int.MAX_VALUE) { "Integer argument '$key' is out of range." }
+        value.toInt()
+    }
+
+    fun optionalBoolean(key: String): Boolean? = if (extras.containsKey(key)) {
+        requireBoolean(key)
+    } else {
+        null
+    }
+
     fun boolean(key: String, default: Boolean): Boolean = when {
         !extras.containsKey(key) -> default
         raw(key) is Boolean -> extras.getBoolean(key)
@@ -380,6 +551,25 @@ internal class DebugArguments(
 
     @Suppress("DEPRECATION")
     private fun raw(key: String): Any? = extras.get(key)
+}
+
+private fun parseStemGains(encoded: String): Map<String, Float> {
+    val result = linkedMapOf<String, Float>()
+    encoded.split(',').forEach { token ->
+        val parts = token.trim().split('=', limit = 2)
+        require(parts.size == 2 && parts[0].isNotBlank()) {
+            "Invalid stem gain '$token'; expected stem_id=0..1."
+        }
+        val gain = parts[1].toFloatOrNull()
+        require(gain != null && gain.isFinite() && gain in 0f..1f) {
+            "Invalid gain for '${parts[0]}'; expected a number from 0 to 1."
+        }
+        require(result.put(parts[0], gain) == null) {
+            "Duplicate stem gain ID '${parts[0]}'."
+        }
+    }
+    require(result.isNotEmpty()) { "No stem gains were supplied." }
+    return result
 }
 
 private fun Song.toJson(): JSONObject = JSONObject()

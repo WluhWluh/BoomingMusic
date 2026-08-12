@@ -25,9 +25,10 @@ class SourceSeparationDebugControlAuditTest {
         ).readText()
 
         assertTrue(provider.contains("Binder.getCallingUid()"))
-        assertTrue(provider.contains("callingUid == ownUid"))
-        assertTrue(provider.contains("callingUid == Process.SHELL_UID"))
-        assertTrue(provider.contains("callingUid == 0"))
+        assertTrue(provider.contains("callingUid != ownUid"))
+        assertTrue(provider.contains("callingUid != Process.SHELL_UID"))
+        assertTrue(provider.contains("callingUid != 0"))
+        assertTrue(provider.contains("throw SecurityException"))
     }
 
     private fun appFile(relativePath: String): File {

@@ -55,6 +55,8 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIM
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_ENABLED
+import com.mardous.booming.util.SOURCE_SEPARATION_REMEMBER_PER_SONG
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -2129,12 +2131,12 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
 
     private fun readBlendMode(): SourceSeparationBlendMode {
         val playbackEnabled = preferences.getBoolean(
-            KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED,
+            SOURCE_SEPARATION_PLAYBACK_ENABLED,
             false,
         )
         return when {
             !playbackEnabled -> SourceSeparationBlendMode.Off
-            preferences.getBoolean(KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG, true) ->
+            preferences.getBoolean(SOURCE_SEPARATION_REMEMBER_PER_SONG, true) ->
                 SourceSeparationBlendMode.PerSong
             else -> SourceSeparationBlendMode.Global
         }
@@ -2539,10 +2541,6 @@ private fun MdxSourceDecodeMode.toUiState(): SourceSeparationDecodeModeUiState {
     }
 }
 
-private const val KEY_SOURCE_SEPARATION_PLAYBACK_ENABLED =
-    "source_separation.playback_enabled"
-private const val KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG =
-    "source_separation.remember_per_song"
 private const val SOURCE_SEPARATION_FOREGROUND_WORKER_IDLE_MS = 250L
 private const val SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS = 50L
 private const val SOURCE_SEPARATION_DEBUG_WINDOW_SAMPLE_LIMIT = 128

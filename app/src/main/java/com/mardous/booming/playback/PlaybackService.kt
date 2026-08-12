@@ -152,6 +152,7 @@ import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_START
 import com.mardous.booming.util.SOURCE_SEPARATION_AUTO_FLAC_COMPRESSION
 import com.mardous.booming.util.SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import com.mardous.booming.util.SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
+import com.mardous.booming.util.SOURCE_SEPARATION_REMEMBER_PER_SONG
 import com.mardous.booming.util.SOURCE_SEPARATION_WINDOW_DECODE
 import com.mardous.booming.util.STOP_WHEN_CLOSED_FROM_RECENTS
 import com.mardous.booming.util.SongPlayCountHelper
@@ -2757,7 +2758,7 @@ class PlaybackService :
         val demandBlend = SourceSeparationStemGainPolicy.demandBlend(normalizedGains)
         val previousBlend = sourceSeparationMixProcessor.blend
         val persistPerSong = commit && preferences.getBoolean(
-            KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG,
+            SOURCE_SEPARATION_REMEMBER_PER_SONG,
             true,
         )
         val request = SourceSeparationRequestedStemMix(
@@ -2879,7 +2880,7 @@ class PlaybackService :
         fallback?.takeIf { gains -> gains.size == stemIds.size }?.let {
             return SourceSeparationStemGainPolicy.normalize(it)
         }
-        if (!preferences.getBoolean(KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG, true)) {
+        if (!preferences.getBoolean(SOURCE_SEPARATION_REMEMBER_PER_SONG, true)) {
             val global = sourceSeparationMixSettings.readGlobalStemGains(
                 model = SourceSeparationMixModelKey.multiStem(runtimeSong.modelId),
                 stemIds = stemIds,
@@ -5161,8 +5162,6 @@ private fun SourceSeparationCacheManifest.mdxBlendEndpointStemIds(): List<String
     return mdxStemContract.toMdxBlendEndpointStemIds().map { stemId -> stemId.value }
 }
 
-private const val KEY_SOURCE_SEPARATION_REMEMBER_PER_SONG =
-    "source_separation.remember_per_song"
 
 @OptIn(UnstableApi::class)
 private fun musicMediaSourceFactory(
