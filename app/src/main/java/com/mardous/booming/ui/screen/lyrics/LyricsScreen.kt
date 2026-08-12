@@ -28,9 +28,11 @@ import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -66,6 +68,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -101,6 +104,7 @@ import com.mardous.booming.data.model.Song
 import com.mardous.booming.data.model.lyrics.SyncedLyrics
 import com.mardous.booming.extensions.isPowerSaveMode
 import com.mardous.booming.extensions.resolveColor
+import com.mardous.booming.separation.SourceSeparationStemGainPolicy
 import com.mardous.booming.separation.SourceSeparationStemIconResolver
 import com.mardous.booming.ui.component.compose.AnimatedEqBars
 import com.mardous.booming.ui.component.compose.color.extractGradientColors
@@ -112,6 +116,7 @@ import com.mardous.booming.ui.component.views.PlaceholderDrawable
 import com.mardous.booming.ui.screen.library.LibraryViewModel
 import com.mardous.booming.ui.screen.player.PlayerViewModel
 import com.mardous.booming.ui.screen.player.SourceSeparationBlendMode
+import com.mardous.booming.ui.screen.player.SourceSeparationMultiStemMixUiState
 import com.mardous.booming.ui.screen.player.SourceSeparationPlaybackProcessingProgressState
 import com.mardous.booming.ui.screen.player.animateSourceSeparationPlaybackProcessingProgress
 import com.mardous.booming.ui.theme.PlayerTheme
@@ -337,20 +342,25 @@ fun CoverLyricsScreen(
         val sourceSeparationMultiStemMixState by playerViewModel
             .sourceSeparationMultiStemMixStateFlow
             .collectAsStateWithLifecycle()
+        val multiStemMixState = sourceSeparationMultiStemMixState
         val quickBlendExpanded = showSourceSeparationQuickControls &&
                 sourceSeparationBlendMode != SourceSeparationBlendMode.Off &&
-                sourceSeparationMultiStemMixState == null
-        val quickBlendProcessingProgressState =
+                multiStemMixState == null
+        val multiStemQuickExpanded = showSourceSeparationQuickControls &&
+                sourceSeparationBlendMode != SourceSeparationBlendMode.Off &&
+                multiStemMixState != null
+        val quickControlExpanded = quickBlendExpanded || multiStemQuickExpanded
+        val quickControlProcessingProgressState =
             sourceSeparationPlaybackProcessingProgressState.takeIf {
-                quickBlendExpanded
+                quickControlExpanded
             }
         var reserveLyricsEndSpace by remember {
-            mutableStateOf(quickBlendExpanded)
+            mutableStateOf(quickControlExpanded)
         }
-        LaunchedEffect(showSourceSeparationQuickControls, quickBlendExpanded) {
+        LaunchedEffect(showSourceSeparationQuickControls, quickControlExpanded) {
             val shouldReserveEndSpace = when {
                 !showSourceSeparationQuickControls -> false
-                quickBlendExpanded -> true
+                quickControlExpanded -> true
                 else -> {
                     delay(CoverLyricsQuickControlsTransitionDurationMillis.toLong())
                     false
@@ -361,7 +371,7 @@ fun CoverLyricsScreen(
             }
         }
         val reserveExpandedControls = showSourceSeparationQuickControls &&
-                (quickBlendExpanded || reserveLyricsEndSpace)
+                (quickControlExpanded || reserveLyricsEndSpace)
         val overlayAvoidance = coverLyricsOverlayAvoidance(
             showSourceSeparationQuickControls = showSourceSeparationQuickControls,
             reserveExpandedControls = reserveExpandedControls,
@@ -411,33 +421,45 @@ fun CoverLyricsScreen(
                     .padding(CoverLyricsOverlayPadding)
             ) {
                 if (showSourceSeparationQuickControls) {
-                    CoverLyricsQuickBlendControl(
-                        expanded = quickBlendExpanded,
-                        blend = sourceSeparationPlaybackState.blend,
-                        processingProgressState = quickBlendProcessingProgressState,
-                        topStemIconRes = SourceSeparationStemIconResolver.resourceId(
-                            sourceSeparationBlendStemLabels.vocalsCanonicalLabel,
-                        ),
-                        bottomStemIconRes = SourceSeparationStemIconResolver.resourceId(
-                            sourceSeparationBlendStemLabels.instrumentalCanonicalLabel,
-                        ),
-                        onEnableSeparatedPlayback = {
-                            if (sourceSeparationMultiStemMixState != null) {
-                                onSourceSeparationPanelLongClick()
-                            } else {
+                    if (multiStemMixState != null) {
+                        CoverLyricsMultiStemControl(
+                            expanded = multiStemQuickExpanded,
+                            state = multiStemMixState,
+                            processingProgressState = quickControlProcessingProgressState,
+                            onEnableSeparatedPlayback = onSourceSeparationPanelLongClick,
+                            onDisableSeparatedPlayback = {
+                                playerViewModel.setSourceSeparationPlaybackEnabled(false)
+                            },
+                            onGainPreview = playerViewModel::previewSourceSeparationStemGain,
+                            onGainChangeFinished = playerViewModel::setSourceSeparationStemGain,
+                            onInvertGains = playerViewModel::invertSourceSeparationStemGains,
+                            onLongClick = onSourceSeparationPanelLongClick,
+                        )
+                    } else {
+                        CoverLyricsQuickBlendControl(
+                            expanded = quickBlendExpanded,
+                            blend = sourceSeparationPlaybackState.blend,
+                            processingProgressState = quickControlProcessingProgressState,
+                            topStemIconRes = SourceSeparationStemIconResolver.resourceId(
+                                sourceSeparationBlendStemLabels.vocalsCanonicalLabel,
+                            ),
+                            bottomStemIconRes = SourceSeparationStemIconResolver.resourceId(
+                                sourceSeparationBlendStemLabels.instrumentalCanonicalLabel,
+                            ),
+                            onEnableSeparatedPlayback = {
                                 playerViewModel.setSourceSeparationPlaybackEnabled(
                                     enabled = true,
                                     blend = sourceSeparationPlaybackState.blend
                                 )
-                            }
-                        },
-                        onDisableSeparatedPlayback = {
-                            playerViewModel.setSourceSeparationPlaybackEnabled(false)
-                        },
-                        onBlendPreview = playerViewModel::previewSourceSeparationBlend,
-                        onBlendChangeFinished = playerViewModel::setSourceSeparationBlend,
-                        onLongClick = onSourceSeparationPanelLongClick,
-                    )
+                            },
+                            onDisableSeparatedPlayback = {
+                                playerViewModel.setSourceSeparationPlaybackEnabled(false)
+                            },
+                            onBlendPreview = playerViewModel::previewSourceSeparationBlend,
+                            onBlendChangeFinished = playerViewModel::setSourceSeparationBlend,
+                            onLongClick = onSourceSeparationPanelLongClick,
+                        )
+                    }
                 }
 
                 CoverLyricsCircularIconButton(
@@ -845,6 +867,432 @@ private fun CoverLyricsQuickBlendControl(
     }
 }
 
+private data class CoverLyricsMultiStemTransitionTarget(
+    val expanded: Boolean,
+    val stemCount: Int,
+)
+
+@Composable
+private fun CoverLyricsMultiStemControl(
+    expanded: Boolean,
+    state: SourceSeparationMultiStemMixUiState,
+    processingProgressState: SourceSeparationPlaybackProcessingProgressState?,
+    onEnableSeparatedPlayback: () -> Unit,
+    onDisableSeparatedPlayback: () -> Unit,
+    onGainPreview: (String, Float) -> Unit,
+    onGainChangeFinished: (String, Float) -> Unit,
+    onInvertGains: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val stemCount = state.stems.size
+    val expandedStackHeight = coverLyricsMultiStemExpandedHeight(stemCount)
+    var draggingStemId by remember { mutableStateOf<String?>(null) }
+    var dragGain by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(state.modelId, state.songId, state.cacheKey, expanded) {
+        draggingStemId = null
+    }
+
+    val transition = updateTransition(
+        targetState = CoverLyricsMultiStemTransitionTarget(
+            expanded = expanded,
+            stemCount = stemCount,
+        ),
+        label = "CoverLyricsMultiStem",
+    )
+    val height by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "height",
+    ) { target ->
+        if (target.expanded) {
+            coverLyricsMultiStemExpandedHeight(target.stemCount)
+        } else {
+            CoverLyricsButtonSize
+        }
+    }
+    val buttonBackgroundAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "buttonBackgroundAlpha",
+    ) { target -> if (target.expanded) 0f else 1f }
+    val trackAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "trackAlpha",
+    ) { target -> if (target.expanded) 0.1f else 0f }
+    val stemIconAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "stemIconAlpha",
+    ) { target -> if (target.expanded) 0f else 1f }
+    val endpointIconAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "endpointIconAlpha",
+    ) { target -> if (target.expanded) 1f else 0f }
+
+    val colorScheme = MaterialTheme.colorScheme
+    val progressColor = colorScheme.onSurface
+    val currentState by rememberUpdatedState(state)
+    val currentOnEnableSeparatedPlayback by rememberUpdatedState(onEnableSeparatedPlayback)
+    val currentOnDisableSeparatedPlayback by rememberUpdatedState(onDisableSeparatedPlayback)
+    val currentOnGainPreview by rememberUpdatedState(onGainPreview)
+    val currentOnGainChangeFinished by rememberUpdatedState(onGainChangeFinished)
+    val currentOnInvertGains by rememberUpdatedState(onInvertGains)
+    val currentOnLongClick by rememberUpdatedState(onLongClick)
+    val viewConfiguration = LocalViewConfiguration.current
+    val touchSlop = viewConfiguration.touchSlop
+    val longPressTimeoutMillis = viewConfiguration.longPressTimeoutMillis
+    val hapticFeedback = LocalHapticFeedback.current
+    val view = LocalView.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val segmentHeightPx = with(density) {
+        CoverLyricsMultiStemSegmentSize.toPx()
+    }
+    val segmentGapPx = with(density) {
+        CoverLyricsMultiStemSegmentGap.toPx()
+    }
+    val segmentCount = stemCount + 2
+
+    val gestureModifier = Modifier.pointerInput(
+        expanded,
+        segmentCount,
+        segmentHeightPx,
+        segmentGapPx,
+        touchSlop,
+        longPressTimeoutMillis,
+        hapticFeedback,
+        view,
+    ) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val pointerId = down.id
+            val downSegment = if (expanded) {
+                coverLyricsMultiStemHitSegment(
+                    y = down.position.y,
+                    segmentCount = segmentCount,
+                    segmentHeightPx = segmentHeightPx,
+                    segmentGapPx = segmentGapPx,
+                )
+            } else {
+                -1
+            }
+            val activeStemIndex = downSegment - 1
+            val activeStem = currentState.stems.getOrNull(activeStemIndex)
+            val startY = down.position.y
+            val startGain = activeStem?.gain ?: 0f
+            var latestGain = startGain
+            var releasedChange: PointerInputChange? = null
+            var dragStartChange: PointerInputChange? = null
+
+            fun updateDrag(change: PointerInputChange) {
+                val stem = currentState.stems.getOrNull(activeStemIndex) ?: return
+                latestGain = coverLyricsMultiStemGainForDrag(
+                    startGain = startGain,
+                    deltaY = change.position.y - startY,
+                    segmentHeightPx = segmentHeightPx,
+                )
+                draggingStemId = stem.stemId
+                dragGain = latestGain
+                currentOnGainPreview(stem.stemId, latestGain)
+                change.consume()
+            }
+
+            val longPressReached = withTimeoutOrNull(longPressTimeoutMillis) {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes
+                        .firstOrNull { it.id == pointerId }
+                        ?: continue
+
+                    if (!change.pressed) {
+                        releasedChange = change
+                        return@withTimeoutOrNull false
+                    }
+
+                    if ((change.position - down.position).getDistance() > touchSlop) {
+                        dragStartChange = change
+                        return@withTimeoutOrNull false
+                    }
+                }
+            } == null
+
+            when {
+                longPressReached -> {
+                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    currentOnLongClick()
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes
+                            .firstOrNull { it.id == pointerId }
+                            ?: continue
+                        change.consume()
+                        if (!change.pressed) break
+                    }
+                }
+
+                releasedChange != null -> {
+                    releasedChange.let { change ->
+                        if (!expanded) {
+                            currentOnEnableSeparatedPlayback()
+                        } else {
+                            when (
+                                coverLyricsMultiStemHitSegment(
+                                    y = change.position.y,
+                                    segmentCount = segmentCount,
+                                    segmentHeightPx = segmentHeightPx,
+                                    segmentGapPx = segmentGapPx,
+                                )
+                            ) {
+                                0 -> currentOnInvertGains()
+                                segmentCount - 1 -> currentOnDisableSeparatedPlayback()
+                                else -> {
+                                    val stem = currentState.stems
+                                        .getOrNull(activeStemIndex)
+                                        ?: return@let
+                                    val nextGain = if (stem.gain >= 0.5f) {
+                                        SourceSeparationStemGainPolicy.MIN_GAIN
+                                    } else {
+                                        SourceSeparationStemGainPolicy.MAX_GAIN
+                                    }
+                                    currentOnGainChangeFinished(stem.stemId, nextGain)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                expanded && dragStartChange != null && activeStem != null -> {
+                    draggingStemId = activeStem.stemId
+                    try {
+                        updateDrag(dragStartChange)
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes
+                                .firstOrNull { it.id == pointerId }
+                                ?: continue
+                            if (!change.pressed) {
+                                currentOnGainChangeFinished(activeStem.stemId, latestGain)
+                                change.consume()
+                                break
+                            }
+                            updateDrag(change)
+                        }
+                    } finally {
+                        draggingStemId = null
+                    }
+                }
+
+                dragStartChange != null -> {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes
+                            .firstOrNull { it.id == pointerId }
+                            ?: continue
+                        if (!change.pressed) break
+                    }
+                }
+            }
+        }
+    }
+    val interactionModifier = if (expanded) {
+        gestureModifier
+    } else {
+        Modifier
+            .clip(CircleShape)
+            .then(gestureModifier)
+    }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.size(
+            width = CoverLyricsControlSlotSize,
+            height = height,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = CoverLyricsButtonSize, height = height)
+                .clip(RectangleShape)
+                .then(interactionModifier),
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(CircleShape)
+                    .background(progressColor.copy(alpha = buttonBackgroundAlpha)),
+            )
+
+            Column(
+                verticalArrangement = Arrangement.spacedBy(CoverLyricsMultiStemSegmentGap),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .requiredHeight(expandedStackHeight)
+                    .offset(y = height - expandedStackHeight)
+                    .alpha(endpointIconAlpha),
+            ) {
+                CoverLyricsMultiStemFixedSegment(
+                    iconRes = R.drawable.ic_swap_vert_24dp,
+                    background = progressColor,
+                    iconTint = colorScheme.surface,
+                    shape = RoundedCornerShape(
+                        topStart = CoverLyricsButtonSize / 2,
+                        topEnd = CoverLyricsButtonSize / 2,
+                        bottomStart = CoverLyricsMultiStemInnerCornerRadius,
+                        bottomEnd = CoverLyricsMultiStemInnerCornerRadius,
+                    ),
+                )
+                state.stems.forEach { stem ->
+                    CoverLyricsMultiStemGainSegment(
+                        iconRes = SourceSeparationStemIconResolver.resourceId(stem.semanticId),
+                        gain = if (draggingStemId == stem.stemId) dragGain else stem.gain,
+                        trackAlpha = trackAlpha,
+                        progressColor = progressColor,
+                        filledColor = colorScheme.surface,
+                    )
+                }
+                CoverLyricsMultiStemFixedSegment(
+                    iconRes = R.drawable.ic_close_24dp,
+                    background = progressColor.copy(alpha = 0.1f),
+                    iconTint = progressColor,
+                    shape = RoundedCornerShape(
+                        topStart = CoverLyricsMultiStemInnerCornerRadius,
+                        topEnd = CoverLyricsMultiStemInnerCornerRadius,
+                        bottomStart = CoverLyricsButtonSize / 2,
+                        bottomEnd = CoverLyricsButtonSize / 2,
+                    ),
+                )
+            }
+
+            Icon(
+                painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
+                contentDescription = stringResource(R.string.action_source_separation_playback),
+                tint = colorScheme.surface,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .alpha(stemIconAlpha),
+            )
+        }
+
+        if (processingProgressState != null) {
+            val displayedProgress =
+                animateSourceSeparationPlaybackProcessingProgress(processingProgressState)
+            CircularProgressIndicator(
+                progress = { displayedProgress },
+                color = progressColor,
+                trackColor = progressColor.copy(alpha = 0.1f),
+                strokeWidth = CoverLyricsQuickBlendProgressStrokeWidth,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = -CoverLyricsQuickBlendProgressOffset)
+                    .size(CoverLyricsQuickBlendProgressSize)
+                    .alpha(endpointIconAlpha),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CoverLyricsMultiStemFixedSegment(
+    iconRes: Int,
+    background: Color,
+    iconTint: Color,
+    shape: RoundedCornerShape,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .size(CoverLyricsMultiStemSegmentSize)
+            .clip(shape),
+    ) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(background),
+        )
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = null,
+            tint = iconTint,
+            modifier = Modifier.size(CoverLyricsQuickBlendIconSize),
+        )
+    }
+}
+
+@Composable
+private fun CoverLyricsMultiStemGainSegment(
+    iconRes: Int,
+    gain: Float,
+    trackAlpha: Float,
+    progressColor: Color,
+    filledColor: Color,
+) {
+    val normalizedGain = SourceSeparationStemGainPolicy.normalize(gain)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .size(CoverLyricsMultiStemSegmentSize)
+            .clip(CoverLyricsMultiStemMiddleSegmentShape)
+            .background(progressColor.copy(alpha = trackAlpha)),
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(CoverLyricsMultiStemSegmentSize * normalizedGain)
+                .background(progressColor),
+        )
+        CoverLyricsQuickBlendEndpointIcon(
+            painter = painterResource(iconRes),
+            unfilledColor = progressColor,
+            filledColor = filledColor,
+            filledHeight = CoverLyricsQuickBlendIconSize * normalizedGain,
+            fillFromTop = false,
+            modifier = Modifier.size(CoverLyricsQuickBlendIconSize),
+        )
+    }
+}
+
+internal fun coverLyricsMultiStemExpandedHeight(stemCount: Int): Dp {
+    val segmentCount = stemCount.coerceAtLeast(0) + 2
+    val gapCount = (segmentCount - 1).coerceAtLeast(0)
+    return CoverLyricsMultiStemSegmentSize * segmentCount.toFloat() +
+            CoverLyricsMultiStemSegmentGap * gapCount.toFloat()
+}
+
+internal fun coverLyricsMultiStemHitSegment(
+    y: Float,
+    segmentCount: Int,
+    segmentHeightPx: Float,
+    segmentGapPx: Float,
+): Int {
+    if (segmentCount <= 0 || y < 0f) return -1
+    val totalHeight = segmentCount * segmentHeightPx +
+            (segmentCount - 1).coerceAtLeast(0) * segmentGapPx
+    if (y >= totalHeight) return -1
+    repeat(segmentCount) { index ->
+        val visualStart = index * (segmentHeightPx + segmentGapPx)
+        val visualEnd = visualStart + segmentHeightPx
+        val hitStart = if (index == 0) 0f else visualStart - segmentGapPx / 2f
+        val hitEnd = if (index == segmentCount - 1) totalHeight else {
+            visualEnd + segmentGapPx / 2f
+        }
+        if (y >= hitStart && y < hitEnd) return index
+    }
+    return segmentCount - 1
+}
+
+internal fun coverLyricsMultiStemGainForDrag(
+    startGain: Float,
+    deltaY: Float,
+    segmentHeightPx: Float,
+): Float {
+    if (segmentHeightPx <= 0f) {
+        return SourceSeparationStemGainPolicy.normalize(startGain)
+    }
+    return SourceSeparationStemGainPolicy.normalize(
+        startGain - deltaY / (segmentHeightPx * 2f),
+    )
+}
+
 @Composable
 private fun CoverLyricsQuickBlendEndpointIcon(
     painter: Painter,
@@ -1060,6 +1508,12 @@ private val CoverLyricsOverlayPadding = 16.dp
 private val CoverLyricsBaseVerticalPadding = 72.dp
 private val CoverLyricsBaseHorizontalPadding = 12.dp
 private val CoverLyricsQuickBlendInnerCornerRadius = 2.dp
+private val CoverLyricsMultiStemSegmentSize = 40.dp
+private val CoverLyricsMultiStemSegmentGap = 4.dp
+private val CoverLyricsMultiStemInnerCornerRadius = 2.dp
+private val CoverLyricsMultiStemMiddleSegmentShape = RoundedCornerShape(
+    CoverLyricsMultiStemInnerCornerRadius,
+)
 private const val CoverLyricsQuickBlendNeutralBlend = 0.5f
 private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.10f
 private const val CoverLyricsQuickControlsTransitionDurationMillis = 260

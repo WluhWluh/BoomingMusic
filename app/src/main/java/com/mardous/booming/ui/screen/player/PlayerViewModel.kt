@@ -2277,6 +2277,18 @@ class PlayerViewModel(
         commitSourceSeparationStemMix(updated)
     }
 
+    fun invertSourceSeparationStemGains() {
+        val current = _sourceSeparationMultiStemMixStateFlow.value ?: return
+        val updated = current.copy(
+            stems = current.stems.map { stem ->
+                stem.copy(
+                    gain = SourceSeparationStemGainPolicy.invert(stem.gain),
+                )
+            },
+        )
+        commitSourceSeparationStemMix(updated)
+    }
+
     fun resetSourceSeparationStemGains() {
         val neutral = _sourceSeparationMultiStemMixStateFlow.value?.neutralized() ?: return
         commitSourceSeparationStemMix(neutral)

@@ -14,6 +14,8 @@ object SourceSeparationStemGainPolicy {
         return gain.coerceIn(MIN_GAIN, MAX_GAIN)
     }
 
+    fun invert(gain: Float): Float = normalize(MAX_GAIN - normalize(gain))
+
     fun requiresSeparatedOutput(gains: Collection<Float>): Boolean =
         gains.any { gain -> abs(normalize(gain) - NEUTRAL_GAIN) >= GAIN_EPSILON }
 

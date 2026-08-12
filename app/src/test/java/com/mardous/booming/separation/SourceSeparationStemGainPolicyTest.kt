@@ -25,6 +25,13 @@ class SourceSeparationStemGainPolicyTest {
     }
 
     @Test
+    fun `inverting gains swaps mute and full volume`() {
+        assertEquals(1f, SourceSeparationStemGainPolicy.invert(0f))
+        assertEquals(0f, SourceSeparationStemGainPolicy.invert(1f))
+        assertEquals(0.25f, SourceSeparationStemGainPolicy.invert(0.75f))
+    }
+
+    @Test
     fun `ordered gain map requires the exact stem identity set`() {
         val stemIds = listOf("drums", "bass", "other", "vocals")
         val stored = mapOf(
