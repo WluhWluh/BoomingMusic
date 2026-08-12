@@ -63,7 +63,10 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     var debugTraceSink: ((String) -> Unit)? = null
 
     @Volatile
-    var mixedOutputStartedSink: (() -> Unit)? = null
+    var mixedOutputStartedSink: ((outputGeneration: Long) -> Unit)? = null
+
+    @Volatile
+    var outputFlushedSink: ((barrierId: Long, outputGeneration: Long) -> Unit)? = null
 
     @Volatile
     internal var dataPlaneStateChangedSink: ((SourceSeparationPlaybackDataState) -> Unit)? = null
@@ -118,8 +121,16 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     @Volatile
     private var notifyMixedOutputStarted = false
 
+    @Volatile
+    private var mixedOutputGeneration = 0L
+
     private var mixedOutputPrerollFramesRemaining = 0L
     private var mixedOutputReadyPrerollMs = DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS
+
+    @Volatile
+    private var mixedOutputNotificationPrerollMs = DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS
+
+    private var outputFlushBarrierId: Long? = null
 
     fun enable(
         vocalsFile: File,
@@ -245,11 +256,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             debugSessionId = debugSessionSeq.incrementAndGet()
             debugQueueSeq.set(0)
             debugQueueTraceRemaining = DEBUG_INITIAL_QUEUE_TRACE_COUNT
-            resetMixedOutputNotificationLocked()
             this.inputMode = inputMode
             this.stemSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
             this.stemChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
             this.mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs.coerceAtLeast(0L)
+            resetMixedOutputNotificationLocked()
             configuredStemCount = expectedGainCount
             legacyTwoStemBlendLaw = useLegacyTwoStemBlendLaw
             this.blendEndpointStemIndexes = blendEndpointIndexes
@@ -404,6 +415,30 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         }
     }
 
+    fun armOutputFlushBarrier(barrierId: Long): Boolean {
+        require(barrierId > 0L) { "Output flush barrier IDs must be positive." }
+        synchronized(lock) {
+            if (!active) return false
+            outputFlushBarrierId = barrierId
+            traceDebug(
+                "outputFlush.arm",
+                "session=$debugSessionId barrier=$barrierId generation=$mixedOutputGeneration",
+            )
+            return true
+        }
+    }
+
+    fun cancelOutputFlushBarrier(barrierId: Long) {
+        synchronized(lock) {
+            if (outputFlushBarrierId != barrierId) return
+            outputFlushBarrierId = null
+            traceDebug(
+                "outputFlush.cancel",
+                "session=$debugSessionId barrier=$barrierId generation=$mixedOutputGeneration",
+            )
+        }
+    }
+
     fun hotSwapToPcmInputs(
         vocalsFile: File,
         instrumentalFile: File,
@@ -520,6 +555,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     override fun onFlush(streamMetadata: AudioProcessor.StreamMetadata) {
+        var confirmedBarrier: Pair<Long, Long>? = null
         synchronized(lock) {
             val engine = playbackEngine
             if (active && engine != null) {
@@ -537,7 +573,20 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             } else {
                 clearResampleCachesLocked()
             }
-            resetMixedOutputNotificationLocked()
+            val barrierId = outputFlushBarrierId
+            val outputGeneration = resetMixedOutputNotificationLocked(
+                prerollMs = if (barrierId != null) 0L else mixedOutputReadyPrerollMs,
+            )
+            if (active && barrierId != null) {
+                confirmedBarrier = barrierId to outputGeneration
+            }
+        }
+        confirmedBarrier?.let { (barrierId, outputGeneration) ->
+            traceDebug(
+                "outputFlush.confirmed",
+                "session=$debugSessionId barrier=$barrierId generation=$outputGeneration",
+            )
+            outputFlushedSink?.invoke(barrierId, outputGeneration)
         }
     }
 
@@ -1257,6 +1306,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         instrumentalInput?.close()
         instrumentalInput = null
         blendEndpointStemIndexes = null
+        outputFlushBarrierId = null
         notifyMixedOutputStarted = false
         mixedOutputPrerollFramesRemaining = 0L
     }
@@ -1283,20 +1333,27 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         }
     }
 
-    private fun resetMixedOutputNotificationLocked() {
+    private fun resetMixedOutputNotificationLocked(
+        prerollMs: Long = mixedOutputReadyPrerollMs,
+    ): Long {
+        mixedOutputGeneration++
+        mixedOutputNotificationPrerollMs = prerollMs.coerceAtLeast(0L)
         notifyMixedOutputStarted = true
         mixedOutputPrerollFramesRemaining = -1L
+        return mixedOutputGeneration
     }
 
     private fun notifyMixedOutputStartedIfNeeded(frames: Int) {
         if (!notifyMixedOutputStarted) return
+        val outputGeneration = mixedOutputGeneration
         if (mixedOutputPrerollFramesRemaining < 0L) {
             val sampleRate = inputAudioFormat.sampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
             mixedOutputPrerollFramesRemaining =
-                sampleRate * mixedOutputReadyPrerollMs / MILLIS_PER_SECOND
+                sampleRate * mixedOutputNotificationPrerollMs / MILLIS_PER_SECOND
             traceDebug(
                 "mixedOutputPreroll.start",
-                "session=$debugSessionId sampleRate=$sampleRate ms=$mixedOutputReadyPrerollMs " +
+                "session=$debugSessionId generation=$outputGeneration sampleRate=$sampleRate " +
+                        "ms=$mixedOutputNotificationPrerollMs " +
                         "frames=$mixedOutputPrerollFramesRemaining"
             )
         }
@@ -1304,8 +1361,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         if (mixedOutputPrerollFramesRemaining > 0L) return
         notifyMixedOutputStarted = false
         mixedOutputPrerollFramesRemaining = 0L
-        traceDebug("mixedOutputPreroll.ready", "session=$debugSessionId")
-        mixedOutputStartedSink?.invoke()
+        traceDebug(
+            "mixedOutputPreroll.ready",
+            "session=$debugSessionId generation=$outputGeneration",
+        )
+        mixedOutputStartedSink?.invoke(outputGeneration)
     }
 
     private fun traceQueueIfNeeded(

@@ -21,6 +21,60 @@ class SourceSeparationMixAudioProcessorTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
+    fun outputFlushBarrierSkipsPrerollOnlyAfterTheAudioProcessorFlushes() {
+        val vocals = writeWav("flush-barrier-vocals.wav", 16_384, 1_000)
+        val instrumental = writeWav("flush-barrier-instrumental.wav", 16_384, 2_000)
+        val processor = SourceSeparationMixAudioProcessor()
+        val flushes = CopyOnWriteArrayList<Pair<Long, Long>>()
+        val mixedOutputGenerations = CopyOnWriteArrayList<Long>()
+        processor.outputFlushedSink = { barrierId, outputGeneration ->
+            flushes += barrierId to outputGeneration
+        }
+        processor.mixedOutputStartedSink = { outputGeneration ->
+            mixedOutputGenerations += outputGeneration
+        }
+        try {
+            processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                vocalsFile = vocals,
+                instrumentalFile = instrumental,
+                positionMs = 0L,
+                inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 400L,
+            )
+            await { processor.isDataPlaneReady() }
+
+            processor.queueInput(silentInput(1))
+            processor.output
+            assertTrue(mixedOutputGenerations.isEmpty())
+
+            assertTrue(processor.armOutputFlushBarrier(73L))
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            assertEquals(2, flushes.size)
+            assertTrue(flushes.all { (barrierId, _) -> barrierId == 73L })
+            assertTrue(flushes[1].second > flushes[0].second)
+
+            processor.queueInput(silentInput(1))
+            processor.output
+            assertEquals(listOf(flushes.last().second), mixedOutputGenerations)
+
+            processor.cancelOutputFlushBarrier(73L)
+            processor.seekTo(100L)
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.queueInput(silentInput(1))
+            processor.output
+            assertEquals(2, flushes.size)
+            assertEquals(listOf(flushes.last().second), mixedOutputGenerations)
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
     fun fourStemWavSessionUsesOrderedGainsAndClampsOnce() {
         val frames = 16_384
         val stems = List(4) { index ->

@@ -167,6 +167,27 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `playback switches flush queued original audio before accepting mixed output`() {
+        val service = mainSource(
+            "com/mardous/booming/playback/PlaybackService.kt",
+        ).readText()
+        val processor = mainSource(
+            "com/mardous/booming/playback/processor/SourceSeparationMixAudioProcessor.kt",
+        ).readText()
+
+        assertTrue(service.contains("requestSourceSeparationOutputFlush(\"newSession\")"))
+        assertTrue(service.contains("requestSourceSeparationOutputFlush(\"completedCacheUpgrade\")"))
+        assertTrue(service.contains("requestSourceSeparationOutputFlush(\"realignAfterProcessing\")"))
+        assertTrue(service.contains("clearSourceSeparationOutputFlushBarrier(\"playback.clear\")"))
+        assertTrue(service.contains("forceDiscontinuity = true"))
+        assertTrue(service.contains("reason=flushPending"))
+        assertTrue(service.contains("playback.outputFlush.confirmed"))
+        assertTrue(processor.contains("override fun onFlush(streamMetadata"))
+        assertTrue(processor.contains("prerollMs = if (barrierId != null) 0L"))
+        assertTrue(processor.contains("outputFlushedSink?.invoke(barrierId, outputGeneration)"))
+    }
+
+    @Test
     fun `active playback entry points gate the current unready window`() {
         val service = mainSource(
             "com/mardous/booming/playback/PlaybackService.kt",

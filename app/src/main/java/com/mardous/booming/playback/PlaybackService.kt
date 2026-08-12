@@ -272,6 +272,10 @@ class PlaybackService :
     private var sourceSeparationOutputMuted = false
     private var sourceSeparationOutputWaitingForMixedOutput = false
     private var sourceSeparationOutputMuteStartedAtMs = 0L
+    private var sourceSeparationOutputFlushBarrierSeq = 0L
+    private var sourceSeparationPendingOutputFlush:
+            SourceSeparationPendingOutputFlush? = null
+    private var sourceSeparationPendingMixedOutputGeneration: Long? = null
     private var sourceSeparationPlaybackContextGeneration = 0L
     private var sourceSeparationActiveSelection: SourceSeparationActiveSelectionSnapshot? = null
     private var sourceSeparationMultiStemSelection:
@@ -342,9 +346,14 @@ class PlaybackService :
                 traceSourceSeparationProcessor(detail)
             }
         }
-        sourceSeparationMixProcessor.mixedOutputStartedSink = {
+        sourceSeparationMixProcessor.mixedOutputStartedSink = { outputGeneration ->
             serviceScope.launch {
-                onSourceSeparationMixedOutputStarted()
+                onSourceSeparationMixedOutputStarted(outputGeneration)
+            }
+        }
+        sourceSeparationMixProcessor.outputFlushedSink = { barrierId, outputGeneration ->
+            serviceScope.launch {
+                onSourceSeparationOutputFlushed(barrierId, outputGeneration)
             }
         }
         sourceSeparationMixProcessor.dataPlaneStateChangedSink = { signaledState ->
@@ -521,6 +530,7 @@ class PlaybackService :
         sourceSeparationMixProcessor.disable()
         sourceSeparationMixProcessor.debugTraceSink = null
         sourceSeparationMixProcessor.mixedOutputStartedSink = null
+        sourceSeparationMixProcessor.outputFlushedSink = null
         sourceSeparationMixProcessor.dataPlaneStateChangedSink = null
         if (BuildConfig.DEBUG) {
             PlaybackContentionDiagnostics.detach(player.exoPlayer)
@@ -2210,6 +2220,7 @@ class PlaybackService :
             sourceSeparationPlaybackSession = session
             enableSourceSeparationMixProcessor(session, switchPositionMs)
             updateSourceSeparationPlaybackReadinessMonitor(session)
+            requestSourceSeparationOutputFlush("newSession")
             traceSourceSeparationPlayback(
                 "check.newSession.afterPrepare",
                 "id=$checkId position=$switchPositionMs shouldPlayAfterSwitch=$shouldPlayAfterSwitch " +
@@ -2572,6 +2583,7 @@ class PlaybackService :
             sourceSeparationPlaybackSession = session
             enableSourceSeparationMixProcessor(session, switchPositionMs)
             updateSourceSeparationPlaybackReadinessMonitor(session)
+            requestSourceSeparationOutputFlush("completedCacheUpgrade")
             resumeSourceSeparationOutputAfterSwitch(
                 reason = "completedCacheUpgrade",
                 resume = shouldPlayAfterSwitch || resumeAfterSwitch,
@@ -3111,12 +3123,7 @@ class PlaybackService :
             waitForMixedOutput = true,
         )
         enableSourceSeparationMixProcessor(session, positionMs)
-        val index = player.currentMediaItemIndex
-        if (index != C.INDEX_UNSET) {
-            player.seekTo(index, positionMs)
-        } else {
-            player.seekTo(positionMs)
-        }
+        requestSourceSeparationOutputFlush("realignAfterProcessing")
         resumeSourceSeparationOutputAfterSwitch(
             reason = "realignAfterProcessing",
             resume = resumeAfterSwitch || resumeWhenReady,
@@ -3182,6 +3189,8 @@ class PlaybackService :
         sourceSeparationPlaybackSession = null
         cancelSourceSeparationPlaybackReadinessMonitor("clear")
         cancelSourceSeparationDataPlaneMonitor("clear")
+        clearSourceSeparationOutputFlushBarrier("playback.clear")
+        sourceSeparationPendingMixedOutputGeneration = null
         sourceSeparationMixProcessor.disable()
         setSourceSeparationPlaybackProcessing(null)
         sourceSeparationPausedBlendFlushPending = false
@@ -3774,6 +3783,7 @@ class PlaybackService :
         sourceSeparationOutputMuted = true
         sourceSeparationOutputWaitingForMixedOutput = waitForMixedOutput
         sourceSeparationOutputMuteStartedAtMs = SystemClock.elapsedRealtime()
+        sourceSeparationPendingMixedOutputGeneration = null
         player.volume = 0f
         sourceSeparationOutputMuteJob = serviceScope.launch {
             val delayMs = if (waitForMixedOutput) {
@@ -3786,15 +3796,52 @@ class PlaybackService :
         }
     }
 
-    private fun onSourceSeparationMixedOutputStarted() {
+    private fun onSourceSeparationMixedOutputStarted(outputGeneration: Long) {
         if (!sourceSeparationOutputMuted || !sourceSeparationOutputWaitingForMixedOutput) return
+        sourceSeparationPendingMixedOutputGeneration = outputGeneration
+        maybeAcceptSourceSeparationMixedOutput("mixedOutputStarted")
+    }
+
+    private fun maybeAcceptSourceSeparationMixedOutput(reason: String) {
+        if (!sourceSeparationOutputMuted || !sourceSeparationOutputWaitingForMixedOutput) return
+        val outputGeneration = sourceSeparationPendingMixedOutputGeneration ?: return
+        val outputFlush = sourceSeparationPendingOutputFlush
+        if (outputFlush != null &&
+            outputFlush.outputGeneration == null
+        ) {
+            traceSourceSeparationPlayback(
+                "playback.mixedOutputStarted.deferred",
+                "reason=flushPending barrier=${outputFlush.barrierId} " +
+                        "actualGeneration=$outputGeneration",
+            )
+            return
+        }
+        if (outputFlush != null && outputFlush.outputGeneration != outputGeneration) {
+            traceSourceSeparationPlayback(
+                "playback.mixedOutputStarted.stale",
+                "reason=flushGenerationMismatch barrier=${outputFlush.barrierId} " +
+                        "expectedGeneration=${outputFlush.outputGeneration} " +
+                        "actualGeneration=$outputGeneration",
+            )
+            sourceSeparationPendingMixedOutputGeneration = null
+            return
+        }
         if (sourceSeparationPlaybackIsProcessing ||
             sourceSeparationPlaybackWindowWaitTracker.current != null
         ) {
-            traceSourceSeparationPlayback("playback.mixedOutputStarted.deferred")
+            traceSourceSeparationPlayback(
+                "playback.mixedOutputStarted.deferred",
+                "reason=cacheWait source=$reason generation=$outputGeneration",
+            )
             return
         }
-        traceSourceSeparationPlayback("playback.mixedOutputStarted")
+        traceSourceSeparationPlayback(
+            "playback.mixedOutputStarted",
+            "source=$reason generation=$outputGeneration",
+        )
+        sourceSeparationPendingMixedOutputGeneration = null
+        clearSourceSeparationOutputFlushBarrier("mixedOutputStarted")
+        sourceSeparationOutputWaitingForMixedOutput = false
         sourceSeparationOutputMuteJob?.cancel()
         sourceSeparationOutputMuteJob = serviceScope.launch {
             delay(SOURCE_SEPARATION_OUTPUT_UNMUTE_DELAY_MS)
@@ -3814,7 +3861,32 @@ class PlaybackService :
         sourceSeparationOutputMuted = false
         sourceSeparationOutputWaitingForMixedOutput = false
         sourceSeparationOutputMuteStartedAtMs = 0L
+        sourceSeparationPendingMixedOutputGeneration = null
+        clearSourceSeparationOutputFlushBarrier("outputUnmute.$reason")
         restorePlayerVolume()
+    }
+
+    private fun onSourceSeparationOutputFlushed(
+        barrierId: Long,
+        outputGeneration: Long,
+    ) {
+        val pending = sourceSeparationPendingOutputFlush
+        if (pending?.barrierId != barrierId) {
+            traceSourceSeparationPlayback(
+                "playback.outputFlush.stale",
+                "barrier=$barrierId generation=$outputGeneration " +
+                        "pending=${pending?.barrierId}",
+            )
+            return
+        }
+        sourceSeparationPendingOutputFlush = pending.copy(
+            outputGeneration = outputGeneration,
+        )
+        traceSourceSeparationPlayback(
+            "playback.outputFlush.confirmed",
+            "reason=${pending.reason} barrier=$barrierId generation=$outputGeneration",
+        )
+        maybeAcceptSourceSeparationMixedOutput("outputFlushConfirmed")
     }
 
     private fun shouldExpectSourceSeparationProcessingOnTransition(): Boolean {
@@ -4133,21 +4205,21 @@ class PlaybackService :
     private fun flushSourceSeparationPausedOutput(
         reason: String,
         forceDiscontinuity: Boolean = false,
-    ) {
+    ): Boolean {
         val index = player.currentMediaItemIndex
         if (index == C.INDEX_UNSET) {
             traceSourceSeparationPlayback(
                 "playback.flushPausedOutput.skip",
                 "reason=$reason index=C.INDEX_UNSET"
             )
-            return
+            return false
         }
         if (player.playbackState == Player.STATE_BUFFERING) {
             traceSourceSeparationPlayback(
                 "playback.flushPausedOutput.skip",
                 "reason=$reason state=BUFFERING"
             )
-            return
+            return false
         }
         val positionMs = player.currentPosition.coerceAtLeast(0)
         val seekPositionMs = if (forceDiscontinuity) {
@@ -4163,6 +4235,48 @@ class PlaybackService :
         sourceSeparationPlaybackInternalSeekTarget =
             SourceSeparationPlaybackInternalSeekTarget(index, seekPositionMs)
         player.seekTo(index, seekPositionMs)
+        return true
+    }
+
+    private fun requestSourceSeparationOutputFlush(reason: String): Boolean {
+        clearSourceSeparationOutputFlushBarrier("superseded.$reason")
+        val barrierId = ++sourceSeparationOutputFlushBarrierSeq
+        if (!sourceSeparationMixProcessor.armOutputFlushBarrier(barrierId)) {
+            traceSourceSeparationPlayback(
+                "playback.outputFlush.skip",
+                "reason=$reason barrier=$barrierId processorInactive",
+            )
+            return false
+        }
+        sourceSeparationPendingOutputFlush = SourceSeparationPendingOutputFlush(
+            barrierId = barrierId,
+            reason = reason,
+            outputGeneration = null,
+        )
+        traceSourceSeparationPlayback(
+            "playback.outputFlush.request",
+            "reason=$reason barrier=$barrierId",
+        )
+        if (flushSourceSeparationPausedOutput(
+                reason = "$reason.outputFlush",
+                forceDiscontinuity = true,
+            )
+        ) {
+            return true
+        }
+        clearSourceSeparationOutputFlushBarrier("requestFailed.$reason")
+        return false
+    }
+
+    private fun clearSourceSeparationOutputFlushBarrier(reason: String) {
+        val pending = sourceSeparationPendingOutputFlush ?: return
+        sourceSeparationPendingOutputFlush = null
+        sourceSeparationMixProcessor.cancelOutputFlushBarrier(pending.barrierId)
+        traceSourceSeparationPlayback(
+            "playback.outputFlush.clear",
+            "reason=$reason barrier=${pending.barrierId} " +
+                    "generation=${pending.outputGeneration}",
+        )
     }
 
     private fun consumeSourceSeparationInternalSeekTarget(
@@ -4901,6 +5015,12 @@ class PlaybackService :
 private data class SourceSeparationPlaybackInternalSeekTarget(
     val mediaItemIndex: Int,
     val positionMs: Long,
+)
+
+private data class SourceSeparationPendingOutputFlush(
+    val barrierId: Long,
+    val reason: String,
+    val outputGeneration: Long?,
 )
 
 private data class SourceSeparationPlaybackSession(
