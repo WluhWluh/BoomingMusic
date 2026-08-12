@@ -20,12 +20,11 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.add
-import androidx.compose.foundation.layout.calculateEndPadding
-import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -78,7 +77,6 @@ import androidx.compose.ui.keepScreenOn
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.rememberNestedScrollInteropConnection
@@ -121,7 +119,6 @@ import com.mardous.booming.ui.screen.player.SourceSeparationPlaybackProcessingPr
 import com.mardous.booming.ui.screen.player.animateSourceSeparationPlaybackProcessingProgress
 import com.mardous.booming.ui.theme.PlayerTheme
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
@@ -354,42 +351,21 @@ fun CoverLyricsScreen(
             sourceSeparationPlaybackProcessingProgressState.takeIf {
                 quickControlExpanded
             }
-        var reserveLyricsEndSpace by remember {
-            mutableStateOf(quickControlExpanded)
-        }
-        LaunchedEffect(showSourceSeparationQuickControls, quickControlExpanded) {
-            val shouldReserveEndSpace = when {
-                !showSourceSeparationQuickControls -> false
-                quickControlExpanded -> true
-                else -> {
-                    delay(CoverLyricsQuickControlsTransitionDurationMillis.toLong())
-                    false
-                }
-            }
-            if (reserveLyricsEndSpace != shouldReserveEndSpace) {
-                reserveLyricsEndSpace = shouldReserveEndSpace
-            }
-        }
-        val reserveExpandedControls = showSourceSeparationQuickControls &&
-                (quickControlExpanded || reserveLyricsEndSpace)
-        val overlayAvoidance = coverLyricsOverlayAvoidance(
+        val lyricsEndClearance = coverLyricsEndClearance(
             showSourceSeparationQuickControls = showSourceSeparationQuickControls,
-            reserveExpandedControls = reserveExpandedControls,
+            reserveExpandedControls = quickControlExpanded,
         )
         val animatedLyricsEndClearance by animateDpAsState(
-            targetValue = overlayAvoidance.endClearance,
+            targetValue = lyricsEndClearance,
             animationSpec = tween(
                 durationMillis = CoverLyricsQuickControlsTransitionDurationMillis,
                 easing = FastOutSlowInEasing,
             ),
             label = "lyricsEndClearance",
         )
-        val baseLyricsContentPadding = PaddingValues(
+        val lyricsContentPadding = PaddingValues(
             vertical = CoverLyricsBaseVerticalPadding,
             horizontal = CoverLyricsBaseHorizontalPadding,
-        )
-        val lyricsContentPadding = baseLyricsContentPadding.withMinimumBottom(
-            overlayAvoidance.minimumBottomPadding,
         )
         Box(modifier = modifier.fillMaxSize()) {
             LyricsSurface(
@@ -413,13 +389,19 @@ fun CoverLyricsScreen(
                     .padding(end = animatedLyricsEndClearance),
             )
 
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(CoverLyricsButtonSpacing),
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(CoverLyricsButtonSpacing),
+                verticalAlignment = Alignment.Bottom,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(CoverLyricsOverlayPadding)
             ) {
+                CoverLyricsCircularIconButton(
+                    painter = painterResource(R.drawable.ic_open_in_full_24dp),
+                    contentDescription = stringResource(R.string.action_lyrics_editor),
+                    onClick = onExpandClick
+                )
+
                 if (showSourceSeparationQuickControls) {
                     if (multiStemMixState != null) {
                         CoverLyricsMultiStemControl(
@@ -466,12 +448,6 @@ fun CoverLyricsScreen(
                         )
                     }
                 }
-
-                CoverLyricsCircularIconButton(
-                    painter = painterResource(R.drawable.ic_open_in_full_24dp),
-                    contentDescription = stringResource(R.string.action_lyrics_editor),
-                    onClick = onExpandClick
-                )
             }
         }
     }
@@ -751,11 +727,11 @@ private fun CoverLyricsQuickBlendControl(
             .then(gestureModifier)
     }
     Box(
-        contentAlignment = Alignment.Center,
+        contentAlignment = Alignment.TopCenter,
         modifier = Modifier
             .size(
                 width = CoverLyricsControlSlotSize,
-                height = height
+                height = height + CoverLyricsControlSlotInset,
             )
     ) {
         Box(
@@ -1131,10 +1107,10 @@ private fun CoverLyricsMultiStemControl(
     }
 
     Box(
-        contentAlignment = Alignment.Center,
+        contentAlignment = Alignment.TopCenter,
         modifier = Modifier.size(
             width = CoverLyricsControlSlotSize,
-            height = height,
+            height = height + CoverLyricsControlSlotInset,
         ),
     ) {
         Box(
@@ -1525,19 +1501,10 @@ private fun LyricsSurface(
     }
 }
 
-@Composable
-private fun PaddingValues.withMinimumBottom(minimumBottom: Dp): PaddingValues {
-    val layoutDirection = LocalLayoutDirection.current
-    return PaddingValues(
-        start = calculateStartPadding(layoutDirection),
-        top = calculateTopPadding(),
-        end = calculateEndPadding(layoutDirection),
-        bottom = maxOf(calculateBottomPadding(), minimumBottom)
-    )
-}
-
 private val CoverLyricsButtonSize = 40.dp
 private val CoverLyricsControlSlotSize = 48.dp
+private val CoverLyricsControlSlotInset =
+    (CoverLyricsControlSlotSize - CoverLyricsButtonSize) / 2
 private val CoverLyricsQuickBlendSliderHeight = 120.dp
 private val CoverLyricsQuickBlendCenterGap = 4.dp
 private val CoverLyricsQuickBlendIconSize = 24.dp
@@ -1557,43 +1524,13 @@ private const val CoverLyricsQuickBlendNeutralBlend = 0.5f
 private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.10f
 private const val CoverLyricsQuickControlsTransitionDurationMillis = 260
 
-internal data class CoverLyricsOverlayAvoidance(
-    val minimumBottomPadding: Dp,
-    val endClearance: Dp,
-)
-
-internal fun coverLyricsOverlayAvoidance(
+internal fun coverLyricsEndClearance(
     showSourceSeparationQuickControls: Boolean,
     reserveExpandedControls: Boolean,
-): CoverLyricsOverlayAvoidance {
-    val overlayClearance = maxOf(
-        0.dp,
-        CoverLyricsBaseVerticalPadding -
-                CoverLyricsControlSlotSize -
-                CoverLyricsOverlayPadding,
-    )
-    val collapsedControlsHeight = if (showSourceSeparationQuickControls) {
-        CoverLyricsButtonSize +
-                CoverLyricsButtonSpacing +
-                CoverLyricsControlSlotSize
-    } else {
-        CoverLyricsControlSlotSize
-    }
-    return CoverLyricsOverlayAvoidance(
-        minimumBottomPadding = maxOf(
-            CoverLyricsBaseVerticalPadding,
-            collapsedControlsHeight +
-                    CoverLyricsOverlayPadding +
-                    overlayClearance,
-        ),
-        endClearance = if (
-            showSourceSeparationQuickControls && reserveExpandedControls
-        ) {
-            CoverLyricsControlSlotSize
-        } else {
-            0.dp
-        },
-    )
+): Dp = if (showSourceSeparationQuickControls && reserveExpandedControls) {
+    CoverLyricsControlSlotSize
+} else {
+    0.dp
 }
 
 private fun coverLyricsQuickBlendDpTransitionSpec() =

@@ -7,46 +7,42 @@ import org.junit.Test
 class CoverLyricsOverlayAvoidanceTest {
 
     @Test
-    fun `hidden source separation controls retain the base lyrics area`() {
-        val avoidance = coverLyricsOverlayAvoidance(
+    fun `hidden source separation controls do not narrow lyrics`() {
+        val clearance = coverLyricsEndClearance(
             showSourceSeparationQuickControls = false,
             reserveExpandedControls = false,
         )
 
-        assertEquals(72.dp, avoidance.minimumBottomPadding)
-        assertEquals(0.dp, avoidance.endClearance)
+        assertEquals(0.dp, clearance)
     }
 
     @Test
-    fun `collapsed quick controls reserve only their fixed bottom area`() {
-        val avoidance = coverLyricsOverlayAvoidance(
+    fun `collapsed quick controls do not narrow lyrics`() {
+        val clearance = coverLyricsEndClearance(
             showSourceSeparationQuickControls = true,
             reserveExpandedControls = false,
         )
 
-        assertEquals(124.dp, avoidance.minimumBottomPadding)
-        assertEquals(0.dp, avoidance.endClearance)
+        assertEquals(0.dp, clearance)
     }
 
     @Test
-    fun `expanded quick controls narrow the logical end without growing bottom padding`() {
-        val avoidance = coverLyricsOverlayAvoidance(
+    fun `expanded quick controls narrow the logical end by one slot`() {
+        val clearance = coverLyricsEndClearance(
             showSourceSeparationQuickControls = true,
             reserveExpandedControls = true,
         )
 
-        assertEquals(124.dp, avoidance.minimumBottomPadding)
-        assertEquals(48.dp, avoidance.endClearance)
+        assertEquals(48.dp, clearance)
     }
 
     @Test
     fun `hidden controls never reserve an expanded side strip`() {
-        val avoidance = coverLyricsOverlayAvoidance(
+        val clearance = coverLyricsEndClearance(
             showSourceSeparationQuickControls = false,
             reserveExpandedControls = true,
         )
 
-        assertEquals(72.dp, avoidance.minimumBottomPadding)
-        assertEquals(0.dp, avoidance.endClearance)
+        assertEquals(0.dp, clearance)
     }
 }
