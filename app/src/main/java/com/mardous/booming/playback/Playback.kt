@@ -27,6 +27,8 @@ object Playback {
         "com.mardous.booming.command.source_separation.trace_marker"
     const val GET_SOURCE_SEPARATION_DEBUG_STATE =
         "com.mardous.booming.command.source_separation.debug_state"
+    const val FLUSH_SOURCE_SEPARATION_DEBUG_TRACE =
+        "com.mardous.booming.command.source_separation.flush_debug_trace"
 
     // Custom events
     const val EVENT_MEDIA_CONTENT_CHANGED = "com.mardous.booming.event.media_content_changed"
@@ -73,4 +75,5 @@ object Playback {
     const val EXTRA_DEBUG_WINDOW_WAIT = "debug_window_wait"
     const val EXTRA_DEBUG_DATA_PLANE_READY = "debug_data_plane_ready"
     const val EXTRA_DEBUG_WORKER_STATUS = "debug_worker_status"
+    const val EXTRA_DEBUG_TRACE_PATH = "debug_trace_path"
 }

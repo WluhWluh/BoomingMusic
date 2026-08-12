@@ -28,6 +28,14 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
     private val modelRuntimes by lazy {
         SourceSeparationDebugModelRuntimeController(operations)
     }
+    private val diagnostics by lazy {
+        SourceSeparationDebugDiagnosticsExporter(
+            context = providerContext(),
+            operations = operations,
+            mediaClient = ::requireMediaClient,
+            stateSnapshot = { fullState(requireMediaClient()) },
+        )
+    }
 
     override fun onCreate(): Boolean = true
 
@@ -327,6 +335,7 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
         "operation.cancel" -> SourceSeparationDebugProtocol.success(
             operations.cancel(args.requireString("operation_id")).toJson(),
         )
+        "diagnostics.export" -> accepted(diagnostics.submit())
         "ui.launch" -> {
             providerContext().startActivity(
                 Intent(providerContext(), MainActivity::class.java)
@@ -345,6 +354,16 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
         .put("queue", playbackQueue(client))
         .put("separation", bundleJson(client.debugState()))
         .put("worker", SourceSeparationForegroundWorkerDebugBridge.status())
+        .put("settings", captureStateSection(resources::settings))
+        .put("caches", captureStateSection(resources::caches))
+        .put(
+            "models",
+            captureStateSection {
+                modelRuntimes.models(refresh = false, allowCatalogDownload = false)
+            },
+        )
+        .put("runtimes", captureStateSection { modelRuntimes.runtimes(verify = false) })
+        .put("operations", operations.snapshots().toJson())
 
     private fun playbackState(client: SourceSeparationDebugMediaClient): JSONObject =
         client.read {
@@ -609,3 +628,10 @@ private fun Throwable.debugCode(): String = when (this) {
     is java.util.concurrent.TimeoutException -> "timeout"
     else -> "internal_error"
 }
+
+private inline fun captureStateSection(block: () -> JSONObject): JSONObject =
+    runCatching(block).getOrElse { error ->
+        JSONObject()
+            .put("available", false)
+            .put("error", error.message ?: error::class.java.name)
+    }

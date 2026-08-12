@@ -89,6 +89,7 @@ internal object SourceSeparationDebugProtocol {
         "operation.get" to listOf("operation_id:string"),
         "operation.list" to emptyList(),
         "operation.cancel" to listOf("operation_id:string"),
+        "diagnostics.export" to emptyList(),
         "ui.launch" to emptyList(),
     )
 

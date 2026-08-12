@@ -70,9 +70,6 @@ object SourceSeparationForegroundWorkerDebugBridge {
             requireNotNull(blendModeFromName(name)) { "Unknown source-separation mix mode '$name'." }
         }
         val viewModel = viewModelRef?.get() ?: return false
-        autoStart?.let(viewModel::setSourceSeparationAutoStartEnabled)
-        mode?.let(viewModel::setSourceSeparationBlendMode)
-        blend?.let(viewModel::setSourceSeparationBlend)
         autoFlac?.let(viewModel::setSourceSeparationAutoFlacCompressionEnabled)
         gpuEnabled?.let(viewModel::setSourceSeparationGpuEnabled)
         windowDecode?.let(viewModel::setSourceSeparationWindowDecodeEnabled)
@@ -83,6 +80,10 @@ object SourceSeparationForegroundWorkerDebugBridge {
         autoCacheCleanup?.let(viewModel::setSourceSeparationAutoCacheCleanupEnabled)
         partialCacheLimit?.let(viewModel::setSourceSeparationAutoCacheCleanupPartialLimit)
         completedCacheLimit?.let(viewModel::setSourceSeparationAutoCacheCleanupCompletedLimit)
+        if (autoStart == false) viewModel.setSourceSeparationAutoStartEnabled(false)
+        mode?.let(viewModel::setSourceSeparationBlendMode)
+        if (autoStart == true) viewModel.setSourceSeparationAutoStartEnabled(true)
+        blend?.let(viewModel::setSourceSeparationBlend)
         return true
     }
 

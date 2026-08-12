@@ -265,6 +265,7 @@ class PlaybackService :
     private var sourceSeparationDataPlaneResumeWhenReady = false
     private var sourceSeparationPlaybackTraceFile: File? = null
     private var sourceSeparationPlaybackTraceFlushJob: Job? = null
+    private var sourceSeparationPlaybackTraceWriteJob: Job? = null
     private var sourceSeparationOutputMuteJob: Job? = null
     private val sourceSeparationPlaybackTraceLock = Any()
     private val sourceSeparationPlaybackTraceBuffer = mutableListOf<String>()
@@ -592,6 +593,9 @@ class PlaybackService :
             )
             availableCommands.add(
                 SessionCommand(Playback.GET_SOURCE_SEPARATION_DEBUG_STATE, Bundle.EMPTY)
+            )
+            availableCommands.add(
+                SessionCommand(Playback.FLUSH_SOURCE_SEPARATION_DEBUG_TRACE, Bundle.EMPTY)
             )
         }
 
@@ -1142,6 +1146,25 @@ class PlaybackService :
                             },
                         )
                     )
+                }
+            }
+
+            Playback.FLUSH_SOURCE_SEPARATION_DEBUG_TRACE -> {
+                if (!BuildConfig.DEBUG) {
+                    Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
+                } else {
+                    serviceScope.future {
+                        flushSourceSeparationPlaybackTraceAndWait()
+                        SessionResult(
+                            SessionResult.RESULT_SUCCESS,
+                            Bundle().apply {
+                                putString(
+                                    Playback.EXTRA_DEBUG_TRACE_PATH,
+                                    sourceSeparationPlaybackTraceFile?.absolutePath,
+                                )
+                            },
+                        )
+                    }
                 }
             }
 
@@ -4871,26 +4894,53 @@ class PlaybackService :
     }
 
     private fun flushSourceSeparationPlaybackTrace() {
-        val file = sourceSeparationPlaybackTraceFile ?: return
-        val lines = synchronized(sourceSeparationPlaybackTraceLock) {
-            if (sourceSeparationPlaybackTraceBuffer.isEmpty()) return
-            sourceSeparationPlaybackTraceBuffer.joinToString(
+        enqueueSourceSeparationPlaybackTraceWrite()
+    }
+
+    private suspend fun flushSourceSeparationPlaybackTraceAndWait() {
+        enqueueSourceSeparationPlaybackTraceWrite()?.join()
+    }
+
+    private fun enqueueSourceSeparationPlaybackTraceWrite(): Job? =
+        synchronized(sourceSeparationPlaybackTraceLock) {
+            val file = sourceSeparationPlaybackTraceFile
+                ?: return@synchronized sourceSeparationPlaybackTraceWriteJob
+            if (sourceSeparationPlaybackTraceBuffer.isEmpty()) {
+                return@synchronized sourceSeparationPlaybackTraceWriteJob
+            }
+            val lines = sourceSeparationPlaybackTraceBuffer.joinToString(
                 separator = "\n",
                 postfix = "\n",
-            ).also {
-                sourceSeparationPlaybackTraceBuffer.clear()
-                sourceSeparationPlaybackTraceFlushJob?.cancel()
-                sourceSeparationPlaybackTraceFlushJob = null
+            )
+            sourceSeparationPlaybackTraceBuffer.clear()
+            sourceSeparationPlaybackTraceFlushJob?.cancel()
+            sourceSeparationPlaybackTraceFlushJob = null
+
+            val previous = sourceSeparationPlaybackTraceWriteJob
+            lateinit var writeJob: Job
+            writeJob = serviceScope.launch(IO, start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                previous?.join()
+                runCatching {
+                    file.appendText(lines, Charsets.UTF_8)
+                }.onFailure { error ->
+                    Log.w(
+                        TAG_SOURCE_SEPARATION_PLAYBACK,
+                        "Unable to append playback gate trace",
+                        error,
+                    )
+                }
             }
-        }
-        serviceScope.launch(IO) {
-            runCatching {
-                file.appendText(lines, Charsets.UTF_8)
-            }.onFailure { error ->
-                Log.w(TAG_SOURCE_SEPARATION_PLAYBACK, "Unable to append playback gate trace", error)
+            sourceSeparationPlaybackTraceWriteJob = writeJob
+            writeJob.invokeOnCompletion {
+                synchronized(sourceSeparationPlaybackTraceLock) {
+                    if (sourceSeparationPlaybackTraceWriteJob === writeJob) {
+                        sourceSeparationPlaybackTraceWriteJob = null
+                    }
+                }
             }
+            writeJob.start()
+            writeJob
         }
-    }
 
     private fun sourceSeparationPlaybackTraceState(): String {
         val session = sourceSeparationPlaybackSession

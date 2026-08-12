@@ -23,6 +23,8 @@ class SourceSeparationMultiStemReleaseInstaller(
 
     fun catalog(): SourceSeparationReleaseCatalog = catalogRepository.current()
 
+    fun cachedCatalog(): SourceSeparationReleaseCatalog? = catalogRepository.cached()
+
     fun refreshCatalog(): SourceSeparationReleaseCatalog = catalogRepository.refresh()
 
     fun installed(modelId: String): SourceSeparationInstalledMultiStemModel? =
@@ -51,6 +53,10 @@ class SourceSeparationReleaseCatalogRepository internal constructor(
     fun current(): SourceSeparationReleaseCatalog = synchronized(lock) {
         readCached()?.let { return@synchronized it }
         refreshLocked()
+    }
+
+    fun cached(): SourceSeparationReleaseCatalog? = synchronized(lock) {
+        readCached()
     }
 
     fun refresh(): SourceSeparationReleaseCatalog = synchronized(lock) {

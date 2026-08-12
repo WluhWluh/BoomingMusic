@@ -9,6 +9,7 @@ import com.mardous.booming.separation.model.contract.SourceSeparationInstalledMu
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemInstallProgressKind
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
 import com.mardous.booming.separation.model.contract.SourceSeparationReleaseCatalog
+import com.mardous.booming.separation.model.contract.SourceSeparationReleaseCatalogMetadata
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationInstalledPreset
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
@@ -43,14 +44,22 @@ internal class SourceSeparationDebugModelRuntimeController(
     private val runtimeProcessController: SourceSeparationRuntimeProcessController
         get() = get(SourceSeparationRuntimeProcessController::class.java)
 
-    fun models(refresh: Boolean): JSONObject {
+    fun models(
+        refresh: Boolean,
+        allowCatalogDownload: Boolean = true,
+    ): JSONObject {
         val repository = presetRepository
         val activeReference = repository.activeSelectionFlow.value.reference
         val selectedMultiStem = multiStemSelection.selectedModelId()
         val installedMdx = repository.installedModels()
         val installedBySha = installedMdx.associateBy { it.sha256.lowercase() }
         val multiCatalogResult = runCatching {
-            if (refresh) multiStemInstaller.refreshCatalog() else multiStemInstaller.catalog()
+            when {
+                refresh -> multiStemInstaller.refreshCatalog()
+                allowCatalogDownload -> multiStemInstaller.catalog()
+                else -> multiStemInstaller.cachedCatalog()
+                    ?: error("The multi-stem Release catalog is not cached.")
+            }
         }
         val multiInstalled = multiStemInstaller.installedModels()
             .associateBy(SourceSeparationInstalledMultiStemModel::modelId)
@@ -71,7 +80,14 @@ internal class SourceSeparationDebugModelRuntimeController(
                 ),
             )
         }
-        multiCatalogResult.getOrNull()?.entries?.forEach { entry ->
+        multiCatalogResult.getOrNull()?.entries
+            ?.filter { entry ->
+                entry.artifactFamily ==
+                    SourceSeparationReleaseCatalogMetadata.MULTISTEM_ARTIFACT_FAMILY &&
+                    entry.pipelineId ==
+                    SourceSeparationReleaseCatalogMetadata.MULTISTEM_PIPELINE_ID
+            }
+            ?.forEach { entry ->
             entries.put(
                 JSONObject()
                     .put("family", "htdemucs_multistem")
@@ -425,7 +441,12 @@ internal class SourceSeparationDebugModelRuntimeController(
     private fun requireMultiStemEntry(
         catalog: SourceSeparationReleaseCatalog,
         modelId: String,
-    ) = catalog.entries.singleOrNull { it.modelId == modelId }
+    ) = catalog.entries.singleOrNull { entry ->
+        entry.modelId == modelId &&
+            entry.artifactFamily ==
+            SourceSeparationReleaseCatalogMetadata.MULTISTEM_ARTIFACT_FAMILY &&
+            entry.pipelineId == SourceSeparationReleaseCatalogMetadata.MULTISTEM_PIPELINE_ID
+    }
         ?: throw IllegalArgumentException("Unknown model_id '$modelId'.")
 
     private fun currentAbi(): String {
