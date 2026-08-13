@@ -91,6 +91,14 @@ internal object SourceSeparationDebugProtocol {
         "runtime.repair" to listOf("runtime_kind:cpu|gpu", "component_id:string?"),
         "runtime.activate" to listOf("runtime_kind:cpu|gpu", "component_id:string?"),
         "runtime.remove" to listOf("runtime_kind:cpu|gpu", "component_id:string?"),
+        "setup.plan" to listOf(
+            "mode:restore_recommended|repair_current|bootstrap_recommended",
+            "verify:boolean=false",
+        ),
+        "setup.execute" to listOf(
+            "mode:restore_recommended|repair_current|bootstrap_recommended",
+            "verify:boolean=false",
+        ),
         "operation.get" to listOf("operation_id:string"),
         "operation.list" to emptyList(),
         "operation.cancel" to listOf("operation_id:string"),

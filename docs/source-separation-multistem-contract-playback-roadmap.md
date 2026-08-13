@@ -1752,10 +1752,29 @@ gate, not a prerequisite for this lifecycle fix.
 
 #### Phase 8D: Product management parity
 
-- [ ] Make Quick Setup understand an active HTDemucs selection and never commit
+- [x] Make Quick Setup understand an active HTDemucs selection and never commit
   a hidden MDX recommendation over it.
 - [ ] Make Cache Management report, activate, and delete MDX and HTDemucs exact
   models through one family-aware action contract.
+
+Quick Setup readiness, planning, commit, and rollback now carry an explicit
+model family. An active HTDemucs Release model is admitted through its installed
+artifact and executable sidecar, remains the proposed selection in every setup
+mode, and suppresses bounded-GPU work that cannot affect the CPU-only pipeline.
+A missing or invalid selected multi-stem pair is reinstalled through the same
+pinned Release provider instead of silently selecting MDX. The transaction
+snapshot retains the hidden MDX active/pending references, active multi-stem
+model ID, and GPU preference, so failed final readiness restores all user state.
+
+The Debug provider exposes `setup.plan` and `setup.execute` over the same product
+evaluator, planner, and executor. Focused planner/executor and command-table JVM
+tests pass, and the GitHub Debug APK builds. On S10 (`SM-G9730`, API 31, arm64),
+`setup.plan` reported the selected official four-stem model
+`htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0` as a resolved CPU path with no
+items. `setup.execute` completed with no downloads; before and after retained
+generation 7, artifact
+`9855718072ee819bacacdb6b670bd6257feca172bf27ac1d72dff994cdbeed81`, and
+contract `htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0@1`.
 
 #### Phase 8E: One remote execution authority
 

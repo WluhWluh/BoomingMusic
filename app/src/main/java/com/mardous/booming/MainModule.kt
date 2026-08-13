@@ -229,6 +229,7 @@ private val mainModule = module {
     single {
         SourceSeparationPresetDownloader(repository = get())
     }
+    single { SourceSeparationMultiStemPlaybackSelectionStore(get(), get()) }
     single {
         SourceSeparationQuickSetupModelInstaller(
             repository = get(),
@@ -240,6 +241,8 @@ private val mainModule = module {
             runtimeStore = get(),
             gpuRuntimeStore = get(),
             presetRepository = get(),
+            multiStemSelectionStore = get(),
+            multiStemInstaller = get(),
             preferences = get(),
         )
     }
@@ -248,6 +251,8 @@ private val mainModule = module {
             runtimeStore = get(),
             gpuRuntimeStore = get(),
             presetRepository = get(),
+            multiStemSelectionStore = get(),
+            multiStemInstaller = get(),
             modelInstaller = get(),
             preferences = get(),
             readinessEvaluator = { get<LocalSeparationReadinessEvaluator>().evaluate() },
@@ -290,7 +295,6 @@ private val mainModule = module {
             ),
         )
     }
-    single { SourceSeparationMultiStemPlaybackSelectionStore(get(), get()) }
     single {
         SourceSeparationExecutionSelectionResolver(
             presetRepository = get(),

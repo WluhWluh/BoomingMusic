@@ -1,6 +1,9 @@
 package com.mardous.booming.separation.setup
 
 import android.content.SharedPreferences
+import com.mardous.booming.separation.SourceSeparationModelFamily
+import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
@@ -55,6 +58,7 @@ internal data class SourceSeparationQuickSetupSelectionSnapshot(
     val activeModel: SourceSeparationActiveModelReference?,
     val pendingModel: SourceSeparationActiveModelReference?,
     val gpuEnabled: Boolean,
+    val multiStemModelId: String? = null,
 )
 
 internal interface SourceSeparationQuickSetupOperations {
@@ -67,7 +71,7 @@ internal interface SourceSeparationQuickSetupOperations {
     fun selectionSnapshot(): SourceSeparationQuickSetupSelectionSnapshot
 
     fun commitSelection(
-        activeModel: SourceSeparationActiveModelReference?,
+        selection: LocalSeparationActiveModelSelection?,
         gpuEnabled: Boolean?,
     )
 
@@ -82,6 +86,8 @@ internal class SourceSeparationQuickSetupExecutor internal constructor(
         runtimeStore: SourceSeparationRuntimeStore,
         gpuRuntimeStore: SourceSeparationGpuRuntimeStore,
         presetRepository: SourceSeparationPresetRepository,
+        multiStemSelectionStore: SourceSeparationMultiStemPlaybackSelectionStore,
+        multiStemInstaller: SourceSeparationMultiStemReleaseInstaller,
         modelInstaller: SourceSeparationQuickSetupModelInstaller,
         preferences: SharedPreferences,
         readinessEvaluator: () -> LocalSeparationReadiness,
@@ -94,6 +100,8 @@ internal class SourceSeparationQuickSetupExecutor internal constructor(
             runtimeStore = runtimeStore,
             gpuRuntimeStore = gpuRuntimeStore,
             presetRepository = presetRepository,
+            multiStemSelectionStore = multiStemSelectionStore,
+            multiStemInstaller = multiStemInstaller,
             modelInstaller = modelInstaller,
             preferences = preferences,
             platformProvider = platformProvider,
@@ -259,7 +267,7 @@ internal class SourceSeparationQuickSetupExecutor internal constructor(
         if (!preserveRunnableSelection) {
             try {
                 operations.commitSelection(
-                    activeModel = plan.proposedActiveModel,
+                    selection = plan.proposedSelection,
                     gpuEnabled = proposedGpuEnabled,
                 )
                 selectionCommitted = true
@@ -437,6 +445,8 @@ private class DefaultSourceSeparationQuickSetupOperations(
     private val runtimeStore: SourceSeparationRuntimeStore,
     private val gpuRuntimeStore: SourceSeparationGpuRuntimeStore,
     private val presetRepository: SourceSeparationPresetRepository,
+    private val multiStemSelectionStore: SourceSeparationMultiStemPlaybackSelectionStore,
+    private val multiStemInstaller: SourceSeparationMultiStemReleaseInstaller,
     private val modelInstaller: SourceSeparationQuickSetupModelInstaller,
     private val preferences: SharedPreferences,
     private val platformProvider: () -> MdxRuntimePlatform,
@@ -500,14 +510,40 @@ private class DefaultSourceSeparationQuickSetupOperations(
 
             SourceSeparationQuickSetupAction.InstallAndSelectModel -> {
                 val modelId = requireNotNull(item.modelId)
-                val expected = presetRepository.officialPreset(modelId)
-                presetRepository.installedModels().singleOrNull {
-                    it.sha256.equals(expected.sha256, ignoreCase = true)
-                } ?: modelInstaller.install(
-                    modelId = modelId,
-                    onProgress = onProgress,
-                    shouldCancel = shouldCancel,
-                )
+                when (item.modelFamily ?: SourceSeparationModelFamily.Mdx) {
+                    SourceSeparationModelFamily.Mdx -> {
+                        val expected = presetRepository.officialPreset(modelId)
+                        presetRepository.installedModels().singleOrNull {
+                            it.sha256.equals(expected.sha256, ignoreCase = true)
+                        } ?: modelInstaller.install(
+                            modelId = modelId,
+                            onProgress = onProgress,
+                            shouldCancel = shouldCancel,
+                        )
+                    }
+                    SourceSeparationModelFamily.Htdemucs -> {
+                        val catalogEntry = multiStemInstaller.catalog().entries
+                            .single { it.modelId == modelId }
+                        val existing = multiStemInstaller.installed(modelId)
+                        if (existing != null && item.expectedDownloadBytes > 0L) {
+                            multiStemInstaller.delete(modelId)
+                        }
+                        multiStemInstaller.install(modelId) { progress ->
+                            if (shouldCancel()) {
+                                throw CancellationException("Model installation canceled.")
+                            }
+                            val totalBytes = catalogEntry.artifact.byteSize +
+                                catalogEntry.contract.byteSize
+                            val downloadedBytes = when (progress.kind) {
+                                com.mardous.booming.separation.model.contract.SourceSeparationMultiStemInstallProgressKind.Model ->
+                                    progress.downloadedBytes
+                                com.mardous.booming.separation.model.contract.SourceSeparationMultiStemInstallProgressKind.Sidecar ->
+                                    catalogEntry.artifact.byteSize + progress.downloadedBytes
+                            }
+                            onProgress(downloadedBytes, totalBytes)
+                        }
+                    }
+                }
                 if (shouldCancel()) throw CancellationException("Model installation canceled.")
             }
 
@@ -526,31 +562,45 @@ private class DefaultSourceSeparationQuickSetupOperations(
             activeModel = (presetRepository.activeModel() as?
                 SourceSeparationActivePresetState.Reference)?.reference,
             pendingModel = presetRepository.pendingActiveModel(),
+            multiStemModelId = multiStemSelectionStore.selectedModelId(),
             gpuEnabled = preferences.readSourceSeparationGpuEnabled(),
         )
 
     override fun commitSelection(
-        activeModel: SourceSeparationActiveModelReference?,
+        selection: LocalSeparationActiveModelSelection?,
         gpuEnabled: Boolean?,
     ) {
-        val current = (presetRepository.activeModel() as?
-            SourceSeparationActivePresetState.Reference)?.reference
-        if (activeModel != null && activeModel != current) {
-            if (activeModel.profileId == null) {
-                presetRepository.activate(
-                    sha256 = activeModel.artifactSha256,
-                    platform = platformProvider(),
-                    scope = SourceSeparationPresetSelectionScope.InternalValidation,
-                    experimentalConfirmed = false,
-                )
-            } else {
-                presetRepository.activateCustomProfile(
-                    sha256 = activeModel.artifactSha256,
-                    profileId = activeModel.profileId,
-                    platform = platformProvider(),
-                    scope = SourceSeparationPresetSelectionScope.InternalValidation,
-                )
+        when (selection?.family) {
+            SourceSeparationModelFamily.Mdx -> {
+                val activeModel = requireNotNull(selection.mdxReference)
+                val current = (presetRepository.activeModel() as?
+                    SourceSeparationActivePresetState.Reference)?.reference
+                if (activeModel != current) {
+                    if (activeModel.profileId == null) {
+                        presetRepository.activate(
+                            sha256 = activeModel.artifactSha256,
+                            platform = platformProvider(),
+                            scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                            experimentalConfirmed = false,
+                        )
+                    } else {
+                        presetRepository.activateCustomProfile(
+                            sha256 = activeModel.artifactSha256,
+                            profileId = activeModel.profileId,
+                            platform = platformProvider(),
+                            scope = SourceSeparationPresetSelectionScope.InternalValidation,
+                        )
+                    }
+                }
+                multiStemSelectionStore.select(null)
             }
+            SourceSeparationModelFamily.Htdemucs -> {
+                requireNotNull(multiStemInstaller.installed(selection.modelId)) {
+                    "The selected multi-stem model is not installed."
+                }
+                multiStemSelectionStore.select(selection.modelId)
+            }
+            null -> Unit
         }
         gpuEnabled?.let(preferences::writeSourceSeparationGpuEnabled)
     }
@@ -560,6 +610,7 @@ private class DefaultSourceSeparationQuickSetupOperations(
             activeReference = snapshot.activeModel,
             pendingReference = snapshot.pendingModel,
         )
+        multiStemSelectionStore.select(snapshot.multiStemModelId)
         preferences.writeSourceSeparationGpuEnabled(snapshot.gpuEnabled)
     }
 }

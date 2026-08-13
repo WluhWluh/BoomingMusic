@@ -1,6 +1,9 @@
 package com.mardous.booming.separation.setup
 
 import android.content.SharedPreferences
+import com.mardous.booming.separation.HtdemucsSourceSeparationEngine
+import com.mardous.booming.separation.SourceSeparationModelFamily
+import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelResolution
 import com.mardous.booming.separation.cache.v2.SourceSeparationActiveCacheModelUnavailableReason
 import com.mardous.booming.separation.cache.v2.resolveActiveCacheModelResolution
@@ -13,6 +16,11 @@ import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.contract.CatalogEntry
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
+import com.mardous.booming.separation.model.contract.SourceSeparationReleaseCatalog
+import com.mardous.booming.separation.model.contract.SourceSeparationReleaseCatalogMetadata
+import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
+import com.mardous.booming.separation.model.contract.matchesReleaseEntry
 import com.mardous.booming.separation.model.preset.SourceSeparationActivePresetState
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
@@ -27,8 +35,8 @@ import com.mardous.booming.util.readSourceSeparationGpuEnabled
 import java.security.MessageDigest
 
 internal object LocalSeparationReadinessContract {
-    const val SCHEMA_VERSION = 2
-    const val PLAN_SCHEMA_VERSION = 3
+    const val SCHEMA_VERSION = 3
+    const val PLAN_SCHEMA_VERSION = 4
 }
 
 internal enum class LocalSeparationReadinessState {
@@ -95,6 +103,7 @@ internal data class LocalSeparationRepairCandidate(
     val required: Boolean,
     val componentId: String? = null,
     val modelId: String? = null,
+    val modelFamily: SourceSeparationModelFamily? = null,
 )
 
 internal data class LocalSeparationRuntimeSnapshot(
@@ -137,7 +146,24 @@ internal data class LocalSeparationModelSnapshot(
     val installed: Boolean,
     val active: Boolean,
     val official: Boolean,
+    val family: SourceSeparationModelFamily = SourceSeparationModelFamily.Mdx,
 )
+
+internal data class LocalSeparationActiveModelSelection(
+    val family: SourceSeparationModelFamily,
+    val modelId: String,
+    val mdxReference: SourceSeparationActiveModelReference? = null,
+) {
+    init {
+        require(modelId.isNotBlank()) { "The active local model ID is empty." }
+        require((family == SourceSeparationModelFamily.Mdx) == (mdxReference != null)) {
+            "Only an MDX selection may carry an MDX model reference."
+        }
+        require(mdxReference == null || mdxReference.modelId == modelId) {
+            "The active local model reference does not match its model ID."
+        }
+    }
+}
 
 internal data class LocalSeparationReadiness(
     val schemaVersion: Int,
@@ -148,7 +174,7 @@ internal data class LocalSeparationReadiness(
     val cpuRuntime: LocalSeparationRuntimeSnapshot?,
     val activeModel: LocalSeparationModelSnapshot?,
     val recommendedModel: LocalSeparationModelSnapshot?,
-    val activeModelReference: SourceSeparationActiveModelReference?,
+    val activeSelection: LocalSeparationActiveModelSelection?,
     val runnablePaths: List<LocalSeparationRunnablePath>,
     val blockers: List<LocalSeparationIssue>,
     val degradations: List<LocalSeparationIssue>,
@@ -159,6 +185,9 @@ internal data class LocalSeparationReadiness(
 ) {
     val isRunnable: Boolean
         get() = runnablePaths.isNotEmpty()
+
+    val activeModelReference: SourceSeparationActiveModelReference?
+        get() = activeSelection?.mdxReference
 }
 
 internal data class LocalSeparationRunnablePath(
@@ -166,12 +195,15 @@ internal data class LocalSeparationRunnablePath(
     val modelId: String,
     val runtimeComponentId: String,
     val profileId: String,
+    val family: SourceSeparationModelFamily = SourceSeparationModelFamily.Mdx,
 )
 
 internal class LocalSeparationReadinessEvaluator(
     private val runtimeStore: SourceSeparationRuntimeStore,
     private val gpuRuntimeStore: SourceSeparationGpuRuntimeStore,
     private val presetRepository: SourceSeparationPresetRepository,
+    private val multiStemSelectionStore: SourceSeparationMultiStemPlaybackSelectionStore,
+    private val multiStemInstaller: SourceSeparationMultiStemReleaseInstaller,
     private val preferences: SharedPreferences,
     private val platformProvider: () -> MdxRuntimePlatform = {
         AndroidMdxRuntimePlatformProvider.current()
@@ -181,7 +213,14 @@ internal class LocalSeparationReadinessEvaluator(
         val platformResult = runCatching { platformProvider() }
         val platform = platformResult.getOrNull()
         val catalog = presetRepository.catalogSnapshot()
-        val catalogRevision = buildCatalogRevision(catalog.catalogId, catalog.catalogSchemaVersion)
+        val multiStemCatalog = runCatching { multiStemInstaller.cachedCatalog() }.getOrNull()
+        val catalogRevision = buildCatalogRevision(
+            catalogId = catalog.catalogId,
+            schemaVersion = catalog.catalogSchemaVersion,
+            multiStemCatalogId = multiStemCatalog?.catalogId,
+            multiStemSchemaVersion = multiStemCatalog?.catalogSchemaVersion,
+            multiStemReleaseTag = multiStemCatalog?.releaseTag,
+        )
         val runtimeInventoryResult = runCatching {
             if (verifyPayloadHashes) runtimeStore.inventory() else runtimeStore.trustedInventory()
         }
@@ -199,23 +238,55 @@ internal class LocalSeparationReadinessEvaluator(
         }
         val gpuSnapshot = gpuItem?.toSnapshot()
         val gpuEnabled = preferences.readSourceSeparationGpuEnabled()
-        val activeState = presetRepository.activeModel()
-        val activeReference = when (activeState) {
-            is SourceSeparationActivePresetState.Reference -> activeState.reference
+        val mdxActiveState = presetRepository.activeModel()
+        val mdxActiveReference = when (mdxActiveState) {
+            is SourceSeparationActivePresetState.Reference -> mdxActiveState.reference
             SourceSeparationActivePresetState.None -> presetRepository.pendingActiveModel()
         }
-        val modelResolution = runCatching {
-            if (verifyPayloadHashes) {
-                presetRepository.resolveActiveCacheModelResolution()
-            } else {
-                presetRepository.resolveTrustedActiveCacheModelResolution()
-            }
-        }.getOrNull()
-        val activeModel = activeState.installedModelSnapshot(
-            reference = activeReference,
+        val selectedMultiStemModelId = multiStemSelectionStore.selectedModelId()
+        val activeSelection = selectedMultiStemModelId?.let { modelId ->
+            LocalSeparationActiveModelSelection(
+                family = SourceSeparationModelFamily.Htdemucs,
+                modelId = modelId,
+            )
+        } ?: mdxActiveReference?.let { reference ->
+            LocalSeparationActiveModelSelection(
+                family = SourceSeparationModelFamily.Mdx,
+                modelId = reference.modelId,
+                mdxReference = reference,
+            )
+        }
+        val modelResolution = if (selectedMultiStemModelId == null) {
+            runCatching {
+                if (verifyPayloadHashes) {
+                    presetRepository.resolveActiveCacheModelResolution()
+                } else {
+                    presetRepository.resolveTrustedActiveCacheModelResolution()
+                }
+            }.getOrNull()
+        } else {
+            null
+        }
+        val multiStemResolution = selectedMultiStemModelId?.let { modelId ->
+            resolveMultiStemModel(
+                modelId = modelId,
+                catalog = multiStemCatalog,
+                verifyPayloadHashes = verifyPayloadHashes,
+            )
+        }
+        val activeModel = if (selectedMultiStemModelId != null) {
+            multiStemResolution?.model
+        } else {
+            mdxActiveState.installedModelSnapshot(
+                reference = mdxActiveReference,
+                repository = presetRepository,
+            )
+        }
+        val recommendedModel = recommendedModelSnapshot(
+            catalog = catalog,
             repository = presetRepository,
+            activeReference = mdxActiveReference.takeIf { selectedMultiStemModelId == null },
         )
-        val recommendedModel = recommendedModelSnapshot(catalog, presetRepository, activeReference)
         val blockers = mutableListOf<LocalSeparationIssue>()
         val degradations = mutableListOf<LocalSeparationIssue>()
         val candidates = mutableListOf<LocalSeparationRepairCandidate>()
@@ -329,13 +400,14 @@ internal class LocalSeparationReadinessEvaluator(
             }
         }
 
-        if (gpuInventoryResult.isFailure) {
+        val gpuAppliesToSelection = activeSelection?.family != SourceSeparationModelFamily.Htdemucs
+        if (gpuAppliesToSelection && gpuInventoryResult.isFailure) {
             degradations += LocalSeparationIssue(
                 LocalSeparationDegradationCode.GpuInventoryUnavailable,
                 gpuInventoryResult.exceptionOrNull()?.message
                     ?: "The optional GPU runtime inventory could not be read.",
             )
-        } else if (platform != null && gpuItem != null) {
+        } else if (gpuAppliesToSelection && platform != null && gpuItem != null) {
             when (gpuItem.state) {
                 SourceSeparationGpuRuntimeState.Missing -> {
                     if (gpuEnabled) {
@@ -413,73 +485,94 @@ internal class LocalSeparationReadinessEvaluator(
             }
         }
 
-        when (modelResolution) {
-            is SourceSeparationActiveCacheModelResolution.Ready -> {
-                val compatibility = platform?.let { current ->
-                    MdxLiteRtCompatibilityResolver.resolve(
-                        profile = modelResolution.model.executionProfile,
-                        backend = MdxInferenceBackend.LiteRtCpu,
-                        platform = current,
-                        policy = MdxCompatibilityPolicy.AllowCandidates,
+        val hasValidModel = if (selectedMultiStemModelId != null) {
+            val issue = multiStemResolution?.issue ?: if (multiStemResolution?.model == null) {
+                LocalSeparationIssue(
+                    LocalSeparationBlockerCode.ActiveModelContractInvalid,
+                    "The selected multi-stem model could not be resolved.",
+                )
+            } else {
+                null
+            }
+            if (issue != null) {
+                blockers += issue
+                val candidate = multiStemResolution?.model
+                if (candidate?.official == true) {
+                    candidates += LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.InstallActiveModel,
+                        reason = "Restore the selected multi-stem model without changing selection.",
+                        required = true,
+                        modelId = candidate.modelId,
+                        modelFamily = SourceSeparationModelFamily.Htdemucs,
                     )
-                }
-                if (compatibility != null && !compatibility.isAllowed) {
-                    blockers += LocalSeparationIssue(
-                        LocalSeparationBlockerCode.ActiveModelDeviceUnsupported,
-                        compatibility.reason,
+                } else {
+                    candidates += LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.OpenModelManagement,
+                        reason = "The selected multi-stem model must be installed again.",
+                        required = true,
                     )
                 }
             }
-
-            is SourceSeparationActiveCacheModelResolution.Unavailable -> {
-                val issue = modelResolution.reason.toIssue()
-                blockers += issue
-                when (modelResolution.reason) {
-                    SourceSeparationActiveCacheModelUnavailableReason.NoSelection,
-                    SourceSeparationActiveCacheModelUnavailableReason.PendingSelection,
-                    SourceSeparationActiveCacheModelUnavailableReason.ModelNotInstalled,
-                    SourceSeparationActiveCacheModelUnavailableReason.ModelIdentityMismatch,
-                    SourceSeparationActiveCacheModelUnavailableReason.ProfileNotInstalled,
-                    SourceSeparationActiveCacheModelUnavailableReason.ContractMismatch,
-                    SourceSeparationActiveCacheModelUnavailableReason.ContractInvalid,
-                    -> {
-                        val activeCandidate = activeModel?.takeIf { it.official }
-                        if (activeCandidate != null) {
-                            candidates += LocalSeparationRepairCandidate(
-                                kind = LocalSeparationRepairCandidateKind.InstallActiveModel,
-                                reason = "Restore the selected model without changing model selection.",
-                                required = true,
-                                modelId = activeCandidate.modelId,
-                            )
-                        } else if (activeReference != null) {
-                            candidates += LocalSeparationRepairCandidate(
-                                kind = LocalSeparationRepairCandidateKind.OpenModelManagement,
-                                reason = "The selected model must be installed or profiled again.",
-                                required = true,
-                            )
-                        }
+            issue == null && multiStemResolution?.model != null
+        } else {
+            when (modelResolution) {
+                is SourceSeparationActiveCacheModelResolution.Ready -> {
+                    val compatibility = platform?.let { current ->
+                        MdxLiteRtCompatibilityResolver.resolve(
+                            profile = modelResolution.model.executionProfile,
+                            backend = MdxInferenceBackend.LiteRtCpu,
+                            platform = current,
+                            policy = MdxCompatibilityPolicy.AllowCandidates,
+                        )
+                    }
+                    if (compatibility != null && !compatibility.isAllowed) {
+                        blockers += LocalSeparationIssue(
+                            LocalSeparationBlockerCode.ActiveModelDeviceUnsupported,
+                            compatibility.reason,
+                        )
                     }
                 }
+
+                is SourceSeparationActiveCacheModelResolution.Unavailable -> {
+                    val issue = modelResolution.reason.toIssue()
+                    blockers += issue
+                    val activeCandidate = activeModel?.takeIf { it.official }
+                    if (activeCandidate != null) {
+                        candidates += LocalSeparationRepairCandidate(
+                            kind = LocalSeparationRepairCandidateKind.InstallActiveModel,
+                            reason = "Restore the selected model without changing model selection.",
+                            required = true,
+                            modelId = activeCandidate.modelId,
+                            modelFamily = SourceSeparationModelFamily.Mdx,
+                        )
+                    } else if (mdxActiveReference != null) {
+                        candidates += LocalSeparationRepairCandidate(
+                            kind = LocalSeparationRepairCandidateKind.OpenModelManagement,
+                            reason = "The selected model must be installed or profiled again.",
+                            required = true,
+                        )
+                    }
+                }
+
+                null -> blockers += LocalSeparationIssue(
+                    LocalSeparationBlockerCode.ActiveModelContractInvalid,
+                    "The active model resolution failed.",
+                )
             }
-
-            null -> blockers += LocalSeparationIssue(
-                LocalSeparationBlockerCode.ActiveModelContractInvalid,
-                "The active model resolution failed.",
-            )
+            modelResolution is SourceSeparationActiveCacheModelResolution.Ready &&
+                blockers.none { it.code == LocalSeparationBlockerCode.ActiveModelDeviceUnsupported }
         }
-
-        val hasValidModel = modelResolution is SourceSeparationActiveCacheModelResolution.Ready &&
-            blockers.none { it.code == LocalSeparationBlockerCode.ActiveModelDeviceUnsupported }
         val hasRunnableCpu = runtimeSnapshot?.isRunnable == true && hasValidModel
-        if (!hasValidModel && recommendedModel != null && activeReference == null) {
+        if (!hasValidModel && recommendedModel != null && activeSelection == null) {
             candidates += LocalSeparationRepairCandidate(
                 kind = LocalSeparationRepairCandidateKind.InstallRecommendedModel,
                 reason = "Install the release-recommended model for the first local separation path.",
                 required = true,
                 modelId = recommendedModel.modelId,
+                modelFamily = SourceSeparationModelFamily.Mdx,
             )
         }
-        if (!hasValidModel && activeReference == null) {
+        if (!hasValidModel && activeSelection == null) {
             blockers += LocalSeparationIssue(
                 LocalSeparationBlockerCode.NoActiveModel,
                 "No active model has been selected.",
@@ -508,10 +601,15 @@ internal class LocalSeparationReadinessEvaluator(
             val currentModel = requireNotNull(activeModel)
             listOf(
                 LocalSeparationRunnablePath(
+                    family = currentModel.family,
                     backend = MdxInferenceBackend.LiteRtCpu.name,
                     modelId = currentModel.modelId,
                     runtimeComponentId = currentRuntime.componentId,
-                    profileId = "cpu-default-fp32-v1",
+                    profileId = if (currentModel.family == SourceSeparationModelFamily.Htdemucs) {
+                        HtdemucsSourceSeparationEngine.HTDEMUCS_CPU_PROFILE_ID
+                    } else {
+                        "cpu-default-fp32-v1"
+                    },
                 ),
             )
         } else {
@@ -525,7 +623,7 @@ internal class LocalSeparationReadinessEvaluator(
                 runtime = runtimeSnapshot,
                 gpuRuntime = gpuSnapshot,
                 gpuEnabled = gpuEnabled,
-                activeReference = activeReference,
+                activeSelection = activeSelection,
                 activeModel = activeModel,
                 state = state,
             ),
@@ -537,7 +635,7 @@ internal class LocalSeparationReadinessEvaluator(
             gpuEnabled = gpuEnabled,
             activeModel = activeModel,
             recommendedModel = recommendedModel,
-            activeModelReference = activeReference,
+            activeSelection = activeSelection,
             runnablePaths = runnablePaths,
             blockers = blockers.distinctBy { it.code },
             degradations = degradations.distinctBy { it.code },
@@ -555,6 +653,7 @@ internal class LocalSeparationReadinessEvaluator(
         val entry = catalog.entries.singleOrNull(CatalogEntry::isDefault) ?: return null
         val preset = runCatching { repository.officialPreset(entry.modelId) }.getOrNull() ?: return null
         return LocalSeparationModelSnapshot(
+            family = SourceSeparationModelFamily.Mdx,
             modelId = preset.modelId,
             displayName = preset.displayName,
             artifactSha256 = preset.sha256,
@@ -568,6 +667,118 @@ internal class LocalSeparationReadinessEvaluator(
             official = true,
         )
     }
+
+    private fun resolveMultiStemModel(
+        modelId: String,
+        catalog: SourceSeparationReleaseCatalog?,
+        verifyPayloadHashes: Boolean,
+    ): MultiStemReadinessResolution {
+        val entry = catalog?.entries?.singleOrNull { candidate ->
+            candidate.modelId == modelId &&
+                candidate.artifactFamily == SourceSeparationReleaseCatalogMetadata.MULTISTEM_ARTIFACT_FAMILY
+        }
+        val installed = multiStemInstaller.installed(modelId)
+        val catalogSnapshot = entry?.let { catalogEntry ->
+            LocalSeparationModelSnapshot(
+                family = SourceSeparationModelFamily.Htdemucs,
+                modelId = catalogEntry.modelId,
+                displayName = catalogEntry.displayName,
+                artifactSha256 = catalogEntry.artifact.sha256,
+                contractSchemaVersion = 1,
+                byteSize = catalogEntry.artifact.byteSize + catalogEntry.contract.byteSize,
+                releaseTag = catalog.releaseTag,
+                installed = installed != null,
+                active = true,
+                official = true,
+            )
+        }
+        if (installed == null) {
+            return MultiStemReadinessResolution(
+                model = catalogSnapshot,
+                issue = LocalSeparationIssue(
+                    LocalSeparationBlockerCode.ActiveModelNotInstalled,
+                    "The selected multi-stem model is not installed.",
+                ),
+            )
+        }
+        val executable = runCatching {
+            installed.sidecarFile.bufferedReader().use { reader ->
+                SourceSeparationMultiTensorExecutableContractLoader.load(reader.readText())
+            }
+        }.getOrElse { error ->
+            return MultiStemReadinessResolution(
+                model = catalogSnapshot,
+                issue = LocalSeparationIssue(
+                    LocalSeparationBlockerCode.ActiveModelContractInvalid,
+                    error.message ?: "The selected multi-stem contract is invalid.",
+                ),
+            )
+        }
+        val contract = executable.modelContract
+        val model = LocalSeparationModelSnapshot(
+            family = SourceSeparationModelFamily.Htdemucs,
+            modelId = installed.modelId,
+            displayName = installed.displayName,
+            artifactSha256 = installed.modelSha256,
+            contractSchemaVersion = contract.contractSchemaVersion,
+            byteSize = entry?.let { catalogEntry ->
+                catalogEntry.artifact.byteSize + catalogEntry.contract.byteSize
+            } ?: (installed.modelByteSize + installed.sidecarFile.length()),
+            releaseTag = catalog?.releaseTag,
+            installed = true,
+            active = true,
+            official = entry != null,
+        )
+        val metadataMatches = contract.modelId == modelId &&
+            executable.artifact.fileName == installed.modelFile.name &&
+            executable.artifact.byteSize == installed.modelByteSize &&
+            executable.artifact.sha256.equals(installed.modelSha256, ignoreCase = true) &&
+            installed.modelFile.length() == installed.modelByteSize &&
+            (entry == null || installed.matchesReleaseEntry(entry))
+        if (!metadataMatches) {
+            return MultiStemReadinessResolution(
+                model = model,
+                issue = LocalSeparationIssue(
+                    LocalSeparationBlockerCode.ActiveModelIdentityMismatch,
+                    "The selected multi-stem model does not match its installed identity.",
+                ),
+            )
+        }
+        if (verifyPayloadHashes) {
+            val modelHashMatches = sha256(installed.modelFile)
+                .equals(installed.modelSha256, ignoreCase = true)
+            val sidecarHashMatches = entry == null || sha256(installed.sidecarFile)
+                .equals(entry.contract.sha256, ignoreCase = true)
+            if (!modelHashMatches || !sidecarHashMatches) {
+                return MultiStemReadinessResolution(
+                    model = model,
+                    issue = LocalSeparationIssue(
+                        LocalSeparationBlockerCode.ActiveModelIdentityMismatch,
+                        "The selected multi-stem model failed integrity validation.",
+                    ),
+                )
+            }
+        }
+        return MultiStemReadinessResolution(model = model, issue = null)
+    }
+
+    private fun sha256(file: java.io.File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(256 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                if (read > 0) digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+    }
+
+    private data class MultiStemReadinessResolution(
+        val model: LocalSeparationModelSnapshot?,
+        val issue: LocalSeparationIssue?,
+    )
 
     private fun SourceSeparationRuntimeInventoryItem.toSnapshot() =
         LocalSeparationRuntimeSnapshot(
@@ -633,6 +844,7 @@ internal class LocalSeparationReadinessEvaluator(
             }
         }
         return LocalSeparationModelSnapshot(
+            family = SourceSeparationModelFamily.Mdx,
             modelId = installed.modelId,
             displayName = installed.displayName,
             artifactSha256 = installed.sha256,
@@ -681,8 +893,18 @@ internal class LocalSeparationReadinessEvaluator(
             },
         )
 
-    private fun buildCatalogRevision(catalogId: String, schemaVersion: Int): String =
-        "$catalogId:$schemaVersion"
+    private fun buildCatalogRevision(
+        catalogId: String,
+        schemaVersion: Int,
+        multiStemCatalogId: String?,
+        multiStemSchemaVersion: Int?,
+        multiStemReleaseTag: String?,
+    ): String = buildString {
+        append(catalogId).append(':').append(schemaVersion)
+        append('|').append(multiStemCatalogId.orEmpty())
+        append(':').append(multiStemSchemaVersion ?: 0)
+        append(':').append(multiStemReleaseTag.orEmpty())
+    }
 
     private fun fingerprint(
         platform: MdxRuntimePlatform?,
@@ -690,7 +912,7 @@ internal class LocalSeparationReadinessEvaluator(
         runtime: LocalSeparationRuntimeSnapshot?,
         gpuRuntime: LocalSeparationGpuRuntimeSnapshot?,
         gpuEnabled: Boolean,
-        activeReference: SourceSeparationActiveModelReference?,
+        activeSelection: LocalSeparationActiveModelSelection?,
         activeModel: LocalSeparationModelSnapshot?,
         state: LocalSeparationReadinessState,
     ): String {
@@ -710,10 +932,11 @@ internal class LocalSeparationReadinessEvaluator(
             append('|').append(gpuRuntime?.producerReleaseVersion.orEmpty())
             append('|').append(gpuRuntime?.reason.orEmpty())
             append('|').append(gpuEnabled)
-            append('|').append(activeReference?.modelId.orEmpty())
-            append('|').append(activeReference?.artifactSha256.orEmpty())
-            append('|').append(activeReference?.contractSchemaVersion ?: 0)
-            append('|').append(activeReference?.profileId.orEmpty())
+            append('|').append(activeSelection?.family?.name.orEmpty())
+            append('|').append(activeSelection?.modelId.orEmpty())
+            append('|').append(activeSelection?.mdxReference?.artifactSha256.orEmpty())
+            append('|').append(activeSelection?.mdxReference?.contractSchemaVersion ?: 0)
+            append('|').append(activeSelection?.mdxReference?.profileId.orEmpty())
             append('|').append(activeModel?.artifactSha256.orEmpty())
             append('|').append(activeModel?.byteSize ?: 0L)
             append('|').append(state.name)
@@ -771,6 +994,7 @@ internal data class SourceSeparationQuickSetupPlanItem(
     val dependencyIds: List<String> = emptyList(),
     val componentId: String? = null,
     val modelId: String? = null,
+    val modelFamily: SourceSeparationModelFamily? = null,
     val expectedDownloadBytes: Long = 0L,
     val expectedInstalledBytes: Long = 0L,
     val state: SourceSeparationQuickSetupItemState = SourceSeparationQuickSetupItemState.Pending,
@@ -783,7 +1007,7 @@ internal data class SourceSeparationQuickSetupPlan(
     val inputReadinessFingerprint: String,
     val catalogRevision: String,
     val items: List<SourceSeparationQuickSetupPlanItem>,
-    val proposedActiveModel: SourceSeparationActiveModelReference?,
+    val proposedSelection: LocalSeparationActiveModelSelection?,
     val proposedGpuEnabled: Boolean? = null,
     val proposedNpuEnabled: Boolean? = null,
 ) {
@@ -792,6 +1016,9 @@ internal data class SourceSeparationQuickSetupPlan(
 
     val selectedItems: List<SourceSeparationQuickSetupPlanItem>
         get() = items.filter { it.selected }
+
+    val proposedActiveModel: SourceSeparationActiveModelReference?
+        get() = proposedSelection?.mdxReference
 }
 
 internal object SourceSeparationQuickSetupPlanner {
@@ -851,6 +1078,8 @@ internal object SourceSeparationQuickSetupPlanner {
                 LocalSeparationRepairCandidateKind.ActivatePendingGpuRuntime,
                 LocalSeparationRepairCandidateKind.ConfigureGpuRuntime,
             )
+        }?.takeIf {
+            readiness.activeSelection?.family != SourceSeparationModelFamily.Htdemucs
         }
         if (gpuCandidate != null && gpuRuntime != null) {
             val action = when (gpuCandidate.kind) {
@@ -888,19 +1117,35 @@ internal object SourceSeparationQuickSetupPlanner {
             )
         }
 
+        val preserveMultiStem =
+            readiness.activeSelection?.family == SourceSeparationModelFamily.Htdemucs
         val targetModel = if (readiness.state == LocalSeparationReadinessState.Unsupported) {
             null
+        } else if (preserveMultiStem) {
+            readiness.activeModel
         } else {
             when (mode) {
                 SourceSeparationQuickSetupMode.BootstrapRecommended,
                 SourceSeparationQuickSetupMode.RestoreRecommended -> readiness.recommendedModel
                 SourceSeparationQuickSetupMode.RepairCurrent ->
                     readiness.activeModel?.takeIf { it.official }
-                        ?: readiness.recommendedModel?.takeIf { readiness.activeModelReference == null }
+                        ?: readiness.recommendedModel?.takeIf { readiness.activeSelection == null }
             }
         }
         val shouldApplyModel = targetModel != null && (
-            !targetModel.installed || !targetModel.active
+            !targetModel.installed || !targetModel.active ||
+                readiness.repairCandidates.any { candidate ->
+                    candidate.kind == LocalSeparationRepairCandidateKind.InstallActiveModel &&
+                        candidate.modelId == targetModel.modelId &&
+                        (candidate.modelFamily == null || candidate.modelFamily == targetModel.family)
+                }
+        )
+        val modelRequiresDownload = targetModel != null && (
+            !targetModel.installed || readiness.repairCandidates.any { candidate ->
+                candidate.kind == LocalSeparationRepairCandidateKind.InstallActiveModel &&
+                    candidate.modelId == targetModel.modelId &&
+                    (candidate.modelFamily == null || candidate.modelFamily == targetModel.family)
+            }
         )
         val runtimeDependency = items.filter {
             it.requirement == SourceSeparationQuickSetupRequirement.Required
@@ -922,7 +1167,8 @@ internal object SourceSeparationQuickSetupPlanner {
                 },
                 dependencyIds = runtimeDependency,
                 modelId = model.modelId,
-                expectedDownloadBytes = if (model.installed) 0L else model.byteSize,
+                modelFamily = model.family,
+                expectedDownloadBytes = if (modelRequiresDownload) model.byteSize else 0L,
                 expectedInstalledBytes = model.byteSize,
             )
         }
@@ -952,11 +1198,12 @@ internal object SourceSeparationQuickSetupPlanner {
                 disabledReason = "This device cannot be repaired automatically.",
             )
         }
-        val proposedModel = when {
+        val proposedSelection = when {
+            preserveMultiStem -> readiness.activeSelection
             mode == SourceSeparationQuickSetupMode.RestoreRecommended ->
-                targetModel?.let(::toReference)
-            shouldApplyModel -> toReference(requireNotNull(targetModel))
-            else -> readiness.activeModelReference
+                targetModel?.let(::toSelection)
+            shouldApplyModel -> toSelection(requireNotNull(targetModel))
+            else -> readiness.activeSelection
         }
         val proposedGpuEnabled = if (gpuCandidate != null && gpuRuntime?.maturity == "recommended") {
             true
@@ -967,7 +1214,7 @@ internal object SourceSeparationQuickSetupPlanner {
             mode,
             readiness.fingerprint,
             items,
-            proposedModel,
+            proposedSelection,
             proposedGpuEnabled,
         )
         return SourceSeparationQuickSetupPlan(
@@ -977,33 +1224,44 @@ internal object SourceSeparationQuickSetupPlanner {
             inputReadinessFingerprint = readiness.fingerprint,
             catalogRevision = readiness.catalogRevision,
             items = items,
-            proposedActiveModel = proposedModel,
+            proposedSelection = proposedSelection,
             proposedGpuEnabled = proposedGpuEnabled,
         )
     }
 
-    private fun toReference(model: LocalSeparationModelSnapshot) =
-        SourceSeparationActiveModelReference(
+    private fun toSelection(model: LocalSeparationModelSnapshot) = when (model.family) {
+        SourceSeparationModelFamily.Mdx -> LocalSeparationActiveModelSelection(
+            family = SourceSeparationModelFamily.Mdx,
             modelId = model.modelId,
-            artifactSha256 = model.artifactSha256,
-            contractSchemaVersion = model.contractSchemaVersion,
+            mdxReference = SourceSeparationActiveModelReference(
+                modelId = model.modelId,
+                artifactSha256 = model.artifactSha256,
+                contractSchemaVersion = model.contractSchemaVersion,
+            ),
         )
+        SourceSeparationModelFamily.Htdemucs -> LocalSeparationActiveModelSelection(
+            family = SourceSeparationModelFamily.Htdemucs,
+            modelId = model.modelId,
+        )
+    }
 
     private fun hashPlan(
         mode: SourceSeparationQuickSetupMode,
         fingerprint: String,
         items: List<SourceSeparationQuickSetupPlanItem>,
-        proposedModel: SourceSeparationActiveModelReference?,
+        proposedSelection: LocalSeparationActiveModelSelection?,
         proposedGpuEnabled: Boolean?,
     ): String {
         val canonical = buildString {
             append(mode.name).append('|').append(fingerprint)
             items.forEach { item ->
                 append('|').append(item.itemId).append(':').append(item.action.name)
+                    .append(':').append(item.modelFamily?.name.orEmpty())
                     .append(':').append(item.selected)
             }
-            append('|').append(proposedModel?.modelId.orEmpty())
-            append('|').append(proposedModel?.artifactSha256.orEmpty())
+            append('|').append(proposedSelection?.family?.name.orEmpty())
+            append('|').append(proposedSelection?.modelId.orEmpty())
+            append('|').append(proposedSelection?.mdxReference?.artifactSha256.orEmpty())
             append('|').append(proposedGpuEnabled)
         }
         return MessageDigest.getInstance("SHA-256")

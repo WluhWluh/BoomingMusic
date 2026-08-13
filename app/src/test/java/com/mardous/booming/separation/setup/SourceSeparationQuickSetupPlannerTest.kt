@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.setup
 
+import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.delivery.SourceSeparationDeliveryReference
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimePlatform
@@ -288,7 +289,81 @@ class SourceSeparationQuickSetupPlannerTest {
 
         assertTrue(plan.items.isEmpty())
         assertEquals(reference, plan.proposedActiveModel)
-        assertEquals(3, plan.schemaVersion)
+        assertEquals(LocalSeparationReadinessContract.PLAN_SCHEMA_VERSION, plan.schemaVersion)
+    }
+
+    @Test
+    fun `restore recommended preserves an installed active multistem model`() {
+        val multiStem = model(
+            modelId = "htdemucs_4s",
+            sha256 = "d".repeat(64),
+            installed = true,
+            active = true,
+            family = SourceSeparationModelFamily.Htdemucs,
+        )
+        val activeSelection = LocalSeparationActiveModelSelection(
+            family = SourceSeparationModelFamily.Htdemucs,
+            modelId = multiStem.modelId,
+        )
+        val plan = SourceSeparationQuickSetupPlanner.create(
+            readiness = readiness(
+                state = LocalSeparationReadinessState.Ready,
+                runtimeState = SourceSeparationRuntimeState.Installed,
+                activeModel = multiStem,
+                activeSelection = activeSelection,
+                gpuRuntime = gpuRuntime(SourceSeparationGpuRuntimeState.Installed),
+                gpuEnabled = false,
+                repairCandidates = listOf(
+                    LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.ConfigureGpuRuntime,
+                        reason = "Enable GPU.",
+                        required = false,
+                        componentId = "gpu-arm64",
+                    ),
+                ),
+            ),
+            mode = SourceSeparationQuickSetupMode.RestoreRecommended,
+        )
+
+        assertTrue(plan.items.isEmpty())
+        assertEquals(activeSelection, plan.proposedSelection)
+        assertEquals(null, plan.proposedGpuEnabled)
+    }
+
+    @Test
+    fun `repair current reinstalls the selected multistem model without switching family`() {
+        val multiStem = model(
+            modelId = "htdemucs_6s",
+            sha256 = "e".repeat(64),
+            installed = false,
+            active = true,
+            family = SourceSeparationModelFamily.Htdemucs,
+        )
+        val activeSelection = LocalSeparationActiveModelSelection(
+            family = SourceSeparationModelFamily.Htdemucs,
+            modelId = multiStem.modelId,
+        )
+        val plan = SourceSeparationQuickSetupPlanner.create(
+            readiness = readiness(
+                activeModel = multiStem,
+                activeSelection = activeSelection,
+                repairCandidates = listOf(
+                    LocalSeparationRepairCandidate(
+                        kind = LocalSeparationRepairCandidateKind.InstallActiveModel,
+                        reason = "Repair selected model.",
+                        required = true,
+                        modelId = multiStem.modelId,
+                        modelFamily = SourceSeparationModelFamily.Htdemucs,
+                    ),
+                ),
+            ),
+            mode = SourceSeparationQuickSetupMode.RepairCurrent,
+        )
+
+        assertEquals(1, plan.items.size)
+        assertEquals(SourceSeparationModelFamily.Htdemucs, plan.items.single().modelFamily)
+        assertEquals(multiStem.byteSize, plan.items.single().expectedDownloadBytes)
+        assertEquals(activeSelection, plan.proposedSelection)
     }
 
     @Test
@@ -336,6 +411,13 @@ class SourceSeparationQuickSetupPlannerTest {
         runtimeState: SourceSeparationRuntimeState? = SourceSeparationRuntimeState.Missing,
         activeModel: LocalSeparationModelSnapshot? = null,
         activeReference: SourceSeparationActiveModelReference? = null,
+        activeSelection: LocalSeparationActiveModelSelection? = activeReference?.let {
+            LocalSeparationActiveModelSelection(
+                family = SourceSeparationModelFamily.Mdx,
+                modelId = it.modelId,
+                mdxReference = it,
+            )
+        },
         recommendedModel: LocalSeparationModelSnapshot = model(
             modelId = "recommended-model",
             sha256 = "c".repeat(64),
@@ -355,7 +437,7 @@ class SourceSeparationQuickSetupPlannerTest {
         cpuRuntime = runtime?.copy(state = runtimeState ?: runtime.state),
         activeModel = activeModel,
         recommendedModel = recommendedModel,
-        activeModelReference = activeReference,
+        activeSelection = activeSelection,
         runnablePaths = emptyList(),
         blockers = blockers,
         degradations = emptyList(),
@@ -391,6 +473,7 @@ class SourceSeparationQuickSetupPlannerTest {
         sha256: String,
         installed: Boolean,
         active: Boolean,
+        family: SourceSeparationModelFamily = SourceSeparationModelFamily.Mdx,
     ) = LocalSeparationModelSnapshot(
         modelId = modelId,
         displayName = modelId,
@@ -401,6 +484,7 @@ class SourceSeparationQuickSetupPlannerTest {
         installed = installed,
         active = active,
         official = true,
+        family = family,
     )
 
     private fun gpuRuntime(state: SourceSeparationGpuRuntimeState) =

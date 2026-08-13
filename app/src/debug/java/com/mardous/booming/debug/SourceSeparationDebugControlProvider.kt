@@ -28,6 +28,9 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
     private val modelRuntimes by lazy {
         SourceSeparationDebugModelRuntimeController(operations)
     }
+    private val quickSetup by lazy {
+        SourceSeparationDebugQuickSetupController(operations)
+    }
     private val diagnostics by lazy {
         SourceSeparationDebugDiagnosticsExporter(
             context = providerContext(),
@@ -352,6 +355,18 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
                     componentId = args.optionalString("component_id"),
                 ),
             )
+        "setup.plan" -> SourceSeparationDebugProtocol.success(
+            quickSetup.plan(
+                mode = parseQuickSetupMode(args.optionalString("mode")),
+                verify = args.boolean("verify", false),
+            ),
+        )
+        "setup.execute" -> accepted(
+            quickSetup.submit(
+                mode = parseQuickSetupMode(args.optionalString("mode")),
+                verify = args.boolean("verify", false),
+            ),
+        )
         "operation.get" -> SourceSeparationDebugProtocol.success(
             operations.snapshot(args.requireString("operation_id")).toJson(),
         )

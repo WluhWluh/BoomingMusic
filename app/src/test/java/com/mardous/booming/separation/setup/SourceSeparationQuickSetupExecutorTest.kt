@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.setup
 
+import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -146,7 +147,7 @@ class SourceSeparationQuickSetupExecutorTest {
         val operations = FakeOperations(oldSelection)
         val plan = plan(reference('a')).copy(
             items = emptyList(),
-            proposedActiveModel = null,
+            proposedSelection = null,
             proposedGpuEnabled = null,
         )
         val result = executor(operations) {
@@ -155,6 +156,29 @@ class SourceSeparationQuickSetupExecutorTest {
 
         assertEquals(SourceSeparationQuickSetupTerminalStatus.Completed, result.status)
         assertEquals(oldSelection, operations.selection)
+    }
+
+    @Test
+    fun `failed final readiness restores hidden MDX and active multistem selection`() {
+        val oldSelection = selection(
+            activeModel = reference('a'),
+            gpuEnabled = false,
+            multiStemModelId = "htdemucs_4s",
+        )
+        val operations = FakeOperations(oldSelection)
+        val result = executor(operations) {
+            readiness(
+                fingerprint = "input",
+                runnable = false,
+                activeModel = oldSelection.activeModel,
+                multiStemModelId = oldSelection.multiStemModelId,
+            )
+        }.execute(plan(reference('b')))
+
+        assertEquals(SourceSeparationQuickSetupTerminalStatus.Blocked, result.status)
+        assertEquals(oldSelection, operations.selection)
+        assertEquals(1, operations.commitCount)
+        assertEquals(1, operations.restoreCount)
     }
 
     private fun executor(
@@ -188,7 +212,7 @@ class SourceSeparationQuickSetupExecutorTest {
                     dependencies = listOf("cpu"),
                 ),
             ),
-            proposedActiveModel = targetModel,
+            proposedSelection = mdxSelection(targetModel),
             proposedGpuEnabled = true,
         )
 
@@ -215,6 +239,7 @@ class SourceSeparationQuickSetupExecutorTest {
         fingerprint: String,
         runnable: Boolean,
         activeModel: SourceSeparationActiveModelReference? = null,
+        multiStemModelId: String? = null,
     ) = LocalSeparationReadiness(
         schemaVersion = LocalSeparationReadinessContract.SCHEMA_VERSION,
         fingerprint = fingerprint,
@@ -225,7 +250,12 @@ class SourceSeparationQuickSetupExecutorTest {
         cpuRuntime = null,
         activeModel = null,
         recommendedModel = null,
-        activeModelReference = activeModel,
+        activeSelection = multiStemModelId?.let {
+            LocalSeparationActiveModelSelection(
+                family = SourceSeparationModelFamily.Htdemucs,
+                modelId = it,
+            )
+        } ?: activeModel?.let(::mdxSelection),
         runnablePaths = if (runnable) {
             listOf(LocalSeparationRunnablePath("cpu", "model", "runtime", "profile"))
         } else {
@@ -245,11 +275,20 @@ class SourceSeparationQuickSetupExecutorTest {
     private fun selection(
         activeModel: SourceSeparationActiveModelReference?,
         gpuEnabled: Boolean,
+        multiStemModelId: String? = null,
     ) = SourceSeparationQuickSetupSelectionSnapshot(
         activeModel = activeModel,
         pendingModel = null,
         gpuEnabled = gpuEnabled,
+        multiStemModelId = multiStemModelId,
     )
+
+    private fun mdxSelection(reference: SourceSeparationActiveModelReference) =
+        LocalSeparationActiveModelSelection(
+            family = SourceSeparationModelFamily.Mdx,
+            modelId = reference.modelId,
+            mdxReference = reference,
+        )
 
     private class FakeOperations(
         var selection: SourceSeparationQuickSetupSelectionSnapshot,
@@ -275,13 +314,23 @@ class SourceSeparationQuickSetupExecutorTest {
         override fun selectionSnapshot(): SourceSeparationQuickSetupSelectionSnapshot = selection
 
         override fun commitSelection(
-            activeModel: SourceSeparationActiveModelReference?,
+            selection: LocalSeparationActiveModelSelection?,
             gpuEnabled: Boolean?,
         ) {
             commitCount++
-            selection = selection.copy(
-                activeModel = activeModel ?: selection.activeModel,
-                gpuEnabled = gpuEnabled ?: selection.gpuEnabled,
+            this.selection = this.selection.copy(
+                activeModel = when (selection?.family) {
+                    SourceSeparationModelFamily.Mdx -> selection.mdxReference
+                    SourceSeparationModelFamily.Htdemucs,
+                    null,
+                    -> this.selection.activeModel
+                },
+                multiStemModelId = when (selection?.family) {
+                    SourceSeparationModelFamily.Mdx -> null
+                    SourceSeparationModelFamily.Htdemucs -> selection.modelId
+                    null -> this.selection.multiStemModelId
+                },
+                gpuEnabled = gpuEnabled ?: this.selection.gpuEnabled,
             )
             afterCommit()
         }
