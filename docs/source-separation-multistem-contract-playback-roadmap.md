@@ -1898,10 +1898,30 @@ missing-terminal, remote-death, or replacement-cache failure was observed.
 - [x] Localize all HTDemucs stages and expose family-specific ETA and window
   timing through the existing progress surfaces. Phase 8C3 records the
   protocol, automated gates, and S10 product-path evidence.
-- [ ] Keep next-song prefetch ownership only in `PlaybackService`.
+- [x] Keep next-song prefetch ownership only in `PlaybackService`.
 - [ ] Reuse the shared source-preflight memo for multi-stem resolution.
 - [ ] Remove the unused two-file mixer compatibility entry point after 2/4/6
   stem regressions pass.
+
+`PlayerViewModel` no longer owns a second prestart job, infers repeat-all queue
+targets, or retriggers prefetch from song, mix, cache, model, and setting
+events. `PlaybackService` is the sole product caller of `preStartSong()` and
+uses Media3's actual next index plus current repeat/shuffle, output-demand, and
+service-lifecycle state. The coordinator and Debug bridge retain the
+family-neutral operation itself so bounded admission remains independently
+testable. A production-route audit now rejects any ViewModel prestart job or
+call site.
+
+The focused production-route suite, full `:app:testGithubDebugUnitTest`, and
+`:app:assembleGithubDebug` passed. On S10 (`SM-G9730`, API 31, arm64), an
+installed post-change APK kept completed official four-stem `Colour Spectrum`
+as the current playback cache while Debug requested one bounded window for
+`Bixby_Soundcamp_Hip-Hop1`. The worker emitted exactly one request,
+selection generation 17 / request generation 1005, and one cache identity
+`84306d99531d...`. It committed one 7,968 ms CPU window and entered
+`Paused(song=5016)` at `1/5`; after another 15 seconds the cache and single
+window sample were unchanged, with no second request generation or duplicate
+cache.
 
 ## Required Tests and Gates
 

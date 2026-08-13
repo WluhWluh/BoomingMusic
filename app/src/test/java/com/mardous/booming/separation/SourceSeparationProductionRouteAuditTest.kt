@@ -137,6 +137,26 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `playback service exclusively owns product next song prestart`() {
+        val service = mainSource(
+            "com/mardous/booming/playback/PlaybackService.kt",
+        ).readText()
+        val viewModel = mainSource(
+            "com/mardous/booming/ui/screen/player/PlayerViewModel.kt",
+        ).readText()
+
+        assertTrue(service.contains("private fun maybePreStartNextSourceSeparation(reason: String)"))
+        assertTrue(
+            service.contains(
+                "sourceSeparationForegroundWorkerCoordinator.preStartSong(",
+            ),
+        )
+        assertFalse(viewModel.contains("maybePreStartNextSourceSeparation"))
+        assertFalse(viewModel.contains("sourceSeparationPreStartJob"))
+        assertFalse(viewModel.contains(".preStartSong("))
+    }
+
+    @Test
     fun `completed current cache cannot preempt next song prestart`() {
         val coordinator = mainSource(
             "com/mardous/booming/ui/screen/player/SourceSeparationForegroundWorkerCoordinator.kt",
