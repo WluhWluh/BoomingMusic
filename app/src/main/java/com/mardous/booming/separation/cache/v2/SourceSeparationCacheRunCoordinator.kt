@@ -10,6 +10,7 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.MdxRangePreparation
 import com.mardous.booming.separation.model.MdxRangeResumeState
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
+import com.mardous.booming.separation.model.HtdemucsRangeResumeState
 import com.mardous.booming.separation.model.toMdxPhysicalStemIds
 import com.mardous.booming.separation.model.contract.StemDescriptor
 import com.mardous.booming.separation.model.contract.StemId
@@ -147,8 +148,9 @@ class SourceSeparationCacheRunCoordinator(
                     segment.hasValidArtifactSet(store, request.identity.cacheKey)
                 }
                 .orEmpty()
-            val resumed = existing?.toResumeState(store)
-            val manifest = if (resumed != null) {
+            val mdxResumeState = existing?.toResumeState(store)
+            val htdemucsResumeState = existing?.toHtdemucsResumeState()
+            val manifest = if (mdxResumeState != null || htdemucsResumeState != null) {
                 val resumedAt = nowEpochMs()
                 val resumedPlan = existing.segmentPlan!!.withValidatedReadySegments(
                     store = store,
@@ -205,6 +207,7 @@ class SourceSeparationCacheRunCoordinator(
                     completedDirectory = completedDirectory,
                     segmentsDirectory = segmentsDirectory,
                     resumeState = manifest.toResumeState(store),
+                    htdemucsResumeState = manifest.toHtdemucsResumeState(),
                     runId = request.runId,
                     processGeneration = request.processGeneration,
                     lease = lease,
@@ -643,6 +646,20 @@ class SourceSeparationCacheRunCoordinator(
         )
     }
 
+    private fun SourceSeparationCacheManifest.toHtdemucsResumeState():
+            HtdemucsRangeResumeState? {
+        if (state == SourceSeparationCacheManifestState.Completed) return null
+        if (contract.multiTensorContract == null || contract.multiStemSet == null) return null
+        val plan = segmentPlan ?: return null
+        val partialOutput = output ?: return null
+        if (partialOutput.outputFrameCount != plan.rangeEndFrame ||
+            partialOutput.outputSampleRate != plan.sampleRate ||
+            partialOutput.windowCount != plan.segmentCount ||
+            partialOutput.stems.map { it.stemId } != plan.stemIds
+        ) return null
+        return HtdemucsRangeResumeState(plan)
+    }
+
     private fun SourceSeparationSegmentPlan.withValidatedReadySegments(
         store: SourceSeparationCacheStore,
         cacheKey: String,
@@ -932,6 +949,7 @@ class SourceSeparationModelAwareCacheRun internal constructor(
     val completedDirectory: File,
     val segmentsDirectory: File,
     val resumeState: MdxRangeResumeState?,
+    internal val htdemucsResumeState: HtdemucsRangeResumeState?,
     val runId: String,
     val processGeneration: Long,
     private val lease: SourceSeparationCacheEntryLease,

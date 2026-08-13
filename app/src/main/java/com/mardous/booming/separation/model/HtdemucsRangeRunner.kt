@@ -1,12 +1,20 @@
 package com.mardous.booming.separation.model
 
 import com.mardous.booming.separation.audio.WavFileWriter
+import com.mardous.booming.separation.audio.Pcm16WavFileReader
 import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.contract.StemId
 import java.io.File
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.RandomAccessFile
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.CancellationException
 import kotlin.math.roundToInt
 
@@ -52,6 +60,10 @@ internal data class HtdemucsRangeResult(
     val segmentPlan: SourceSeparationSegmentPlan,
 )
 
+internal data class HtdemucsRangeResumeState(
+    val segmentPlan: SourceSeparationSegmentPlan,
+)
+
 internal data class HtdemucsRangeProgress(
     val completedWindows: Int,
     val totalWindows: Int,
@@ -65,6 +77,7 @@ internal class HtdemucsRangeRunner(
     fun run(
         outputDirectory: File,
         segmentDirectory: File,
+        resumeState: HtdemucsRangeResumeState? = null,
         onPrepared: (HtdemucsRangePreparation) -> Unit = {},
         onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit = { _, _ -> },
         onProgress: (HtdemucsRangeProgress) -> Unit = {},
@@ -85,7 +98,7 @@ internal class HtdemucsRangeRunner(
         val stemIds = session.orderedStemIds.map(::StemId)
         require(stemIds.isNotEmpty() && stemIds.distinct().size == stemIds.size)
         val plans = HtdemucsTrackWindowPlanner.plans(source.frameCount)
-        val segmentPlan = SourceSeparationSegmentPlan.build(
+        val freshSegmentPlan = SourceSeparationSegmentPlan.build(
             rangeStartFrame = 0,
             rangeEndFrame = source.frameCount,
             sampleRate = HtdemucsPipelineAdapter.SAMPLE_RATE,
@@ -95,7 +108,12 @@ internal class HtdemucsRangeRunner(
             stemIds = stemIds,
             defaultState = SourceSeparationSegmentState.Queued,
         )
-        require(segmentPlan.segmentCount == plans.size)
+        require(freshSegmentPlan.segmentCount == plans.size)
+        val segmentPlan = resumeState?.segmentPlan?.also { resumed ->
+            require(resumed.copy(segments = freshSegmentPlan.segments) == freshSegmentPlan) {
+                "HTDemucs resume geometry does not match the current source and model."
+            }
+        } ?: freshSegmentPlan
         requireWorkspaceAvailable()
         outputDirectory.mkdirs()
         segmentDirectory.mkdirs()
@@ -111,12 +129,51 @@ internal class HtdemucsRangeRunner(
         )
         onPrepared(preparation)
 
-        onProgress(HtdemucsRangeProgress(0, plans.size, "Computing global normalization"))
-        val normalization = computeNormalization(
-            shouldPause,
-            pauseReasonProvider,
-            shouldInterrupt,
+        var completedWindows = segmentPlan.segments.count { it.state.isPlaybackReady }
+        var currentPlan = segmentPlan
+        if (completedWindows == plans.size) {
+            rebuildWorkFilesFromCommittedSegments(
+                stemFiles = stemFiles,
+                segmentPlan = currentPlan,
+                segmentDirectory = segmentDirectory,
+                requireWorkspaceAvailable = requireWorkspaceAvailable,
+            )
+            onProgress(HtdemucsRangeProgress(completedWindows, plans.size, "Completed"))
+            return HtdemucsRangeResult(
+                stemFiles = stemFiles,
+                outputFrameCount = source.frameCount,
+                outputSampleRate = HtdemucsPipelineAdapter.SAMPLE_RATE,
+                windowCount = plans.size,
+                elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L,
+                segmentPlan = currentPlan,
+            )
+        }
+        val checkpointStore = HtdemucsNormalizationCheckpointStore(
+            File(outputDirectory, NORMALIZATION_CHECKPOINT_FILE_NAME),
         )
+        val normalization = checkpointStore.read(
+            trackSamples = source.frameCount,
+            orderedStemIds = session.orderedStemIds,
+        ) ?: run {
+            onProgress(HtdemucsRangeProgress(
+                completedWindows,
+                plans.size,
+                "Computing global normalization",
+            ))
+            computeNormalization(
+                shouldPause,
+                pauseReasonProvider,
+                shouldInterrupt,
+            ).also { computed ->
+                throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
+                requireWorkspaceAvailable()
+                checkpointStore.write(
+                    trackSamples = source.frameCount,
+                    orderedStemIds = session.orderedStemIds,
+                    normalization = computed,
+                )
+            }
+        }
         throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
         val declaredBytes = source.frameCount.toLong() * HtdemucsPipelineAdapter.CHANNEL_COUNT *
             Short.SIZE_BYTES
@@ -128,19 +185,35 @@ internal class HtdemucsRangeRunner(
                 declaredDataSizeBytes = declaredBytes,
             )
         }
-        var completedWindows = 0
-        var currentPlan = segmentPlan
         try {
+            restoreCommittedSegments(
+                writers = writers,
+                segmentPlan = currentPlan,
+                segmentDirectory = segmentDirectory,
+                requireWorkspaceAvailable = requireWorkspaceAvailable,
+            )
+            val firstPendingSegment = currentPlan.segments.indexOfFirst {
+                !it.state.isPlaybackReady
+            }
+            check(firstPendingSegment >= 0)
+            val firstPlanIndex = (firstPendingSegment - 1).coerceAtLeast(0)
             val ola = HtdemucsStreamingOverlapAdd(
                 orderedStemIds = session.orderedStemIds,
                 trackSamples = source.frameCount,
                 normalization = normalization,
+                initialPlanIndex = firstPlanIndex,
+                initialBufferStart = plans[firstPlanIndex].offset,
             )
-            plans.forEach { plan ->
+            plans.drop(firstPlanIndex).forEach { plan ->
                 throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
                 requireWorkspaceAvailable()
-                currentPlan = currentPlan.withSegmentState(plan.index, SourceSeparationSegmentState.Running)
-                onSegmentStateChanged(plan.index, SourceSeparationSegmentState.Running)
+                if (!currentPlan.segments[plan.index].state.isPlaybackReady) {
+                    currentPlan = currentPlan.withSegmentState(
+                        plan.index,
+                        SourceSeparationSegmentState.Running,
+                    )
+                    onSegmentStateChanged(plan.index, SourceSeparationSegmentState.Running)
+                }
                 onProgress(
                     HtdemucsRangeProgress(
                         completedWindows,
@@ -156,37 +229,42 @@ internal class HtdemucsRangeRunner(
                 normalizeInPlace(padded, normalization)
                 val stemSet = session.runNormalizedWindow(padded, shouldInterrupt)
                 ola.addWindow(plan, stemSet)?.let { chunk ->
-                    publishChunk(
-                        chunk = chunk,
-                        segmentIndex = plan.index - 1,
-                        writers = writers,
-                        segmentPlan = currentPlan,
-                        segmentDirectory = segmentDirectory,
-                        requireWorkspaceAvailable = requireWorkspaceAvailable,
-                    )
-                    currentPlan = currentPlan.withSegmentState(
-                        plan.index - 1,
-                        SourceSeparationSegmentState.Ready,
-                    )
-                    onSegmentStateChanged(plan.index - 1, SourceSeparationSegmentState.Ready)
-                    completedWindows += 1
+                    val segmentIndex = plan.index - 1
+                    if (!currentPlan.segments[segmentIndex].state.isPlaybackReady) {
+                        publishChunk(
+                            chunk = chunk,
+                            segmentIndex = segmentIndex,
+                            writers = writers,
+                            segmentPlan = currentPlan,
+                            segmentDirectory = segmentDirectory,
+                            requireWorkspaceAvailable = requireWorkspaceAvailable,
+                        )
+                        currentPlan = currentPlan.withSegmentState(
+                            segmentIndex,
+                            SourceSeparationSegmentState.Ready,
+                        )
+                        onSegmentStateChanged(segmentIndex, SourceSeparationSegmentState.Ready)
+                        completedWindows += 1
+                    }
                 }
             }
             val tail = ola.finish()
-            publishChunk(
-                chunk = tail,
-                segmentIndex = plans.lastIndex,
-                writers = writers,
-                segmentPlan = currentPlan,
-                segmentDirectory = segmentDirectory,
-                requireWorkspaceAvailable = requireWorkspaceAvailable,
-            )
-            currentPlan = currentPlan.withSegmentState(
-                plans.lastIndex,
-                SourceSeparationSegmentState.Ready,
-            )
-            onSegmentStateChanged(plans.lastIndex, SourceSeparationSegmentState.Ready)
-            completedWindows += 1
+            if (!currentPlan.segments[plans.lastIndex].state.isPlaybackReady) {
+                publishChunk(
+                    chunk = tail,
+                    segmentIndex = plans.lastIndex,
+                    writers = writers,
+                    segmentPlan = currentPlan,
+                    segmentDirectory = segmentDirectory,
+                    requireWorkspaceAvailable = requireWorkspaceAvailable,
+                )
+                currentPlan = currentPlan.withSegmentState(
+                    plans.lastIndex,
+                    SourceSeparationSegmentState.Ready,
+                )
+                onSegmentStateChanged(plans.lastIndex, SourceSeparationSegmentState.Ready)
+                completedWindows += 1
+            }
             require(completedWindows == plans.size)
             onProgress(HtdemucsRangeProgress(completedWindows, plans.size, "Completed"))
         } finally {
@@ -243,6 +321,60 @@ internal class HtdemucsRangeRunner(
                 sampleRate = HtdemucsPipelineAdapter.SAMPLE_RATE,
                 channelCount = HtdemucsPipelineAdapter.CHANNEL_COUNT,
             ).use { writer -> writer.writePcm16(pcm16) }
+        }
+    }
+
+    private fun rebuildWorkFilesFromCommittedSegments(
+        stemFiles: List<HtdemucsRangeStemFile>,
+        segmentPlan: SourceSeparationSegmentPlan,
+        segmentDirectory: File,
+        requireWorkspaceAvailable: () -> Unit,
+    ) {
+        val declaredBytes = source.frameCount.toLong() * HtdemucsPipelineAdapter.CHANNEL_COUNT *
+            Short.SIZE_BYTES
+        val writers = stemFiles.map { stem ->
+            WavFileWriter(
+                file = stem.file,
+                sampleRate = HtdemucsPipelineAdapter.SAMPLE_RATE,
+                channelCount = HtdemucsPipelineAdapter.CHANNEL_COUNT,
+                declaredDataSizeBytes = declaredBytes,
+            )
+        }
+        try {
+            restoreCommittedSegments(
+                writers,
+                segmentPlan,
+                segmentDirectory,
+                requireWorkspaceAvailable,
+            )
+        } finally {
+            closeAll(writers)
+        }
+    }
+
+    private fun restoreCommittedSegments(
+        writers: List<WavFileWriter>,
+        segmentPlan: SourceSeparationSegmentPlan,
+        segmentDirectory: File,
+        requireWorkspaceAvailable: () -> Unit,
+    ) {
+        segmentPlan.segments.filter { it.state.isPlaybackReady }.forEach { segment ->
+            segment.stems.forEachIndexed { stemOrder, stemPath ->
+                requireWorkspaceAvailable()
+                val segmentFile = File(segmentDirectory.parentFile, stemPath.path)
+                val info = Pcm16WavFileReader.read(segmentFile)
+                require(info.sampleRate == HtdemucsPipelineAdapter.SAMPLE_RATE &&
+                    info.channelCount == HtdemucsPipelineAdapter.CHANNEL_COUNT &&
+                    info.frameCount == segment.playbackFrameCount.toLong() &&
+                    info.dataSize <= Int.MAX_VALUE
+                ) { "Committed HTDemucs segment geometry is invalid." }
+                val pcm16 = ByteArray(info.dataSize.toInt())
+                RandomAccessFile(segmentFile, "r").use { input ->
+                    input.seek(info.dataOffset)
+                    input.readFully(pcm16)
+                }
+                writers[stemOrder].writePcm16AtFrame(segment.playbackStartFrame, pcm16)
+            }
         }
     }
 
@@ -312,5 +444,92 @@ internal class HtdemucsRangeRunner(
 
     private companion object {
         const val NORMALIZATION_READ_FRAMES = 262_144
+        const val NORMALIZATION_CHECKPOINT_FILE_NAME = "htdemucs-normalization-v1.bin"
+    }
+}
+
+private class HtdemucsNormalizationCheckpointStore(
+    private val file: File,
+) {
+    fun read(
+        trackSamples: Int,
+        orderedStemIds: List<String>,
+    ): HtdemucsGlobalNormalization? = runCatching {
+        if (!file.isFile) return null
+        DataInputStream(FileInputStream(file).buffered()).use { input ->
+            require(input.readInt() == MAGIC)
+            require(input.readInt() == VERSION)
+            require(input.readInt() == trackSamples)
+            require(input.readInt() == HtdemucsPipelineAdapter.SAMPLE_RATE)
+            require(input.readInt() == HtdemucsPipelineAdapter.WINDOW_SAMPLES)
+            require(input.readInt() == HtdemucsTrackWindowPlanner.STRIDE_SAMPLES)
+            val stemCount = input.readInt()
+            require(stemCount == orderedStemIds.size)
+            repeat(stemCount) { index -> require(input.readUTF() == orderedStemIds[index]) }
+            val normalization = HtdemucsGlobalNormalization(
+                mean = input.readFloat(),
+                sampleStandardDeviation = input.readFloat(),
+                divisor = input.readFloat(),
+            )
+            require(normalization.mean.isFinite() &&
+                normalization.sampleStandardDeviation.isFinite() &&
+                normalization.sampleStandardDeviation >= 0f &&
+                normalization.divisor.isFinite() &&
+                normalization.divisor > 0f &&
+                input.read() == -1
+            )
+            normalization
+        }
+    }.getOrElse {
+        file.delete()
+        null
+    }
+
+    fun write(
+        trackSamples: Int,
+        orderedStemIds: List<String>,
+        normalization: HtdemucsGlobalNormalization,
+    ) {
+        file.parentFile?.mkdirs()
+        val temporary = File.createTempFile("${file.name}.", ".tmp", file.parentFile)
+        try {
+            FileOutputStream(temporary).use { output ->
+                val data = DataOutputStream(output.buffered())
+                data.writeInt(MAGIC)
+                data.writeInt(VERSION)
+                data.writeInt(trackSamples)
+                data.writeInt(HtdemucsPipelineAdapter.SAMPLE_RATE)
+                data.writeInt(HtdemucsPipelineAdapter.WINDOW_SAMPLES)
+                data.writeInt(HtdemucsTrackWindowPlanner.STRIDE_SAMPLES)
+                data.writeInt(orderedStemIds.size)
+                orderedStemIds.forEach(data::writeUTF)
+                data.writeFloat(normalization.mean)
+                data.writeFloat(normalization.sampleStandardDeviation)
+                data.writeFloat(normalization.divisor)
+                data.flush()
+                output.fd.sync()
+            }
+            runCatching {
+                Files.move(
+                    temporary.toPath(),
+                    file.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE,
+                )
+            }.getOrElse {
+                Files.move(
+                    temporary.toPath(),
+                    file.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            }
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    private companion object {
+        const val MAGIC = 0x4854444E
+        const val VERSION = 1
     }
 }

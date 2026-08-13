@@ -1691,14 +1691,31 @@ to MDX 9662
 and back; no superseded playback session or current-cache marker survived the
 family switch.
 
-#### Phase 8B: Resumable HTDemucs execution
+#### Phase 8B: Resumable HTDemucs execution (complete)
 
-- [ ] Preserve committed multi-stem segments across pause, process death, and
-  app restart instead of resetting the working cache.
-- [ ] Persist or deterministically recover global normalization and the minimum
-  OLA boundary state needed to resume without seams or mixed generations.
-- [ ] Verify manual pause/resume and forced inference-process death through the
-  Debug control provider on both four- and six-stem contracts.
+- [x] Preserve committed multi-stem segments across pause, process death, and
+  app restart instead of resetting the working cache. Recovery trusts only the
+  journal-committed per-segment WAV artifacts; temporary whole-track work files
+  are rebuilt and cannot overwrite committed output.
+- [x] Persist and validate a small model/source/geometry-bound normalization
+  checkpoint. If it is missing or corrupt, it is discarded and recomputed.
+  OLA state is deterministically rebuilt by replaying at most the preceding
+  boundary window before the first pending segment, so no large float buffer is
+  persisted and the overlap boundary remains exact.
+- [x] Verify manual pause/resume and forced application/inference-process death
+  through the Debug control provider on the official four-stem contract. On S10
+  (`SM-G9730`, API 31, arm64), `Colour Spectrum` was paused at `1/11`, resumed
+  to `3/11`, then the app and `:source_separation` process were force-stopped.
+  After normal Launcher restart the same cache key retained `5/11` and
+  continued to `11/11` completed; no ready segment returned to zero and
+  separated output stayed admitted during recovery. The short 4-stem
+  12-second product-path smoke also completed `3/3`.
+
+The JVM range-runner, OLA, engine, and cache-coordinator regression tests pass,
+including uninterrupted-versus-resumed PCM equality and invalid-checkpoint
+recomputation. Six-stem execution remains covered by the existing ordered
+range-runner tests; full six-stem device recovery remains a follow-up resource
+gate, not a prerequisite for this lifecycle fix.
 
 #### Phase 8C: Shared scheduling and playback-demand progress
 

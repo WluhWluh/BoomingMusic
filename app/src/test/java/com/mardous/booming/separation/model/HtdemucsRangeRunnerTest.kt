@@ -3,6 +3,10 @@ package com.mardous.booming.separation.model
 import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
+import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
+import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
@@ -86,7 +90,114 @@ class HtdemucsRangeRunnerTest {
         assertEquals(0, session.runCount)
     }
 
-    private class FakeTrackSource(
+    @Test
+    fun `resume reuses committed segments and matches uninterrupted wav output`() {
+        val stemIds = listOf("drums", "vocals")
+        val frames = HtdemucsPipelineAdapter.WINDOW_SAMPLES +
+            HtdemucsTrackWindowPlanner.STRIDE_SAMPLES * 3 + 7_000
+        val source = FakeTrackSource(frames)
+        val fullRoot = temporary.newFolder("resume-full")
+        val fullSession = CopyingSession(stemIds)
+        val full = HtdemucsRangeRunner(source, fullSession).run(
+            outputDirectory = fullRoot.resolve("work"),
+            segmentDirectory = fullRoot.resolve("segments"),
+        )
+        val expected = full.stemFiles.map { it.file.readBytes() }
+
+        val resumedRoot = temporary.newFolder("resume-partial")
+        val pausedSession = CopyingSession(stemIds)
+        val pause = AtomicBoolean(false)
+        var partialPlan: SourceSeparationSegmentPlan? = null
+        assertThrows(SourceSeparationPausedException::class.java) {
+            HtdemucsRangeRunner(source, pausedSession).run(
+                outputDirectory = resumedRoot.resolve("work"),
+                segmentDirectory = resumedRoot.resolve("segments"),
+                onPrepared = { partialPlan = it.segmentPlan },
+                onSegmentStateChanged = { index, state ->
+                    partialPlan = requireNotNull(partialPlan).withSegmentState(index, state)
+                    if (state == SourceSeparationSegmentState.Ready && index == 2) {
+                        pause.set(true)
+                    }
+                },
+                shouldPause = pause::get,
+            )
+        }
+        val resumablePlan = requireNotNull(partialPlan).copy(
+            segments = requireNotNull(partialPlan).segments.map { segment ->
+                if (segment.state == SourceSeparationSegmentState.Running) {
+                    segment.copy(state = SourceSeparationSegmentState.Queued)
+                } else {
+                    segment
+                }
+            },
+        )
+        assertEquals(listOf(0, 1, 2), resumablePlan.segments
+            .filter { it.state.isPlaybackReady }.map { it.index })
+        val committedBeforeResume = resumablePlan.segments
+            .filter { it.state.isPlaybackReady }
+            .flatMap { segment -> segment.stems.map { resumedRoot.resolve(it.path) } }
+            .associateWith(File::readBytes)
+        resumedRoot.resolve("work").listFiles().orEmpty().forEach { work ->
+            if (work.name.startsWith("stem-")) work.writeText("corrupt-work-file")
+        }
+
+        val resumeSession = CopyingSession(stemIds)
+        val resumed = HtdemucsRangeRunner(source, resumeSession).run(
+            outputDirectory = resumedRoot.resolve("work"),
+            segmentDirectory = resumedRoot.resolve("segments"),
+            resumeState = HtdemucsRangeResumeState(resumablePlan),
+        )
+
+        assertTrue(resumeSession.runCount < fullSession.runCount)
+        committedBeforeResume.forEach { (file, bytes) -> assertArrayEquals(bytes, file.readBytes()) }
+        resumed.stemFiles.forEachIndexed { index, stem ->
+            assertArrayEquals(expected[index], stem.file.readBytes())
+        }
+        assertTrue(resumed.segmentPlan.segments.all { it.state.isPlaybackReady })
+    }
+
+    @Test
+    fun `invalid normalization checkpoint is discarded and recomputed`() {
+        val stemIds = listOf("drums", "vocals")
+        val frames = HtdemucsPipelineAdapter.WINDOW_SAMPLES +
+            HtdemucsTrackWindowPlanner.STRIDE_SAMPLES * 2 + 1
+        val root = temporary.newFolder("resume-invalid-checkpoint")
+        val source = CountingTrackSource(frames)
+        val pause = AtomicBoolean(false)
+        var partialPlan: SourceSeparationSegmentPlan? = null
+        assertThrows(SourceSeparationPausedException::class.java) {
+            HtdemucsRangeRunner(source, CopyingSession(stemIds)).run(
+                outputDirectory = root.resolve("work"),
+                segmentDirectory = root.resolve("segments"),
+                onPrepared = { partialPlan = it.segmentPlan },
+                onSegmentStateChanged = { index, state ->
+                    partialPlan = requireNotNull(partialPlan).withSegmentState(index, state)
+                    if (state == SourceSeparationSegmentState.Ready && index == 0) pause.set(true)
+                },
+                shouldPause = pause::get,
+            )
+        }
+        val resumablePlan = requireNotNull(partialPlan).copy(
+            segments = requireNotNull(partialPlan).segments.map { segment ->
+                if (segment.state == SourceSeparationSegmentState.Running) {
+                    segment.copy(state = SourceSeparationSegmentState.Queued)
+                } else segment
+            },
+        )
+        root.resolve("work/htdemucs-normalization-v1.bin").writeText("invalid")
+        source.readCount = 0
+
+        HtdemucsRangeRunner(source, CopyingSession(stemIds)).run(
+            outputDirectory = root.resolve("work"),
+            segmentDirectory = root.resolve("segments"),
+            resumeState = HtdemucsRangeResumeState(resumablePlan),
+        )
+
+        assertTrue(source.readCount > HtdemucsTrackWindowPlanner.plans(frames).size)
+        assertTrue(root.resolve("work/htdemucs-normalization-v1.bin").length() > 16L)
+    }
+
+    private open class FakeTrackSource(
         override val frameCount: Int,
     ) : HtdemucsTrackSource {
         private val track = FloatArray(frameCount * 2) { index ->
@@ -108,6 +219,52 @@ class HtdemucsRangeRunnerTest {
                 }
             }
         }
+    }
+
+    private class CountingTrackSource(frameCount: Int) : FakeTrackSource(frameCount) {
+        var readCount = 0
+
+        override fun readPlanarStereo(
+            startFrame: Int,
+            frameCount: Int,
+            shouldCancel: () -> Boolean,
+        ): FloatArray {
+            readCount += 1
+            return super.readPlanarStereo(startFrame, frameCount, shouldCancel)
+        }
+    }
+
+    private class CopyingSession(
+        override val orderedStemIds: List<String>,
+    ) : HtdemucsTrackInferenceSession {
+        var runCount = 0
+
+        override fun runNormalizedWindow(
+            normalizedPlanarStereo: FloatArray,
+            shouldCancel: () -> Boolean,
+        ): HtdemucsWindowStemSet {
+            shouldCancel()
+            runCount += 1
+            val frames = HtdemucsPipelineAdapter.WINDOW_SAMPLES
+            return HtdemucsWindowStemSet(
+                orderedStemIds = orderedStemIds,
+                planarSamples = FloatArray(orderedStemIds.size * 2 * frames).also { output ->
+                    orderedStemIds.indices.forEach { stem ->
+                        repeat(2) { channel ->
+                            normalizedPlanarStereo.copyInto(
+                                destination = output,
+                                destinationOffset = (stem * 2 + channel) * frames,
+                                startIndex = channel * frames,
+                                endIndex = (channel + 1) * frames,
+                            )
+                        }
+                    }
+                },
+                samplesPerStem = frames,
+            )
+        }
+
+        override fun close() = Unit
     }
 
     private class FakeSession(

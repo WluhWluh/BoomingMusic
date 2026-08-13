@@ -113,22 +113,26 @@ data class HtdemucsRenderedTrackChunk(
     val planarSamples: FloatArray,
 )
 
-class HtdemucsStreamingOverlapAdd(
+internal class HtdemucsStreamingOverlapAdd(
     private val orderedStemIds: List<String>,
     private val trackSamples: Int,
     private val normalization: HtdemucsGlobalNormalization,
+    initialPlanIndex: Int = 0,
+    initialBufferStart: Int = 0,
 ) {
     private val planeCount = orderedStemIds.size * HtdemucsPipelineAdapter.CHANNEL_COUNT
     private val accumulation = FloatArray(planeCount * HtdemucsPipelineAdapter.WINDOW_SAMPLES)
     private val accumulatedWeight = FloatArray(HtdemucsPipelineAdapter.WINDOW_SAMPLES)
     private val weight = triangularWeight()
-    private var bufferStart = 0
-    private var nextPlanIndex = 0
+    private var bufferStart = initialBufferStart
+    private var nextPlanIndex = initialPlanIndex
     private var finished = false
 
     init {
         require(orderedStemIds.isNotEmpty() && orderedStemIds.distinct().size == orderedStemIds.size)
         require(trackSamples > 0)
+        require(initialPlanIndex >= 0)
+        require(initialBufferStart in 0 until trackSamples)
     }
 
     fun addWindow(

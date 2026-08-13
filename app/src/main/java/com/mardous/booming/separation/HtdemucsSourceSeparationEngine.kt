@@ -110,9 +110,6 @@ internal class HtdemucsSourceSeparationEngine(
     ): HtdemucsSourceSeparationEngineResult {
         var terminal: Throwable? = null
         return try {
-            check(run.resumeState == null) {
-                "HTDemucs partial WAV output cannot be resumed by this engine revision."
-            }
             val result = rangeExecutor.separate(
                 HtdemucsSourceSeparationRangeRequest(
                     sourceUri = input.sourceUri,
@@ -122,6 +119,7 @@ internal class HtdemucsSourceSeparationEngine(
                     segmentsDirectory = run.segmentsDirectory,
                     expectedSourceAudioFingerprint = identity.source.audioFingerprint,
                     windowDecodeEnabled = windowDecodeEnabled,
+                    resumeState = run.htdemucsResumeState,
                     onPrepared = { preparation ->
                         onPrepared(coordinator.updatePreparation(run, preparation))
                     },

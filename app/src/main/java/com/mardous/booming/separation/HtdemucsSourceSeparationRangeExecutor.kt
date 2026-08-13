@@ -9,6 +9,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRunStemFile
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRuntimeRecord
 import com.mardous.booming.separation.model.HtdemucsMdxTrackSource
 import com.mardous.booming.separation.model.HtdemucsRangeProgress
+import com.mardous.booming.separation.model.HtdemucsRangeResumeState
 import com.mardous.booming.separation.model.HtdemucsRangeRunner
 import com.mardous.booming.separation.model.HtdemucsTrackInferenceSession
 import com.mardous.booming.separation.model.HtdemucsTrackSource
@@ -30,6 +31,7 @@ internal data class HtdemucsSourceSeparationRangeRequest(
     val segmentsDirectory: File,
     val expectedSourceAudioFingerprint: String,
     val windowDecodeEnabled: Boolean,
+    val resumeState: HtdemucsRangeResumeState? = null,
     val onPrepared: (SourceSeparationCacheRunPreparation) -> Unit = {},
     val onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit = { _, _ -> },
     val onProgress: (MdxRangeProgress) -> Unit = {},
@@ -87,6 +89,7 @@ internal class HtdemucsSourceSeparationRangeExecutor(
             HtdemucsRangeRunner(source.source, activeSession).run(
                 outputDirectory = request.workDirectory,
                 segmentDirectory = request.segmentsDirectory,
+                resumeState = request.resumeState,
                 onPrepared = { preparation ->
                     request.onPrepared(
                         SourceSeparationCacheRunPreparation(
