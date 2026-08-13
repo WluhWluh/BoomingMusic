@@ -1899,7 +1899,7 @@ missing-terminal, remote-death, or replacement-cache failure was observed.
   timing through the existing progress surfaces. Phase 8C3 records the
   protocol, automated gates, and S10 product-path evidence.
 - [x] Keep next-song prefetch ownership only in `PlaybackService`.
-- [ ] Reuse the shared source-preflight memo for multi-stem resolution.
+- [x] Reuse the shared source-preflight memo for multi-stem resolution.
 - [ ] Remove the unused two-file mixer compatibility entry point after 2/4/6
   stem regressions pass.
 
@@ -1922,6 +1922,36 @@ selection generation 17 / request generation 1005, and one cache identity
 `Paused(song=5016)` at `1/5`; after another 15 seconds the cache and single
 window sample were unchanged, with no second request generation or duplicate
 cache.
+
+MDX resolution, HTDemucs playback resolution, and the direct multi-stem product
+facade now share one application-scoped, four-entry source-preflight memo. Its
+identity key contains source URI, file path, size, raw modification stamp, and
+duration; any source change misses naturally. Only successful source identity
+probes are retained, a hit reports zero additional preflight time, and same-key
+concurrent callers share one in-flight probe. A canceled owner does not poison
+other callers: an uncanceled waiter takes over and retries. Different source
+keys remain independently resolvable.
+
+The two multi-stem resolution paths also share a bounded parsed-sidecar memo
+keyed by exact model/contract identity plus sidecar path, length, and
+modification stamp. This removes repeated sidecar reads from ordinary
+readiness/playback resolution while preserving automatic invalidation after a
+model update or reinstall. Invalid sidecars and failed source probes are never
+memoized. Debug `state` exposes aggregate hit, miss, eviction, and entry counts
+without changing Release UI or cache identity.
+
+Focused memo, failure/retry, LRU, concurrent-owner cancellation, and
+production-route tests pass, together with full
+`:app:testGithubDebugUnitTest`,
+`:app:compileGithubDebugAndroidTestKotlin`, and
+`:app:assembleGithubDebug`. On S10 (`SM-G9730`, API 31, arm64), the installed
+build resolved the completed official four-stem `Colour Spectrum` cache twice
+through `separation.start`. Before the second request, both source and sidecar
+memos reported `hits=3, misses=2, entries=2`; afterward each reported
+`hits=6, misses=2, entries=2`. The cache remained completed at `11/11`, so the
+repeated product request reused both preflight layers without inference or a
+new cache identity. The device was then restored to the official six-stem
+selection and its retained `3/127` cache.
 
 ## Required Tests and Gates
 

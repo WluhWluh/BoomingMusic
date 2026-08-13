@@ -7,7 +7,6 @@ import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.contract.SourceSeparationInstalledMultiStemModel
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemInstallProgress
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
-import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
 import com.mardous.booming.separation.model.contract.SourceSeparationReleaseCatalog
 import java.util.concurrent.CancellationException
 
@@ -16,6 +15,8 @@ internal class SourceSeparationMultiStemProductFacade(
     private val installer: SourceSeparationMultiStemReleaseInstaller,
     private val executionHost: SourceSeparationMultiStemExecutionHost,
     private val preflightResolver: SourceSeparationModelAwarePreflightResolver,
+    private val sourcePreflightMemo: SourceSeparationSourcePreflightMemo,
+    private val contractMemo: SourceSeparationMultiStemContractMemo,
 ) : SourceSeparationMultiStemRuntimeExecutor {
     fun catalog(): SourceSeparationReleaseCatalog = installer.catalog()
 
@@ -46,16 +47,16 @@ internal class SourceSeparationMultiStemProductFacade(
         require(song != Song.emptySong) { "Cannot separate an empty song." }
         if (shouldCancel()) throw CancellationException("Multi-stem separation canceled.")
         val input = SourceSeparationModelAwareSongInput.from(song)
-        val preflight = preflightResolver.resolve(input.sourceUri, shouldCancel)
+        val preflight = sourcePreflightMemo.resolve(song, input, preflightResolver, shouldCancel)
         return execute(
             SourceSeparationMultiStemRuntimeExecutionRequest(
                 song = SourceSeparationRuntimeSong.forMultiStem(
                     song = song,
                     identity = SourceSeparationCacheContractSnapshot.fromMultiTensor(
-                        SourceSeparationMultiTensorExecutableContractLoader.load(
+                        contractMemo.resolve(
                             requireNotNull(installer.installed(modelId)) {
                                 "The selected multi-stem model is not installed: $modelId"
-                            }.sidecarFile.readText(),
+                            },
                         ),
                     ).identity(
                         preflight.identity,

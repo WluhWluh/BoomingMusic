@@ -85,7 +85,10 @@ import com.mardous.booming.separation.SourceSeparationExecutionSelectionResolver
 import com.mardous.booming.separation.SourceSeparationCacheModelActivator
 import com.mardous.booming.separation.SourceSeparationSelectionGenerationStore
 import com.mardous.booming.separation.SourceSeparationModelMixSettingsStore
+import com.mardous.booming.separation.SourceSeparationModelAwarePreflightResolver
+import com.mardous.booming.separation.SourceSeparationMultiStemContractMemo
 import com.mardous.booming.separation.SourceSeparationMultiStemRuntimeResolver
+import com.mardous.booming.separation.SourceSeparationSourcePreflightMemo
 import com.mardous.booming.separation.cache.v2.resolveTrustedActiveCacheModelResolution
 import com.mardous.booming.separation.model.preset.AndroidSourceSeparationPresetStructuralInspector
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetDownloader
@@ -304,11 +307,18 @@ private val mainModule = module {
         )
     }
     single { SourceSeparationModelMixSettingsStore(get()) }
+    single<SourceSeparationModelAwarePreflightResolver> {
+        AndroidSourceSeparationModelAwarePreflightResolver(androidContext())
+    }
+    single { SourceSeparationSourcePreflightMemo() }
+    single { SourceSeparationMultiStemContractMemo() }
     single<SourceSeparationMultiStemRuntimeResolver> {
         SourceSeparationMultiStemPlaybackResolver(
             selection = get(),
             installer = get(),
-            preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(androidContext()),
+            preflightResolver = get(),
+            sourcePreflightMemo = get(),
+            contractMemo = get(),
         )
     }
     single {
@@ -337,7 +347,9 @@ private val mainModule = module {
         SourceSeparationMultiStemProductFacade(
             installer = get<SourceSeparationMultiStemReleaseInstaller>(),
             executionHost = get(),
-            preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(androidContext()),
+            preflightResolver = get(),
+            sourcePreflightMemo = get(),
+            contractMemo = get(),
         )
     }
     single { SourceSeparationCacheFlacPromoter(store = get(), repository = get()) }
@@ -370,7 +382,8 @@ private val mainModule = module {
             multiStemPlaybackResolver = get(),
             multiStemExecutor = get<SourceSeparationMultiStemProductFacade>(),
             compatibilityResolver = AndroidSourceSeparationRuntimeCompatibilityResolver,
-            preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(androidContext()),
+            preflightResolver = get(),
+            sourcePreflightMemo = get(),
             engine = get(),
             manualFullSongEngineFactory = {
                 SourceSeparationModelAwareEngine.createIndependentForegroundPrototype(

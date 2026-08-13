@@ -1,6 +1,7 @@
 package com.mardous.booming.separation
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -154,6 +155,30 @@ class SourceSeparationProductionRouteAuditTest {
         assertFalse(viewModel.contains("maybePreStartNextSourceSeparation"))
         assertFalse(viewModel.contains("sourceSeparationPreStartJob"))
         assertFalse(viewModel.contains(".preStartSong("))
+    }
+
+    @Test
+    fun `model families share source preflight and multistem contract memos`() {
+        val module = mainSource("com/mardous/booming/MainModule.kt").readText()
+        val runtime = mainSource(
+            "com/mardous/booming/separation/SourceSeparationRuntimeFacade.kt",
+        ).readText()
+        val playbackResolver = mainSource(
+            "com/mardous/booming/separation/SourceSeparationMultiStemPlaybackResolver.kt",
+        ).readText()
+        val productFacade = mainSource(
+            "com/mardous/booming/separation/SourceSeparationMultiStemProductFacade.kt",
+        ).readText()
+
+        assertTrue(module.contains("single { SourceSeparationSourcePreflightMemo() }"))
+        assertTrue(module.contains("single { SourceSeparationMultiStemContractMemo() }"))
+        assertTrue(runtime.contains("sourcePreflightMemo.resolve(song, input"))
+        assertTrue(playbackResolver.contains("sourcePreflightMemo.resolve(song, input"))
+        assertTrue(productFacade.contains("sourcePreflightMemo.resolve(song, input"))
+        assertTrue(playbackResolver.contains("contractMemo.resolve(installed)"))
+        assertTrue(productFacade.contains("contractMemo.resolve("))
+        assertEquals(3, Regex("sourcePreflightMemo = get\\(\\)").findAll(module).count())
+        assertEquals(2, Regex("contractMemo = get\\(\\)").findAll(module).count())
     }
 
     @Test

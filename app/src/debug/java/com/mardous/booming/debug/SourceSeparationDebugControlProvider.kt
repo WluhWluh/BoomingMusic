@@ -12,6 +12,8 @@ import androidx.media3.common.C
 import com.mardous.booming.data.local.repository.Repository
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.playback.Playback
+import com.mardous.booming.separation.SourceSeparationSourcePreflightMemo
+import com.mardous.booming.separation.SourceSeparationMultiStemContractMemo
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationMultiStemExecutionHost
 import com.mardous.booming.ui.screen.MainActivity
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerDebugBridge
@@ -406,6 +408,8 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
         .put("queue", playbackQueue(client))
         .put("separation", bundleJson(client.debugState()))
         .put("worker", SourceSeparationForegroundWorkerDebugBridge.status())
+        .put("preflightMemo", preflightMemoState())
+        .put("multiStemContractMemo", multiStemContractMemoState())
         .put("settings", captureStateSection(resources::settings))
         .put("caches", captureStateSection(resources::caches))
         .put(
@@ -416,6 +420,27 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
         )
         .put("runtimes", captureStateSection { modelRuntimes.runtimes(verify = false) })
         .put("operations", operations.snapshots().toJson())
+
+    private fun preflightMemoState(): JSONObject {
+        val memo: SourceSeparationSourcePreflightMemo =
+            get(SourceSeparationSourcePreflightMemo::class.java)
+        val snapshot = memo.snapshot()
+        return JSONObject()
+            .put("hits", snapshot.hits)
+            .put("misses", snapshot.misses)
+            .put("evictions", snapshot.evictions)
+            .put("entryCount", snapshot.entryCount)
+    }
+
+    private fun multiStemContractMemoState(): JSONObject {
+        val memo: SourceSeparationMultiStemContractMemo =
+            get(SourceSeparationMultiStemContractMemo::class.java)
+        val snapshot = memo.snapshot()
+        return JSONObject()
+            .put("hits", snapshot.hits)
+            .put("misses", snapshot.misses)
+            .put("entryCount", snapshot.entryCount)
+    }
 
     private fun playbackState(client: SourceSeparationDebugMediaClient): JSONObject =
         client.read {

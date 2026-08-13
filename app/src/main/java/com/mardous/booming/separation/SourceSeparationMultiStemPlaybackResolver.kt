@@ -4,7 +4,6 @@ import android.content.SharedPreferences
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnapshot
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
-import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -73,6 +72,8 @@ internal class SourceSeparationMultiStemPlaybackResolver(
     private val selection: SourceSeparationMultiStemPlaybackSelectionStore,
     private val installer: SourceSeparationMultiStemReleaseInstaller,
     private val preflightResolver: SourceSeparationModelAwarePreflightResolver,
+    private val sourcePreflightMemo: SourceSeparationSourcePreflightMemo,
+    private val contractMemo: SourceSeparationMultiStemContractMemo,
 ) : SourceSeparationMultiStemRuntimeResolver {
     override fun selectedModelId(): String? = selection.selectedModelId()
 
@@ -84,10 +85,8 @@ internal class SourceSeparationMultiStemPlaybackResolver(
         val installed = installer.installed(modelId) ?: return null
         if (shouldCancel()) throw CancellationException("Multi-stem playback resolution canceled.")
         val input = SourceSeparationModelAwareSongInput.from(song)
-        val preflight = preflightResolver.resolve(input.sourceUri, shouldCancel)
-        val executable = installed.sidecarFile.bufferedReader().use { reader ->
-            SourceSeparationMultiTensorExecutableContractLoader.load(reader.readText())
-        }
+        val preflight = sourcePreflightMemo.resolve(song, input, preflightResolver, shouldCancel)
+        val executable = contractMemo.resolve(installed)
         val snapshot = SourceSeparationCacheContractSnapshot.fromMultiTensor(executable)
         return SourceSeparationRuntimeSong.forMultiStem(
             song = song,
