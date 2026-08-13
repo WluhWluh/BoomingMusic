@@ -15,6 +15,7 @@ import com.mardous.booming.separation.SourceSeparationBackgroundPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPauseReason
+import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.cache.v2.SourceSeparationExactCacheModelException
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetRepository
 import com.mardous.booming.separation.process.InProcessSourceSeparationExecutionHost
@@ -39,6 +40,11 @@ import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePo
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionRecycleRequiredException
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionPoisonedException
+import com.mardous.booming.separation.process.SourceSeparationProcessExecutionAuthority
+import com.mardous.booming.separation.process.SourceSeparationProcessExecutionBusyException
+import com.mardous.booming.separation.process.SourceSeparationProcessExecutionLease
+import com.mardous.booming.separation.process.SourceSeparationProcessExecutionLifetime
+import com.mardous.booming.separation.process.SourceSeparationProcessExecutionOwner
 import com.mardous.booming.separation.process.SourceSeparationProcessingWakeLockOperationResult
 import com.mardous.booming.separation.process.SourceSeparationRemoteCacheUnavailableException
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheLostException
@@ -49,12 +55,14 @@ import com.mardous.booming.separation.process.SourceSeparationResidentProcessVal
 import com.mardous.booming.separation.process.toExecutionCompletion
 import java.util.LinkedHashSet
 import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import org.koin.android.ext.android.inject
 
 internal class SourceSeparationExecutionService : Service() {
     private val presetRepository: SourceSeparationPresetRepository by inject()
     private val stateLock = Any()
+    private val destroyed = AtomicBoolean(false)
     private val environmentLock = Any()
     private val processGeneration by lazy(::createProcessGeneration)
     private val commandLedger = SourceSeparationIpcCommandLedger()
@@ -162,22 +170,18 @@ internal class SourceSeparationExecutionService : Service() {
     }
 
     override fun onDestroy() {
+        destroyed.set(true)
         observerDeadline.close()
         processingWakeLockController.releaseActive("service-destroyed")
         foregroundController.stopActive("service-destroyed")
-        val acknowledgedRecycle = synchronized(stateLock) {
-            activeRun?.close()
-            activeRun = null
+        val closeEnvironmentNow = synchronized(stateLock) {
+            activeRun?.requestCancel()
             unlinkClientDeathLocked()
             client = null
-            recycleAcknowledgement != null
+            closeFinishedRunLocked()
+            activeRun == null && recycleAcknowledgement == null
         }
-        if (!acknowledgedRecycle) {
-            synchronized(environmentLock) {
-                executionEnvironment?.close()
-                executionEnvironment = null
-            }
-        }
+        if (closeEnvironmentNow) closeExecutionEnvironment()
         super.onDestroy()
     }
 
@@ -506,37 +510,50 @@ internal class SourceSeparationExecutionService : Service() {
         if (!commandLedger.record(command.commandId)) {
             throw SourceSeparationIpcDuplicateCommandException(command.commandId)
         }
-        if (activeRun != null) throw SourceSeparationIpcBusyException()
-        if (recycleAcknowledgement != null) throw SourceSeparationIpcRecyclingException()
-        val connectedClient = replaceClientLocked(
-            observerId = observerId,
-            clientProcessName = clientProcessName,
-            callback = callback,
-        )
-        ensureForegroundStarted(command.foregroundLease)
-        val wakeLockDiagnostics = processingWakeLockController.diagnostics()
-        require(wakeLockDiagnostics.activeLease == null &&
-            !wakeLockDiagnostics.platformHeld
-        ) { "A prior processing wake-lock lifetime has not ended." }
-        val control = SourceSeparationRemoteExecutionControl(
-            initialPlaybackPositionMs = command.descriptor.runtime.initialPlaybackPositionMs,
-            initialPlaybackReadyWindowCount =
-                command.descriptor.runtime.initialPlaybackReadyWindowCount,
-        )
-        val sender = SourceSeparationRemoteEventSender(
-            initialObserverId = connectedClient.state.observerId,
-            initialDelivery = connectedClient.callback::onEvent,
-            onDeliveryFailure = ::handleObserverDeliveryFailure,
-        )
-        val environment = executionEnvironment()
-        val admittedExecution = try {
-            environment.prepare(command.descriptor, control)
-        } catch (error: Throwable) {
-            sender.close()
-            throw error
+        activeRun?.let { active ->
+            throw SourceSeparationProcessExecutionBusyException(active.processOwner)
         }
+        if (recycleAcknowledgement != null) throw SourceSeparationIpcRecyclingException()
+        val processLease = SourceSeparationProcessExecutionAuthority.shared.acquire(
+            SourceSeparationProcessExecutionOwner(
+                family = SourceSeparationModelFamily.Mdx,
+                runId = command.descriptor.runId,
+                processGeneration = command.descriptor.processGeneration,
+            ),
+        )
+        var sender: SourceSeparationRemoteEventSender? = null
+        var admittedExecution: com.mardous.booming.separation.process
+            .SourceSeparationRemoteAdmittedExecution? = null
+        var active: ActiveRemoteRun? = null
         try {
-            admittedExecution.observerConnected(
+            val connectedClient = replaceClientLocked(
+                observerId = observerId,
+                clientProcessName = clientProcessName,
+                callback = callback,
+            )
+            ensureForegroundStarted(command.foregroundLease)
+            val wakeLockDiagnostics = processingWakeLockController.diagnostics()
+            require(wakeLockDiagnostics.activeLease == null &&
+                !wakeLockDiagnostics.platformHeld
+            ) { "A prior processing wake-lock lifetime has not ended." }
+            val control = SourceSeparationRemoteExecutionControl(
+                initialPlaybackPositionMs = command.descriptor.runtime.initialPlaybackPositionMs,
+                initialPlaybackReadyWindowCount =
+                    command.descriptor.runtime.initialPlaybackReadyWindowCount,
+            )
+            val preparedSender = SourceSeparationRemoteEventSender(
+                initialObserverId = connectedClient.state.observerId,
+                initialDelivery = connectedClient.callback::onEvent,
+                onDeliveryFailure = ::handleObserverDeliveryFailure,
+            ).also { sender = it }
+            val environment = executionEnvironment()
+            val preparedExecution = try {
+                environment.prepare(command.descriptor, control)
+            } catch (error: Throwable) {
+                preparedSender.close()
+                throw error
+            }.also { admittedExecution = it }
+            preparedExecution.observerConnected(
                 observerId = connectedClient.state.observerId,
                 observerProcessName = connectedClient.state.clientProcessName,
             )
@@ -545,14 +562,15 @@ internal class SourceSeparationExecutionService : Service() {
                 processGeneration = processGeneration,
                 mode = SourceSeparationExecutionHostMode.BoundRemote,
             )
-            val active = ActiveRemoteRun(
+            active = ActiveRemoteRun(
                 descriptor = command.descriptor,
                 control = control,
-                sender = sender,
+                sender = preparedSender,
                 host = host,
                 environment = environment,
-                admittedExecution = admittedExecution,
+                admittedExecution = preparedExecution,
                 observerState = connectedClient.state,
+                processExecutionLease = processLease,
             )
             command.foregroundLease?.let { lease ->
                 val attached = foregroundController.attach(lease)
@@ -563,8 +581,11 @@ internal class SourceSeparationExecutionService : Service() {
             }
             active.also { activeRun = it }
         } catch (error: Throwable) {
-            admittedExecution.close()
-            sender.close()
+            active?.rejectBeforeExecution() ?: run {
+                runCatching { admittedExecution?.close() }
+                runCatching { sender?.close() }
+                processLease.close()
+            }
             throw error
         }
     }
@@ -667,7 +688,9 @@ internal class SourceSeparationExecutionService : Service() {
                     processingWakeLockController.release(lease, foregroundStopReason)
                     foregroundController.stop(lease, foregroundStopReason)
                 }
+                active.markExecutionFinished()
                 closeAbandonedRun(active)
+                closeDestroyedServiceEnvironmentIfIdle()
             }
         }
     }
@@ -788,7 +811,8 @@ internal class SourceSeparationExecutionService : Service() {
             status = when (error) {
                 is SourceSeparationIpcDuplicateCommandException ->
                     SourceSeparationIpcStatus.Duplicate
-                is SourceSeparationIpcBusyException -> SourceSeparationIpcStatus.Busy
+                is SourceSeparationProcessExecutionBusyException ->
+                    SourceSeparationIpcStatus.Busy
                 is com.mardous.booming.separation.process
                     .SourceSeparationRemoteCacheBusyException -> SourceSeparationIpcStatus.Busy
                 is com.mardous.booming.separation.process
@@ -932,6 +956,32 @@ internal class SourceSeparationExecutionService : Service() {
         }
     }
 
+    private fun closeFinishedRunLocked() {
+        val active = activeRun?.takeIf(ActiveRemoteRun::executionFinished) ?: return
+        observerDeadline.runClosed(active.identity)
+        active.host.closeRun(
+            active.descriptor.runId,
+            active.descriptor.processGeneration,
+        )
+        active.close()
+        activeRun = null
+    }
+
+    private fun closeDestroyedServiceEnvironmentIfIdle() {
+        if (!destroyed.get()) return
+        val shouldClose = synchronized(stateLock) {
+            activeRun == null && recycleAcknowledgement == null
+        }
+        if (shouldClose) closeExecutionEnvironment()
+    }
+
+    private fun closeExecutionEnvironment() {
+        synchronized(environmentLock) {
+            executionEnvironment?.close()
+            executionEnvironment = null
+        }
+    }
+
     private fun unlinkClientDeathLocked() {
         client?.let { connected ->
             runCatching {
@@ -1036,7 +1086,11 @@ internal class SourceSeparationExecutionService : Service() {
         val admittedExecution: com.mardous.booming.separation.process
             .SourceSeparationRemoteAdmittedExecution,
         observerState: SourceSeparationIpcObserverState,
+        private val processExecutionLease: SourceSeparationProcessExecutionLease,
     ) : AutoCloseable {
+        private val closed = AtomicBoolean(false)
+        private val processExecutionLifetime =
+            SourceSeparationProcessExecutionLifetime(processExecutionLease)
         private val foregroundDeferredReason =
             AtomicReference<SourceSeparationForegroundDeferredReason?>(null)
         private var observerState = observerState
@@ -1053,6 +1107,9 @@ internal class SourceSeparationExecutionService : Service() {
             get() = descriptor.runtime.runClass == SourceSeparationExecutionRunClass.ManualFullSong &&
                 descriptor.runtime.backgroundPolicy ==
                 SourceSeparationBackgroundPolicy.IndependentForegroundEligible
+
+        val processOwner: SourceSeparationProcessExecutionOwner
+            get() = processExecutionLifetime.owner
 
         val executionRequest: com.mardous.booming.separation
             .SourceSeparationModelAwareExecutionRequest
@@ -1119,6 +1176,17 @@ internal class SourceSeparationExecutionService : Service() {
             requestPause()
         }
 
+        fun markExecutionFinished() {
+            processExecutionLifetime.markExecutionFinished()
+        }
+
+        fun executionFinished(): Boolean = processExecutionLifetime.executionFinished()
+
+        fun rejectBeforeExecution() {
+            processExecutionLifetime.rejectBeforeExecution()
+            close()
+        }
+
         fun foregroundDeferredException(
             cause: SourceSeparationPausedException,
         ): SourceSeparationForegroundExecutionDeferredException? =
@@ -1127,9 +1195,20 @@ internal class SourceSeparationExecutionService : Service() {
             }
 
         override fun close() {
-            sender.close()
-            host.close()
-            admittedExecution.close()
+            if (!closed.compareAndSet(false, true)) return
+            try {
+                sender.close()
+            } finally {
+                try {
+                    host.close()
+                } finally {
+                    try {
+                        admittedExecution.close()
+                    } finally {
+                        processExecutionLifetime.close()
+                    }
+                }
+            }
         }
     }
 
@@ -1225,9 +1304,6 @@ private fun nowElapsedRealtimeNanos(): Long =
 private class SourceSeparationIpcDuplicateCommandException(
     commandId: String,
 ) : IllegalArgumentException("Duplicate IPC command: $commandId")
-
-private class SourceSeparationIpcBusyException :
-    IllegalStateException("The remote execution host is busy.")
 
 private class SourceSeparationIpcRecyclingException :
     IllegalStateException("The remote execution process is recycling.")

@@ -455,7 +455,11 @@ internal class BoundRemoteSourceSeparationExecutionHost(
             }
             SourceSeparationIpcStatus.Busy -> {
                 recordTerminalStatus(response.status)
-                throw SourceSeparationRemoteCacheBusyException(request.descriptor.cacheKey)
+                throw sourceSeparationRemoteBusyFailure(
+                    errorType = response.error?.type,
+                    message = response.error?.message,
+                    cacheKey = request.descriptor.cacheKey,
+                )
             }
             SourceSeparationIpcStatus.AlreadyCompleted -> {
                 recordTerminalStatus(response.status)

@@ -43,6 +43,7 @@ import com.mardous.booming.separation.process.ipc.SourceSeparationMultiStemIndep
 import com.mardous.booming.separation.process.ipc.SourceSeparationMultiStemReconnectedSession
 import com.mardous.booming.separation.process.ipc.SourceSeparationReconnectedSession
 import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteHostDiedException
+import com.mardous.booming.separation.process.ipc.SourceSeparationRemoteProcessBusyException
 import com.mardous.booming.separation.process.toMdxRangeProgress
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
@@ -1953,6 +1954,18 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 }
                 cancelRequested.set(true)
             }
+        } catch (_: SourceSeparationRemoteProcessBusyException) {
+            trace("worker.song process handoff busy song=${song.id}")
+            if (isCurrentRequest(request, admittedSong?.cacheKey)) {
+                _workerStateFlow.value = SourceSeparationUiState.Idle
+                delay(SOURCE_SEPARATION_PROCESS_HANDOFF_RETRY_MS)
+                if (isCurrentRequest(request, admittedSong?.cacheKey) &&
+                    activeJob?.isActive == true && !cancelRequested.get() &&
+                    !pauseRequested.get()
+                ) {
+                    setPendingStart(request)
+                }
+            }
         } catch (_: SourceSeparationRemoteHostDiedException) {
             trace("worker.song remote host died song=${song.id}")
             if (isCurrentRequest(request, admittedSong?.cacheKey)) {
@@ -2649,4 +2662,5 @@ private fun MdxSourceDecodeMode.toUiState(): SourceSeparationDecodeModeUiState {
 
 private const val SOURCE_SEPARATION_FOREGROUND_WORKER_IDLE_MS = 250L
 private const val SOURCE_SEPARATION_FOREGROUND_WORKER_LEAVE_SONG_WAIT_MS = 50L
+private const val SOURCE_SEPARATION_PROCESS_HANDOFF_RETRY_MS = 150L
 private const val SOURCE_SEPARATION_DEBUG_WINDOW_SAMPLE_LIMIT = 128

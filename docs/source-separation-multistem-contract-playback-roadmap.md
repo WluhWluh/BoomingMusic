@@ -1798,11 +1798,34 @@ active multi-stem playback output.
 
 #### Phase 8E: One remote execution authority
 
-- [ ] Enforce one process-wide execution owner across MDX and HTDemucs, then
+- [x] Enforce one process-wide execution owner across MDX and HTDemucs, then
   converge the two service/control protocols where doing so removes duplicate
   lifecycle state.
 - [ ] Map remote death to one recoverable product error and replace the fixed
   30-minute HTDemucs await timeout with journal/process-lifecycle observation.
+
+The two remote services now share a tokenized process-wide execution lease.
+The lease contains the model family, run ID, and process generation; it is
+released only after both cancellation/cleanup and the actual remote execution
+terminal are observed. A queued HTDemucs run is drained through the executor's
+normal `finally` path, and a rejected handoff is retried as process Busy rather
+than being confused with a cache conflict. The worker preserves the complete
+selection identity while retrying, so an old family cannot publish progress
+after a model switch.
+
+The focused JVM gate passed 37 tests, including the authority, tokenized
+release, typed Busy mapping, Binder protocol, and production-route audits. On
+S10 (`SM-G9730`, API 31, arm64), the Debug ADB product path was exercised with
+`settings.set gpu_enabled=false` followed by `separation.prestart` for an
+existing HTDemucs cache at `2/11`. The log reported the retained cache and
+`Processing window 2/11`, confirming continuation rather than a fresh empty
+run. While that request was active, selecting MDX 9662 advanced the unified
+selection generation; the old HTDemucs request logged `worker.song paused` and
+`worker.paused.stale`, and the new MDX selection became active. The cache
+inventory retained the HTDemucs partial entry and did not report a cache Busy
+failure. The shell-triggered `separation.start` path was also observed to be
+blocked by Android's foreground-service launch policy; subsequent verification
+used `separation.prestart`, which follows the client-bound worker/Binder path.
 
 #### Phase 8F: Diagnostics and remaining duplication
 

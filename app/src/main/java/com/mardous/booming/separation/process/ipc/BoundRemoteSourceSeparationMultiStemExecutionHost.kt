@@ -183,9 +183,19 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                             terminal.countDown()
                         }
                         is SourceSeparationMultiStemExecutionEventPayload.Failed -> {
-                            failure.compareAndSet(null, IllegalStateException(
-                                "${payload.errorType}: ${payload.message ?: "remote failure"}",
-                            ))
+                            failure.compareAndSet(
+                                null,
+                                if (payload.errorType == com.mardous.booming.separation.process
+                                        .SourceSeparationRemoteCacheBusyException::class.java.name
+                                ) {
+                                    SourceSeparationRemoteCacheBusyException(descriptor.cacheKey)
+                                } else {
+                                    IllegalStateException(
+                                        "${payload.errorType}: " +
+                                            (payload.message ?: "remote failure"),
+                                    )
+                                },
+                            )
                             terminal.countDown()
                         }
                     }
@@ -280,7 +290,11 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                 ),
             )
             if (response.status == SourceSeparationMultiStemIpcStatus.Busy) {
-                return HtdemucsSourceSeparationEngineResult.Busy(descriptor.cacheKey)
+                throw sourceSeparationRemoteBusyFailure(
+                    errorType = response.errorType,
+                    message = response.message,
+                    cacheKey = descriptor.cacheKey,
+                )
             }
             if (response.status != SourceSeparationMultiStemIpcStatus.Accepted) {
                 throw IllegalStateException(
@@ -292,7 +306,12 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             check(terminal.await(timeoutMs, TimeUnit.MILLISECONDS)) {
                 "Timed out waiting for remote multi-stem execution."
             }
-            failure.get()?.takeUnless { it === AlreadyCompletedSignal }?.let { throw it }
+            failure.get()?.takeUnless { it === AlreadyCompletedSignal }?.let { error ->
+                if (error is SourceSeparationRemoteCacheBusyException) {
+                    return HtdemucsSourceSeparationEngineResult.Busy(descriptor.cacheKey)
+                }
+                throw error
+            }
             val manifest = requireNotNull(cacheStore.readManifest(descriptor.cacheKey)) {
                 "Remote multi-stem execution completed without a manifest."
             }

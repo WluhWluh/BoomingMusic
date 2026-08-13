@@ -16,6 +16,7 @@ import com.mardous.booming.separation.SourceSeparationMultiStemExecutionRequest
 import com.mardous.booming.separation.InProcessSourceSeparationMultiStemExecutionHost
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPauseReason
+import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourcePreflight
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
 import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionDescriptor
@@ -37,6 +38,11 @@ import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseLif
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseOperationResult
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.process.SourceSeparationProcessingWakeLockOperationResult
+import com.mardous.booming.separation.process.SourceSeparationProcessExecutionAuthority
+import com.mardous.booming.separation.process.SourceSeparationProcessExecutionBusyException
+import com.mardous.booming.separation.process.SourceSeparationProcessExecutionLease
+import com.mardous.booming.separation.process.SourceSeparationProcessExecutionLifetime
+import com.mardous.booming.separation.process.SourceSeparationProcessExecutionOwner
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -86,6 +92,7 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
         ): String {
             var foregroundLease: SourceSeparationForegroundLeaseRequest? = null
             var reservedRun: ActiveRun? = null
+            var executionScheduled = false
             return try {
                 val command = SourceSeparationMultiStemExecutionCodec
                     .decodeStartCommand(descriptorJson)
@@ -95,15 +102,32 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                     "Multi-stem descriptor targets a stale process generation."
                 }
                 val run = synchronized(stateLock) {
-                    check(active == null) { "A multi-stem run is already active." }
-                    ActiveRun(descriptor, callback, foregroundLease).also {
-                        active = it
-                        reservedRun = it
+                    if (active != null) {
+                        throw SourceSeparationProcessExecutionBusyException(
+                            requireNotNull(active).processOwner,
+                        )
+                    }
+                    val processLease = SourceSeparationProcessExecutionAuthority.shared.acquire(
+                        SourceSeparationProcessExecutionOwner(
+                            family = SourceSeparationModelFamily.Htdemucs,
+                            runId = descriptor.runId,
+                            processGeneration = descriptor.processGeneration,
+                        ),
+                    )
+                    try {
+                        ActiveRun(descriptor, callback, foregroundLease, processLease).also {
+                            active = it
+                            reservedRun = it
+                        }
+                    } catch (error: Throwable) {
+                        processLease.close()
+                        throw error
                     }
                 }
                 attachForegroundOwnership(run)
                 run.emit(SourceSeparationMultiStemExecutionEventPayload.Accepted(descriptor))
                 worker.execute { execute(run) }
+                executionScheduled = true
                 SourceSeparationMultiStemExecutionCodec.encodeStartResponse(
                     SourceSeparationMultiStemIpcStartResponse(
                         status = SourceSeparationMultiStemIpcStatus.Accepted,
@@ -112,9 +136,12 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                     ),
                 )
             } catch (error: Throwable) {
-                reservedRun?.observerDisconnected()
-                synchronized(stateLock) {
-                    if (active === reservedRun) active = null
+                if (executionScheduled) throw error
+                reservedRun?.let { run ->
+                    run.rejectBeforeExecution()
+                    synchronized(stateLock) {
+                        if (active === run) active = null
+                    }
                 }
                 foregroundLease?.let { lease ->
                     processingWakeLockController.release(lease, "start-rejected")
@@ -122,7 +149,7 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                 }
                 SourceSeparationMultiStemExecutionCodec.encodeStartResponse(
                     SourceSeparationMultiStemIpcStartResponse(
-                        status = if (error.message?.contains("already active") == true) {
+                        status = if (error is SourceSeparationProcessExecutionBusyException) {
                             SourceSeparationMultiStemIpcStatus.Busy
                         } else {
                             SourceSeparationMultiStemIpcStatus.Failed
@@ -268,9 +295,9 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
         synchronized(stateLock) {
             active?.requestCancel()
             active?.observerDisconnected()
-            active = null
         }
-        worker.shutdownNow()
+        // A queued run must reach execute() so its finally block releases process ownership.
+        worker.shutdown()
         super.onDestroy()
     }
 
@@ -354,7 +381,8 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                     return
                 }
                 is HtdemucsSourceSeparationEngineResult.Busy ->
-                    error("The multi-stem cache is busy: ${result.cacheKey}")
+                    throw com.mardous.booming.separation.process
+                        .SourceSeparationRemoteCacheBusyException(result.cacheKey)
             }
         } catch (error: SourceSeparationPausedException) {
             terminalReason = "paused"
@@ -377,7 +405,8 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
             synchronized(stateLock) {
                 if (active === run) active = null
             }
-            run.observerDisconnected()
+            run.markExecutionFinished()
+            run.close()
         }
     }
 
@@ -460,7 +489,11 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
         val descriptor: SourceSeparationMultiStemExecutionDescriptor,
         callback: ISourceSeparationMultiStemExecutionCallback,
         val foregroundLease: SourceSeparationForegroundLeaseRequest?,
-    ) {
+        private val processExecutionLease: SourceSeparationProcessExecutionLease,
+    ) : AutoCloseable {
+        private val closed = AtomicBoolean(false)
+        private val processExecutionLifetime =
+            SourceSeparationProcessExecutionLifetime(processExecutionLease)
         private val sequence = AtomicLong(0L)
         private val pause = AtomicBoolean(false)
         private val cancel = AtomicBoolean(false)
@@ -477,6 +510,9 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
         val independentlyOwned: Boolean
             get() = foregroundLease != null
 
+        val processOwner: SourceSeparationProcessExecutionOwner
+            get() = processExecutionLifetime.owner
+
         init {
             adopt(callback)
         }
@@ -489,6 +525,15 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
         fun requestCancel() {
             pause.set(false)
             cancel.set(true)
+        }
+
+        fun markExecutionFinished() {
+            processExecutionLifetime.markExecutionFinished()
+        }
+
+        fun rejectBeforeExecution() {
+            processExecutionLifetime.rejectBeforeExecution()
+            close()
         }
 
         fun matches(request: SourceSeparationForegroundLeaseRequest): Boolean =
@@ -577,6 +622,15 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                     if (callback === target) observerDisconnected()
                 }
                 if (error !is RemoteException) Log.w(TAG, "Multi-stem callback failed", error)
+            }
+        }
+
+        override fun close() {
+            if (!closed.compareAndSet(false, true)) return
+            try {
+                observerDisconnected()
+            } finally {
+                processExecutionLifetime.close()
             }
         }
     }

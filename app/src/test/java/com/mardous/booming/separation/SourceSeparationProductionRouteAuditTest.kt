@@ -368,6 +368,41 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `remote services retain process ownership until execution really finishes`() {
+        val mdxService = mainSource(
+            "com/mardous/booming/separation/process/ipc/SourceSeparationExecutionService.kt",
+        ).readText()
+        val multiStemService = mainSource(
+            "com/mardous/booming/separation/process/ipc/" +
+                "SourceSeparationMultiStemExecutionService.kt",
+        ).readText()
+
+        val mdxDestroy = mdxService.substring(
+            mdxService.indexOf("override fun onDestroy()"),
+            mdxService.indexOf("private val binder", mdxService.indexOf("override fun onDestroy()")),
+        )
+        assertTrue(mdxDestroy.contains("activeRun?.requestCancel()"))
+        assertTrue(mdxDestroy.contains("closeFinishedRunLocked()"))
+        assertFalse(mdxDestroy.contains("activeRun?.close()"))
+        assertTrue(mdxService.contains("active.markExecutionFinished()"))
+
+        val multiStemDestroy = multiStemService.substring(
+            multiStemService.indexOf("override fun onDestroy()"),
+            multiStemService.indexOf(
+                "private fun execute(run:",
+                multiStemService.indexOf("override fun onDestroy()"),
+            ),
+        )
+        assertTrue(multiStemDestroy.contains("active?.requestCancel()"))
+        assertTrue(multiStemDestroy.contains("worker.shutdown()"))
+        assertFalse(multiStemDestroy.contains("active?.close()"))
+        assertFalse(multiStemDestroy.contains("shutdownNow()"))
+        assertTrue(multiStemService.contains("var executionScheduled = false"))
+        assertTrue(multiStemService.contains("if (executionScheduled) throw error"))
+        assertTrue(multiStemService.contains("run.markExecutionFinished()"))
+    }
+
+    @Test
     fun `generic inference boundaries have no implicit ORT provider`() {
         val runtime = mainSource(
             "com/mardous/booming/separation/model/MdxInferenceRuntime.kt",
