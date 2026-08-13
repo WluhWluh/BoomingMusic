@@ -430,6 +430,7 @@ internal fun MdxRangeProgress.toExecutionProgress() = SourceSeparationExecutionP
     sourceDecodeDiagnostics = sourceDecodeDiagnostics?.toExecutionDiagnostics(),
     completedWindowElapsedMs = completedWindowElapsedMs,
     scheduler = scheduler?.toExecutionProgress(),
+    runtimeBackend = runtimeBackend?.name,
 )
 
 internal fun SourceSeparationExecutionProgress.toMdxRangeProgress() = MdxRangeProgress(
@@ -439,6 +440,7 @@ internal fun SourceSeparationExecutionProgress.toMdxRangeProgress() = MdxRangePr
     sourceDecodeDiagnostics = sourceDecodeDiagnostics?.toMdxDiagnostics(),
     completedWindowElapsedMs = completedWindowElapsedMs,
     scheduler = scheduler?.toMdxProgress(),
+    runtimeBackend = runtimeBackend?.let(com.mardous.booming.separation.model.MdxInferenceBackend::valueOf),
 )
 
 private fun MdxSegmentSchedulerProgress.toExecutionProgress() =

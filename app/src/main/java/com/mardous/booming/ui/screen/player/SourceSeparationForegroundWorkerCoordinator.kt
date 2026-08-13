@@ -20,6 +20,7 @@ import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelection
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.SourceSeparationPerformanceStats
+import com.mardous.booming.separation.SourceSeparationPerformanceScope
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationRuntimeSong
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
@@ -49,6 +50,7 @@ import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_COMPLETED_LIMIT
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_CACHE_CLEANUP_PARTIAL_LIMIT
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AUTO_START
+import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_PLAYBACK_READY_WINDOW_COUNT
 import com.mardous.booming.util.readSourceSeparationGpuEnabled
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_WINDOW_DECODE
@@ -1032,14 +1034,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             is SourceSeparationMultiStemExecutionEventPayload.Progress -> {
                 publishWorkerProgress(
                     song = song,
-                    progress = MdxRangeProgress(
-                        completedWindows = payload.completedWindows,
-                        totalWindows = payload.totalWindows,
-                        stage = payload.stage,
-                        completedWindowElapsedMs = payload.completedWindowElapsedMs,
-                        scheduler = payload.scheduler,
-                    ),
-                    selectionGeneration = selection?.generation,
+                    progress = payload.toMdxRangeProgress(),
+                    selection = selection,
                     cacheKey = session.cacheKey,
                 )
                 false
@@ -1321,7 +1317,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 publishWorkerProgress(
                     song = recoveredSong,
                     progress = payload.progress.toMdxRangeProgress(),
-                    selectionGeneration = reconnectedExecutionSelection?.generation,
+                    selection = reconnectedExecutionSelection,
                     cacheKey = session.cacheKey,
                 )
                 false
@@ -1815,7 +1811,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     publishWorkerProgress(
                         song = song,
                         progress = progress,
-                        selectionGeneration = request.selection.generation,
+                        selection = request.selection,
                         cacheKey = resolved.cacheKey,
                     )
                 },
@@ -2103,17 +2099,20 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private fun publishWorkerProgress(
         song: Song,
         progress: MdxRangeProgress,
-        selectionGeneration: Long? = null,
+        selection: SourceSeparationExecutionSelectionSnapshot? = null,
         cacheKey: String? = null,
     ) {
-        val averageWindowMs = progress.completedWindowElapsedMs
-            ?.let(performanceStats::recordWindowElapsed)
-            ?: performanceStats.averageWindowMs()
-        recordDebugWindowSample(song, progress)
+        val performanceScope = selection?.performanceScope(progress.runtimeBackend?.name)
+        val averageWindowMs = performanceScope?.let { scope ->
+            progress.completedWindowElapsedMs
+                ?.let { performanceStats.recordWindowElapsed(scope, it) }
+                ?: performanceStats.averageWindowMs(scope)
+        } ?: DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS
+        recordDebugWindowSample(song, progress, performanceScope, averageWindowMs)
         _workerStateFlow.value = SourceSeparationUiState.Running(
             songId = song.id,
             songTitle = song.title,
-            selectionGeneration = selectionGeneration,
+            selectionGeneration = selection?.generation,
             cacheKey = cacheKey,
             completedWindows = progress.completedWindows,
             totalWindows = progress.totalWindows,
@@ -2123,6 +2122,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             sourceDecodeMode = progress.sourceDecodeDiagnostics?.mode?.toUiState(),
             averageWindowMs = averageWindowMs,
             lastWindowMs = progress.completedWindowElapsedMs,
+            runtimeBackend = progress.runtimeBackend?.name,
+            performanceScope = performanceScope?.debugName(),
             scheduler = progress.scheduler?.let { scheduler ->
                 SourceSeparationSchedulerUiState(
                     playbackSegmentIndex = scheduler.playbackSegmentIndex,
@@ -2162,6 +2163,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private fun recordDebugWindowSample(
         song: Song,
         progress: MdxRangeProgress,
+        performanceScope: SourceSeparationPerformanceScope?,
+        averageWindowMs: Long,
     ) {
         val elapsedMs = progress.completedWindowElapsedMs ?: return
         val sample = SourceSeparationDebugWindowSample(
@@ -2171,6 +2174,9 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             completedWindows = progress.completedWindows,
             totalWindows = progress.totalWindows,
             elapsedMs = elapsedMs,
+            averageWindowMs = averageWindowMs,
+            runtimeBackend = progress.runtimeBackend?.name,
+            performanceScope = performanceScope?.debugName(),
             playbackPositionMs = _playbackStateFlow.value
                 .takeIf { it.song.id == song.id }
                 ?.estimatedPositionMs()
@@ -2204,6 +2210,19 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 protectedCacheKeys = pruneProtectedCacheKeys(),
             )
         }
+    }
+
+    private fun SourceSeparationExecutionSelectionSnapshot.performanceScope(
+        runtimeBackend: String?,
+    ): SourceSeparationPerformanceScope? {
+        val model = identity ?: return null
+        val backend = runtimeBackend?.takeIf(String::isNotBlank) ?: return null
+        return SourceSeparationPerformanceScope(
+            family = model.family,
+            modelId = model.modelId,
+            profileId = "${model.profileRevisionId}:${model.renderProfileId}",
+            backend = backend,
+        )
     }
 
     private fun observeAutomaticPruneRequests() {
@@ -2608,11 +2627,16 @@ private data class SourceSeparationDebugWindowSample(
     val completedWindows: Int,
     val totalWindows: Int,
     val elapsedMs: Long,
+    val averageWindowMs: Long,
+    val runtimeBackend: String?,
+    val performanceScope: String?,
     val playbackPositionMs: Long?,
 ) {
     fun toDebugText(): String {
         return "t=$elapsedRealtimeMs,song=$songId,window=$completedWindows/$totalWindows," +
-                "elapsedMs=$elapsedMs,playbackMs=$playbackPositionMs,title=${songTitle.sanitizeDebugText()}"
+                "elapsedMs=$elapsedMs,averageMs=$averageWindowMs,backend=$runtimeBackend," +
+                "scope=${performanceScope?.sanitizeDebugText()},playbackMs=$playbackPositionMs," +
+                "title=${songTitle.sanitizeDebugText()}"
     }
 }
 
@@ -2628,6 +2652,9 @@ private fun SourceSeparationUiState.debugName(): String {
         is SourceSeparationUiState.Running ->
             "Running(song=$songId windows=$completedWindows/$totalWindows percent=$percent " +
                     "lastWindowMs=${lastWindowMs ?: "null"} averageWindowMs=$averageWindowMs " +
+                    "backend=${runtimeBackend ?: "null"} scope=${performanceScope ?: "null"} " +
+                    "decodeMode=${sourceDecodeMode ?: "null"} " +
+                    "diagnostics=${sourceDecodeDiagnostics.orEmpty().sanitizeDebugText()} " +
                     "stage=${stage.orEmpty()})"
         is SourceSeparationUiState.Completed -> "Completed(song=$songId)"
         is SourceSeparationUiState.Canceled -> "Canceled(song=$songId)"

@@ -293,6 +293,7 @@ class MdxRangeSeparator(
                                 stage = "Preparing window ${windowIndex + 1}/${windowCount}",
                                 sourceDecodeDiagnostics = sourceInput.diagnostics,
                                 scheduler = schedulerProgress,
+                                runtimeBackend = runtimeDiagnostics?.backend,
                             )
                         )
                         SourceSeparationCacheFaultInjection.reach(
@@ -339,6 +340,7 @@ class MdxRangeSeparator(
                                     stage = "MP3 window overlap check failed; decoding full source",
                                     sourceDecodeDiagnostics = sourceInput.diagnostics,
                                     scheduler = schedulerProgress,
+                                    runtimeBackend = runtimeDiagnostics?.backend,
                                 )
                             )
                             sourceInput = MdxSourceInput.createFullSongFallback(
@@ -482,6 +484,7 @@ class MdxRangeSeparator(
                                             processingSegmentIndex = null,
                                         ),
                                 ),
+                                runtimeBackend = runtimeDiagnostics?.backend,
                             )
                         )
                         throwIfCanceled(shouldCancel)
@@ -496,6 +499,7 @@ class MdxRangeSeparator(
                 windowCount,
                 stage = "Hashing source audio",
                 sourceDecodeDiagnostics = sourceInput.diagnostics,
+                runtimeBackend = runtimeDiagnostics?.backend,
             )
         )
         val sourceAudioFingerprint = sourceInput.sourceAudioFingerprint(timing, shouldCancel)
@@ -512,6 +516,7 @@ class MdxRangeSeparator(
                 windowCount,
                 stage = "Writing timing report",
                 sourceDecodeDiagnostics = sourceInput.diagnostics,
+                runtimeBackend = runtimeDiagnostics?.backend,
             )
         )
         val timingReport = timing.toReport(
@@ -974,6 +979,7 @@ data class MdxRangeProgress(
     val sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics? = null,
     val completedWindowElapsedMs: Long? = null,
     val scheduler: MdxSegmentSchedulerProgress? = null,
+    val runtimeBackend: MdxInferenceBackend? = null,
 ) {
     val percent: Int = if (totalWindows > 0) {
         ((completedWindows * 100.0) / totalWindows).roundToInt()

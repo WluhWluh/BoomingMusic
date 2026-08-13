@@ -5,6 +5,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheContractSnap
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceIdentity
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
+import com.mardous.booming.separation.model.MdxInferenceBackend
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
@@ -144,8 +145,23 @@ class SourceSeparationMultiStemExecutionProtocolTest {
                 completedWindows = 1,
                 totalWindows = 4,
                 stage = "Processed window 1/4",
+                sourceDecodeDiagnostics = SourceSeparationExecutionSourceDecodeDiagnostics(
+                    mode = "Window",
+                    profile = "flac",
+                    mimeType = "audio/flac",
+                    sampleRate = 44_100,
+                    channelCount = 2,
+                    sourceFrameCount = 44_100,
+                    outputFrameCount = 44_100,
+                    fallbackReason = null,
+                    experimental = false,
+                    calibration = null,
+                    encoderDelayFrames = null,
+                    encoderPaddingFrames = null,
+                ),
                 completedWindowElapsedMs = 123L,
                 scheduler = scheduler,
+                runtimeBackend = MdxInferenceBackend.LiteRtCpu.name,
             ),
         )
         val decodedEvent = SourceSeparationMultiStemExecutionCodec.decodeEvent(
@@ -155,6 +171,12 @@ class SourceSeparationMultiStemExecutionProtocolTest {
             SourceSeparationMultiStemExecutionEventPayload.Progress
         assertEquals(123L, progress.completedWindowElapsedMs)
         assertEquals(scheduler, progress.scheduler)
+        assertEquals("audio/flac", progress.sourceDecodeDiagnostics?.mimeType)
+        assertEquals(MdxInferenceBackend.LiteRtCpu.name, progress.runtimeBackend)
+        val productProgress = progress.toMdxRangeProgress()
+        assertEquals(MdxInferenceBackend.LiteRtCpu, productProgress.runtimeBackend)
+        assertEquals("audio/flac", productProgress.sourceDecodeDiagnostics?.mimeType)
+        assertEquals(progress, productProgress.toMultiStemExecutionProgress())
 
         val command = SourceSeparationMultiStemIpcControlCommand(
             runId = fixture().runId,

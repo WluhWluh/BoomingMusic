@@ -3049,6 +3049,8 @@ sealed class SourceSeparationUiState {
         val sourceDecodeMode: SourceSeparationDecodeModeUiState? = null,
         val averageWindowMs: Long = DEFAULT_SOURCE_SEPARATION_AVERAGE_WINDOW_MS,
         val lastWindowMs: Long? = null,
+        val runtimeBackend: String? = null,
+        val performanceScope: String? = null,
         val scheduler: SourceSeparationSchedulerUiState? = null,
     ) : SourceSeparationUiState()
 

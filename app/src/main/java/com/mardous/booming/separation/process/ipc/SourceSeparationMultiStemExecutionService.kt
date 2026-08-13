@@ -25,6 +25,7 @@ import com.mardous.booming.separation.process.SourceSeparationMultiStemExecution
 import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionCodec
 import com.mardous.booming.separation.process.toMultiStemExecutionCompletion
 import com.mardous.booming.separation.process.toMultiStemExecutionPreparation
+import com.mardous.booming.separation.process.toMultiStemExecutionProgress
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcControlAction
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcControlCommand
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcControlResponse
@@ -337,15 +338,7 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                     runClass = descriptor.runtime.runClass,
                     windowDecodeEnabled = descriptor.runtime.windowDecodeEnabled,
                     onProgress = { progress ->
-                        run.emit(
-                            SourceSeparationMultiStemExecutionEventPayload.Progress(
-                                completedWindows = progress.completedWindows.coerceAtLeast(0),
-                                totalWindows = progress.totalWindows.coerceAtLeast(1),
-                                stage = progress.stage,
-                                completedWindowElapsedMs = progress.completedWindowElapsedMs,
-                                scheduler = progress.scheduler,
-                            ),
-                        )
+                        run.emit(progress.toMultiStemExecutionProgress())
                     },
                     onPrepared = { manifest ->
                         run.emit(SourceSeparationMultiStemExecutionEventPayload.Prepared(

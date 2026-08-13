@@ -99,7 +99,7 @@ class SourceSeparationModelMixSettingsStoreTest {
     )
 }
 
-private class MemorySharedPreferences : SharedPreferences {
+internal class MemorySharedPreferences : SharedPreferences {
     private val values = linkedMapOf<String, Any?>()
     private val listeners = linkedSetOf<SharedPreferences.OnSharedPreferenceChangeListener>()
 

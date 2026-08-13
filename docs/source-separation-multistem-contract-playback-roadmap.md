@@ -1745,10 +1745,43 @@ gate, not a prerequisite for this lifecycle fix.
   post-fix APK verification remained at `2/11` after an additional 35-second
   observation, with only the first two window samples recorded.
 
-##### Phase 8C3: Diagnostics and family-specific estimates (pending)
+##### Phase 8C3: Diagnostics and family-specific estimates (complete)
 
-- [ ] Add source-decode diagnostics to HTDemucs progress where meaningful and
-  keep timing statistics separated by family, model/profile, and backend.
+- [x] Add source-decode diagnostics to HTDemucs progress where meaningful and
+  keep timing statistics separated by family, exact model/profile, and actual
+  backend.
+
+MDX execution protocol v18 and multi-stem protocol v4 carry the source-decode
+diagnostics and actual runtime backend through in-process and Binder progress.
+HTDemucs reports its CPU backend from session creation onward and preserves the
+source MIME type, sample rate, channel count, frame mapping, decode mode, and
+window-decoder profile across normalization and inference stages. MDX reports
+the admitted backend after any GPU-to-CPU fallback rather than the requested
+preference.
+
+Window timing is now keyed by model family, exact model ID, profile revision
+and render profile, and actual backend. A new scope starts from the neutral
+default until its first real sample, so an HTDemucs CPU estimate cannot inherit
+MDX CPU/GPU history or another Demucs artifact's measurements. The Debug state
+and `separation.samples` output expose the same backend, scope, elapsed time,
+and rolling average used by the product ETA surface.
+
+Focused protocol, executor, timing-scope, stage-parser, and IPC tests pass, as
+do `:app:testGithubDebugUnitTest`,
+`:app:compileGithubDebugAndroidTestKotlin`, and
+`:app:assembleGithubDebug`. The installed arm64 Debug build was then exercised
+on S10 (`SM-G9730`, API 31) through the ADB control path with the exact official
+six-stem artifact and cache `30f00aeadcb3...`. The run reported window MP3
+decode (`audio/mpeg`, 44.1 kHz, mono, no-gapless calibrated), backend
+`LiteRtCpu`, and scope
+`Htdemucs:htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0:htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0@1:htdemucs-cpu-fp32-v1:LiteRtCpu`.
+Its first three committed windows measured 7,660 ms, 7,632 ms, and 7,978 ms,
+with a resulting 7,756 ms rolling average. `separation.pause` retained the
+partial cache at `3/127`; the unrelated completed official four-stem cache
+remained intact at `11/11`. The app must be resumed before issuing the start
+command on Android 12+, because the platform correctly rejects a Debug
+provider request that tries to start the inference foreground service while
+the app is background-cached.
 
 #### Phase 8D: Product management parity
 
@@ -1862,8 +1895,9 @@ missing-terminal, remote-death, or replacement-cache failure was observed.
 
 #### Phase 8F: Diagnostics and remaining duplication
 
-- [ ] Localize all HTDemucs stages and expose family-specific ETA and window
-  timing through the existing progress surfaces.
+- [x] Localize all HTDemucs stages and expose family-specific ETA and window
+  timing through the existing progress surfaces. Phase 8C3 records the
+  protocol, automated gates, and S10 product-path evidence.
 - [ ] Keep next-song prefetch ownership only in `PlaybackService`.
 - [ ] Reuse the shared source-preflight memo for multi-stem resolution.
 - [ ] Remove the unused two-file mixer compatibility entry point after 2/4/6

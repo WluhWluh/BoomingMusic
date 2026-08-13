@@ -27,6 +27,7 @@ import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStatus
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcActiveRunState
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.toExecutionDescriptor
+import com.mardous.booming.separation.process.toMdxRangeProgress
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -149,15 +150,7 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                             require(payload.descriptor == descriptor)
                         }
                         is SourceSeparationMultiStemExecutionEventPayload.Progress ->
-                            request.onProgress(
-                                com.mardous.booming.separation.model.MdxRangeProgress(
-                                    completedWindows = payload.completedWindows,
-                                    totalWindows = payload.totalWindows,
-                                    stage = payload.stage,
-                                    completedWindowElapsedMs = payload.completedWindowElapsedMs,
-                                    scheduler = payload.scheduler,
-                                ),
-                            )
+                            request.onProgress(payload.toMdxRangeProgress())
                         is SourceSeparationMultiStemExecutionEventPayload.Prepared -> {
                             cacheStore.readManifest(descriptor.cacheKey)?.let(request.onPrepared)
                         }

@@ -12,11 +12,13 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSongLocator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
 import com.mardous.booming.separation.model.contract.StemId
 import com.mardous.booming.separation.model.SourceSeparationSegmentSchedulerProgress
+import com.mardous.booming.separation.model.MdxInferenceBackend
+import com.mardous.booming.separation.model.MdxRangeProgress
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-internal const val SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION = 3
+internal const val SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION = 4
 
 /** Wire descriptor for the multi-stem worker; it intentionally has no MDX fields. */
 @Serializable
@@ -211,8 +213,10 @@ internal sealed class SourceSeparationMultiStemExecutionEventPayload {
         val completedWindows: Int,
         val totalWindows: Int,
         val stage: String? = null,
+        val sourceDecodeDiagnostics: SourceSeparationExecutionSourceDecodeDiagnostics? = null,
         val completedWindowElapsedMs: Long? = null,
         val scheduler: SourceSeparationSegmentSchedulerProgress? = null,
+        val runtimeBackend: String? = null,
     ) : SourceSeparationMultiStemExecutionEventPayload() {
         init {
             require(completedWindows >= 0 && totalWindows > 0 &&
@@ -269,6 +273,28 @@ internal sealed class SourceSeparationMultiStemExecutionEventPayload {
         init { require(errorType.isNotBlank()) }
     }
 }
+
+internal fun MdxRangeProgress.toMultiStemExecutionProgress() =
+    SourceSeparationMultiStemExecutionEventPayload.Progress(
+        completedWindows = completedWindows.coerceAtLeast(0),
+        totalWindows = totalWindows.coerceAtLeast(1),
+        stage = stage,
+        sourceDecodeDiagnostics = sourceDecodeDiagnostics?.toExecutionDiagnostics(),
+        completedWindowElapsedMs = completedWindowElapsedMs,
+        scheduler = scheduler,
+        runtimeBackend = runtimeBackend?.name,
+    )
+
+internal fun SourceSeparationMultiStemExecutionEventPayload.Progress.toMdxRangeProgress() =
+    MdxRangeProgress(
+        completedWindows = completedWindows,
+        totalWindows = totalWindows,
+        stage = stage,
+        sourceDecodeDiagnostics = sourceDecodeDiagnostics?.toMdxDiagnostics(),
+        completedWindowElapsedMs = completedWindowElapsedMs,
+        scheduler = scheduler,
+        runtimeBackend = runtimeBackend?.let(MdxInferenceBackend::valueOf),
+    )
 
 @Serializable
 internal data class SourceSeparationMultiStemExecutionEvent(

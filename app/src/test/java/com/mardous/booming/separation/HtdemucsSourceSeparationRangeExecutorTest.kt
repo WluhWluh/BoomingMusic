@@ -6,6 +6,8 @@ import com.mardous.booming.separation.model.HtdemucsTrackSource
 import com.mardous.booming.separation.model.HtdemucsWindowStemSet
 import com.mardous.booming.separation.model.MdxSourceDecodeDiagnostics
 import com.mardous.booming.separation.model.MdxSourceDecodeMode
+import com.mardous.booming.separation.model.MdxInferenceBackend
+import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.contract.SourceSeparationInstalledMultiStemModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -30,12 +32,14 @@ class HtdemucsSourceSeparationRangeExecutorTest {
         )
         val root = temporary.newFolder("executor")
         var preparedStemIds = emptyList<String>()
+        val progress = mutableListOf<MdxRangeProgress>()
 
         val result = executor.separate(
             request(root).copy(
                 onPrepared = { preparation ->
                     preparedStemIds = preparation.stemFiles.map { it.stemId.value }
                 },
+                onProgress = progress::add,
             ),
         )
 
@@ -44,6 +48,9 @@ class HtdemucsSourceSeparationRangeExecutorTest {
         assertEquals("htdemucs-cpu-fp32-v1", result.completion.runtimeRecord.runtimeProfileId)
         assertEquals("LiteRtCpu", result.completion.runtimeRecord.backend)
         assertEquals(FINGERPRINT, result.completion.sourceAudioFingerprint)
+        assertTrue(progress.isNotEmpty())
+        assertTrue(progress.all { it.sourceDecodeDiagnostics == diagnostics() })
+        assertTrue(progress.all { it.runtimeBackend == MdxInferenceBackend.LiteRtCpu })
         assertTrue(session.closed)
     }
 

@@ -108,7 +108,9 @@ internal class HtdemucsSourceSeparationRangeExecutor(
                     )
                 },
                 onSegmentStateChanged = request.onSegmentStateChanged,
-                onProgress = { progress -> request.onProgress(progress.toMdxProgress()) },
+                onProgress = { progress ->
+                    request.onProgress(progress.toMdxProgress(source.diagnostics))
+                },
                 playbackPositionMsProvider = request.playbackPositionMsProvider,
                 playbackReadyWindowCountProvider = request.playbackReadyWindowCountProvider,
                 shouldPause = request.shouldPause,
@@ -150,12 +152,16 @@ internal class HtdemucsSourceSeparationRangeExecutor(
         )
     }
 
-    private fun HtdemucsRangeProgress.toMdxProgress() = MdxRangeProgress(
+    private fun HtdemucsRangeProgress.toMdxProgress(
+        diagnostics: MdxSourceDecodeDiagnostics,
+    ) = MdxRangeProgress(
         completedWindows = completedWindows,
         totalWindows = totalWindows,
         stage = stage,
+        sourceDecodeDiagnostics = diagnostics,
         completedWindowElapsedMs = completedWindowElapsedMs,
         scheduler = scheduler,
+        runtimeBackend = com.mardous.booming.separation.model.MdxInferenceBackend.LiteRtCpu,
     )
 
     private companion object {

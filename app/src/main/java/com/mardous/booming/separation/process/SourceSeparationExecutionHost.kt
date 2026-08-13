@@ -19,7 +19,7 @@ import com.mardous.booming.separation.model.contract.StemId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 17
+internal const val SOURCE_SEPARATION_EXECUTION_PROTOCOL_VERSION = 18
 
 internal interface SourceSeparationExecutionHost : AutoCloseable {
     val mode: SourceSeparationExecutionHostMode
@@ -468,6 +468,7 @@ internal data class SourceSeparationExecutionProgress(
     val sourceDecodeDiagnostics: SourceSeparationExecutionSourceDecodeDiagnostics?,
     val completedWindowElapsedMs: Long?,
     val scheduler: SourceSeparationExecutionSchedulerProgress?,
+    val runtimeBackend: String? = null,
 )
 
 internal typealias SourceSeparationExecutionSchedulerProgress =
