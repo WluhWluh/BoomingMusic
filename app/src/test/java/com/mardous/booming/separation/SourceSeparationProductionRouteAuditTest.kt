@@ -274,6 +274,38 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `stem mixer exposes only ordered session entry points`() {
+        val service = mainSource(
+            "com/mardous/booming/playback/PlaybackService.kt",
+        ).readText()
+        val processor = mainSource(
+            "com/mardous/booming/playback/processor/SourceSeparationMixAudioProcessor.kt",
+        ).readText()
+
+        assertEquals(1, Regex("""(?m)^    fun enable\(""").findAll(processor).count())
+        assertEquals(1, Regex("""(?m)^    internal fun prepareInputs\(""").findAll(processor).count())
+        assertEquals(1, Regex("""(?m)^    fun hotSwapToPcmInputs\(""").findAll(processor).count())
+        assertTrue(Regex("""fun enable\(\r?\n        stemFiles: List<File>""").containsMatchIn(processor))
+        assertTrue(
+            Regex("""internal fun prepareInputs\(\r?\n        stemFiles: List<File>""")
+                .containsMatchIn(processor),
+        )
+        assertTrue(
+            Regex("""fun hotSwapToPcmInputs\(\r?\n        stemFiles: List<File>""")
+                .containsMatchIn(processor),
+        )
+        assertFalse(processor.contains("legacyTwoStemBlendLaw"))
+        assertFalse(processor.contains("useLegacyTwoStemBlendLaw"))
+        assertFalse(processor.contains("internal val vocalsFile: File"))
+        assertFalse(processor.contains("internal val instrumentalFile: File?"))
+        assertTrue(
+            Regex(
+                """sourceSeparationMixProcessor\.enable\(\r?\n            stemFiles = session\.stemFiles""",
+            ).containsMatchIn(service),
+        )
+    }
+
+    @Test
     fun `active playback entry points gate the current unready window`() {
         val service = mainSource(
             "com/mardous/booming/playback/PlaybackService.kt",

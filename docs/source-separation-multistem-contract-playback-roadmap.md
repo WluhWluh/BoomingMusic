@@ -1900,7 +1900,7 @@ missing-terminal, remote-death, or replacement-cache failure was observed.
   protocol, automated gates, and S10 product-path evidence.
 - [x] Keep next-song prefetch ownership only in `PlaybackService`.
 - [x] Reuse the shared source-preflight memo for multi-stem resolution.
-- [ ] Remove the unused two-file mixer compatibility entry point after 2/4/6
+- [x] Remove the unused two-file mixer compatibility entry point after 2/4/6
   stem regressions pass.
 
 `PlayerViewModel` no longer owns a second prestart job, infers repeat-all queue
@@ -1952,6 +1952,34 @@ memos reported `hits=3, misses=2, entries=2`; afterward each reported
 repeated product request reused both preflight layers without inference or a
 new cache identity. The device was then restored to the official six-stem
 selection and its retained `3/127` cache.
+
+`SourceSeparationMixAudioProcessor` now exposes one ordered `List<File>` plus
+stem-ID contract each for session enable, input preparation, and PCM hot-swap.
+The tests that formerly selected the two-file overload now use the same entry
+point as `PlaybackService`; MDX keeps its existing endpoint blend law through
+`blendEndpointStemIds`, while 4/6-stem sessions continue to use ordered gains.
+The two-file overloads, prepared-input aliases, and engine-only legacy blend
+branch have been removed. A production-route audit freezes this single-entry
+shape so compatibility helpers cannot quietly return.
+
+The focused mixer and FLAC promoter tests, full
+`:app:testGithubDebugUnitTest`,
+`:app:compileGithubDebugAndroidTestKotlin`, both Debug APK assemblies, and
+`:app:assembleGithubDebug` passed. On S10 (`SM-G9730`, API 31, arm64), the
+installed build exercised the Debug product path with partial MDX cache
+`8934c423854c...` at `4/11`: output became data-plane ready, blend changes were
+accepted, and playback advanced from the ready start without inference. The
+completed official four-stem cache `e6ede349aa3a...` at `11/11` accepted four
+independent gains, played, paused, and resumed after a seek from 0 to 20
+seconds without a mixed-output or cache-window wait. Device instrumentation
+then passed the ordered two-stem indexed-FLAC test with 100 random seeks and
+the four- and six-stem indexed-FLAC resource smoke tests. The available
+official six-stem product cache belongs to a mono transport and the completed
+guitar-ft fixture is no longer in MediaStore, so six-stem mixer behavior was
+verified at the device data plane rather than represented as a Debug product
+session. No validation cache was retained; the device was restored to the
+official six-stem selection, `01-第1课`, output off, paused at 0, and its original
+`3/127`, `11/11`, and `4/11` caches remained unchanged.
 
 ## Required Tests and Gates
 

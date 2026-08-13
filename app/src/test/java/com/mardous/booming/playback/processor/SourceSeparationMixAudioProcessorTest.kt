@@ -37,8 +37,9 @@ class SourceSeparationMixAudioProcessorTest {
             processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
             processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
             processor.enable(
-                vocalsFile = vocals,
-                instrumentalFile = instrumental,
+                stemFiles = listOf(vocals, instrumental),
+                stemIds = MDX_STEM_IDS,
+                blendEndpointStemIds = MDX_STEM_IDS,
                 positionMs = 0L,
                 inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
                 stemSampleRate = 44_100,
@@ -354,10 +355,10 @@ class SourceSeparationMixAudioProcessorTest {
             )
             processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
             processor.enable(
-                vocalsFile = vocals,
-                instrumentalFile = instrumental,
+                stemFiles = listOf(vocals, instrumental),
+                stemIds = MDX_STEM_IDS,
+                blendEndpointStemIds = MDX_STEM_IDS,
                 positionMs = 0L,
-                initialBlend = 0.5f,
                 inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
                 stemSampleRate = 44_100,
                 stemChannelCount = 2,
@@ -397,10 +398,10 @@ class SourceSeparationMixAudioProcessorTest {
             )
             processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
             processor.enable(
-                vocalsFile = vocals,
-                instrumentalFile = instrumental,
+                stemFiles = listOf(vocals, instrumental),
+                stemIds = MDX_STEM_IDS,
+                blendEndpointStemIds = MDX_STEM_IDS,
                 positionMs = 0L,
-                initialBlend = 0.5f,
                 inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
                 stemSampleRate = 44_100,
                 stemChannelCount = 2,
@@ -451,8 +452,9 @@ class SourceSeparationMixAudioProcessorTest {
             )
             processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
             processor.enable(
-                vocalsFile = vocalsFlac,
-                instrumentalFile = instrumentalFlac,
+                stemFiles = listOf(vocalsFlac, instrumentalFlac),
+                stemIds = MDX_STEM_IDS,
+                blendEndpointStemIds = MDX_STEM_IDS,
                 positionMs = 0L,
                 inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
                 stemSampleRate = 44_100,
@@ -634,8 +636,9 @@ class SourceSeparationMixAudioProcessorTest {
             processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
             processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
             processor.enable(
-                vocalsFile = vocals,
-                instrumentalFile = instrumental,
+                stemFiles = listOf(vocals, instrumental),
+                stemIds = MDX_STEM_IDS,
+                blendEndpointStemIds = MDX_STEM_IDS,
                 positionMs = 0L,
                 inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
                 stemSampleRate = 44_100,
@@ -644,8 +647,8 @@ class SourceSeparationMixAudioProcessorTest {
             )
             await { processor.isDataPlaneReady() }
             assertEquals(true, processor.hotSwapToPcmInputs(
-                vocalsFile = replacementVocals,
-                instrumentalFile = replacementInstrumental,
+                stemFiles = listOf(replacementVocals, replacementInstrumental),
+                stemIds = MDX_STEM_IDS,
             ))
             await { processor.isDataPlaneReady() }
 
@@ -713,10 +716,10 @@ class SourceSeparationMixAudioProcessorTest {
             processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
             processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
             processor.enable(
-                vocalsFile = vocals,
-                instrumentalFile = instrumental,
+                stemFiles = listOf(vocals, instrumental),
+                stemIds = MDX_STEM_IDS,
+                blendEndpointStemIds = MDX_STEM_IDS,
                 positionMs = 0L,
-                initialBlend = 0.5f,
                 inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
                 stemSampleRate = 44_100,
                 stemChannelCount = 2,
@@ -751,8 +754,9 @@ class SourceSeparationMixAudioProcessorTest {
         try {
             assertThrows(IllegalArgumentException::class.java) {
                 processor.enable(
-                    vocalsFile = vocals,
-                    instrumentalFile = instrumental,
+                    stemFiles = listOf(vocals, instrumental),
+                    stemIds = MDX_STEM_IDS,
+                    blendEndpointStemIds = MDX_STEM_IDS,
                     positionMs = 0L,
                     inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
                 )
@@ -855,6 +859,7 @@ class SourceSeparationMixAudioProcessorTest {
     }
 
     private companion object {
+        val MDX_STEM_IDS = listOf("vocals", "instrumental")
         const val BYTES_PER_FRAME = 4
         const val FLAC_FAILURE_FRAME_COUNT = 4_096
         val STEM_GEOMETRIES = listOf(2, 4, 6, 8)

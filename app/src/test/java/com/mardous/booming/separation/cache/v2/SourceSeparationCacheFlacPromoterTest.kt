@@ -137,8 +137,9 @@ class SourceSeparationCacheFlacPromoterTest {
         }
         try {
             processor.enable(
-                vocalsFile = playback.vocalsFile,
-                instrumentalFile = playback.instrumentalFile,
+                stemFiles = listOf(playback.vocalsFile, playback.instrumentalFile),
+                stemIds = listOf("vocals", "instrumental"),
+                blendEndpointStemIds = listOf("vocals", "instrumental"),
                 positionMs = 0L,
             )
             awaitCondition { mixTrace.count { "indexedOpen success" in it } == 2 }

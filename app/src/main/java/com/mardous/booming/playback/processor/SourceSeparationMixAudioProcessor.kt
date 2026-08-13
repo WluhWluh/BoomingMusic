@@ -42,11 +42,6 @@ class PreparedSourceSeparationPlaybackInputs internal constructor(
         }
     }
 
-    internal val vocalsFile: File
-        get() = stemFiles.first()
-
-    internal val instrumentalFile: File?
-        get() = stemFiles.getOrNull(1)
 }
 
 @OptIn(UnstableApi::class)
@@ -82,8 +77,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     private var targetStemGains = FloatArray(configuredStemCount) { 1f }
     private var stemGainSteps = FloatArray(configuredStemCount)
     private var gainRampFramesRemaining = 0
-    private var legacyTwoStemBlendLaw = true
-
     @Volatile
     private var blendEndpointStemIndexes: IntArray? = intArrayOf(0, 1)
 
@@ -100,7 +93,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     @Volatile
     private var playbackEngine: SourceSeparationStemPlaybackEngine? = null
     private var engineStemBuffers: Array<ByteArray> = emptyArray()
-    private var engineHasInstrumentalInput = false
     private var vocalsInput: StemPcmInput? = null
     private var instrumentalInput: StemPcmInput? = null
     private var scratch = ByteArray(0)
@@ -132,45 +124,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
     private var outputFlushBarrierId: Long? = null
 
-    fun enable(
-        vocalsFile: File,
-        instrumentalFile: File? = null,
-        positionMs: Long,
-        initialBlend: Float = blend,
-        inputMode: InputMode = InputMode.InstrumentalStem,
-        stemSampleRate: Int = DEFAULT_SAMPLE_RATE,
-        stemChannelCount: Int = CHANNEL_COUNT_STEREO,
-        mixedOutputReadyPrerollMs: Long = DEFAULT_MIXED_OUTPUT_READY_PREROLL_MS,
-        preparedInputs: PreparedSourceSeparationPlaybackInputs? = null,
-    ) {
-        val normalizedBlend = initialBlend.coerceIn(0f, 1f)
-        val stemFiles = buildList {
-            add(vocalsFile)
-            instrumentalFile?.let(::add)
-        }
-        val legacyGains = legacyBlendGains(normalizedBlend)
-        enableInternal(
-            stemFiles = stemFiles,
-            stemIds = stemFiles.indices.map { index ->
-                if (index == 0) "vocals" else "instrumental"
-            },
-            positionMs = positionMs,
-            initialGains = legacyGains,
-            initialBlend = normalizedBlend,
-            inputMode = inputMode,
-            stemSampleRate = stemSampleRate,
-            stemChannelCount = stemChannelCount,
-            mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs,
-            preparedInputs = preparedInputs,
-            useLegacyTwoStemBlendLaw = true,
-            blendEndpointStemIds = listOf("vocals", "instrumental"),
-        )
-    }
-
     /**
-     * Enables an ordered multi-stem session. The original source remains the
-     * transport clock; every listed stem is mixed with its corresponding gain.
-     * Multi-stem sessions deliberately require the bounded playback engine.
+     * Enables an ordered stem session. The original source remains the transport
+     * clock; every listed stem is mixed with its corresponding gain.
      */
     fun enable(
         stemFiles: List<File>,
@@ -184,36 +140,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         preparedInputs: PreparedSourceSeparationPlaybackInputs? = null,
         blendEndpointStemIds: List<String>? = null,
     ) {
-        enableInternal(
-            stemFiles = stemFiles,
-            stemIds = stemIds,
-            positionMs = positionMs,
-            initialGains = initialGains,
-            initialBlend = blend,
-            inputMode = inputMode,
-            stemSampleRate = stemSampleRate,
-            stemChannelCount = stemChannelCount,
-            mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs,
-            preparedInputs = preparedInputs,
-            useLegacyTwoStemBlendLaw = false,
-            blendEndpointStemIds = blendEndpointStemIds,
-        )
-    }
-
-    private fun enableInternal(
-        stemFiles: List<File>,
-        stemIds: List<String>,
-        positionMs: Long,
-        initialGains: List<Float>,
-        initialBlend: Float,
-        inputMode: InputMode,
-        stemSampleRate: Int,
-        stemChannelCount: Int,
-        mixedOutputReadyPrerollMs: Long,
-        preparedInputs: PreparedSourceSeparationPlaybackInputs?,
-        useLegacyTwoStemBlendLaw: Boolean,
-        blendEndpointStemIds: List<String>?,
-    ) {
+        val initialBlend = blend
         require(stemFiles.isNotEmpty()) { "Playback requires at least one stem." }
         require(stemIds.size == stemFiles.size) {
             "Playback stem IDs must match the stem file count."
@@ -262,7 +189,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             this.mixedOutputReadyPrerollMs = mixedOutputReadyPrerollMs.coerceAtLeast(0L)
             resetMixedOutputNotificationLocked()
             configuredStemCount = expectedGainCount
-            legacyTwoStemBlendLaw = useLegacyTwoStemBlendLaw
             this.blendEndpointStemIndexes = blendEndpointIndexes
             blend = initialBlend
             publishGainSnapshot(normalizedGains)
@@ -287,7 +213,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                     stateChangedSink = { state -> dataPlaneStateChangedSink?.invoke(state) },
                 )
                 playbackEngine = engine
-                engineHasInstrumentalInput = engineFactories.size > 1
                 engineStemBuffers = Array(engineFactories.size) {
                     ByteArray(engine.blockFrameCapacity * DEFAULT_FRAME_SIZE)
                 }
@@ -321,26 +246,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                         "stems=${stemFiles.joinToString { file -> file.name }}"
             )
         }
-    }
-
-    internal fun prepareInputs(
-        vocalsFile: File,
-        instrumentalFile: File?,
-        stemSampleRate: Int,
-        stemChannelCount: Int,
-    ): PreparedSourceSeparationPlaybackInputs {
-        val stemFiles = buildList {
-            add(vocalsFile)
-            instrumentalFile?.let(::add)
-        }
-        return prepareInputs(
-            stemFiles = stemFiles,
-            stemIds = stemFiles.indices.map { index ->
-                if (index == 0) "vocals" else "instrumental"
-            },
-            stemSampleRate = stemSampleRate,
-            stemChannelCount = stemChannelCount,
-        )
     }
 
     internal fun prepareInputs(
@@ -440,14 +345,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     fun hotSwapToPcmInputs(
-        vocalsFile: File,
-        instrumentalFile: File,
-    ): Boolean = hotSwapToPcmInputs(
-        stemFiles = listOf(vocalsFile, instrumentalFile),
-        stemIds = listOf("vocals", "instrumental"),
-    )
-
-    fun hotSwapToPcmInputs(
         stemFiles: List<File>,
         stemIds: List<String> = stemFiles.indices.map { index -> "stem-$index" },
     ): Boolean {
@@ -463,7 +360,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             require(factories.size == configuredStemCount) {
                 "Hot-swapped playback must keep the active stem count."
             }
-            engineHasInstrumentalInput = factories.size > 1
             engineStemBuffers = Array(factories.size) {
                 ByteArray(engine.blockFrameCapacity * DEFAULT_FRAME_SIZE)
             }
@@ -656,7 +552,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 },
                 remaining = remaining,
                 bytesRead = mixedFrames * frameSize,
-                instrumentalBytesRead = if (engineHasInstrumentalInput) {
+                instrumentalBytesRead = if (engineStemBuffers.size > 1) {
                     mixedFrames * frameSize
                 } else {
                     null
@@ -774,11 +670,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 var stemOffset = 0
                 repeat(chunkFrames) {
                     advanceGainRamp()
-                    val inputLeft = inputBuffer.short.toInt()
-                    val inputRight = inputBuffer.short.toInt()
+                    inputBuffer.position(inputBuffer.position() + frameSize)
                     outputBuffer.putShort(
                         mixEngineSample(
-                            inputSample = inputLeft,
                             stemOffset = stemOffset,
                             bytesRead = chunkBytes,
                             channel = CHANNEL_LEFT,
@@ -786,7 +680,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                     )
                     outputBuffer.putShort(
                         mixEngineSample(
-                            inputSample = inputRight,
                             stemOffset = stemOffset,
                             bytesRead = chunkBytes,
                             channel = CHANNEL_RIGHT,
@@ -884,14 +777,12 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
 
             repeat(chunkFrames) { outputFrame ->
                 advanceGainRamp()
-                val inputLeft = inputBuffer.short.toInt()
-                val inputRight = inputBuffer.short.toInt()
+                inputBuffer.position(inputBuffer.position() + frameSize)
                 val sourcePosition = startPosition + outputFrame * ratio
                 val sourceFrame = floor(sourcePosition).toLong().coerceAtLeast(0L)
                 val fraction = sourcePosition - sourceFrame
                 outputBuffer.putShort(
                     mixResampledSample(
-                        inputSample = inputLeft,
                         sourceFrame = sourceFrame,
                         fraction = fraction,
                         channel = CHANNEL_LEFT,
@@ -900,7 +791,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 )
                 outputBuffer.putShort(
                     mixResampledSample(
-                        inputSample = inputRight,
                         sourceFrame = sourceFrame,
                         fraction = fraction,
                         channel = CHANNEL_RIGHT,
@@ -1122,26 +1012,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     private fun mixEngineSample(
-        inputSample: Int,
         stemOffset: Int,
         bytesRead: Int,
         channel: Int,
     ): Short {
         val sampleOffset = stemOffset + channel * BYTES_PER_SAMPLE
-        if (legacyTwoStemBlendLaw) {
-            val vocals = readPcm16(sampleOffset, engineStemBuffers[0], bytesRead)
-            val instrumental = engineStemBuffers.getOrNull(1)?.let { bytes ->
-                readPcm16(sampleOffset, bytes, bytesRead)
-            } ?: 0
-            return mixSample(
-                inputSample = inputSample,
-                vocalSample = vocals,
-                instrumentalSample = instrumental,
-                mode = inputMode,
-                hasInstrumentalStemInput = engineHasInstrumentalInput,
-            )
-        }
-
         var output = 0f
         for (stemIndex in engineStemBuffers.indices) {
             output += readPcm16(
@@ -1154,32 +1029,11 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     private fun mixResampledSample(
-        inputSample: Int,
         sourceFrame: Long,
         fraction: Double,
         channel: Int,
         frameSize: Int,
     ): Short {
-        if (legacyTwoStemBlendLaw) {
-            val vocals = interpolatePcm16(
-                cache = engineResampleCaches[0],
-                sourceFrame = sourceFrame,
-                channel = channel,
-                fraction = fraction,
-                frameSize = frameSize,
-            )
-            val instrumental = engineResampleCaches.getOrNull(1)?.let { cache ->
-                interpolatePcm16(cache, sourceFrame, channel, fraction, frameSize)
-            } ?: 0
-            return mixSample(
-                inputSample = inputSample,
-                vocalSample = vocals,
-                instrumentalSample = instrumental,
-                mode = inputMode,
-                hasInstrumentalStemInput = engineHasInstrumentalInput,
-            )
-        }
-
         var output = 0f
         for (stemIndex in engineResampleCaches.indices) {
             output += interpolatePcm16(
@@ -1300,7 +1154,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         clearResampleCachesLocked()
         engineStemBuffers = emptyArray()
         engineResampleCaches = emptyArray()
-        engineHasInstrumentalInput = false
         vocalsInput?.close()
         vocalsInput = null
         instrumentalInput?.close()

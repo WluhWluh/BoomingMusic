@@ -58,9 +58,11 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
                 expectedFrameCount = FRAME_COUNT,
             )
 
+            val stemFiles = listOf(vocalsFlac, instrumentalFlac)
+            val stemIds = listOf("vocals", "instrumental")
             val prepared = processor.prepareInputs(
-                vocalsFile = vocalsFlac,
-                instrumentalFile = instrumentalFlac,
+                stemFiles = stemFiles,
+                stemIds = stemIds,
                 stemSampleRate = SAMPLE_RATE,
                 stemChannelCount = CHANNEL_COUNT,
             )
@@ -69,10 +71,11 @@ class SourceSeparationPlaybackDataPlaneDeviceTest {
             )
             processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
             processor.enable(
-                vocalsFile = vocalsFlac,
-                instrumentalFile = instrumentalFlac,
+                stemFiles = stemFiles,
+                stemIds = stemIds,
+                initialGains = listOf(1f, 1f),
+                blendEndpointStemIds = stemIds,
                 positionMs = 0L,
-                initialBlend = SourceSeparationMixAudioProcessor.CENTER_BLEND,
                 inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
                 stemSampleRate = SAMPLE_RATE,
                 stemChannelCount = CHANNEL_COUNT,
