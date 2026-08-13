@@ -14,6 +14,7 @@ import com.mardous.booming.separation.SourceSeparationMultiStemExecutionRequest
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
+import com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifestState
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionCodec
 import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionDescriptor
@@ -35,7 +36,7 @@ import kotlin.concurrent.thread
 /** Bound client for the dedicated multi-stem process. */
 internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
     context: Context,
-    private val timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    private val connectionTimeoutMs: Long = DEFAULT_CONNECTION_TIMEOUT_MS,
     private val controlPollMs: Long = DEFAULT_CONTROL_POLL_MS,
 ) : SourceSeparationMultiStemExecutionHost {
     private val applicationContext = context.applicationContext
@@ -321,8 +322,69 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                 )
             }
             controlThread.start()
-            check(terminal.await(timeoutMs, TimeUnit.MILLISECONDS)) {
-                "Timed out waiting for remote multi-stem execution."
+            while (!terminal.await(TERMINAL_OBSERVATION_POLL_MS, TimeUnit.MILLISECONDS)) {
+                if (!connected.binder.isBinderAlive) {
+                    failure.compareAndSet(
+                        null,
+                        SourceSeparationRemoteHostDiedException(
+                            DeadObjectException("Multi-stem service is no longer alive."),
+                        ),
+                    )
+                    terminal.countDown()
+                    break
+                }
+                val activeResponse = SourceSeparationMultiStemExecutionCodec
+                    .decodeActiveRunResponse(service.activeRun())
+                val activeState = activeResponse.state
+                if (activeState != null) {
+                    require(activeState.descriptor.runId == descriptor.runId &&
+                        activeState.descriptor.processGeneration ==
+                            descriptor.processGeneration &&
+                        activeState.descriptor.cacheKey == descriptor.cacheKey
+                    ) { "Remote multi-stem lifecycle moved to a different run." }
+                    continue
+                }
+                val journal = cacheStore.readRunJournal(descriptor.cacheKey)
+                when (val durable = journal?.terminalStateFor(descriptor)) {
+                    null -> Unit
+                    SourceSeparationMultiStemDurableTerminal.Completed -> {
+                        check(cacheStore.readManifest(descriptor.cacheKey)?.state ==
+                            SourceSeparationCacheManifestState.Completed
+                        ) { "Durable multi-stem completion has no completed manifest." }
+                        terminal.countDown()
+                    }
+                    is SourceSeparationMultiStemDurableTerminal.Paused -> {
+                        failure.compareAndSet(
+                            null,
+                            SourceSeparationPausedException(
+                                pauseReason = durable.reason,
+                            ),
+                        )
+                        terminal.countDown()
+                    }
+                    is SourceSeparationMultiStemDurableTerminal.Canceled -> {
+                        failure.compareAndSet(
+                            null,
+                            java.util.concurrent.CancellationException(durable.message),
+                        )
+                        terminal.countDown()
+                    }
+                    is SourceSeparationMultiStemDurableTerminal.Failed -> {
+                        failure.compareAndSet(
+                            null,
+                            IllegalStateException(
+                                "${durable.errorType}: " +
+                                    (durable.message ?: "remote failure"),
+                            ),
+                        )
+                        terminal.countDown()
+                    }
+                }
+                if (terminal.count > 0L) {
+                    throw IllegalStateException(
+                        "Remote multi-stem run ended without a durable terminal state.",
+                    )
+                }
             }
             failure.get()?.takeUnless { it === AlreadyCompletedSignal }?.let { error ->
                 if (error is SourceSeparationRemoteCacheBusyException) {
@@ -378,7 +440,7 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             Context.BIND_AUTO_CREATE,
         )) { "Unable to bind the multi-stem execution service." }
         try {
-            check(connected.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+            check(connected.await(connectionTimeoutMs, TimeUnit.MILLISECONDS)) {
                 "Timed out binding the multi-stem execution service."
             }
             error.get()?.let { throw it.asSourceSeparationRemoteHostDied() }
@@ -402,8 +464,9 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
     )
 
     private companion object {
-        const val DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000L
+        const val DEFAULT_CONNECTION_TIMEOUT_MS = 10_000L
         const val DEFAULT_CONTROL_POLL_MS = 50L
+        const val TERMINAL_OBSERVATION_POLL_MS = 5_000L
         val AlreadyCompletedSignal = IllegalStateException("already-completed")
     }
 }

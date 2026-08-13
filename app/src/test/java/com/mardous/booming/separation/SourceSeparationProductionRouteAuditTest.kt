@@ -423,6 +423,30 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `multistem terminal observation has no full-run deadline`() {
+        val host = mainSource(
+            "com/mardous/booming/separation/process/ipc/" +
+                "BoundRemoteSourceSeparationMultiStemExecutionHost.kt",
+        ).readText()
+        val durableTerminal = mainSource(
+            "com/mardous/booming/separation/process/ipc/" +
+                "SourceSeparationMultiStemDurableTerminal.kt",
+        ).readText()
+
+        assertTrue(host.contains("DEFAULT_CONNECTION_TIMEOUT_MS = 10_000L"))
+        assertTrue(host.contains(
+            "while (!terminal.await(TERMINAL_OBSERVATION_POLL_MS, TimeUnit.MILLISECONDS))",
+        ))
+        assertTrue(host.contains("service.activeRun()"))
+        assertTrue(host.contains("terminalStateFor(descriptor)"))
+        assertFalse(host.contains("30 * 60 * 1_000L"))
+        assertFalse(host.contains("Timed out waiting for remote multi-stem execution."))
+        assertTrue(durableTerminal.contains("request.runId != descriptor.runId"))
+        assertTrue(durableTerminal.contains("request.identity == descriptor.cacheIdentity"))
+        assertTrue(durableTerminal.contains("request.contract == descriptor.contract"))
+    }
+
+    @Test
     fun `generic inference boundaries have no implicit ORT provider`() {
         val runtime = mainSource(
             "com/mardous/booming/separation/model/MdxInferenceRuntime.kt",

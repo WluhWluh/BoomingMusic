@@ -1803,7 +1803,7 @@ active multi-stem playback output.
   lifecycle state.
 - [x] Map remote death from both execution families to one recoverable product
   error while retaining the exact partial cache for an explicit retry.
-- [ ] Replace the fixed 30-minute HTDemucs await timeout with
+- [x] Replace the fixed 30-minute HTDemucs await timeout with
   journal/process-lifecycle observation.
 
 The two remote services now share a tokenized process-wide execution lease.
@@ -1837,8 +1837,28 @@ localized message and retained partial cache `8934c423854c...` at `0/11`.
 `separation.start` then reused that exact cache key and advanced it to `1/11`
 instead of creating or selecting another entry. The shared Binder transport
 mapping has focused unit coverage, and the Debug command is documented as a
-validation-only operation. The fixed HTDemucs terminal wait remains a separate
-open lifecycle item.
+validation-only operation.
+
+HTDemucs terminal observation no longer has a whole-run deadline. Service
+binding retains a bounded 10-second timeout, while an accepted run waits on its
+Binder terminal callback and performs a 5-second lifecycle audit of Binder
+liveness plus the exact remote run ID, process generation, cache identity, and
+durable journal. The journal is consulted only after the service no longer
+reports that active run, so a terminal cache commit cannot cause the client to
+unbind while the service is still releasing execution ownership. Exact durable
+`Completed`, `Paused`, `Canceled`, and `Failed` states recover a lost callback;
+a live service that loses both its active run and durable terminal fails
+explicitly instead of hanging or guessing from elapsed time. Focused parser and
+production-route tests freeze these boundaries and forbid reintroducing the
+30-minute full-run timeout.
+
+The installed Debug build completed the product gate on S10 (`SM-G9730`, API
+31, arm64) with the official four-stem model and `Colour Spectrum`. The same
+cache `e6ede349aa3a...` resumed from `2/11`, remained active for about 19 seconds
+across three lifecycle audits, and advanced into window 3 without an artificial
+terminal. A Debug pause returned normally and retained `5/11`; restarting then
+continued the same cache for about 63 seconds to `11/11` completed. No timeout,
+missing-terminal, remote-death, or replacement-cache failure was observed.
 
 #### Phase 8F: Diagnostics and remaining duplication
 
