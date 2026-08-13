@@ -228,7 +228,7 @@ class PlayerViewModel(
 
     val sourceSeparationStateFlow = combine(
         sourceSeparationForegroundWorkerCoordinator.workerStateFlow,
-        sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow,
+        sourceSeparationForegroundWorkerCoordinator.executionSelectionStateFlow,
     ) { state, selection ->
         if (state.selectionGenerationOrNull() == null ||
             state.selectionGenerationOrNull() == selection.generation
@@ -922,7 +922,7 @@ class PlayerViewModel(
     suspend fun prepareSourceSeparationCacheForManualDelete(cacheKey: String) {
         val song = currentSong
         val selection = sourceSeparationForegroundWorkerCoordinator
-            .activeSelectionStateFlow.value
+            .executionSelectionStateFlow.value
         val currentRuntimeSong = resolveSourceSeparationRuntimeSong(song)
         val isCurrentCache = currentRuntimeSong?.cacheKey == cacheKey
         if (isCurrentCache) {
@@ -933,7 +933,7 @@ class PlayerViewModel(
             )
         }
         val preflightIdentity = if (isCurrentCache &&
-            sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value == selection
+            sourceSeparationForegroundWorkerCoordinator.executionSelectionStateFlow.value == selection
         ) {
             SourceSeparationWorkerRequestIdentity.from(song, selection)
         } else {
@@ -1283,7 +1283,7 @@ class PlayerViewModel(
 
     fun refreshCurrentSourceSeparationCacheAvailable(song: Song = currentSong): Job {
         val selection =
-            sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value
+            sourceSeparationForegroundWorkerCoordinator.executionSelectionStateFlow.value
         val refreshGeneration = sourceSeparationCacheRefreshGate.nextGeneration()
         return viewModelScope.launch(IO) {
             val runtimeSong = resolveSourceSeparationRuntimeSong(song)
@@ -1294,7 +1294,7 @@ class PlayerViewModel(
                 }.getOrDefault(SourceSeparationCacheUiState.NotStarted)
             }
             val selectionMatches =
-                sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value ==
+                sourceSeparationForegroundWorkerCoordinator.executionSelectionStateFlow.value ==
                     selection
             val currentSongId = currentSong.id
             val published = sourceSeparationCacheRefreshGate.publishIfCurrent(
@@ -1336,7 +1336,7 @@ class PlayerViewModel(
         state: SourceSeparationUiState =
             sourceSeparationForegroundWorkerCoordinator.workerStateFlow.value,
     ): Boolean = state.selectionGenerationOrNull() ==
-        sourceSeparationForegroundWorkerCoordinator.activeSelectionStateFlow.value.generation
+        sourceSeparationForegroundWorkerCoordinator.executionSelectionStateFlow.value.generation
 
     private fun resolveSourceSeparationRuntimeSong(
         song: Song,

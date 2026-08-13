@@ -12,12 +12,14 @@ import kotlinx.coroutines.flow.asStateFlow
 /** Persists the selected experimental multi-stem model independently of MDX presets. */
 class SourceSeparationMultiStemPlaybackSelectionStore(
     private val preferences: SharedPreferences,
+    private val generationStore: SourceSeparationSelectionGenerationStore =
+        SourceSeparationSelectionGenerationStore(preferences),
 ) {
     private val lock = Any()
     private val _selectionFlow = MutableStateFlow(
         SourceSeparationMultiStemPlaybackSelectionSnapshot(
             modelId = preferences.getString(KEY, null),
-            generation = 0L,
+            generation = generationStore.current(),
         ),
     )
     val selectionFlow = _selectionFlow.asStateFlow()
@@ -37,7 +39,7 @@ class SourceSeparationMultiStemPlaybackSelectionStore(
         }
         _selectionFlow.value = SourceSeparationMultiStemPlaybackSelectionSnapshot(
             modelId = normalized,
-            generation = previous.generation + 1L,
+            generation = generationStore.next(),
         )
     }
 

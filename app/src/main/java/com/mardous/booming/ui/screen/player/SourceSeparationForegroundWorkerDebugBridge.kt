@@ -133,7 +133,7 @@ object SourceSeparationForegroundWorkerDebugBridge {
         val preflightIdentity = if (isCurrentCache && song != Song.emptySong) {
             SourceSeparationWorkerRequestIdentity.from(
                 song,
-                worker.activeSelectionStateFlow.value,
+                worker.executionSelectionStateFlow.value,
             )
         } else {
             null

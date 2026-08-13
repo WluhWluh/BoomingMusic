@@ -165,11 +165,13 @@ active producer even when only a resumable partial cache remains.
 
 ### Selection and request identity
 
-Use three existing identity levels plus one lightweight generation:
+Use three existing identity levels plus one lightweight cross-family
+generation:
 
-1. `ActiveSelectionSnapshot` contains the existing
-   `SourceSeparationActiveModelReference?` and a process-local monotonically
-   increasing generation.
+1. `SourceSeparationExecutionSelectionSnapshot` projects the MDX and HTDemucs
+   stores into one visible selection. It contains family, selected model ID,
+   optional exact executable identity, and one monotonically increasing
+   generation shared by every family.
 2. A pending `SourceSeparationWorkerRequest` captures the song plus that
    snapshot. Before preflight, this pair is sufficient to distinguish A from
    B.
@@ -178,10 +180,12 @@ Use three existing identity levels plus one lightweight generation:
 4. After admission, the existing `runId` and `processGeneration` distinguish
    attempts and remote callbacks.
 
-Do not add a persistent selection revision, a parallel contract identity, or
-a second run token. A process restart invalidates process-local jobs; remote
-survivors already carry durable exact run identity. The selection generation
-does not enter the cache key or backup.
+Persist only that one shared generation so independently stored MDX and
+HTDemucs selections remain ordered across process recreation. Do not add a
+second per-family revision, parallel contract identity, or second run token.
+Remote survivors continue to carry durable exact run identity. The selection
+generation does not enter the cache key, executable contract, or portable
+model identity.
 
 Activating the already active exact reference is a no-op and emits no new
 generation. A different model, artifact hash, schema, or custom profile ID is
@@ -397,8 +401,8 @@ Suggested commits:
 
 ### Phase 1: Observe selection and serialize the existing coordinator
 
-Status: complete on 2026-08-03. All `SourceSeparation*` JVM tests pass and the
-GitHub debug Android-test source set compiles.
+Status: complete on 2026-08-03 and extended across MDX/HTDemucs on 2026-08-12.
+Focused cross-family JVM tests and the GitHub Debug APK build pass.
 
 - [x] Add process-local selection generation and
   `StateFlow<ActiveSelectionSnapshot>` to `SourceSeparationPresetRepository`.
@@ -414,6 +418,14 @@ GitHub debug Android-test source set compiles.
   it as current work.
 - [x] Add selection generation/cache key to existing worker UI state rather
   than creating another state hierarchy.
+- [x] Replace the independent MDX and HTDemucs visible generations with one
+  persisted cross-family generation and one
+  `SourceSeparationExecutionSelectionSnapshot`. Capture exact family, artifact,
+  contract, profile, pipeline, and render identity when the installed model can
+  be resolved.
+- [x] Apply the unified snapshot to ordinary/prestart requests, both recovery
+  clients, stale callback rejection, current-cache refresh, manual deletion
+  preflight, and debug state.
 
 **Exit:** same-song A and B are never coalesced, one run remains admitted, and
 old local or remote callbacks cannot overwrite the current coordinator slot.
@@ -445,6 +457,9 @@ Phase 4.
   quick-control progress, and messages by selection generation and cache key.
 - [x] Reject model deletion as busy while the focused active/pending/recovery
   query reports the artifact in use.
+- [x] Make `PlaybackService` observe the unified selection only once, require
+  both generation and complete selection equality before reusing a session,
+  and clear requested multi-stem state when the family changes.
 
 **Exit:** after B is committed, no A cache can provide output or current UI;
 A stops safely and remains resumable; B alone determines subsequent work.
@@ -609,7 +624,7 @@ Do not add the following unless the focused implementation or tests produce a
 concrete need:
 
 - a full command actor for the coordinator;
-- a persisted selection generation;
+- an additional per-family or per-screen selection generation;
 - parallel active-model, work-key, and run-token hierarchies;
 - a general model-artifact lease subsystem;
 - stopping unrelated inactive-cache FLAC promotion on model switch;
@@ -621,7 +636,8 @@ concrete need:
 
 This roadmap is complete when:
 
-1. normal activation emits one ordered process-local selection snapshot;
+1. normal activation emits one ordered cross-family execution-selection
+   snapshot;
 2. pending, active, recovered, UI, and playback state reject a stale selection
    or exact cache key;
 3. model switching safely pauses old inference while preserving its cache;

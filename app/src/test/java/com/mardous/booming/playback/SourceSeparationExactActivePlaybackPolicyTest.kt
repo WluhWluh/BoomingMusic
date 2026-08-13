@@ -11,6 +11,7 @@ class SourceSeparationExactActivePlaybackPolicyTest {
             SourceSeparationExactActivePlaybackPolicy.canReuseSession(
                 activeSelectionGeneration = 4L,
                 sessionSelectionGeneration = 4L,
+                activeSelectionMatchesSession = true,
                 sessionCacheKey = "cache-b",
                 resolvedSessionCacheKey = "cache-b",
             ),
@@ -19,6 +20,7 @@ class SourceSeparationExactActivePlaybackPolicyTest {
             SourceSeparationExactActivePlaybackPolicy.canReuseSession(
                 activeSelectionGeneration = 5L,
                 sessionSelectionGeneration = 4L,
+                activeSelectionMatchesSession = true,
                 sessionCacheKey = "cache-a",
                 resolvedSessionCacheKey = "cache-a",
             ),
@@ -27,8 +29,18 @@ class SourceSeparationExactActivePlaybackPolicyTest {
             SourceSeparationExactActivePlaybackPolicy.canReuseSession(
                 activeSelectionGeneration = 4L,
                 sessionSelectionGeneration = 4L,
+                activeSelectionMatchesSession = true,
                 sessionCacheKey = "cache-a",
                 resolvedSessionCacheKey = "cache-b",
+            ),
+        )
+        assertFalse(
+            SourceSeparationExactActivePlaybackPolicy.canReuseSession(
+                activeSelectionGeneration = 4L,
+                sessionSelectionGeneration = 4L,
+                activeSelectionMatchesSession = false,
+                sessionCacheKey = "cache-a",
+                resolvedSessionCacheKey = "cache-a",
             ),
         )
     }

@@ -3,6 +3,8 @@ package com.mardous.booming.separation.model.preset
 import android.content.Context
 import android.content.SharedPreferences
 import com.mardous.booming.separation.model.MdxRuntimePlatform
+import com.mardous.booming.separation.InMemorySourceSeparationSelectionGenerationStore
+import com.mardous.booming.separation.SourceSeparationSelectionGenerationStore
 import com.mardous.booming.separation.model.contract.ModelFileIdentity
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
@@ -38,6 +40,8 @@ class SourceSeparationPresetRepository internal constructor(
         ),
     private val structuralInspector: SourceSeparationPresetStructuralInspector =
         UnavailableSourceSeparationPresetStructuralInspector,
+    private val selectionGenerationStore: SelectionGenerationStore =
+        InMemorySelectionGenerationStore(),
 ) {
     constructor(
         context: Context,
@@ -50,6 +54,9 @@ class SourceSeparationPresetRepository internal constructor(
             File(context.filesDir, CUSTOM_PROFILE_ROOT_DIRECTORY),
         ),
         structuralInspector = AndroidSourceSeparationPresetStructuralInspector,
+        selectionGenerationStore = SharedSelectionGenerationStore(
+            SourceSeparationSelectionGenerationStore(preferences),
+        ),
     )
 
     private val lock = Any()
@@ -57,7 +64,7 @@ class SourceSeparationPresetRepository internal constructor(
     private val _activeSelectionFlow = MutableStateFlow(
         SourceSeparationActiveSelectionSnapshot(
             reference = activeModelStore.read(),
-            generation = 0L,
+            generation = selectionGenerationStore.current(),
         ),
     )
     val activeSelectionFlow = _activeSelectionFlow.asStateFlow()
@@ -550,7 +557,7 @@ class SourceSeparationPresetRepository internal constructor(
         if (!sameNullableReference(previous.reference, committed)) {
             _activeSelectionFlow.value = SourceSeparationActiveSelectionSnapshot(
                 reference = committed,
-                generation = previous.generation + 1L,
+                generation = selectionGenerationStore.next(),
             )
         }
     }
@@ -923,6 +930,26 @@ class SourceSeparationPresetRepository internal constructor(
         private const val TFLITE_SUFFIX = ".tflite"
         private val SHA256_PATTERN = Regex("^[0-9a-fA-F]{64}$")
     }
+}
+
+internal interface SelectionGenerationStore {
+    fun current(): Long
+    fun next(): Long
+}
+
+private class InMemorySelectionGenerationStore(
+    private val store: InMemorySourceSeparationSelectionGenerationStore =
+        InMemorySourceSeparationSelectionGenerationStore(),
+) : SelectionGenerationStore {
+    override fun current(): Long = store.current()
+    override fun next(): Long = store.next()
+}
+
+internal class SharedSelectionGenerationStore(
+    private val store: SourceSeparationSelectionGenerationStore,
+) : SelectionGenerationStore {
+    override fun current(): Long = store.current()
+    override fun next(): Long = store.next()
 }
 
 data class SourceSeparationPresetSidecar(

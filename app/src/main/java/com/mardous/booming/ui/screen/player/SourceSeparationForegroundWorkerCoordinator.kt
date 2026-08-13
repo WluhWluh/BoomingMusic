@@ -11,6 +11,8 @@ import com.mardous.booming.data.model.Song
 import com.mardous.booming.separation.SourceSeparationAdmittedGpuRuntimeMismatchException
 import com.mardous.booming.separation.SourceSeparationBlendDemand
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationExecutionSelectionSnapshot
+import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
 import com.mardous.booming.separation.SourceSeparationMixModelKey
 import com.mardous.booming.separation.SourceSeparationModelMixSettingsStore
@@ -94,6 +96,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         StateFlow<SourceSeparationMultiStemPlaybackSelectionSnapshot> = MutableStateFlow(
             SourceSeparationMultiStemPlaybackSelectionSnapshot(null, 0L),
         ),
+    private val executionSelectionFlow:
+        StateFlow<SourceSeparationExecutionSelectionSnapshot> = MutableStateFlow(
+            SourceSeparationExecutionSelectionSnapshot.fromLegacySelections(
+                activeSelectionFlow.value,
+                multiStemSelectionFlow.value,
+            ),
+        ),
 ) {
     private val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val performanceStats = SourceSeparationPerformanceStats(preferences)
@@ -118,6 +127,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     @Volatile
     private var reconnectedSong: Song? = null
     private var reconnectedSelection: SourceSeparationActiveSelectionSnapshot? = null
+    private var reconnectedExecutionSelection:
+        SourceSeparationExecutionSelectionSnapshot? = null
     @Volatile
     private var reconnectedLatestSequence = 0L
     @Volatile
@@ -126,6 +137,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private var multiStemReconnectedSong: Song? = null
     private var multiStemReconnectedSelection:
         SourceSeparationMultiStemPlaybackSelectionSnapshot? = null
+    private var multiStemReconnectedExecutionSelection:
+        SourceSeparationExecutionSelectionSnapshot? = null
     @Volatile
     private var multiStemReconnectedLatestSequence = 0L
     private var autoStartSuppressedSongId: Long? = null
@@ -144,6 +157,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     val workerStateFlow = _workerStateFlow.asStateFlow()
     val activeSelectionStateFlow: StateFlow<SourceSeparationActiveSelectionSnapshot>
         get() = activeSelectionFlow
+    val executionSelectionStateFlow: StateFlow<SourceSeparationExecutionSelectionSnapshot>
+        get() = executionSelectionFlow
 
     private val _eventFlow =
         MutableSharedFlow<SourceSeparationForegroundPlaybackEvent>(
@@ -153,47 +168,36 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
 
     init {
         trace("init recovery=${independentRunRecovery != null}")
-        observeActiveSelection()
-        observeMultiStemSelection()
+        observeExecutionSelection()
         observeAutomaticPruneRequests()
         independentRunRecovery?.let(::startIndependentRunRecovery)
         multiStemIndependentRunRecovery?.let(::startMultiStemIndependentRunRecovery)
     }
 
-    private fun observeMultiStemSelection() {
-        var observed = multiStemSelectionFlow.value
+    private fun observeExecutionSelection() {
+        var observed = executionSelectionFlow.value
         workerScope.launch {
-            multiStemSelectionFlow.collect { selection ->
-                if (selection == observed) return@collect
-                observed = selection
-                multiStemReconnectedSession
-                    ?.takeIf { multiStemReconnectedSelection != selection }
-                    ?.let { session ->
-                        requestMultiStemRecoveredControl(
-                            session,
-                            SourceSeparationRecoveredControl.Pause,
-                            SourceSeparationPauseReason.ActiveModelSuperseded,
-                        )
-                    }
-            }
-        }
-    }
-
-    private fun observeActiveSelection() {
-        var observed = activeSelectionFlow.value
-        workerScope.launch {
-            activeSelectionFlow.collect { selection ->
+            executionSelectionFlow.collect { selection ->
                 if (selection == observed) return@collect
                 val previous = observed
                 observed = selection
-                val recoveredToPause = synchronized(stateLock) {
+                val recoveredToPause: Pair<
+                    SourceSeparationReconnectedSession?,
+                    SourceSeparationMultiStemReconnectedSession?,
+                > = synchronized(stateLock) {
                     if (pendingStartRequest?.selection != selection) {
                         pendingStartRequest = null
                     }
                     if (activeWorkerRequest?.selection != selection) {
                         pauseRequested.set(true)
                     }
-                    reconnectedSession.takeIf { reconnectedSelection != selection }
+                    reconnectedSession?.takeUnless { session ->
+                        selection.family == SourceSeparationModelFamily.Mdx &&
+                            selection.matches(session.journal.request.identity)
+                    } to multiStemReconnectedSession?.takeUnless { session ->
+                        selection.family == SourceSeparationModelFamily.Htdemucs &&
+                            selection.matches(session.journal.request.identity)
+                    }
                 }
                 val state = _workerStateFlow.value
                 if (state.selectionGenerationOrNull() != null &&
@@ -201,8 +205,15 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 ) {
                     _workerStateFlow.value = SourceSeparationUiState.Idle
                 }
-                recoveredToPause?.let { session ->
+                recoveredToPause.first?.let { session ->
                     requestRecoveredControl(
+                        session = session,
+                        control = SourceSeparationRecoveredControl.Pause,
+                        pauseReason = SourceSeparationPauseReason.ActiveModelSuperseded,
+                    )
+                }
+                recoveredToPause.second?.let { session ->
+                    requestMultiStemRecoveredControl(
                         session = session,
                         control = SourceSeparationRecoveredControl.Pause,
                         pauseReason = SourceSeparationPauseReason.ActiveModelSuperseded,
@@ -212,7 +223,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     SourceSeparationLifecycleTrace.format(
                         event = "selection.changed",
                         selectionGeneration = selection.generation,
-                    ) + " previousGeneration=${previous.generation}",
+                    ) + " family=${selection.family} model=${selection.modelId} " +
+                        "previousGeneration=${previous.generation}",
                 )
             }
         }
@@ -434,12 +446,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         when (action) {
             SourceSeparationRequestAction.PauseRecovered -> {
                 maybePauseRecoveredRunFor(incoming)
-                multiStemReconnectedSession?.let { session ->
-                    requestMultiStemRecoveredControl(
-                        session,
-                        SourceSeparationRecoveredControl.Pause,
-                    )
-                }
+                maybePauseMultiStemRecoveredRunFor(incoming)
             }
             SourceSeparationRequestAction.EnsureWorker ->
                 ensureWorkerRunningIfActivated()
@@ -450,7 +457,6 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     suspend fun preStartSong(song: Song, readyWindowCount: Int): Boolean {
         if (!playbackOwnerActive.get()) return false
         if (song == Song.emptySong || readyWindowCount <= 0) return false
-        val multiStemSelection = multiStemSelectionFlow.value
         val request = newPreStartRequest(
             song = song,
             readyWindowCount = readyWindowCount,
@@ -465,15 +471,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         ) return false
         if (!playbackOwnerActive.get() ||
             requestGeneration.get() != request.requestGeneration ||
-            activeSelectionFlow.value != request.selection ||
-            multiStemSelectionFlow.value != multiStemSelection
+            executionSelectionFlow.value != request.selection
         ) return false
 
         val action = synchronized(stateLock) {
             if (!playbackOwnerActive.get() ||
                 requestGeneration.get() != request.requestGeneration ||
-                activeSelectionFlow.value != request.selection ||
-                multiStemSelectionFlow.value != multiStemSelection ||
+                executionSelectionFlow.value != request.selection ||
                 activeWorkerRequest?.identity == request.identity
             ) {
                 return false
@@ -503,7 +507,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             _workerStateFlow.value = SourceSeparationUiState.Paused(
                 songId = recoveredSong.id,
                 songTitle = recoveredSong.title,
-                selectionGeneration = activeSelectionFlow.value.generation,
+                selectionGeneration = executionSelectionFlow.value.generation,
                 cacheKey = recovered.cacheKey,
             )
             requestRecoveredControl(recovered, SourceSeparationRecoveredControl.Pause)
@@ -514,7 +518,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             _workerStateFlow.value = SourceSeparationUiState.Paused(
                 songId = multiStemSong.id,
                 songTitle = multiStemSong.title,
-                selectionGeneration = multiStemReconnectedSelection?.generation,
+                selectionGeneration = multiStemReconnectedExecutionSelection?.generation,
                 cacheKey = multiStemRecovered.cacheKey,
             )
             requestMultiStemRecoveredControl(
@@ -711,8 +715,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
 
     fun isModelArtifactInUse(artifactSha256: String): Boolean = synchronized(stateLock) {
         val normalized = artifactSha256.lowercase()
-        activeWorkerRequest?.selection?.reference?.artifactSha256?.lowercase() == normalized ||
-            pendingStartRequest?.selection?.reference?.artifactSha256?.lowercase() == normalized ||
+        activeWorkerRequest?.selection?.identity?.artifactSha256?.lowercase() == normalized ||
+            pendingStartRequest?.selection?.identity?.artifactSha256?.lowercase() == normalized ||
             activeWorkerSong?.artifactSha256?.lowercase() == normalized ||
             reconnectedSession?.journal?.request?.identity?.artifactSha256?.lowercase() == normalized
             || multiStemReconnectedSession?.journal?.request?.identity?.artifactSha256
@@ -734,7 +738,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 hasCompletedCache = false,
             )
         }
-        val selection = activeSelectionFlow.value
+        val selection = executionSelectionFlow.value
         if (activeWorkerRequest?.identity?.matches(song, selection) == true ||
             pendingStartRequest?.identity?.matches(song, selection) == true
         ) {
@@ -844,6 +848,13 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             append(" mode=").append(readBlendMode())
             append(" blend=").append(playbackState.sourceSeparationBlend)
             append(" ui=").append(state.debugName())
+            val selection = executionSelectionFlow.value
+            append(" selectionFamily=").append(selection.family)
+            append(" selectionModel=").append(selection.modelId)
+            append(" selectionGeneration=").append(selection.generation)
+            append(" selectionResolved=").append(selection.isResolved)
+            append(" selectionArtifact=")
+                .append(selection.identity?.artifactSha256?.take(12))
             append(" progress=").append(playbackState.estimatedPositionMs())
             append(" duration=").append(playbackState.durationMs)
             append(" lastSample=").append(debugLastWindowSample?.toDebugText())
@@ -883,11 +894,16 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         var terminal = false
         try {
             val selection = multiStemSelectionFlow.value
+            val executionSelection = executionSelectionFlow.value
+            if (executionSelection.family != SourceSeparationModelFamily.Htdemucs ||
+                executionSelection.modelId != selection.modelId
+            ) return
             val reconnected = recovery.reconnect(selection) { event -> events.trySend(event) }
                 ?: return
             session = reconnected
             if (multiStemSelectionFlow.value != selection ||
-                session.journal.request.identity.modelId != selection.modelId
+                executionSelectionFlow.value != executionSelection ||
+                !executionSelection.matches(session.journal.request.identity)
             ) {
                 runCatching {
                     session.pause(SourceSeparationPauseReason.ActiveModelSuperseded)
@@ -898,6 +914,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 multiStemReconnectedSession = session
                 multiStemReconnectedSong = session.journal.toRecoveredSong()
                 multiStemReconnectedSelection = selection
+                multiStemReconnectedExecutionSelection = executionSelection
                 multiStemReconnectedLatestSequence = 0L
             }
             terminal = applyMultiStemRecoveredEvent(session, session.baselineEvent)
@@ -935,6 +952,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 multiStemReconnectedSession = null
                 multiStemReconnectedSong = null
                 multiStemReconnectedSelection = null
+                multiStemReconnectedExecutionSelection = null
                 multiStemReconnectedLatestSequence = 0L
             }
             if (multiStemRecoveryJob == activeJob) multiStemRecoveryJob = null
@@ -948,8 +966,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         session: SourceSeparationMultiStemReconnectedSession,
         event: SourceSeparationMultiStemExecutionEvent,
     ): Boolean {
-        val selection = multiStemReconnectedSelection
-        if (selection != null && multiStemSelectionFlow.value != selection) {
+        val selection = multiStemReconnectedExecutionSelection
+        if (selection != null && executionSelectionFlow.value != selection) {
             runCatching {
                 session.pause(SourceSeparationPauseReason.ActiveModelSuperseded)
             }
@@ -1007,6 +1025,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 requestAutomaticPrune()
                 runCatching { session.close() }
                 multiStemReconnectedSession = null
+                multiStemReconnectedExecutionSelection = null
                 dispatchRecoveredTerminal(SourceSeparationRecoveredTerminal.Completed(
                     song = callbackSong,
                     cacheKey = session.cacheKey,
@@ -1092,6 +1111,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         var terminal = false
         try {
             val recoverySelection = activeSelectionFlow.value
+            val executionSelection = executionSelectionFlow.value
+            if (executionSelection.family != SourceSeparationModelFamily.Mdx) return
             val reconnected = recovery.reconnect(
                 activeSelection = recoverySelection,
                 onEvent = { event -> events.trySend(event) },
@@ -1101,6 +1122,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             }
             session = reconnected
             if (activeSelectionFlow.value != recoverySelection ||
+                executionSelectionFlow.value != executionSelection ||
+                !executionSelection.matches(session.journal.request.identity) ||
                 (recoverySelection.reference != null &&
                     !session.journal.matchesSelection(recoverySelection))
             ) {
@@ -1124,6 +1147,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 reconnectedSession = session
                 reconnectedSong = session.journal.toRecoveredSong()
                 reconnectedSelection = recoverySelection
+                reconnectedExecutionSelection = executionSelection
                 reconnectedLatestSequence = 0L
             }
             terminal = applyRecoveredBaseline(session)
@@ -1178,6 +1202,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 reconnectedSession = null
                 reconnectedSong = null
                 reconnectedSelection = null
+                reconnectedExecutionSelection = null
                 reconnectedLatestSequence = 0L
             }
             if (recoveryJob == activeJob) {
@@ -1202,7 +1227,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         _workerStateFlow.value = SourceSeparationUiState.Running(
             songId = song.id,
             songTitle = song.title,
-            selectionGeneration = reconnectedSelection?.generation,
+            selectionGeneration = reconnectedExecutionSelection?.generation,
             cacheKey = session.cacheKey,
         )
         return applyRecoveredEvent(session, session.baselineEvent)
@@ -1212,8 +1237,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         session: SourceSeparationReconnectedSession,
         event: SourceSeparationExecutionHostEvent,
     ): Boolean {
-        val admittedSelection = synchronized(stateLock) { reconnectedSelection }
-        if (admittedSelection != null && activeSelectionFlow.value != admittedSelection) {
+        val admittedSelection = synchronized(stateLock) { reconnectedExecutionSelection }
+        if (admittedSelection != null && executionSelectionFlow.value != admittedSelection) {
             trace(
                 SourceSeparationLifecycleTrace.format(
                     event = "recovery.event.staleSelection",
@@ -1228,6 +1253,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 if (reconnectedSession === session) {
                     reconnectedSession = null
                     reconnectedSelection = null
+                    reconnectedExecutionSelection = null
                 }
             }
             return true
@@ -1248,7 +1274,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 _workerStateFlow.value = SourceSeparationUiState.Running(
                     songId = recoveredSong.id,
                     songTitle = recoveredSong.title,
-                    selectionGeneration = reconnectedSelection?.generation,
+                    selectionGeneration = reconnectedExecutionSelection?.generation,
                     cacheKey = session.cacheKey,
                 )
                 false
@@ -1257,7 +1283,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 publishWorkerProgress(
                     song = recoveredSong,
                     progress = payload.progress.toMdxRangeProgress(),
-                    selectionGeneration = reconnectedSelection?.generation,
+                    selectionGeneration = reconnectedExecutionSelection?.generation,
                     cacheKey = session.cacheKey,
                 )
                 false
@@ -1267,7 +1293,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     _workerStateFlow.value = SourceSeparationUiState.Running(
                         songId = recoveredSong.id,
                         songTitle = recoveredSong.title,
-                        selectionGeneration = reconnectedSelection?.generation,
+                        selectionGeneration = reconnectedExecutionSelection?.generation,
                         cacheKey = session.cacheKey,
                     )
                 }
@@ -1283,7 +1309,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 _workerStateFlow.value = SourceSeparationUiState.Completed(
                     songId = recoveredSong.id,
                     songTitle = recoveredSong.title,
-                    selectionGeneration = reconnectedSelection?.generation,
+                    selectionGeneration = reconnectedExecutionSelection?.generation,
                     cacheKey = session.cacheKey,
                 )
                 requestAutomaticPrune()
@@ -1312,7 +1338,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 _workerStateFlow.value = SourceSeparationUiState.Canceled(
                     songId = recoveredSong.id,
                     songTitle = recoveredSong.title,
-                    selectionGeneration = reconnectedSelection?.generation,
+                    selectionGeneration = reconnectedExecutionSelection?.generation,
                     cacheKey = session.cacheKey,
                 )
                 workerActivated = false
@@ -1327,7 +1353,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     songId = recoveredSong.id,
                     songTitle = recoveredSong.title,
                     message = message,
-                    selectionGeneration = reconnectedSelection?.generation,
+                    selectionGeneration = reconnectedExecutionSelection?.generation,
                     cacheKey = session.cacheKey,
                 )
                 workerActivated = false
@@ -1349,7 +1375,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private fun maybePauseRecoveredRunFor(request: SourceSeparationWorkerRequest) {
         val session = reconnectedSession ?: return
         val song = reconnectedSong ?: return
-        val recoveredSelection = reconnectedSelection
+        val recoveredSelection = reconnectedExecutionSelection
         if (request.song.id == song.id && recoveredSelection == request.selection) {
             clearPendingStart()
             workerActivated = false
@@ -1360,6 +1386,31 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             request.priority >= SourceSeparationPendingStartReason.Manual.priority
         ) {
             requestRecoveredControl(
+                session = session,
+                control = SourceSeparationRecoveredControl.Pause,
+                pauseReason = if (selectionChanged) {
+                    SourceSeparationPauseReason.ActiveModelSuperseded
+                } else {
+                    SourceSeparationPauseReason.Standard
+                },
+            )
+        }
+    }
+
+    private fun maybePauseMultiStemRecoveredRunFor(request: SourceSeparationWorkerRequest) {
+        val session = multiStemReconnectedSession ?: return
+        val song = multiStemReconnectedSong ?: return
+        val recoveredSelection = multiStemReconnectedExecutionSelection
+        if (request.song.id == song.id && recoveredSelection == request.selection) {
+            clearPendingStart()
+            workerActivated = false
+            return
+        }
+        val selectionChanged = recoveredSelection != request.selection
+        if (selectionChanged ||
+            request.priority >= SourceSeparationPendingStartReason.Manual.priority
+        ) {
+            requestMultiStemRecoveredControl(
                 session = session,
                 control = SourceSeparationRecoveredControl.Pause,
                 pauseReason = if (selectionChanged) {
@@ -1779,7 +1830,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 },
                 pauseReasonProvider = {
                     pauseReasonOverride.getAndSet(null) ?:
-                    if (activeSelectionFlow.value != request.selection) {
+                    if (executionSelectionFlow.value != request.selection) {
                         SourceSeparationPauseReason.ActiveModelSuperseded
                     } else {
                         SourceSeparationPauseReason.Standard
@@ -2147,10 +2198,14 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     }
 
     private fun currentMixModelKey(): SourceSeparationMixModelKey? {
-        return multiStemSelectionFlow.value.modelId
-            ?.let(SourceSeparationMixModelKey::multiStem)
-            ?: activeSelectionFlow.value.reference?.modelId
-                ?.let(SourceSeparationMixModelKey::mdx)
+        val selection = executionSelectionFlow.value
+        return when (selection.family) {
+            SourceSeparationModelFamily.Htdemucs ->
+                selection.modelId?.let(SourceSeparationMixModelKey::multiStem)
+            SourceSeparationModelFamily.Mdx ->
+                selection.modelId?.let(SourceSeparationMixModelKey::mdx)
+            null -> null
+        }
     }
 
     private fun songNeedsSeparatedOutputForCurrentMode(song: Song): Boolean {
@@ -2220,7 +2275,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     ): SourceSeparationWorkerRequest.Full = SourceSeparationWorkerRequest.Full(
         song = song,
         reason = reason,
-        selection = activeSelectionFlow.value,
+        selection = executionSelectionFlow.value,
         requestGeneration = requestGeneration.incrementAndGet(),
     )
 
@@ -2231,7 +2286,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         SourceSeparationWorkerRequest.StartWindowPreStart(
             song = song,
             readyWindowCount = readyWindowCount,
-            selection = activeSelectionFlow.value,
+            selection = executionSelectionFlow.value,
             requestGeneration = requestGeneration.incrementAndGet(),
         )
 
@@ -2241,7 +2296,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     ): Boolean = synchronized(stateLock) {
         activeWorkerRequest?.requestGeneration == request.requestGeneration &&
             activeWorkerRequest?.selection == request.selection &&
-            activeSelectionFlow.value == request.selection &&
+            executionSelectionFlow.value == request.selection &&
             (cacheKey == null || activeWorkerSong?.cacheKey == cacheKey)
     }
 
@@ -2282,7 +2337,7 @@ private enum class SourceSeparationRequestAction {
 
 private sealed interface SourceSeparationWorkerRequest {
     val song: Song
-    val selection: SourceSeparationActiveSelectionSnapshot
+    val selection: SourceSeparationExecutionSelectionSnapshot
     val requestGeneration: Long
     val debugReason: String
     val runClass: SourceSeparationExecutionRunClass
@@ -2293,7 +2348,7 @@ private sealed interface SourceSeparationWorkerRequest {
     data class Full(
         override val song: Song,
         val reason: SourceSeparationPendingStartReason,
-        override val selection: SourceSeparationActiveSelectionSnapshot,
+        override val selection: SourceSeparationExecutionSelectionSnapshot,
         override val requestGeneration: Long,
     ) : SourceSeparationWorkerRequest {
         override val debugReason: String = reason.name
@@ -2309,7 +2364,7 @@ private sealed interface SourceSeparationWorkerRequest {
     data class StartWindowPreStart(
         override val song: Song,
         val readyWindowCount: Int,
-        override val selection: SourceSeparationActiveSelectionSnapshot,
+        override val selection: SourceSeparationExecutionSelectionSnapshot,
         override val requestGeneration: Long,
     ) : SourceSeparationWorkerRequest {
         override val debugReason: String = "PreStart($readyWindowCount)"
@@ -2324,26 +2379,44 @@ internal data class SourceSeparationWorkerRequestIdentity(
     val fileSize: Long,
     val rawDateModified: Long,
     val durationMs: Long,
-    val activeReference: SourceSeparationActiveModelReference?,
+    val executionIdentity: com.mardous.booming.separation.SourceSeparationExecutionModelIdentity?,
+    val selectedFamily: SourceSeparationModelFamily?,
+    val selectedModelId: String?,
     val selectionGeneration: Long,
 ) {
     fun matches(
         song: Song,
-        selection: SourceSeparationActiveSelectionSnapshot,
+        selection: SourceSeparationExecutionSelectionSnapshot,
     ): Boolean = this == from(song, selection)
 
     companion object {
         fun from(
             song: Song,
-            selection: SourceSeparationActiveSelectionSnapshot,
+            selection: SourceSeparationExecutionSelectionSnapshot,
         ): SourceSeparationWorkerRequestIdentity = SourceSeparationWorkerRequestIdentity(
             songId = song.id,
             filePath = song.data,
             fileSize = song.size,
             rawDateModified = song.rawDateModified,
             durationMs = song.duration,
-            activeReference = selection.reference,
+            executionIdentity = selection.identity,
+            selectedFamily = selection.family,
+            selectedModelId = selection.modelId,
             selectionGeneration = selection.generation,
+        )
+
+        fun from(
+            song: Song,
+            selection: SourceSeparationActiveSelectionSnapshot,
+        ): SourceSeparationWorkerRequestIdentity = from(
+            song,
+            SourceSeparationExecutionSelectionSnapshot.fromLegacySelections(
+                mdx = selection,
+                multiStem = SourceSeparationMultiStemPlaybackSelectionSnapshot(
+                    modelId = null,
+                    generation = selection.generation,
+                ),
+            ),
         )
     }
 }

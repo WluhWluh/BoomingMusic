@@ -1655,6 +1655,84 @@ playback was disabled, and the original song retained ready/play intent. The
 selected model remained installed and selected; only the active song cache was
 deleted.
 
+### Phase 8: Converge MDX and HTDemucs lifecycle behavior
+
+This phase closes cross-family differences found after the first multi-stem UI,
+cache, and playback integration. It preserves the intentional DSP and control
+differences while making selection, scheduling, recovery, product management,
+and diagnostics obey one lifecycle contract.
+
+#### Phase 8A: Unified execution selection and exact admission (complete)
+
+- [x] Project the MDX preset selection and HTDemucs playback selection into one
+  `SourceSeparationExecutionSelectionSnapshot` with family, model ID, exact
+  artifact/contract/profile/pipeline/render identity, and one persisted global
+  generation.
+- [x] Capture that snapshot in full-song and prestart requests and use it for
+  both MDX and HTDemucs recovery admission, stale callback rejection, worker/UI
+  filtering, deletion preflight, and debug reporting.
+- [x] Make `PlaybackService` observe one selection flow, invalidate an admitted
+  session on any exact identity mismatch, and remove stale requested stem sets
+  when switching families.
+- [x] Keep inactive partial and completed caches intact; selection affects
+  admission and visibility, not retention.
+
+Focused JVM coverage passes for exact playback reuse, worker request identity,
+and cross-family generation behavior. The GitHub Debug APK also builds. Product
+verification used the ADB debug provider (`model.select`, `playback.song`,
+`separation.output`, and `state`). On S25, switching from an active official
+four-stem run to MDX paused the old run and rejected its delayed pause callback
+as stale. The final A-to-B-to-A check ran on S10 with the updated playback path:
+the unified generation advanced exactly `4 -> 5 -> 6`; the current exact cache
+identity changed from official six-stem
+`30f00aeadcb3ce9f715e21e9e69d6e9ed1c56b7028f59e50d9c27ffda822fd7e`
+to MDX 9662
+`1f05653087928bad4cbdc9f6c8ecf39f25d77a08d920ea7d3612d43e35bceb3f`
+and back; no superseded playback session or current-cache marker survived the
+family switch.
+
+#### Phase 8B: Resumable HTDemucs execution
+
+- [ ] Preserve committed multi-stem segments across pause, process death, and
+  app restart instead of resetting the working cache.
+- [ ] Persist or deterministically recover global normalization and the minimum
+  OLA boundary state needed to resume without seams or mixed generations.
+- [ ] Verify manual pause/resume and forced inference-process death through the
+  Debug control provider on both four- and six-stem contracts.
+
+#### Phase 8C: Shared scheduling and playback-demand progress
+
+- [ ] Give HTDemucs the same scheduler snapshot, playback position, ready
+  waterline, prefetch stop, timing, and source-decode diagnostics contract used
+  by MDX.
+- [ ] Stop next-song work after the requested ready window count and resume only
+  when demand changes.
+- [ ] Keep timing statistics separated by family, model/profile, and backend.
+
+#### Phase 8D: Product management parity
+
+- [ ] Make Quick Setup understand an active HTDemucs selection and never commit
+  a hidden MDX recommendation over it.
+- [ ] Make Cache Management report, activate, and delete MDX and HTDemucs exact
+  models through one family-aware action contract.
+
+#### Phase 8E: One remote execution authority
+
+- [ ] Enforce one process-wide execution owner across MDX and HTDemucs, then
+  converge the two service/control protocols where doing so removes duplicate
+  lifecycle state.
+- [ ] Map remote death to one recoverable product error and replace the fixed
+  30-minute HTDemucs await timeout with journal/process-lifecycle observation.
+
+#### Phase 8F: Diagnostics and remaining duplication
+
+- [ ] Localize all HTDemucs stages and expose family-specific ETA and window
+  timing through the existing progress surfaces.
+- [ ] Keep next-song prefetch ownership only in `PlaybackService`.
+- [ ] Reuse the shared source-preflight memo for multi-stem resolution.
+- [ ] Remove the unused two-file mixer compatibility entry point after 2/4/6
+  stem regressions pass.
+
 ## Required Tests and Gates
 
 ### Contract and serialization

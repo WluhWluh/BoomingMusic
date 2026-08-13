@@ -81,6 +81,8 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationPresetCacheAvaila
 import com.mardous.booming.separation.cache.v2.SourceSeparationProductCacheAvailabilityProvider
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackResolver
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
+import com.mardous.booming.separation.SourceSeparationExecutionSelectionResolver
+import com.mardous.booming.separation.SourceSeparationSelectionGenerationStore
 import com.mardous.booming.separation.SourceSeparationModelMixSettingsStore
 import com.mardous.booming.separation.SourceSeparationMultiStemRuntimeResolver
 import com.mardous.booming.separation.cache.v2.resolveTrustedActiveCacheModelResolution
@@ -163,6 +165,7 @@ private val mainModule = module {
     single {
         PreferenceManager.getDefaultSharedPreferences(androidContext())
     }
+    single { SourceSeparationSelectionGenerationStore(get()) }
     single {
         SourceSeparationRuntimeCatalogLoader.load(androidContext())
     }
@@ -287,7 +290,14 @@ private val mainModule = module {
             ),
         )
     }
-    single { SourceSeparationMultiStemPlaybackSelectionStore(get()) }
+    single { SourceSeparationMultiStemPlaybackSelectionStore(get(), get()) }
+    single {
+        SourceSeparationExecutionSelectionResolver(
+            presetRepository = get(),
+            multiStemSelectionStore = get(),
+            multiStemInstaller = get(),
+        )
+    }
     single { SourceSeparationModelMixSettingsStore(get()) }
     single<SourceSeparationMultiStemRuntimeResolver> {
         SourceSeparationMultiStemPlaybackResolver(
@@ -510,6 +520,8 @@ private val viewModule = module {
             multiStemSelectionFlow = get<SourceSeparationMultiStemPlaybackSelectionStore>()
                 .selectionFlow,
             activeSelectionFlow = presetRepository.activeSelectionFlow,
+            executionSelectionFlow =
+                get<SourceSeparationExecutionSelectionResolver>().selectionFlow,
         )
     }
 
