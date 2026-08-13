@@ -48,6 +48,11 @@ internal object SourceSeparationDebugProtocol {
         ),
         "separation.start" to emptyList(),
         "separation.resume" to emptyList(),
+        "separation.prestart" to listOf(
+            "song_id:long|path:string|query:string",
+            "first:boolean=false",
+            "ready_windows:int=2",
+        ),
         "separation.pause" to emptyList(),
         "separation.cancel" to emptyList(),
         "separation.marker" to listOf("marker:string"),

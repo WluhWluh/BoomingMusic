@@ -129,12 +129,53 @@ class SourceSeparationProductionRouteAuditTest {
                     preStart.indexOf("hasReadyPlaybackStartCache(song, readyWindowCount)"),
         )
         assertTrue(preStart.contains("requestGeneration.get() != request.requestGeneration"))
-        assertTrue(preStart.contains("activeSelectionFlow.value != request.selection"))
-        assertTrue(preStart.contains("val multiStemSelection = multiStemSelectionFlow.value"))
-        assertTrue(preStart.contains("multiStemSelectionFlow.value != multiStemSelection"))
+        assertTrue(preStart.contains("executionSelectionFlow.value != request.selection"))
         assertTrue(
             preStart.substring(preStart.indexOf("val action = synchronized(stateLock)"))
                 .contains("!playbackOwnerActive.get()"),
+        )
+    }
+
+    @Test
+    fun `completed current cache cannot preempt next song prestart`() {
+        val coordinator = mainSource(
+            "com/mardous/booming/ui/screen/player/SourceSeparationForegroundWorkerCoordinator.kt",
+        ).readText()
+        val admission = coordinator.substring(
+            coordinator.indexOf("fun requestPlaybackDemandSong("),
+            coordinator.indexOf("private fun requestFullSong("),
+        )
+
+        val asyncStart = admission.indexOf("workerScope.launch")
+        val completedCheck = admission.indexOf(
+            "SourceSeparationModelAwareCacheStatus.Completed",
+        )
+        val completedShortCircuit = admission.indexOf("if (hasCompletedCache)")
+        val requestStart = admission.indexOf(
+            "requestFullSong(song, SourceSeparationPendingStartReason.PlaybackDemand)",
+        )
+        assertTrue(asyncStart >= 0)
+        assertTrue(completedCheck > asyncStart)
+        assertTrue(completedShortCircuit > completedCheck)
+        assertTrue(requestStart > completedShortCircuit)
+    }
+
+    @Test
+    fun `current song refresh does not pause a different next song prestart`() {
+        val coordinator = mainSource(
+            "com/mardous/booming/ui/screen/player/SourceSeparationForegroundWorkerCoordinator.kt",
+        ).readText()
+        val refresh = coordinator.substring(
+            coordinator.indexOf("private fun pauseWorkerIfSongChanged("),
+            coordinator.indexOf("private fun setPendingStart(", coordinator.indexOf("private fun pauseWorkerIfSongChanged(")),
+        )
+
+        assertTrue(refresh.contains("if (isRunningPreStartRequest())"))
+        assertTrue(
+            coordinator.contains(
+                "private fun isRunningPreStartRequest(): Boolean =\n" +
+                        "        activeWorkerRequest is SourceSeparationWorkerRequest.StartWindowPreStart",
+            ),
         )
     }
 

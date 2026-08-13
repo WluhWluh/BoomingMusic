@@ -146,7 +146,13 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                 if (run.descriptor.processGeneration != command.processGeneration) {
                     return controlResponse(SourceSeparationMultiStemIpcStatus.StaleGeneration)
                 }
+                run.updatePlaybackDemand(
+                    hasPositionUpdate = command.hasPlaybackPositionUpdate,
+                    positionMs = command.playbackPositionMs,
+                    readyWindowCount = command.playbackReadyWindowCount,
+                )
                 when (command.action) {
+                    SourceSeparationMultiStemIpcControlAction.Update -> Unit
                     SourceSeparationMultiStemIpcControlAction.Pause ->
                         run.requestPause(requireNotNull(command.pauseReason))
                     SourceSeparationMultiStemIpcControlAction.Cancel -> run.requestCancel()
@@ -309,6 +315,8 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                                 completedWindows = progress.completedWindows.coerceAtLeast(0),
                                 totalWindows = progress.totalWindows.coerceAtLeast(1),
                                 stage = progress.stage,
+                                completedWindowElapsedMs = progress.completedWindowElapsedMs,
+                                scheduler = progress.scheduler,
                             ),
                         )
                     },
@@ -323,6 +331,8 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                             state,
                         ))
                     },
+                    playbackPositionMsProvider = run::playbackPositionMs,
+                    playbackReadyWindowCountProvider = run::playbackReadyWindowCount,
                     shouldPause = run::shouldPause,
                     pauseReasonProvider = run::pauseReason,
                     shouldCancel = run::shouldCancel,
@@ -455,6 +465,10 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
         private val pause = AtomicBoolean(false)
         private val cancel = AtomicBoolean(false)
         private val pauseReason = AtomicReference<SourceSeparationPauseReason?>(null)
+        private val playbackPositionMs = AtomicReference<Long?>(descriptor.runtime.initialPlaybackPositionMs)
+        private val playbackReadyWindowCount = AtomicLong(
+            descriptor.runtime.initialPlaybackReadyWindowCount.toLong(),
+        )
         private var callback: ISourceSeparationMultiStemExecutionCallback? = null
         private var callbackBinder: IBinder? = null
         private var callbackDeathRecipient: IBinder.DeathRecipient? = null
@@ -529,6 +543,21 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
         fun shouldCancel(): Boolean = cancel.get()
         fun pauseReason(): SourceSeparationPauseReason =
             pauseReason.get() ?: SourceSeparationPauseReason.Standard
+
+        fun updatePlaybackDemand(
+            hasPositionUpdate: Boolean,
+            positionMs: Long?,
+            readyWindowCount: Int?,
+        ) {
+            if (hasPositionUpdate) playbackPositionMs.set(positionMs)
+            if (readyWindowCount != null) {
+                playbackReadyWindowCount.set(readyWindowCount.coerceAtLeast(1).toLong())
+            }
+        }
+
+        fun playbackPositionMs(): Long? = playbackPositionMs.get()
+
+        fun playbackReadyWindowCount(): Int = playbackReadyWindowCount.get().toInt()
 
         fun emit(payload: SourceSeparationMultiStemExecutionEventPayload) {
             val event = SourceSeparationMultiStemExecutionEvent(

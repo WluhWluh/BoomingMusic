@@ -111,6 +111,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     private val pauseReasonOverride = AtomicReference<SourceSeparationPauseReason?>(null)
     private val playbackOwnerActive = AtomicBoolean(true)
     private val requestGeneration = AtomicLong()
+    private val playbackDemandAdmissionGeneration = AtomicLong()
     private val debugWindowSamples = ArrayDeque<SourceSeparationDebugWindowSample>()
     private val stateLock = Any()
     private val automaticPruneRequests = Channel<Unit>(Channel.CONFLATED)
@@ -370,12 +371,36 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
 
     fun requestManualSong(song: Song) {
         trace("requestManual song=${song.id}")
+        playbackDemandAdmissionGeneration.incrementAndGet()
         requestFullSong(song, SourceSeparationPendingStartReason.Manual)
     }
 
     fun requestPlaybackDemandSong(song: Song) {
         if (!playbackOwnerActive.get()) return
-        requestFullSong(song, SourceSeparationPendingStartReason.PlaybackDemand)
+        if (song == Song.emptySong) return
+        val selection = executionSelectionFlow.value
+        val admissionGeneration = playbackDemandAdmissionGeneration.incrementAndGet()
+        workerScope.launch {
+            val hasCompletedCache = withContext(Dispatchers.IO) {
+                runCatching {
+                    val resolved = resolveSong(song) ?: return@runCatching false
+                    sourceSeparationRuntime.cacheStatus(resolved) is
+                        SourceSeparationModelAwareCacheStatus.Completed
+                }.getOrDefault(false)
+            }
+            if (playbackDemandAdmissionGeneration.get() != admissionGeneration ||
+                !playbackOwnerActive.get() ||
+                _playbackStateFlow.value.song.id != song.id ||
+                executionSelectionFlow.value != selection
+            ) {
+                return@launch
+            }
+            if (hasCompletedCache) {
+                trace("requestPlaybackDemand skipped completed song=${song.id}")
+                return@launch
+            }
+            requestFullSong(song, SourceSeparationPendingStartReason.PlaybackDemand)
+        }
     }
 
     private fun requestFullSong(
@@ -1000,6 +1025,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                         completedWindows = payload.completedWindows,
                         totalWindows = payload.totalWindows,
                         stage = payload.stage,
+                        completedWindowElapsedMs = payload.completedWindowElapsedMs,
+                        scheduler = payload.scheduler,
                     ),
                     selectionGeneration = selection?.generation,
                     cacheKey = session.cacheKey,
@@ -1593,7 +1620,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             activeWorkerRequest?.song?.id
         } ?: return
         if (song.id != runningSongId) {
-            if (isRunningPreStartRequestFor(song)) {
+            if (isRunningPreStartRequest()) {
                 return
             }
             song.takeIf { it != Song.emptySong }
@@ -1610,10 +1637,8 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         }
     }
 
-    private fun isRunningPreStartRequestFor(song: Song): Boolean {
-        return activeWorkerRequest is SourceSeparationWorkerRequest.StartWindowPreStart &&
-                activeWorkerRequest?.song?.id == song.id
-    }
+    private fun isRunningPreStartRequest(): Boolean =
+        activeWorkerRequest is SourceSeparationWorkerRequest.StartWindowPreStart
 
     private fun setPendingStart(request: SourceSeparationWorkerRequest) {
         synchronized(stateLock) {
@@ -1772,9 +1797,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                         return@separate
                     }
                     if (preStartReadyWindowCount != null &&
-                        progress.scheduler?.playbackSegmentIndex == 0 &&
-                        progress.scheduler.playbackReadyWindowReadyCount >=
-                        preStartReadyWindowCount
+                        progress.isPreStartReady(preStartReadyWindowCount)
                     ) {
                         preStartSatisfied = true
                     }
@@ -2101,6 +2124,16 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         notifyCallbacks("progress") {
             it.onSourceSeparationWorkerProgress(song.callbackSong())
         }
+    }
+
+    private fun MdxRangeProgress.isPreStartReady(requestedReadyWindowCount: Int): Boolean {
+        val scheduler = scheduler ?: return false
+        val required = minOf(
+            requestedReadyWindowCount.coerceAtLeast(1),
+            scheduler.totalSegments,
+        )
+        return scheduler.playbackSegmentIndex == 0 &&
+            scheduler.playbackReadyWindowReadyCount >= required
     }
 
     private fun recordDebugWindowSample(

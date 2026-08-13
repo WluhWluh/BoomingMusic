@@ -300,6 +300,8 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
                     windowDecodeEnabled = windowDecodeEnabled,
                     onProgress = onProgress,
                     onPrepared = onPrepared,
+                    playbackPositionMsProvider = playbackPositionMsProvider,
+                    playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
                     shouldPause = shouldPause,
                     pauseReasonProvider = pauseReasonProvider,
                     shouldCancel = shouldCancel,

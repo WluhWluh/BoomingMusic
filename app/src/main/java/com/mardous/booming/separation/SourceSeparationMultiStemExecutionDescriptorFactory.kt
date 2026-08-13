@@ -51,6 +51,9 @@ internal fun SourceSeparationMultiStemExecutionRequest.toExecutionDescriptor(
             runClass = runClass,
             backgroundPolicy = runClass.backgroundPolicy,
             windowDecodeEnabled = windowDecodeEnabled,
+            initialPlaybackPositionMs = playbackPositionMsProvider()
+                ?.takeIf { it >= 0L },
+            initialPlaybackReadyWindowCount = playbackReadyWindowCountProvider().coerceAtLeast(1),
         ),
     )
 }

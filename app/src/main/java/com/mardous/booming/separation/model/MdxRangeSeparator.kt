@@ -996,19 +996,7 @@ data class MdxRangeProgress(
     }
 }
 
-data class MdxSegmentSchedulerProgress(
-    val playbackSegmentIndex: Int?,
-    val playbackSegmentState: String?,
-    val nextSegmentIndex: Int?,
-    val nextSegmentState: String?,
-    val processingSegmentIndex: Int,
-    val priority: String?,
-    val readySegments: Int,
-    val totalSegments: Int,
-    val readyWindowCount: Int,
-    val playbackReadyWindowReadyCount: Int,
-    val playbackReadyWindowPendingCount: Int,
-)
+typealias MdxSegmentSchedulerProgress = SourceSeparationSegmentSchedulerProgress
 
 data class MdxRangePreparation(
     val vocalsFile: File,

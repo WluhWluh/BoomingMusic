@@ -35,6 +35,8 @@ internal data class HtdemucsSourceSeparationRangeRequest(
     val onPrepared: (SourceSeparationCacheRunPreparation) -> Unit = {},
     val onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit = { _, _ -> },
     val onProgress: (MdxRangeProgress) -> Unit = {},
+    val playbackPositionMsProvider: () -> Long? = { null },
+    val playbackReadyWindowCountProvider: () -> Int = { 2 },
     val shouldPause: () -> Boolean = { false },
     val pauseReasonProvider: () -> SourceSeparationPauseReason = {
         SourceSeparationPauseReason.Standard
@@ -107,6 +109,8 @@ internal class HtdemucsSourceSeparationRangeExecutor(
                 },
                 onSegmentStateChanged = request.onSegmentStateChanged,
                 onProgress = { progress -> request.onProgress(progress.toMdxProgress()) },
+                playbackPositionMsProvider = request.playbackPositionMsProvider,
+                playbackReadyWindowCountProvider = request.playbackReadyWindowCountProvider,
                 shouldPause = request.shouldPause,
                 pauseReasonProvider = request.pauseReasonProvider,
                 shouldCancel = request.shouldCancel,
@@ -150,6 +154,8 @@ internal class HtdemucsSourceSeparationRangeExecutor(
         completedWindows = completedWindows,
         totalWindows = totalWindows,
         stage = stage,
+        completedWindowElapsedMs = completedWindowElapsedMs,
+        scheduler = scheduler,
     )
 
     private companion object {

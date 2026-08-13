@@ -145,6 +145,8 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                                     completedWindows = payload.completedWindows,
                                     totalWindows = payload.totalWindows,
                                     stage = payload.stage,
+                                    completedWindowElapsedMs = payload.completedWindowElapsedMs,
+                                    scheduler = payload.scheduler,
                                 ),
                             )
                         is SourceSeparationMultiStemExecutionEventPayload.Prepared -> {
@@ -198,7 +200,9 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             terminal.countDown()
         }
         connected.binder.linkToDeath(deathRecipient, 0)
-        val controlThread = thread(start = true, isDaemon = true, name = "BSS-MultiStem-Control") {
+        val controlThread = thread(start = false, isDaemon = true, name = "BSS-MultiStem-Control") {
+            var lastPlaybackPositionMs = descriptor.runtime.initialPlaybackPositionMs
+            var lastReadyWindowCount = descriptor.runtime.initialPlaybackReadyWindowCount
             while (terminal.count > 0L) {
                 try {
                     if (request.shouldCancel()) {
@@ -221,6 +225,30 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                             ),
                         ))
                         return@thread
+                    }
+                    val playbackPositionMs = request.playbackPositionMsProvider()
+                        ?.takeIf { it >= 0L }
+                    val readyWindowCount = request.playbackReadyWindowCountProvider()
+                        .coerceAtLeast(1)
+                    val positionChanged = playbackPositionMs != lastPlaybackPositionMs
+                    val readyCountChanged = readyWindowCount != lastReadyWindowCount
+                    if (positionChanged || readyCountChanged) {
+                        service.updateControl(
+                            SourceSeparationMultiStemExecutionCodec.encodeControlCommand(
+                                SourceSeparationMultiStemIpcControlCommand(
+                                    runId = descriptor.runId,
+                                    processGeneration = descriptor.processGeneration,
+                                    action = SourceSeparationMultiStemIpcControlAction.Update,
+                                    hasPlaybackPositionUpdate = positionChanged,
+                                    playbackPositionMs = playbackPositionMs
+                                        .takeIf { positionChanged },
+                                    playbackReadyWindowCount = readyWindowCount
+                                        .takeIf { readyCountChanged },
+                                ),
+                            ),
+                        )
+                        lastPlaybackPositionMs = playbackPositionMs
+                        lastReadyWindowCount = readyWindowCount
                     }
                     Thread.sleep(controlPollMs)
                 } catch (error: Throwable) {
@@ -260,6 +288,7 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                         (response.message ?: ""),
                 )
             }
+            controlThread.start()
             check(terminal.await(timeoutMs, TimeUnit.MILLISECONDS)) {
                 "Timed out waiting for remote multi-stem execution."
             }

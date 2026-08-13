@@ -62,6 +62,10 @@ Separation commands:
 - `separation.blend` with `blend:f`; optional `persist:b`
 - `separation.stem_gains` with all active stems encoded as one string, for example `gains:s:drums=1,bass=0.5,other=0,vocals=1`; optional `persist:b`
 - `separation.start`, `separation.resume`, `separation.pause`, `separation.cancel`
+- `separation.prestart` with one of `song_id:l`, `path:s`, or `query:s`;
+  optional `first:b` and `ready_windows:i` (default 2). This follows the same
+  next-song preprocessing path as playback and pauses after the requested
+  start-window waterline is ready.
 - `separation.marker` with `marker:s`
 - `separation.samples`, `separation.samples.clear`
 

@@ -266,6 +266,32 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
             val started = SourceSeparationForegroundWorkerDebugBridge.startCurrentSong()
             booleanResult(started, "worker_unavailable", "No current song is attached to the worker.")
         }
+        "separation.prestart" -> {
+            val song = resolveSong(args)
+            val readyWindowCount = args.optionalInt("ready_windows") ?: 2
+            require(readyWindowCount > 0) { "ready_windows must be greater than zero." }
+            val started = kotlinx.coroutines.runBlocking {
+                SourceSeparationForegroundWorkerDebugBridge.preStartSong(
+                    song = song,
+                    readyWindowCount = readyWindowCount,
+                )
+            }
+            if (started) {
+                SourceSeparationDebugProtocol.success(
+                    JSONObject()
+                        .put("requestedSong", song.toJson())
+                        .put("readyWindows", readyWindowCount),
+                )
+            } else {
+                SourceSeparationDebugProtocol.failure(
+                    "prestart_not_scheduled",
+                    "The song is already ready, active, or playback no longer owns the worker.",
+                    JSONObject()
+                        .put("requestedSong", song.toJson())
+                        .put("readyWindows", readyWindowCount),
+                )
+            }
+        }
         "separation.pause" -> {
             val paused = SourceSeparationForegroundWorkerDebugBridge.pause()
             booleanResult(paused, "worker_unavailable", "No source-separation worker is available.")

@@ -1719,12 +1719,36 @@ gate, not a prerequisite for this lifecycle fix.
 
 #### Phase 8C: Shared scheduling and playback-demand progress
 
-- [ ] Give HTDemucs the same scheduler snapshot, playback position, ready
-  waterline, prefetch stop, timing, and source-decode diagnostics contract used
-  by MDX.
-- [ ] Stop next-song work after the requested ready window count and resume only
-  when demand changes.
-- [ ] Keep timing statistics separated by family, model/profile, and backend.
+##### Phase 8C1: Scheduler and demand contract (complete)
+
+- [x] Give HTDemucs the same family-neutral scheduler snapshot, playback
+  position, ready waterline, segment priority, and per-window timing fields used
+  by MDX. The multi-stem IPC protocol is now version 3 and forwards playback
+  position and the requested ready-window count only when those values change.
+- [x] Keep the HTDemucs ordered OLA constraint explicit: this stage carries
+  playback demand and waterline information, but does not claim random-access
+  execution after a seek.
+
+##### Phase 8C2: Bounded next-song prefetch (complete)
+
+- [x] Stop next-song work after the requested ready window count, including
+  short songs whose total segment count is below the configured waterline.
+- [x] Do not let ordinary current-song state refreshes pause a different
+  next-song prefetch. A real current-song demand or manual request still
+  preempts it through the existing request-priority path.
+- [x] Add the Debug-only `separation.prestart` ADB command so the product
+  prefetch route can be exercised without UI timing assumptions.
+- [x] On S10 (`SM-G9730`, API 31, arm64), the provider accepted an official
+  HTDemucs 4-stem `Colour Spectrum` prestart with `ready_windows=2`; the run
+  entered `Paused(song=99169)` without being canceled or reset. The initial
+  attempt exposed and fixed the current-song refresh preemption bug. A clean
+  post-fix APK verification remained at `2/11` after an additional 35-second
+  observation, with only the first two window samples recorded.
+
+##### Phase 8C3: Diagnostics and family-specific estimates (pending)
+
+- [ ] Add source-decode diagnostics to HTDemucs progress where meaningful and
+  keep timing statistics separated by family, model/profile, and backend.
 
 #### Phase 8D: Product management parity
 

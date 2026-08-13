@@ -34,6 +34,8 @@ internal class HtdemucsSourceSeparationEngine(
         onProgress: (MdxRangeProgress) -> Unit = {},
         onPrepared: (SourceSeparationCacheManifest) -> Unit = {},
         onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit = { _, _ -> },
+        playbackPositionMsProvider: () -> Long? = { null },
+        playbackReadyWindowCountProvider: () -> Int = { 2 },
         shouldPause: () -> Boolean = { false },
         pauseReasonProvider: () -> SourceSeparationPauseReason = {
             SourceSeparationPauseReason.Standard
@@ -88,6 +90,8 @@ internal class HtdemucsSourceSeparationEngine(
                 onProgress = onProgress,
                 onPrepared = onPrepared,
                 onSegmentStateChanged = onSegmentStateChanged,
+                playbackPositionMsProvider = playbackPositionMsProvider,
+                playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
                 shouldPause = shouldPause,
                 pauseReasonProvider = pauseReasonProvider,
                 shouldCancel = shouldCancel,
@@ -104,6 +108,8 @@ internal class HtdemucsSourceSeparationEngine(
         onProgress: (MdxRangeProgress) -> Unit,
         onPrepared: (SourceSeparationCacheManifest) -> Unit,
         onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit,
+        playbackPositionMsProvider: () -> Long?,
+        playbackReadyWindowCountProvider: () -> Int,
         shouldPause: () -> Boolean,
         pauseReasonProvider: () -> SourceSeparationPauseReason,
         shouldCancel: () -> Boolean,
@@ -128,6 +134,8 @@ internal class HtdemucsSourceSeparationEngine(
                         onSegmentStateChanged(index, state)
                     },
                     onProgress = onProgress,
+                    playbackPositionMsProvider = playbackPositionMsProvider,
+                    playbackReadyWindowCountProvider = playbackReadyWindowCountProvider,
                     shouldPause = shouldPause,
                     pauseReasonProvider = pauseReasonProvider,
                     shouldCancel = shouldCancel,

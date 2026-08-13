@@ -6,6 +6,7 @@ import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -195,6 +196,43 @@ class HtdemucsRangeRunnerTest {
 
         assertTrue(source.readCount > HtdemucsTrackWindowPlanner.plans(frames).size)
         assertTrue(root.resolve("work/htdemucs-normalization-v1.bin").length() > 16L)
+    }
+
+    @Test
+    fun `progress exposes changing playback demand and ready waterline`() {
+        val frames = HtdemucsPipelineAdapter.WINDOW_SAMPLES +
+            HtdemucsTrackWindowPlanner.STRIDE_SAMPLES * 3 + 7_000
+        val root = temporary.newFolder("scheduler-progress")
+        val positionMs = AtomicLong(0L)
+        val progress = mutableListOf<HtdemucsRangeProgress>()
+        val firstWindowEndMs =
+            (HtdemucsTrackWindowPlanner.STRIDE_SAMPLES * 1_000L) /
+                HtdemucsPipelineAdapter.SAMPLE_RATE + 1L
+
+        HtdemucsRangeRunner(
+            FakeTrackSource(frames),
+            CopyingSession(listOf("drums", "bass", "other", "vocals")),
+        ).run(
+            outputDirectory = root.resolve("work"),
+            segmentDirectory = root.resolve("segments"),
+            onProgress = { snapshot ->
+                progress += snapshot
+                if (snapshot.stage == "Processed window 1/${HtdemucsTrackWindowPlanner.plans(frames).size}") {
+                    positionMs.set(firstWindowEndMs)
+                }
+            },
+            playbackPositionMsProvider = { positionMs.get() },
+            playbackReadyWindowCountProvider = { 2 },
+        )
+
+        val shifted = progress.first {
+            it.scheduler?.playbackSegmentIndex == 1
+        }
+        assertEquals(2, shifted.scheduler?.readyWindowCount)
+        assertEquals(1, shifted.scheduler?.playbackSegmentIndex)
+        assertEquals(2, shifted.scheduler?.playbackReadyWindowPendingCount)
+        val ready = progress.last { it.completedWindows >= 2 && it.scheduler != null }
+        assertTrue(ready.scheduler!!.playbackReadyWindowReadyCount >= 1)
     }
 
     private open class FakeTrackSource(

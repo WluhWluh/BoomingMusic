@@ -14,6 +14,7 @@ import com.mardous.booming.separation.cache.SourceSeparationCacheRelativePath
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSongLocator
 import com.mardous.booming.separation.model.MdxRangeSeparationResult
+import com.mardous.booming.separation.model.SourceSeparationSegmentSchedulerProgress
 import com.mardous.booming.separation.model.contract.StemId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -469,20 +470,8 @@ internal data class SourceSeparationExecutionProgress(
     val scheduler: SourceSeparationExecutionSchedulerProgress?,
 )
 
-@Serializable
-internal data class SourceSeparationExecutionSchedulerProgress(
-    val playbackSegmentIndex: Int?,
-    val playbackSegmentState: String?,
-    val nextSegmentIndex: Int?,
-    val nextSegmentState: String?,
-    val processingSegmentIndex: Int,
-    val priority: String?,
-    val readySegments: Int,
-    val totalSegments: Int,
-    val readyWindowCount: Int,
-    val playbackReadyWindowReadyCount: Int,
-    val playbackReadyWindowPendingCount: Int,
-)
+internal typealias SourceSeparationExecutionSchedulerProgress =
+    SourceSeparationSegmentSchedulerProgress
 
 @Serializable
 internal data class SourceSeparationExecutionSourceDecodeDiagnostics(

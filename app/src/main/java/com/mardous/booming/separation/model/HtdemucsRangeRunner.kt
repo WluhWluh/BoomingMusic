@@ -5,6 +5,7 @@ import com.mardous.booming.separation.audio.Pcm16WavFileReader
 import com.mardous.booming.separation.SourceSeparationPauseReason
 import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
+import com.mardous.booming.separation.cache.SourceSeparationSegmentScheduler
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.contract.StemId
 import java.io.File
@@ -68,6 +69,8 @@ internal data class HtdemucsRangeProgress(
     val completedWindows: Int,
     val totalWindows: Int,
     val stage: String,
+    val completedWindowElapsedMs: Long? = null,
+    val scheduler: SourceSeparationSegmentSchedulerProgress? = null,
 )
 
 internal class HtdemucsRangeRunner(
@@ -81,6 +84,8 @@ internal class HtdemucsRangeRunner(
         onPrepared: (HtdemucsRangePreparation) -> Unit = {},
         onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit = { _, _ -> },
         onProgress: (HtdemucsRangeProgress) -> Unit = {},
+        playbackPositionMsProvider: () -> Long? = { null },
+        playbackReadyWindowCountProvider: () -> Int = { DEFAULT_READY_WINDOW_COUNT },
         shouldPause: () -> Boolean = { false },
         pauseReasonProvider: () -> SourceSeparationPauseReason = {
             SourceSeparationPauseReason.Standard
@@ -138,7 +143,21 @@ internal class HtdemucsRangeRunner(
                 segmentDirectory = segmentDirectory,
                 requireWorkspaceAvailable = requireWorkspaceAvailable,
             )
-            onProgress(HtdemucsRangeProgress(completedWindows, plans.size, "Completed"))
+            onProgress(
+                HtdemucsRangeProgress(
+                    completedWindows = completedWindows,
+                    totalWindows = plans.size,
+                    stage = "Completed",
+                    scheduler = currentPlan.schedulerProgress(
+                        playbackSegmentIndex = playbackSegmentIndex(
+                            playbackPositionMsProvider(),
+                            currentPlan,
+                        ),
+                        processingSegmentIndex = plans.lastIndex,
+                        readyWindowCount = playbackReadyWindowCountProvider(),
+                    ),
+                ),
+            )
             return HtdemucsRangeResult(
                 stemFiles = stemFiles,
                 outputFrameCount = source.frameCount,
@@ -205,6 +224,7 @@ internal class HtdemucsRangeRunner(
                 initialBufferStart = plans[firstPlanIndex].offset,
             )
             plans.drop(firstPlanIndex).forEach { plan ->
+                val windowStartedAtNanos = System.nanoTime()
                 throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
                 requireWorkspaceAvailable()
                 if (!currentPlan.segments[plan.index].state.isPlaybackReady) {
@@ -214,11 +234,32 @@ internal class HtdemucsRangeRunner(
                     )
                     onSegmentStateChanged(plan.index, SourceSeparationSegmentState.Running)
                 }
+                val playbackIndex = playbackSegmentIndex(
+                    playbackPositionMsProvider(),
+                    currentPlan,
+                )
+                val readyWindowCount = playbackReadyWindowCountProvider().coerceAtLeast(1)
+                val selectedPriority = SourceSeparationSegmentScheduler
+                    .prioritize(
+                        segmentPlan = currentPlan,
+                        playbackFrame = playbackIndex
+                            ?.let { currentPlan.segments[it].playbackStartFrame }
+                            ?: plan.offset,
+                        readyWindowCount = readyWindowCount,
+                    )
+                    .firstOrNull { it.segment.index == plan.index }
+                    ?.priority
                 onProgress(
                     HtdemucsRangeProgress(
-                        completedWindows,
-                        plans.size,
-                        "Processing window ${plan.index + 1}/${plans.size}",
+                        completedWindows = completedWindows,
+                        totalWindows = plans.size,
+                        stage = "Processing window ${plan.index + 1}/${plans.size}",
+                        scheduler = currentPlan.schedulerProgress(
+                            playbackSegmentIndex = playbackIndex,
+                            processingSegmentIndex = plan.index,
+                            readyWindowCount = readyWindowCount,
+                            priority = selectedPriority,
+                        ),
                     ),
                 )
                 val padded = source.readPlanarStereo(
@@ -245,6 +286,24 @@ internal class HtdemucsRangeRunner(
                         )
                         onSegmentStateChanged(segmentIndex, SourceSeparationSegmentState.Ready)
                         completedWindows += 1
+                        onProgress(
+                            HtdemucsRangeProgress(
+                                completedWindows = completedWindows,
+                                totalWindows = plans.size,
+                                stage = "Processed window ${segmentIndex + 1}/${plans.size}",
+                                completedWindowElapsedMs =
+                                    (System.nanoTime() - windowStartedAtNanos) / 1_000_000L,
+                                scheduler = currentPlan.schedulerProgress(
+                                    playbackSegmentIndex = playbackSegmentIndex(
+                                        playbackPositionMsProvider(),
+                                        currentPlan,
+                                    ),
+                                    processingSegmentIndex = segmentIndex,
+                                    readyWindowCount = playbackReadyWindowCountProvider(),
+                                    priority = selectedPriority,
+                                ),
+                            ),
+                        )
                     }
                 }
             }
@@ -266,7 +325,21 @@ internal class HtdemucsRangeRunner(
                 completedWindows += 1
             }
             require(completedWindows == plans.size)
-            onProgress(HtdemucsRangeProgress(completedWindows, plans.size, "Completed"))
+            onProgress(
+                HtdemucsRangeProgress(
+                    completedWindows = completedWindows,
+                    totalWindows = plans.size,
+                    stage = "Completed",
+                    scheduler = currentPlan.schedulerProgress(
+                        playbackSegmentIndex = playbackSegmentIndex(
+                            playbackPositionMsProvider(),
+                            currentPlan,
+                        ),
+                        processingSegmentIndex = plans.lastIndex,
+                        readyWindowCount = playbackReadyWindowCountProvider(),
+                    ),
+                ),
+            )
         } finally {
             closeAll(writers)
         }
@@ -431,6 +504,18 @@ internal class HtdemucsRangeRunner(
         if (shouldCancel()) throw CancellationException("HTDemucs range run was canceled.")
     }
 
+    private fun playbackSegmentIndex(
+        positionMs: Long?,
+        plan: SourceSeparationSegmentPlan,
+    ): Int? {
+        val position = positionMs?.takeIf { it >= 0L } ?: return null
+        val frame = (position.toDouble() * HtdemucsPipelineAdapter.SAMPLE_RATE / 1_000.0)
+            .toLong()
+            .coerceIn(0L, (source.frameCount - 1).toLong())
+            .toInt()
+        return plan.segmentIndexForFrame(frame)
+    }
+
     private fun interruptProbe(
         shouldPause: () -> Boolean,
         pauseReasonProvider: () -> SourceSeparationPauseReason,
@@ -445,6 +530,7 @@ internal class HtdemucsRangeRunner(
     private companion object {
         const val NORMALIZATION_READ_FRAMES = 262_144
         const val NORMALIZATION_CHECKPOINT_FILE_NAME = "htdemucs-normalization-v1.bin"
+        const val DEFAULT_READY_WINDOW_COUNT = 2
     }
 }
 

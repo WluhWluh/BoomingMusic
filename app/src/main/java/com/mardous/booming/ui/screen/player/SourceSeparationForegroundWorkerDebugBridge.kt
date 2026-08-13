@@ -28,6 +28,9 @@ object SourceSeparationForegroundWorkerDebugBridge {
         }.getOrDefault(false)
     }
 
+    suspend fun preStartSong(song: Song, readyWindowCount: Int): Boolean =
+        worker().preStartSong(song, readyWindowCount)
+
     fun pause(): Boolean {
         viewModelRef?.get()?.let { viewModel ->
             viewModel.pauseSourceSeparation()

@@ -11,11 +11,12 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationCacheRuntimeRecor
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSongLocator
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheSourceDiagnostics
 import com.mardous.booming.separation.model.contract.StemId
+import com.mardous.booming.separation.model.SourceSeparationSegmentSchedulerProgress
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-internal const val SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION = 2
+internal const val SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION = 3
 
 /** Wire descriptor for the multi-stem worker; it intentionally has no MDX fields. */
 @Serializable
@@ -111,6 +112,8 @@ internal data class SourceSeparationMultiStemExecutionRuntime(
     val runClass: SourceSeparationExecutionRunClass,
     val backgroundPolicy: SourceSeparationBackgroundPolicy,
     val windowDecodeEnabled: Boolean,
+    val initialPlaybackPositionMs: Long? = null,
+    val initialPlaybackReadyWindowCount: Int = 2,
 ) {
     init {
         require(executionProfileId.isNotBlank()) {
@@ -118,6 +121,12 @@ internal data class SourceSeparationMultiStemExecutionRuntime(
         }
         require(backgroundPolicy == runClass.backgroundPolicy) {
             "Multi-stem execution background policy does not match its run class."
+        }
+        require(initialPlaybackPositionMs == null || initialPlaybackPositionMs >= 0L) {
+            "Multi-stem initial playback position is invalid."
+        }
+        require(initialPlaybackReadyWindowCount > 0) {
+            "Multi-stem initial playback ready-window count is invalid."
         }
     }
 }
@@ -202,10 +211,13 @@ internal sealed class SourceSeparationMultiStemExecutionEventPayload {
         val completedWindows: Int,
         val totalWindows: Int,
         val stage: String? = null,
+        val completedWindowElapsedMs: Long? = null,
+        val scheduler: SourceSeparationSegmentSchedulerProgress? = null,
     ) : SourceSeparationMultiStemExecutionEventPayload() {
         init {
             require(completedWindows >= 0 && totalWindows > 0 &&
                 completedWindows <= totalWindows)
+            require(completedWindowElapsedMs == null || completedWindowElapsedMs >= 0L)
         }
     }
 
@@ -372,6 +384,7 @@ internal data class SourceSeparationMultiStemIpcActiveRunResponse(
 
 @Serializable
 internal enum class SourceSeparationMultiStemIpcControlAction {
+    Update,
     Pause,
     Cancel,
 }
@@ -383,12 +396,20 @@ internal data class SourceSeparationMultiStemIpcControlCommand(
     val processGeneration: Long,
     val action: SourceSeparationMultiStemIpcControlAction,
     val pauseReason: com.mardous.booming.separation.SourceSeparationPauseReason? = null,
+    val hasPlaybackPositionUpdate: Boolean = false,
+    val playbackPositionMs: Long? = null,
+    val playbackReadyWindowCount: Int? = null,
 ) {
     init {
         require(protocolVersion == SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION)
         require(runId.isNotBlank() && processGeneration > 0L)
         require((action == SourceSeparationMultiStemIpcControlAction.Pause) ==
             (pauseReason != null))
+        require(hasPlaybackPositionUpdate || playbackPositionMs == null) {
+            "Multi-stem playback position was supplied without an update marker."
+        }
+        require(playbackPositionMs == null || playbackPositionMs >= 0L)
+        require(playbackReadyWindowCount == null || playbackReadyWindowCount > 0)
     }
 }
 

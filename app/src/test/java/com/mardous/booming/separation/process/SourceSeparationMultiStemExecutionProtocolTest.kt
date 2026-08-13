@@ -10,6 +10,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SourceSeparationMultiStemExecutionProtocolTest {
@@ -117,6 +118,57 @@ class SourceSeparationMultiStemExecutionProtocolTest {
                 state = state,
             )
         }
+    }
+
+    @Test
+    fun `progress and demand control preserve scheduler waterline`() {
+        val scheduler = com.mardous.booming.separation.model
+            .SourceSeparationSegmentSchedulerProgress(
+                playbackSegmentIndex = 1,
+                playbackSegmentState = "Queued",
+                nextSegmentIndex = 2,
+                nextSegmentState = "Ready",
+                processingSegmentIndex = 1,
+                priority = "CurrentPlayback",
+                readySegments = 2,
+                totalSegments = 4,
+                readyWindowCount = 2,
+                playbackReadyWindowReadyCount = 1,
+                playbackReadyWindowPendingCount = 1,
+            )
+        val event = SourceSeparationMultiStemExecutionEvent(
+            runId = fixture().runId,
+            processGeneration = 3L,
+            sequence = 1L,
+            payload = SourceSeparationMultiStemExecutionEventPayload.Progress(
+                completedWindows = 1,
+                totalWindows = 4,
+                stage = "Processed window 1/4",
+                completedWindowElapsedMs = 123L,
+                scheduler = scheduler,
+            ),
+        )
+        val decodedEvent = SourceSeparationMultiStemExecutionCodec.decodeEvent(
+            SourceSeparationMultiStemExecutionCodec.encodeEvent(event),
+        )
+        val progress = decodedEvent.payload as
+            SourceSeparationMultiStemExecutionEventPayload.Progress
+        assertEquals(123L, progress.completedWindowElapsedMs)
+        assertEquals(scheduler, progress.scheduler)
+
+        val command = SourceSeparationMultiStemIpcControlCommand(
+            runId = fixture().runId,
+            processGeneration = 3L,
+            action = SourceSeparationMultiStemIpcControlAction.Update,
+            hasPlaybackPositionUpdate = true,
+            playbackPositionMs = 5_000L,
+            playbackReadyWindowCount = 3,
+        )
+        val decodedCommand = SourceSeparationMultiStemExecutionCodec.decodeControlCommand(
+            SourceSeparationMultiStemExecutionCodec.encodeControlCommand(command),
+        )
+        assertEquals(command, decodedCommand)
+        assertTrue(decodedCommand.playbackReadyWindowCount == 3)
     }
 
     private fun fixture(): SourceSeparationMultiStemExecutionDescriptor {
