@@ -1,5 +1,8 @@
 package com.mardous.booming.ui.screen.player
 
+import com.mardous.booming.separation.SourceSeparationExecutionModelIdentity
+import com.mardous.booming.separation.SourceSeparationExecutionSelectionSnapshot
+import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntry
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
@@ -70,14 +73,16 @@ class SourceSeparationModelAwareCacheManagementStateTest {
     fun `only an exact installed inactive cache model can be selected`() {
         val installed = entry(cacheKeySeed = 'a', modelId = "model-a")
         val activeState = SourceSeparationModelAwareCacheManagementUiState(
-            activeModelId = installed.modelId,
-            activeArtifactSha256 = installed.artifactSha256,
-            activeProfileId = null,
+            activeSelection = selection(installed.executionIdentity),
         )
 
         assertFalse(installed.canUseModel(activeState))
         assertTrue(
-            installed.copy(artifactSha256 = "b".repeat(64)).canUseModel(activeState),
+            installed.copy(
+                executionIdentity = installed.executionIdentity.copy(
+                    artifactSha256 = "b".repeat(64),
+                ),
+            ).canUseModel(activeState),
         )
         assertFalse(
             installed.copy(
@@ -90,14 +95,39 @@ class SourceSeparationModelAwareCacheManagementStateTest {
     fun `custom profile selection compares the exact profile revision`() {
         val installed = entry(cacheKeySeed = 'a', modelId = "custom-model")
         val activeState = SourceSeparationModelAwareCacheManagementUiState(
-            activeModelId = installed.modelId,
-            activeArtifactSha256 = installed.artifactSha256,
-            activeProfileId = installed.profileRevisionId,
+            activeSelection = selection(installed.executionIdentity),
         )
 
         assertFalse(installed.canUseModel(activeState))
         assertTrue(
-            installed.copy(profileRevisionId = "other-profile").canUseModel(activeState),
+            installed.copy(
+                executionIdentity = installed.executionIdentity.copy(
+                    profileRevisionId = "other-profile",
+                ),
+            ).canUseModel(activeState),
+        )
+    }
+
+    @Test
+    fun `cache model selection compares family and full execution identity`() {
+        val mdx = entry(cacheKeySeed = 'a', modelId = "shared-model")
+        val activeState = SourceSeparationModelAwareCacheManagementUiState(
+            activeSelection = selection(mdx.executionIdentity),
+        )
+
+        assertTrue(
+            mdx.copy(
+                executionIdentity = mdx.executionIdentity.copy(
+                    family = SourceSeparationModelFamily.Htdemucs,
+                ),
+            ).canUseModel(activeState),
+        )
+        assertTrue(
+            mdx.copy(
+                executionIdentity = mdx.executionIdentity.copy(
+                    contractFingerprint = "f".repeat(64),
+                ),
+            ).canUseModel(activeState),
         )
     }
 
@@ -113,12 +143,19 @@ class SourceSeparationModelAwareCacheManagementStateTest {
         title = "Song",
         artist = "Artist",
         album = "Album",
-        modelId = modelId,
+        executionIdentity = SourceSeparationExecutionModelIdentity(
+            family = SourceSeparationModelFamily.Mdx,
+            modelId = modelId,
+            artifactSha256 = cacheKeySeed.toString().repeat(64),
+            contractId = "$modelId-contract",
+            contractSchemaVersion = 2,
+            contractFingerprint = "d".repeat(64),
+            profileRevisionId = "$modelId-profile",
+            pipelineId = "mdx-windowed-overlap-add",
+            pipelineVersion = 2,
+            renderProfileId = "mdx-fp32-render-v1",
+        ),
         displayName = modelId,
-        artifactSha256 = cacheKeySeed.toString().repeat(64),
-        contractId = "$modelId-contract",
-        profileRevisionId = "$modelId-profile",
-        renderProfileId = "mdx-fp32-render-v1",
         state = state,
         modelAvailability = SourceSeparationCacheModelAvailability.InstalledExact,
         readySegments = null,
@@ -127,5 +164,14 @@ class SourceSeparationModelAwareCacheManagementStateTest {
         sizeBytes = sizeBytes,
         updatedAtEpochMs = 1L,
         lastAccessedAtEpochMs = 2L,
+    )
+
+    private fun selection(
+        identity: SourceSeparationExecutionModelIdentity,
+    ) = SourceSeparationExecutionSelectionSnapshot(
+        family = identity.family,
+        modelId = identity.modelId,
+        identity = identity,
+        generation = 1L,
     )
 }

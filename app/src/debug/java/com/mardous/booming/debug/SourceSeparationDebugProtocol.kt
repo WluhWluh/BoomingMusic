@@ -75,6 +75,7 @@ internal object SourceSeparationDebugProtocol {
             "npu_enabled:boolean? (false only)",
         ),
         "cache.list" to emptyList(),
+        "cache.activate" to listOf("cache_key:string|current:boolean=true"),
         "cache.delete" to listOf("cache_key:string|current:boolean=true"),
         "cache.delete_all" to emptyList(),
         "cache.promote" to listOf("cache_key:string|current:boolean=true"),

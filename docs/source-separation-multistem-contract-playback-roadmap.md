@@ -1754,7 +1754,7 @@ gate, not a prerequisite for this lifecycle fix.
 
 - [x] Make Quick Setup understand an active HTDemucs selection and never commit
   a hidden MDX recommendation over it.
-- [ ] Make Cache Management report, activate, and delete MDX and HTDemucs exact
+- [x] Make Cache Management report, activate, and delete MDX and HTDemucs exact
   models through one family-aware action contract.
 
 Quick Setup readiness, planning, commit, and rollback now carry an explicit
@@ -1775,6 +1775,26 @@ items. `setup.execute` completed with no downloads; before and after retained
 generation 7, artifact
 `9855718072ee819bacacdb6b670bd6257feca172bf27ac1d72dff994cdbeed81`, and
 contract `htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0@1`.
+
+Cache inventory entries now carry the complete family-aware execution identity:
+family, model/artifact, contract schema/fingerprint, profile, pipeline, and
+render profile. The Cache Management use action and Debug-only `cache.activate`
+command share one exact-model activator. It validates the installed MDX or
+HTDemucs pair before pausing superseded work, applies the family-specific
+selection transaction, and rejects success unless the unified selection
+resolver matches every cache identity field. Cache deletion remains
+family-neutral and continues through the existing runtime facade, so selecting
+or deleting a song cache never removes model weights. Focused repository,
+activator, state, command-table, and AndroidTest compilation gates pass.
+
+On S10 (`SM-G9730`, API 31, arm64), the retained product cache inventory
+reported one exact MDX cache and exact four-/six-stem HTDemucs caches with their
+correct families. Activating the already-current four-stem cache was a no-op at
+generation 7. Activating the retained 9662 MDX cache switched families and
+advanced generation 7 to 8; activating the guitar-ft six-stem cache advanced 8
+to 9; restoring the four-stem cache advanced 9 to 10. Every operation returned
+`exactIdentityActive=true`, and the MDX switch also released the previously
+active multi-stem playback output.
 
 #### Phase 8E: One remote execution authority
 

@@ -66,6 +66,18 @@ data class SourceSeparationExecutionModelIdentity(
             pipelineId == identity.pipelineId &&
             pipelineVersion == identity.pipelineVersion &&
             renderProfileId == identity.renderProfileId
+
+    fun matches(identity: SourceSeparationExecutionModelIdentity): Boolean =
+        family == identity.family &&
+            modelId == identity.modelId &&
+            artifactSha256.equals(identity.artifactSha256, ignoreCase = true) &&
+            contractId == identity.contractId &&
+            contractSchemaVersion == identity.contractSchemaVersion &&
+            contractFingerprint.equals(identity.contractFingerprint, ignoreCase = true) &&
+            profileRevisionId == identity.profileRevisionId &&
+            pipelineId == identity.pipelineId &&
+            pipelineVersion == identity.pipelineVersion &&
+            renderProfileId == identity.renderProfileId
 }
 
 data class SourceSeparationExecutionSelectionSnapshot(
@@ -88,6 +100,9 @@ data class SourceSeparationExecutionSelectionSnapshot(
         get() = identity != null
 
     fun matches(identity: SourceSeparationCacheIdentity): Boolean =
+        this.identity?.matches(identity) == true
+
+    fun matches(identity: SourceSeparationExecutionModelIdentity): Boolean =
         this.identity?.matches(identity) == true
 
     companion object {

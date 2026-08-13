@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.HtdemucsSourceSeparationEngine
+import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.model.contract.SourceSeparationInstalledMultiStemModel
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
 import java.io.RandomAccessFile
@@ -12,6 +13,45 @@ import org.junit.rules.TemporaryFolder
 class SourceSeparationMultiStemCacheAvailabilityProviderTest {
     @get:Rule
     val temporary = TemporaryFolder()
+
+    @Test
+    fun `multistem manifest entry reports its full family-aware execution identity`() {
+        val fixture = fixture()
+        val store = SourceSeparationCacheStore(
+            SourceSeparationCacheRoot(
+                directory = temporary.newFolder(),
+                location = SourceSeparationCacheRootLocation.InternalCache,
+            ),
+        )
+        store.writeManifest(fixture.manifest)
+        val repository = SourceSeparationModelAwareCacheRepository(
+            store = store,
+            modelAvailability = SourceSeparationMultiStemCacheAvailabilityProvider {
+                fixture.installed
+            },
+        )
+
+        val entry = repository.entries().single()
+
+        assertEquals(SourceSeparationModelFamily.Htdemucs, entry.modelFamily)
+        assertEquals(fixture.manifest.identity.modelId, entry.executionIdentity.modelId)
+        assertEquals(
+            fixture.manifest.identity.artifactSha256,
+            entry.executionIdentity.artifactSha256,
+        )
+        assertEquals(
+            fixture.manifest.identity.contractFingerprint,
+            entry.executionIdentity.contractFingerprint,
+        )
+        assertEquals(
+            fixture.manifest.identity.pipelineId,
+            entry.executionIdentity.pipelineId,
+        )
+        assertEquals(
+            fixture.manifest.identity.renderProfileId,
+            entry.executionIdentity.renderProfileId,
+        )
+    }
 
     @Test
     fun `exact installed release contract admits its multistem cache`() {

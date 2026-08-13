@@ -3,6 +3,7 @@ package com.mardous.booming.separation.cache.v2
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
@@ -22,6 +23,26 @@ class SourceSeparationModelAwareCacheRepositoryTest {
 
     @get:Rule
     val temporary = TemporaryFolder()
+
+    @Test
+    fun `MDX manifest entry reports its full family-aware execution identity`() {
+        val store = store()
+        val manifest = completedManifest(store, "uvr_mdxnet_3_9662", 'a')
+        store.writeManifest(manifest)
+
+        val entry = repository(store).entries().single()
+
+        assertEquals(SourceSeparationModelFamily.Mdx, entry.modelFamily)
+        assertEquals(manifest.identity.modelId, entry.executionIdentity.modelId)
+        assertEquals(manifest.identity.artifactSha256, entry.executionIdentity.artifactSha256)
+        assertEquals(manifest.identity.contractId, entry.executionIdentity.contractId)
+        assertEquals(
+            manifest.identity.contractFingerprint,
+            entry.executionIdentity.contractFingerprint,
+        )
+        assertEquals(manifest.identity.pipelineId, entry.executionIdentity.pipelineId)
+        assertEquals(manifest.identity.renderProfileId, entry.executionIdentity.renderProfileId)
+    }
 
     @Test
     fun `normal lookup never substitutes another model cache for the same song`() {

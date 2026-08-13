@@ -82,6 +82,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationProductCacheAvail
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackResolver
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.SourceSeparationExecutionSelectionResolver
+import com.mardous.booming.separation.SourceSeparationCacheModelActivator
 import com.mardous.booming.separation.SourceSeparationSelectionGenerationStore
 import com.mardous.booming.separation.SourceSeparationModelMixSettingsStore
 import com.mardous.booming.separation.SourceSeparationMultiStemRuntimeResolver
@@ -529,6 +530,17 @@ private val viewModule = module {
         )
     }
 
+    single {
+        val worker = get<SourceSeparationForegroundWorkerCoordinator>()
+        SourceSeparationCacheModelActivator(
+            presetRepository = get(),
+            multiStemInstaller = get(),
+            multiStemSelectionStore = get(),
+            executionSelectionResolver = get(),
+            pauseForModelSupersession = worker::pauseForActiveModelSupersession,
+        )
+    }
+
     viewModel {
         LibraryViewModel(repository = get(), inclExclDao = get(), customPlaylistImageManager = get())
     }
@@ -568,7 +580,7 @@ private val viewModule = module {
     viewModel {
         SourceSeparationModelAwareCacheManagementViewModel(
             runtime = get(),
-            presetRepository = get(),
+            modelActivator = get(),
         )
     }
 

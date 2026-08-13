@@ -86,12 +86,12 @@ npu_enabled:b:false
 
 Inventory and mutation commands:
 
-- `cache.list`, `cache.delete`, `cache.delete_all`, `cache.promote`, `cache.cleanup`
+- `cache.list`, `cache.activate`, `cache.delete`, `cache.delete_all`, `cache.promote`, `cache.cleanup`
 - `model.list`, `model.install`, `model.select`, `model.delete`
 - `runtime.list`, `runtime.install`, `runtime.repair`, `runtime.activate`, `runtime.remove`
 - `setup.plan`, `setup.execute`
 
-Cache commands accept `cache_key:s:<key>` or `current:b:true`. Model selection/deletion accepts `model_id:s:<id>` or `sha256:s:<hash>`; imported MDX custom profiles may add `profile_id:s:<id>`. Runtime mutations accept `runtime_kind:s:cpu|gpu` and optional `component_id:s:<id>` and are limited to the current process ABI. NPU is intentionally reported as unsupported.
+Cache activation/deletion/promotion commands accept `cache_key:s:<key>` or `current:b:true`. `cache.activate` follows the Cache Management action contract and requires the exact installed MDX or HTDemucs artifact and executable contract carried by that cache. Model selection/deletion accepts `model_id:s:<id>` or `sha256:s:<hash>`; imported MDX custom profiles may add `profile_id:s:<id>`. Runtime mutations accept `runtime_kind:s:cpu|gpu` and optional `component_id:s:<id>` and are limited to the current process ABI. NPU is intentionally reported as unsupported.
 
 Cache deletion follows the UI path: disable current separated output, cancel matching work, delete through the runtime facade, and notify playback. Runtime and model downloads are large; inspect inventory before mutating a device.
 

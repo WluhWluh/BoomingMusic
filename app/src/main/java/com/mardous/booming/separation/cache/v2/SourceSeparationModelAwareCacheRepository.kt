@@ -1,6 +1,8 @@
 package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.SourceSeparationStemGainPolicy
+import com.mardous.booming.separation.SourceSeparationExecutionModelIdentity
+import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.contract.StemDescriptor
 import com.mardous.booming.separation.model.contract.StemSemanticId
@@ -33,12 +35,23 @@ class SourceSeparationModelAwareCacheRepository(
                 title = manifest.song.title,
                 artist = manifest.song.artist,
                 album = manifest.song.album,
-                modelId = manifest.identity.modelId,
+                executionIdentity = SourceSeparationExecutionModelIdentity(
+                    family = if (manifest.contract.multiTensorContract == null) {
+                        SourceSeparationModelFamily.Mdx
+                    } else {
+                        SourceSeparationModelFamily.Htdemucs
+                    },
+                    modelId = manifest.identity.modelId,
+                    artifactSha256 = manifest.identity.artifactSha256,
+                    contractId = manifest.identity.contractId,
+                    contractSchemaVersion = manifest.identity.contractSchemaVersion,
+                    contractFingerprint = manifest.identity.contractFingerprint,
+                    profileRevisionId = manifest.identity.profileRevisionId,
+                    pipelineId = manifest.identity.pipelineId,
+                    pipelineVersion = manifest.identity.pipelineVersion,
+                    renderProfileId = manifest.identity.renderProfileId,
+                ),
                 displayName = manifest.contract.displayName,
-                artifactSha256 = manifest.identity.artifactSha256,
-                contractId = manifest.identity.contractId,
-                profileRevisionId = manifest.identity.profileRevisionId,
-                renderProfileId = manifest.identity.renderProfileId,
                 state = manifest.toEntryState(availability, validation, journal),
                 modelAvailability = availability,
                 readySegments = manifest.segmentPlan?.segments?.count {
@@ -551,12 +564,8 @@ data class SourceSeparationModelAwareCacheEntry(
     val title: String,
     val artist: String,
     val album: String,
-    val modelId: String,
+    val executionIdentity: SourceSeparationExecutionModelIdentity,
     val displayName: String,
-    val artifactSha256: String,
-    val contractId: String,
-    val profileRevisionId: String,
-    val renderProfileId: String,
     val state: SourceSeparationModelAwareCacheEntryState,
     val modelAvailability: SourceSeparationCacheModelAvailability,
     val readySegments: Int?,
@@ -567,7 +576,20 @@ data class SourceSeparationModelAwareCacheEntry(
     val lastAccessedAtEpochMs: Long,
     val stemLabels: List<String> = emptyList(),
     val supportsStandardPlayback: Boolean = true,
-)
+) {
+    val modelFamily: SourceSeparationModelFamily
+        get() = executionIdentity.family
+    val modelId: String
+        get() = executionIdentity.modelId
+    val artifactSha256: String
+        get() = executionIdentity.artifactSha256
+    val contractId: String
+        get() = executionIdentity.contractId
+    val profileRevisionId: String
+        get() = executionIdentity.profileRevisionId
+    val renderProfileId: String
+        get() = executionIdentity.renderProfileId
+}
 
 enum class SourceSeparationModelAwareCacheEntryState {
     Partial,

@@ -5,6 +5,7 @@ import androidx.core.content.edit
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.playback.Playback
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
+import com.mardous.booming.separation.SourceSeparationCacheModelActivator
 import com.mardous.booming.separation.SourceSeparationRuntimeSongResolution
 import com.mardous.booming.separation.SourceSeparationMixModelKey
 import com.mardous.booming.separation.SourceSeparationModelMixSettingsStore
@@ -51,6 +52,8 @@ internal class SourceSeparationDebugResourceController(
 ) {
     private val runtime: SourceSeparationRuntimeFacade
         get() = get(SourceSeparationRuntimeFacade::class.java)
+    private val cacheModelActivator: SourceSeparationCacheModelActivator
+        get() = get(SourceSeparationCacheModelActivator::class.java)
     private val preferences: SharedPreferences
         get() = get(SharedPreferences::class.java)
     private val mixSettings: SourceSeparationModelMixSettingsStore
@@ -356,6 +359,24 @@ internal class SourceSeparationDebugResourceController(
         }
     }
 
+    fun submitCacheActivation(cacheKey: String): SourceSeparationDebugOperationSnapshot {
+        val entry = runtime.entries().singleOrNull { it.cacheKey == cacheKey }
+            ?: throw IllegalArgumentException("Unknown cache '$cacheKey'.")
+        return operations.submit("cache.activate", cacheKey) {
+            stage("activate", "${entry.modelFamily.name.lowercase()}:${entry.modelId}")
+            val before = cacheModelActivator.current()
+            val after = cacheModelActivator.activate(entry)
+            JSONObject()
+                .put("cacheKey", cacheKey)
+                .put("family", entry.modelFamily.name.lowercase())
+                .put("modelId", entry.modelId)
+                .put("artifactSha256", entry.artifactSha256)
+                .put("selectionGenerationBefore", before.generation)
+                .put("selectionGenerationAfter", after.generation)
+                .put("exactIdentityActive", after.matches(entry.executionIdentity))
+        }
+    }
+
     fun submitCacheDeleteAll(): SourceSeparationDebugOperationSnapshot {
         val keys = runtime.entries().map(SourceSeparationModelAwareCacheEntry::cacheKey)
         require(keys.isNotEmpty()) { "There are no source-separation caches to delete." }
@@ -535,6 +556,7 @@ private fun SourceSeparationModelAwareCacheEntry.toJson(current: Boolean): JSONO
         .put("title", title)
         .put("artist", artist)
         .put("album", album)
+        .put("family", modelFamily.name.lowercase())
         .put("modelId", modelId)
         .put("displayName", displayName)
         .put("artifactSha256", artifactSha256)

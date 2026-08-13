@@ -18,6 +18,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.R
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
+import com.mardous.booming.separation.SourceSeparationExecutionModelIdentity
+import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheModelAvailability
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntry
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheEntryState
@@ -63,12 +65,19 @@ class SourceSeparationManagementScreenTest {
             title = "Recovery song",
             artist = "Recovery artist",
             album = "Recovery album",
-            modelId = "uvr_mdxnet_3_9662",
+            executionIdentity = SourceSeparationExecutionModelIdentity(
+                family = SourceSeparationModelFamily.Mdx,
+                modelId = "uvr_mdxnet_3_9662",
+                artifactSha256 = "b".repeat(64),
+                contractId = "uvr_mdxnet_3_9662@2",
+                contractSchemaVersion = 2,
+                contractFingerprint = "c".repeat(64),
+                profileRevisionId = "uvr_mdxnet_3_9662@2",
+                pipelineId = "mdx-windowed-overlap-add",
+                pipelineVersion = 2,
+                renderProfileId = "mdx-fp32-render-v1",
+            ),
             displayName = "UVR MDXNET 3 9662",
-            artifactSha256 = "b".repeat(64),
-            contractId = "uvr_mdxnet_3_9662@2",
-            profileRevisionId = "uvr_mdxnet_3_9662@2",
-            renderProfileId = "mdx-fp32-render-v1",
             state = SourceSeparationModelAwareCacheEntryState.Partial,
             modelAvailability = SourceSeparationCacheModelAvailability.InstalledExact,
             readySegments = 3,

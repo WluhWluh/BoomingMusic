@@ -538,11 +538,7 @@ internal fun SourceSeparationModelAwareCacheEntry.canUseModel(
     state: SourceSeparationModelAwareCacheManagementUiState,
 ): Boolean {
     if (modelAvailability != SourceSeparationCacheModelAvailability.InstalledExact) return false
-    val activeArtifact = state.activeArtifactSha256 ?: return true
-    if (!artifactSha256.equals(activeArtifact, ignoreCase = true) ||
-        modelId != state.activeModelId
-    ) return true
-    return state.activeProfileId != null && state.activeProfileId != profileRevisionId
+    return state.activeSelection?.matches(executionIdentity) != true
 }
 
 private const val SHORT_IDENTITY_LENGTH = 12

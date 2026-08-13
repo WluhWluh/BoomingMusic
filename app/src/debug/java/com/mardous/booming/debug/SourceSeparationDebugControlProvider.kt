@@ -317,6 +317,9 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
         "settings.get" -> SourceSeparationDebugProtocol.success(resources.settings())
         "settings.set" -> SourceSeparationDebugProtocol.success(resources.updateSettings(args))
         "cache.list" -> SourceSeparationDebugProtocol.success(resources.caches())
+        "cache.activate" -> accepted(
+            resources.submitCacheActivation(resolveCacheKey(args)),
+        )
         "cache.delete" -> accepted(
             resources.submitCacheDelete(resolveCacheKey(args)),
         )
