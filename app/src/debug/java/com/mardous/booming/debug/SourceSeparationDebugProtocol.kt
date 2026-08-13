@@ -58,6 +58,7 @@ internal object SourceSeparationDebugProtocol {
         "separation.marker" to listOf("marker:string"),
         "separation.samples" to emptyList(),
         "separation.samples.clear" to emptyList(),
+        "separation.process.terminate" to emptyList(),
         "settings.get" to emptyList(),
         "settings.set" to listOf(
             "mix_mode:string?",

@@ -58,6 +58,8 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             SourceSeparationMultiStemExecutionCodec.decodeActiveRunResponse(
                 connected.service.activeRun(),
             ).state
+        } catch (error: Throwable) {
+            throw error.asSourceSeparationRemoteHostDied()
         } finally {
             runCatching { applicationContext.unbindService(connected.connection) }
         }
@@ -83,23 +85,29 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                 state = state,
                 callback = callback,
                 control = { action, reason ->
-                    SourceSeparationMultiStemExecutionCodec.decodeControlResponse(
-                        connected.service.updateControl(
-                            SourceSeparationMultiStemExecutionCodec.encodeControlCommand(
-                                SourceSeparationMultiStemIpcControlCommand(
-                                    runId = state.descriptor.runId,
-                                    processGeneration = state.descriptor.processGeneration,
-                                    action = action,
-                                    pauseReason = reason,
+                    try {
+                        SourceSeparationMultiStemExecutionCodec.decodeControlResponse(
+                            connected.service.updateControl(
+                                SourceSeparationMultiStemExecutionCodec.encodeControlCommand(
+                                    SourceSeparationMultiStemIpcControlCommand(
+                                        runId = state.descriptor.runId,
+                                        processGeneration = state.descriptor.processGeneration,
+                                        action = action,
+                                        pauseReason = reason,
+                                    ),
                                 ),
                             ),
-                        ),
-                    ).status
+                        ).status
+                    } catch (error: Throwable) {
+                        throw error.asSourceSeparationRemoteHostDied()
+                    }
                 },
                 closeBinding = {
                     runCatching { applicationContext.unbindService(connected.connection) }
                 },
             )
+        } catch (error: Throwable) {
+            throw error.asSourceSeparationRemoteHostDied()
         } finally {
             if (!adopted) {
                 runCatching { applicationContext.unbindService(connected.connection) }
@@ -206,10 +214,20 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             }
         }
         val deathRecipient = IBinder.DeathRecipient {
-            failure.compareAndSet(null, DeadObjectException("Multi-stem service died."))
+            failure.compareAndSet(
+                null,
+                SourceSeparationRemoteHostDiedException(
+                    DeadObjectException("Multi-stem service died."),
+                ),
+            )
             terminal.countDown()
         }
-        connected.binder.linkToDeath(deathRecipient, 0)
+        try {
+            connected.binder.linkToDeath(deathRecipient, 0)
+        } catch (error: Throwable) {
+            runCatching { applicationContext.unbindService(connected.connection) }
+            throw error.asSourceSeparationRemoteHostDied()
+        }
         val controlThread = thread(start = false, isDaemon = true, name = "BSS-MultiStem-Control") {
             var lastPlaybackPositionMs = descriptor.runtime.initialPlaybackPositionMs
             var lastReadyWindowCount = descriptor.runtime.initialPlaybackReadyWindowCount
@@ -262,7 +280,7 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                     }
                     Thread.sleep(controlPollMs)
                 } catch (error: Throwable) {
-                    failure.compareAndSet(null, error)
+                    failure.compareAndSet(null, error.asSourceSeparationRemoteHostDied())
                     terminal.countDown()
                     return@thread
                 }
@@ -320,6 +338,8 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             } else {
                 HtdemucsSourceSeparationEngineResult.Completed(manifest)
             }
+        } catch (error: Throwable) {
+            throw error.asSourceSeparationRemoteHostDied()
         } finally {
             controlThread.interrupt()
             runCatching { connected.binder.unlinkToDeath(deathRecipient, 0) }
@@ -361,7 +381,7 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             check(connected.await(timeoutMs, TimeUnit.MILLISECONDS)) {
                 "Timed out binding the multi-stem execution service."
             }
-            error.get()?.let { throw it }
+            error.get()?.let { throw it.asSourceSeparationRemoteHostDied() }
             val binder = requireNotNull(binderRef.get())
             val service = requireNotNull(serviceRef.get())
             val response = SourceSeparationMultiStemExecutionCodec.decodeConnectResponse(
@@ -370,7 +390,7 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             return Connected(connection, binder, service, response.processGeneration)
         } catch (error: Throwable) {
             runCatching { applicationContext.unbindService(connection) }
-            throw error
+            throw error.asSourceSeparationRemoteHostDied()
         }
     }
 

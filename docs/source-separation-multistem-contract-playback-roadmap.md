@@ -1801,8 +1801,10 @@ active multi-stem playback output.
 - [x] Enforce one process-wide execution owner across MDX and HTDemucs, then
   converge the two service/control protocols where doing so removes duplicate
   lifecycle state.
-- [ ] Map remote death to one recoverable product error and replace the fixed
-  30-minute HTDemucs await timeout with journal/process-lifecycle observation.
+- [x] Map remote death from both execution families to one recoverable product
+  error while retaining the exact partial cache for an explicit retry.
+- [ ] Replace the fixed 30-minute HTDemucs await timeout with
+  journal/process-lifecycle observation.
 
 The two remote services now share a tokenized process-wide execution lease.
 The lease contains the model family, run ID, and process generation; it is
@@ -1823,9 +1825,20 @@ run. While that request was active, selecting MDX 9662 advanced the unified
 selection generation; the old HTDemucs request logged `worker.song paused` and
 `worker.paused.stale`, and the new MDX selection became active. The cache
 inventory retained the HTDemucs partial entry and did not report a cache Busy
-failure. The shell-triggered `separation.start` path was also observed to be
-blocked by Android's foreground-service launch policy; subsequent verification
-used `separation.prestart`, which follows the client-bound worker/Binder path.
+failure.
+
+Remote-death behavior was then verified through the Debug-only
+`separation.process.terminate` command with Booming SS kept in the resumed
+foreground state. Terminating an active HTDemucs run produced the localized
+recoverable message, retained the exact four-stem cache at `2/11`, and a new
+`separation.prestart` continued that cache. The same command terminated an
+active MDX 9662 run for `Colour Spectrum`; the worker reported the identical
+localized message and retained partial cache `8934c423854c...` at `0/11`.
+`separation.start` then reused that exact cache key and advanced it to `1/11`
+instead of creating or selecting another entry. The shared Binder transport
+mapping has focused unit coverage, and the Debug command is documented as a
+validation-only operation. The fixed HTDemucs terminal wait remains a separate
+open lifecycle item.
 
 #### Phase 8F: Diagnostics and remaining duplication
 

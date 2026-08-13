@@ -68,6 +68,9 @@ Separation commands:
   start-window waterline is ready.
 - `separation.marker` with `marker:s`
 - `separation.samples`, `separation.samples.clear`
+- `separation.process.terminate` requests Debug-only termination of the shared
+  inference process through its Binder validation endpoint. Use it only while
+  validating remote-death recovery; the current partial cache is retained.
 
 Mix commits use the same ViewModel path as the UI while it is present. Without a ViewModel, the provider applies the equivalent global or per-song persistence before sending one MediaSession command.
 

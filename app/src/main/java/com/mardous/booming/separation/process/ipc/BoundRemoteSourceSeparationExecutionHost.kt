@@ -1370,10 +1370,6 @@ internal class SourceSeparationRemoteRecycleTimeoutException(
 internal class SourceSeparationRemoteRecycleInProgressException :
     IllegalStateException("Source-separation process recycle is still in progress.")
 
-internal class SourceSeparationRemoteHostDiedException(
-    cause: Throwable?,
-) : IllegalStateException("Source-separation remote host died.", cause)
-
 internal class SourceSeparationRemoteExecutionException(
     val remoteError: SourceSeparationIpcError,
 ) : IllegalStateException(

@@ -12,6 +12,7 @@ import androidx.media3.common.C
 import com.mardous.booming.data.local.repository.Repository
 import com.mardous.booming.data.model.Song
 import com.mardous.booming.playback.Playback
+import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationMultiStemExecutionHost
 import com.mardous.booming.ui.screen.MainActivity
 import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerDebugBridge
 import org.json.JSONArray
@@ -314,6 +315,13 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
             "worker_unavailable",
             "Unable to clear worker samples.",
         )
+        "separation.process.terminate" -> {
+            BoundRemoteSourceSeparationMultiStemExecutionHost(providerContext())
+                .terminateRemoteProcessForValidation()
+            SourceSeparationDebugProtocol.success(
+                JSONObject().put("terminationRequested", true),
+            )
+        }
         "settings.get" -> SourceSeparationDebugProtocol.success(resources.settings())
         "settings.set" -> SourceSeparationDebugProtocol.success(resources.updateSettings(args))
         "cache.list" -> SourceSeparationDebugProtocol.success(resources.caches())

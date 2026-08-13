@@ -403,6 +403,26 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `both remote families expose the same recoverable binder death`() {
+        val multiStemHost = mainSource(
+            "com/mardous/booming/separation/process/ipc/" +
+                "BoundRemoteSourceSeparationMultiStemExecutionHost.kt",
+        ).readText()
+        val worker = mainSource(
+            "com/mardous/booming/ui/screen/player/" +
+                "SourceSeparationForegroundWorkerCoordinator.kt",
+        ).readText()
+
+        assertTrue(multiStemHost.contains("SourceSeparationRemoteHostDiedException("))
+        assertTrue(multiStemHost.contains("error.asSourceSeparationRemoteHostDied()"))
+        assertFalse(multiStemHost.contains(
+            "failure.compareAndSet(null, DeadObjectException(\"Multi-stem service died.\"))",
+        ))
+        assertTrue(worker.contains("multistem recovery remote host died"))
+        assertTrue(worker.contains("message = remoteProcessStoppedMessage()"))
+    }
+
+    @Test
     fun `generic inference boundaries have no implicit ORT provider`() {
         val runtime = mainSource(
             "com/mardous/booming/separation/model/MdxInferenceRuntime.kt",

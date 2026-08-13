@@ -960,6 +960,16 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                 val event = events.receiveCatching().getOrNull() ?: break
                 terminal = applyMultiStemRecoveredEvent(session, event)
             }
+        } catch (_: SourceSeparationRemoteHostDiedException) {
+            trace("multistem recovery remote host died")
+            val song = multiStemReconnectedSong
+            if (song != null) {
+                _workerStateFlow.value = SourceSeparationUiState.Failed(
+                    songId = song.id,
+                    songTitle = song.title,
+                    message = remoteProcessStoppedMessage(),
+                )
+            }
         } catch (error: Throwable) {
             val song = multiStemReconnectedSong
             if (song != null && error !is CancellationException) {
