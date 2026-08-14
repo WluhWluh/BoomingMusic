@@ -101,6 +101,7 @@ internal object SourceSeparationLifecycleTestFixtures {
             admittedAtEpochMs = 1L,
         )
         return SourceSeparationCacheRunJournal(
+            journalSchemaVersion = SourceSeparationCacheRunJournal.SCHEMA_VERSION,
             request = request,
             lifecycle = lifecycle,
             transitions = listOf(

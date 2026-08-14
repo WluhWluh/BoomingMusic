@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class SourceSeparationCacheRunJournal(
-    val journalSchemaVersion: Int = SCHEMA_VERSION,
+    val journalSchemaVersion: Int,
     val request: SourceSeparationCacheRunJournalRequest,
     val lifecycle: SourceSeparationCacheRunJournalLifecycle,
     val transitions: List<SourceSeparationCacheRunJournalTransition>,
@@ -227,6 +227,7 @@ data class SourceSeparationCacheRunJournal(
         fun admitted(
             request: SourceSeparationCacheRunJournalRequest,
         ) = SourceSeparationCacheRunJournal(
+            journalSchemaVersion = SCHEMA_VERSION,
             request = request,
             lifecycle = SourceSeparationCacheRunJournalLifecycle.Running,
             transitions = listOf(
@@ -336,6 +337,7 @@ data class SourceSeparationCacheRunJournal(
                 )
             }
             return SourceSeparationCacheRunJournal(
+                journalSchemaVersion = SCHEMA_VERSION,
                 request = request,
                 lifecycle = SourceSeparationCacheRunJournalLifecycle.Running,
                 transitions = resumedTransitions,

@@ -173,6 +173,7 @@ class SourceSeparationCacheRunCoordinator(
                 segmentsDirectory.mkdirs()
                 val now = nowEpochMs()
                 SourceSeparationCacheManifest(
+                    manifestSchemaVersion = SourceSeparationCacheManifest.SCHEMA_VERSION,
                     cacheKey = request.identity.cacheKey,
                     identity = request.identity,
                     contract = request.contract,

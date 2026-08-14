@@ -142,6 +142,19 @@ class SourceSeparationCacheStoreTest {
             """{"playbackSettingsSchemaVersion":3,"cacheKey":"${manifest.cacheKey}","audioFingerprint":"${manifest.identity.source.audioFingerprint}","blend":0.75,"updatedAtEpochMs":5}"""
         )
         assertNull(store.readPlaybackSettings(manifest))
+
+        store.writePlaybackSettings(manifest, settings)
+        val currentJson = settingsFile.readText()
+        settingsFile.writeText(currentJson.replaceFirst("{", "{\"obsolete\":true,"))
+        assertNull(store.readPlaybackSettings(manifest))
+
+        settingsFile.writeText(
+            currentJson.replace(
+                "\"playbackSettingsSchemaVersion\":${SourceSeparationCachePlaybackSettings.SCHEMA_VERSION},",
+                "",
+            )
+        )
+        assertNull(store.readPlaybackSettings(manifest))
     }
 
     @Test
@@ -289,7 +302,7 @@ class SourceSeparationCacheStoreTest {
     }
 
     @Test
-    fun `manifest reader rejects historical schema and wrong directory key`() {
+    fun `manifest reader rejects noncurrent incomplete and extended schemas`() {
         val store = SourceSeparationCacheStore(cacheRoot())
         val manifest = completedManifest(store)
         store.writeManifest(manifest)
@@ -297,8 +310,9 @@ class SourceSeparationCacheStoreTest {
             store.entryDirectory(manifest.cacheKey),
             SourceSeparationCacheStore.MANIFEST_FILE_NAME,
         )
+        val currentJson = manifestFile.readText()
         manifestFile.writeText(
-            manifestFile.readText().replace(
+            currentJson.replace(
                 "\"manifestSchemaVersion\":4",
                 "\"manifestSchemaVersion\":1",
             )
@@ -306,12 +320,57 @@ class SourceSeparationCacheStoreTest {
 
         assertNull(store.readManifest(manifest.cacheKey))
 
+        manifestFile.writeText(
+            currentJson.replace(
+                "\"manifestSchemaVersion\":${SourceSeparationCacheManifest.SCHEMA_VERSION},",
+                "",
+            )
+        )
+        assertNull(store.readManifest(manifest.cacheKey))
+
+        manifestFile.writeText(
+            currentJson.replace(
+                "\"cacheIdentitySchemaVersion\":${SourceSeparationCacheIdentity.SCHEMA_VERSION},",
+                "",
+            )
+        )
+        assertNull(store.readManifest(manifest.cacheKey))
+
+        manifestFile.writeText(currentJson.replaceFirst("{", "{\"obsolete\":true,"))
+        assertNull(store.readManifest(manifest.cacheKey))
+
         val wrongDirectory = store.entryDirectory("0".repeat(64)).apply { mkdirs() }
+        manifestFile.writeText(currentJson)
         manifestFile.copyTo(
             File(wrongDirectory, SourceSeparationCacheStore.MANIFEST_FILE_NAME),
             overwrite = true,
         )
         assertNull(store.readManifest("0".repeat(64)))
+    }
+
+    @Test
+    fun `run journal reader rejects missing schema and unknown fields`() {
+        val store = SourceSeparationCacheStore(cacheRoot())
+        val manifest = completedManifest(store)
+        store.writeManifest(manifest)
+        val journal = runningJournal(manifest)
+        store.writeRunJournal(journal)
+        val journalFile = store.resolveEntryPath(
+            manifest.cacheKey,
+            SourceSeparationCacheStore.RUN_JOURNAL_FILE_NAME,
+        )
+        val currentJson = journalFile.readText()
+
+        journalFile.writeText(
+            currentJson.replace(
+                "\"journalSchemaVersion\":${SourceSeparationCacheRunJournal.SCHEMA_VERSION},",
+                "",
+            )
+        )
+        assertNull(store.readRunJournal(manifest.cacheKey))
+
+        journalFile.writeText(currentJson.replaceFirst("{", "{\"obsolete\":true,"))
+        assertNull(store.readRunJournal(manifest.cacheKey))
     }
 
     @Test
@@ -392,6 +451,7 @@ class SourceSeparationCacheStoreTest {
             ),
         )
         return SourceSeparationCacheManifest(
+            manifestSchemaVersion = SourceSeparationCacheManifest.SCHEMA_VERSION,
             cacheKey = identity.cacheKey,
             identity = identity,
             contract = snapshot,

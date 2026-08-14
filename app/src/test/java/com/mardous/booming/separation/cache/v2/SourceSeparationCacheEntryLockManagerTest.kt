@@ -61,6 +61,36 @@ class SourceSeparationCacheEntryLockManagerTest {
     }
 
     @Test
+    fun `lock ownership rejects metadata without the exact schema`() {
+        val root = root()
+        val manager = SourceSeparationCacheEntryLockManager(root)
+        val lease = requireNotNull(manager.tryAcquire(KEY_A, owner("run")))
+        val metadataFile = root.directory.resolve(
+            "${SourceSeparationCacheEntryLockManager.LOCKS_DIRECTORY_NAME}/$KEY_A.owner.json"
+        )
+        val currentJson = metadataFile.readText()
+
+        metadataFile.writeText(
+            currentJson.replace(
+                "\"schemaVersion\":${SourceSeparationCacheLockMetadata.SCHEMA_VERSION},",
+                "",
+            )
+        )
+        assertThrows(SourceSeparationCacheLostException::class.java) {
+            lease.requireAvailable()
+        }
+        lease.close()
+
+        val next = requireNotNull(manager.tryAcquire(KEY_A, owner("run-2")))
+        val nextJson = metadataFile.readText()
+        metadataFile.writeText(nextJson.replaceFirst("{", "{\"obsolete\":true,"))
+        assertThrows(SourceSeparationCacheLostException::class.java) {
+            next.requireAvailable()
+        }
+        next.close()
+    }
+
+    @Test
     fun `startup recovery skips a remotely locked entry`() {
         val root = root()
         val writerStore = SourceSeparationCacheStore(root)

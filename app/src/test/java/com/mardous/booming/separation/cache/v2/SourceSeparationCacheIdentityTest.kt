@@ -170,6 +170,7 @@ class SourceSeparationCacheIdentityTest {
         val identity = snapshot.identity(sourceIdentity(), "htdemucs-cpu-fp32-v1")
         val integrity = SourceSeparationCacheFileIntegrity(128L, "d".repeat(64))
         val manifest = SourceSeparationCacheManifest(
+            manifestSchemaVersion = SourceSeparationCacheManifest.SCHEMA_VERSION,
             cacheKey = identity.cacheKey,
             identity = identity,
             contract = snapshot,
@@ -306,6 +307,7 @@ class SourceSeparationCacheIdentityTest {
             ),
         )
         return SourceSeparationCacheManifest(
+            manifestSchemaVersion = SourceSeparationCacheManifest.SCHEMA_VERSION,
             cacheKey = identity.cacheKey,
             identity = identity,
             contract = snapshot,

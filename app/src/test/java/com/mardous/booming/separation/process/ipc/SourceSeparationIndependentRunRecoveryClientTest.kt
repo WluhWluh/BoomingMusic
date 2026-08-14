@@ -137,6 +137,7 @@ class SourceSeparationIndependentRunRecoveryClientTest {
             admittedAtEpochMs = 1L,
         )
         return SourceSeparationCacheRunJournal(
+            journalSchemaVersion = SourceSeparationCacheRunJournal.SCHEMA_VERSION,
             request = request,
             lifecycle = SourceSeparationCacheRunJournalLifecycle.Running,
             transitions = listOf(

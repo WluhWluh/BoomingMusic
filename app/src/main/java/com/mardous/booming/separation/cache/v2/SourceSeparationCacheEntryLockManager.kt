@@ -45,6 +45,7 @@ class SourceSeparationCacheEntryLockManager(
         return try {
             val token = UUID.randomUUID().toString()
             val metadata = SourceSeparationCacheLockMetadata(
+                schemaVersion = SourceSeparationCacheLockMetadata.SCHEMA_VERSION,
                 token = token,
                 cacheKey = cacheKey,
                 purpose = owner.purpose,
@@ -82,7 +83,9 @@ class SourceSeparationCacheEntryLockManager(
         private val CACHE_KEY_PATTERN = Regex("^[0-9a-f]{64}$")
         private val DEFAULT_JSON = Json {
             encodeDefaults = true
-            ignoreUnknownKeys = true
+            ignoreUnknownKeys = false
+            isLenient = false
+            coerceInputValues = false
             explicitNulls = false
         }
 
@@ -136,7 +139,7 @@ enum class SourceSeparationCacheLockPurpose {
 
 @Serializable
 data class SourceSeparationCacheLockMetadata(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int,
     val token: String,
     val cacheKey: String,
     val purpose: SourceSeparationCacheLockPurpose,
@@ -144,7 +147,17 @@ data class SourceSeparationCacheLockMetadata(
     val processGeneration: Long? = null,
     val pid: Int? = null,
     val acquiredAtEpochMs: Long,
-)
+) {
+    init {
+        require(schemaVersion == SCHEMA_VERSION) {
+            "Unsupported cache lock metadata schema: $schemaVersion"
+        }
+    }
+
+    companion object {
+        const val SCHEMA_VERSION = 1
+    }
+}
 
 class SourceSeparationCacheEntryKernelLease internal constructor(
     private val root: SourceSeparationCacheRoot,

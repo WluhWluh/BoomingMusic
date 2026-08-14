@@ -27,7 +27,7 @@ import java.security.MessageDigest
 
 @Serializable
 data class SourceSeparationCacheIdentity(
-    val cacheIdentitySchemaVersion: Int = SCHEMA_VERSION,
+    val cacheIdentitySchemaVersion: Int,
     val source: SourceSeparationCacheSourceIdentity,
     val modelId: String,
     val artifactSha256: String,
@@ -172,6 +172,7 @@ data class SourceSeparationCacheContractSnapshot(
         source: SourceSeparationCacheSourceIdentity,
         renderProfileId: String = SourceSeparationCacheIdentity.FP32_RENDER_PROFILE_ID,
     ): SourceSeparationCacheIdentity = SourceSeparationCacheIdentity(
+        cacheIdentitySchemaVersion = SourceSeparationCacheIdentity.SCHEMA_VERSION,
         source = source,
         modelId = modelId,
         artifactSha256 = artifactSha256,

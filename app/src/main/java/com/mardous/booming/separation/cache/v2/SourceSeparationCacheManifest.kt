@@ -12,7 +12,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class SourceSeparationCacheManifest(
-    val manifestSchemaVersion: Int = SCHEMA_VERSION,
+    val manifestSchemaVersion: Int,
     val cacheKey: String,
     val identity: SourceSeparationCacheIdentity,
     val contract: SourceSeparationCacheContractSnapshot,

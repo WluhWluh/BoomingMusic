@@ -659,7 +659,9 @@ class SourceSeparationCacheStore(
         private val RUN_ID_PATTERN = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
         private val DEFAULT_JSON = Json {
             encodeDefaults = true
-            ignoreUnknownKeys = true
+            ignoreUnknownKeys = false
+            isLenient = false
+            coerceInputValues = false
             explicitNulls = false
         }
 

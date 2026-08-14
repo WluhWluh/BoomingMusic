@@ -124,6 +124,7 @@ class SourceSeparationMultiStemCacheAvailabilityProviderTest {
             HtdemucsSourceSeparationEngine.HTDEMUCS_CPU_PROFILE_ID,
         )
         val manifest = SourceSeparationCacheManifest(
+            manifestSchemaVersion = SourceSeparationCacheManifest.SCHEMA_VERSION,
             cacheKey = identity.cacheKey,
             identity = identity,
             contract = contract,

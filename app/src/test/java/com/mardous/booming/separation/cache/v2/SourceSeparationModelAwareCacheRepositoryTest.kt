@@ -444,6 +444,7 @@ class SourceSeparationModelAwareCacheRepositoryTest {
         updatedAt: Long,
     ): SourceSeparationCacheManifest {
         return SourceSeparationCacheManifest(
+            manifestSchemaVersion = SourceSeparationCacheManifest.SCHEMA_VERSION,
             cacheKey = identity.cacheKey,
             identity = identity,
             contract = snapshot,
