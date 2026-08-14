@@ -1,5 +1,6 @@
 package com.mardous.booming.ui.screen.lyrics
 
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -116,6 +117,24 @@ class CoverLyricsMultiStemControlTest {
             coverLyricsMultiStemHitSegment(
                 y = 43f,
                 segmentCount = 4,
+                segmentHeightPx = 40f,
+                segmentGapPx = 4f,
+            ),
+        )
+        assertEquals(
+            Offset(20f, 40f),
+            coverLyricsSegmentPressPosition(
+                pointerPosition = Offset(20f, 41f),
+                segmentIndex = 0,
+                segmentHeightPx = 40f,
+                segmentGapPx = 4f,
+            ),
+        )
+        assertEquals(
+            Offset(20f, 0f),
+            coverLyricsSegmentPressPosition(
+                pointerPosition = Offset(20f, 43f),
+                segmentIndex = 1,
                 segmentHeightPx = 40f,
                 segmentGapPx = 4f,
             ),

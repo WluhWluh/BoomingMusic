@@ -21,6 +21,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -50,6 +53,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -74,6 +78,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -698,6 +703,7 @@ private fun CoverLyricsQuickBlendControl(
         if (isExpanded) CoverLyricsQuickBlendEndpointIconOffset else 0.dp
     }
     val segmentTapEffect = rememberCoverLyricsSegmentTapEffectState()
+    val segmentInteractionSources = rememberCoverLyricsSegmentInteractionSources(2)
     val segmentTapExpansion = segmentTapEffect.expansion.value
     val segmentTapHeightOffsets = remember(segmentTapEffect.segmentIndex) {
         coverLyricsSegmentTapHeightOffsets(
@@ -751,6 +757,16 @@ private fun CoverLyricsQuickBlendControl(
             CoverLyricsQuickBlendIconSize
     val bottomIconFillHeight = (instrumentalFillHeight - bottomIconTopInTrack)
         .coerceIn(0.dp, CoverLyricsQuickBlendIconSize)
+    val topRippleColor = if (vocalsFillHeight >= topTrackHeight / 2) {
+        colorScheme.surface
+    } else {
+        progressColor
+    }
+    val bottomRippleColor = if (instrumentalFillHeight >= bottomTrackHeight / 2) {
+        colorScheme.surface
+    } else {
+        progressColor
+    }
     val buttonBackgroundShape = CircleShape
     val topTrackShape = RoundedCornerShape(
         topStart = topOuterCornerRadius,
@@ -769,6 +785,10 @@ private fun CoverLyricsQuickBlendControl(
     val longPressTimeoutMillis = viewConfiguration.longPressTimeoutMillis
     val hapticFeedback = LocalHapticFeedback.current
     val view = LocalView.current
+    val density = LocalDensity.current
+    val expandedSegmentGapPx = with(density) {
+        CoverLyricsCompactControlGap.toPx()
+    }
     val currentDisplayedBlend by rememberUpdatedState(displayedBlend)
     val currentOnEnableSeparatedPlayback by rememberUpdatedState(onEnableSeparatedPlayback)
     val currentOnDisableSeparatedPlayback by rememberUpdatedState(onDisableSeparatedPlayback)
@@ -781,10 +801,31 @@ private fun CoverLyricsQuickBlendControl(
         longPressTimeoutMillis,
         hapticFeedback,
         view,
+        expandedSegmentGapPx,
     ) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val pointerId = down.id
+            val pressedSegment = if (expanded) {
+                if (down.position.y < size.height / 2f) 0 else 1
+            } else {
+                -1
+            }
+            val pressSegmentHeight = if (expanded) {
+                ((size.height - expandedSegmentGapPx) / 2f).coerceAtLeast(0f)
+            } else {
+                0f
+            }
+            val activePress = startCoverLyricsSegmentPress(
+                interactionSources = segmentInteractionSources,
+                segmentIndex = pressedSegment,
+                pressPosition = coverLyricsSegmentPressPosition(
+                    pointerPosition = down.position,
+                    segmentIndex = pressedSegment,
+                    segmentHeightPx = pressSegmentHeight,
+                    segmentGapPx = expandedSegmentGapPx,
+                ),
+            )
             var releasedChange: PointerInputChange? = null
             var dragStartChange: PointerInputChange? = null
             var latestBlend = currentDisplayedBlend
@@ -832,6 +873,7 @@ private fun CoverLyricsQuickBlendControl(
 
             when {
                 longPressReached -> {
+                    cancelCoverLyricsSegmentPress(activePress)
                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     currentOnLongClick()
                     while (true) {
@@ -845,6 +887,7 @@ private fun CoverLyricsQuickBlendControl(
                 }
 
                 releasedChange != null -> {
+                    releaseCoverLyricsSegmentPress(activePress)
                     releasedChange.let { change ->
                         if (expanded) {
                             segmentTapEffect.trigger(
@@ -864,6 +907,7 @@ private fun CoverLyricsQuickBlendControl(
                 }
 
                 expanded && dragStartChange != null -> {
+                    cancelCoverLyricsSegmentPress(activePress)
                     dragging = true
                     try {
                         updateDrag(dragStartChange)
@@ -886,6 +930,7 @@ private fun CoverLyricsQuickBlendControl(
                 }
 
                 dragStartChange != null -> {
+                    cancelCoverLyricsSegmentPress(activePress)
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes
@@ -937,6 +982,10 @@ private fun CoverLyricsQuickBlendControl(
                     )
                     .clip(topTrackShape)
                     .background(progressColor.copy(alpha = trackAlpha))
+                    .indication(
+                        interactionSource = segmentInteractionSources[0],
+                        indication = ripple(color = topRippleColor),
+                    )
             ) {
                 Box(
                     modifier = Modifier
@@ -960,6 +1009,10 @@ private fun CoverLyricsQuickBlendControl(
                     )
                     .clip(bottomTrackShape)
                     .background(progressColor.copy(alpha = trackAlpha))
+                    .indication(
+                        interactionSource = segmentInteractionSources[1],
+                        indication = ripple(color = bottomRippleColor),
+                    )
             ) {
                 Box(
                     modifier = Modifier
@@ -1080,6 +1133,7 @@ private fun CoverLyricsCompactControl(
         label = "collapsedIconAlpha",
     ) { isExpanded -> if (isExpanded) 0f else 1f }
     val segmentTapEffect = rememberCoverLyricsSegmentTapEffectState()
+    val segmentInteractionSources = rememberCoverLyricsSegmentInteractionSources(2)
     val segmentTapExpansion = segmentTapEffect.expansion.value
     val segmentTapHeightOffsets = remember(segmentTapEffect.segmentIndex) {
         coverLyricsSegmentTapHeightOffsets(
@@ -1117,6 +1171,10 @@ private fun CoverLyricsCompactControl(
     val touchSlop = viewConfiguration.touchSlop
     val longPressTimeoutMillis = viewConfiguration.longPressTimeoutMillis
     val view = LocalView.current
+    val density = LocalDensity.current
+    val expandedSegmentGapPx = with(density) {
+        CoverLyricsCompactControlGap.toPx()
+    }
     val currentOnEnableSeparatedPlayback by rememberUpdatedState(onEnableSeparatedPlayback)
     val currentOnOpenPanel by rememberUpdatedState(onOpenPanel)
     val currentOnDisableSeparatedPlayback by rememberUpdatedState(
@@ -1128,10 +1186,31 @@ private fun CoverLyricsCompactControl(
         touchSlop,
         longPressTimeoutMillis,
         view,
+        expandedSegmentGapPx,
     ) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val pointerId = down.id
+            val pressedSegment = if (expanded) {
+                if (down.position.y < size.height / 2f) 0 else 1
+            } else {
+                -1
+            }
+            val pressSegmentHeight = if (expanded) {
+                ((size.height - expandedSegmentGapPx) / 2f).coerceAtLeast(0f)
+            } else {
+                0f
+            }
+            val activePress = startCoverLyricsSegmentPress(
+                interactionSources = segmentInteractionSources,
+                segmentIndex = pressedSegment,
+                pressPosition = coverLyricsSegmentPressPosition(
+                    pointerPosition = down.position,
+                    segmentIndex = pressedSegment,
+                    segmentHeightPx = pressSegmentHeight,
+                    segmentGapPx = expandedSegmentGapPx,
+                ),
+            )
             var releasedChange: PointerInputChange? = null
             var moved = false
 
@@ -1156,6 +1235,7 @@ private fun CoverLyricsCompactControl(
 
             when {
                 longPressReached -> {
+                    cancelCoverLyricsSegmentPress(activePress)
                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     currentOnLongClick()
                     while (true) {
@@ -1169,6 +1249,7 @@ private fun CoverLyricsCompactControl(
                 }
 
                 releasedChange != null -> {
+                    releaseCoverLyricsSegmentPress(activePress)
                     releasedChange.let { change ->
                         if (!expanded) {
                             currentOnEnableSeparatedPlayback()
@@ -1193,6 +1274,7 @@ private fun CoverLyricsCompactControl(
                 }
 
                 moved -> {
+                    cancelCoverLyricsSegmentPress(activePress)
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes
@@ -1243,9 +1325,10 @@ private fun CoverLyricsCompactControl(
                     topStart = topOuterCornerRadius,
                     topEnd = topOuterCornerRadius,
                         bottomStart = innerCornerRadius,
-                        bottomEnd = innerCornerRadius,
-                    ),
-                )
+                    bottomEnd = innerCornerRadius,
+                ),
+                interactionSource = segmentInteractionSources[0],
+            )
                 CoverLyricsMultiStemFixedSegment(
                     iconRes = R.drawable.ic_close_24dp,
                 background = progressColor.copy(alpha = 0.1f),
@@ -1256,8 +1339,9 @@ private fun CoverLyricsCompactControl(
                         topEnd = innerCornerRadius,
                     bottomStart = bottomOuterCornerRadius,
                     bottomEnd = bottomOuterCornerRadius,
-                    ),
-                )
+                ),
+                interactionSource = segmentInteractionSources[1],
+            )
             }
 
             Icon(
@@ -1398,6 +1482,7 @@ private fun CoverLyricsMultiStemControl(
         label = "endpointIconAlpha",
     ) { target -> if (target.expanded) 1f else 0f }
     val segmentTapEffect = rememberCoverLyricsSegmentTapEffectState()
+    val segmentInteractionSources = rememberCoverLyricsSegmentInteractionSources(segmentCount)
     val segmentTapHeightOffsets = remember(
         segmentCount,
         segmentTapEffect.segmentIndex,
@@ -1488,6 +1573,24 @@ private fun CoverLyricsMultiStemControl(
                 (downSegment - 1).takeIf { it in state.stems.indices }
             }
             val activeStem = activeStemIndex?.let { currentState.stems.getOrNull(it) }
+            val pressedSegment = downSegment.takeIf { segment ->
+                expanded && (
+                        segment == 0 ||
+                                segment == pageSegmentIndex ||
+                                segment == segmentCount - 1 ||
+                                activeStem != null
+                        )
+            } ?: -1
+            val activePress = startCoverLyricsSegmentPress(
+                interactionSources = segmentInteractionSources,
+                segmentIndex = pressedSegment,
+                pressPosition = coverLyricsSegmentPressPosition(
+                    pointerPosition = down.position,
+                    segmentIndex = pressedSegment,
+                    segmentHeightPx = segmentHeightPx,
+                    segmentGapPx = segmentGapPx,
+                ),
+            )
             val startY = down.position.y
             val startGain = activeStem?.gain ?: 0f
             var latestGain = startGain
@@ -1528,6 +1631,7 @@ private fun CoverLyricsMultiStemControl(
 
             when {
                 longPressReached -> {
+                    cancelCoverLyricsSegmentPress(activePress)
                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     currentOnLongClick()
                     while (true) {
@@ -1541,6 +1645,7 @@ private fun CoverLyricsMultiStemControl(
                 }
 
                 releasedChange != null -> {
+                    releaseCoverLyricsSegmentPress(activePress)
                     releasedChange.let { change ->
                         if (!expanded) {
                             currentOnEnableSeparatedPlayback()
@@ -1580,6 +1685,7 @@ private fun CoverLyricsMultiStemControl(
                 }
 
                 expanded && dragStartChange != null && activeStem != null -> {
+                    cancelCoverLyricsSegmentPress(activePress)
                     draggingStemId = activeStem.stemId
                     try {
                         updateDrag(dragStartChange)
@@ -1601,6 +1707,7 @@ private fun CoverLyricsMultiStemControl(
                 }
 
                 dragStartChange != null -> {
+                    cancelCoverLyricsSegmentPress(activePress)
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes
@@ -1663,6 +1770,7 @@ private fun CoverLyricsMultiStemControl(
                         bottomStart = innerCornerRadius,
                         bottomEnd = innerCornerRadius,
                     ),
+                    interactionSource = segmentInteractionSources[0],
                 )
                 visibleStems.forEachIndexed { index, stem ->
                     val segmentIndex = index + 1
@@ -1681,6 +1789,7 @@ private fun CoverLyricsMultiStemControl(
                             trackAlpha = trackAlpha,
                             progressColor = progressColor,
                             filledColor = colorScheme.surface,
+                            interactionSource = segmentInteractionSources[segmentIndex],
                         )
                     } else {
                         CoverLyricsMultiStemFixedSegment(
@@ -1708,6 +1817,7 @@ private fun CoverLyricsMultiStemControl(
                             expansion = segmentTapExpansion,
                         ),
                         shape = RoundedCornerShape(innerCornerRadius),
+                        interactionSource = segmentInteractionSources[pageSegmentIndex],
                     )
                 }
                 CoverLyricsMultiStemFixedSegment(
@@ -1726,6 +1836,7 @@ private fun CoverLyricsMultiStemControl(
                         bottomStart = bottomOuterCornerRadius,
                         bottomEnd = bottomOuterCornerRadius,
                     ),
+                    interactionSource = segmentInteractionSources[segmentCount - 1],
                 )
             }
 
@@ -1749,13 +1860,24 @@ private fun CoverLyricsMultiStemFixedSegment(
     iconTint: Color,
     height: Dp,
     shape: RoundedCornerShape,
+    interactionSource: MutableInteractionSource? = null,
 ) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxWidth()
             .height(height)
-            .clip(shape),
+            .clip(shape)
+            .then(
+                if (interactionSource != null) {
+                    Modifier.indication(
+                        interactionSource = interactionSource,
+                        indication = ripple(color = iconTint),
+                    )
+                } else {
+                    Modifier
+                },
+            ),
     ) {
         Box(
             modifier = Modifier
@@ -1782,6 +1904,7 @@ private fun CoverLyricsMultiStemGainSegment(
     trackAlpha: Float,
     progressColor: Color,
     filledColor: Color,
+    interactionSource: MutableInteractionSource,
 ) {
     val normalizedGain = SourceSeparationStemGainPolicy.normalize(gain)
     val fillHeight = height * normalizedGain
@@ -1789,13 +1912,18 @@ private fun CoverLyricsMultiStemGainSegment(
         (height - CoverLyricsQuickBlendIconSize) / 2
     val iconFillHeight = (fillHeight - iconBottomInset)
         .coerceIn(0.dp, CoverLyricsQuickBlendIconSize)
+    val rippleColor = if (normalizedGain >= 0.5f) filledColor else progressColor
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxWidth()
             .height(height)
             .clip(RoundedCornerShape(cornerRadius))
-            .background(progressColor.copy(alpha = trackAlpha)),
+            .background(progressColor.copy(alpha = trackAlpha))
+            .indication(
+                interactionSource = interactionSource,
+                indication = ripple(color = rippleColor),
+            ),
     ) {
         Box(
             modifier = Modifier
@@ -2111,6 +2239,57 @@ private const val CoverLyricsWidthNarrowingHeightFraction = 0.40f
 private val CoverLyricsSegmentTapExpansionEasing = FastOutSlowInEasing
 private val CoverLyricsSegmentTapReturnEasing =
     CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
+private data class CoverLyricsActiveSegmentPress(
+    val interactionSource: MutableInteractionSource,
+    val interaction: PressInteraction.Press,
+)
+
+@Composable
+private fun rememberCoverLyricsSegmentInteractionSources(
+    segmentCount: Int,
+): List<MutableInteractionSource> = remember(segmentCount) {
+    List(segmentCount.coerceAtLeast(0)) { MutableInteractionSource() }
+}
+
+private fun startCoverLyricsSegmentPress(
+    interactionSources: List<MutableInteractionSource>,
+    segmentIndex: Int,
+    pressPosition: Offset,
+): CoverLyricsActiveSegmentPress? {
+    val interactionSource = interactionSources.getOrNull(segmentIndex) ?: return null
+    val interaction = PressInteraction.Press(pressPosition)
+    if (!interactionSource.tryEmit(interaction)) return null
+    return CoverLyricsActiveSegmentPress(interactionSource, interaction)
+}
+
+private fun releaseCoverLyricsSegmentPress(
+    activePress: CoverLyricsActiveSegmentPress?,
+) {
+    activePress ?: return
+    activePress.interactionSource.tryEmit(PressInteraction.Release(activePress.interaction))
+}
+
+private fun cancelCoverLyricsSegmentPress(
+    activePress: CoverLyricsActiveSegmentPress?,
+) {
+    activePress ?: return
+    activePress.interactionSource.tryEmit(PressInteraction.Cancel(activePress.interaction))
+}
+
+internal fun coverLyricsSegmentPressPosition(
+    pointerPosition: Offset,
+    segmentIndex: Int,
+    segmentHeightPx: Float,
+    segmentGapPx: Float,
+): Offset {
+    if (segmentIndex < 0 || segmentHeightPx <= 0f) return Offset.Unspecified
+    val segmentTop = segmentIndex * (segmentHeightPx + segmentGapPx)
+    return Offset(
+        x = pointerPosition.x,
+        y = (pointerPosition.y - segmentTop).coerceIn(0f, segmentHeightPx),
+    )
+}
 
 private class CoverLyricsSegmentTapEffectState {
     val expansion = Animatable(0f)
