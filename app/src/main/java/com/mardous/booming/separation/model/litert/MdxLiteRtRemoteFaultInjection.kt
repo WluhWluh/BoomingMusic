@@ -42,14 +42,16 @@ internal enum class MdxLiteRtRemoteFailpoint(
 
 @Serializable
 internal data class MdxLiteRtRemoteFaultControl(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int,
     val token: String,
     val failpoint: String,
     val failureInvocationCount: Int,
     val expiresAtElapsedRealtimeMs: Long,
 ) {
     init {
-        require(schemaVersion == 1) { "Unsupported remote fault-control schema." }
+        require(schemaVersion == SCHEMA_VERSION) {
+            "Unsupported remote fault-control schema."
+        }
         require(REMOTE_FAULT_TOKEN_PATTERN.matches(token)) {
             "Remote fault-control token is invalid."
         }
@@ -63,11 +65,15 @@ internal data class MdxLiteRtRemoteFaultControl(
             "Remote fault-control expiry is invalid."
         }
     }
+
+    companion object {
+        const val SCHEMA_VERSION = 1
+    }
 }
 
 @Serializable
 internal data class MdxLiteRtRemoteFaultEvidence(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int,
     val token: String,
     val failpoint: String,
     val pid: Int,
@@ -80,12 +86,25 @@ internal data class MdxLiteRtRemoteFaultEvidence(
     val cpuCloseCount: Int,
     val injectedAtElapsedRealtimeMs: Long?,
     val events: List<String>,
-)
+) {
+    init {
+        require(schemaVersion == SCHEMA_VERSION) {
+            "Unsupported remote fault-evidence schema."
+        }
+    }
+
+    companion object {
+        const val SCHEMA_VERSION = 1
+    }
+}
 
 internal object MdxLiteRtRemoteFaultInjection {
     private val json = Json {
         encodeDefaults = true
         ignoreUnknownKeys = false
+        isLenient = false
+        coerceInputValues = false
+        explicitNulls = false
     }
 
     fun arm(
@@ -110,6 +129,7 @@ internal object MdxLiteRtRemoteFaultInjection {
             controlFile(directory),
             json.encodeToString(
                 MdxLiteRtRemoteFaultControl(
+                    schemaVersion = MdxLiteRtRemoteFaultControl.SCHEMA_VERSION,
                     token = token,
                     failpoint = failpoint.argumentValue,
                     failureInvocationCount = failureInvocationCount,
@@ -317,6 +337,7 @@ private class MdxLiteRtRemoteFaultController(
             File(directory, "evidence.json"),
             json.encodeToString(
                 MdxLiteRtRemoteFaultEvidence(
+                    schemaVersion = MdxLiteRtRemoteFaultEvidence.SCHEMA_VERSION,
                     token = control.token,
                     failpoint = failpoint.argumentValue,
                     pid = pid,

@@ -29,6 +29,7 @@ class MdxLiteRtRemoteFaultInjectionTest {
     @Test
     fun `remote fault control rejects probe and identity hazards`() {
         val valid = MdxLiteRtRemoteFaultControl(
+            schemaVersion = MdxLiteRtRemoteFaultControl.SCHEMA_VERSION,
             token = "phase5-cleanup-1",
             failpoint = MdxLiteRtRemoteFailpoint.Cleanup.argumentValue,
             failureInvocationCount = 2,
@@ -44,6 +45,9 @@ class MdxLiteRtRemoteFaultInjectionTest {
         }
         assertThrows(IllegalArgumentException::class.java) {
             valid.copy(token = "contains spaces")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            valid.copy(schemaVersion = 0)
         }
     }
 }

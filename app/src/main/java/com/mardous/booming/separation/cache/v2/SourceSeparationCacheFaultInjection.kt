@@ -14,7 +14,9 @@ import kotlinx.serialization.json.Json
 internal object SourceSeparationCacheFaultInjection {
     private val json = Json {
         encodeDefaults = true
-        ignoreUnknownKeys = true
+        ignoreUnknownKeys = false
+        isLenient = false
+        coerceInputValues = false
         explicitNulls = false
     }
 
