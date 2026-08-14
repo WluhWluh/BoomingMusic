@@ -157,6 +157,34 @@ and ordinary Booming Music data as described later in this document, but it is
 not a general old-app-data migration and must never restore old model or cache
 files.
 
+This exception is intentionally narrow. All app-private state read during
+ordinary startup or product operation accepts only the current production
+schema: the Room database, active execution selection, model mix settings,
+cache identity/manifest/journal/lock records, playback settings, worker and IPC
+state, and Debug fault controls. No normal reader may recognize an obsolete
+field alias, positional two-stem value, blend-only payload, predecessor schema,
+or development-era preference key. Incompatible disposable state is removed
+and rebuilt; incompatible durable installed resources require an explicit
+repair or reinstall; an incompatible Room database is destructively recreated.
+There is no in-place conversion path because none of these formats has shipped.
+
+Current-schema closure record (2026-08-13):
+
+- `13b4e712` removes the blend-only cache/playback payload and makes the ordered
+  stem-gain representation authoritative.
+- `6a1dc25c` requires explicit current cache identity, manifest, journal, and
+  lock schemas instead of allowing decoder defaults to reinterpret missing
+  versions.
+- `641dd70b` rejects positional and predecessor model-mix payloads rather than
+  converting them to the current stem-ID map.
+- `75d48a8c` removes the unreleased Room migration chain and opens only schema 6,
+  with destructive recreation for any incompatible on-device database.
+- `40ba4d0e` removes obsolete selection, stem-name, worker-request, and playback
+  adapters; `f3be6f66` makes stale Debug fault-control values fail closed.
+- The versioned `.bmgbak` codec, filtered upstream/fork preference projections,
+  and allowlisted legacy package import remain intentionally supported and are
+  the only predecessor-data readers retained by this audit.
+
 In-place upgrades from an earlier Booming SS build, preservation of its model
 downloads, and preservation of its separation results are not release or
 acceptance requirements for this stage.
@@ -792,13 +820,13 @@ settings/common.json
 source_separation/settings.json
 ```
 
-The first manifest fixes these independent schema numbers:
+The current manifest uses these independent schema numbers:
 
 ```json
 {
   "formatVersion": 1,
   "commonSettingsSchema": 1,
-  "sourceSeparationSettingsSchema": 1
+  "sourceSeparationSettingsSchema": 2
 }
 ```
 
@@ -809,6 +837,14 @@ the application version. The common snapshot contains only a maintained
 allowlist of stable Booming Music settings. The source-separation snapshot
 contains only the fork allowlist below. Neither file is a dump of the default
 preferences file.
+
+Backup schema evolution is part of this explicit portable boundary, not an
+internal-data migration mechanism. The restore implementation may read the
+reviewed backup schema versions and filtered package projections required for
+Booming Music interoperability, but it must never reuse that code to admit an
+old app-private preference, model, cache, journal, database, or mix-setting
+format. New Booming SS backups write source-separation settings schema 2;
+schema 1 remains readable only inside the deliberate backup contract.
 
 An unknown optional fork payload or source-separation schema must be reported
 and skipped without preventing restoration of recognized common settings,
@@ -3068,12 +3104,13 @@ verified GitHub x86 or other-ABI runtime contracts.
 
 ### Backup format and allowlists
 
-Adopt backup `formatVersion` 1, `commonSettingsSchema` 1, and
-`sourceSeparationSettingsSchema` 1. The manifest also records producer package,
-flavor, app version, generation time, and payload list. Unknown optional fork
-payloads are skipped and reported without blocking recognized common data;
-unsupported top-level format or invalid declared canonical payload fails before
-application.
+Use backup `formatVersion` 1, `commonSettingsSchema` 1, and current
+`sourceSeparationSettingsSchema` 2. Source-separation schema 1 is accepted only
+by the explicit backup restore contract; it is not an app-private settings
+migration. The manifest also records producer package, flavor, app version,
+generation time, and payload list. Unknown optional fork payloads are skipped
+and reported without blocking recognized common data; unsupported top-level
+format or invalid declared canonical payload fails before application.
 
 The common allowlist is a maintained table of stable, user-facing upstream
 settings with key, type, default, and schema introduction. Freeze that table

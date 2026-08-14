@@ -501,6 +501,22 @@ revision does not silently reinterpret installed state. Unknown future schema
 versions fail closed before native loading while leaving unrelated playback
 and local resources intact.
 
+Because Booming SS has not shipped a release, app-private product state also
+has no predecessor-schema compatibility contract. Runtime inventory, readiness,
+Quick Setup state, run admission, cache journals, debug controls, and ordinary
+preferences accept only their current schema and key set. A schema replacement
+must update the writer and reader together; it must not add a fallback parser,
+field alias, migration marker, or value conversion for an unreleased format.
+Invalid durable resources are repaired or reinstalled, disposable state is
+discarded and rebuilt, and an incompatible Room database is destructively
+recreated.
+
+The sole compatibility exception is the user-invoked `.bmgbak` boundary. Its
+versioned common-settings payload and filtered package preference projections
+remain interoperable with upstream Booming Music. That explicit import/export
+contract does not make any runtime, model, cache, journal, mix-setting, debug,
+or database predecessor schema readable during normal application startup.
+
 ### Provider-neutral delivery reference
 
 Runtime and model content identity is independent from its delivery channel.
@@ -662,9 +678,11 @@ Every admitted run records a versioned immutable snapshot containing:
 - process generation; and
 - source/cache identity required by the existing separation protocol.
 
-Historical journals that store `tryGpu` remain readable as historical test
-records. New product code treats it only as a legacy representation of GPU
-intent; it is not the canonical settings or UI contract.
+Only the current run-journal schema is accepted. Its `tryGpu` member is an
+immutable per-run admission fact that must agree with the recorded GPU runtime
+identity; it is not a preference alias or a migration input. Diagnostic reports
+retained outside app-private product state may describe old experiments, but no
+production reader translates those reports into settings or resume state.
 
 ### Storage ownership
 
@@ -707,9 +725,12 @@ separation request may offer Quick Setup, and downloading a missing model in
 Model Management still requires an explicit `Use` action unless the user
 explicitly runs `RestoreRecommended`.
 
-The clean-install compatibility boundary remains the release baseline. If an
-upgrade adapter is retained for development, the old `tryGpu` value may map to
-`gpuEnabled`; it is not canonical and does not create an NPU preference.
+The clean-install compatibility boundary remains the release baseline. The old
+`source_separation.try_gpu` preference is rejected rather than mapped to
+`source_separation.gpu_enabled`; only the explicit `.bmgbak`
+settings-compatibility boundary may translate an allowlisted upstream
+preference representation. The current journal's `tryGpu` admission fact does
+not weaken that preference boundary.
 
 ## UX Contract
 
@@ -1147,6 +1168,11 @@ are either completed or explicitly waived with a documented support boundary.
 - [x] Promote `source_separation.gpu_enabled` into the versioned backup
   allowlist and device tests. The old `source_separation.try_gpu` key is not
   canonical and is rejected under the unreleased clean-install boundary.
+- [x] Close the unreleased predecessor-data audit. Cache identity/manifest/
+  journal/lock records, model mix settings, Room data, execution-selection
+  requests, and Debug fault controls now require their current representation;
+  only the user-invoked `.bmgbak` codec retains reviewed Booming Music
+  interoperability (`13b4e712` through `f3be6f66`).
 - [x] Verify by path-ownership tests that clear-cache targets generated
   separation data only and leaves runtime/model inventory roots outside it.
   A destructive clear-app-data/uninstall run remains a manual qualification
@@ -1318,7 +1344,7 @@ Keep commits small, buildable, and specific. Recommended sequence:
 6. Runtime Management CPU UI;
 7. readiness evaluator;
 8. Quick Setup CPU/model orchestration;
-9. bounded GPU component and preference migration;
+9. bounded GPU component and canonical preference cutover;
 10. ORT retirement and clean APK inventory baseline;
 11. deterministic provider/executor tests and Quick Setup transaction repair;
 12. CPU/GPU lifecycle, backup, clean-install, and S10/S25 baseline closure;
