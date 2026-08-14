@@ -395,13 +395,26 @@ fun CoverLyricsScreen(
                     .coerceAtLeast(0f)
                     .toDp()
             }
-            val quickControlTargetHeight = when {
-                multiStemQuickExpanded -> coverLyricsMultiStemExpandedHeight(
+            val fullExpandedQuickControlHeight = if (multiStemMixState != null) {
+                coverLyricsMultiStemExpandedHeight(
                     multiStemMixState.stems.size,
                 ) + CoverLyricsControlSlotInset
-                quickBlendExpanded ->
-                    CoverLyricsQuickBlendSliderHeight + CoverLyricsControlSlotInset
-                else -> CoverLyricsControlSlotSize
+            } else {
+                CoverLyricsQuickBlendSliderHeight + CoverLyricsControlSlotInset
+            }
+            val useCompactQuickControl = showSourceSeparationQuickControls &&
+                    coverLyricsShouldUseCompactQuickControl(
+                        availableHeight = maxHeight,
+                        safeDrawingTop = safeDrawingTop,
+                        bottomPadding = CoverLyricsOverlayPadding,
+                        fullQuickControlHeight = fullExpandedQuickControlHeight,
+                    )
+            val quickControlTargetHeight = if (!quickControlExpanded) {
+                CoverLyricsControlSlotSize
+            } else if (useCompactQuickControl) {
+                CoverLyricsCompactControlExpandedHeight + CoverLyricsControlSlotInset
+            } else {
+                fullExpandedQuickControlHeight
             }
             val progressPlacement = coverLyricsProcessingProgressPlacement(
                 availableHeight = maxHeight,
@@ -461,7 +474,24 @@ fun CoverLyricsScreen(
 
                 if (showSourceSeparationQuickControls) {
                     Box(contentAlignment = Alignment.TopCenter) {
-                        if (multiStemMixState != null) {
+                        if (useCompactQuickControl) {
+                            CoverLyricsCompactControl(
+                                expanded = quickControlExpanded,
+                                onEnableSeparatedPlayback = {
+                                    val demandBlend = multiStemMixState?.demandBlend
+                                        ?: sourceSeparationPlaybackState.blend
+                                    playerViewModel.setSourceSeparationPlaybackEnabled(
+                                        enabled = true,
+                                        blend = demandBlend,
+                                    )
+                                },
+                                onOpenPanel = onSourceSeparationPanelLongClick,
+                                onDisableSeparatedPlayback = {
+                                    playerViewModel.setSourceSeparationPlaybackEnabled(false)
+                                },
+                                onLongClick = onSourceSeparationPanelLongClick,
+                            )
+                        } else if (multiStemMixState != null) {
                             CoverLyricsMultiStemControl(
                                 expanded = multiStemQuickExpanded,
                                 state = multiStemMixState,
@@ -915,6 +945,212 @@ private fun CoverLyricsProcessingProgressIndicator(
             strokeWidth = CoverLyricsQuickBlendProgressStrokeWidth,
             modifier = Modifier.size(CoverLyricsQuickBlendProgressSize),
         )
+    }
+}
+
+@Composable
+private fun CoverLyricsCompactControl(
+    expanded: Boolean,
+    onEnableSeparatedPlayback: () -> Unit,
+    onOpenPanel: () -> Unit,
+    onDisableSeparatedPlayback: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val transition = updateTransition(expanded, label = "CoverLyricsCompactControl")
+    val height by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "height",
+    ) { isExpanded ->
+        if (isExpanded) CoverLyricsCompactControlExpandedHeight else CoverLyricsButtonSize
+    }
+    val segmentHeight by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "segmentHeight",
+    ) { isExpanded ->
+        if (isExpanded) {
+            CoverLyricsCompactControlSegmentHeight
+        } else {
+            CoverLyricsButtonSize / 2
+        }
+    }
+    val segmentGap by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "segmentGap",
+    ) { isExpanded ->
+        if (isExpanded) CoverLyricsCompactControlGap else 0.dp
+    }
+    val innerCornerRadius by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "innerCornerRadius",
+    ) { isExpanded ->
+        if (isExpanded) CoverLyricsQuickBlendInnerCornerRadius else 0.dp
+    }
+    val buttonBackgroundAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "buttonBackgroundAlpha",
+    ) { isExpanded -> if (isExpanded) 0f else 1f }
+    val segmentAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "segmentAlpha",
+    ) { isExpanded -> if (isExpanded) 1f else 0f }
+    val collapsedIconAlpha by transition.animateFloat(
+        transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
+        label = "collapsedIconAlpha",
+    ) { isExpanded -> if (isExpanded) 0f else 1f }
+    val colorScheme = MaterialTheme.colorScheme
+    val progressColor = colorScheme.onSurface
+    val viewConfiguration = LocalViewConfiguration.current
+    val touchSlop = viewConfiguration.touchSlop
+    val longPressTimeoutMillis = viewConfiguration.longPressTimeoutMillis
+    val view = LocalView.current
+    val currentOnEnableSeparatedPlayback by rememberUpdatedState(onEnableSeparatedPlayback)
+    val currentOnOpenPanel by rememberUpdatedState(onOpenPanel)
+    val currentOnDisableSeparatedPlayback by rememberUpdatedState(
+        onDisableSeparatedPlayback,
+    )
+    val currentOnLongClick by rememberUpdatedState(onLongClick)
+    val gestureModifier = Modifier.pointerInput(
+        expanded,
+        touchSlop,
+        longPressTimeoutMillis,
+        view,
+    ) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val pointerId = down.id
+            var releasedChange: PointerInputChange? = null
+            var moved = false
+
+            val longPressReached = withTimeoutOrNull(longPressTimeoutMillis) {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes
+                        .firstOrNull { it.id == pointerId }
+                        ?: continue
+
+                    if (!change.pressed) {
+                        releasedChange = change
+                        return@withTimeoutOrNull false
+                    }
+
+                    if ((change.position - down.position).getDistance() > touchSlop) {
+                        moved = true
+                        return@withTimeoutOrNull false
+                    }
+                }
+            } == null
+
+            when {
+                longPressReached -> {
+                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    currentOnLongClick()
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes
+                            .firstOrNull { it.id == pointerId }
+                            ?: continue
+                        change.consume()
+                        if (!change.pressed) break
+                    }
+                }
+
+                releasedChange != null -> {
+                    releasedChange.let { change ->
+                        if (!expanded) {
+                            currentOnEnableSeparatedPlayback()
+                        } else {
+                            when (
+                                coverLyricsCompactControlActionForY(
+                                    y = change.position.y,
+                                    heightPx = size.height.toFloat(),
+                                )
+                            ) {
+                                CoverLyricsCompactControlAction.OpenPanel -> currentOnOpenPanel()
+                                CoverLyricsCompactControlAction.DisableSeparatedPlayback ->
+                                    currentOnDisableSeparatedPlayback()
+                                null -> Unit
+                            }
+                        }
+                    }
+                }
+
+                moved -> {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes
+                            .firstOrNull { it.id == pointerId }
+                            ?: continue
+                        if (!change.pressed) break
+                    }
+                }
+            }
+        }
+    }
+
+    Box(
+        contentAlignment = Alignment.TopCenter,
+        modifier = Modifier.size(
+            width = CoverLyricsControlSlotSize,
+            height = height + CoverLyricsControlSlotInset,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(
+                    width = CoverLyricsButtonSize,
+                    height = height,
+                )
+                .then(gestureModifier),
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(CircleShape)
+                    .background(progressColor.copy(alpha = buttonBackgroundAlpha)),
+            )
+
+            Column(
+                verticalArrangement = Arrangement.spacedBy(segmentGap),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .alpha(segmentAlpha),
+            ) {
+                CoverLyricsMultiStemFixedSegment(
+                    iconRes = R.drawable.ic_stem_blend_24dp,
+                    background = progressColor,
+                    iconTint = colorScheme.surface,
+                    height = segmentHeight,
+                    shape = RoundedCornerShape(
+                        topStart = CoverLyricsButtonSize / 2,
+                        topEnd = CoverLyricsButtonSize / 2,
+                        bottomStart = innerCornerRadius,
+                        bottomEnd = innerCornerRadius,
+                    ),
+                )
+                CoverLyricsMultiStemFixedSegment(
+                    iconRes = R.drawable.ic_close_24dp,
+                    background = progressColor.copy(alpha = 0.1f),
+                    iconTint = progressColor,
+                    height = segmentHeight,
+                    shape = RoundedCornerShape(
+                        topStart = innerCornerRadius,
+                        topEnd = innerCornerRadius,
+                        bottomStart = CoverLyricsButtonSize / 2,
+                        bottomEnd = CoverLyricsButtonSize / 2,
+                    ),
+                )
+            }
+
+            Icon(
+                painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
+                contentDescription = stringResource(R.string.action_source_separation_playback),
+                tint = colorScheme.surface,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .alpha(collapsedIconAlpha),
+            )
+        }
     }
 }
 
@@ -1566,6 +1802,10 @@ private val CoverLyricsQuickBlendEndpointIconOffset = 8.dp
 private val CoverLyricsQuickBlendProgressSize = 24.dp
 private val CoverLyricsQuickBlendProgressStrokeWidth = 3.dp
 private val CoverLyricsQuickBlendProgressOffset = 32.dp
+private val CoverLyricsCompactControlSegmentHeight = 40.dp
+private val CoverLyricsCompactControlGap = 4.dp
+private val CoverLyricsCompactControlExpandedHeight =
+    CoverLyricsCompactControlSegmentHeight * 2 + CoverLyricsCompactControlGap
 private val CoverLyricsButtonSpacing = 12.dp
 private val CoverLyricsOverlayPadding = 16.dp
 private val CoverLyricsBaseVerticalPadding = 72.dp
@@ -1581,6 +1821,30 @@ private const val CoverLyricsQuickControlsTransitionDurationMillis = 260
 internal enum class CoverLyricsProcessingProgressPlacement {
     AboveQuickControl,
     FullscreenButtonInnerSlot,
+}
+
+internal enum class CoverLyricsCompactControlAction {
+    OpenPanel,
+    DisableSeparatedPlayback,
+}
+
+internal fun coverLyricsShouldUseCompactQuickControl(
+    availableHeight: Dp,
+    safeDrawingTop: Dp,
+    bottomPadding: Dp,
+    fullQuickControlHeight: Dp,
+): Boolean = availableHeight - safeDrawingTop - bottomPadding < fullQuickControlHeight
+
+internal fun coverLyricsCompactControlActionForY(
+    y: Float,
+    heightPx: Float,
+): CoverLyricsCompactControlAction? {
+    if (heightPx <= 0f || y < 0f || y >= heightPx) return null
+    return if (y < heightPx / 2f) {
+        CoverLyricsCompactControlAction.OpenPanel
+    } else {
+        CoverLyricsCompactControlAction.DisableSeparatedPlayback
+    }
 }
 
 internal fun coverLyricsProcessingProgressPlacement(
