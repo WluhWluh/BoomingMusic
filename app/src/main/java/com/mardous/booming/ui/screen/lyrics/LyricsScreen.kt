@@ -365,22 +365,6 @@ fun CoverLyricsScreen(
             animationSpec = coverLyricsQuickBlendFloatTransitionSpec(),
             label = "quickControlProgressAlpha",
         )
-        val lyricsEndClearance = coverLyricsEndClearance(
-            showSourceSeparationQuickControls = showSourceSeparationQuickControls,
-            reserveExpandedControls = quickControlExpanded,
-        )
-        val animatedLyricsEndClearance by animateDpAsState(
-            targetValue = lyricsEndClearance,
-            animationSpec = tween(
-                durationMillis = CoverLyricsQuickControlsTransitionDurationMillis,
-                easing = FastOutSlowInEasing,
-            ),
-            label = "lyricsEndClearance",
-        )
-        val lyricsContentPadding = PaddingValues(
-            vertical = CoverLyricsBaseVerticalPadding,
-            horizontal = CoverLyricsBaseHorizontalPadding,
-        )
         var containerTopInWindowPx by remember { mutableFloatStateOf(0f) }
         BoxWithConstraints(
             modifier = modifier
@@ -395,13 +379,15 @@ fun CoverLyricsScreen(
                     .coerceAtLeast(0f)
                     .toDp()
             }
-            val fullExpandedQuickControlHeight = if (multiStemMixState != null) {
+            val fullExpandedQuickControlVisibleHeight = if (multiStemMixState != null) {
                 coverLyricsMultiStemExpandedHeight(
                     multiStemMixState.stems.size,
-                ) + CoverLyricsControlSlotInset
+                )
             } else {
-                CoverLyricsQuickBlendSliderHeight + CoverLyricsControlSlotInset
+                CoverLyricsQuickBlendSliderHeight
             }
+            val fullExpandedQuickControlHeight =
+                fullExpandedQuickControlVisibleHeight + CoverLyricsControlSlotInset
             val useCompactQuickControl = showSourceSeparationQuickControls &&
                     coverLyricsShouldUseCompactQuickControl(
                         availableHeight = maxHeight,
@@ -416,6 +402,11 @@ fun CoverLyricsScreen(
             } else {
                 fullExpandedQuickControlHeight
             }
+            val quickControlVisibleTargetHeight = when {
+                !quickControlExpanded -> CoverLyricsButtonSize
+                useCompactQuickControl -> CoverLyricsCompactControlExpandedHeight
+                else -> fullExpandedQuickControlVisibleHeight
+            }
             val progressPlacement = coverLyricsProcessingProgressPlacement(
                 availableHeight = maxHeight,
                 safeDrawingTop = safeDrawingTop,
@@ -424,6 +415,31 @@ fun CoverLyricsScreen(
             )
             val showProgressInside = displayedQuickControlProgress != null &&
                     progressPlacement == CoverLyricsProcessingProgressPlacement.FullscreenButtonInnerSlot
+            val overlayAvoidance = coverLyricsOverlayAvoidance(
+                showSourceSeparationQuickControls = showSourceSeparationQuickControls,
+                quickControlExpanded = quickControlExpanded,
+                quickControlHeight = quickControlTargetHeight,
+                quickControlVisibleHeight = quickControlVisibleTargetHeight,
+                progressAboveQuickControl = displayedQuickControlProgress != null &&
+                        progressPlacement == CoverLyricsProcessingProgressPlacement.AboveQuickControl,
+                totalAvailableHeight = (maxHeight - safeDrawingTop).coerceAtLeast(0.dp),
+            )
+            val animatedLyricsEndClearance by animateDpAsState(
+                targetValue = overlayAvoidance.endClearance,
+                animationSpec = coverLyricsQuickBlendDpTransitionSpec(),
+                label = "lyricsEndClearance",
+            )
+            val animatedLyricsBottomPadding by animateDpAsState(
+                targetValue = overlayAvoidance.minimumBottomPadding,
+                animationSpec = coverLyricsQuickBlendDpTransitionSpec(),
+                label = "lyricsBottomPadding",
+            )
+            val lyricsContentPadding = PaddingValues(
+                start = CoverLyricsBaseHorizontalPadding,
+                top = CoverLyricsBaseVerticalPadding,
+                end = CoverLyricsBaseHorizontalPadding,
+                bottom = animatedLyricsBottomPadding,
+            )
 
             LyricsSurface(
                 uiState = uiState,
@@ -1817,6 +1833,7 @@ private val CoverLyricsMultiStemInnerCornerRadius = 6.dp
 private const val CoverLyricsQuickBlendNeutralBlend = 0.5f
 private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.10f
 private const val CoverLyricsQuickControlsTransitionDurationMillis = 260
+private const val CoverLyricsWidthNarrowingHeightFraction = 0.40f
 
 internal enum class CoverLyricsProcessingProgressPlacement {
     AboveQuickControl,
@@ -1862,13 +1879,57 @@ internal fun coverLyricsProcessingProgressPlacement(
     }
 }
 
-internal fun coverLyricsEndClearance(
+internal data class CoverLyricsOverlayAvoidance(
+    val minimumBottomPadding: Dp,
+    val endClearance: Dp,
+)
+
+internal fun coverLyricsOverlayAvoidance(
     showSourceSeparationQuickControls: Boolean,
-    reserveExpandedControls: Boolean,
-): Dp = if (showSourceSeparationQuickControls && reserveExpandedControls) {
-    CoverLyricsControlSlotSize
-} else {
-    0.dp
+    quickControlExpanded: Boolean,
+    quickControlHeight: Dp,
+    quickControlVisibleHeight: Dp,
+    progressAboveQuickControl: Boolean,
+    totalAvailableHeight: Dp,
+): CoverLyricsOverlayAvoidance {
+    val shouldNarrowLyrics = showSourceSeparationQuickControls &&
+            quickControlExpanded &&
+            quickControlVisibleHeight >
+            totalAvailableHeight * CoverLyricsWidthNarrowingHeightFraction
+    val quickControlOverlayHeight = if (showSourceSeparationQuickControls) {
+        quickControlHeight + if (progressAboveQuickControl) {
+            CoverLyricsQuickBlendProgressOffset
+        } else {
+            0.dp
+        }
+    } else {
+        0.dp
+    }
+    val overlayHeight = maxOf(
+        CoverLyricsControlSlotSize,
+        quickControlOverlayHeight,
+    )
+    val overlayTopClearance = maxOf(
+        0.dp,
+        CoverLyricsBaseVerticalPadding -
+                CoverLyricsControlSlotSize -
+                CoverLyricsOverlayPadding,
+    )
+    return CoverLyricsOverlayAvoidance(
+        minimumBottomPadding = if (shouldNarrowLyrics) {
+            CoverLyricsBaseVerticalPadding
+        } else {
+            maxOf(
+                CoverLyricsBaseVerticalPadding,
+                overlayHeight + CoverLyricsOverlayPadding + overlayTopClearance,
+            )
+        },
+        endClearance = if (shouldNarrowLyrics) {
+            CoverLyricsControlSlotSize
+        } else {
+            0.dp
+        },
+    )
 }
 
 private fun coverLyricsQuickBlendDpTransitionSpec() =

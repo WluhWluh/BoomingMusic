@@ -7,42 +7,152 @@ import org.junit.Test
 class CoverLyricsOverlayAvoidanceTest {
 
     @Test
-    fun `hidden source separation controls do not narrow lyrics`() {
-        val clearance = coverLyricsEndClearance(
+    fun `hidden quick controls retain base bottom padding and full width`() {
+        val avoidance = coverLyricsOverlayAvoidance(
             showSourceSeparationQuickControls = false,
-            reserveExpandedControls = false,
+            quickControlExpanded = true,
+            quickControlHeight = 352.dp,
+            quickControlVisibleHeight = 348.dp,
+            progressAboveQuickControl = true,
+            totalAvailableHeight = 800.dp,
         )
 
-        assertEquals(0.dp, clearance)
+        assertEquals(72.dp, avoidance.minimumBottomPadding)
+        assertEquals(0.dp, avoidance.endClearance)
     }
 
     @Test
-    fun `collapsed quick controls do not narrow lyrics`() {
-        val clearance = coverLyricsEndClearance(
+    fun `collapsed horizontal controls fit inside base bottom padding`() {
+        val avoidance = coverLyricsOverlayAvoidance(
             showSourceSeparationQuickControls = true,
-            reserveExpandedControls = false,
+            quickControlExpanded = false,
+            quickControlHeight = 48.dp,
+            quickControlVisibleHeight = 40.dp,
+            progressAboveQuickControl = false,
+            totalAvailableHeight = 800.dp,
         )
 
-        assertEquals(0.dp, clearance)
+        assertEquals(72.dp, avoidance.minimumBottomPadding)
+        assertEquals(0.dp, avoidance.endClearance)
     }
 
     @Test
-    fun `expanded quick controls narrow the logical end by one slot`() {
-        val clearance = coverLyricsEndClearance(
+    fun `short expanded control grows bottom padding instead of narrowing lyrics`() {
+        val avoidance = coverLyricsOverlayAvoidance(
             showSourceSeparationQuickControls = true,
-            reserveExpandedControls = true,
+            quickControlExpanded = true,
+            quickControlHeight = 124.dp,
+            quickControlVisibleHeight = 120.dp,
+            progressAboveQuickControl = false,
+            totalAvailableHeight = 500.dp,
         )
 
-        assertEquals(48.dp, clearance)
+        assertEquals(148.dp, avoidance.minimumBottomPadding)
+        assertEquals(0.dp, avoidance.endClearance)
     }
 
     @Test
-    fun `hidden controls never reserve an expanded side strip`() {
-        val clearance = coverLyricsEndClearance(
-            showSourceSeparationQuickControls = false,
-            reserveExpandedControls = true,
+    fun `progress above short control contributes its full vertical offset`() {
+        val avoidance = coverLyricsOverlayAvoidance(
+            showSourceSeparationQuickControls = true,
+            quickControlExpanded = true,
+            quickControlHeight = 124.dp,
+            quickControlVisibleHeight = 120.dp,
+            progressAboveQuickControl = true,
+            totalAvailableHeight = 500.dp,
         )
 
-        assertEquals(0.dp, clearance)
+        assertEquals(180.dp, avoidance.minimumBottomPadding)
+        assertEquals(0.dp, avoidance.endClearance)
+    }
+
+    @Test
+    fun `progress in inner slot does not grow vertical avoidance`() {
+        val avoidance = coverLyricsOverlayAvoidance(
+            showSourceSeparationQuickControls = true,
+            quickControlExpanded = true,
+            quickControlHeight = 124.dp,
+            quickControlVisibleHeight = 120.dp,
+            progressAboveQuickControl = false,
+            totalAvailableHeight = 500.dp,
+        )
+
+        assertEquals(148.dp, avoidance.minimumBottomPadding)
+        assertEquals(0.dp, avoidance.endClearance)
+    }
+
+    @Test
+    fun `tall expanded control narrows lyrics and disables variable bottom padding`() {
+        val avoidance = coverLyricsOverlayAvoidance(
+            showSourceSeparationQuickControls = true,
+            quickControlExpanded = true,
+            quickControlHeight = 352.dp,
+            quickControlVisibleHeight = 348.dp,
+            progressAboveQuickControl = true,
+            totalAvailableHeight = 800.dp,
+        )
+
+        assertEquals(72.dp, avoidance.minimumBottomPadding)
+        assertEquals(48.dp, avoidance.endClearance)
+    }
+
+    @Test
+    fun `height equal to forty percent does not narrow lyrics`() {
+        val avoidance = coverLyricsOverlayAvoidance(
+            showSourceSeparationQuickControls = true,
+            quickControlExpanded = true,
+            quickControlHeight = 124.dp,
+            quickControlVisibleHeight = 120.dp,
+            progressAboveQuickControl = false,
+            totalAvailableHeight = 300.dp,
+        )
+
+        assertEquals(148.dp, avoidance.minimumBottomPadding)
+        assertEquals(0.dp, avoidance.endClearance)
+    }
+
+    @Test
+    fun `height above forty percent narrows lyrics`() {
+        val avoidance = coverLyricsOverlayAvoidance(
+            showSourceSeparationQuickControls = true,
+            quickControlExpanded = true,
+            quickControlHeight = 124.dp,
+            quickControlVisibleHeight = 120.dp,
+            progressAboveQuickControl = false,
+            totalAvailableHeight = 299.dp,
+        )
+
+        assertEquals(72.dp, avoidance.minimumBottomPadding)
+        assertEquals(48.dp, avoidance.endClearance)
+    }
+
+    @Test
+    fun `compact control uses bottom avoidance when below threshold`() {
+        val avoidance = coverLyricsOverlayAvoidance(
+            showSourceSeparationQuickControls = true,
+            quickControlExpanded = true,
+            quickControlHeight = 88.dp,
+            quickControlVisibleHeight = 84.dp,
+            progressAboveQuickControl = false,
+            totalAvailableHeight = 300.dp,
+        )
+
+        assertEquals(112.dp, avoidance.minimumBottomPadding)
+        assertEquals(0.dp, avoidance.endClearance)
+    }
+
+    @Test
+    fun `compact control narrows lyrics when above threshold`() {
+        val avoidance = coverLyricsOverlayAvoidance(
+            showSourceSeparationQuickControls = true,
+            quickControlExpanded = true,
+            quickControlHeight = 88.dp,
+            quickControlVisibleHeight = 84.dp,
+            progressAboveQuickControl = false,
+            totalAvailableHeight = 209.dp,
+        )
+
+        assertEquals(72.dp, avoidance.minimumBottomPadding)
+        assertEquals(48.dp, avoidance.endClearance)
     }
 }
