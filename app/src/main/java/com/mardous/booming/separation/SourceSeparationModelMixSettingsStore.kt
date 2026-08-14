@@ -138,8 +138,12 @@ class SourceSeparationModelMixSettingsStore(
         key: String,
         stemIds: List<String>,
     ): Map<String, Float>? {
-        val encoded = preferences.getString(key, null) ?: return null
-        return runCatching {
+        val encoded = runCatching { preferences.getString(key, null) }
+            .getOrElse {
+                preferences.edit { remove(key) }
+                return null
+            } ?: return null
+        val decoded = runCatching {
             val stored = JSON.decodeFromString<StoredStemGains>(encoded)
             val ordered = SourceSeparationStemGainPolicy.orderedGains(
                 stemIds = stemIds,
@@ -150,12 +154,17 @@ class SourceSeparationModelMixSettingsStore(
             ) ?: return@runCatching null
             SourceSeparationStemGainPolicy.orderedMap(stemIds, ordered)
         }.getOrNull()
+        if (decoded == null) {
+            preferences.edit { remove(key) }
+        }
+        return decoded
     }
 
     private fun encodeStemGains(stemIds: List<String>, gains: List<Float>): String {
         val ordered = SourceSeparationStemGainPolicy.orderedMap(stemIds, gains)
         return JSON.encodeToString(
             StoredStemGains(
+                schemaVersion = STEM_GAINS_SCHEMA_VERSION,
                 stemIds = ordered.keys.toList(),
                 gains = ordered.values.toList(),
             ),
@@ -187,12 +196,27 @@ class SourceSeparationModelMixSettingsStore(
 
     @Serializable
     private data class StoredStemGains(
+        val schemaVersion: Int,
         val stemIds: List<String>,
         val gains: List<Float>,
-    )
+    ) {
+        init {
+            require(schemaVersion == STEM_GAINS_SCHEMA_VERSION) {
+                "Unsupported stored stem-gain schema: $schemaVersion"
+            }
+        }
+    }
 
     private companion object {
-        val JSON = Json { ignoreUnknownKeys = true }
+        val JSON = Json {
+            encodeDefaults = true
+            ignoreUnknownKeys = false
+            isLenient = false
+            coerceInputValues = false
+            explicitNulls = false
+        }
+
+        const val STEM_GAINS_SCHEMA_VERSION = 1
 
         const val KEY_GLOBAL_BLEND = "source_separation.global_blend"
         const val KEY_GLOBAL_STEM_GAINS = "source_separation.global_stem_gains"

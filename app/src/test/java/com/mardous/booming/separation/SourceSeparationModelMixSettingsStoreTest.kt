@@ -3,6 +3,7 @@ package com.mardous.booming.separation
 import android.content.SharedPreferences
 import com.mardous.booming.data.model.Song
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -78,6 +79,26 @@ class SourceSeparationModelMixSettingsStoreTest {
         )
         assertNull(store.readPendingStemGains(cacheB, stemIds))
         assertNull(store.readPendingStemGains(cacheA, stemIds - "other"))
+        assertFalse(preferences.contains("source_separation.stem_gains.pending.$cacheA"))
+    }
+
+    @Test
+    fun `stored stem gains reject obsolete and extended JSON`() {
+        val model = SourceSeparationMixModelKey.multiStem("htdemucs_4s")
+        val stemIds = listOf("drums", "bass", "other", "vocals")
+        val key = "source_separation.global_stem_gains.multistem.htdemucs_4s"
+        val payloads = listOf(
+            """{"stemIds":["drums","bass","other","vocals"],"gains":[1,1,1,1]}""",
+            """{"schemaVersion":0,"stemIds":["drums","bass","other","vocals"],"gains":[1,1,1,1]}""",
+            """{"schemaVersion":1,"stemIds":["drums","bass","other","vocals"],"gains":[1,1,1,1],"obsolete":true}""",
+        )
+
+        payloads.forEach { payload ->
+            preferences.edit().putString(key, payload).commit()
+
+            assertNull(store.readGlobalStemGains(model, stemIds))
+            assertFalse(preferences.contains(key))
+        }
     }
 
     private fun song(id: Long, data: String) = Song(
