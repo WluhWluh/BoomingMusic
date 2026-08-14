@@ -6,6 +6,71 @@ import org.junit.Test
 
 class CoverLyricsMultiStemControlTest {
     @Test
+    fun `two segment tap expansion is fully absorbed by other segment`() {
+        assertEquals(
+            listOf(6.dp, (-6).dp),
+            coverLyricsSegmentTapHeightOffsets(segmentCount = 2, tappedSegment = 0),
+        )
+    }
+
+    @Test
+    fun `end segment tap expansion is absorbed four then two dp`() {
+        val offsets = coverLyricsSegmentTapHeightOffsets(
+            segmentCount = 6,
+            tappedSegment = 0,
+        )
+
+        assertEquals(listOf(6.dp, (-4).dp, (-2).dp, 0.dp, 0.dp, 0.dp), offsets)
+        assertEquals(0.dp, offsets.fold(0.dp) { total, value -> total + value })
+    }
+
+    @Test
+    fun `middle segment expands eight dp split across adjacent segments`() {
+        val offsets = coverLyricsSegmentTapHeightOffsets(
+            segmentCount = 6,
+            tappedSegment = 3,
+        )
+
+        assertEquals(listOf(0.dp, 0.dp, (-4).dp, 8.dp, (-4).dp, 0.dp), offsets)
+        assertEquals(0.dp, offsets.fold(0.dp) { total, value -> total + value })
+    }
+
+    @Test
+    fun `tap expansion yields to a simultaneous zero height transition`() {
+        assertEquals(
+            0f,
+            coverLyricsConstrainedSegmentTapExpansion(
+                requestedExpansion = 1f,
+                baseHeights = listOf(20.dp, 0.dp, 0.dp, 20.dp),
+                heightOffsets = listOf(0.dp, (-2).dp, (-4).dp, 6.dp),
+            ),
+            0f,
+        )
+    }
+
+    @Test
+    fun `tapped capsule end corner reaches twelve dp`() {
+        assertEquals(
+            12.dp,
+            coverLyricsSegmentTapOuterCornerRadius(
+                segmentIndex = 0,
+                endSegmentIndex = 0,
+                tappedSegment = 0,
+                expansion = 1f,
+            ),
+        )
+        assertEquals(
+            20.dp,
+            coverLyricsSegmentTapOuterCornerRadius(
+                segmentIndex = 0,
+                endSegmentIndex = 0,
+                tappedSegment = 1,
+                expansion = 1f,
+            ),
+        )
+    }
+
+    @Test
     fun `expanded height includes every segment and internal gap`() {
         assertEquals(348.dp, coverLyricsMultiStemExpandedHeight(stemCount = 6))
     }

@@ -4,6 +4,8 @@ import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateDpAsState
@@ -55,6 +57,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -694,40 +697,72 @@ private fun CoverLyricsQuickBlendControl(
     ) { isExpanded ->
         if (isExpanded) CoverLyricsQuickBlendEndpointIconOffset else 0.dp
     }
+    val segmentTapEffect = rememberCoverLyricsSegmentTapEffectState()
+    val segmentTapExpansion = segmentTapEffect.expansion.value
+    val segmentTapHeightOffsets = remember(segmentTapEffect.segmentIndex) {
+        coverLyricsSegmentTapHeightOffsets(
+            segmentCount = 2,
+            tappedSegment = segmentTapEffect.segmentIndex,
+        )
+    }
     val colorScheme = MaterialTheme.colorScheme
     val progressColor = colorScheme.onSurface
     val displayedBlend = dragBlend
-    val trackHeight = ((height - centerGap) / 2).coerceAtLeast(0.dp)
-    val vocalsFillHeight = trackHeight *
+    val baseTrackHeight = ((height - centerGap) / 2).coerceAtLeast(0.dp)
+    val topTrackHeight = coverLyricsSegmentTapHeight(
+        baseHeight = baseTrackHeight,
+        segmentIndex = 0,
+        heightOffsets = segmentTapHeightOffsets,
+        expansion = segmentTapExpansion,
+    )
+    val bottomTrackHeight = coverLyricsSegmentTapHeight(
+        baseHeight = baseTrackHeight,
+        segmentIndex = 1,
+        heightOffsets = segmentTapHeightOffsets,
+        expansion = segmentTapExpansion,
+    )
+    val topOuterCornerRadius = coverLyricsSegmentTapOuterCornerRadius(
+        segmentIndex = 0,
+        endSegmentIndex = 0,
+        tappedSegment = segmentTapEffect.segmentIndex,
+        expansion = segmentTapExpansion,
+    )
+    val bottomOuterCornerRadius = coverLyricsSegmentTapOuterCornerRadius(
+        segmentIndex = 1,
+        endSegmentIndex = 1,
+        tappedSegment = segmentTapEffect.segmentIndex,
+        expansion = segmentTapExpansion,
+    )
+    val vocalsFillHeight = topTrackHeight *
             ((CoverLyricsQuickBlendNeutralBlend - displayedBlend) /
                     CoverLyricsQuickBlendNeutralBlend).coerceIn(0f, 1f)
-    val instrumentalFillHeight = trackHeight *
+    val instrumentalFillHeight = bottomTrackHeight *
             ((displayedBlend - CoverLyricsQuickBlendNeutralBlend) /
                     CoverLyricsQuickBlendNeutralBlend).coerceIn(0f, 1f)
     val topIconFillHeight = (
             CoverLyricsQuickBlendEndpointIconOffset + CoverLyricsQuickBlendIconSize -
                     maxOf(
                         CoverLyricsQuickBlendEndpointIconOffset,
-                        trackHeight - vocalsFillHeight
+                        topTrackHeight - vocalsFillHeight
                     )
             ).coerceIn(0.dp, CoverLyricsQuickBlendIconSize)
-    val bottomIconTopInTrack = trackHeight -
+    val bottomIconTopInTrack = bottomTrackHeight -
             CoverLyricsQuickBlendEndpointIconOffset -
             CoverLyricsQuickBlendIconSize
     val bottomIconFillHeight = (instrumentalFillHeight - bottomIconTopInTrack)
         .coerceIn(0.dp, CoverLyricsQuickBlendIconSize)
     val buttonBackgroundShape = CircleShape
     val topTrackShape = RoundedCornerShape(
-        topStart = CoverLyricsButtonSize / 2,
-        topEnd = CoverLyricsButtonSize / 2,
+        topStart = topOuterCornerRadius,
+        topEnd = topOuterCornerRadius,
         bottomStart = innerCornerRadius,
         bottomEnd = innerCornerRadius,
     )
     val bottomTrackShape = RoundedCornerShape(
         topStart = innerCornerRadius,
         topEnd = innerCornerRadius,
-        bottomStart = CoverLyricsButtonSize / 2,
-        bottomEnd = CoverLyricsButtonSize / 2,
+        bottomStart = bottomOuterCornerRadius,
+        bottomEnd = bottomOuterCornerRadius,
     )
     val viewConfiguration = LocalViewConfiguration.current
     val touchSlop = viewConfiguration.touchSlop
@@ -812,6 +847,9 @@ private fun CoverLyricsQuickBlendControl(
                 releasedChange != null -> {
                     releasedChange.let { change ->
                         if (expanded) {
+                            segmentTapEffect.trigger(
+                                if (change.position.y < size.height / 2f) 0 else 1,
+                            )
                             coverLyricsQuickBlendHandleTap(
                                 y = change.position.y,
                                 heightPx = size.height.toFloat(),
@@ -895,7 +933,7 @@ private fun CoverLyricsQuickBlendControl(
                     .fillMaxWidth()
                     .size(
                         width = CoverLyricsButtonSize,
-                        height = trackHeight
+                        height = topTrackHeight
                     )
                     .clip(topTrackShape)
                     .background(progressColor.copy(alpha = trackAlpha))
@@ -918,7 +956,7 @@ private fun CoverLyricsQuickBlendControl(
                     .fillMaxWidth()
                     .size(
                         width = CoverLyricsButtonSize,
-                        height = trackHeight
+                        height = bottomTrackHeight
                     )
                     .clip(bottomTrackShape)
                     .background(progressColor.copy(alpha = trackAlpha))
@@ -1041,6 +1079,38 @@ private fun CoverLyricsCompactControl(
         transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
         label = "collapsedIconAlpha",
     ) { isExpanded -> if (isExpanded) 0f else 1f }
+    val segmentTapEffect = rememberCoverLyricsSegmentTapEffectState()
+    val segmentTapExpansion = segmentTapEffect.expansion.value
+    val segmentTapHeightOffsets = remember(segmentTapEffect.segmentIndex) {
+        coverLyricsSegmentTapHeightOffsets(
+            segmentCount = 2,
+            tappedSegment = segmentTapEffect.segmentIndex,
+        )
+    }
+    val topSegmentHeight = coverLyricsSegmentTapHeight(
+        baseHeight = segmentHeight,
+        segmentIndex = 0,
+        heightOffsets = segmentTapHeightOffsets,
+        expansion = segmentTapExpansion,
+    )
+    val bottomSegmentHeight = coverLyricsSegmentTapHeight(
+        baseHeight = segmentHeight,
+        segmentIndex = 1,
+        heightOffsets = segmentTapHeightOffsets,
+        expansion = segmentTapExpansion,
+    )
+    val topOuterCornerRadius = coverLyricsSegmentTapOuterCornerRadius(
+        segmentIndex = 0,
+        endSegmentIndex = 0,
+        tappedSegment = segmentTapEffect.segmentIndex,
+        expansion = segmentTapExpansion,
+    )
+    val bottomOuterCornerRadius = coverLyricsSegmentTapOuterCornerRadius(
+        segmentIndex = 1,
+        endSegmentIndex = 1,
+        tappedSegment = segmentTapEffect.segmentIndex,
+        expansion = segmentTapExpansion,
+    )
     val colorScheme = MaterialTheme.colorScheme
     val progressColor = colorScheme.onSurface
     val viewConfiguration = LocalViewConfiguration.current
@@ -1109,9 +1179,13 @@ private fun CoverLyricsCompactControl(
                                     heightPx = size.height.toFloat(),
                                 )
                             ) {
-                                CoverLyricsCompactControlAction.OpenPanel -> currentOnOpenPanel()
-                                CoverLyricsCompactControlAction.DisableSeparatedPlayback ->
+                                CoverLyricsCompactControlAction.OpenPanel -> {
+                                    segmentTapEffect.trigger(0)
+                                    currentOnOpenPanel()
+                                }
+                                CoverLyricsCompactControlAction.DisableSeparatedPlayback -> {
                                     currentOnDisableSeparatedPlayback()
+                                }
                                 null -> Unit
                             }
                         }
@@ -1162,26 +1236,26 @@ private fun CoverLyricsCompactControl(
             ) {
                 CoverLyricsMultiStemFixedSegment(
                     iconRes = R.drawable.ic_stem_blend_24dp,
-                    background = progressColor,
-                    iconTint = colorScheme.surface,
-                    height = segmentHeight,
-                    shape = RoundedCornerShape(
-                        topStart = CoverLyricsButtonSize / 2,
-                        topEnd = CoverLyricsButtonSize / 2,
+                background = progressColor,
+                iconTint = colorScheme.surface,
+                height = topSegmentHeight,
+                shape = RoundedCornerShape(
+                    topStart = topOuterCornerRadius,
+                    topEnd = topOuterCornerRadius,
                         bottomStart = innerCornerRadius,
                         bottomEnd = innerCornerRadius,
                     ),
                 )
                 CoverLyricsMultiStemFixedSegment(
                     iconRes = R.drawable.ic_close_24dp,
-                    background = progressColor.copy(alpha = 0.1f),
-                    iconTint = progressColor,
-                    height = segmentHeight,
+                background = progressColor.copy(alpha = 0.1f),
+                iconTint = progressColor,
+                height = bottomSegmentHeight,
                     shape = RoundedCornerShape(
                         topStart = innerCornerRadius,
                         topEnd = innerCornerRadius,
-                        bottomStart = CoverLyricsButtonSize / 2,
-                        bottomEnd = CoverLyricsButtonSize / 2,
+                    bottomStart = bottomOuterCornerRadius,
+                    bottomEnd = bottomOuterCornerRadius,
                     ),
                 )
             }
@@ -1323,6 +1397,39 @@ private fun CoverLyricsMultiStemControl(
         transitionSpec = { coverLyricsQuickBlendFloatTransitionSpec() },
         label = "endpointIconAlpha",
     ) { target -> if (target.expanded) 1f else 0f }
+    val segmentTapEffect = rememberCoverLyricsSegmentTapEffectState()
+    val segmentTapHeightOffsets = remember(
+        segmentCount,
+        segmentTapEffect.segmentIndex,
+    ) {
+        coverLyricsSegmentTapHeightOffsets(
+            segmentCount = segmentCount,
+            tappedSegment = segmentTapEffect.segmentIndex,
+        )
+    }
+    val segmentTapBaseHeights = buildList {
+        add(endpointSegmentHeight)
+        repeat(visibleStems.size) { add(stemSegmentHeight) }
+        if (paged) add(pageSegmentHeight)
+        add(endpointSegmentHeight)
+    }
+    val segmentTapExpansion = coverLyricsConstrainedSegmentTapExpansion(
+        requestedExpansion = segmentTapEffect.expansion.value,
+        baseHeights = segmentTapBaseHeights,
+        heightOffsets = segmentTapHeightOffsets,
+    )
+    val topOuterCornerRadius = coverLyricsSegmentTapOuterCornerRadius(
+        segmentIndex = 0,
+        endSegmentIndex = 0,
+        tappedSegment = segmentTapEffect.segmentIndex,
+        expansion = segmentTapExpansion,
+    )
+    val bottomOuterCornerRadius = coverLyricsSegmentTapOuterCornerRadius(
+        segmentIndex = segmentCount - 1,
+        endSegmentIndex = segmentCount - 1,
+        tappedSegment = segmentTapEffect.segmentIndex,
+        expansion = segmentTapExpansion,
+    )
 
     val colorScheme = MaterialTheme.colorScheme
     val progressColor = colorScheme.onSurface
@@ -1438,20 +1545,28 @@ private fun CoverLyricsMultiStemControl(
                         if (!expanded) {
                             currentOnEnableSeparatedPlayback()
                         } else {
-                            when (
-                                coverLyricsMultiStemHitSegment(
-                                    y = change.position.y,
-                                    segmentCount = segmentCount,
-                                    segmentHeightPx = segmentHeightPx,
-                                    segmentGapPx = segmentGapPx,
-                                )
-                            ) {
-                                0 -> currentOnInvertGains()
-                                pageSegmentIndex -> currentOnPageChange(1 - normalizedPage)
-                                segmentCount - 1 -> currentOnDisableSeparatedPlayback()
+                            val tappedSegment = coverLyricsMultiStemHitSegment(
+                                y = change.position.y,
+                                segmentCount = segmentCount,
+                                segmentHeightPx = segmentHeightPx,
+                                segmentGapPx = segmentGapPx,
+                            )
+                            when (tappedSegment) {
+                                0 -> {
+                                    segmentTapEffect.trigger(tappedSegment)
+                                    currentOnInvertGains()
+                                }
+                                pageSegmentIndex -> {
+                                    segmentTapEffect.trigger(tappedSegment)
+                                    currentOnPageChange(1 - normalizedPage)
+                                }
+                                segmentCount - 1 -> {
+                                    currentOnDisableSeparatedPlayback()
+                                }
                                 else -> {
                                     val stem = activeStem
                                         ?: return@let
+                                    segmentTapEffect.trigger(tappedSegment)
                                     val nextGain = if (stem.gain >= 0.5f) {
                                         SourceSeparationStemGainPolicy.MIN_GAIN
                                     } else {
@@ -1536,20 +1651,32 @@ private fun CoverLyricsMultiStemControl(
                     iconRes = R.drawable.ic_swap_vert_24dp,
                     background = progressColor,
                     iconTint = colorScheme.surface,
-                    height = endpointSegmentHeight,
+                    height = coverLyricsSegmentTapHeight(
+                        baseHeight = endpointSegmentHeight,
+                        segmentIndex = 0,
+                        heightOffsets = segmentTapHeightOffsets,
+                        expansion = segmentTapExpansion,
+                    ),
                     shape = RoundedCornerShape(
-                        topStart = CoverLyricsButtonSize / 2,
-                        topEnd = CoverLyricsButtonSize / 2,
+                        topStart = topOuterCornerRadius,
+                        topEnd = topOuterCornerRadius,
                         bottomStart = innerCornerRadius,
                         bottomEnd = innerCornerRadius,
                     ),
                 )
-                visibleStems.forEach { stem ->
+                visibleStems.forEachIndexed { index, stem ->
+                    val segmentIndex = index + 1
+                    val tappedHeight = coverLyricsSegmentTapHeight(
+                        baseHeight = stemSegmentHeight,
+                        segmentIndex = segmentIndex,
+                        heightOffsets = segmentTapHeightOffsets,
+                        expansion = segmentTapExpansion,
+                    )
                     if (stem != null) {
                         CoverLyricsMultiStemGainSegment(
                             iconRes = SourceSeparationStemIconResolver.resourceId(stem.semanticId),
                             gain = if (draggingStemId == stem.stemId) dragGain else stem.gain,
-                            height = stemSegmentHeight,
+                            height = tappedHeight,
                             cornerRadius = innerCornerRadius,
                             trackAlpha = trackAlpha,
                             progressColor = progressColor,
@@ -1560,7 +1687,7 @@ private fun CoverLyricsMultiStemControl(
                             iconRes = null,
                             background = progressColor.copy(alpha = trackAlpha),
                             iconTint = progressColor,
-                            height = stemSegmentHeight,
+                            height = tappedHeight,
                             shape = RoundedCornerShape(innerCornerRadius),
                         )
                     }
@@ -1574,7 +1701,12 @@ private fun CoverLyricsMultiStemControl(
                         },
                         background = progressColor.copy(alpha = 0.1f),
                         iconTint = progressColor,
-                        height = pageSegmentHeight,
+                        height = coverLyricsSegmentTapHeight(
+                            baseHeight = pageSegmentHeight,
+                            segmentIndex = pageSegmentIndex,
+                            heightOffsets = segmentTapHeightOffsets,
+                            expansion = segmentTapExpansion,
+                        ),
                         shape = RoundedCornerShape(innerCornerRadius),
                     )
                 }
@@ -1582,12 +1714,17 @@ private fun CoverLyricsMultiStemControl(
                     iconRes = R.drawable.ic_close_24dp,
                     background = progressColor.copy(alpha = 0.1f),
                     iconTint = progressColor,
-                    height = endpointSegmentHeight,
+                    height = coverLyricsSegmentTapHeight(
+                        baseHeight = endpointSegmentHeight,
+                        segmentIndex = segmentCount - 1,
+                        heightOffsets = segmentTapHeightOffsets,
+                        expansion = segmentTapExpansion,
+                    ),
                     shape = RoundedCornerShape(
                         topStart = innerCornerRadius,
                         topEnd = innerCornerRadius,
-                        bottomStart = CoverLyricsButtonSize / 2,
-                        bottomEnd = CoverLyricsButtonSize / 2,
+                        bottomStart = bottomOuterCornerRadius,
+                        bottomEnd = bottomOuterCornerRadius,
                     ),
                 )
             }
@@ -1958,14 +2095,139 @@ private val CoverLyricsButtonSpacing = 12.dp
 private val CoverLyricsOverlayPadding = 16.dp
 private val CoverLyricsBaseVerticalPadding = 72.dp
 private val CoverLyricsBaseHorizontalPadding = 12.dp
-private val CoverLyricsQuickBlendInnerCornerRadius = 6.dp
+private val CoverLyricsQuickBlendInnerCornerRadius = 8.dp
 private val CoverLyricsMultiStemSegmentSize = 40.dp
 private val CoverLyricsMultiStemSegmentGap = 4.dp
-private val CoverLyricsMultiStemInnerCornerRadius = 6.dp
+private val CoverLyricsMultiStemInnerCornerRadius = 8.dp
+private val CoverLyricsSegmentTapEndExpansion = 6.dp
+private val CoverLyricsSegmentTapMiddleExpansion = 8.dp
+private val CoverLyricsSegmentTapEndCornerRadius = 12.dp
 private const val CoverLyricsQuickBlendNeutralBlend = 0.5f
 private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.10f
 private const val CoverLyricsQuickControlsTransitionDurationMillis = 260
+private const val CoverLyricsSegmentTapExpansionDurationMillis = 100
+private const val CoverLyricsSegmentTapReturnDurationMillis = 160
 private const val CoverLyricsWidthNarrowingHeightFraction = 0.40f
+private val CoverLyricsSegmentTapExpansionEasing = FastOutSlowInEasing
+private val CoverLyricsSegmentTapReturnEasing =
+    CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
+private class CoverLyricsSegmentTapEffectState {
+    val expansion = Animatable(0f)
+    var segmentIndex by mutableIntStateOf(-1)
+        private set
+    var generation by mutableIntStateOf(0)
+        private set
+
+    fun trigger(segmentIndex: Int) {
+        if (segmentIndex < 0) return
+        this.segmentIndex = segmentIndex
+        generation++
+    }
+
+    fun finish(generation: Int) {
+        if (this.generation == generation) segmentIndex = -1
+    }
+}
+
+@Composable
+private fun rememberCoverLyricsSegmentTapEffectState(): CoverLyricsSegmentTapEffectState {
+    val state = remember { CoverLyricsSegmentTapEffectState() }
+    LaunchedEffect(state.generation) {
+        if (state.generation == 0) return@LaunchedEffect
+        val generation = state.generation
+        state.expansion.snapTo(0f)
+        state.expansion.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = CoverLyricsSegmentTapExpansionDurationMillis,
+                easing = CoverLyricsSegmentTapExpansionEasing,
+            ),
+        )
+        state.expansion.animateTo(
+            targetValue = 0f,
+            animationSpec = tween(
+                durationMillis = CoverLyricsSegmentTapReturnDurationMillis,
+                easing = CoverLyricsSegmentTapReturnEasing,
+            ),
+        )
+        state.finish(generation)
+    }
+    return state
+}
+
+internal fun coverLyricsSegmentTapHeightOffsets(
+    segmentCount: Int,
+    tappedSegment: Int,
+): List<Dp> {
+    if (segmentCount < 2 || tappedSegment !in 0 until segmentCount) {
+        return List(segmentCount.coerceAtLeast(0)) { 0.dp }
+    }
+    return MutableList(segmentCount) { 0.dp }.apply {
+        when {
+            segmentCount == 2 -> {
+                this[tappedSegment] = CoverLyricsSegmentTapEndExpansion
+                this[1 - tappedSegment] = -CoverLyricsSegmentTapEndExpansion
+            }
+            tappedSegment == 0 -> {
+                this[tappedSegment] = CoverLyricsSegmentTapEndExpansion
+                this[1] = -4.dp
+                this[2] = -2.dp
+            }
+            tappedSegment == segmentCount - 1 -> {
+                this[tappedSegment] = CoverLyricsSegmentTapEndExpansion
+                this[segmentCount - 2] = -4.dp
+                this[segmentCount - 3] = -2.dp
+            }
+            else -> {
+                this[tappedSegment] = CoverLyricsSegmentTapMiddleExpansion
+                this[tappedSegment - 1] = -4.dp
+                this[tappedSegment + 1] = -4.dp
+            }
+        }
+    }
+}
+
+private fun coverLyricsSegmentTapHeight(
+    baseHeight: Dp,
+    segmentIndex: Int,
+    heightOffsets: List<Dp>,
+    expansion: Float,
+): Dp = (baseHeight +
+        (heightOffsets.getOrNull(segmentIndex) ?: 0.dp) * expansion).coerceAtLeast(0.dp)
+
+internal fun coverLyricsConstrainedSegmentTapExpansion(
+    requestedExpansion: Float,
+    baseHeights: List<Dp>,
+    heightOffsets: List<Dp>,
+): Float {
+    require(baseHeights.size == heightOffsets.size) {
+        "Segment tap height geometry is inconsistent."
+    }
+    var constrainedExpansion = requestedExpansion.coerceIn(0f, 1f)
+    baseHeights.zip(heightOffsets).forEach { (baseHeight, heightOffset) ->
+        if (heightOffset < 0.dp) {
+            val supportedExpansion = (baseHeight.value / -heightOffset.value)
+                .coerceAtLeast(0f)
+            constrainedExpansion = constrainedExpansion.coerceAtMost(supportedExpansion)
+        }
+    }
+    return constrainedExpansion
+}
+
+internal fun coverLyricsSegmentTapOuterCornerRadius(
+    segmentIndex: Int,
+    endSegmentIndex: Int,
+    tappedSegment: Int,
+    expansion: Float,
+): Dp {
+    val outerCornerRadius = CoverLyricsButtonSize / 2
+    if (segmentIndex != endSegmentIndex || tappedSegment != segmentIndex) {
+        return outerCornerRadius
+    }
+    return outerCornerRadius +
+            (CoverLyricsSegmentTapEndCornerRadius - outerCornerRadius) * expansion
+}
 
 internal enum class CoverLyricsProcessingProgressPlacement {
     AboveQuickControl,
