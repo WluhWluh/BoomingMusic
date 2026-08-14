@@ -258,7 +258,7 @@ class HtdemucsRangeRunnerTest {
         val root = temporary.newFolder("mid-run-forward")
         val positionMs = AtomicLong(0L)
         val processingIndexes = mutableListOf<Int>()
-        val stateChanges = mutableListOf<Pair<Int, SourceSeparationSegmentState>>()
+        val progressSnapshots = mutableListOf<HtdemucsRangeProgress>()
         var preparedPlan: SourceSeparationSegmentPlan? = null
         var committedBeforeSeek: List<ByteArray>? = null
         var preservedAtTarget = false
@@ -270,6 +270,7 @@ class HtdemucsRangeRunnerTest {
             segmentDirectory = root.resolve("segments"),
             onPrepared = { preparedPlan = it.segmentPlan },
             onProgress = { progress ->
+                progressSnapshots += progress
                 if (progress.stage.startsWith("Processing window")) {
                     processingIndexes += requireNotNull(progress.scheduler)
                         .processingSegmentIndex
@@ -279,7 +280,6 @@ class HtdemucsRangeRunnerTest {
                 }
             },
             onSegmentStateChanged = { index, state, _ ->
-                stateChanges += index to state
                 if (index == 1 && state == SourceSeparationSegmentState.Ready) {
                     committedBeforeSeek = requireNotNull(preparedPlan).segments
                         .take(2)
@@ -303,8 +303,12 @@ class HtdemucsRangeRunnerTest {
             playbackReadyWindowCountProvider = { 2 },
         )
 
-        assertEquals(listOf(0, 1, 2, targetIndex, targetIndex + 1), processingIndexes.take(5))
-        assertTrue(stateChanges.contains(2 to SourceSeparationSegmentState.Queued))
+        assertEquals(listOf(0, 1, targetIndex, targetIndex + 1), processingIndexes.take(4))
+        val demandReady = progressSnapshots.first {
+            it.stage == "Processed window ${targetIndex + 2}/${plans.size}"
+        }.scheduler
+        assertEquals(2, demandReady?.playbackReadyWindowReadyCount)
+        assertEquals(0, demandReady?.playbackReadyWindowPendingCount)
         assertTrue(preservedAtTarget)
         assertTrue(result.segmentPlan.segments.all { it.state.isComplete })
         result.stemFiles.forEachIndexed { index, stem ->
@@ -348,8 +352,8 @@ class HtdemucsRangeRunnerTest {
         )
 
         assertEquals(
-            listOf(0, 1, 2, targetIndex - 1, targetIndex, targetIndex + 1),
-            processingIndexes.take(6),
+            listOf(0, 1, targetIndex - 1, targetIndex),
+            processingIndexes.take(4),
         )
         assertTrue(stateChanges.any { (index, state, _) ->
             index == targetIndex - 1 && state == SourceSeparationSegmentState.Provisional
@@ -413,7 +417,15 @@ class HtdemucsRangeRunnerTest {
         assertTrue(backwardSeekIssued)
         assertTrue(readySeekIssued)
         assertEquals(
-            listOf(0, 1, 2, forwardIndex, backwardIndex, backwardIndex + 1, backwardIndex + 2),
+            listOf(
+                0,
+                1,
+                forwardIndex,
+                backwardIndex,
+                backwardIndex + 1,
+                backwardIndex + 2,
+                backwardIndex + 3,
+            ),
             processingIndexes.take(7),
         )
     }
@@ -646,7 +658,7 @@ class HtdemucsRangeRunnerTest {
         )
 
         assertEquals(
-            (4..plans.lastIndex).toList() + (0..3).toList(),
+            (4..plans.lastIndex).toList() + (0..2).toList(),
             processingIndexes,
         )
         assertTrue(resumed.segmentPlan.segments.all { it.state.isComplete })

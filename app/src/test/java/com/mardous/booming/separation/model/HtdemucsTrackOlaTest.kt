@@ -1,6 +1,7 @@
 package com.mardous.booming.separation.model
 
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,9 +53,9 @@ class HtdemucsTrackOlaTest {
         val first = constantWindow(stems, 2f)
         val second = constantWindow(stems, 4f)
 
-        assertEquals(null, ola.addWindow(plans[0], first))
-        val ready = requireNotNull(ola.addWindow(plans[1], second))
-        val tail = ola.finish()
+        val ready = ola.addWindow(plans[0], first)
+        val tail = ola.addWindow(plans[1], second)
+        ola.finish()
 
         assertEquals(0, ready.startFrame)
         assertEquals(HtdemucsTrackWindowPlanner.STRIDE_SAMPLES, ready.frameCount)
@@ -69,6 +70,66 @@ class HtdemucsTrackOlaTest {
                 (firstTailWeight + secondHeadWeight)) * 2f + 1f
         assertEquals(expectedFirstTail, tail.planarSamples[0], 1e-6f)
         assertTrue(tail.planarSamples.all(Float::isFinite))
+    }
+
+    @Test
+    fun `immediate chunks match canonical full track overlap add`() {
+        val trackSamples = HtdemucsPipelineAdapter.WINDOW_SAMPLES + 2_000
+        val plans = HtdemucsTrackWindowPlanner.plans(trackSamples)
+        val stems = listOf("vocals")
+        val planeCount = stems.size * HtdemucsPipelineAdapter.CHANNEL_COUNT
+        val normalization = HtdemucsGlobalNormalization(0.25f, 1.25f, 1.5f)
+        val windows = plans.map { plan ->
+            HtdemucsWindowStemSet(
+                orderedStemIds = stems,
+                planarSamples = FloatArray(
+                    planeCount * HtdemucsPipelineAdapter.WINDOW_SAMPLES,
+                ) { index ->
+                    ((index * 17L + plan.index * 31L) % 997L).toFloat() / 997f - 0.5f
+                },
+                samplesPerStem = HtdemucsPipelineAdapter.WINDOW_SAMPLES,
+            )
+        }
+        val ola = HtdemucsStreamingOverlapAdd(
+            orderedStemIds = stems,
+            trackSamples = trackSamples,
+            normalization = normalization,
+        )
+        val chunks = plans.mapIndexed { index, plan ->
+            ola.addWindow(plan, windows[index])
+        }
+        ola.finish()
+        val actual = FloatArray(planeCount * trackSamples)
+        chunks.forEach { chunk ->
+            repeat(planeCount) { plane ->
+                chunk.planarSamples.copyInto(
+                    destination = actual,
+                    destinationOffset = plane * trackSamples + chunk.startFrame,
+                    startIndex = plane * chunk.frameCount,
+                    endIndex = (plane + 1) * chunk.frameCount,
+                )
+            }
+        }
+        val canonical = HtdemucsStreamingPlan().overlapAdd(
+            trackSamples = trackSamples,
+            outputPlaneCount = planeCount,
+            windowOutputs = plans.mapIndexed { index, plan ->
+                HtdemucsWindowOutput(
+                    offset = plan.offset,
+                    planarSamples = windows[index].planarSamples,
+                )
+            },
+        ).planarSamples
+        val expected = FloatArray(canonical.size) { index ->
+            canonical[index] * normalization.divisor + normalization.mean
+        }
+
+        assertEquals(plans.map { it.offset }, chunks.map { it.startFrame })
+        assertEquals(
+            plans.map { minOf(HtdemucsTrackWindowPlanner.STRIDE_SAMPLES, trackSamples - it.offset) },
+            chunks.map { it.frameCount },
+        )
+        assertArrayEquals(expected, actual, 1e-6f)
     }
 
     private fun constantWindow(stems: List<String>, value: Float) = HtdemucsWindowStemSet(

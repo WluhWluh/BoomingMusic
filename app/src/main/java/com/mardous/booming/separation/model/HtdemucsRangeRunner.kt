@@ -299,11 +299,7 @@ internal class HtdemucsRangeRunner(
                         .playbackStartFrame + HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES
                     if (playbackFrame < playableFromFrame) return null
                 }
-                val publicationPlanIndex = if (playbackIndex == plans.lastIndex) {
-                    playbackIndex
-                } else {
-                    playbackIndex + 1
-                }
+                val publicationPlanIndex = playbackIndex
                 if (nextPlanIndex > publicationPlanIndex) return null
                 return publicationPlanIndex - nextPlanIndex + 1
             }
@@ -331,28 +327,6 @@ internal class HtdemucsRangeRunner(
                 return demandTarget.takeIf { currentCost == null || currentCost > retargetCost }
             }
 
-            fun resetAbandonedPassTail(
-                passTarget: HtdemucsPassTarget,
-                nextPlanIndex: Int,
-            ) {
-                val tailSegmentIndex = nextPlanIndex - 1
-                if (tailSegmentIndex < passTarget.startPlanIndex) return
-                if (currentPlan.segments[tailSegmentIndex].state !=
-                    SourceSeparationSegmentState.Running
-                ) {
-                    return
-                }
-                currentPlan = currentPlan.withSegmentState(
-                    segmentIndex = tailSegmentIndex,
-                    state = SourceSeparationSegmentState.Queued,
-                )
-                onSegmentStateChanged(
-                    tailSegmentIndex,
-                    SourceSeparationSegmentState.Queued,
-                    null,
-                )
-            }
-
             fun processPass(
                 passTarget: HtdemucsPassTarget,
             ): HtdemucsPassTarget? {
@@ -366,16 +340,13 @@ internal class HtdemucsRangeRunner(
                     initialPlanIndex = startPlanIndex,
                     initialBufferStart = plans[startPlanIndex].offset,
                 )
+                var reachedTrackEnd = false
                 for (plan in plans.drop(startPlanIndex)) {
                     if (completedWindows == plans.size) break
                     retargetForPlaybackDemand(
                         currentPassTarget = passTarget,
                         nextPlanIndex = plan.index,
                     )?.let { retarget ->
-                        resetAbandonedPassTail(
-                            passTarget = passTarget,
-                            nextPlanIndex = plan.index,
-                        )
                         return retarget
                     }
                     val windowStartedAtNanos = System.nanoTime()
@@ -427,72 +398,12 @@ internal class HtdemucsRangeRunner(
                     )
                     normalizeInPlace(padded, normalization)
                     val stemSet = session.runNormalizedWindow(padded, shouldInterrupt)
-                    ola.addWindow(plan, stemSet)?.let { chunk ->
-                        val segmentIndex = plan.index - 1
-                        if (!currentPlan.segments[segmentIndex].state.isComplete) {
-                            val outputState = if (
-                                segmentIndex == provisionalOutputSegmentIndex
-                            ) {
-                                SourceSeparationSegmentState.Provisional
-                            } else {
-                                SourceSeparationSegmentState.Ready
-                            }
-                            val playableFromFrame = if (
-                                outputState == SourceSeparationSegmentState.Provisional
-                            ) {
-                                currentPlan.segments[segmentIndex].playbackStartFrame +
-                                    HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES
-                            } else {
-                                null
-                            }
-                            publishChunk(
-                                chunk = chunk,
-                                segmentIndex = segmentIndex,
-                                writers = writers,
-                                segmentPlan = currentPlan,
-                                segmentDirectory = segmentDirectory,
-                                publicationId = segmentPublicationId,
-                                requireWorkspaceAvailable = requireWorkspaceAvailable,
-                            )
-                            currentPlan = currentPlan.withSegmentState(
-                                segmentIndex = segmentIndex,
-                                state = outputState,
-                                playableFromFrame = playableFromFrame,
-                            )
-                            onSegmentStateChanged(
-                                segmentIndex,
-                                outputState,
-                                playableFromFrame,
-                            )
-                            if (outputState.isComplete) completedWindows += 1
-                            val latestPlaybackFrame = playbackFrame(
-                                playbackPositionMsProvider(),
-                            )
-                            onProgress(
-                                HtdemucsRangeProgress(
-                                    completedWindows = completedWindows,
-                                    totalWindows = plans.size,
-                                    stage = "Processed window ${segmentIndex + 1}/${plans.size}",
-                                    completedWindowElapsedMs =
-                                        (System.nanoTime() - windowStartedAtNanos) / 1_000_000L,
-                                    scheduler = currentPlan.schedulerProgress(
-                                        playbackSegmentIndex = latestPlaybackFrame
-                                            ?.let(currentPlan::segmentIndexForFrame),
-                                        playbackFrame = latestPlaybackFrame,
-                                        processingSegmentIndex = segmentIndex,
-                                        readyWindowCount = playbackReadyWindowCountProvider(),
-                                        priority = selectedPriority,
-                                    ),
-                                ),
-                            )
-                        }
-                    }
-                }
-                if (completedWindows < plans.size) {
-                    val tail = ola.finish()
-                    if (!currentPlan.segments[plans.lastIndex].state.isComplete) {
+                    val chunk = ola.addWindow(plan, stemSet)
+                    if (plan.index == plans.lastIndex) reachedTrackEnd = true
+                    val segmentIndex = plan.index
+                    if (!currentPlan.segments[segmentIndex].state.isComplete) {
                         val outputState = if (
-                            plans.lastIndex == provisionalOutputSegmentIndex
+                            segmentIndex == provisionalOutputSegmentIndex
                         ) {
                             SourceSeparationSegmentState.Provisional
                         } else {
@@ -501,14 +412,14 @@ internal class HtdemucsRangeRunner(
                         val playableFromFrame = if (
                             outputState == SourceSeparationSegmentState.Provisional
                         ) {
-                            currentPlan.segments[plans.lastIndex].playbackStartFrame +
+                            currentPlan.segments[segmentIndex].playbackStartFrame +
                                 HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES
                         } else {
                             null
                         }
                         publishChunk(
-                            chunk = tail,
-                            segmentIndex = plans.lastIndex,
+                            chunk = chunk,
+                            segmentIndex = segmentIndex,
                             writers = writers,
                             segmentPlan = currentPlan,
                             segmentDirectory = segmentDirectory,
@@ -516,18 +427,39 @@ internal class HtdemucsRangeRunner(
                             requireWorkspaceAvailable = requireWorkspaceAvailable,
                         )
                         currentPlan = currentPlan.withSegmentState(
-                            segmentIndex = plans.lastIndex,
+                            segmentIndex = segmentIndex,
                             state = outputState,
                             playableFromFrame = playableFromFrame,
                         )
                         onSegmentStateChanged(
-                            plans.lastIndex,
+                            segmentIndex,
                             outputState,
                             playableFromFrame,
                         )
                         if (outputState.isComplete) completedWindows += 1
+                        val latestPlaybackFrame = playbackFrame(
+                            playbackPositionMsProvider(),
+                        )
+                        onProgress(
+                            HtdemucsRangeProgress(
+                                completedWindows = completedWindows,
+                                totalWindows = plans.size,
+                                stage = "Processed window ${segmentIndex + 1}/${plans.size}",
+                                completedWindowElapsedMs =
+                                    (System.nanoTime() - windowStartedAtNanos) / 1_000_000L,
+                                scheduler = currentPlan.schedulerProgress(
+                                    playbackSegmentIndex = latestPlaybackFrame
+                                        ?.let(currentPlan::segmentIndexForFrame),
+                                    playbackFrame = latestPlaybackFrame,
+                                    processingSegmentIndex = segmentIndex,
+                                    readyWindowCount = playbackReadyWindowCountProvider(),
+                                    priority = selectedPriority,
+                                ),
+                            ),
+                        )
                     }
                 }
+                if (reachedTrackEnd) ola.finish()
                 return null
             }
 

@@ -138,16 +138,14 @@ internal class HtdemucsStreamingOverlapAdd(
     fun addWindow(
         plan: HtdemucsTrackWindowPlan,
         stemSet: HtdemucsWindowStemSet,
-    ): HtdemucsRenderedTrackChunk? {
+    ): HtdemucsRenderedTrackChunk {
         check(!finished) { "HTDemucs overlap-add is finished." }
         require(plan.index == nextPlanIndex) { "HTDemucs windows must be added in order." }
-        require(plan.offset >= bufferStart)
+        require(plan.offset == bufferStart)
         require(stemSet.orderedStemIds == orderedStemIds)
         require(stemSet.samplesPerStem == HtdemucsPipelineAdapter.WINDOW_SAMPLES)
         require(stemSet.planarSamples.size == planeCount * HtdemucsPipelineAdapter.WINDOW_SAMPLES)
 
-        val ready = if (plan.offset > bufferStart) flush(plan.offset - bufferStart) else null
-        require(bufferStart == plan.offset)
         val activeStart = plan.cropLeft
         repeat(planeCount) { plane ->
             val inputOffset = plane * HtdemucsPipelineAdapter.WINDOW_SAMPLES + activeStart
@@ -159,19 +157,24 @@ internal class HtdemucsStreamingOverlapAdd(
         }
         repeat(plan.actualSamples) { sample -> accumulatedWeight[sample] += weight[sample] }
         nextPlanIndex += 1
-        return ready
+        val readyFrames = minOf(
+            HtdemucsTrackWindowPlanner.STRIDE_SAMPLES,
+            trackSamples - bufferStart,
+        )
+        return flush(readyFrames)
     }
 
-    fun finish(): HtdemucsRenderedTrackChunk {
+    fun finish() {
         check(!finished) { "HTDemucs overlap-add is already finished." }
         finished = true
         require(nextPlanIndex > 0) { "HTDemucs overlap-add has no windows." }
-        return requireNotNull(flush(trackSamples - bufferStart))
+        require(bufferStart == trackSamples) {
+            "HTDemucs overlap-add ended before the complete pass was emitted."
+        }
     }
 
-    private fun flush(frames: Int): HtdemucsRenderedTrackChunk? {
-        require(frames in 0..HtdemucsPipelineAdapter.WINDOW_SAMPLES)
-        if (frames == 0) return null
+    private fun flush(frames: Int): HtdemucsRenderedTrackChunk {
+        require(frames in 1..HtdemucsPipelineAdapter.WINDOW_SAMPLES)
         val start = bufferStart
         val output = FloatArray(planeCount * frames)
         repeat(frames) { frame -> require(accumulatedWeight[frame] > 0f) }

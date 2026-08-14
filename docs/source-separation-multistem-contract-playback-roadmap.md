@@ -1824,11 +1824,17 @@ the app is background-cached.
   final PCM against an uninterrupted window-zero reference.
 - [x] Re-evaluate the latest playback demand at every HTDemucs inference-window
   boundary. When the demanded segment is not playable and a fresh OLA pass can
-  publish it sooner than the current pass, discard only the unpublished OLA
-  tail, return its transient `Running` segment to `Queued`, and restart at k or
-  k-1 according to the leading-overlap rule. Preserve all published artifacts,
-  allow a newer forward or backward seek to retarget again, and never disturb
-  the current pass for a seek into an already-playable segment.
+  publish it sooner than the current pass, discard only the in-memory overlap
+  residual and restart at k or k-1 according to the leading-overlap rule.
+  Preserve all published artifacts, allow a newer forward or backward seek to
+  retarget again, and never disturb the current pass for a seek into an
+  already-playable segment.
+- [x] Publish the current stride-safe playback segment immediately after its
+  model window completes. The next model window begins at that segment's end,
+  so delaying publication until the next inference contributes no additional
+  OLA samples. A recovery waterline of N now requires N target-pass inferences,
+  including the k-1 provisional warm-up when the anchor is in k's leading
+  overlap. Canonical full-track OLA comparison freezes byte-equivalent output.
 
 The S25 Debug product gate used the installed official six-stem Release model
 and `一瞬间` at 61,000 ms, after segment 10's leading overlap. The first pass
@@ -1879,11 +1885,11 @@ manual run to receive an immediate platform timeout and pause. The device-only
 deleted afterward; no application preference or product behavior was changed.
 The cache/scheduler gates and full JVM/AndroidTest compilation suite passed.
 
-The mid-run seek gate used the same S25 and official six-stem model with the
-24-segment `Rise - Epic Music` cache. A forward seek from the early sequential
-pass to 105,000 ms entered a two-window cache wait; instead of traversing the
-intervening unfinished segments, the worker moved directly into the target
-pass and was already reporting `Processing window 20/24` while only 13 exact
+The initial mid-run seek gate used the same S25 and official six-stem model
+with the 24-segment `Rise - Epic Music` cache. A forward seek from the early
+sequential pass to 105,000 ms entered a two-window cache wait. The worker
+skipped the intervening unfinished segments, moved directly into the target
+pass, and was already reporting `Processing window 20/24` while only 13 exact
 segments had been committed. During the later zero-based backfill, a backward
 seek from `Processing window 6/24` to an unfinished segment at 80,000 ms changed
 the next observed stage to `14/24`, then advanced through `15/24` and `16/24`.
@@ -1891,10 +1897,25 @@ The two-window wait cleared and playback resumed within the ninth one-second
 poll. A final seek to the already-ready 30,000 ms region created no cache wait
 and left execution monotonic through `21,22,23,24`, followed by normal
 zero-based backfill. Deterministic JVM cases additionally cover repeated seeks,
-leading-overlap k-1 warm-up, abandoned-tail reset, committed-artifact retention,
-and byte-identical final WAVs. The no-audio diagnostic archive is retained at
-`.artifacts/debug-diagnostics/source-separation-1786696581695.zip` with SHA-256
+leading-overlap k-1 warm-up, in-memory residual abandonment, committed-artifact
+retention, and byte-identical final WAVs. The no-audio diagnostic archive is
+retained at `.artifacts/debug-diagnostics/source-separation-1786696581695.zip`
+with SHA-256
 `d4c0a53cff98a2fd5ef9993f7ff509e1c5e039880555ea6307b0ecd187e5ae2a`.
+That run also exposed that OLA publication itself remained one inference late:
+although the two-window admission count was correct, the target pass visibly
+ran three model windows before it could publish two playback segments.
+
+The immediate-publication follow-up repeated a clean-cache 80,000 ms seek on
+the S25. The first target inference published the current segment as
+`Provisional`; the second published the adjacent exact segment, and the gate
+reported `Ready(Partial)` at 16:54:05.082. Mixed output started at 16:54:05.129
+and was audible at 16:54:05.252. The third inference sample was recorded only
+after playback had advanced from the approximately 81-second anchor to
+84,476 ms, confirming that it was background continuation rather than part of
+the seek wait. The no-audio follow-up archive is
+`.artifacts/debug-diagnostics/source-separation-1786697675942.zip`, SHA-256
+`aecf484f6adab47598afb9c5c6ae0ec1438f73a6913f5a419588dcb5d1b153b3`.
 
 #### Phase 8D: Product management parity
 
