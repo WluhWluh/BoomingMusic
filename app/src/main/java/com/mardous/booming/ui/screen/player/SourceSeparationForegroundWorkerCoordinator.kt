@@ -101,7 +101,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         ),
     private val executionSelectionFlow:
         StateFlow<SourceSeparationExecutionSelectionSnapshot> = MutableStateFlow(
-            SourceSeparationExecutionSelectionSnapshot.fromLegacySelections(
+            SourceSeparationExecutionSelectionSnapshot.fromFamilySelections(
                 activeSelectionFlow.value,
                 multiStemSelectionFlow.value,
             ),
@@ -1823,7 +1823,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
                     if (preStartReadyWindowCount == null &&
                         readBlendMode() == SourceSeparationBlendMode.PerSong
                     ) {
-                        migrateTemporaryPerSongBlend(song, resolved)
+                        commitPendingPerSongBlend(song, resolved)
                     }
                     notifyCallbacks("prepared") {
                         it.onSourceSeparationWorkerPrepared(song)
@@ -2324,7 +2324,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         return saved
     }
 
-    private fun migrateTemporaryPerSongBlend(
+    private fun commitPendingPerSongBlend(
         song: Song,
         resolved: SourceSeparationRuntimeSong,
     ): Boolean {
@@ -2480,19 +2480,6 @@ internal data class SourceSeparationWorkerRequestIdentity(
             selectionGeneration = selection.generation,
         )
 
-        fun from(
-            song: Song,
-            selection: SourceSeparationActiveSelectionSnapshot,
-        ): SourceSeparationWorkerRequestIdentity = from(
-            song,
-            SourceSeparationExecutionSelectionSnapshot.fromLegacySelections(
-                mdx = selection,
-                multiStem = SourceSeparationMultiStemPlaybackSelectionSnapshot(
-                    modelId = null,
-                    generation = selection.generation,
-                ),
-            ),
-        )
     }
 }
 

@@ -8,6 +8,26 @@ import java.io.File
 
 class SourceSeparationProductionRouteAuditTest {
     @Test
+    fun `current data paths expose no unreleased compatibility adapters`() {
+        val selection = mainSource(
+            "com/mardous/booming/separation/SourceSeparationExecutionSelection.kt",
+        ).readText()
+        val coordinator = mainSource(
+            "com/mardous/booming/ui/screen/player/SourceSeparationForegroundWorkerCoordinator.kt",
+        ).readText()
+        val service = mainSource(
+            "com/mardous/booming/playback/PlaybackService.kt",
+        ).readText()
+
+        assertFalse(selection.contains("fromLegacySelections"))
+        assertFalse(coordinator.contains("migrateTemporaryPerSongBlend"))
+        assertFalse(service.contains("\"vocalsFile\""))
+        assertFalse(service.contains("\"instrumentalFile\""))
+        assertTrue(service.contains("\"stemFiles\""))
+        assertTrue(service.contains("\"stemIds\""))
+    }
+
+    @Test
     fun `normal application routes do not reference legacy or ORT runtime types`() {
         val prohibited = listOf(
             "import com.mardous.booming.separation.SourceSeparationEngine",

@@ -29,8 +29,8 @@ data class MdxPhysicalStemIds(
 }
 
 /**
- * MDX contracts order the direct model output before its residual. Vocals outputs keep the
- * historical vocals file slot; every other target uses the instrumental slot.
+ * MDX contracts order the direct model output before its residual. A vocals target uses the
+ * vocals output slot; every other target uses the instrumental slot.
  */
 fun List<StemId>.toMdxPhysicalStemIds(): MdxPhysicalStemIds {
     require(size == 2 && distinct().size == size) {

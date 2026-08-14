@@ -13,11 +13,11 @@ class SourceSeparationExecutionSelectionTest {
             modelId = "htdemucs_6s",
             generation = 2L,
         )
-        val before = SourceSeparationExecutionSelectionSnapshot.fromLegacySelections(
+        val before = SourceSeparationExecutionSelectionSnapshot.fromFamilySelections(
             mdx = mdxSelection(modelId = SourceSeparationLifecycleTestFixtures.MODEL_A, generation = 1L),
             multiStem = demucs,
         )
-        val afterHiddenMdxUpdate = SourceSeparationExecutionSelectionSnapshot.fromLegacySelections(
+        val afterHiddenMdxUpdate = SourceSeparationExecutionSelectionSnapshot.fromFamilySelections(
             mdx = mdxSelection(modelId = SourceSeparationLifecycleTestFixtures.MODEL_B, generation = 3L),
             multiStem = demucs,
         )
@@ -34,11 +34,11 @@ class SourceSeparationExecutionSelectionTest {
         val demucs = SourceSeparationMultiStemPlaybackSelectionSnapshot("htdemucs_6s", 2L)
         val clearedDemucs = SourceSeparationMultiStemPlaybackSelectionSnapshot(null, 4L)
 
-        val before = SourceSeparationExecutionSelectionSnapshot.fromLegacySelections(
+        val before = SourceSeparationExecutionSelectionSnapshot.fromFamilySelections(
             selectedMdx,
             demucs,
         )
-        val after = SourceSeparationExecutionSelectionSnapshot.fromLegacySelections(
+        val after = SourceSeparationExecutionSelectionSnapshot.fromFamilySelections(
             selectedMdx,
             clearedDemucs,
         )
@@ -56,9 +56,9 @@ class SourceSeparationExecutionSelectionTest {
         val demucs = SourceSeparationMultiStemPlaybackSelectionSnapshot("htdemucs_6s", 2L)
         val cleared = SourceSeparationMultiStemPlaybackSelectionSnapshot(null, 3L)
 
-        val firstA = SourceSeparationExecutionSelectionSnapshot.fromLegacySelections(mdxA, none)
-        val middle = SourceSeparationExecutionSelectionSnapshot.fromLegacySelections(mdxA, demucs)
-        val secondA = SourceSeparationExecutionSelectionSnapshot.fromLegacySelections(mdxA, cleared)
+        val firstA = SourceSeparationExecutionSelectionSnapshot.fromFamilySelections(mdxA, none)
+        val middle = SourceSeparationExecutionSelectionSnapshot.fromFamilySelections(mdxA, demucs)
+        val secondA = SourceSeparationExecutionSelectionSnapshot.fromFamilySelections(mdxA, cleared)
 
         assertEquals(listOf(1L, 2L, 3L), listOf(firstA.generation, middle.generation, secondA.generation))
         assertNotEquals(firstA, secondA)

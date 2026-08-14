@@ -2395,13 +2395,13 @@ class PlayerViewModel(
             SourceSeparationStemGainPolicy.orderedGains(stemIds, gainsByStemId)
         }
         if (pendingOrderedGains != null && runtimeSong != null && cacheKey != null) {
-            val migrated = runCatching {
+            val persisted = runCatching {
                 sourceSeparationRuntime.writeStemGains(
                     runtimeSong,
                     SourceSeparationStemGainPolicy.orderedMap(stemIds, pendingOrderedGains),
                 )
             }.getOrDefault(false)
-            if (migrated) removePendingSourceSeparationStemGains(cacheKey)
+            if (persisted) removePendingSourceSeparationStemGains(cacheKey)
         }
         val storedOrderedGains = storedGains?.let { gainsByStemId ->
             SourceSeparationStemGainPolicy.orderedGains(stemIds, gainsByStemId)

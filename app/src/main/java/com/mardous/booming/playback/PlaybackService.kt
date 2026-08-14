@@ -925,12 +925,6 @@ class PlaybackService :
                         sourceSeparationRuntime.openCompletedCache(manifest.cacheKey),
                     )
                     playback.use {
-                        val legacyVocals = playback.fileFor(
-                            com.mardous.booming.separation.model.contract.StemSemanticId.Vocals,
-                        )
-                        val legacyInstrumental = playback.fileFor(
-                            com.mardous.booming.separation.model.contract.StemSemanticId.Instrumental,
-                        )
                         SessionResult(
                             SessionResult.RESULT_SUCCESS,
                             Bundle().apply {
@@ -942,12 +936,6 @@ class PlaybackService :
                                     "stemIds",
                                     ArrayList(playback.stemIds),
                                 )
-                                legacyVocals?.let { file ->
-                                    putString("vocalsFile", file.absolutePath)
-                                }
-                                legacyInstrumental?.let { file ->
-                                    putString("instrumentalFile", file.absolutePath)
-                                }
                                 putString("timingFile", playback.timingFile?.absolutePath)
                                 putLong("elapsedMs", playback.manifest.output?.elapsedMs ?: 0L)
                                 putInt("windowCount", playback.manifest.output?.windowCount ?: 0)

@@ -5783,7 +5783,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
             assertTrue(currentReadySegments > 0)
             val preflightIdentity = SourceSeparationWorkerRequestIdentity.from(
                 source,
-                presetRepository.activeSelectionFlow.value,
+                coordinator.executionSelectionStateFlow.value,
             )
             coordinator.suppressAndPauseSong(source.id)
             assertTrue(

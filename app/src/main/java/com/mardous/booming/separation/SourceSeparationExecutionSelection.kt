@@ -106,7 +106,7 @@ data class SourceSeparationExecutionSelectionSnapshot(
         this.identity?.matches(identity) == true
 
     companion object {
-        fun fromLegacySelections(
+        fun fromFamilySelections(
             mdx: SourceSeparationActiveSelectionSnapshot,
             multiStem: SourceSeparationMultiStemPlaybackSelectionSnapshot,
         ): SourceSeparationExecutionSelectionSnapshot {
