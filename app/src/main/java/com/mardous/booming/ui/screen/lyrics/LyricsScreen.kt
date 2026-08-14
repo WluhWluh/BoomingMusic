@@ -8,6 +8,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -19,6 +20,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +34,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -75,7 +78,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.keepScreenOn
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -351,6 +357,14 @@ fun CoverLyricsScreen(
             sourceSeparationPlaybackProcessingProgressState.takeIf {
                 quickControlExpanded
             }
+        val displayedQuickControlProgress = quickControlProcessingProgressState?.let {
+            animateSourceSeparationPlaybackProcessingProgress(it)
+        }
+        val quickControlProgressAlpha by animateFloatAsState(
+            targetValue = if (quickControlProcessingProgressState != null) 1f else 0f,
+            animationSpec = coverLyricsQuickBlendFloatTransitionSpec(),
+            label = "quickControlProgressAlpha",
+        )
         val lyricsEndClearance = coverLyricsEndClearance(
             showSourceSeparationQuickControls = showSourceSeparationQuickControls,
             reserveExpandedControls = quickControlExpanded,
@@ -367,7 +381,37 @@ fun CoverLyricsScreen(
             vertical = CoverLyricsBaseVerticalPadding,
             horizontal = CoverLyricsBaseHorizontalPadding,
         )
-        Box(modifier = modifier.fillMaxSize()) {
+        var containerTopInWindowPx by remember { mutableFloatStateOf(0f) }
+        BoxWithConstraints(
+            modifier = modifier
+                .fillMaxSize()
+                .onGloballyPositioned { coordinates ->
+                    containerTopInWindowPx = coordinates.boundsInWindow().top
+                },
+        ) {
+            val density = LocalDensity.current
+            val safeDrawingTop = with(density) {
+                (WindowInsets.safeDrawing.getTop(this) - containerTopInWindowPx)
+                    .coerceAtLeast(0f)
+                    .toDp()
+            }
+            val quickControlTargetHeight = when {
+                multiStemQuickExpanded -> coverLyricsMultiStemExpandedHeight(
+                    multiStemMixState.stems.size,
+                ) + CoverLyricsControlSlotInset
+                quickBlendExpanded ->
+                    CoverLyricsQuickBlendSliderHeight + CoverLyricsControlSlotInset
+                else -> CoverLyricsControlSlotSize
+            }
+            val progressPlacement = coverLyricsProcessingProgressPlacement(
+                availableHeight = maxHeight,
+                safeDrawingTop = safeDrawingTop,
+                bottomPadding = CoverLyricsOverlayPadding,
+                quickControlHeight = quickControlTargetHeight,
+            )
+            val showProgressInside = displayedQuickControlProgress != null &&
+                    progressPlacement == CoverLyricsProcessingProgressPlacement.FullscreenButtonInnerSlot
+
             LyricsSurface(
                 uiState = uiState,
                 playerViewModel = playerViewModel,
@@ -394,8 +438,21 @@ fun CoverLyricsScreen(
                 verticalAlignment = Alignment.Bottom,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(CoverLyricsOverlayPadding)
+                    .padding(
+                        start = CoverLyricsOverlayPadding,
+                        end = CoverLyricsOverlayPadding,
+                        bottom = CoverLyricsOverlayPadding,
+                    )
             ) {
+                if (showProgressInside) {
+                    CoverLyricsProcessingProgressIndicator(
+                        progress = checkNotNull(displayedQuickControlProgress),
+                        modifier = Modifier
+                            .size(CoverLyricsControlSlotSize)
+                            .alpha(quickControlProgressAlpha),
+                    )
+                }
+
                 CoverLyricsCircularIconButton(
                     painter = painterResource(R.drawable.ic_open_in_full_24dp),
                     contentDescription = stringResource(R.string.action_lyrics_editor),
@@ -403,49 +460,59 @@ fun CoverLyricsScreen(
                 )
 
                 if (showSourceSeparationQuickControls) {
-                    if (multiStemMixState != null) {
-                        CoverLyricsMultiStemControl(
-                            expanded = multiStemQuickExpanded,
-                            state = multiStemMixState,
-                            processingProgressState = quickControlProcessingProgressState,
-                            onEnableSeparatedPlayback = {
-                                playerViewModel.setSourceSeparationPlaybackEnabled(
-                                    enabled = true,
-                                    blend = multiStemMixState.demandBlend,
-                                )
-                            },
-                            onDisableSeparatedPlayback = {
-                                playerViewModel.setSourceSeparationPlaybackEnabled(false)
-                            },
-                            onGainPreview = playerViewModel::previewSourceSeparationStemGain,
-                            onGainChangeFinished = playerViewModel::setSourceSeparationStemGain,
-                            onInvertGains = playerViewModel::invertSourceSeparationStemGains,
-                            onLongClick = onSourceSeparationPanelLongClick,
-                        )
-                    } else {
-                        CoverLyricsQuickBlendControl(
-                            expanded = quickBlendExpanded,
-                            blend = sourceSeparationPlaybackState.blend,
-                            processingProgressState = quickControlProcessingProgressState,
-                            topStemIconRes = SourceSeparationStemIconResolver.resourceId(
-                                sourceSeparationBlendStemLabels.vocalsCanonicalLabel,
-                            ),
-                            bottomStemIconRes = SourceSeparationStemIconResolver.resourceId(
-                                sourceSeparationBlendStemLabels.instrumentalCanonicalLabel,
-                            ),
-                            onEnableSeparatedPlayback = {
-                                playerViewModel.setSourceSeparationPlaybackEnabled(
-                                    enabled = true,
-                                    blend = sourceSeparationPlaybackState.blend
-                                )
-                            },
-                            onDisableSeparatedPlayback = {
-                                playerViewModel.setSourceSeparationPlaybackEnabled(false)
-                            },
-                            onBlendPreview = playerViewModel::previewSourceSeparationBlend,
-                            onBlendChangeFinished = playerViewModel::setSourceSeparationBlend,
-                            onLongClick = onSourceSeparationPanelLongClick,
-                        )
+                    Box(contentAlignment = Alignment.TopCenter) {
+                        if (multiStemMixState != null) {
+                            CoverLyricsMultiStemControl(
+                                expanded = multiStemQuickExpanded,
+                                state = multiStemMixState,
+                                onEnableSeparatedPlayback = {
+                                    playerViewModel.setSourceSeparationPlaybackEnabled(
+                                        enabled = true,
+                                        blend = multiStemMixState.demandBlend,
+                                    )
+                                },
+                                onDisableSeparatedPlayback = {
+                                    playerViewModel.setSourceSeparationPlaybackEnabled(false)
+                                },
+                                onGainPreview = playerViewModel::previewSourceSeparationStemGain,
+                                onGainChangeFinished = playerViewModel::setSourceSeparationStemGain,
+                                onInvertGains = playerViewModel::invertSourceSeparationStemGains,
+                                onLongClick = onSourceSeparationPanelLongClick,
+                            )
+                        } else {
+                            CoverLyricsQuickBlendControl(
+                                expanded = quickBlendExpanded,
+                                blend = sourceSeparationPlaybackState.blend,
+                                topStemIconRes = SourceSeparationStemIconResolver.resourceId(
+                                    sourceSeparationBlendStemLabels.vocalsCanonicalLabel,
+                                ),
+                                bottomStemIconRes = SourceSeparationStemIconResolver.resourceId(
+                                    sourceSeparationBlendStemLabels.instrumentalCanonicalLabel,
+                                ),
+                                onEnableSeparatedPlayback = {
+                                    playerViewModel.setSourceSeparationPlaybackEnabled(
+                                        enabled = true,
+                                        blend = sourceSeparationPlaybackState.blend
+                                    )
+                                },
+                                onDisableSeparatedPlayback = {
+                                    playerViewModel.setSourceSeparationPlaybackEnabled(false)
+                                },
+                                onBlendPreview = playerViewModel::previewSourceSeparationBlend,
+                                onBlendChangeFinished = playerViewModel::setSourceSeparationBlend,
+                                onLongClick = onSourceSeparationPanelLongClick,
+                            )
+                        }
+
+                        if (displayedQuickControlProgress != null && !showProgressInside) {
+                            CoverLyricsProcessingProgressIndicator(
+                                progress = displayedQuickControlProgress,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .offset(y = -CoverLyricsQuickBlendProgressOffset)
+                                    .alpha(quickControlProgressAlpha),
+                            )
+                        }
                     }
                 }
             }
@@ -485,7 +552,6 @@ private fun CoverLyricsCircularIconButton(
 private fun CoverLyricsQuickBlendControl(
     expanded: Boolean,
     blend: Float,
-    processingProgressState: SourceSeparationPlaybackProcessingProgressState?,
     @DrawableRes topStemIconRes: Int,
     @DrawableRes bottomStemIconRes: Int,
     onEnableSeparatedPlayback: () -> Unit,
@@ -829,22 +895,26 @@ private fun CoverLyricsQuickBlendControl(
             )
         }
 
-        if (processingProgressState != null) {
-            val displayedProgress =
-                animateSourceSeparationPlaybackProcessingProgress(processingProgressState)
-            val progressModifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = -CoverLyricsQuickBlendProgressOffset)
-                .size(CoverLyricsQuickBlendProgressSize)
-                .alpha(endpointIconAlpha)
-            CircularProgressIndicator(
-                progress = { displayedProgress },
-                color = progressColor,
-                trackColor = progressColor.copy(alpha = 0.1f),
-                strokeWidth = CoverLyricsQuickBlendProgressStrokeWidth,
-                modifier = progressModifier
-            )
-        }
+    }
+}
+
+@Composable
+private fun CoverLyricsProcessingProgressIndicator(
+    progress: Float,
+    modifier: Modifier = Modifier,
+) {
+    val progressColor = MaterialTheme.colorScheme.onSurface
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier,
+    ) {
+        CircularProgressIndicator(
+            progress = { progress },
+            color = progressColor,
+            trackColor = progressColor.copy(alpha = 0.1f),
+            strokeWidth = CoverLyricsQuickBlendProgressStrokeWidth,
+            modifier = Modifier.size(CoverLyricsQuickBlendProgressSize),
+        )
     }
 }
 
@@ -857,7 +927,6 @@ private data class CoverLyricsMultiStemTransitionTarget(
 private fun CoverLyricsMultiStemControl(
     expanded: Boolean,
     state: SourceSeparationMultiStemMixUiState,
-    processingProgressState: SourceSeparationPlaybackProcessingProgressState?,
     onEnableSeparatedPlayback: () -> Unit,
     onDisableSeparatedPlayback: () -> Unit,
     onGainPreview: (String, Float) -> Unit,
@@ -1180,21 +1249,6 @@ private fun CoverLyricsMultiStemControl(
             )
         }
 
-        if (processingProgressState != null) {
-            val displayedProgress =
-                animateSourceSeparationPlaybackProcessingProgress(processingProgressState)
-            CircularProgressIndicator(
-                progress = { displayedProgress },
-                color = progressColor,
-                trackColor = progressColor.copy(alpha = 0.1f),
-                strokeWidth = CoverLyricsQuickBlendProgressStrokeWidth,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .offset(y = -CoverLyricsQuickBlendProgressOffset)
-                    .size(CoverLyricsQuickBlendProgressSize)
-                    .alpha(endpointIconAlpha),
-            )
-        }
     }
 }
 
@@ -1523,6 +1577,26 @@ private val CoverLyricsMultiStemInnerCornerRadius = 6.dp
 private const val CoverLyricsQuickBlendNeutralBlend = 0.5f
 private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.10f
 private const val CoverLyricsQuickControlsTransitionDurationMillis = 260
+
+internal enum class CoverLyricsProcessingProgressPlacement {
+    AboveQuickControl,
+    FullscreenButtonInnerSlot,
+}
+
+internal fun coverLyricsProcessingProgressPlacement(
+    availableHeight: Dp,
+    safeDrawingTop: Dp,
+    bottomPadding: Dp,
+    quickControlHeight: Dp,
+): CoverLyricsProcessingProgressPlacement {
+    val progressTop = availableHeight - bottomPadding - quickControlHeight -
+            CoverLyricsQuickBlendProgressOffset
+    return if (progressTop >= safeDrawingTop) {
+        CoverLyricsProcessingProgressPlacement.AboveQuickControl
+    } else {
+        CoverLyricsProcessingProgressPlacement.FullscreenButtonInnerSlot
+    }
+}
 
 internal fun coverLyricsEndClearance(
     showSourceSeparationQuickControls: Boolean,
