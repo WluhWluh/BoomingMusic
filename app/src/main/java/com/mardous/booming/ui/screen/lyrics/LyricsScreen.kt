@@ -739,12 +739,14 @@ private fun CoverLyricsQuickBlendControl(
         tappedSegment = segmentTapEffect.segmentIndex,
         expansion = segmentTapExpansion,
     )
-    val vocalsFillHeight = topTrackHeight *
-            ((CoverLyricsQuickBlendNeutralBlend - displayedBlend) /
-                    CoverLyricsQuickBlendNeutralBlend).coerceIn(0f, 1f)
-    val instrumentalFillHeight = bottomTrackHeight *
-            ((displayedBlend - CoverLyricsQuickBlendNeutralBlend) /
-                    CoverLyricsQuickBlendNeutralBlend).coerceIn(0f, 1f)
+    val vocalsFillFraction =
+        ((CoverLyricsQuickBlendNeutralBlend - displayedBlend) /
+                CoverLyricsQuickBlendNeutralBlend).coerceIn(0f, 1f)
+    val instrumentalFillFraction =
+        ((displayedBlend - CoverLyricsQuickBlendNeutralBlend) /
+                CoverLyricsQuickBlendNeutralBlend).coerceIn(0f, 1f)
+    val vocalsFillHeight = topTrackHeight * vocalsFillFraction
+    val instrumentalFillHeight = bottomTrackHeight * instrumentalFillFraction
     val topIconFillHeight = (
             CoverLyricsQuickBlendEndpointIconOffset + CoverLyricsQuickBlendIconSize -
                     maxOf(
@@ -757,16 +759,6 @@ private fun CoverLyricsQuickBlendControl(
             CoverLyricsQuickBlendIconSize
     val bottomIconFillHeight = (instrumentalFillHeight - bottomIconTopInTrack)
         .coerceIn(0.dp, CoverLyricsQuickBlendIconSize)
-    val topRippleColor = if (vocalsFillHeight >= topTrackHeight / 2) {
-        colorScheme.surface
-    } else {
-        progressColor
-    }
-    val bottomRippleColor = if (instrumentalFillHeight >= bottomTrackHeight / 2) {
-        colorScheme.surface
-    } else {
-        progressColor
-    }
     val buttonBackgroundShape = CircleShape
     val topTrackShape = RoundedCornerShape(
         topStart = topOuterCornerRadius,
@@ -982,10 +974,6 @@ private fun CoverLyricsQuickBlendControl(
                     )
                     .clip(topTrackShape)
                     .background(progressColor.copy(alpha = trackAlpha))
-                    .indication(
-                        interactionSource = segmentInteractionSources[0],
-                        indication = ripple(color = topRippleColor),
-                    )
             ) {
                 Box(
                     modifier = Modifier
@@ -1009,10 +997,6 @@ private fun CoverLyricsQuickBlendControl(
                     )
                     .clip(bottomTrackShape)
                     .background(progressColor.copy(alpha = trackAlpha))
-                    .indication(
-                        interactionSource = segmentInteractionSources[1],
-                        indication = ripple(color = bottomRippleColor),
-                    )
             ) {
                 Box(
                     modifier = Modifier
@@ -1057,6 +1041,32 @@ private fun CoverLyricsQuickBlendControl(
                     .align(Alignment.BottomCenter)
                     .offset(y = -endpointIconOffset)
                     .alpha(endpointIconAlpha)
+            )
+
+            CoverLyricsSplitRippleOverlay(
+                interactionSource = segmentInteractionSources[0],
+                filledFraction = vocalsFillFraction,
+                fillFromTop = false,
+                unfilledRippleColor = progressColor,
+                filledRippleColor = colorScheme.surface,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(topTrackHeight)
+                    .clip(topTrackShape),
+            )
+
+            CoverLyricsSplitRippleOverlay(
+                interactionSource = segmentInteractionSources[1],
+                filledFraction = instrumentalFillFraction,
+                fillFromTop = true,
+                unfilledRippleColor = progressColor,
+                filledRippleColor = colorScheme.surface,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(bottomTrackHeight)
+                    .clip(bottomTrackShape),
             )
         }
 
@@ -1868,6 +1878,7 @@ private fun CoverLyricsMultiStemFixedSegment(
             .fillMaxWidth()
             .height(height)
             .clip(shape)
+            .background(background)
             .then(
                 if (interactionSource != null) {
                     Modifier.indication(
@@ -1879,11 +1890,6 @@ private fun CoverLyricsMultiStemFixedSegment(
                 },
             ),
     ) {
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .background(background),
-        )
         if (iconRes != null) {
             Icon(
                 painter = painterResource(iconRes),
@@ -1912,18 +1918,13 @@ private fun CoverLyricsMultiStemGainSegment(
         (height - CoverLyricsQuickBlendIconSize) / 2
     val iconFillHeight = (fillHeight - iconBottomInset)
         .coerceIn(0.dp, CoverLyricsQuickBlendIconSize)
-    val rippleColor = if (normalizedGain >= 0.5f) filledColor else progressColor
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxWidth()
             .height(height)
             .clip(RoundedCornerShape(cornerRadius))
-            .background(progressColor.copy(alpha = trackAlpha))
-            .indication(
-                interactionSource = interactionSource,
-                indication = ripple(color = rippleColor),
-            ),
+            .background(progressColor.copy(alpha = trackAlpha)),
     ) {
         Box(
             modifier = Modifier
@@ -1940,7 +1941,85 @@ private fun CoverLyricsMultiStemGainSegment(
             fillFromTop = false,
             modifier = Modifier.requiredSize(CoverLyricsQuickBlendIconSize),
         )
+        CoverLyricsSplitRippleOverlay(
+            interactionSource = interactionSource,
+            filledFraction = normalizedGain,
+            fillFromTop = false,
+            unfilledRippleColor = progressColor,
+            filledRippleColor = filledColor,
+            modifier = Modifier.matchParentSize(),
+        )
     }
+}
+
+@Composable
+private fun CoverLyricsSplitRippleOverlay(
+    interactionSource: MutableInteractionSource,
+    filledFraction: Float,
+    fillFromTop: Boolean,
+    unfilledRippleColor: Color,
+    filledRippleColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val normalizedFill = filledFraction.coerceIn(0f, 1f)
+    Box(modifier = modifier) {
+        CoverLyricsClippedRipple(
+            interactionSource = interactionSource,
+            filledFraction = normalizedFill,
+            fillFromTop = fillFromTop,
+            drawFilledRegion = false,
+            color = unfilledRippleColor,
+        )
+        CoverLyricsClippedRipple(
+            interactionSource = interactionSource,
+            filledFraction = normalizedFill,
+            fillFromTop = fillFromTop,
+            drawFilledRegion = true,
+            color = filledRippleColor,
+        )
+    }
+}
+
+@Composable
+private fun CoverLyricsClippedRipple(
+    interactionSource: MutableInteractionSource,
+    filledFraction: Float,
+    fillFromTop: Boolean,
+    drawFilledRegion: Boolean,
+    color: Color,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .drawWithContent {
+                val filledHeight = size.height * filledFraction
+                val filledTop = if (fillFromTop) 0f else size.height - filledHeight
+                val filledBottom = if (fillFromTop) filledHeight else size.height
+                val top = if (drawFilledRegion) {
+                    filledTop
+                } else if (fillFromTop) {
+                    filledBottom
+                } else {
+                    0f
+                }
+                val bottom = if (drawFilledRegion) {
+                    filledBottom
+                } else if (fillFromTop) {
+                    size.height
+                } else {
+                    filledTop
+                }
+                if (bottom > top) {
+                    clipRect(top = top, bottom = bottom) {
+                        this@drawWithContent.drawContent()
+                    }
+                }
+            }
+            .indication(
+                interactionSource = interactionSource,
+                indication = ripple(color = color),
+            ),
+    )
 }
 
 internal fun coverLyricsMultiStemExpandedHeight(stemCount: Int): Dp {
