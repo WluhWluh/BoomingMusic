@@ -83,6 +83,7 @@ class SourceSeparationProductionRouteAuditTest {
             completionStart,
         )
         val completion = viewModel.substring(completionStart, completionEnd)
+        val currentSongSnapshot = completion.indexOf("val isCurrentSong")
         val identitySnapshot = completion.indexOf("val acceptsCurrentPlaybackState")
         val mainThreadLaunch = completion.indexOf("viewModelScope.launch")
         val controllerRead = completion.indexOf(
@@ -91,6 +92,8 @@ class SourceSeparationProductionRouteAuditTest {
 
         assertTrue(coordinator.contains("dispatchCallbackSafely("))
         assertFalse(coordinator.contains("callbacks?.onSourceSeparationWorker"))
+        assertTrue(currentSongSnapshot >= 0)
+        assertTrue(currentSongSnapshot < mainThreadLaunch)
         assertTrue(identitySnapshot >= 0)
         assertTrue(identitySnapshot < mainThreadLaunch)
         assertTrue(controllerRead > mainThreadLaunch)

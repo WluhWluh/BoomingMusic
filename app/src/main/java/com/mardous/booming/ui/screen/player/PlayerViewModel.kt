@@ -1223,18 +1223,22 @@ class PlayerViewModel(
         cacheKey: String,
         shouldPromoteCompletedStems: Boolean,
     ) {
+        val isCurrentSong = currentSong.id == song.id
         val acceptsCurrentPlaybackState = acceptsCurrentSourceSeparationWorkerState(
             song,
             cacheKey,
         )
         viewModelScope.launch {
             val plan = sourceSeparationWorkerCompletionPlan(
+                isCurrentSong = isCurrentSong,
                 acceptsCurrentPlaybackState = acceptsCurrentPlaybackState,
                 playWhenReady = sourceSeparationPlaybackHasPlayIntent(),
                 shouldPromoteCompletedStems = shouldPromoteCompletedStems,
             )
             val cacheRefreshJob = if (plan.refreshCurrentCacheState) {
-                clearSourceSeparationPausePendingAction(song)
+                if (plan.clearCurrentPausePendingAction) {
+                    clearSourceSeparationPausePendingAction(song)
+                }
                 refreshCurrentSourceSeparationCacheAvailable(song)
             } else {
                 null
