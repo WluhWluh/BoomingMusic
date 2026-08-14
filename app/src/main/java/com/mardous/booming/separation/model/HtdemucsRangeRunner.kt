@@ -65,6 +65,11 @@ internal data class HtdemucsRangeResumeState(
     val segmentPlan: SourceSeparationSegmentPlan,
 )
 
+private data class HtdemucsPassTarget(
+    val startPlanIndex: Int,
+    val provisionalOutputSegmentIndex: Int?,
+)
+
 internal data class HtdemucsRangeProgress(
     val completedWindows: Int,
     val totalWindows: Int,
@@ -251,10 +256,109 @@ internal class HtdemucsRangeRunner(
             }
             val segmentPublicationId = java.util.UUID.randomUUID().toString()
 
-            fun processPass(
-                startPlanIndex: Int,
-                provisionalOutputSegmentIndex: Int? = null,
+            fun isPlaybackReadyAt(segmentIndex: Int, playbackFrame: Int): Boolean {
+                val segment = currentPlan.segments[segmentIndex]
+                if (segment.state.isPlaybackReady) return true
+                return segment.state == SourceSeparationSegmentState.Provisional &&
+                    requireNotNull(segment.playableFromFrame) <= playbackFrame
+            }
+
+            fun passTargetForPlaybackDemand(
+                playbackFrame: Int,
+            ): HtdemucsPassTarget? {
+                val playbackIndex = currentPlan.segmentIndexForFrame(playbackFrame)
+                if (isPlaybackReadyAt(playbackIndex, playbackFrame)) return null
+                val segment = currentPlan.segments[playbackIndex]
+                val playableFromFrame = segment.playbackStartFrame +
+                    HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES
+                val canStartAtDemandSegment = playbackIndex > 0 &&
+                    playableFromFrame < segment.playbackEndFrame &&
+                    playbackFrame >= playableFromFrame
+                val startPlanIndex = if (canStartAtDemandSegment) {
+                    playbackIndex
+                } else {
+                    (playbackIndex - 1).coerceAtLeast(0)
+                }
+                return HtdemucsPassTarget(
+                    startPlanIndex = startPlanIndex,
+                    provisionalOutputSegmentIndex = startPlanIndex.takeIf { index ->
+                        index > 0 && !currentPlan.segments[index].state.isComplete
+                    },
+                )
+            }
+
+            fun inferenceWindowsUntilPlaybackArtifact(
+                passTarget: HtdemucsPassTarget,
+                nextPlanIndex: Int,
+                playbackFrame: Int,
+            ): Int? {
+                val playbackIndex = currentPlan.segmentIndexForFrame(playbackFrame)
+                if (passTarget.startPlanIndex > playbackIndex) return null
+                if (passTarget.provisionalOutputSegmentIndex == playbackIndex) {
+                    val playableFromFrame = currentPlan.segments[playbackIndex]
+                        .playbackStartFrame + HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES
+                    if (playbackFrame < playableFromFrame) return null
+                }
+                val publicationPlanIndex = if (playbackIndex == plans.lastIndex) {
+                    playbackIndex
+                } else {
+                    playbackIndex + 1
+                }
+                if (nextPlanIndex > publicationPlanIndex) return null
+                return publicationPlanIndex - nextPlanIndex + 1
+            }
+
+            fun retargetForPlaybackDemand(
+                currentPassTarget: HtdemucsPassTarget,
+                nextPlanIndex: Int,
+            ): HtdemucsPassTarget? {
+                val currentPlaybackFrame = playbackFrame(playbackPositionMsProvider())
+                    ?: return null
+                val demandTarget = passTargetForPlaybackDemand(currentPlaybackFrame)
+                    ?: return null
+                val currentCost = inferenceWindowsUntilPlaybackArtifact(
+                    passTarget = currentPassTarget,
+                    nextPlanIndex = nextPlanIndex,
+                    playbackFrame = currentPlaybackFrame,
+                )
+                val retargetCost = requireNotNull(
+                    inferenceWindowsUntilPlaybackArtifact(
+                        passTarget = demandTarget,
+                        nextPlanIndex = demandTarget.startPlanIndex,
+                        playbackFrame = currentPlaybackFrame,
+                    ),
+                )
+                return demandTarget.takeIf { currentCost == null || currentCost > retargetCost }
+            }
+
+            fun resetAbandonedPassTail(
+                passTarget: HtdemucsPassTarget,
+                nextPlanIndex: Int,
             ) {
+                val tailSegmentIndex = nextPlanIndex - 1
+                if (tailSegmentIndex < passTarget.startPlanIndex) return
+                if (currentPlan.segments[tailSegmentIndex].state !=
+                    SourceSeparationSegmentState.Running
+                ) {
+                    return
+                }
+                currentPlan = currentPlan.withSegmentState(
+                    segmentIndex = tailSegmentIndex,
+                    state = SourceSeparationSegmentState.Queued,
+                )
+                onSegmentStateChanged(
+                    tailSegmentIndex,
+                    SourceSeparationSegmentState.Queued,
+                    null,
+                )
+            }
+
+            fun processPass(
+                passTarget: HtdemucsPassTarget,
+            ): HtdemucsPassTarget? {
+                val startPlanIndex = passTarget.startPlanIndex
+                val provisionalOutputSegmentIndex =
+                    passTarget.provisionalOutputSegmentIndex
                 val ola = HtdemucsStreamingOverlapAdd(
                     orderedStemIds = session.orderedStemIds,
                     trackSamples = source.frameCount,
@@ -264,6 +368,16 @@ internal class HtdemucsRangeRunner(
                 )
                 for (plan in plans.drop(startPlanIndex)) {
                     if (completedWindows == plans.size) break
+                    retargetForPlaybackDemand(
+                        currentPassTarget = passTarget,
+                        nextPlanIndex = plan.index,
+                    )?.let { retarget ->
+                        resetAbandonedPassTail(
+                            passTarget = passTarget,
+                            nextPlanIndex = plan.index,
+                        )
+                        return retarget
+                    }
                     val windowStartedAtNanos = System.nanoTime()
                     throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
                     requireWorkspaceAvailable()
@@ -414,15 +528,21 @@ internal class HtdemucsRangeRunner(
                         if (outputState.isComplete) completedWindows += 1
                     }
                 }
+                return null
             }
 
             // A demand outside the leading overlap can use the first pass immediately.
             // Continue that OLA pass to the end before backfilling from the track start.
-            processPass(
+            var nextPass = HtdemucsPassTarget(
                 startPlanIndex = firstPlanIndex,
                 provisionalOutputSegmentIndex = provisionalOutputSegmentIndex,
             )
-            if (completedWindows < plans.size) processPass(0)
+            while (completedWindows < plans.size) {
+                nextPass = processPass(nextPass) ?: HtdemucsPassTarget(
+                    startPlanIndex = 0,
+                    provisionalOutputSegmentIndex = null,
+                )
+            }
             require(completedWindows == plans.size)
             onProgress(
                 HtdemucsRangeProgress(

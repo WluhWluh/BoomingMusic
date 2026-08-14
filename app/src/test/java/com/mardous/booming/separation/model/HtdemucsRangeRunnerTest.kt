@@ -236,6 +236,189 @@ class HtdemucsRangeRunnerTest {
     }
 
     @Test
+    fun `mid run forward seek retargets before the old cursor and preserves output`() {
+        val stemIds = listOf("drums", "vocals")
+        val frames = HtdemucsPipelineAdapter.WINDOW_SAMPLES +
+            HtdemucsTrackWindowPlanner.STRIDE_SAMPLES * 9 + 7_000
+        val plans = HtdemucsTrackWindowPlanner.plans(frames)
+        val targetIndex = 7
+        val targetFrame = plans[targetIndex].offset +
+            HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES + 1_000
+        val source = FakeTrackSource(frames)
+        val referenceRoot = temporary.newFolder("mid-run-forward-reference")
+        val reference = HtdemucsRangeRunner(
+            source,
+            CopyingSession(stemIds),
+        ).run(
+            outputDirectory = referenceRoot.resolve("work"),
+            segmentDirectory = referenceRoot.resolve("segments"),
+        )
+        val expected = reference.stemFiles.map { it.file.readBytes() }
+
+        val root = temporary.newFolder("mid-run-forward")
+        val positionMs = AtomicLong(0L)
+        val processingIndexes = mutableListOf<Int>()
+        val stateChanges = mutableListOf<Pair<Int, SourceSeparationSegmentState>>()
+        var preparedPlan: SourceSeparationSegmentPlan? = null
+        var committedBeforeSeek: List<ByteArray>? = null
+        var preservedAtTarget = false
+        val result = HtdemucsRangeRunner(
+            source,
+            CopyingSession(stemIds),
+        ).run(
+            outputDirectory = root.resolve("work"),
+            segmentDirectory = root.resolve("segments"),
+            onPrepared = { preparedPlan = it.segmentPlan },
+            onProgress = { progress ->
+                if (progress.stage.startsWith("Processing window")) {
+                    processingIndexes += requireNotNull(progress.scheduler)
+                        .processingSegmentIndex
+                }
+                if (progress.stage == "Processed window 2/${plans.size}") {
+                    positionMs.set(positionMsAtOrAfter(targetFrame))
+                }
+            },
+            onSegmentStateChanged = { index, state, _ ->
+                stateChanges += index to state
+                if (index == 1 && state == SourceSeparationSegmentState.Ready) {
+                    committedBeforeSeek = requireNotNull(preparedPlan).segments
+                        .take(2)
+                        .flatMap { segment -> segment.stems }
+                        .map { stem -> root.resolve(stem.path).readBytes() }
+                }
+                if (index == targetIndex &&
+                    state == SourceSeparationSegmentState.Provisional
+                ) {
+                    val retained = requireNotNull(preparedPlan).segments
+                        .take(2)
+                        .flatMap { segment -> segment.stems }
+                        .map { stem -> root.resolve(stem.path).readBytes() }
+                    requireNotNull(committedBeforeSeek).zip(retained).forEach { (before, after) ->
+                        assertArrayEquals(before, after)
+                    }
+                    preservedAtTarget = true
+                }
+            },
+            playbackPositionMsProvider = { positionMs.get() },
+            playbackReadyWindowCountProvider = { 2 },
+        )
+
+        assertEquals(listOf(0, 1, 2, targetIndex, targetIndex + 1), processingIndexes.take(5))
+        assertTrue(stateChanges.contains(2 to SourceSeparationSegmentState.Queued))
+        assertTrue(preservedAtTarget)
+        assertTrue(result.segmentPlan.segments.all { it.state.isComplete })
+        result.stemFiles.forEachIndexed { index, stem ->
+            assertArrayEquals(expected[index], stem.file.readBytes())
+        }
+    }
+
+    @Test
+    fun `mid run overlap seek warms the previous window and satisfies the waterline`() {
+        val frames = HtdemucsPipelineAdapter.WINDOW_SAMPLES +
+            HtdemucsTrackWindowPlanner.STRIDE_SAMPLES * 9 + 7_000
+        val plans = HtdemucsTrackWindowPlanner.plans(frames)
+        val targetIndex = 7
+        val targetFrame = plans[targetIndex].offset + 1_000
+        val positionMs = AtomicLong(0L)
+        val processingIndexes = mutableListOf<Int>()
+        val stateChanges = mutableListOf<Triple<Int, SourceSeparationSegmentState, Int?>>()
+        val progressSnapshots = mutableListOf<HtdemucsRangeProgress>()
+
+        HtdemucsRangeRunner(
+            FakeTrackSource(frames),
+            CopyingSession(listOf("drums", "bass", "other", "vocals")),
+        ).run(
+            outputDirectory = temporary.newFolder("mid-run-overlap").resolve("work"),
+            segmentDirectory = temporary.root.resolve("mid-run-overlap/segments"),
+            onProgress = { progress ->
+                progressSnapshots += progress
+                if (progress.stage.startsWith("Processing window")) {
+                    processingIndexes += requireNotNull(progress.scheduler)
+                        .processingSegmentIndex
+                }
+                if (progress.stage == "Processed window 2/${plans.size}") {
+                    positionMs.set(positionMsAtOrAfter(targetFrame))
+                }
+            },
+            onSegmentStateChanged = { index, state, playableFromFrame ->
+                stateChanges += Triple(index, state, playableFromFrame)
+            },
+            playbackPositionMsProvider = { positionMs.get() },
+            playbackReadyWindowCountProvider = { 2 },
+        )
+
+        assertEquals(
+            listOf(0, 1, 2, targetIndex - 1, targetIndex, targetIndex + 1),
+            processingIndexes.take(6),
+        )
+        assertTrue(stateChanges.any { (index, state, _) ->
+            index == targetIndex - 1 && state == SourceSeparationSegmentState.Provisional
+        })
+        assertTrue(stateChanges.any { (index, state, _) ->
+            index == targetIndex && state == SourceSeparationSegmentState.Ready
+        })
+        val demandReady = progressSnapshots.first {
+            it.stage == "Processed window ${targetIndex + 1}/${plans.size}"
+        }.scheduler
+        assertEquals(2, demandReady?.playbackReadyWindowReadyCount)
+        assertEquals(0, demandReady?.playbackReadyWindowPendingCount)
+    }
+
+    @Test
+    fun `newest backward seek retargets again while a ready seek leaves the pass alone`() {
+        val frames = HtdemucsPipelineAdapter.WINDOW_SAMPLES +
+            HtdemucsTrackWindowPlanner.STRIDE_SAMPLES * 10 + 7_000
+        val plans = HtdemucsTrackWindowPlanner.plans(frames)
+        val forwardIndex = 8
+        val backwardIndex = 3
+        val forwardFrame = plans[forwardIndex].offset +
+            HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES + 1_000
+        val backwardFrame = plans[backwardIndex].offset +
+            HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES + 1_000
+        val positionMs = AtomicLong(0L)
+        val processingIndexes = mutableListOf<Int>()
+        var backwardSeekIssued = false
+        var readySeekIssued = false
+
+        HtdemucsRangeRunner(
+            FakeTrackSource(frames),
+            CopyingSession(listOf("drums", "vocals")),
+        ).run(
+            outputDirectory = temporary.newFolder("repeated-mid-run-seek").resolve("work"),
+            segmentDirectory = temporary.root.resolve("repeated-mid-run-seek/segments"),
+            onProgress = { progress ->
+                if (progress.stage.startsWith("Processing window")) {
+                    val processingIndex = requireNotNull(progress.scheduler)
+                        .processingSegmentIndex
+                    processingIndexes += processingIndex
+                    if (processingIndex == forwardIndex && !backwardSeekIssued) {
+                        positionMs.set(positionMsAtOrAfter(backwardFrame))
+                        backwardSeekIssued = true
+                    }
+                }
+                if (progress.stage == "Processed window 2/${plans.size}") {
+                    positionMs.set(positionMsAtOrAfter(forwardFrame))
+                }
+                if (progress.stage ==
+                    "Processed window ${backwardIndex + 1}/${plans.size}" &&
+                    !readySeekIssued
+                ) {
+                    positionMs.set(positionMsAtOrAfter(plans[0].offset + 1_000))
+                    readySeekIssued = true
+                }
+            },
+            playbackPositionMsProvider = { positionMs.get() },
+        )
+
+        assertTrue(backwardSeekIssued)
+        assertTrue(readySeekIssued)
+        assertEquals(
+            listOf(0, 1, 2, forwardIndex, backwardIndex, backwardIndex + 1, backwardIndex + 2),
+            processingIndexes.take(7),
+        )
+    }
+
+    @Test
     fun `playback demand inside the leading overlap warms the previous window`() {
         val frames = HtdemucsPipelineAdapter.WINDOW_SAMPLES +
             HtdemucsTrackWindowPlanner.STRIDE_SAMPLES * 3 + 7_000
@@ -568,5 +751,9 @@ class HtdemucsRangeRunnerTest {
     private companion object {
         const val TRACK_FRAMES = 4_096
         const val WAV_HEADER_BYTES = 44L
+
+        fun positionMsAtOrAfter(frame: Int): Long =
+            (frame.toLong() * 1_000L + HtdemucsPipelineAdapter.SAMPLE_RATE - 1L) /
+                HtdemucsPipelineAdapter.SAMPLE_RATE
     }
 }
