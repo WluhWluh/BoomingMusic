@@ -404,13 +404,7 @@ private val mainModule = module {
 private val roomModule = module {
     single {
         Room.databaseBuilder(androidContext(), BoomingDatabase::class.java, "music_database.db")
-            .addMigrations(
-                BoomingDatabase.MIGRATION_1_2,
-                BoomingDatabase.MIGRATION_2_3,
-                BoomingDatabase.MIGRATION_3_4,
-                BoomingDatabase.MIGRATION_4_5,
-                BoomingDatabase.MIGRATION_5_6
-            )
+            .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }
 
