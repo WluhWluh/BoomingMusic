@@ -345,7 +345,13 @@ fun CoverLyricsScreen(
         val sourceSeparationMultiStemMixState by playerViewModel
             .sourceSeparationMultiStemMixStateFlow
             .collectAsStateWithLifecycle()
+        val sourceSeparationMultiStemQuickControlPages by playerViewModel
+            .sourceSeparationMultiStemQuickControlPagesFlow
+            .collectAsStateWithLifecycle()
         val multiStemMixState = sourceSeparationMultiStemMixState
+        val multiStemQuickPage = multiStemMixState?.modelId
+            ?.let { sourceSeparationMultiStemQuickControlPages[it] }
+            ?: 0
         val quickBlendExpanded = showSourceSeparationQuickControls &&
                 sourceSeparationBlendMode != SourceSeparationBlendMode.Off &&
                 multiStemMixState == null
@@ -388,24 +394,37 @@ fun CoverLyricsScreen(
             }
             val fullExpandedQuickControlHeight =
                 fullExpandedQuickControlVisibleHeight + CoverLyricsControlSlotInset
-            val useCompactQuickControl = showSourceSeparationQuickControls &&
-                    coverLyricsShouldUseCompactQuickControl(
-                        availableHeight = maxHeight,
-                        safeDrawingTop = safeDrawingTop,
-                        bottomPadding = CoverLyricsOverlayPadding,
-                        fullQuickControlHeight = fullExpandedQuickControlHeight,
-                    )
+            val pagedExpandedQuickControlVisibleHeight = multiStemMixState?.let {
+                coverLyricsMultiStemPagedExpandedHeight(it.stems.size)
+            }
+            val quickControlLayout = coverLyricsQuickControlLayout(
+                availableHeight = maxHeight,
+                safeDrawingTop = safeDrawingTop,
+                bottomPadding = CoverLyricsOverlayPadding,
+                fullQuickControlHeight = fullExpandedQuickControlHeight,
+                pagedQuickControlHeight = pagedExpandedQuickControlVisibleHeight?.plus(
+                    CoverLyricsControlSlotInset,
+                ),
+            )
             val quickControlTargetHeight = if (!quickControlExpanded) {
                 CoverLyricsControlSlotSize
-            } else if (useCompactQuickControl) {
-                CoverLyricsCompactControlExpandedHeight + CoverLyricsControlSlotInset
             } else {
-                fullExpandedQuickControlHeight
+                when (quickControlLayout) {
+                    CoverLyricsQuickControlLayout.Full -> fullExpandedQuickControlHeight
+                    CoverLyricsQuickControlLayout.Paged ->
+                        checkNotNull(pagedExpandedQuickControlVisibleHeight) +
+                                CoverLyricsControlSlotInset
+                    CoverLyricsQuickControlLayout.Compact ->
+                        CoverLyricsCompactControlExpandedHeight + CoverLyricsControlSlotInset
+                }
             }
             val quickControlVisibleTargetHeight = when {
                 !quickControlExpanded -> CoverLyricsButtonSize
-                useCompactQuickControl -> CoverLyricsCompactControlExpandedHeight
-                else -> fullExpandedQuickControlVisibleHeight
+                quickControlLayout == CoverLyricsQuickControlLayout.Full ->
+                    fullExpandedQuickControlVisibleHeight
+                quickControlLayout == CoverLyricsQuickControlLayout.Paged ->
+                    checkNotNull(pagedExpandedQuickControlVisibleHeight)
+                else -> CoverLyricsCompactControlExpandedHeight
             }
             val progressPlacement = coverLyricsProcessingProgressPlacement(
                 availableHeight = maxHeight,
@@ -490,7 +509,7 @@ fun CoverLyricsScreen(
 
                 if (showSourceSeparationQuickControls) {
                     Box(contentAlignment = Alignment.TopCenter) {
-                        if (useCompactQuickControl) {
+                        if (quickControlLayout == CoverLyricsQuickControlLayout.Compact) {
                             CoverLyricsCompactControl(
                                 expanded = quickControlExpanded,
                                 onEnableSeparatedPlayback = {
@@ -511,6 +530,15 @@ fun CoverLyricsScreen(
                             CoverLyricsMultiStemControl(
                                 expanded = multiStemQuickExpanded,
                                 state = multiStemMixState,
+                                paged = quickControlLayout ==
+                                        CoverLyricsQuickControlLayout.Paged,
+                                page = multiStemQuickPage,
+                                onPageChange = { page ->
+                                    playerViewModel.setSourceSeparationMultiStemQuickControlPage(
+                                        modelId = multiStemMixState.modelId,
+                                        page = page,
+                                    )
+                                },
                                 onEnableSeparatedPlayback = {
                                     playerViewModel.setSourceSeparationPlaybackEnabled(
                                         enabled = true,
@@ -1172,13 +1200,17 @@ private fun CoverLyricsCompactControl(
 
 private data class CoverLyricsMultiStemTransitionTarget(
     val expanded: Boolean,
-    val stemCount: Int,
+    val segmentCount: Int,
+    val paged: Boolean,
 )
 
 @Composable
 private fun CoverLyricsMultiStemControl(
     expanded: Boolean,
     state: SourceSeparationMultiStemMixUiState,
+    paged: Boolean,
+    page: Int,
+    onPageChange: (Int) -> Unit,
     onEnableSeparatedPlayback: () -> Unit,
     onDisableSeparatedPlayback: () -> Unit,
     onGainPreview: (String, Float) -> Unit,
@@ -1187,16 +1219,47 @@ private fun CoverLyricsMultiStemControl(
     onLongClick: () -> Unit,
 ) {
     val stemCount = state.stems.size
+    val normalizedPage = page.coerceIn(0, 1)
+    val pagedTrackSlotCount = coverLyricsMultiStemPagedTrackSlotCount(stemCount)
+    val visibleStems = if (paged) {
+        List(pagedTrackSlotCount) { slot ->
+            coverLyricsMultiStemPagedStemIndex(
+                stemCount = stemCount,
+                page = normalizedPage,
+                slot = slot,
+            )?.let(state.stems::get)
+        }
+    } else {
+        state.stems.map { it }
+    }
+    val segmentCount = if (paged) {
+        coverLyricsMultiStemPagedSegmentCount(stemCount)
+    } else {
+        visibleStems.size + 2
+    }
+    val pageSegmentIndex = if (paged) {
+        coverLyricsMultiStemPagedPageSegmentIndex(stemCount)
+    } else {
+        Int.MIN_VALUE
+    }
     var draggingStemId by remember { mutableStateOf<String?>(null) }
     var dragGain by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(state.modelId, state.songId, state.cacheKey, expanded) {
+    LaunchedEffect(
+        state.modelId,
+        state.songId,
+        state.cacheKey,
+        expanded,
+        paged,
+        normalizedPage,
+    ) {
         draggingStemId = null
     }
 
     val transition = updateTransition(
         targetState = CoverLyricsMultiStemTransitionTarget(
             expanded = expanded,
-            stemCount = stemCount,
+            segmentCount = segmentCount,
+            paged = paged,
         ),
         label = "CoverLyricsMultiStem",
     )
@@ -1205,7 +1268,7 @@ private fun CoverLyricsMultiStemControl(
         label = "height",
     ) { target ->
         if (target.expanded) {
-            coverLyricsMultiStemExpandedHeight(target.stemCount)
+            coverLyricsMultiStemSegmentStackHeight(target.segmentCount)
         } else {
             CoverLyricsButtonSize
         }
@@ -1225,6 +1288,12 @@ private fun CoverLyricsMultiStemControl(
         label = "stemSegmentHeight",
     ) { target ->
         if (target.expanded) CoverLyricsMultiStemSegmentSize else 0.dp
+    }
+    val pageSegmentHeight by transition.animateDp(
+        transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
+        label = "pageSegmentHeight",
+    ) { target ->
+        if (target.expanded && target.paged) CoverLyricsMultiStemSegmentSize else 0.dp
     }
     val segmentGap by transition.animateDp(
         transitionSpec = { coverLyricsQuickBlendDpTransitionSpec() },
@@ -1263,6 +1332,7 @@ private fun CoverLyricsMultiStemControl(
     val currentOnGainPreview by rememberUpdatedState(onGainPreview)
     val currentOnGainChangeFinished by rememberUpdatedState(onGainChangeFinished)
     val currentOnInvertGains by rememberUpdatedState(onInvertGains)
+    val currentOnPageChange by rememberUpdatedState(onPageChange)
     val currentOnLongClick by rememberUpdatedState(onLongClick)
     val viewConfiguration = LocalViewConfiguration.current
     val touchSlop = viewConfiguration.touchSlop
@@ -1276,10 +1346,10 @@ private fun CoverLyricsMultiStemControl(
     val segmentGapPx = with(density) {
         CoverLyricsMultiStemSegmentGap.toPx()
     }
-    val segmentCount = stemCount + 2
-
     val gestureModifier = Modifier.pointerInput(
         expanded,
+        paged,
+        normalizedPage,
         segmentCount,
         segmentHeightPx,
         segmentGapPx,
@@ -1301,8 +1371,16 @@ private fun CoverLyricsMultiStemControl(
             } else {
                 -1
             }
-            val activeStemIndex = downSegment - 1
-            val activeStem = currentState.stems.getOrNull(activeStemIndex)
+            val activeStemIndex = if (paged) {
+                coverLyricsMultiStemPagedStemIndex(
+                    stemCount = stemCount,
+                    page = normalizedPage,
+                    slot = downSegment - 1,
+                )
+            } else {
+                (downSegment - 1).takeIf { it in state.stems.indices }
+            }
+            val activeStem = activeStemIndex?.let { currentState.stems.getOrNull(it) }
             val startY = down.position.y
             val startGain = activeStem?.gain ?: 0f
             var latestGain = startGain
@@ -1310,7 +1388,7 @@ private fun CoverLyricsMultiStemControl(
             var dragStartChange: PointerInputChange? = null
 
             fun updateDrag(change: PointerInputChange) {
-                val stem = currentState.stems.getOrNull(activeStemIndex) ?: return
+                val stem = activeStem ?: return
                 latestGain = coverLyricsMultiStemGainForDrag(
                     startGain = startGain,
                     deltaY = change.position.y - startY,
@@ -1369,10 +1447,10 @@ private fun CoverLyricsMultiStemControl(
                                 )
                             ) {
                                 0 -> currentOnInvertGains()
+                                pageSegmentIndex -> currentOnPageChange(1 - normalizedPage)
                                 segmentCount - 1 -> currentOnDisableSeparatedPlayback()
                                 else -> {
-                                    val stem = currentState.stems
-                                        .getOrNull(activeStemIndex)
+                                    val stem = activeStem
                                         ?: return@let
                                     val nextGain = if (stem.gain >= 0.5f) {
                                         SourceSeparationStemGainPolicy.MIN_GAIN
@@ -1466,15 +1544,38 @@ private fun CoverLyricsMultiStemControl(
                         bottomEnd = innerCornerRadius,
                     ),
                 )
-                state.stems.forEach { stem ->
-                    CoverLyricsMultiStemGainSegment(
-                        iconRes = SourceSeparationStemIconResolver.resourceId(stem.semanticId),
-                        gain = if (draggingStemId == stem.stemId) dragGain else stem.gain,
-                        height = stemSegmentHeight,
-                        cornerRadius = innerCornerRadius,
-                        trackAlpha = trackAlpha,
-                        progressColor = progressColor,
-                        filledColor = colorScheme.surface,
+                visibleStems.forEach { stem ->
+                    if (stem != null) {
+                        CoverLyricsMultiStemGainSegment(
+                            iconRes = SourceSeparationStemIconResolver.resourceId(stem.semanticId),
+                            gain = if (draggingStemId == stem.stemId) dragGain else stem.gain,
+                            height = stemSegmentHeight,
+                            cornerRadius = innerCornerRadius,
+                            trackAlpha = trackAlpha,
+                            progressColor = progressColor,
+                            filledColor = colorScheme.surface,
+                        )
+                    } else {
+                        CoverLyricsMultiStemFixedSegment(
+                            iconRes = null,
+                            background = progressColor.copy(alpha = trackAlpha),
+                            iconTint = progressColor,
+                            height = stemSegmentHeight,
+                            shape = RoundedCornerShape(innerCornerRadius),
+                        )
+                    }
+                }
+                if (paged) {
+                    CoverLyricsMultiStemFixedSegment(
+                        iconRes = if (normalizedPage == 0) {
+                            R.drawable.ic_stepper_1_of_2_24dp
+                        } else {
+                            R.drawable.ic_stepper_2_of_2_24dp
+                        },
+                        background = progressColor.copy(alpha = 0.1f),
+                        iconTint = progressColor,
+                        height = pageSegmentHeight,
+                        shape = RoundedCornerShape(innerCornerRadius),
                     )
                 }
                 CoverLyricsMultiStemFixedSegment(
@@ -1506,7 +1607,7 @@ private fun CoverLyricsMultiStemControl(
 
 @Composable
 private fun CoverLyricsMultiStemFixedSegment(
-    iconRes: Int,
+    iconRes: Int?,
     background: Color,
     iconTint: Color,
     height: Dp,
@@ -1524,12 +1625,14 @@ private fun CoverLyricsMultiStemFixedSegment(
                 .matchParentSize()
                 .background(background),
         )
-        Icon(
-            painter = painterResource(iconRes),
-            contentDescription = null,
-            tint = iconTint,
-            modifier = Modifier.requiredSize(CoverLyricsQuickBlendIconSize),
-        )
+        if (iconRes != null) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.requiredSize(CoverLyricsQuickBlendIconSize),
+            )
+        }
     }
 }
 
@@ -1576,9 +1679,38 @@ private fun CoverLyricsMultiStemGainSegment(
 }
 
 internal fun coverLyricsMultiStemExpandedHeight(stemCount: Int): Dp {
-    val segmentCount = stemCount.coerceAtLeast(0) + 2
-    val gapCount = (segmentCount - 1).coerceAtLeast(0)
-    return CoverLyricsMultiStemSegmentSize * segmentCount.toFloat() +
+    return coverLyricsMultiStemSegmentStackHeight(stemCount.coerceAtLeast(0) + 2)
+}
+
+internal fun coverLyricsMultiStemPagedTrackSlotCount(stemCount: Int): Int =
+    (stemCount.coerceAtLeast(0) + 1) / 2
+
+internal fun coverLyricsMultiStemPagedSegmentCount(stemCount: Int): Int =
+    coverLyricsMultiStemPagedTrackSlotCount(stemCount) + 3
+
+internal fun coverLyricsMultiStemPagedPageSegmentIndex(stemCount: Int): Int =
+    coverLyricsMultiStemPagedSegmentCount(stemCount) - 2
+
+internal fun coverLyricsMultiStemPagedExpandedHeight(stemCount: Int): Dp {
+    return coverLyricsMultiStemSegmentStackHeight(
+        coverLyricsMultiStemPagedSegmentCount(stemCount),
+    )
+}
+
+internal fun coverLyricsMultiStemPagedStemIndex(
+    stemCount: Int,
+    page: Int,
+    slot: Int,
+): Int? {
+    val trackSlotCount = coverLyricsMultiStemPagedTrackSlotCount(stemCount)
+    if (page !in 0..1 || slot !in 0 until trackSlotCount) return null
+    return (page * trackSlotCount + slot).takeIf { it < stemCount }
+}
+
+private fun coverLyricsMultiStemSegmentStackHeight(segmentCount: Int): Dp {
+    val safeSegmentCount = segmentCount.coerceAtLeast(0)
+    val gapCount = (safeSegmentCount - 1).coerceAtLeast(0)
+    return CoverLyricsMultiStemSegmentSize * safeSegmentCount.toFloat() +
             CoverLyricsMultiStemSegmentGap * gapCount.toFloat()
 }
 
@@ -1845,12 +1977,29 @@ internal enum class CoverLyricsCompactControlAction {
     DisableSeparatedPlayback,
 }
 
-internal fun coverLyricsShouldUseCompactQuickControl(
+internal enum class CoverLyricsQuickControlLayout {
+    Full,
+    Paged,
+    Compact,
+}
+
+internal fun coverLyricsQuickControlLayout(
     availableHeight: Dp,
     safeDrawingTop: Dp,
     bottomPadding: Dp,
     fullQuickControlHeight: Dp,
-): Boolean = availableHeight - safeDrawingTop - bottomPadding < fullQuickControlHeight
+    pagedQuickControlHeight: Dp?,
+): CoverLyricsQuickControlLayout {
+    val availableControlHeight = availableHeight - safeDrawingTop - bottomPadding
+    return when {
+        fullQuickControlHeight <= availableControlHeight ->
+            CoverLyricsQuickControlLayout.Full
+        pagedQuickControlHeight != null &&
+                pagedQuickControlHeight <= availableControlHeight ->
+            CoverLyricsQuickControlLayout.Paged
+        else -> CoverLyricsQuickControlLayout.Compact
+    }
+}
 
 internal fun coverLyricsCompactControlActionForY(
     y: Float,

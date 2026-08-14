@@ -7,27 +7,57 @@ import org.junit.Test
 class CoverLyricsProcessingProgressPlacementTest {
 
     @Test
-    fun `complete control remains when its own height exactly fits`() {
+    fun `full control remains when its own height exactly fits`() {
         assertEquals(
-            false,
-            coverLyricsShouldUseCompactQuickControl(
+            CoverLyricsQuickControlLayout.Full,
+            coverLyricsQuickControlLayout(
                 availableHeight = 388.dp,
                 safeDrawingTop = 20.dp,
                 bottomPadding = 16.dp,
                 fullQuickControlHeight = 352.dp,
+                pagedQuickControlHeight = 264.dp,
             ),
         )
     }
 
     @Test
-    fun `compact control replaces complete control when it misses by one dp`() {
+    fun `paged control replaces full control when full height misses by one dp`() {
         assertEquals(
-            true,
-            coverLyricsShouldUseCompactQuickControl(
+            CoverLyricsQuickControlLayout.Paged,
+            coverLyricsQuickControlLayout(
                 availableHeight = 387.dp,
                 safeDrawingTop = 20.dp,
                 bottomPadding = 16.dp,
                 fullQuickControlHeight = 352.dp,
+                pagedQuickControlHeight = 264.dp,
+            ),
+        )
+    }
+
+    @Test
+    fun `compact control replaces paged control when paged height misses by one dp`() {
+        assertEquals(
+            CoverLyricsQuickControlLayout.Compact,
+            coverLyricsQuickControlLayout(
+                availableHeight = 299.dp,
+                safeDrawingTop = 20.dp,
+                bottomPadding = 16.dp,
+                fullQuickControlHeight = 352.dp,
+                pagedQuickControlHeight = 264.dp,
+            ),
+        )
+    }
+
+    @Test
+    fun `two stem control falls directly to compact when full height misses`() {
+        assertEquals(
+            CoverLyricsQuickControlLayout.Compact,
+            coverLyricsQuickControlLayout(
+                availableHeight = 159.dp,
+                safeDrawingTop = 20.dp,
+                bottomPadding = 16.dp,
+                fullQuickControlHeight = 124.dp,
+                pagedQuickControlHeight = null,
             ),
         )
     }

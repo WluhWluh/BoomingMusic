@@ -142,6 +142,21 @@ class CoverLyricsOverlayAvoidanceTest {
     }
 
     @Test
+    fun `paged control narrows lyrics in its eligible height range`() {
+        val avoidance = coverLyricsOverlayAvoidance(
+            showSourceSeparationQuickControls = true,
+            quickControlExpanded = true,
+            quickControlHeight = 264.dp,
+            quickControlVisibleHeight = 260.dp,
+            progressAboveQuickControl = false,
+            totalAvailableHeight = 350.dp,
+        )
+
+        assertEquals(72.dp, avoidance.minimumBottomPadding)
+        assertEquals(48.dp, avoidance.endClearance)
+    }
+
+    @Test
     fun `compact control narrows lyrics when above threshold`() {
         val avoidance = coverLyricsOverlayAvoidance(
             showSourceSeparationQuickControls = true,

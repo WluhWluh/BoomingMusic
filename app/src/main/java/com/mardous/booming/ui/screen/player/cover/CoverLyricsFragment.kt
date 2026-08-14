@@ -35,6 +35,7 @@ class CoverLyricsFragment : Fragment(), SharedPreferences.OnSharedPreferenceChan
         savedInstanceState: Bundle?
     ): View {
         return ComposeView(requireContext()).apply {
+            id = R.id.cover_lyrics_compose_view
             setViewCompositionStrategy(
                 ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
             )

@@ -11,6 +11,31 @@ class CoverLyricsMultiStemControlTest {
     }
 
     @Test
+    fun `paged height includes swap tracks page and close segments`() {
+        assertEquals(260.dp, coverLyricsMultiStemPagedExpandedHeight(stemCount = 6))
+        assertEquals(216.dp, coverLyricsMultiStemPagedExpandedHeight(stemCount = 4))
+        assertEquals(6, coverLyricsMultiStemPagedSegmentCount(stemCount = 6))
+        assertEquals(4, coverLyricsMultiStemPagedPageSegmentIndex(stemCount = 6))
+    }
+
+    @Test
+    fun `odd stem count gives first page the extra stem and pads second page`() {
+        assertEquals(3, coverLyricsMultiStemPagedTrackSlotCount(stemCount = 5))
+        assertEquals(0, coverLyricsMultiStemPagedStemIndex(5, page = 0, slot = 0))
+        assertEquals(2, coverLyricsMultiStemPagedStemIndex(5, page = 0, slot = 2))
+        assertEquals(3, coverLyricsMultiStemPagedStemIndex(5, page = 1, slot = 0))
+        assertEquals(4, coverLyricsMultiStemPagedStemIndex(5, page = 1, slot = 1))
+        assertEquals(null, coverLyricsMultiStemPagedStemIndex(5, page = 1, slot = 2))
+    }
+
+    @Test
+    fun `even stem count fills both pages equally`() {
+        assertEquals(3, coverLyricsMultiStemPagedTrackSlotCount(stemCount = 6))
+        assertEquals(3, coverLyricsMultiStemPagedStemIndex(6, page = 1, slot = 0))
+        assertEquals(5, coverLyricsMultiStemPagedStemIndex(6, page = 1, slot = 2))
+    }
+
+    @Test
     fun `gap hit areas are split between adjacent segments`() {
         assertEquals(
             0,

@@ -257,6 +257,11 @@ class PlayerViewModel(
     val sourceSeparationMultiStemMixStateFlow =
         _sourceSeparationMultiStemMixStateFlow.asStateFlow()
 
+    private val _sourceSeparationMultiStemQuickControlPagesFlow =
+        MutableStateFlow<Map<String, Int>>(emptyMap())
+    val sourceSeparationMultiStemQuickControlPagesFlow =
+        _sourceSeparationMultiStemQuickControlPagesFlow.asStateFlow()
+
     private val _currentSourceSeparationCacheAvailableFlow = MutableStateFlow(false)
     val currentSourceSeparationCacheAvailableFlow =
         _currentSourceSeparationCacheAvailableFlow.asStateFlow()
@@ -2167,6 +2172,15 @@ class PlayerViewModel(
             }
             sourceSeparationStemGainPreviewJob = null
         }
+    }
+
+    fun setSourceSeparationMultiStemQuickControlPage(modelId: String, page: Int) {
+        if (modelId.isBlank()) return
+        val normalizedPage = page.coerceIn(0, 1)
+        val current = _sourceSeparationMultiStemQuickControlPagesFlow.value
+        if (current[modelId] == normalizedPage) return
+        _sourceSeparationMultiStemQuickControlPagesFlow.value =
+            current + (modelId to normalizedPage)
     }
 
     fun setSourceSeparationStemGain(stemId: String, gain: Float) {
