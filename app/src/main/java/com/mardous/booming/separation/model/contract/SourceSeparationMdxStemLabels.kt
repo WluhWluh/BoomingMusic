@@ -24,7 +24,7 @@ fun StemContract.toMdxStemLabels(): SourceSeparationMdxStemLabels {
     )
 }
 
-/** Left/top then right/bottom endpoint IDs for the legacy MDX blend control. */
+/** Left/top then right/bottom endpoint IDs for the MDX blend control. */
 fun StemContract.toMdxBlendEndpointStemIds(): List<StemId> {
     val orderedStemIds = toStemSet().stems.map(StemDescriptor::stemId)
     val physicalStemIds = orderedStemIds.toMdxPhysicalStemIds()

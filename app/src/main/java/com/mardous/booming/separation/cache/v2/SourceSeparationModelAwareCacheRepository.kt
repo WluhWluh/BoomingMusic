@@ -1,12 +1,14 @@
 package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.SourceSeparationStemGainPolicy
+import com.mardous.booming.separation.SourceSeparationMdxMixPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionModelIdentity
 import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.model.contract.StemDescriptor
 import com.mardous.booming.separation.model.contract.StemSemanticId
 import com.mardous.booming.separation.model.contract.toStemSet
+import com.mardous.booming.separation.model.contract.toMdxBlendEndpointStemIds
 import java.io.File
 
 class SourceSeparationModelAwareCacheRepository(
@@ -248,8 +250,20 @@ class SourceSeparationModelAwareCacheRepository(
 
     fun readBlend(identity: SourceSeparationCacheIdentity): Float? {
         val manifest = manifest(identity) ?: return null
+        val stemIds = manifest.contract.expectedStemSet().stems
+            .map { stem -> stem.stemId.value }
+        val endpointStemIds = manifest.contract.stemContract
+            ?.toMdxBlendEndpointStemIds()
+            ?.map { stemId -> stemId.value }
+            ?: return null
         val lease = leases.tryAcquireRead(manifest.cacheKey) ?: return null
-        return lease.use { store.readPlaybackSettings(manifest)?.blend }
+        val stored = lease.use { store.readPlaybackSettings(manifest)?.stemGains } ?: return null
+        val ordered = SourceSeparationStemGainPolicy.orderedGains(stemIds, stored) ?: return null
+        return SourceSeparationMdxMixPolicy.blendFromOrderedGains(
+            stemIds = stemIds,
+            endpointStemIds = endpointStemIds,
+            gains = ordered,
+        )
     }
 
     fun readStemGains(identity: SourceSeparationCacheIdentity): Map<String, Float>? {
@@ -263,20 +277,30 @@ class SourceSeparationModelAwareCacheRepository(
 
     fun writeBlend(identity: SourceSeparationCacheIdentity, blend: Float): Boolean {
         val manifest = manifest(identity) ?: return false
+        val stemIds = manifest.contract.expectedStemSet().stems
+            .map { stem -> stem.stemId.value }
+        val endpointStemIds = manifest.contract.stemContract
+            ?.toMdxBlendEndpointStemIds()
+            ?.map { stemId -> stemId.value }
+            ?: return false
+        val stemGains = SourceSeparationStemGainPolicy.orderedMap(
+            stemIds,
+            SourceSeparationMdxMixPolicy.orderedGains(stemIds, endpointStemIds, blend),
+        )
         val lease = tryAcquireExclusive(
             manifest.cacheKey,
             SourceSeparationCacheLockPurpose.PlaybackSettings,
         ) ?: return false
         return lease.use {
             it.bindEntryDirectory(store.entryDirectory(manifest.cacheKey))
-            val existing = store.readPlaybackSettings(manifest)
             store.writePlaybackSettings(
                 manifest = manifest,
                 settings = SourceSeparationCachePlaybackSettings(
+                    playbackSettingsSchemaVersion =
+                        SourceSeparationCachePlaybackSettings.SCHEMA_VERSION,
                     cacheKey = manifest.cacheKey,
                     audioFingerprint = manifest.identity.source.audioFingerprint,
-                    blend = blend,
-                    stemGains = existing?.stemGains.orEmpty(),
+                    stemGains = stemGains,
                     updatedAtEpochMs = nowEpochMs(),
                 ),
             )
@@ -304,9 +328,10 @@ class SourceSeparationModelAwareCacheRepository(
             store.writePlaybackSettings(
                 manifest = manifest,
                 settings = SourceSeparationCachePlaybackSettings(
+                    playbackSettingsSchemaVersion =
+                        SourceSeparationCachePlaybackSettings.SCHEMA_VERSION,
                     cacheKey = manifest.cacheKey,
                     audioFingerprint = manifest.identity.source.audioFingerprint,
-                    blend = SourceSeparationStemGainPolicy.demandBlend(orderedGains),
                     stemGains = normalized,
                     updatedAtEpochMs = nowEpochMs(),
                 ),

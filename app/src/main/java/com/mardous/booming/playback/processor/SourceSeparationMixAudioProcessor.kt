@@ -10,6 +10,7 @@ import com.mardous.booming.playback.SourceSeparationFlacStemSourceFactory
 import com.mardous.booming.playback.SourceSeparationPlaybackDataState
 import com.mardous.booming.playback.SourceSeparationPlaybackStemSourceFactory
 import com.mardous.booming.playback.SourceSeparationStemPlaybackEngine
+import com.mardous.booming.separation.SourceSeparationMdxMixPolicy
 import com.mardous.booming.util.DEFAULT_SOURCE_SEPARATION_MIXED_OUTPUT_PREROLL_MS
 import java.io.File
 import java.io.Closeable
@@ -164,10 +165,10 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         val expectedGainCount = stemFiles.size
         val normalizedGains = if (initialGains.isEmpty()) {
             if (blendEndpointIndexes != null) {
-                legacyBlendGainsForStemOrder(
-                    value = initialBlend,
-                    stemCount = expectedGainCount,
-                    endpointIndexes = blendEndpointIndexes,
+                SourceSeparationMdxMixPolicy.orderedGains(
+                    stemIds = stemIds,
+                    endpointStemIds = requireNotNull(blendEndpointStemIds),
+                    blend = initialBlend,
                 )
             } else {
                 List(expectedGainCount) { 1f }
@@ -290,7 +291,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             return
         }
         val gains = gainSnapshot.get().gains.toMutableList()
-        val blendGains = legacyBlendGains(normalized)
+        val blendGains = SourceSeparationMdxMixPolicy.endpointGains(normalized)
         gains[endpointIndexes[0]] = blendGains[0]
         gains[endpointIndexes[1]] = blendGains[1]
         publishGainSnapshot(gains, normalized)
@@ -1101,26 +1102,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 gains = gains.toList(),
             ),
         )
-    }
-
-    private fun legacyBlendGains(value: Float): List<Float> {
-        val vocalsGain = if (value <= CENTER_BLEND) 1f else
-            (1f - value) / CENTER_BLEND
-        val instrumentalGain = if (value >= CENTER_BLEND) 1f else
-            value / CENTER_BLEND
-        return listOf(vocalsGain, instrumentalGain)
-    }
-
-    private fun legacyBlendGainsForStemOrder(
-        value: Float,
-        stemCount: Int,
-        endpointIndexes: IntArray,
-    ): List<Float> {
-        val endpointGains = legacyBlendGains(value)
-        return MutableList(stemCount) { 1f }.apply {
-            this[endpointIndexes[0]] = endpointGains[0]
-            this[endpointIndexes[1]] = endpointGains[1]
-        }
     }
 
     private fun seekToLocked(positionMs: Long) {

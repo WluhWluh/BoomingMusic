@@ -3,6 +3,8 @@ package com.mardous.booming.separation.cache.v2
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
+import com.mardous.booming.separation.SourceSeparationMdxMixPolicy
+import com.mardous.booming.separation.SourceSeparationStemGainPolicy
 import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.model.contract.ContractStemSemantic
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
@@ -142,7 +144,7 @@ class SourceSeparationModelAwareCacheRepositoryTest {
     }
 
     @Test
-    fun `stem gains retain exact order and survive a later blend write`() {
+    fun `MDX blend persists as the canonical complete stem gain map`() {
         val store = store()
         val manifest = completedManifest(store, "uvr_mdxnet_3_9662", 'a')
         store.writeManifest(manifest)
@@ -152,10 +154,20 @@ class SourceSeparationModelAwareCacheRepositoryTest {
 
         assertTrue(repository.writeStemGains(manifest.identity, gains))
         assertEquals(gains, repository.readStemGains(manifest.identity))
-        assertEquals(0f, repository.readBlend(manifest.identity))
+        assertEquals(0.875f, repository.readBlend(manifest.identity))
 
         assertTrue(repository.writeBlend(manifest.identity, 0.7f))
-        assertEquals(gains, repository.readStemGains(manifest.identity))
+        assertEquals(
+            SourceSeparationStemGainPolicy.orderedMap(
+                stemIds,
+                SourceSeparationMdxMixPolicy.orderedGains(
+                    stemIds = stemIds,
+                    endpointStemIds = listOf("vocals", "instrumental"),
+                    blend = 0.7f,
+                ),
+            ),
+            repository.readStemGains(manifest.identity),
+        )
         assertEquals(0.7f, repository.readBlend(manifest.identity))
     }
 

@@ -269,9 +269,12 @@ class SourceSeparationCacheIdentityTest {
     fun `playback settings bind to the exact cache key`() {
         val manifest = completedManifest()
         val settings = SourceSeparationCachePlaybackSettings(
+            playbackSettingsSchemaVersion = SourceSeparationCachePlaybackSettings.SCHEMA_VERSION,
             cacheKey = manifest.cacheKey,
             audioFingerprint = manifest.identity.source.audioFingerprint,
-            blend = 0.25f,
+            stemGains = manifest.contract.expectedStemSet().stems.associate { stem ->
+                stem.stemId.value to 1f
+            },
             updatedAtEpochMs = 10L,
         )
 

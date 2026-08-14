@@ -115,9 +115,9 @@ class SourceSeparationCacheStoreTest {
         val manifest = completedManifest(store)
         store.writeManifest(manifest)
         val settings = SourceSeparationCachePlaybackSettings(
+            playbackSettingsSchemaVersion = SourceSeparationCachePlaybackSettings.SCHEMA_VERSION,
             cacheKey = manifest.cacheKey,
             audioFingerprint = manifest.identity.source.audioFingerprint,
-            blend = 0.75f,
             stemGains = manifest.output!!.stems.associate { stem ->
                 stem.stemId.value to 0.75f
             },
@@ -133,6 +133,15 @@ class SourceSeparationCacheStoreTest {
                 settings.copy(cacheKey = "0".repeat(64)),
             )
         }
+
+        val settingsFile = store.resolveEntryPath(
+            manifest.cacheKey,
+            SourceSeparationCacheStore.PLAYBACK_SETTINGS_FILE_NAME,
+        )
+        settingsFile.writeText(
+            """{"playbackSettingsSchemaVersion":3,"cacheKey":"${manifest.cacheKey}","audioFingerprint":"${manifest.identity.source.audioFingerprint}","blend":0.75,"updatedAtEpochMs":5}"""
+        )
+        assertNull(store.readPlaybackSettings(manifest))
     }
 
     @Test

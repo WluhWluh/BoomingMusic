@@ -5150,7 +5150,7 @@ private data class SourceSeparationPlaybackSession(
             stemGains = SourceSeparationStemGainPolicy.normalize(stemGains)
         } else {
             require(stemGains.isEmpty()) {
-                "Legacy blend sessions must not carry independent stem gains."
+                "MDX blend sessions must not carry independent stem gains."
             }
         }
     }

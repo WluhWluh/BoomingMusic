@@ -271,11 +271,10 @@ data class SourceSeparationCacheRuntimeRecord(
 
 @Serializable
 data class SourceSeparationCachePlaybackSettings(
-    val playbackSettingsSchemaVersion: Int = SCHEMA_VERSION,
+    val playbackSettingsSchemaVersion: Int,
     val cacheKey: String,
     val audioFingerprint: String,
-    val blend: Float,
-    val stemGains: Map<String, Float> = emptyMap(),
+    val stemGains: Map<String, Float>,
     val updatedAtEpochMs: Long,
 ) {
     init {
@@ -284,9 +283,10 @@ data class SourceSeparationCachePlaybackSettings(
         }
         require(CACHE_KEY_PATTERN.matches(cacheKey)) { "Playback cache key is invalid." }
         require(audioFingerprint.isNotBlank()) { "Playback source fingerprint is empty." }
-        require(blend in 0f..1f) { "Playback blend is invalid." }
-        require(stemGains.keys.all(String::isNotBlank)) {
-            "Playback stem gain ID is empty."
+        require(stemGains.isNotEmpty() &&
+            stemGains.keys.all(String::isNotBlank)
+        ) {
+            "Playback stem gain IDs must be non-empty."
         }
         require(stemGains.values.all { gain -> gain.isFinite() && gain in 0f..1f }) {
             "Playback stem gain is invalid."
@@ -296,11 +296,14 @@ data class SourceSeparationCachePlaybackSettings(
 
     fun matches(manifest: SourceSeparationCacheManifest): Boolean {
         return cacheKey == manifest.cacheKey &&
-            audioFingerprint == manifest.identity.source.audioFingerprint
+            audioFingerprint == manifest.identity.source.audioFingerprint &&
+            stemGains.keys == manifest.contract.expectedStemSet().stems
+                .map { stem -> stem.stemId.value }
+                .toSet()
     }
 
     companion object {
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
         private val CACHE_KEY_PATTERN = Regex("^[0-9a-f]{64}$")
     }
 }

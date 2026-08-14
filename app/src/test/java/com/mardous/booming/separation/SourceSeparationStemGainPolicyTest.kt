@@ -52,4 +52,26 @@ class SourceSeparationStemGainPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `MDX blend policy round trips endpoint gains in contract order`() {
+        val stemIds = listOf("remaining_audio", "bass")
+        val endpoints = listOf("bass", "remaining_audio")
+
+        listOf(0f, 0.2f, 0.5f, 0.7f, 1f).forEach { blend ->
+            val gains = SourceSeparationMdxMixPolicy.orderedGains(
+                stemIds = stemIds,
+                endpointStemIds = endpoints,
+                blend = blend,
+            )
+            assertEquals(
+                blend,
+                SourceSeparationMdxMixPolicy.blendFromOrderedGains(
+                    stemIds = stemIds,
+                    endpointStemIds = endpoints,
+                    gains = gains,
+                ),
+            )
+        }
+    }
 }
