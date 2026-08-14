@@ -33,7 +33,8 @@ internal data class HtdemucsSourceSeparationRangeRequest(
     val windowDecodeEnabled: Boolean,
     val resumeState: HtdemucsRangeResumeState? = null,
     val onPrepared: (SourceSeparationCacheRunPreparation) -> Unit = {},
-    val onSegmentStateChanged: (Int, SourceSeparationSegmentState) -> Unit = { _, _ -> },
+    val onSegmentStateChanged: (Int, SourceSeparationSegmentState, Int?) -> Unit =
+        { _, _, _ -> },
     val onProgress: (MdxRangeProgress) -> Unit = {},
     val playbackPositionMsProvider: () -> Long? = { null },
     val playbackReadyWindowCountProvider: () -> Int = { 2 },

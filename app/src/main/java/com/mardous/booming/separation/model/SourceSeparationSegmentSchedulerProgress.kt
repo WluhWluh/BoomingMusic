@@ -2,6 +2,9 @@ package com.mardous.booming.separation.model
 
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPlan
 import com.mardous.booming.separation.cache.SourceSeparationSegmentPriority
+import com.mardous.booming.separation.cache.SourceSeparationSegmentReadinessRequirement
+import com.mardous.booming.separation.cache.SourceSeparationSegmentState
+import com.mardous.booming.separation.cache.playbackReadinessRequirements
 import kotlinx.serialization.Serializable
 
 /** Family-neutral scheduler snapshot shared by MDX and multi-stem pipelines. */
@@ -22,6 +25,7 @@ data class SourceSeparationSegmentSchedulerProgress(
 
 internal fun SourceSeparationSegmentPlan.schedulerProgress(
     playbackSegmentIndex: Int?,
+    playbackFrame: Int? = null,
     processingSegmentIndex: Int,
     readyWindowCount: Int,
     priority: SourceSeparationSegmentPriority? = null,
@@ -32,13 +36,29 @@ internal fun SourceSeparationSegmentPlan.schedulerProgress(
         ?.plus(1)
         ?.takeIf { it < segments.size }
     val playbackWindow = safePlaybackIndex?.let { start ->
-        segments.subList(
-            start,
-            (start + safeReadyWindowCount).coerceAtMost(segments.size),
+        playbackReadinessRequirements(
+            playbackFrame = playbackFrame ?: segments[start].playbackStartFrame,
+            readyWindowCount = safeReadyWindowCount,
         )
     }.orEmpty()
-    val processingReady = segments.getOrNull(processingSegmentIndex)?.state
-        ?.isPlaybackReady == true
+    fun isReadyAtPlayback(
+        requirement: SourceSeparationSegmentReadinessRequirement,
+    ): Boolean {
+        val segment = requirement.segment
+        if (segment.state.isPlaybackReady) return true
+        if (segment.state != SourceSeparationSegmentState.Provisional) return false
+        return segment.playableFromFrame != null &&
+            requirement.requiredFrame >= segment.playableFromFrame
+    }
+    val processingRequirement = playbackWindow.singleOrNull {
+        it.segment.index == processingSegmentIndex
+    }
+    val processingReady = when {
+        processingRequirement != null -> isReadyAtPlayback(processingRequirement)
+        processingSegmentIndex in segments.indices ->
+            segments[processingSegmentIndex].state.hasPlaybackArtifact
+        else -> false
+    }
     val effectivePriority = priority ?: safePlaybackIndex?.let { current ->
         com.mardous.booming.separation.cache.SourceSeparationSegmentScheduler
             .prioritize(
@@ -59,11 +79,11 @@ internal fun SourceSeparationSegmentPlan.schedulerProgress(
         readySegments = segments.count { it.state.isPlaybackReady },
         totalSegments = segments.size,
         readyWindowCount = safeReadyWindowCount,
-        playbackReadyWindowReadyCount = playbackWindow.count { it.state.isPlaybackReady },
-        playbackReadyWindowPendingCount = playbackWindow.count { !it.state.isPlaybackReady } +
+        playbackReadyWindowReadyCount = playbackWindow.count(::isReadyAtPlayback),
+        playbackReadyWindowPendingCount = playbackWindow.count { !isReadyAtPlayback(it) } +
             if (!processingReady &&
                 processingSegmentIndex >= 0 &&
-                playbackWindow.none { it.index == processingSegmentIndex }
+                playbackWindow.none { it.segment.index == processingSegmentIndex }
             ) 1 else 0,
     )
 }

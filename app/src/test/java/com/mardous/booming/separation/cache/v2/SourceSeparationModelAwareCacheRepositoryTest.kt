@@ -214,6 +214,103 @@ class SourceSeparationModelAwareCacheRepositoryTest {
     }
 
     @Test
+    fun `provisional segment is playable only at or after its declared frame`() {
+        val store = store()
+        val running = runningManifest(store, "uvr_mdxnet_3_9662", 'a')
+        val plan = requireNotNull(running.segmentPlan)
+        val provisionalStartFrame = 20_000
+        val provisionalPlan = plan.copy(
+            segments = plan.segments.map { segment ->
+                if (segment.index == 0) {
+                    segment.copy(
+                        state = SourceSeparationSegmentState.Provisional,
+                        playableFromFrame = provisionalStartFrame,
+                    )
+                } else {
+                    segment
+                }
+            },
+        )
+        val provisional = running.copy(segmentPlan = provisionalPlan)
+        store.writeManifest(provisional)
+        store.writeRunJournal(runningJournal(provisional))
+        val repository = repository(store)
+
+        assertEquals(
+            SourceSeparationModelAwarePlayableStatus.Processing,
+            repository.playableStatus(provisional.identity, 0L, 1),
+        )
+        assertEquals(
+            SourceSeparationModelAwareReadyHorizonStatus.Processing,
+            repository.readyHorizon(provisional.identity, 0L),
+        )
+
+        val playablePositionMs = (
+            provisionalStartFrame.toLong() * 1_000L + plan.sampleRate - 1L
+            ) / plan.sampleRate
+        val ready = repository.playableStatus(
+            provisional.identity,
+            playablePositionMs,
+            2,
+        )
+        assertTrue(ready is SourceSeparationModelAwarePlayableStatus.Ready)
+        (ready as SourceSeparationModelAwarePlayableStatus.Ready).playback.close()
+        val horizon = repository.readyHorizon(provisional.identity, playablePositionMs)
+            as SourceSeparationModelAwareReadyHorizonStatus.Ready
+        assertEquals(0, horizon.segmentIndex)
+        assertEquals(1, horizon.readyThroughSegmentIndex)
+    }
+
+    @Test
+    fun `leading provisional warmup contributes to the requested playback window count`() {
+        val store = store()
+        val running = runningManifest(store, "uvr_mdxnet_3_9662", 'b')
+        val plan = SourceSeparationSegmentPlan.build(
+            rangeStartFrame = 0,
+            rangeEndFrame = 132_300,
+            sampleRate = 44_100,
+            generationSize = 44_100,
+            trim = 0,
+            chunkSize = 46_148,
+            defaultState = SourceSeparationSegmentState.Queued,
+        )
+        val leadingOverlapFrames = plan.chunkSize - plan.generationSize
+        val preparedPlan = plan.copy(
+            segments = plan.segments.map { segment ->
+                when (segment.index) {
+                    0 -> segment.copy(
+                        state = SourceSeparationSegmentState.Provisional,
+                        playableFromFrame = segment.playbackStartFrame + leadingOverlapFrames,
+                    )
+                    1 -> segment.copy(state = SourceSeparationSegmentState.Ready)
+                    else -> segment
+                }
+            },
+        )
+        val partial = running.copy(segmentPlan = preparedPlan)
+        store.writeManifest(partial)
+        store.writeRunJournal(runningJournal(partial))
+        val repository = repository(store)
+        val current = preparedPlan.segments[1]
+        val insideOverlapFrame = current.playbackStartFrame + leadingOverlapFrames / 2
+        val insideOverlapMs = (
+            insideOverlapFrame.toLong() * 1_000L + preparedPlan.sampleRate - 1L
+            ) / preparedPlan.sampleRate
+
+        val ready = repository.playableStatus(partial.identity, insideOverlapMs, 2)
+        assertTrue(ready is SourceSeparationModelAwarePlayableStatus.Ready)
+        (ready as SourceSeparationModelAwarePlayableStatus.Ready).playback.close()
+        val outsideOverlapMs = (
+            (current.playbackStartFrame + leadingOverlapFrames + 1).toLong() * 1_000L +
+                preparedPlan.sampleRate - 1L
+            ) / preparedPlan.sampleRate
+        assertEquals(
+            SourceSeparationModelAwarePlayableStatus.Processing,
+            repository.playableStatus(partial.identity, outsideOverlapMs, 2),
+        )
+    }
+
+    @Test
     fun `status and ready horizon expose exact entry state`() {
         val store = store()
         val running = runningManifest(store, "uvr_mdxnet_3_9662", 'a')

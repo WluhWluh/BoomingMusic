@@ -480,6 +480,7 @@ enum class SourceSeparationCacheRunTransitionType {
     PreviousOwnerDied,
     Prepared,
     SegmentRunning,
+    SegmentProvisional,
     SegmentReady,
     SegmentInvalidated,
     Completed,

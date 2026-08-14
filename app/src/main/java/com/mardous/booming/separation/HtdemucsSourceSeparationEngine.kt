@@ -129,8 +129,13 @@ internal class HtdemucsSourceSeparationEngine(
                     onPrepared = { preparation ->
                         onPrepared(coordinator.updatePreparation(run, preparation))
                     },
-                    onSegmentStateChanged = { index, state ->
-                        coordinator.updateSegmentState(run, index, state)
+                    onSegmentStateChanged = { index, state, playableFromFrame ->
+                        coordinator.updateSegmentState(
+                            run = run,
+                            segmentIndex = index,
+                            state = state,
+                            playableFromFrame = playableFromFrame,
+                        )
                         onSegmentStateChanged(index, state)
                     },
                     onProgress = onProgress,

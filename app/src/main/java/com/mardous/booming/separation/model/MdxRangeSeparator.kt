@@ -22,8 +22,6 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-private const val SEGMENT_WAV_HEADER_BYTES = 44L
-
 class MdxRangeSeparator(
     private val context: Context,
     private val config: MdxDspConfig = MdxDspConfig(),
@@ -440,12 +438,16 @@ class MdxRangeSeparator(
                                 }
                                 if (segmentOutputDir != null) {
                                     requireWorkspaceAvailable()
-                                    writeSegmentWav(
-                                        segmentOutputDir,
-                                        segment.pathFor(stem.stemId),
-                                        stem.pcm16,
-                                        segmentPublicationId,
-                                        requireWorkspaceAvailable,
+                                    publishSourceSeparationSegmentWav(
+                                        file = File(
+                                            segmentOutputDir.parentFile ?: segmentOutputDir,
+                                            segment.pathFor(stem.stemId),
+                                        ),
+                                        pcm16 = stem.pcm16,
+                                        sampleRate = config.sampleRate,
+                                        channelCount = MdxDspConfig.STEREO_CHANNELS,
+                                        publicationId = segmentPublicationId,
+                                        requireWorkspaceAvailable = requireWorkspaceAvailable,
                                     )
                                 }
                             }
@@ -563,65 +565,6 @@ class MdxRangeSeparator(
             executionProfile = executionProfile,
             sourceDecodeDiagnostics = sourceInput.diagnostics,
         )
-    }
-
-    private fun writeSegmentWav(
-        rootDir: File,
-        relativePath: String,
-        pcm16: ByteArray,
-        publicationId: String,
-        requireWorkspaceAvailable: () -> Unit,
-    ) {
-        val file = File(rootDir.parentFile ?: rootDir, relativePath)
-        requireWorkspaceAvailable()
-        file.parentFile?.mkdirs()
-        requireWorkspaceAvailable()
-        val temporary = File.createTempFile(
-            "${file.name}.$publicationId.",
-            ".tmp",
-            file.parentFile,
-        )
-        try {
-            requireWorkspaceAvailable()
-            WavFileWriter(
-                temporary,
-                config.sampleRate,
-                MdxDspConfig.STEREO_CHANNELS,
-                durable = true,
-            ).use { writer ->
-                writer.writePcm16(pcm16)
-            }
-            require(temporary.length() == SEGMENT_WAV_HEADER_BYTES + pcm16.size.toLong()) {
-                "Published cache segment WAV has an invalid size."
-            }
-            SourceSeparationCacheFaultInjection.reach(
-                SourceSeparationCacheFaultStage.OutputPublish,
-            )
-            requireWorkspaceAvailable()
-            try {
-                java.nio.file.Files.move(
-                    temporary.toPath(),
-                    file.toPath(),
-                    java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                )
-            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
-                java.nio.file.Files.move(
-                    temporary.toPath(),
-                    file.toPath(),
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                )
-            }
-            requireWorkspaceAvailable()
-            runCatching {
-                java.nio.channels.FileChannel.open(
-                    requireNotNull(file.parentFile).toPath(),
-                    java.nio.file.StandardOpenOption.READ,
-                ).use { channel -> channel.force(true) }
-            }
-        } finally {
-            temporary.delete()
-        }
     }
 
     private inline fun <T> measureElapsed(timing: MdxRangeTimingAccumulator, stage: String, block: () -> T): T {

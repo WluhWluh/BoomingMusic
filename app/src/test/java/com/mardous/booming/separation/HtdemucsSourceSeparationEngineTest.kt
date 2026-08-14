@@ -289,7 +289,11 @@ class HtdemucsSourceSeparationEngineTest {
                 )
                 request.onPrepared(preparation)
                 plan.segments.single().index.let { index ->
-                    request.onSegmentStateChanged(index, SourceSeparationSegmentState.Ready)
+                    request.onSegmentStateChanged(
+                        index,
+                        SourceSeparationSegmentState.Ready,
+                        null,
+                    )
                 }
                 throwAfterPreparation?.let { throw it }
                 HtdemucsSourceSeparationRangeResult(

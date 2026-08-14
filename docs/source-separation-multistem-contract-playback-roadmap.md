@@ -1788,6 +1788,90 @@ command on Android 12+, because the platform correctly rejects a Debug
 provider request that tries to start the inference foreground service while
 the app is background-cached.
 
+##### Phase 8C4: Demand-first HTDemucs execution and ordered backfill (complete)
+
+- [x] When playback first demands an unfinished HTDemucs segment, begin at that
+  segment if the playback frame is beyond its leading OLA overlap. Publish the
+  resulting suffix as `Provisional` with an exact `playableFromFrame`; cache
+  admission accepts that artifact only at or after this frame. A demand inside
+  the overlap still starts from the preceding window so the demanded segment is
+  exact; that nonzero warm-up segment remains provisional until zero-based
+  backfill repairs its own leading overlap.
+- [x] Without a subsequent seek, keep the first OLA pass moving monotonically
+  from the demand point to the track end. Do not interrupt forward work merely
+  to repair the provisional leading boundary. After reaching the end, start a
+  second pass at window zero and backfill earlier segments in ascending order;
+  this pass naturally replaces the provisional segment with an exact one. A
+  resumed pass treats a safe current provisional segment as demand-ready and
+  continues from the first incomplete segment beyond the committed forward
+  frontier instead of recomputing it.
+- [x] Keep the first seek/admission probe at one current window so seeking into
+  an already-ready segment never pauses merely because later cache is missing.
+  Once that probe confirms a real miss, create the wait with the configured
+  recovery waterline. If the anchor is inside segment k's leading overlap, k
+  remains mandatory but the provisional k-1 warm-up artifact contributes one
+  slot: a waterline of two is satisfied by k-1 plus k, while a waterline of
+  three additionally requires k+1. Use the same requirement set for cache
+  admission and scheduler progress.
+- [x] Journal provisional segment artifacts so pause, process death, and app
+  restart retain their safe suffix. Rebuild whole-track work files from all
+  committed artifacts, but require every segment to become exact `Ready`
+  before whole-track completion.
+- [x] Use the shared durable temporary-WAV publisher for MDX and HTDemucs so a
+  repaired segment replaces its prior artifact atomically. JVM coverage freezes
+  overlap and non-overlap starts, the forward-to-end then zero-based backfill
+  order, provisional playback gating, journal recovery, and byte-identical
+  final PCM against an uninterrupted window-zero reference.
+
+The S25 Debug product gate used the installed official six-stem Release model
+and `一瞬间` at 61,000 ms, after segment 10's leading overlap. The first pass
+published segment 10 as `Provisional` with `playableFromFrame=2665845`; while
+segments 11-32 were `Ready`, segments 0-9 remained queued. After segment 35
+became ready, the next observations were `0,1 Running`, then `0,1 Ready` with
+`2,3 Running`. Enabling six-stem output at the provisional-safe playback frame
+returned `processing=false`, and playback advanced from 61,010 ms to 120,120 ms
+without an automatic cache wait. The first run completed with all 36 segments
+exactly `Ready` and no provisional state.
+
+A second clean-cache pass paused with segment 10 provisional and segments
+11-14 ready. The durable journal was `Paused`, contained one
+`SegmentProvisional` transition, and retained the committed artifact set.
+After an application force-stop and Launcher restart, `separation.resume`
+continued the same cache key without clearing those segments, again reached the
+track end before zero-based backfill, and completed at `36/36 Ready`. The device
+was `SM-S9310`, API 35, arm64-v8a. The no-audio diagnostic archive is retained
+under `.artifacts/debug-diagnostics/source-separation-1786690589594.zip` with
+SHA-256 `b5f46616e3242d9afc46c67edec2aba7a3122acc94bb3eecef6b9777987f1cff`;
+its final rolling six-stem CPU window average was 4,748 ms.
+
+The final resume-frontier build was then installed over the same S25 data. A
+new pass paused with segment 10 provisional and segments 11-16 ready; six
+seconds after `separation.resume`, segments 17-18 were ready and 19-20 were
+running while 0-9 remained queued. This distinguishes forward continuation
+from replaying the provisional demand window and its already committed suffix.
+
+The overlap-waterline follow-up added deterministic repository and range-runner
+coverage: with k-1 provisional, k ready, and k+1 queued, an overlap anchor
+reports `2/2` and is playable; moving the anchor beyond the overlap reports
+processing. The production-route audit also freezes the one-window probe and
+configured recovery-waterline handoff. On the final S25 APK, playback began in
+an existing ready segment and then sought to 176,000 ms in an unready overlap
+region. Playback paused with
+`requiredReadyWindowCount=2, resumeWhenReady=true`. Segment 29 became
+`Provisional` at 16:10:01.038 and segment 30 became `Ready` at 16:10:04.756.
+The playback gate reported `Ready(Partial)` at 16:10:05.124, cleared the wait,
+and restored `playWhenReady=true` before mixed output began at 16:10:05.220.
+Segment 31 remained incomplete throughout that decision and did not become
+`Ready` until 16:10:08.677. This confirms on the product path that k-1 plus k,
+not k plus k+1, satisfies the two-window overlap waterline.
+
+The S25 had exhausted Android 15's rolling `mediaProcessing` foreground-service
+budget during the preceding long-run matrix, which initially caused every new
+manual run to receive an immediate platform timeout and pause. The device-only
+`media_processing_fgs_timeout_duration` override was raised for this gate and
+deleted afterward; no application preference or product behavior was changed.
+The cache/scheduler gates and full JVM/AndroidTest compilation suite passed.
+
 #### Phase 8D: Product management parity
 
 - [x] Make Quick Setup understand an active HTDemucs selection and never commit

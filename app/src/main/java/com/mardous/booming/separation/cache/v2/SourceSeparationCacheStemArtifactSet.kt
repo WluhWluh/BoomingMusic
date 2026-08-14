@@ -1,12 +1,21 @@
 package com.mardous.booming.separation.cache.v2
 
 import com.mardous.booming.separation.cache.SourceSeparationSegment
+import com.mardous.booming.separation.cache.SourceSeparationSegmentState
 
 internal fun SourceSeparationSegment.hasCompleteReadyArtifactSet(
     store: SourceSeparationCacheStore,
     cacheKey: String,
-): Boolean = state.isPlaybackReady && stems.all { stem ->
-    store.resolveEntryPath(cacheKey, stem.path).isFile
+    playbackFrame: Int? = null,
+): Boolean {
+    val playable = state.isPlaybackReady ||
+        (state == SourceSeparationSegmentState.Provisional &&
+            playbackFrame != null &&
+            playableFromFrame != null &&
+            playbackFrame >= playableFromFrame)
+    return playable && stems.all { stem ->
+        store.resolveEntryPath(cacheKey, stem.path).isFile
+    }
 }
 
 internal fun SourceSeparationSegment.captureCommittedArtifactSet(

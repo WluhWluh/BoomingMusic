@@ -2030,6 +2030,8 @@ class PlaybackService :
             ?: player.currentPosition.coerceAtLeast(0)
         val effectiveReadyWindowCount = activeWindowWait?.requiredReadyWindowCount
             ?: requiredReadyWindowCount.coerceAtLeast(1)
+        val recoveryReadyWindowCount = activeWindowWait?.requiredReadyWindowCount
+            ?: sourceSeparationPlaybackReadyWindowCount.coerceAtLeast(1)
         val status = withContext(IO) {
             runCatching {
                 sourceSeparationRuntime.playableStatus(
@@ -2098,7 +2100,7 @@ class PlaybackService :
                 source = "newSession",
                 processingCacheKey = runtimeSong.cacheKey,
                 waitingPositionMs = positionMs,
-                requiredReadyWindowCount = effectiveReadyWindowCount,
+                requiredReadyWindowCount = recoveryReadyWindowCount,
                 restoreOriginalItem = false,
                 resumeWhenReady = resumeWhenReady,
                 showMessage = showUnavailableMessage,
@@ -2132,7 +2134,7 @@ class PlaybackService :
                 source = "newSession.expectProcessing",
                 processingCacheKey = runtimeSong.cacheKey,
                 waitingPositionMs = positionMs,
-                requiredReadyWindowCount = effectiveReadyWindowCount,
+                requiredReadyWindowCount = recoveryReadyWindowCount,
                 restoreOriginalItem = false,
                 resumeWhenReady = resumeWhenReady,
                 showMessage = showUnavailableMessage,
@@ -2340,6 +2342,8 @@ class PlaybackService :
             ?: player.currentPosition.coerceAtLeast(0)
         val effectiveReadyWindowCount = activeWindowWait?.requiredReadyWindowCount
             ?: readyWindowCount.coerceAtLeast(1)
+        val recoveryReadyWindowCount = activeWindowWait?.requiredReadyWindowCount
+            ?: sourceSeparationPlaybackReadyWindowCount.coerceAtLeast(1)
         val effectiveResumeWhenReady = activeWindowWait?.resumeWhenReady == true ||
                 resumeWhenReady
         val status = withContext(IO) {
@@ -2474,7 +2478,7 @@ class PlaybackService :
                     source = "activeSession",
                     processingCacheKey = runtimeSong.cacheKey,
                     waitingPositionMs = positionMs,
-                    requiredReadyWindowCount = effectiveReadyWindowCount,
+                    requiredReadyWindowCount = recoveryReadyWindowCount,
                     restoreOriginalItem = false,
                     resumeWhenReady = effectiveResumeWhenReady,
                     showMessage = showUnavailableMessage,

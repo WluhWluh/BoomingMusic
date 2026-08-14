@@ -462,7 +462,10 @@ class SourceSeparationCacheStore(
             segmentPlan = plan.copy(
                 segments = plan.segments.map { segment ->
                     if (segment.state == SourceSeparationSegmentState.Running) {
-                        segment.copy(state = SourceSeparationSegmentState.Queued)
+                        segment.copy(
+                            state = SourceSeparationSegmentState.Queued,
+                            playableFromFrame = null,
+                        )
                     } else {
                         segment
                     }

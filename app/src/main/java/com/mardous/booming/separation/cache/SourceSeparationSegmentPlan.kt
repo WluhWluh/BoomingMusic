@@ -54,11 +54,15 @@ data class SourceSeparationSegmentPlan(
     fun withSegmentState(
         segmentIndex: Int,
         state: SourceSeparationSegmentState,
+        playableFromFrame: Int? = null,
     ): SourceSeparationSegmentPlan {
         return copy(
             segments = segments.map { segment ->
                 if (segment.index == segmentIndex) {
-                    segment.copy(state = state)
+                    segment.copy(
+                        state = state,
+                        playableFromFrame = playableFromFrame,
+                    )
                 } else {
                     segment
                 }
@@ -126,6 +130,63 @@ data class SourceSeparationSegmentPlan(
     }
 }
 
+internal data class SourceSeparationSegmentReadinessRequirement(
+    val segment: SourceSeparationSegment,
+    val requiredFrame: Int,
+)
+
+internal fun SourceSeparationSegmentPlan.playbackReadinessRequirements(
+    playbackFrame: Int,
+    readyWindowCount: Int,
+): List<SourceSeparationSegmentReadinessRequirement> {
+    if (segments.isEmpty()) return emptyList()
+    val currentIndex = segmentIndexForFrame(playbackFrame)
+    val current = segments[currentIndex]
+    val normalizedFrame = playbackFrame.coerceIn(
+        current.playbackStartFrame,
+        current.playbackEndFrame - 1,
+    )
+    val targetCount = readyWindowCount.coerceAtLeast(1)
+    return buildList(targetCount) {
+        add(SourceSeparationSegmentReadinessRequirement(current, normalizedFrame))
+        if (targetCount > 1) {
+            val previous = segments.getOrNull(currentIndex - 1)
+            val provisionalStart = previous?.playableFromFrame
+            val leadingOverlapFrames = if (
+                previous?.state == SourceSeparationSegmentState.Provisional &&
+                provisionalStart != null &&
+                previous.playbackEndFrame == current.playbackStartFrame
+            ) {
+                provisionalStart - previous.playbackStartFrame
+            } else {
+                0
+            }
+            val insideLeadingOverlap = leadingOverlapFrames > 0 &&
+                normalizedFrame.toLong() <
+                current.playbackStartFrame.toLong() + leadingOverlapFrames
+            if (insideLeadingOverlap && previous != null) {
+                add(
+                    SourceSeparationSegmentReadinessRequirement(
+                        segment = previous,
+                        requiredFrame = previous.playbackEndFrame - 1,
+                    ),
+                )
+            }
+        }
+        var nextIndex = currentIndex + 1
+        while (size < targetCount && nextIndex < segments.size) {
+            val next = segments[nextIndex]
+            add(
+                SourceSeparationSegmentReadinessRequirement(
+                    segment = next,
+                    requiredFrame = next.playbackStartFrame,
+                ),
+            )
+            nextIndex += 1
+        }
+    }
+}
+
 private fun segmentStemPath(index: Int, stemOrder: Int): String {
     return "segments/%05d/stem-%02d.wav".format(index, stemOrder)
 }
@@ -139,6 +200,7 @@ data class SourceSeparationSegment(
     val windowEndFrame: Int,
     val stems: List<SourceSeparationSegmentStemPath>,
     val state: SourceSeparationSegmentState = SourceSeparationSegmentState.Ready,
+    val playableFromFrame: Int? = null,
 ) {
     init {
         require(index >= 0) { "Segment index is invalid." }
@@ -151,6 +213,18 @@ data class SourceSeparationSegment(
         }
         require(stems.map(SourceSeparationSegmentStemPath::path).distinct().size == stems.size) {
             "Segment stem paths must be unique."
+        }
+        if (state == SourceSeparationSegmentState.Provisional) {
+            require(playableFromFrame != null) {
+                "A provisional segment must declare its playable start frame."
+            }
+            require(playableFromFrame in playbackStartFrame until playbackEndFrame) {
+                "A provisional segment playable start frame is outside its segment."
+            }
+        } else {
+            require(playableFromFrame == null) {
+                "Only a provisional segment may declare a playable start frame."
+            }
         }
     }
 
@@ -179,6 +253,7 @@ enum class SourceSeparationSegmentState {
     Missing,
     Queued,
     Running,
+    Provisional,
     Misaligned,
     Ready,
     Failed,
@@ -190,4 +265,7 @@ enum class SourceSeparationSegmentState {
 
     val isPlaybackReady: Boolean
         get() = this == Ready || this == Misaligned
+
+    val hasPlaybackArtifact: Boolean
+        get() = isPlaybackReady || this == Provisional
 }

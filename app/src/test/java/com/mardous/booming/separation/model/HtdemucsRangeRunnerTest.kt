@@ -35,7 +35,7 @@ class HtdemucsRangeRunnerTest {
                 outputDirectory = root.resolve("work"),
                 segmentDirectory = root.resolve("segments"),
                 onPrepared = { preparation = it },
-                onSegmentStateChanged = { index, state -> states += index to state },
+                onSegmentStateChanged = { index, state, _ -> states += index to state },
             )
 
             assertEquals(stemIds, result.stemFiles.map { it.stemId.value })
@@ -114,7 +114,7 @@ class HtdemucsRangeRunnerTest {
                 outputDirectory = resumedRoot.resolve("work"),
                 segmentDirectory = resumedRoot.resolve("segments"),
                 onPrepared = { partialPlan = it.segmentPlan },
-                onSegmentStateChanged = { index, state ->
+                onSegmentStateChanged = { index, state, _ ->
                     partialPlan = requireNotNull(partialPlan).withSegmentState(index, state)
                     if (state == SourceSeparationSegmentState.Ready && index == 2) {
                         pause.set(true)
@@ -171,7 +171,7 @@ class HtdemucsRangeRunnerTest {
                 outputDirectory = root.resolve("work"),
                 segmentDirectory = root.resolve("segments"),
                 onPrepared = { partialPlan = it.segmentPlan },
-                onSegmentStateChanged = { index, state ->
+                onSegmentStateChanged = { index, state, _ ->
                     partialPlan = requireNotNull(partialPlan).withSegmentState(index, state)
                     if (state == SourceSeparationSegmentState.Ready && index == 0) pause.set(true)
                 },
@@ -233,6 +233,243 @@ class HtdemucsRangeRunnerTest {
         assertEquals(2, shifted.scheduler?.playbackReadyWindowPendingCount)
         val ready = progress.last { it.completedWindows >= 2 && it.scheduler != null }
         assertTrue(ready.scheduler!!.playbackReadyWindowReadyCount >= 1)
+    }
+
+    @Test
+    fun `playback demand inside the leading overlap warms the previous window`() {
+        val frames = HtdemucsPipelineAdapter.WINDOW_SAMPLES +
+            HtdemucsTrackWindowPlanner.STRIDE_SAMPLES * 3 + 7_000
+        val plans = HtdemucsTrackWindowPlanner.plans(frames)
+        val targetIndex = 2
+        val positionMs = AtomicLong(
+            plans[targetIndex].offset.toLong() * 1_000L /
+                HtdemucsPipelineAdapter.SAMPLE_RATE,
+        )
+        val source = FakeTrackSource(frames)
+        val referenceRoot = temporary.newFolder("playback-demand-start-reference")
+        val reference = HtdemucsRangeRunner(
+            source,
+            CopyingSession(listOf("drums", "bass", "other", "vocals")),
+        ).run(
+            outputDirectory = referenceRoot.resolve("work"),
+            segmentDirectory = referenceRoot.resolve("segments"),
+        )
+        val expected = reference.stemFiles.map { it.file.readBytes() }
+        val root = temporary.newFolder("playback-demand-start")
+        val processingIndexes = mutableListOf<Int>()
+        val states = mutableListOf<Triple<Int, SourceSeparationSegmentState, Int?>>()
+        val progressSnapshots = mutableListOf<HtdemucsRangeProgress>()
+
+        val result = HtdemucsRangeRunner(
+            source,
+            CopyingSession(listOf("drums", "bass", "other", "vocals")),
+        ).run(
+            outputDirectory = root.resolve("work"),
+            segmentDirectory = root.resolve("segments"),
+            onProgress = { progress ->
+                progressSnapshots += progress
+                if (progress.stage.startsWith("Processing window")) {
+                    processingIndexes += requireNotNull(progress.scheduler).processingSegmentIndex
+                }
+            },
+            onSegmentStateChanged = { index, state, validFromFrame ->
+                states += Triple(index, state, validFromFrame)
+            },
+            playbackPositionMsProvider = { positionMs.get() },
+            playbackReadyWindowCountProvider = { 2 },
+        )
+
+        assertEquals(targetIndex - 1, processingIndexes.first())
+        val provisional = states.first { it.second == SourceSeparationSegmentState.Provisional }
+        assertEquals(targetIndex - 1, provisional.first)
+        assertEquals(
+            plans[targetIndex - 1].offset + HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES,
+            provisional.third,
+        )
+        val readyIndexes = states
+            .filter { it.second == SourceSeparationSegmentState.Ready }
+            .map { it.first }
+        assertEquals(
+            (targetIndex..plans.lastIndex).toList() +
+                (0 until targetIndex).toList(),
+            readyIndexes,
+        )
+        assertTrue(readyIndexes.indexOf(targetIndex) < readyIndexes.indexOf(0))
+        val demandReady = progressSnapshots.first {
+            it.stage == "Processed window ${targetIndex + 1}/${plans.size}"
+        }.scheduler
+        assertEquals(2, demandReady?.playbackReadyWindowReadyCount)
+        assertEquals(0, demandReady?.playbackReadyWindowPendingCount)
+        result.stemFiles.forEachIndexed { index, stem ->
+            assertArrayEquals(expected[index], stem.file.readBytes())
+        }
+    }
+
+    @Test
+    fun `playback demand after the leading overlap publishes provisional suffix then repairs it`() {
+        val frames = HtdemucsPipelineAdapter.WINDOW_SAMPLES +
+            HtdemucsTrackWindowPlanner.STRIDE_SAMPLES * 3 + 7_000
+        val plans = HtdemucsTrackWindowPlanner.plans(frames)
+        val targetIndex = 2
+        val playableFromFrame = plans[targetIndex].offset +
+            HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES
+        val positionMs = AtomicLong(
+            ((playableFromFrame + 1L) * 1_000L +
+                HtdemucsPipelineAdapter.SAMPLE_RATE - 1L) /
+                HtdemucsPipelineAdapter.SAMPLE_RATE,
+        )
+        val source = FakeTrackSource(frames)
+        val referenceRoot = temporary.newFolder("playback-demand-reference")
+        val reference = HtdemucsRangeRunner(
+            source,
+            CopyingSession(listOf("drums", "bass", "other", "vocals")),
+        ).run(
+            outputDirectory = referenceRoot.resolve("work"),
+            segmentDirectory = referenceRoot.resolve("segments"),
+        )
+        val expected = reference.stemFiles.map { it.file.readBytes() }
+        val root = temporary.newFolder("playback-demand-provisional")
+        val processingIndexes = mutableListOf<Int>()
+        val states = mutableListOf<Triple<Int, SourceSeparationSegmentState, Int?>>()
+
+        val result = HtdemucsRangeRunner(
+            source,
+            CopyingSession(listOf("drums", "bass", "other", "vocals")),
+        ).run(
+            outputDirectory = root.resolve("work"),
+            segmentDirectory = root.resolve("segments"),
+            onProgress = { progress ->
+                if (progress.stage.startsWith("Processing window")) {
+                    processingIndexes += requireNotNull(progress.scheduler).processingSegmentIndex
+                }
+            },
+            onSegmentStateChanged = { index, state, validFromFrame ->
+                states += Triple(index, state, validFromFrame)
+            },
+            playbackPositionMsProvider = { positionMs.get() },
+            playbackReadyWindowCountProvider = { 2 },
+        )
+
+        assertEquals(targetIndex, processingIndexes.first())
+        val provisional = states.first { it.second == SourceSeparationSegmentState.Provisional }
+        assertEquals(targetIndex, provisional.first)
+        assertEquals(playableFromFrame, provisional.third)
+        assertTrue(states.indexOf(provisional) < states.indexOfFirst {
+            it.first == 0 && it.second == SourceSeparationSegmentState.Ready
+        })
+        assertEquals(
+            SourceSeparationSegmentState.Ready,
+            states.last { it.first == targetIndex }.second,
+        )
+        val readyIndexes = states
+            .filter { it.second == SourceSeparationSegmentState.Ready }
+            .map { it.first }
+        assertEquals(
+            ((targetIndex + 1)..plans.lastIndex).toList() +
+                (0 until targetIndex).toList() +
+                targetIndex,
+            readyIndexes,
+        )
+        assertTrue(result.segmentPlan.segments.all { it.state == SourceSeparationSegmentState.Ready })
+        result.stemFiles.forEachIndexed { index, stem ->
+            assertArrayEquals(expected[index], stem.file.readBytes())
+        }
+    }
+
+    @Test
+    fun `resume continues beyond a safe provisional demand before zero based backfill`() {
+        val stemIds = listOf("drums", "vocals")
+        val frames = HtdemucsPipelineAdapter.WINDOW_SAMPLES +
+            HtdemucsTrackWindowPlanner.STRIDE_SAMPLES * 7 + 7_000
+        val plans = HtdemucsTrackWindowPlanner.plans(frames)
+        val targetIndex = 2
+        val playableFromFrame = plans[targetIndex].offset +
+            HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES
+        val positionMs = AtomicLong(
+            ((playableFromFrame + 1L) * 1_000L +
+                HtdemucsPipelineAdapter.SAMPLE_RATE - 1L) /
+                HtdemucsPipelineAdapter.SAMPLE_RATE,
+        )
+        val source = FakeTrackSource(frames)
+        val referenceRoot = temporary.newFolder("provisional-resume-reference")
+        val reference = HtdemucsRangeRunner(
+            source,
+            CopyingSession(stemIds),
+        ).run(
+            outputDirectory = referenceRoot.resolve("work"),
+            segmentDirectory = referenceRoot.resolve("segments"),
+        )
+        val expected = reference.stemFiles.map { it.file.readBytes() }
+
+        val root = temporary.newFolder("provisional-resume")
+        val pause = AtomicBoolean(false)
+        var partialPlan: SourceSeparationSegmentPlan? = null
+        assertThrows(SourceSeparationPausedException::class.java) {
+            HtdemucsRangeRunner(
+                source,
+                CopyingSession(stemIds),
+            ).run(
+                outputDirectory = root.resolve("work"),
+                segmentDirectory = root.resolve("segments"),
+                onPrepared = { partialPlan = it.segmentPlan },
+                onSegmentStateChanged = { index, state, validFromFrame ->
+                    partialPlan = requireNotNull(partialPlan).withSegmentState(
+                        segmentIndex = index,
+                        state = state,
+                        playableFromFrame = validFromFrame,
+                    )
+                    if (state == SourceSeparationSegmentState.Ready && index == 4) {
+                        pause.set(true)
+                    }
+                },
+                playbackPositionMsProvider = { positionMs.get() },
+                shouldPause = pause::get,
+            )
+        }
+        val resumablePlan = requireNotNull(partialPlan).copy(
+            segments = requireNotNull(partialPlan).segments.map { segment ->
+                if (segment.state == SourceSeparationSegmentState.Running) {
+                    segment.copy(
+                        state = SourceSeparationSegmentState.Queued,
+                        playableFromFrame = null,
+                    )
+                } else {
+                    segment
+                }
+            },
+        )
+        assertEquals(SourceSeparationSegmentState.Provisional, resumablePlan.segments[2].state)
+        assertEquals(playableFromFrame, resumablePlan.segments[2].playableFromFrame)
+        assertEquals(
+            listOf(3, 4),
+            resumablePlan.segments.filter { it.state.isComplete }.map { it.index },
+        )
+
+        val processingIndexes = mutableListOf<Int>()
+        val resumed = HtdemucsRangeRunner(
+            source,
+            CopyingSession(stemIds),
+        ).run(
+            outputDirectory = root.resolve("work"),
+            segmentDirectory = root.resolve("segments"),
+            resumeState = HtdemucsRangeResumeState(resumablePlan),
+            onProgress = { progress ->
+                if (progress.stage.startsWith("Processing window")) {
+                    processingIndexes += requireNotNull(progress.scheduler)
+                        .processingSegmentIndex
+                }
+            },
+            playbackPositionMsProvider = { positionMs.get() },
+        )
+
+        assertEquals(
+            (4..plans.lastIndex).toList() + (0..3).toList(),
+            processingIndexes,
+        )
+        assertTrue(resumed.segmentPlan.segments.all { it.state.isComplete })
+        resumed.stemFiles.forEachIndexed { index, stem ->
+            assertArrayEquals(expected[index], stem.file.readBytes())
+        }
     }
 
     private open class FakeTrackSource(

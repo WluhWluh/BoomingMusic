@@ -5,6 +5,7 @@ import com.mardous.booming.separation.SourceSeparationMdxMixPolicy
 import com.mardous.booming.separation.SourceSeparationExecutionModelIdentity
 import com.mardous.booming.separation.SourceSeparationModelFamily
 import com.mardous.booming.separation.cache.SourceSeparationSegmentState
+import com.mardous.booming.separation.cache.playbackReadinessRequirements
 import com.mardous.booming.separation.model.contract.StemDescriptor
 import com.mardous.booming.separation.model.contract.StemSemanticId
 import com.mardous.booming.separation.model.contract.toStemSet
@@ -167,14 +168,24 @@ class SourceSeparationModelAwareCacheRepository(
             val segmentIndex = plan.segmentIndexForFrame(frame)
             val current = plan.segments.getOrNull(segmentIndex)
                 ?: return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
-            if (!current.hasCompleteReadyArtifactSet(store, manifest.cacheKey)) {
+            if (!current.hasCompleteReadyArtifactSet(
+                    store = store,
+                    cacheKey = manifest.cacheKey,
+                    playbackFrame = frame,
+                )
+            ) {
                 return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
             }
             var readyThroughSegmentIndex = segmentIndex
             var readyUntilFrame = current.playbackEndFrame
             for (index in (segmentIndex + 1)..plan.segments.lastIndex) {
                 val segment = plan.segments[index]
-                if (!segment.hasCompleteReadyArtifactSet(store, manifest.cacheKey)) break
+                if (!segment.hasCompleteReadyArtifactSet(
+                        store = store,
+                        cacheKey = manifest.cacheKey,
+                        playbackFrame = segment.playbackStartFrame,
+                    )
+                ) break
                 readyThroughSegmentIndex = index
                 readyUntilFrame = segment.playbackEndFrame
             }
@@ -225,11 +236,15 @@ class SourceSeparationModelAwareCacheRepository(
         val frame = ((playbackPositionMs.coerceAtLeast(0L) * sampleRate) / 1_000L)
             .coerceAtMost(Int.MAX_VALUE.toLong())
             .toInt()
-        val startIndex = plan.segmentIndexForFrame(frame)
-        val endExclusive = (startIndex + readyWindowCount.coerceAtLeast(1))
-            .coerceAtMost(plan.segments.size)
-        val ready = plan.segments.subList(startIndex, endExclusive).all { segment ->
-            segment.hasCompleteReadyArtifactSet(store, manifest.cacheKey)
+        val ready = plan.playbackReadinessRequirements(
+            playbackFrame = frame,
+            readyWindowCount = readyWindowCount,
+        ).all { requirement ->
+            requirement.segment.hasCompleteReadyArtifactSet(
+                store = store,
+                cacheKey = manifest.cacheKey,
+                playbackFrame = requirement.requiredFrame,
+            )
         }
         if (!ready) return SourceSeparationModelAwarePlayableStatus.Processing
         return openPlayback(manifest)?.let(SourceSeparationModelAwarePlayableStatus::Ready)

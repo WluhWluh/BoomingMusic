@@ -122,6 +122,42 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `paused run preserves a committed provisional segment and its playable frame`() {
+        val fixture = fixture()
+        val first = fixture.beginReady()
+        val preparation = fixture.preparation(first, SourceSeparationSegmentState.Queued)
+        fixture.coordinator.updatePreparation(first, preparation)
+        val segment = preparation.segmentPlan.segments[1]
+        val playableFromFrame = segment.playbackStartFrame + 1_024
+
+        fixture.coordinator.updateSegmentState(
+            run = first,
+            segmentIndex = segment.index,
+            state = SourceSeparationSegmentState.Provisional,
+            playableFromFrame = playableFromFrame,
+        )
+        fixture.coordinator.pause(first)
+
+        val committedJournal = requireNotNull(
+            fixture.store.readRunJournal(first.identity.cacheKey),
+        )
+        assertTrue(committedJournal.transitions.any {
+            it.type == SourceSeparationCacheRunTransitionType.SegmentProvisional &&
+                it.segmentIndex == segment.index
+        })
+        assertEquals(
+            segment.index,
+            committedJournal.committedSegments.single().segmentIndex,
+        )
+
+        val resumed = fixture.beginReady()
+        val restored = requireNotNull(resumed.resumeState).segmentPlan.segments[segment.index]
+        assertEquals(SourceSeparationSegmentState.Provisional, restored.state)
+        assertEquals(playableFromFrame, restored.playableFromFrame)
+        fixture.coordinator.pause(resumed)
+    }
+
+    @Test
     fun `model handoff pauses and retains the exact partial cache`() {
         val fixture = fixture()
         val run = fixture.beginReady()

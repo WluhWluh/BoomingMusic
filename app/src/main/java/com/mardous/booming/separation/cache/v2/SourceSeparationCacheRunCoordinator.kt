@@ -274,7 +274,7 @@ class SourceSeparationCacheRunCoordinator(
         updateJournal(run) { journal, now ->
             preparation.segmentPlan.segments
                 .filter { segment ->
-                    segment.state.isPlaybackReady && journal.committedSegments.none {
+                    segment.state.hasPlaybackArtifact && journal.committedSegments.none {
                         it.segmentIndex == segment.index
                     }
                 }
@@ -285,7 +285,11 @@ class SourceSeparationCacheRunCoordinator(
                     )
                 ) { currentJournal, segment ->
                     currentJournal.append(
-                        type = SourceSeparationCacheRunTransitionType.SegmentReady,
+                        type = if (segment.state == SourceSeparationSegmentState.Provisional) {
+                            SourceSeparationCacheRunTransitionType.SegmentProvisional
+                        } else {
+                            SourceSeparationCacheRunTransitionType.SegmentReady
+                        },
                         nowEpochMs = now,
                         segmentIndex = segment.index,
                         committedSegment = segment.captureCommittedArtifactSet(
@@ -332,12 +336,18 @@ class SourceSeparationCacheRunCoordinator(
         run: SourceSeparationModelAwareCacheRun,
         segmentIndex: Int,
         state: SourceSeparationSegmentState,
+        playableFromFrame: Int? = null,
     ): SourceSeparationCacheManifest? {
         run.requireOpen()
         val current = store.readManifest(run.identity.cacheKey) ?: return null
         val plan = current.segmentPlan ?: return current
         val segment = plan.segments.singleOrNull { it.index == segmentIndex }
             ?: return current
+        val updatedPlan = plan.withSegmentState(
+            segmentIndex = segmentIndex,
+            state = state,
+            playableFromFrame = playableFromFrame,
+        )
         updateJournal(run) { journal, now ->
             when (state) {
                 SourceSeparationSegmentState.Running -> journal.append(
@@ -346,13 +356,19 @@ class SourceSeparationCacheRunCoordinator(
                     segmentIndex = segmentIndex,
                 )
 
-                SourceSeparationSegmentState.Ready -> {
+                SourceSeparationSegmentState.Ready,
+                SourceSeparationSegmentState.Provisional,
+                -> {
                     val committed = segment.captureCommittedArtifactSet(
                         store,
                         run.identity.cacheKey,
                     )
                     journal.append(
-                        type = SourceSeparationCacheRunTransitionType.SegmentReady,
+                        type = if (state == SourceSeparationSegmentState.Provisional) {
+                            SourceSeparationCacheRunTransitionType.SegmentProvisional
+                        } else {
+                            SourceSeparationCacheRunTransitionType.SegmentReady
+                        },
                         nowEpochMs = now,
                         segmentIndex = segmentIndex,
                         committedSegment = committed,
@@ -368,10 +384,10 @@ class SourceSeparationCacheRunCoordinator(
             }
         }
         val updated = current.copy(
-            segmentPlan = plan.withSegmentState(segmentIndex, state),
+            segmentPlan = updatedPlan,
             updatedAtEpochMs = nowEpochMs(),
         ).also(store::writeManifest)
-        if (state != SourceSeparationSegmentState.Running && !state.isPlaybackReady) {
+        if (state != SourceSeparationSegmentState.Running && !state.hasPlaybackArtifact) {
             segment.deleteArtifactSet(store, run.identity.cacheKey)
         }
         return updated
@@ -582,7 +598,10 @@ class SourceSeparationCacheRunCoordinator(
             val resetPlan = current.segmentPlan?.copy(
                 segments = current.segmentPlan.segments.map { segment ->
                     if (segment.state == SourceSeparationSegmentState.Running) {
-                        segment.copy(state = SourceSeparationSegmentState.Queued)
+                        segment.copy(
+                            state = SourceSeparationSegmentState.Queued,
+                            playableFromFrame = null,
+                        )
                     } else {
                         segment
                     }
@@ -670,7 +689,7 @@ class SourceSeparationCacheRunCoordinator(
         return copy(
             segments = segments.map { segment ->
                 val committed = committedByIndex[segment.index]
-                val canPreserve = segment.state.isPlaybackReady && committed != null &&
+                val canPreserve = segment.state.hasPlaybackArtifact && committed != null &&
                     committed.matches(segment) &&
                     committed.hasValidArtifactSet(store, cacheKey)
                 segment.copy(
@@ -678,7 +697,8 @@ class SourceSeparationCacheRunCoordinator(
                         segment.state
                     } else {
                         SourceSeparationSegmentState.Queued
-                    }
+                    },
+                    playableFromFrame = segment.playableFromFrame.takeIf { canPreserve },
                 )
             }
         )

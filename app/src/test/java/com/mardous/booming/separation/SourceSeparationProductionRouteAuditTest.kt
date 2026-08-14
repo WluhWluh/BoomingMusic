@@ -325,6 +325,15 @@ class SourceSeparationProductionRouteAuditTest {
         assertTrue(
             seek.contains("activeWindowWait?.requiredReadyWindowCount ?: 1"),
         )
+        assertTrue(
+            service.contains(
+                "val recoveryReadyWindowCount = activeWindowWait?.requiredReadyWindowCount\n" +
+                        "            ?: sourceSeparationPlaybackReadyWindowCount.coerceAtLeast(1)",
+            ),
+        )
+        assertTrue(
+            service.contains("requiredReadyWindowCount = recoveryReadyWindowCount"),
+        )
     }
 
     @Test
