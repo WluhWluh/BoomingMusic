@@ -25,7 +25,10 @@ class SourceSeparationStemPlaybackEngineTest {
         )
         try {
             engine.start(1L, listOf(vocals, instrumental))
-            await { engine.hasResumeWaterline() }
+            await {
+                engine.hasResumeWaterline() &&
+                    engine.currentState == SourceSeparationPlaybackDataState.Ready
+            }
             val output = Array(2) { ByteArray(12 * 4) }
             repeat(3) { chunkIndex ->
                 await { engine.hasResumeWaterline() }

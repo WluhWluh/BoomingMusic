@@ -27,24 +27,37 @@ $adb = (Get-Command adb -ErrorAction Stop).Source
 $authority = "content://$PackageName.debug-control"
 
 function Invoke-Control([string]$Method, [string]$CallArg, [string[]]$Bindings) {
-    $adbArguments = @()
-    if (-not [string]::IsNullOrWhiteSpace($Serial)) {
-        $adbArguments += @("-s", $Serial)
-    }
-    $adbArguments += @(
-        "shell", "content", "call",
+    $remoteArguments = @(
+        "content", "call",
         "--uri", $authority,
         "--method", $Method
     )
     if (-not [string]::IsNullOrWhiteSpace($CallArg)) {
-        $adbArguments += @("--arg", $CallArg)
+        $remoteArguments += @("--arg", $CallArg)
     }
     foreach ($binding in $Bindings) {
         if ($binding -notmatch '^[A-Za-z][A-Za-z0-9_]*:[bsilfd]:.*$') {
             throw "Invalid typed extra '$binding'. Expected key:{b,s,i,l,f,d}:value."
         }
-        $adbArguments += @("--extra", $binding)
+        $remoteArguments += @("--extra", $binding)
     }
+    $singleQuote = [char]39
+    $quotedSingleQuote = [string]::Concat(
+        $singleQuote, [char]34, $singleQuote, [char]34, $singleQuote
+    )
+    $remoteCommand = ($remoteArguments | ForEach-Object {
+        [string]::Concat(
+            $singleQuote,
+            $_.Replace([string]$singleQuote, $quotedSingleQuote),
+            $singleQuote
+        )
+    }) -join " "
+
+    $adbArguments = @()
+    if (-not [string]::IsNullOrWhiteSpace($Serial)) {
+        $adbArguments += @("-s", $Serial)
+    }
+    $adbArguments += @("shell", $remoteCommand)
 
     $output = & $adb @adbArguments 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -139,6 +152,22 @@ function Pull-Diagnostics([string]$RemotePath, [string]$Destination) {
         throw "Unable to pull diagnostics archive '$RemotePath'."
     }
     return (Resolve-Path -LiteralPath $resolvedDestination).Path
+}
+
+if ($Command -eq "ui.launch") {
+    $launchArguments = @()
+    if (-not [string]::IsNullOrWhiteSpace($Serial)) {
+        $launchArguments += @("-s", $Serial)
+    }
+    $launchArguments += @(
+        "shell", "am", "start", "--user", "0", "-n",
+        "$PackageName/com.mardous.booming.activities.MainActivity"
+    )
+    $launchOutput = & $adb @launchArguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to wake the Debug application: $($launchOutput -join [Environment]::NewLine)"
+    }
+    Start-Sleep -Milliseconds 250
 }
 
 $response = Invoke-Control $Command $Arg $Extra

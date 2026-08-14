@@ -22,7 +22,7 @@ internal object SourceSeparationDebugProtocol {
         "playback.next" to emptyList(),
         "playback.previous" to emptyList(),
         "playback.seek" to listOf("position_ms:long"),
-        "playback.seek_percent" to listOf("percent:float"),
+        "playback.seek_percent" to listOf("percent:float (0..100)"),
         "playback.song" to listOf(
             "song_id:long|path:string|query:string",
             "first:boolean=false",

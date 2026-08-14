@@ -226,6 +226,61 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `playback demand preserves a manual pause before and after admission`() {
+        val coordinator = mainSource(
+            "com/mardous/booming/ui/screen/player/SourceSeparationForegroundWorkerCoordinator.kt",
+        ).readText()
+        val admission = coordinator.substring(
+            coordinator.indexOf("fun requestPlaybackDemandSong("),
+            coordinator.indexOf("private fun requestFullSong("),
+        )
+
+        assertEquals(
+            2,
+            Regex("autoStartSuppressedSongId == song\\.id").findAll(admission).count(),
+        )
+    }
+
+    @Test
+    fun `foreground rejection terminates admitted cache runs before releasing ownership`() {
+        val environment = mainSource(
+            "com/mardous/booming/separation/process/SourceSeparationRemoteExecutionEnvironment.kt",
+        ).readText()
+        val mdxService = mainSource(
+            "com/mardous/booming/separation/process/ipc/SourceSeparationExecutionService.kt",
+        ).readText()
+        val multiStemService = mainSource(
+            "com/mardous/booming/separation/process/ipc/SourceSeparationMultiStemExecutionService.kt",
+        ).readText()
+
+        assertTrue(environment.contains("fun rejectBeforeExecution(error: Throwable)"))
+        assertTrue(environment.contains("coordinator.pause(run, error.pauseReason)"))
+        assertTrue(environment.contains("coordinator.fail(run, error)"))
+        assertTrue(mdxService.contains("admittedExecution?.rejectBeforeExecution(error)"))
+        assertTrue(mdxService.contains("foregroundController.attachOrThrow("))
+        assertTrue(multiStemService.contains("foregroundController.attachOrThrow("))
+        assertTrue(multiStemService.contains("SourceSeparationMultiStemIpcStatus.Deferred"))
+    }
+
+    @Test
+    fun `first per-song output activation publishes its explicit mix before admission`() {
+        val viewModel = mainSource(
+            "com/mardous/booming/ui/screen/player/PlayerViewModel.kt",
+        ).readText()
+        val activation = viewModel.substring(
+            viewModel.indexOf("fun setSourceSeparationPlaybackEnabled("),
+            viewModel.indexOf("fun openSourceSeparationModelManagement("),
+        )
+
+        val pendingWrite = activation.indexOf(
+            "writeTemporaryPerSongSourceSeparationBlend(song, normalizedBlend)",
+        )
+        val processingIntent = activation.indexOf("publishSourceSeparationProcessingIntent(")
+        assertTrue(pendingWrite >= 0)
+        assertTrue(processingIntent > pendingWrite)
+    }
+
+    @Test
     fun `current song refresh does not pause a different next song prestart`() {
         val coordinator = mainSource(
             "com/mardous/booming/ui/screen/player/SourceSeparationForegroundWorkerCoordinator.kt",

@@ -1340,11 +1340,17 @@ class PlayerViewModel(
         preferences.edit {
             putBoolean(SOURCE_SEPARATION_PLAYBACK_ENABLED, enabled)
         }
-        if (normalizedBlend != null && !rememberPerSong) {
-            sourceSeparationMixSettings.writeGlobalBlend(
-                currentSourceSeparationMixModelKey(),
-                normalizedBlend,
-            )
+        if (normalizedBlend != null) {
+            if (rememberPerSong && enabled) {
+                currentSong.takeIf { it != Song.emptySong }?.let { song ->
+                    writeTemporaryPerSongSourceSeparationBlend(song, normalizedBlend)
+                }
+            } else if (!rememberPerSong) {
+                sourceSeparationMixSettings.writeGlobalBlend(
+                    currentSourceSeparationMixModelKey(),
+                    normalizedBlend,
+                )
+            }
         }
 
         val mode = sourceSeparationBlendMode(

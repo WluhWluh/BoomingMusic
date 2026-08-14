@@ -33,6 +33,8 @@ $ctl = '.\tools\source_separation_debug_control.ps1'
 ```
 
 Extra syntax is `key:type:value`. Supported types match Android's `content` utility: `b` boolean, `s` string, `i` integer, `l` long, `f` float, and `d` double.
+The helper quotes every remote-shell argument, so string values may contain spaces,
+apostrophes, parentheses, and non-ASCII song or model names.
 
 The equivalent direct call is:
 
@@ -51,13 +53,13 @@ Playback commands:
 - `playback.play`, `playback.pause`, `playback.toggle`, `playback.stop`
 - `playback.next`, `playback.previous`
 - `playback.seek` with `position_ms:l`
-- `playback.seek_percent` with `percent:f`
+- `playback.seek_percent` with `percent:f` in the inclusive `0..100` range
 - `playback.song` with one of `song_id:l`, `path:s`, or `query:s`; optional `first:b`, `play:b`, and `position_ms:l`
 - `playback.queue`
 
 Separation commands:
 
-- `separation.output` with `enabled:b`; optional `auto_sync:b`, `expect_processing:b`, and `blend:f`
+- `separation.output` with `enabled:b`; optional `auto_sync:b`, `expect_processing:b`, and `blend:f`. With the default transition and processing flags, this follows the same `PlayerViewModel` path as the UI when the player is open; non-default flags retain the direct playback-service diagnostic path.
 - `separation.sync` with optional `allow_new_session:b`, `expect_processing:b`, and `prefer_completed:b`
 - `separation.blend` with `blend:f`; optional `persist:b`
 - `separation.stem_gains` with all active stems encoded as one string, for example `gains:s:drums=1,bass=0.5,other=0,vocals=1`; optional `persist:b`

@@ -6,7 +6,9 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.DeadObjectException
 import android.os.IBinder
+import android.os.Process
 import android.os.RemoteException
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.mardous.booming.separation.HtdemucsSourceSeparationEngineResult
 import com.mardous.booming.separation.SourceSeparationMultiStemExecutionHost
@@ -24,6 +26,8 @@ import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcContro
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcControlCommand
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStartCommand
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStatus
+import com.mardous.booming.separation.process.SourceSeparationForegroundExecutionDeferredException
+import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcActiveRunState
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.toExecutionDescriptor
@@ -280,6 +284,7 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                 }
             }
         }
+        var recycleTerminalProcess = false
         return try {
             foregroundLease?.let { lease ->
                 ContextCompat.startForegroundService(
@@ -306,6 +311,11 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                     errorType = response.errorType,
                     message = response.message,
                     cacheKey = descriptor.cacheKey,
+                )
+            }
+            if (response.status == SourceSeparationMultiStemIpcStatus.Deferred) {
+                throw SourceSeparationForegroundExecutionDeferredException(
+                    requireNotNull(response.deferredReason),
                 )
             }
             if (response.status != SourceSeparationMultiStemIpcStatus.Accepted) {
@@ -379,6 +389,9 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                     )
                 }
             }
+            awaitRemoteRunRelease(service, descriptor)
+            recycleTerminalProcess = SourceSeparationProcessLifecyclePolicy
+                .requiresMultiStemTerminalRecycle(Process.is64Bit())
             failure.get()?.takeUnless { it === AlreadyCompletedSignal }?.let { error ->
                 if (error is SourceSeparationRemoteCacheBusyException) {
                     return HtdemucsSourceSeparationEngineResult.Busy(descriptor.cacheKey)
@@ -399,6 +412,37 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             controlThread.interrupt()
             runCatching { connected.binder.unlinkToDeath(deathRecipient, 0) }
             runCatching { applicationContext.unbindService(connected.connection) }
+            if (recycleTerminalProcess) recycleTerminalProcess()
+        }
+    }
+
+    private fun awaitRemoteRunRelease(
+        service: ISourceSeparationMultiStemExecutionService,
+        descriptor: SourceSeparationMultiStemExecutionDescriptor,
+    ) {
+        val deadlineNanos = System.nanoTime() +
+            TimeUnit.MILLISECONDS.toNanos(connectionTimeoutMs)
+        while (true) {
+            val state = SourceSeparationMultiStemExecutionCodec.decodeActiveRunResponse(
+                service.activeRun(),
+            ).state ?: return
+            check(state.descriptor.runId == descriptor.runId &&
+                state.descriptor.processGeneration == descriptor.processGeneration
+            ) { "Remote multi-stem lifecycle moved to a different terminal run." }
+            check(System.nanoTime() < deadlineNanos) {
+                "Timed out waiting for the terminal multi-stem run to release process ownership."
+            }
+            Thread.sleep(controlPollMs.coerceAtLeast(1L))
+        }
+    }
+
+    private fun recycleTerminalProcess() {
+        runCatching {
+            BoundRemoteSourceSeparationExecutionHost(applicationContext).recycleAndStop(
+                SourceSeparationIpcRecycleReason.MemoryPressure,
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "Unable to recycle the 32-bit process after a multi-stem run", error)
         }
     }
 
@@ -457,6 +501,7 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
     )
 
     private companion object {
+        const val TAG = "BssMultiStemHost"
         const val DEFAULT_CONNECTION_TIMEOUT_MS = 10_000L
         const val DEFAULT_CONTROL_POLL_MS = 50L
         const val TERMINAL_OBSERVATION_POLL_MS = 5_000L

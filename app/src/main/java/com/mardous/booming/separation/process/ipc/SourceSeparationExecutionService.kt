@@ -573,15 +573,16 @@ internal class SourceSeparationExecutionService : Service() {
                 processExecutionLease = processLease,
             )
             command.foregroundLease?.let { lease ->
-                val attached = foregroundController.attach(lease)
-                require(attached == SourceSeparationForegroundLeaseOperationResult.Applied ||
-                    attached == SourceSeparationForegroundLeaseOperationResult.AlreadyApplied
-                ) { "The media-processing foreground lease could not attach to its run." }
+                foregroundController.attachOrThrow(
+                    lease,
+                    "The media-processing foreground lease could not attach to its run.",
+                )
                 applyForegroundControls(active, lease)
             }
             active.also { activeRun = it }
         } catch (error: Throwable) {
-            active?.rejectBeforeExecution() ?: run {
+            active?.rejectBeforeExecution(error) ?: run {
+                runCatching { admittedExecution?.rejectBeforeExecution(error) }
                 runCatching { admittedExecution?.close() }
                 runCatching { sender?.close() }
                 processLease.close()
@@ -1182,8 +1183,12 @@ internal class SourceSeparationExecutionService : Service() {
 
         fun executionFinished(): Boolean = processExecutionLifetime.executionFinished()
 
-        fun rejectBeforeExecution() {
+        fun rejectBeforeExecution(error: Throwable) {
             processExecutionLifetime.rejectBeforeExecution()
+            runCatching { admittedExecution.rejectBeforeExecution(error) }
+                .onFailure { terminalError ->
+                    Log.e(TAG, "Unable to persist rejected source-separation run", terminalError)
+                }
             close()
         }
 

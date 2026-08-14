@@ -9,6 +9,7 @@ import com.mardous.booming.separation.SourceSeparationModelAwareExecutionRequest
 import com.mardous.booming.separation.SourceSeparationModelAwareExecutionWorkspace
 import com.mardous.booming.separation.SourceSeparationModelAwareRangeExecutor
 import com.mardous.booming.separation.SourceSeparationPauseReason
+import com.mardous.booming.separation.SourceSeparationPausedException
 import com.mardous.booming.separation.cache.v2.AndroidSourceSeparationCacheRootProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheStore
 import com.mardous.booming.separation.cache.v2.SourceSeparationCacheFaultInjection
@@ -262,6 +263,17 @@ internal class SourceSeparationRemoteAdmittedExecution(
     ) {
         if (terminal) return
         coordinator.observerDisconnected(run, observerId, observerProcessName, reason)
+    }
+
+    @Synchronized
+    fun rejectBeforeExecution(error: Throwable) {
+        if (terminal) return
+        when (error) {
+            is SourceSeparationPausedException -> coordinator.pause(run, error.pauseReason)
+            is CancellationException -> coordinator.cancel(run, error)
+            else -> coordinator.fail(run, error)
+        }
+        terminal = true
     }
 
     @Synchronized

@@ -117,6 +117,25 @@ internal class SourceSeparationMediaProcessingForegroundController(
     }
 
     @Synchronized
+    fun attachOrThrow(
+        request: SourceSeparationForegroundLeaseRequest,
+        failureMessage: String,
+    ) {
+        val result = attach(request)
+        if (result == SourceSeparationForegroundLeaseOperationResult.Applied ||
+            result == SourceSeparationForegroundLeaseOperationResult.AlreadyApplied
+        ) {
+            return
+        }
+        lastDeferredStart
+            ?.takeIf { deferred -> deferred.request == request }
+            ?.let { deferred ->
+                throw SourceSeparationForegroundExecutionDeferredException(deferred.reason)
+            }
+        throw IllegalStateException(failureMessage)
+    }
+
+    @Synchronized
     fun control(
         request: SourceSeparationForegroundLeaseRequest,
         commandId: String,

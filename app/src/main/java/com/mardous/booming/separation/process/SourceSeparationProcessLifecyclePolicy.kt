@@ -6,4 +6,6 @@ internal object SourceSeparationProcessLifecyclePolicy {
     const val RECYCLE_TIMEOUT_MS = 10_000L
     const val RECYCLE_ACKNOWLEDGEMENT_GRACE_MS = 150L
     const val MINIMUM_LARGEST_FREE_ADDRESS_GAP_BYTES = 128L * 1_024L * 1_024L
+
+    fun requiresMultiStemTerminalRecycle(is64Bit: Boolean): Boolean = !is64Bit
 }

@@ -35,6 +35,7 @@ import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcRunAut
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStartResponse
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStatus
 import com.mardous.booming.separation.process.SourceSeparationForegroundControlAction
+import com.mardous.booming.separation.process.SourceSeparationForegroundExecutionDeferredException
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseLifecycle
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseOperationResult
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
@@ -150,13 +151,18 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                 }
                 SourceSeparationMultiStemExecutionCodec.encodeStartResponse(
                     SourceSeparationMultiStemIpcStartResponse(
-                        status = if (error is SourceSeparationProcessExecutionBusyException) {
-                            SourceSeparationMultiStemIpcStatus.Busy
-                        } else {
-                            SourceSeparationMultiStemIpcStatus.Failed
+                        status = when (error) {
+                            is SourceSeparationProcessExecutionBusyException ->
+                                SourceSeparationMultiStemIpcStatus.Busy
+                            is SourceSeparationForegroundExecutionDeferredException ->
+                                SourceSeparationMultiStemIpcStatus.Deferred
+                            else -> SourceSeparationMultiStemIpcStatus.Failed
                         },
                         errorType = error::class.java.name,
                         message = error.message,
+                        deferredReason =
+                            (error as? SourceSeparationForegroundExecutionDeferredException)
+                                ?.reason,
                     ),
                 )
             }
@@ -395,11 +401,11 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                 processingWakeLockController.release(lease, terminalReason)
                 foregroundController.stop(lease, terminalReason)
             }
+            run.markExecutionFinished()
+            run.close()
             synchronized(stateLock) {
                 if (active === run) active = null
             }
-            run.markExecutionFinished()
-            run.close()
         }
     }
 
@@ -421,10 +427,10 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                 "Another media-processing foreground lease is active."
             }
         }
-        val attached = foregroundController.attach(lease)
-        require(attached == SourceSeparationForegroundLeaseOperationResult.Applied ||
-            attached == SourceSeparationForegroundLeaseOperationResult.AlreadyApplied
-        ) { "The multi-stem foreground lease could not attach." }
+        foregroundController.attachOrThrow(
+            lease,
+            "The multi-stem foreground lease could not attach.",
+        )
         val controls = foregroundController.diagnostics().activeLease
             ?.takeIf { record ->
                 record.request == lease &&

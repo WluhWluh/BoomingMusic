@@ -621,6 +621,59 @@ class SourceSeparationCacheRunCoordinatorTest {
     }
 
     @Test
+    fun `corrupt completed cache readmission closes its terminal observer`() {
+        val fixture = fixture()
+        val completedRun = fixture.beginReady()
+        fixture.coordinator.observerConnected(
+            completedRun,
+            observerId = "observer-completed-owner",
+            observerProcessName = "com.example",
+        )
+        val preparation = fixture.preparation(
+            completedRun,
+            SourceSeparationSegmentState.Ready,
+        )
+        fixture.coordinator.updatePreparation(completedRun, preparation)
+        val completed = fixture.coordinator.complete(
+            completedRun,
+            fixture.result(preparation),
+        )
+        fixture.store.resolveEntryPath(
+            completed.cacheKey,
+            requireNotNull(completed.output).stems.first().wavPath,
+        ).appendText("corrupt")
+
+        val resumed = (fixture.coordinator.begin(
+            fixture.request.copy(
+                runId = "recompute-corrupt-completed-run",
+                processGeneration = 2L,
+                ownerPid = 200,
+            )
+        ) as SourceSeparationCacheRunStart.Ready).run
+        val journal = requireNotNull(
+            fixture.store.readRunJournal(resumed.identity.cacheKey)
+        )
+
+        val disconnected = journal.transitions[journal.transitions.lastIndex - 1]
+        assertEquals(
+            SourceSeparationCacheRunTransitionType.ObserverDisconnected,
+            disconnected.type,
+        )
+        assertEquals("observer-completed-owner", disconnected.observerId)
+        assertEquals("terminal-run-replaced", disconnected.observerReason)
+        assertEquals(
+            SourceSeparationCacheRunTransitionType.Admitted,
+            journal.transitions.last().type,
+        )
+        fixture.coordinator.observerConnected(
+            resumed,
+            observerId = "observer-recompute-owner",
+            observerProcessName = "com.example",
+        )
+        fixture.coordinator.pause(resumed)
+    }
+
+    @Test
     fun `run class is immutable for a running owner and explicit on paused readmission`() {
         val activeFixture = fixture()
         val prefetchRequest = activeFixture.request.copy(

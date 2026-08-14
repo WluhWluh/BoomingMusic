@@ -127,6 +127,19 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
         }
         "separation.output" -> withMediaClient { client ->
             val enabled = args.requireBoolean("enabled")
+            val autoSync = args.boolean("auto_sync", true)
+            val expectProcessing = args.boolean("expect_processing", enabled)
+            val blend = args.optionalFloat("blend")?.coerceIn(0f, 1f)
+            if (autoSync && expectProcessing == enabled &&
+                SourceSeparationForegroundWorkerDebugBridge.setPlaybackEnabled(enabled, blend)
+            ) {
+                return@withMediaClient SourceSeparationDebugProtocol.success(
+                    JSONObject()
+                        .put("enabled", enabled)
+                        .put("expectProcessing", expectProcessing)
+                        .put("uiPath", true),
+                )
+            }
             val result = client.send(
                 Playback.SET_SOURCE_SEPARATION_PLAYBACK_ENABLED,
                 Bundle().apply {
@@ -134,18 +147,21 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
                     putBoolean(Playback.EXTRA_SOURCE_SEPARATION_SHOW_MESSAGE, false)
                     putBoolean(
                         Playback.EXTRA_SOURCE_SEPARATION_AUTO_SYNC_ON_TRANSITION,
-                        args.boolean("auto_sync", true),
+                        autoSync,
                     )
                     putBoolean(
                         Playback.EXTRA_SOURCE_SEPARATION_EXPECT_PROCESSING,
-                        args.boolean("expect_processing", enabled),
+                        expectProcessing,
                     )
-                    args.optionalFloat("blend")?.let {
-                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, it.coerceIn(0f, 1f))
+                    blend?.let {
+                        putFloat(Playback.EXTRA_SOURCE_SEPARATION_BLEND, it)
                     }
                 },
             )
-            sessionResult(result.resultCode, result.extras)
+            sessionResult(
+                result.resultCode,
+                Bundle(result.extras).apply { putBoolean("uiPath", false) },
+            )
         }
         "separation.sync" -> withMediaClient { client ->
             val result = client.send(

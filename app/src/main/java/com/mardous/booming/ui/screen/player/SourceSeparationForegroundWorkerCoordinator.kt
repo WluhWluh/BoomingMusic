@@ -145,6 +145,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
         SourceSeparationExecutionSelectionSnapshot? = null
     @Volatile
     private var multiStemReconnectedLatestSequence = 0L
+    @Volatile
     private var autoStartSuppressedSongId: Long? = null
     private var debugLastWindowSample: SourceSeparationDebugWindowSample? = null
     private val callbackLock = Any()
@@ -381,6 +382,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
     fun requestPlaybackDemandSong(song: Song) {
         if (!playbackOwnerActive.get()) return
         if (song == Song.emptySong) return
+        if (autoStartSuppressedSongId == song.id) return
         val selection = executionSelectionFlow.value
         val admissionGeneration = playbackDemandAdmissionGeneration.incrementAndGet()
         workerScope.launch {
@@ -393,6 +395,7 @@ class SourceSeparationForegroundWorkerCoordinator internal constructor(
             }
             if (playbackDemandAdmissionGeneration.get() != admissionGeneration ||
                 !playbackOwnerActive.get() ||
+                autoStartSuppressedSongId == song.id ||
                 _playbackStateFlow.value.song.id != song.id ||
                 executionSelectionFlow.value != selection
             ) {

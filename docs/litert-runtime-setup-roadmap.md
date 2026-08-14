@@ -4,7 +4,7 @@ Status: active product and implementation plan. The product and data contracts
 in this document are frozen; phase checklists may be refined only without
 silently changing those contracts.
 
-Updated: 2026-08-08
+Updated: 2026-08-14
 
 ## Current Model-Delivery Baseline (2026-08-07)
 
@@ -66,8 +66,9 @@ test harnesses.
 - Phases 0-4 are implemented on the downloadable-runtime branch: the
   classes-only LiteRT API, app-owned CPU/GPU component store, explicit loader,
   Runtime Management, Quick Setup, persistent GPU intent, and bounded `N=1`
-  fallback path are present. Clean-install downloaded-path UI and the final
-  S10/S25 release matrix remain qualification work.
+  fallback path are present. The S10/S25 downloaded-path functional matrix is
+  now exercised through the Debug product providers; the final performance,
+  thermal, power, and release-support baseline remains qualification work.
 - The active release catalog contains 33 selectable experimental candidates.
   9662 FP32 remains the Quick Setup default; all other MDX candidates and the
   three HTDemucs candidates require explicit user selection. KARA's arm64 bounded
@@ -84,6 +85,13 @@ test harnesses.
   inaudible blind sample exceeded the frozen one-LSB objective bound. Their
   partial GPU experiments and failed QNN attempt do not create GPU/NPU support
   rows.
+- S10 was re-tested on the real downloaded path as an explicit
+  `armeabi-v7a` row. Official HTDemucs 4/6 CPU execution, 6-stem FLAC
+  promotion/playback, model-family activation, active deletion, process death,
+  app force-stop/manual resume, and resource cleanup passed. A 32-bit
+  HTDemucs terminal run now recycles the dedicated inference process before a
+  later run; this is an experimental CPU lifecycle rule, not a GPU or NPU
+  qualification and not a generalized all-ABI claim.
 
 The next implementation priority is to close the narrow multi-stem PCM16
 attribution item, then finish the downloaded CPU/GPU product baseline. Vendor
@@ -1053,11 +1061,27 @@ native payload in the APK, and CPU remains a complete verified fallback.
   failure-injection, or performance reports and is not release qualification.
   No non-arm64 ABI is promoted to GPU or full-song separation by inference.
 
+The disposable S25 Debug pass on 2026-08-14 added a clean-data product
+lifecycle row. Quick Setup downloaded and installed the pinned arm64 CPU core,
+bounded GPU, and default 9662 Release model, then reached `Ready`. Removing the
+GPU while the inference process was idle recycled that process; with GPU still
+enabled, the next MDX run correctly used `LiteRtCpu`. Repair during an active
+CPU run was rejected without interrupting or corrupting the run, while the
+same repair succeeded after pause. Removing the CPU made readiness non-runnable
+and invalidated the installed GPU dependency; `RepairCurrent` then reinstalled
+CPU and repaired GPU in one transaction without changing the active model or
+selection generation. Runtime/model downloads, failed-operation retry, process
+death, cache playback, and diagnostics export were exercised through the real
+ Debug product providers. This closes the S25 functional lifecycle row; the
+ S10 CPU-only multi-stem row is recorded below. Update/version-switch payloads,
+ thermal/power/PSS runs, and release qualification remain open below.
+
 ### Pre-Phase 5 gate: close the CPU/GPU product baseline
 
-**Status: release graph, contract, and implementation gates are closed; the
-remaining downloaded-path and short human handoff qualification gates remain
-open before any NPU capability is exposed.**
+**Status: release graph, contract, implementation, and S10/S25 functional
+downloaded-path gates are closed; performance/thermal measurement, stable UI
+coverage, and the short human handoff qualification gates remain open before
+any NPU capability is exposed.**
 
 The
 [Source-Separation Lifecycle and Cache Correctness Roadmap](source-separation-lifecycle-cache-correctness-roadmap.md)
@@ -1072,6 +1096,12 @@ qualification.
 
 The current evidence is recorded in
 [pre-npu-baseline-2026-08-02.md](validation/litert-runtime/pre-npu-baseline-2026-08-02.md).
+
+The functional S10 arm32 source-separation evidence is recorded in
+[`source-separation-multistem-contract-playback-roadmap.md`](source-separation-multistem-contract-playback-roadmap.md)
+under the Phase 8 S10 boundary matrix. It closes product-path behavior and
+resource-lifecycle coverage for the CPU-only multi-stem row, but does not close
+the CPU/GPU performance baseline or grant any NPU support.
 
 Phase 5 must not begin as product implementation until the following hard
 gates are closed. Schema drafting and offline AOT tooling research may continue,
@@ -1112,9 +1142,11 @@ change the frozen source-separation algorithm:
    dialogs, cancellation/retry/partial results, process recreation, long
    localized labels, and destructive-action confirmations.
 6. Publish an explicit support matrix. Current evidence supports CPU-loader
-   smoke on four ABI rows and bounded-GPU loading on arm64 S10/S25 only. Until
-   full-song evidence exists, arm32, x86, and x86_64 remain CPU-loader or
-   ordinary-player rows; an API 29 row remains unqualified unless separately
+   smoke on four ABI rows and bounded-GPU loading only on the qualified arm64
+   path. The S10 `armeabi-v7a` row now has full CPU product-path evidence,
+   including the experimental HTDemucs lifecycle rule that recycles the
+   inference process after terminal runs; it still has no GPU row. x86,
+   x86_64, and API 29 remain loader-only or unqualified unless separately
    tested. NPU work may initially target only a named, qualified arm64 device
    and exact model/runtime combination.
 
@@ -1180,6 +1212,11 @@ are either completed or explicitly waived with a documented support boundary.
 
 #### Final CPU/GPU device baseline
 
+- [x] Exercise the downloaded Release path through Debug control on S10
+  `armeabi-v7a` and S25 arm64 for runtime/model installation, MDX and
+  CPU-only HTDemucs execution, cache deletion, model-family activation,
+  inference-process death, app force-stop/manual resume, and diagnostics.
+  This functional row is separate from performance and GPU qualification.
 - [ ] On clean app data, run the complete CPU + recommended 9662 + optional
   bounded-GPU Quick Setup flow on S10 and S25, including cold/warm start,
   force-stop, process death, repair, update, removal, opt-out, and reinstall.

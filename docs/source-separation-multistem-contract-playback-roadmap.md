@@ -5,7 +5,7 @@ one representative-content PCM16 attribution gate. This remains the design
 authority for stem identity, model contracts, imported metadata, cache output
 shape, and playback data flow.
 
-Updated: 2026-08-08
+Updated: 2026-08-14
 
 ## Current Release and Product-Path Baseline (2026-08-08)
 
@@ -48,9 +48,14 @@ zero-underrun playback resources, S25 official-six-stem producer-ahead
 playback, and active deletion through the S25 management panel are complete.
 The bounded contention/resource soak and independent main-process-death
 recovery gates are also complete on S25 and S10. Same-weight human listening
-now passes for all three candidates. The only remaining Phase 6 closeout is to
-attribute the wider-than-frozen PCM16 deltas exposed by that representative
-listening sample without silently weakening the numerical gate.
+now passes for all three candidates. The S10 `armeabi-v7a` product row has now
+also completed the official 4-stem and 6-stem downloaded Release-path matrix,
+including 6-stem FLAC promotion, playback, cross-family activation, active
+deletion, app force-stop/manual resume, and 32-bit terminal-process recycling.
+This is an experimental CPU row only; it does not qualify GPU, NPU, or a
+general all-ABI claim. The only remaining Phase 6 closeout is to attribute the
+wider-than-frozen PCM16 deltas exposed by that representative listening sample
+without silently weakening the numerical gate.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -1980,6 +1985,108 @@ verified at the device data plane rather than represented as a Debug product
 session. No validation cache was retained; the device was restored to the
 official six-stem selection, `01-第1课`, output off, paused at 0, and its original
 `3/127`, `11/11`, and `4/11` caches remained unchanged.
+
+#### Phase 8 S25 boundary matrix (2026-08-14)
+
+A disposable clean-data pass used the Debug control provider on S25
+(`SM-S9310`, API 35, arm64). It found and fixed three boundary defects before
+the matrix continued:
+
+- a media-processing foreground timeout could occur after MDX cache admission;
+  the rejected run now persists `Paused`, `Canceled`, or `Failed` before its
+  lease is released. The reproduced timeout journal changed from manual
+  `Admitted -> ObserverConnected -> Paused` to a new playback-demand admission
+  and completed without `IdentityMismatch` or a retry loop;
+- HTDemucs IPC protocol version 5 now carries typed foreground `Deferred`
+  status and reason, and both remote services use the same throwing foreground
+  attach contract;
+- first-time per-song output activation now writes its explicit mix into the
+  pending per-song store before worker admission. Previously `blend=0` reached
+  playback while the worker reread the absent setting as centered `0.5` and
+  waited forever without creating a cache. The ADB helper also quotes every
+  remote argument, so titles with spaces, apostrophes, and non-ASCII text use
+  the same command path reliably.
+
+The post-fix matrix covered MDX CPU and bounded GPU, OGG/MP3/FLAC/M4A sources,
+window decode and full-song fallback, manual and automatic WAV-to-FLAC
+promotion, indexed-FLAC seeks, rapid mix changes, exact two-window prestart,
+current active-cache deletion, corruption detection and recomputation, and
+automatic partial/completed retention limits. MDX model A-to-B-to-A switching
+paused and retained both exact partial caches; switching back resumed only the
+matching cache. Removing an inactive model made its partial cache stale without
+deleting it, reinstall restored exact availability, and deleting the active
+model was correctly rejected.
+
+Official four- and six-stem Release models both completed real CPU product
+runs with ordered stem labels and independent gains. Four-stem pause/resume,
+inference-process death, and six-stem cancel/resume retained committed windows.
+A six-stem application force-stop retained `10/37`; after launch, resume
+continued the same cache to `13/37` and beyond. Cross-family `cache.activate`
+selected exact MDX and HTDemucs identities. A failed six-stem TLS download
+entered a terminal failed operation, and retry installed the exact asset and
+sidecar without disturbing the active four-stem run.
+
+The pulled diagnostic archive
+`.artifacts/debug-diagnostics/s25-comprehensive-20260814/source-separation-1786678493680.zip`
+has SHA-256
+`d9c0d3fb19ec4567fa2e1d7016ccc57092b8af714aa361ef8627970222c90a44`;
+it contains state, process diagnostics, window samples, and playback-gate
+trace, with no audio/model/runtime payload. The full device log contained no
+app FATAL, ANR, OOM, `IdentityMismatch`, or rejected-journal persistence error.
+
+#### Phase 8 S10 boundary matrix (2026-08-14)
+
+A second disposable product-path pass used S10 (`SM-G9730`, API 31) with the
+Debug APK explicitly installed as `armeabi-v7a`; `primaryCpuAbi` was verified
+as `armeabi-v7a`. Both HTDemucs weights were downloaded from the immutable
+`bss-tflite v0.2.0-experimental.1` Release and installed with their exact
+sidecars. The CPU runtime was installed for the device ABI. The bounded-GPU
+catalog entry was correctly unavailable for this 32-bit process, so no GPU
+result is claimed for this row.
+
+The matrix covered the remaining multi-stem product boundaries:
+
+- official 4-stem CPU execution on a short OGG source, ordered
+  `Drums/Bass/Other/Vocals` labels, four independent gains, playback, pause,
+  resume, and indexed FLAC seek;
+- official 6-stem CPU execution on `Dull Knives` from the exact Release model,
+  with 37/37 windows completed, ordered
+  `Drums/Bass/Other/Vocals/Guitar/Piano` labels, six independent gains,
+  50%-seek playback, and automatic promotion of all six WAV stems to FLAC;
+- pause/resume, cancel/resume, inference-process death/resume, exact partial
+  window retention, cross-family `cache.activate`, current-cache deletion
+  while a task and output request were active, and output shutdown after
+  deletion; and
+- application force-stop/relaunch. Force-stop did not silently restart work;
+  an explicit Debug `separation.resume` continued the retained cache from its
+  journal rather than creating a new identity.
+
+The first post-cancel resume exposed a real 32-bit address-space failure:
+LiteRT could not allocate its 277,360,707-byte HTDemucs output buffer after a
+terminal run. The fix waits for durable terminal observation and process-lease
+release, then recycles the dedicated inference process after every terminal
+HTDemucs run on 32-bit builds. The 64-bit warm-process policy is unchanged.
+After rebuilding and reinstalling, S10 paused at 5/37, the remote process
+exited, resumed from 6/37 to 9/37, canceled and resumed again without the
+allocation failure, and completed the full 6-stem run. The service cleanup
+ordering now releases the execution lease before publishing the idle state, so
+the recycler cannot race a new family request against terminal cleanup.
+
+The pre-fix terminal-observer archive remains at
+`.artifacts/debug-diagnostics/s10-identity-mismatch-20260814/source-separation-1786681076092.zip`
+with SHA-256
+`8f822125e6a12498fc90eed8268ee15d1e0d8847729aee062f00110ecd0b8c76`, and
+the separate pre-fix 32-bit allocation-failure archive is
+`.artifacts/debug-diagnostics/s10-cancel-resume-litert-20260814` with SHA-256
+`5a8b674d2e2275b004ce3ef1258636a7c3e0501d51ea9e3feed831449d44c1d0`;
+the final S10 archive is
+`.artifacts/debug-diagnostics/s10-comprehensive-20260814`
+with SHA-256
+`52202408195513924c4ee5ef2bd04af5b2ac12ffe897abfdfefbc556a85d1e74`.
+Neither archive contains audio, model weights, or runtime binaries. After the
+fix, logcat contained no new `malloc(277360707)` failure, FATAL, ANR, or OOM;
+the only matching allocation failure is the deliberately retained pre-fix
+reproduction.
 
 ## Required Tests and Gates
 

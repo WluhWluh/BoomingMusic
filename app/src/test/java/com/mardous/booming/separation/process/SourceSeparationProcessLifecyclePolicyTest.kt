@@ -14,4 +14,18 @@ class SourceSeparationProcessLifecyclePolicyTest {
         assertEquals(134_217_728L,
             SourceSeparationProcessLifecyclePolicy.MINIMUM_LARGEST_FREE_ADDRESS_GAP_BYTES)
     }
+
+    @Test
+    fun `multi-stem terminal runs recycle only a 32-bit process`() {
+        assertEquals(
+            true,
+            SourceSeparationProcessLifecyclePolicy
+                .requiresMultiStemTerminalRecycle(is64Bit = false),
+        )
+        assertEquals(
+            false,
+            SourceSeparationProcessLifecyclePolicy
+                .requiresMultiStemTerminalRecycle(is64Bit = true),
+        )
+    }
 }

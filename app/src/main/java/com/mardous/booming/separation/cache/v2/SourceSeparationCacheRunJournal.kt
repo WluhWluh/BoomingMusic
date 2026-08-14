@@ -290,38 +290,36 @@ data class SourceSeparationCacheRunJournal(
                         )
                     )
                 }
-                if (previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running ||
-                    previous.lifecycle == SourceSeparationCacheRunJournalLifecycle.Paused
-                ) {
-                    previous.latestObserverTransition()
-                        ?.takeIf { transition ->
-                            transition.type ==
-                                SourceSeparationCacheRunTransitionType.ObserverConnected
-                        }
-                        ?.let { observer ->
-                            sequence += 1L
-                            add(
-                                SourceSeparationCacheRunJournalTransition(
-                                    sequence = sequence,
-                                    runId = previous.request.runId,
-                                    processGeneration = previous.request.processGeneration,
-                                    ownerPid = previous.request.ownerPid,
-                                    runClass = previous.request.runClass,
-                                    backgroundPolicy = previous.request.backgroundPolicy,
-                                    observerId = observer.observerId,
-                                    observerProcessName = observer.observerProcessName,
-                                    observerReason = if (previousOwnerWasRunning) {
+                previous.latestObserverTransition()
+                    ?.takeIf { transition ->
+                        transition.type ==
+                            SourceSeparationCacheRunTransitionType.ObserverConnected
+                    }
+                    ?.let { observer ->
+                        sequence += 1L
+                        add(
+                            SourceSeparationCacheRunJournalTransition(
+                                sequence = sequence,
+                                runId = previous.request.runId,
+                                processGeneration = previous.request.processGeneration,
+                                ownerPid = previous.request.ownerPid,
+                                runClass = previous.request.runClass,
+                                backgroundPolicy = previous.request.backgroundPolicy,
+                                observerId = observer.observerId,
+                                observerProcessName = observer.observerProcessName,
+                                observerReason = when (previous.lifecycle) {
+                                    SourceSeparationCacheRunJournalLifecycle.Running ->
                                         PREVIOUS_OWNER_DIED_OBSERVER_REASON
-                                    } else {
+                                    SourceSeparationCacheRunJournalLifecycle.Paused ->
                                         PREVIOUS_PAUSED_RUN_REPLACED_OBSERVER_REASON
-                                    },
-                                    type = SourceSeparationCacheRunTransitionType
-                                        .ObserverDisconnected,
-                                    timestampEpochMs = request.admittedAtEpochMs,
-                                )
+                                    else -> PREVIOUS_TERMINAL_RUN_REPLACED_OBSERVER_REASON
+                                },
+                                type = SourceSeparationCacheRunTransitionType
+                                    .ObserverDisconnected,
+                                timestampEpochMs = request.admittedAtEpochMs,
                             )
-                        }
-                }
+                        )
+                    }
                 sequence += 1L
                 add(
                     SourceSeparationCacheRunJournalTransition(
@@ -350,6 +348,8 @@ data class SourceSeparationCacheRunJournal(
         private const val PREVIOUS_OWNER_DIED_OBSERVER_REASON = "owner-process-died"
         private const val PREVIOUS_PAUSED_RUN_REPLACED_OBSERVER_REASON =
             "paused-run-replaced"
+        private const val PREVIOUS_TERMINAL_RUN_REPLACED_OBSERVER_REASON =
+            "terminal-run-replaced"
     }
 }
 

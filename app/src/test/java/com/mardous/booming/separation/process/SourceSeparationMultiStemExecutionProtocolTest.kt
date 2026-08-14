@@ -78,6 +78,26 @@ class SourceSeparationMultiStemExecutionProtocolTest {
     }
 
     @Test
+    fun `deferred start response preserves foreground reason`() {
+        val response = SourceSeparationMultiStemIpcStartResponse(
+            status = SourceSeparationMultiStemIpcStatus.Deferred,
+            errorType = SourceSeparationForegroundExecutionDeferredException::class.java.name,
+            message = "Foreground lifetime exhausted.",
+            deferredReason = SourceSeparationForegroundDeferredReason.TimedOut,
+        )
+
+        assertEquals(
+            response,
+            SourceSeparationMultiStemExecutionCodec.decodeStartResponse(
+                SourceSeparationMultiStemExecutionCodec.encodeStartResponse(response),
+            ),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            response.copy(deferredReason = null)
+        }
+    }
+
+    @Test
     fun `active snapshot binds authority observer and latest event`() {
         val descriptor = fixture()
         val lease = SourceSeparationForegroundLeaseRequest(

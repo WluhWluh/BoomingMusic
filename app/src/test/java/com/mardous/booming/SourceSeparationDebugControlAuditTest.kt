@@ -58,6 +58,31 @@ class SourceSeparationDebugControlAuditTest {
         assertEquals(advertised, implemented)
     }
 
+    @Test
+    fun `output control prefers the user-facing player path`() {
+        val provider = appFile(
+            "src/debug/java/com/mardous/booming/debug/SourceSeparationDebugControlProvider.kt",
+        ).readText()
+        val outputBranch = provider.substringAfter("\"separation.output\" ->")
+            .substringBefore("\"separation.sync\" ->")
+
+        assertTrue(outputBranch.contains("SourceSeparationForegroundWorkerDebugBridge.setPlaybackEnabled"))
+        assertTrue(outputBranch.contains("putBoolean(\"uiPath\", false)"))
+    }
+
+    @Test
+    fun `seek percentage contract uses the zero to one hundred scale`() {
+        val protocol = appFile(
+            "src/debug/java/com/mardous/booming/debug/SourceSeparationDebugProtocol.kt",
+        ).readText()
+        val provider = appFile(
+            "src/debug/java/com/mardous/booming/debug/SourceSeparationDebugControlProvider.kt",
+        ).readText()
+
+        assertTrue(protocol.contains("percent:float (0..100)"))
+        assertTrue(provider.contains("percent / 100f"))
+    }
+
     private fun appFile(relativePath: String): File {
         val workingDirectory = File(requireNotNull(System.getProperty("user.dir")))
         val appRoot = if (File(workingDirectory, "src/main").isDirectory) {

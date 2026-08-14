@@ -28,6 +28,12 @@ object SourceSeparationForegroundWorkerDebugBridge {
         }.getOrDefault(false)
     }
 
+    fun setPlaybackEnabled(enabled: Boolean, blend: Float?): Boolean {
+        val viewModel = viewModelRef?.get() ?: return false
+        viewModel.setSourceSeparationPlaybackEnabled(enabled, blend)
+        return true
+    }
+
     suspend fun preStartSong(song: Song, readyWindowCount: Int): Boolean =
         worker().preStartSong(song, readyWindowCount)
 

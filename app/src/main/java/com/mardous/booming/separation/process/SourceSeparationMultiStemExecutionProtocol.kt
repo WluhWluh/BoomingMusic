@@ -18,7 +18,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-internal const val SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION = 4
+internal const val SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION = 5
 
 /** Wire descriptor for the multi-stem worker; it intentionally has no MDX fields. */
 @Serializable
@@ -330,6 +330,7 @@ internal data class SourceSeparationMultiStemIpcStartResponse(
     val processGeneration: Long? = null,
     val errorType: String? = null,
     val message: String? = null,
+    val deferredReason: SourceSeparationForegroundDeferredReason? = null,
 ) {
     init {
         require(protocolVersion == SOURCE_SEPARATION_MULTISTEM_EXECUTION_PROTOCOL_VERSION)
@@ -337,6 +338,9 @@ internal data class SourceSeparationMultiStemIpcStartResponse(
             require(!runId.isNullOrBlank() && processGeneration != null && processGeneration > 0L)
             require(errorType == null)
         }
+        require((status == SourceSeparationMultiStemIpcStatus.Deferred) ==
+            (deferredReason != null)
+        ) { "Deferred multi-stem start response is incomplete." }
         require(errorType == null || errorType.isNotBlank())
     }
 }
@@ -348,6 +352,7 @@ internal enum class SourceSeparationMultiStemIpcStatus {
     Applied,
     AlreadyApplied,
     Busy,
+    Deferred,
     NoActiveRun,
     StaleRun,
     StaleGeneration,
