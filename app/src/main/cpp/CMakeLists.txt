@@ -17,3 +17,4 @@ target_link_options(
     "-Wl,-z,max-page-size=16384"
     "-Wl,-z,common-page-size=16384"
 )
+target_link_libraries(booming_ss_separation PRIVATE dl)
