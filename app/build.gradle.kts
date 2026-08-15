@@ -129,6 +129,23 @@ android {
         versionName = currentVersion.name + sourceSeparationVersionSuffix
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         check(versionCode == currentVersionCode)
+
+        ndk {
+            abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags += listOf("-std=c++17")
+            }
+        }
+    }
+
+    ndkVersion = "27.2.12479018"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     flavorDimensions += "version"
