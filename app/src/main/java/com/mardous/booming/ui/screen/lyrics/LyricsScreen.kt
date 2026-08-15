@@ -959,13 +959,6 @@ private fun CoverLyricsQuickBlendControl(
         ) {
             Box(
                 modifier = Modifier
-                    .matchParentSize()
-                    .clip(buttonBackgroundShape)
-                    .background(progressColor.copy(alpha = buttonBackgroundAlpha))
-            )
-
-            Box(
-                modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .size(
@@ -1009,15 +1002,6 @@ private fun CoverLyricsQuickBlendControl(
                         .background(progressColor.copy(alpha = endpointIconAlpha))
                 )
             }
-
-            Icon(
-                painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
-                contentDescription = stringResource(R.string.action_source_separation_playback),
-                tint = colorScheme.surface,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .alpha(stemIconAlpha)
-            )
 
             CoverLyricsQuickBlendEndpointIcon(
                 painter = painterResource(topStemIconRes),
@@ -1067,6 +1051,22 @@ private fun CoverLyricsQuickBlendControl(
                     .fillMaxWidth()
                     .height(bottomTrackHeight)
                     .clip(bottomTrackShape),
+            )
+
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(buttonBackgroundShape)
+                    .background(progressColor.copy(alpha = buttonBackgroundAlpha)),
+            )
+
+            Icon(
+                painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
+                contentDescription = stringResource(R.string.action_source_separation_playback),
+                tint = colorScheme.surface,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .alpha(stemIconAlpha),
             )
         }
 
@@ -1312,13 +1312,6 @@ private fun CoverLyricsCompactControl(
                 )
                 .then(gestureModifier),
         ) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .clip(CircleShape)
-                    .background(progressColor.copy(alpha = buttonBackgroundAlpha)),
-            )
-
             Column(
                 verticalArrangement = Arrangement.spacedBy(segmentGap),
                 modifier = Modifier
@@ -1353,6 +1346,13 @@ private fun CoverLyricsCompactControl(
                 interactionSource = segmentInteractionSources[1],
             )
             }
+
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(CircleShape)
+                    .background(progressColor.copy(alpha = buttonBackgroundAlpha)),
+            )
 
             Icon(
                 painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
@@ -1750,13 +1750,6 @@ private fun CoverLyricsMultiStemControl(
                 .clip(RectangleShape)
                 .then(interactionModifier),
         ) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .clip(CircleShape)
-                    .background(progressColor.copy(alpha = buttonBackgroundAlpha)),
-            )
-
             Column(
                 verticalArrangement = Arrangement.spacedBy(segmentGap),
                 modifier = Modifier
@@ -1849,6 +1842,13 @@ private fun CoverLyricsMultiStemControl(
                     interactionSource = segmentInteractionSources[segmentCount - 1],
                 )
             }
+
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(CircleShape)
+                    .background(progressColor.copy(alpha = buttonBackgroundAlpha)),
+            )
 
             Icon(
                 painter = painterResource(R.drawable.ic_stem_blend_outline_24dp),
