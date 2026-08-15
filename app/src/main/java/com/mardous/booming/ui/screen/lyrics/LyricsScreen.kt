@@ -67,6 +67,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -133,6 +134,7 @@ import com.mardous.booming.ui.screen.player.SourceSeparationPlaybackProcessingPr
 import com.mardous.booming.ui.screen.player.animateSourceSeparationPlaybackProcessingProgress
 import com.mardous.booming.ui.theme.PlayerTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
@@ -818,6 +820,7 @@ private fun CoverLyricsQuickBlendControl(
                     segmentGapPx = expandedSegmentGapPx,
                 ),
             )
+            segmentTapEffect.press(pressedSegment)
             var releasedChange: PointerInputChange? = null
             var dragStartChange: PointerInputChange? = null
             var latestBlend = currentDisplayedBlend
@@ -867,7 +870,7 @@ private fun CoverLyricsQuickBlendControl(
                 longPressReached -> {
                     cancelCoverLyricsSegmentPress(activePress)
                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                    currentOnLongClick()
+                    segmentTapEffect.release(onAnimationFinished = currentOnLongClick)
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes
@@ -879,12 +882,10 @@ private fun CoverLyricsQuickBlendControl(
                 }
 
                 releasedChange != null -> {
+                    segmentTapEffect.release()
                     releaseCoverLyricsSegmentPress(activePress)
                     releasedChange.let { change ->
                         if (expanded) {
-                            segmentTapEffect.trigger(
-                                if (change.position.y < size.height / 2f) 0 else 1,
-                            )
                             coverLyricsQuickBlendHandleTap(
                                 y = change.position.y,
                                 heightPx = size.height.toFloat(),
@@ -899,6 +900,7 @@ private fun CoverLyricsQuickBlendControl(
                 }
 
                 expanded && dragStartChange != null -> {
+                    segmentTapEffect.release()
                     cancelCoverLyricsSegmentPress(activePress)
                     dragging = true
                     try {
@@ -922,6 +924,7 @@ private fun CoverLyricsQuickBlendControl(
                 }
 
                 dragStartChange != null -> {
+                    segmentTapEffect.release()
                     cancelCoverLyricsSegmentPress(activePress)
                     while (true) {
                         val event = awaitPointerEvent()
@@ -1221,6 +1224,7 @@ private fun CoverLyricsCompactControl(
                     segmentGapPx = expandedSegmentGapPx,
                 ),
             )
+            segmentTapEffect.press(pressedSegment.takeIf { it == 0 } ?: -1)
             var releasedChange: PointerInputChange? = null
             var moved = false
 
@@ -1247,7 +1251,7 @@ private fun CoverLyricsCompactControl(
                 longPressReached -> {
                     cancelCoverLyricsSegmentPress(activePress)
                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                    currentOnLongClick()
+                    segmentTapEffect.release(onAnimationFinished = currentOnLongClick)
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes
@@ -1259,6 +1263,7 @@ private fun CoverLyricsCompactControl(
                 }
 
                 releasedChange != null -> {
+                    segmentTapEffect.release()
                     releaseCoverLyricsSegmentPress(activePress)
                     releasedChange.let { change ->
                         if (!expanded) {
@@ -1271,7 +1276,6 @@ private fun CoverLyricsCompactControl(
                                 )
                             ) {
                                 CoverLyricsCompactControlAction.OpenPanel -> {
-                                    segmentTapEffect.trigger(0)
                                     currentOnOpenPanel()
                                 }
                                 CoverLyricsCompactControlAction.DisableSeparatedPlayback -> {
@@ -1284,6 +1288,7 @@ private fun CoverLyricsCompactControl(
                 }
 
                 moved -> {
+                    segmentTapEffect.release()
                     cancelCoverLyricsSegmentPress(activePress)
                     while (true) {
                         val event = awaitPointerEvent()
@@ -1601,6 +1606,11 @@ private fun CoverLyricsMultiStemControl(
                     segmentGapPx = segmentGapPx,
                 ),
             )
+            segmentTapEffect.press(
+                pressedSegment.takeIf { segment ->
+                    segment >= 0 && segment != segmentCount - 1
+                } ?: -1,
+            )
             val startY = down.position.y
             val startGain = activeStem?.gain ?: 0f
             var latestGain = startGain
@@ -1643,7 +1653,7 @@ private fun CoverLyricsMultiStemControl(
                 longPressReached -> {
                     cancelCoverLyricsSegmentPress(activePress)
                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                    currentOnLongClick()
+                    segmentTapEffect.release(onAnimationFinished = currentOnLongClick)
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes
@@ -1655,6 +1665,7 @@ private fun CoverLyricsMultiStemControl(
                 }
 
                 releasedChange != null -> {
+                    segmentTapEffect.release()
                     releaseCoverLyricsSegmentPress(activePress)
                     releasedChange.let { change ->
                         if (!expanded) {
@@ -1668,11 +1679,9 @@ private fun CoverLyricsMultiStemControl(
                             )
                             when (tappedSegment) {
                                 0 -> {
-                                    segmentTapEffect.trigger(tappedSegment)
                                     currentOnInvertGains()
                                 }
                                 pageSegmentIndex -> {
-                                    segmentTapEffect.trigger(tappedSegment)
                                     currentOnPageChange(1 - normalizedPage)
                                 }
                                 segmentCount - 1 -> {
@@ -1681,7 +1690,6 @@ private fun CoverLyricsMultiStemControl(
                                 else -> {
                                     val stem = activeStem
                                         ?: return@let
-                                    segmentTapEffect.trigger(tappedSegment)
                                     val nextGain = if (stem.gain >= 0.5f) {
                                         SourceSeparationStemGainPolicy.MIN_GAIN
                                     } else {
@@ -1695,6 +1703,7 @@ private fun CoverLyricsMultiStemControl(
                 }
 
                 expanded && dragStartChange != null && activeStem != null -> {
+                    segmentTapEffect.release()
                     cancelCoverLyricsSegmentPress(activePress)
                     draggingStemId = activeStem.stemId
                     try {
@@ -1717,6 +1726,7 @@ private fun CoverLyricsMultiStemControl(
                 }
 
                 dragStartChange != null -> {
+                    segmentTapEffect.release()
                     cancelCoverLyricsSegmentPress(activePress)
                     while (true) {
                         val event = awaitPointerEvent()
@@ -2372,19 +2382,39 @@ internal fun coverLyricsSegmentPressPosition(
 
 private class CoverLyricsSegmentTapEffectState {
     val expansion = Animatable(0f)
+    private var onAnimationFinished: (() -> Unit)? = null
     var segmentIndex by mutableIntStateOf(-1)
+        private set
+    var isPressed by mutableStateOf(false)
         private set
     var generation by mutableIntStateOf(0)
         private set
 
-    fun trigger(segmentIndex: Int) {
+    fun press(segmentIndex: Int) {
         if (segmentIndex < 0) return
+        onAnimationFinished = null
         this.segmentIndex = segmentIndex
+        isPressed = true
         generation++
     }
 
+    fun release(onAnimationFinished: (() -> Unit)? = null) {
+        if (segmentIndex < 0) {
+            onAnimationFinished?.invoke()
+            return
+        }
+        this.onAnimationFinished = onAnimationFinished
+        isPressed = false
+    }
+
     fun finish(generation: Int) {
-        if (this.generation == generation) segmentIndex = -1
+        if (this.generation == generation) {
+            val finishedCallback = onAnimationFinished
+            onAnimationFinished = null
+            segmentIndex = -1
+            isPressed = false
+            finishedCallback?.invoke()
+        }
     }
 }
 
@@ -2402,6 +2432,7 @@ private fun rememberCoverLyricsSegmentTapEffectState(): CoverLyricsSegmentTapEff
                 easing = CoverLyricsSegmentTapExpansionEasing,
             ),
         )
+        snapshotFlow { state.isPressed }.first { isPressed -> !isPressed }
         state.expansion.animateTo(
             targetValue = 0f,
             animationSpec = tween(
