@@ -149,6 +149,15 @@ if ($Backend -eq "auto-fallback" -and -not [string]::IsNullOrWhiteSpace($Seconda
 
 $remoteRelativeRoot = ""
 $remoteTempRoot = ""
+$x86ProcessValidation = $ProcessAbi -eq "x86"
+$arm32ResidentProcessValidation = $ProcessAbi -eq "armeabi-v7a"
+$validationGradleProperties = @()
+if ($x86ProcessValidation) {
+    $validationGradleProperties += "-PboomingSs.x86ProcessValidation=true"
+}
+if ($arm32ResidentProcessValidation) {
+    $validationGradleProperties += "-PboomingSs.arm32ResidentProcessValidation=true"
+}
 $sourceCommitAtInvocation = (& git -C $repoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $sourceCommitAtInvocation -notmatch '^[0-9a-f]{40}$') {
     throw "Could not resolve the source commit for the LiteRT validation build."
@@ -156,9 +165,11 @@ if ($LASTEXITCODE -ne 0 -or $sourceCommitAtInvocation -notmatch '^[0-9a-f]{40}$'
 Push-Location $repoRoot
 try {
     if (-not $SkipBuild) {
-        & .\gradlew.bat assembleGithubDebugAndroidTest --console=plain
+        & .\gradlew.bat assembleGithubDebugAndroidTest `
+            @validationGradleProperties --console=plain
         if ($LASTEXITCODE -ne 0) { throw "AndroidTest assembly failed." }
-        & .\gradlew.bat assembleGithubDebug --console=plain
+        & .\gradlew.bat assembleGithubDebug `
+            @validationGradleProperties --console=plain
         if ($LASTEXITCODE -ne 0) { throw "App assembly failed." }
     }
 
@@ -182,6 +193,11 @@ try {
         if ($buildIdentity.schemaVersion -ne "phase7-build-identity-v1" -or
                 [string]$buildIdentity.appCommit -notmatch '^[0-9a-f]{40}$') {
             throw "Phase 7 build identity is invalid: $buildIdentityPath"
+        }
+        if ([bool]$buildIdentity.x86ProcessValidation -ne $x86ProcessValidation -or
+                [bool]$buildIdentity.arm32ResidentProcessValidation -ne
+                    $arm32ResidentProcessValidation) {
+            throw "The selected APK used different process-validation gates."
         }
         $recordedAppApk = @($buildIdentity.appApks) | Where-Object {
             $_.fileName -eq $appApk.Name
@@ -210,6 +226,8 @@ try {
         $buildIdentity = [ordered]@{
             schemaVersion = "phase7-build-identity-v1"
             appCommit = $sourceCommitAtInvocation
+            x86ProcessValidation = $x86ProcessValidation
+            arm32ResidentProcessValidation = $arm32ResidentProcessValidation
             appApks = $appApkRecords
             testApk = [ordered]@{
                 fileName = $testApk.Name
