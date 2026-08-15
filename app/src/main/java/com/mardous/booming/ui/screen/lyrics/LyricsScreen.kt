@@ -1228,7 +1228,7 @@ private fun CoverLyricsCompactControl(
                     segmentGapPx = expandedSegmentGapPx,
                 ),
             )
-            segmentTapEffect.press(pressedSegment.takeIf { it == 0 } ?: -1)
+            segmentTapEffect.press(pressedSegment)
             var releasedChange: PointerInputChange? = null
             var moved = false
 
@@ -1614,11 +1614,7 @@ private fun CoverLyricsMultiStemControl(
                     segmentGapPx = segmentGapPx,
                 ),
             )
-            segmentTapEffect.press(
-                pressedSegment.takeIf { segment ->
-                    segment >= 0 && segment != segmentCount - 1
-                } ?: -1,
-            )
+            segmentTapEffect.press(pressedSegment)
             val startY = down.position.y
             val startGain = activeStem?.gain ?: 0f
             var latestGain = startGain
