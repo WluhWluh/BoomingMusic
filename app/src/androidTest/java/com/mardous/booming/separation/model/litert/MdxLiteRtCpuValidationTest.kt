@@ -361,6 +361,23 @@ class MdxLiteRtCpuValidationTest {
                     currentProcessAbi().androidName,
                     runtimeAbi.androidName,
                 )
+                if (gpuRuntimeProfile?.productionEligible == true) {
+                    val statistics = MdxLiteRtBoundedGpuRuntime.statistics()
+                    report.put(
+                        "boundedGpuStatistics",
+                        JSONObject()
+                            .put("dispatchCount", statistics.dispatchCount)
+                            .put("eventWaitCount", statistics.eventWaitCount),
+                    )
+                    require(statistics.dispatchCount > 0L) {
+                        "Bounded GPU inference did not submit any OpenCL kernels."
+                    }
+                    require(statistics.dispatchCount == statistics.eventWaitCount) {
+                        "Bounded GPU dispatch/event-wait mismatch: " +
+                            "dispatches=${statistics.dispatchCount}, " +
+                            "eventWaits=${statistics.eventWaitCount}."
+                    }
+                }
                 val beforeInvocationCanceled = runCatching {
                     reusedLease.session.run(input) { true }
                 }.exceptionOrNull()
