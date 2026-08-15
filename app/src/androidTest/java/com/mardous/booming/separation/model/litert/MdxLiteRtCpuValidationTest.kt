@@ -9,6 +9,7 @@ import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.ai.edge.litert.Environment
+import com.mardous.booming.BuildConfig
 import com.mardous.booming.separation.model.MdxCompatibilityDecision
 import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.MdxExecutionProfile
@@ -20,6 +21,7 @@ import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxRuntimeProfiles
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
+import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.model.MdxSpectrogram
 import com.mardous.booming.separation.model.ReusableMdxInferenceSessionProvider
 import com.mardous.booming.separation.model.mapMdxStemWaveforms
@@ -162,10 +164,12 @@ class MdxLiteRtCpuValidationTest {
             require(!resourceProbe || !arguments.getString(ARG_PREFLIGHT_ONLY).toBoolean()) {
                 "An unsupported resource probe cannot also be preflight-only."
             }
+            val (runtimeProfile, runtimeOverride) =
+                internalX86ValidationProfile(contractProfile, contract, runtimeAbi)
             val (profile, compatibilityOverride) = if (resourceProbe) {
-                internalResourceProbeProfile(contractProfile, runtimeAbi)
+                internalResourceProbeProfile(runtimeProfile, runtimeAbi)
             } else {
-                contractProfile to null
+                runtimeProfile to runtimeOverride
             }
             report.put("compatibilityOverride", compatibilityOverride ?: JSONObject.NULL)
 
@@ -677,6 +681,47 @@ class MdxLiteRtCpuValidationTest {
             .put("effectiveStatus", overridden.status.name)
             .put("effectiveRuntimeVersion", overridden.runtimeVersion)
         return probeProfile to report
+    }
+
+    private fun internalX86ValidationProfile(
+        profile: MdxExecutionProfile,
+        contract: SourceSeparationModelContract,
+        runtimeAbi: MdxRuntimeAbi,
+    ): Pair<MdxExecutionProfile, JSONObject?> {
+        if (runtimeAbi != MdxRuntimeAbi.X86) return profile to null
+        val original = profile.runtimeCompatibility.singleOrNull {
+            it.abi == MdxRuntimeAbi.X86 &&
+                it.backend == MdxInferenceBackend.LiteRtCpu &&
+                it.profileId == MdxRuntimeProfiles.CPU_DEFAULT_FP32
+        } ?: return profile to null
+        val platform = MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi)
+        if (!MdxX86ProcessValidationOverride.permitsCatalogQualification(
+                modelId = contract.modelId,
+                artifactSha256 = contract.artifact.sha256,
+                contractId = contract.contractId,
+                platform = platform,
+                originalStatus = original.status,
+                enabled = BuildConfig.X86_PROCESS_VALIDATION,
+            )
+        ) return profile to null
+        val overridden = original.copy(
+            runtimeVersion = platform.runtimeVersion,
+            status = MdxRuntimeSupportStatus.KnownGood,
+            evidence = "AndroidTest x86 process validation; ${original.evidence}",
+        )
+        val effectiveProfile = profile.copy(
+            runtimeCompatibility = profile.runtimeCompatibility.map { record ->
+                if (record == original) overridden else record
+            },
+        )
+        val report = JSONObject()
+            .put("scope", "androidTest-x86-process-validation")
+            .put("abi", runtimeAbi.androidName)
+            .put("originalRuntimeVersion", original.runtimeVersion)
+            .put("originalStatus", original.status.name)
+            .put("effectiveRuntimeVersion", overridden.runtimeVersion)
+            .put("effectiveStatus", overridden.status.name)
+        return effectiveProfile to report
     }
 
     private fun validateInFlightCancellation(
