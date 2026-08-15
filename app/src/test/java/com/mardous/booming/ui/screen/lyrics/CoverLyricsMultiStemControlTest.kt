@@ -9,30 +9,36 @@ class CoverLyricsMultiStemControlTest {
     @Test
     fun `two segment tap expansion is fully absorbed by other segment`() {
         assertEquals(
-            listOf(6.dp, (-6).dp),
+            listOf(4.dp, (-4).dp),
             coverLyricsSegmentTapHeightOffsets(segmentCount = 2, tappedSegment = 0),
         )
     }
 
     @Test
-    fun `end segment tap expansion is absorbed four then two dp`() {
-        val offsets = coverLyricsSegmentTapHeightOffsets(
+    fun `end segment tap expansion is absorbed three then one dp`() {
+        val topOffsets = coverLyricsSegmentTapHeightOffsets(
             segmentCount = 6,
             tappedSegment = 0,
         )
+        val bottomOffsets = coverLyricsSegmentTapHeightOffsets(
+            segmentCount = 6,
+            tappedSegment = 5,
+        )
 
-        assertEquals(listOf(6.dp, (-4).dp, (-2).dp, 0.dp, 0.dp, 0.dp), offsets)
-        assertEquals(0.dp, offsets.fold(0.dp) { total, value -> total + value })
+        assertEquals(listOf(4.dp, (-3).dp, (-1).dp, 0.dp, 0.dp, 0.dp), topOffsets)
+        assertEquals(listOf(0.dp, 0.dp, 0.dp, (-1).dp, (-3).dp, 4.dp), bottomOffsets)
+        assertEquals(0.dp, topOffsets.fold(0.dp) { total, value -> total + value })
+        assertEquals(0.dp, bottomOffsets.fold(0.dp) { total, value -> total + value })
     }
 
     @Test
-    fun `middle segment expands eight dp split across adjacent segments`() {
+    fun `middle segment expands six dp split across adjacent segments`() {
         val offsets = coverLyricsSegmentTapHeightOffsets(
             segmentCount = 6,
             tappedSegment = 3,
         )
 
-        assertEquals(listOf(0.dp, 0.dp, (-4).dp, 8.dp, (-4).dp, 0.dp), offsets)
+        assertEquals(listOf(0.dp, 0.dp, (-3).dp, 6.dp, (-3).dp, 0.dp), offsets)
         assertEquals(0.dp, offsets.fold(0.dp) { total, value -> total + value })
     }
 
@@ -50,9 +56,9 @@ class CoverLyricsMultiStemControlTest {
     }
 
     @Test
-    fun `tapped capsule end corner reaches twelve dp`() {
+    fun `tapped capsule end corner reaches ten dp`() {
         assertEquals(
-            12.dp,
+            10.dp,
             coverLyricsSegmentTapOuterCornerRadius(
                 segmentIndex = 0,
                 endSegmentIndex = 0,

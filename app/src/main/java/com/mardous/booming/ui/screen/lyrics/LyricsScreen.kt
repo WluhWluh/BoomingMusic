@@ -2324,9 +2324,9 @@ private val CoverLyricsQuickBlendInnerCornerRadius = 8.dp
 private val CoverLyricsMultiStemSegmentSize = 40.dp
 private val CoverLyricsMultiStemSegmentGap = 4.dp
 private val CoverLyricsMultiStemInnerCornerRadius = 8.dp
-private val CoverLyricsSegmentTapEndExpansion = 6.dp
-private val CoverLyricsSegmentTapMiddleExpansion = 8.dp
-private val CoverLyricsSegmentTapEndCornerRadius = 12.dp
+private val CoverLyricsSegmentTapEndExpansion = 4.dp
+private val CoverLyricsSegmentTapMiddleExpansion = 6.dp
+private val CoverLyricsSegmentTapEndCornerRadius = 10.dp
 private const val CoverLyricsQuickBlendNeutralBlend = 0.5f
 private const val CoverLyricsQuickBlendNeutralSnapThreshold = 0.10f
 private const val CoverLyricsQuickControlsTransitionDurationMillis = 260
@@ -2459,18 +2459,18 @@ internal fun coverLyricsSegmentTapHeightOffsets(
             }
             tappedSegment == 0 -> {
                 this[tappedSegment] = CoverLyricsSegmentTapEndExpansion
-                this[1] = -4.dp
-                this[2] = -2.dp
+                this[1] = -3.dp
+                this[2] = -1.dp
             }
             tappedSegment == segmentCount - 1 -> {
                 this[tappedSegment] = CoverLyricsSegmentTapEndExpansion
-                this[segmentCount - 2] = -4.dp
-                this[segmentCount - 3] = -2.dp
+                this[segmentCount - 2] = -3.dp
+                this[segmentCount - 3] = -1.dp
             }
             else -> {
                 this[tappedSegment] = CoverLyricsSegmentTapMiddleExpansion
-                this[tappedSegment - 1] = -4.dp
-                this[tappedSegment + 1] = -4.dp
+                this[tappedSegment - 1] = -3.dp
+                this[tappedSegment + 1] = -3.dp
             }
         }
     }
