@@ -12,6 +12,7 @@ import zipfile
 VARIANTS = {"arm64-v8a", "armeabi-v7a", "x86_64", "x86", "universal"}
 FORBIDDEN_LIBRARIES = {
     "libLiteRt.so",
+    "liblitert_jni.so",
     "libLiteRtClGlAccelerator.so",
     "libBssOcl.so",
     "libOCLQ.so",

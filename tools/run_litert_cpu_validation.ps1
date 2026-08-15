@@ -38,7 +38,7 @@ param(
     [switch]$SkipBuild,
     [switch]$SkipInstall,
     [switch]$SkipRuntimeInstall,
-    [string]$RuntimeReleaseTag = "downloadable-runtime-v2.1.5-bss.2-exp.2"
+    [string]$RuntimeReleaseTag = "downloadable-runtime-v2.2.0-bss.2-exp.1"
 )
 
 $ErrorActionPreference = "Stop"

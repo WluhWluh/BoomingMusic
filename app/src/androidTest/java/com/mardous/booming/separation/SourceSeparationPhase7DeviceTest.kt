@@ -145,6 +145,14 @@ class SourceSeparationPhase7DeviceTest {
                 runtimeInstallation.libraryFile.length(),
             )
             assertEquals(runtimeEntry.innerLibrary.sha256, runtimeInstallation.libraryFile.sha256())
+            assertEquals(
+                runtimeEntry.innerJniLibrary.byteSize,
+                runtimeInstallation.jniLibraryFile.length(),
+            )
+            assertEquals(
+                runtimeEntry.innerJniLibrary.sha256,
+                runtimeInstallation.jniLibraryFile.sha256(),
+            )
             assertTrue(runtimeInstallation.manifestFile.isFile)
 
             val gpuRuntime = if (arguments.getString(ARG_BACKEND_MODE) == "auto") {
@@ -226,6 +234,8 @@ class SourceSeparationPhase7DeviceTest {
                     .put("installedBytes", installedRuntime.installedBytes)
                     .put("libraryBytes", runtimeInstallation.libraryFile.length())
                     .put("librarySha256", runtimeInstallation.libraryFile.sha256())
+                    .put("jniLibraryBytes", runtimeInstallation.jniLibraryFile.length())
+                    .put("jniLibrarySha256", runtimeInstallation.jniLibraryFile.sha256())
                 )
                 .put("gpuRuntime", gpuRuntime ?: JSONObject.NULL)
                 .put("downloadActivatesModel", false)

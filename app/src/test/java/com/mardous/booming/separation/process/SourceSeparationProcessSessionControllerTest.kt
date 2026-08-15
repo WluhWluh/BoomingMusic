@@ -36,6 +36,7 @@ class SourceSeparationProcessSessionControllerTest {
     private val profile = testProfile().copy(
         runtimeCompatibility = listOf(
             MdxRuntimeCompatibilityRecord(
+                runtimeVersion = MdxRuntimeProfiles.LITERT_VERSION,
                 abi = MdxRuntimeAbi.X86,
                 backend = MdxInferenceBackend.LiteRtCpu,
                 profileId = MdxRuntimeProfiles.CPU_DEFAULT_FP32,

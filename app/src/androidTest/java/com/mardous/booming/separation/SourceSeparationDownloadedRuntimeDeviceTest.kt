@@ -19,6 +19,11 @@ class SourceSeparationDownloadedRuntimeDeviceTest {
         assertEquals("cpu-core", installation.manifest.component)
         assertEquals(installation.manifest.abi, installation.identity.abi)
         assertTrue(installation.libraryFile.isFile)
+        assertTrue(installation.jniLibraryFile.isFile)
+        assertEquals(
+            listOf("libLiteRt.so", "liblitert_jni.so"),
+            installation.libraryFiles.keys.toList(),
+        )
         assertTrue(installation.manifestFile.isFile)
     }
 

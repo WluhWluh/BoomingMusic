@@ -2,31 +2,33 @@
   "schemaVersion": 1,
   "artifactKind": "classes-only-api-aar",
   "release": {
-    "version": "2.1.5-bss.2-exp.2",
-    "tag": "downloadable-runtime-v2.1.5-bss.2-exp.2",
+    "version": "2.2.0-bss.2-exp.1",
+    "tag": "downloadable-runtime-v2.2.0-bss.2-exp.1",
     "repository": "https://github.com/WluhWluh/bss-litert-android",
     "contractFile": "downloadable-runtime-contract.json",
-    "contractSha256": "8ef393d5aa72ac03b77dc116531f6923bc826f2413e90f88eaf56128607c863a"
+    "contractSha256": "be78535089ef2fd3b1de086303bbc8acde3523703645b7ee534d27707f09f996"
   },
   "litert": {
     "repository": "https://github.com/google-ai-edge/LiteRT.git",
-    "commit": "9d26e89d88ef8785b6a1e54ec41ac8add215a125",
-    "version": "2.1.5"
+    "commit": "145c7523ff08d5e57ab5c582141775eea47da9c7",
+    "version": "2.2.0"
   },
   "apiAar": {
-    "fileName": "litert-api-2.1.5-bss.2-downloadable-loader.aar",
-    "byteSize": 86013,
-    "sha256": "a68b51546f268b6db0b64bec3d1d95389ba44a48c59beaa1769794682c94b4f9",
+    "fileName": "litert-api-2.2.0-bss.2-downloadable-loader.aar",
+    "byteSize": 87693,
+    "sha256": "88a939aa5f3a65ff89bd90eed4b3af30b2a8866bedbbd3838761b143d2ccb387",
     "sourceLockFile": "downloadable-api-source-lock.json",
-    "sourceLockSha256": "f9a08269daa63e11525c94d30a581e1d09f54a0c35a83180c7765e3f73867fca",
-    "baseAarByteSize": 83190,
-    "baseAarSha256": "93728bd6560938bab098e2f362817c3b4469ad710a39a77e8018407dc4e9fa88",
+    "sourceLockSha256": "f1c476d131c2f131ab1f8a90828e620ffd21266a7462373b6627e5bea003883e",
+    "baseAarByteSize": 84348,
+    "baseAarSha256": "1542f1c632ee89c3a790382015995fd2b0d1a1295222bc62af8b37f76f8355a4",
     "nativePayloadEntries": false
   },
   "explicitLoader": {
     "className": "com.google.ai.edge.litert.LiteRtNativeLibraryLoader",
     "configureMethod": "configureAbsolutePath(java.lang.String)",
     "loadMethod": "load()",
+    "configuredJniMethod": "configuredJniAbsolutePath()",
+    "absolutePathLoadOrder": ["libLiteRt.so", "liblitert_jni.so"],
     "routedClasses": [
       "com.google.ai.edge.litert.Environment",
       "com.google.ai.edge.litert.CompiledModel",
@@ -35,7 +37,7 @@
   },
   "nativePayload": {
     "delivery": "downloaded-separately",
-    "releaseContract": "bss-litert-downloadable-runtime-v2",
+    "releaseContract": "bss-litert-downloadable-runtime-v3",
     "cpuComponents": [
       "arm64-v8a",
       "armeabi-v7a",
@@ -48,6 +50,8 @@
     "bazel": "7.7.0",
     "androidApiLevel": 35,
     "androidBuildToolsVersion": "35.0.0",
-    "hermeticPythonVersion": "3.11"
+    "hermeticPythonVersion": "3.11",
+    "packagingPythonVersion": "3.12.3",
+    "packagingZlibVersion": "1.3"
   }
 }

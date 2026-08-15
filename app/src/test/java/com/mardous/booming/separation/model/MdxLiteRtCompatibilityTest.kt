@@ -25,6 +25,28 @@ class MdxLiteRtCompatibilityTest {
     }
 
     @Test
+    fun `historic qualification is not inherited by the current runtime`() {
+        val profile = profile("uvr_mdxnet_3_9662")
+        val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a)
+
+        val current = MdxLiteRtCompatibilityResolver.resolve(
+            profile = profile,
+            backend = MdxInferenceBackend.LiteRtCpu,
+            platform = platform,
+            policy = MdxCompatibilityPolicy.KnownGoodOnly,
+        )
+        val historic = MdxLiteRtCompatibilityResolver.resolve(
+            profile = profile,
+            backend = MdxInferenceBackend.LiteRtCpu,
+            platform = platform.copy(runtimeVersion = HISTORIC_LITERT_VERSION),
+            policy = MdxCompatibilityPolicy.KnownGoodOnly,
+        )
+
+        assertEquals(MdxCompatibilityOutcome.Unsupported, current.outcome)
+        assertEquals(MdxCompatibilityOutcome.Supported, historic.outcome)
+    }
+
+    @Test
     fun `rejected target remains blocked internally`() {
         val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.X86_64)
 
@@ -48,7 +70,11 @@ class MdxLiteRtCompatibilityTest {
     @Test
     fun `candidate GPU profile requires explicit product or internal admission`() {
         val profile = profile("uvr_mdxnet_3_9662")
-        val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a)
+        val platform = MdxRuntimePlatform(
+            35,
+            MdxRuntimeAbi.Arm64V8a,
+            HISTORIC_LITERT_VERSION,
+        )
         val productCandidate = MdxLiteRtCompatibilityResolver.resolve(
             profile = profile,
             backend = MdxInferenceBackend.LiteRtGpu,
@@ -82,7 +108,11 @@ class MdxLiteRtCompatibilityTest {
     @Test
     fun `reviewed HQ4 CPU and GPU candidates are product experimental on arm64`() {
         val profile = profile("uvr_mdxnet_inst_hq_4")
-        val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a)
+        val platform = MdxRuntimePlatform(
+            35,
+            MdxRuntimeAbi.Arm64V8a,
+            HISTORIC_LITERT_VERSION,
+        )
 
         val cpu = MdxLiteRtCompatibilityResolver.resolve(
             profile,
@@ -216,7 +246,7 @@ class MdxLiteRtCompatibilityTest {
         val missing = MdxLiteRtCompatibilityResolver.resolve(
             profileWithoutX86,
             MdxInferenceBackend.LiteRtCpu,
-            MdxRuntimePlatform(26, MdxRuntimeAbi.X86),
+            MdxRuntimePlatform(26, MdxRuntimeAbi.X86, HISTORIC_LITERT_VERSION),
             MdxCompatibilityPolicy.AllowUntestedInternal,
         )
 
@@ -270,7 +300,7 @@ class MdxLiteRtCompatibilityTest {
     ) = MdxLiteRtCompatibilityResolver.resolve(
         profile = profile(modelId),
         backend = MdxInferenceBackend.LiteRtCpu,
-        platform = platform,
+        platform = platform.copy(runtimeVersion = HISTORIC_LITERT_VERSION),
         policy = policy,
     )
 
@@ -279,6 +309,7 @@ class MdxLiteRtCompatibilityTest {
             .toMdxExecutionProfile(catalog.runtimeQualifications)
 
     companion object {
+        private const val HISTORIC_LITERT_VERSION = "2.1.5"
         private lateinit var catalog: SourceSeparationModelCatalog
 
         @JvmStatic

@@ -789,7 +789,7 @@ internal class LocalSeparationReadinessEvaluator(
             producerReleaseVersion = catalogEntry.producerReleaseVersion,
             downloadBytes = catalogEntry.delivery.expectedByteSize,
             installedBytes = installedBytes.takeIf { it > 0L }
-                ?: catalogEntry.innerLibrary.byteSize,
+                ?: catalogEntry.innerLibraries.sumOf { it.byteSize },
             state = state,
             reason = reason,
             delivery = catalogEntry.deliveryReference(),

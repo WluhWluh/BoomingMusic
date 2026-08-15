@@ -11,18 +11,18 @@ import sys
 import zipfile
 
 
-API_VERSION = "2.1.5-bss.2-downloadable-loader"
-EXPECTED_API_BYTES = 86_013
-EXPECTED_API_SHA256 = "a68b51546f268b6db0b64bec3d1d95389ba44a48c59beaa1769794682c94b4f9"
+API_VERSION = "2.2.0-bss.2-downloadable-loader"
+EXPECTED_API_BYTES = 87_693
+EXPECTED_API_SHA256 = "88a939aa5f3a65ff89bd90eed4b3af30b2a8866bedbbd3838761b143d2ccb387"
 EXPECTED_API_ENTRIES = {
     "AndroidManifest.xml",
     "classes.jar",
     "META-INF/bss-litert/downloadable-api-source-lock.json",
     "META-INF/bss-litert/downloadable-runtime-contract.json",
 }
-EXPECTED_CLASSES_SHA256 = "e9bee2c5bd8e017e7d2e1a6cf7b6c1c0fe84568d2d4744b18eb2139ede181fab"
-EXPECTED_SOURCE_LOCK_SHA256 = "f9a08269daa63e11525c94d30a581e1d09f54a0c35a83180c7765e3f73867fca"
-EXPECTED_CONTRACT_SHA256 = "8ef393d5aa72ac03b77dc116531f6923bc826f2413e90f88eaf56128607c863a"
+EXPECTED_CLASSES_SHA256 = "b1d55472781bedb7f08bac108a1ee5cebe96c4663de36269d18b80f96d2ed1ff"
+EXPECTED_SOURCE_LOCK_SHA256 = "f1c476d131c2f131ab1f8a90828e620ffd21266a7462373b6627e5bea003883e"
+EXPECTED_CONTRACT_SHA256 = "be78535089ef2fd3b1de086303bbc8acde3523703645b7ee534d27707f09f996"
 CONTRACT_PATH = "META-INF/bss-litert/downloadable-runtime-contract.json"
 SOURCE_LOCK_PATH = "META-INF/bss-litert/downloadable-api-source-lock.json"
 
@@ -67,8 +67,13 @@ def verify_api(path: Path) -> tuple[dict, str]:
     require_equal(source["loaderApi"]["className"],
                   "com.google.ai.edge.litert.LiteRtNativeLibraryLoader",
                   "explicit loader class")
-    require_equal(contract["schemaVersion"], "bss-litert-downloadable-runtime-v2",
+    require_equal(source["loaderApi"]["configuredJniMethod"],
+                  "configuredJniAbsolutePath()", "explicit JNI path method")
+    require_equal(contract["schemaVersion"], "bss-litert-downloadable-runtime-v3",
                   "runtime contract schema")
+    require_equal(contract["explicitLoader"]["absolutePathLoadOrder"],
+                  ["libLiteRt.so", "liblitert_jni.so"],
+                  "explicit native load order")
     require_equal(contract["androidMinApi"], 26, "runtime minimum API")
     return contract, digest(contract_bytes)
 
@@ -81,8 +86,8 @@ def load_catalog(path: Path) -> dict:
 
 def verify_catalogs(root: Path, contract: dict, contract_sha256: str) -> None:
     asset_root = root / "app/src/main/assets/source-separation"
-    cpu = load_catalog(asset_root / "litert-runtime-catalog-v1.json")
-    gpu = load_catalog(asset_root / "litert-gpu-runtime-catalog-v1.json")
+    cpu = load_catalog(asset_root / "litert-runtime-catalog-v2.json")
+    gpu = load_catalog(asset_root / "litert-gpu-runtime-catalog-v2.json")
     for name, catalog in (("CPU", cpu), ("GPU", gpu)):
         require_equal(catalog["producerContractSchemaVersion"], contract["schemaVersion"],
                       f"{name} catalog contract schema")
@@ -94,7 +99,6 @@ def verify_catalogs(root: Path, contract: dict, contract_sha256: str) -> None:
     require_equal(set(entries_by_abi), set(expected_abis), "CPU catalog ABI set")
     for abi, expected in expected_abis.items():
         entry = entries_by_abi[abi]
-        library = entry["innerLibrary"]
         require_equal(entry["runtimeArtifactVersion"], contract["runtimeArtifactVersion"],
                       f"{abi} runtime version")
         require_equal(entry["androidMinApi"], contract["androidMinApi"],
@@ -102,8 +106,15 @@ def verify_catalogs(root: Path, contract: dict, contract_sha256: str) -> None:
         require_equal(entry["delivery"]["artifactId"],
                       expected["bundleFileName"].removesuffix(".zip"),
                       f"{abi} delivery artifact")
-        for key in ("byteSize", "sha256", "elfClass", "machine", "soname"):
-            require_equal(library[key], expected[key], f"{abi} {key}")
+        require_equal(entry["loadOrder"], contract["cpuCore"]["loadOrder"],
+                      f"{abi} load order")
+        actual_files = {item["role"]: item for item in entry["innerLibraries"]}
+        expected_files = {item["role"]: item for item in expected["files"]}
+        require_equal(set(actual_files), {"runtime", "jni"}, f"{abi} library roles")
+        for role, expected_file in expected_files.items():
+            actual = actual_files[role]
+            for key in ("role", "path", "byteSize", "sha256", "elfClass", "machine", "soname"):
+                require_equal(actual[key], expected_file[key], f"{abi} {role} {key}")
 
     gpu_entries = gpu["entries"]
     require_equal(len(gpu_entries), 1, "GPU catalog entry count")
@@ -114,7 +125,11 @@ def verify_catalogs(root: Path, contract: dict, contract_sha256: str) -> None:
                   expected_gpu["bundleFileName"].removesuffix(".zip"),
                   "GPU delivery artifact")
     require_equal(gpu_entry["requiredCpuLibrarySha256"],
-                  expected_gpu["requiredCoreSha256"], "GPU required CPU SHA-256")
+                  expected_gpu["requiredCore"]["librarySha256"],
+                  "GPU required CPU SHA-256")
+    require_equal(gpu_entry["requiredCpuJniLibrarySha256"],
+                  expected_gpu["requiredCore"]["jniLibrarySha256"],
+                  "GPU required CPU JNI SHA-256")
     require_equal(gpu_entry["capability"], expected_gpu["profile"], "GPU profile")
     expected_files = {item["path"]: item for item in expected_gpu["files"]}
     actual_files = {item["path"]: item for item in gpu_entry["files"]}

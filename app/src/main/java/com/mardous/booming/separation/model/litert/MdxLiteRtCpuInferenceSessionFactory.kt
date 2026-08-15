@@ -30,7 +30,7 @@ internal class MdxLiteRtCpuInferenceSessionFactory(
     }
 
     override val factoryId: String = buildString {
-        append("litert-2.1.5-cpu-").append(compatibilityPolicy.name)
+        append("litert-2.2.0-cpu-").append(compatibilityPolicy.name)
         xnnPackFlags?.let { append("-xnnpack-flags-").append(it) }
     }
     override val backend: MdxInferenceBackend = MdxInferenceBackend.LiteRtCpu

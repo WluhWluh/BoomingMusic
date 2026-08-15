@@ -115,7 +115,7 @@ internal class MdxLiteRtGpuInferenceSessionFactory(
         MdxLiteRtNativeGpuSessionAllocator,
 ) : MdxInferenceSessionFactory {
     override val factoryId: String =
-        "litert-2.1.5-${runtimeProfile.profileId}-${compatibilityPolicy.name}"
+        "litert-2.2.0-${runtimeProfile.profileId}-${compatibilityPolicy.name}"
     override val backend: MdxInferenceBackend = MdxInferenceBackend.LiteRtGpu
 
     override fun create(

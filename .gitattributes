@@ -1,3 +1,4 @@
 app/src/main/assets/source-separation/*.json text eol=lf
+app/src/main/assets/licenses/litert/THIRD_PARTY_LICENSES.txt whitespace=-trailing-space
 docs/validation/**/*.json text eol=lf
 docs/validation/**/SHA256SUMS text eol=lf

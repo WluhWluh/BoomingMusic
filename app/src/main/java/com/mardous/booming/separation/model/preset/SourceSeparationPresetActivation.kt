@@ -57,6 +57,7 @@ object SourceSeparationPresetActivationResolver {
         modelId: String,
         platform: MdxRuntimePlatform,
         scope: SourceSeparationPresetSelectionScope,
+        x86ValidationEnabled: Boolean = MdxX86ProcessValidationOverride.buildEnabled,
     ): SourceSeparationPresetSelectionEligibility {
         val entry = catalog.entries.singleOrNull { it.modelId == modelId }
             ?: return blocked(SourceSeparationPresetSelectionBlockReason.MissingCatalogEntry)
@@ -79,7 +80,7 @@ object SourceSeparationPresetActivationResolver {
         val artifactSha256 = artifact.tflite?.sha256
             ?: return blocked(SourceSeparationPresetSelectionBlockReason.MissingCatalogEntry)
 
-        val qualification = catalog.runtimeQualifications.singleOrNull {
+        val matchingQualifications = catalog.runtimeQualifications.filter {
             it.modelId == modelId &&
                 it.contractId == contract.contractId &&
                 it.artifactSha256 == artifactSha256 &&
@@ -88,6 +89,27 @@ object SourceSeparationPresetActivationResolver {
                 it.precision == ContractRuntimePrecision.Fp32 &&
                 it.abi.matches(platform.runtimeAbi)
         }
+        val exactQualification = matchingQualifications.singleOrNull {
+            it.runtimeVersion == platform.runtimeVersion
+        }
+        val x86ValidationSentinel = if (
+            exactQualification == null &&
+            scope == SourceSeparationPresetSelectionScope.InternalValidation
+        ) {
+            matchingQualifications.singleOrNull { candidate ->
+                MdxX86ProcessValidationOverride.permitsCatalogQualification(
+                    modelId = modelId,
+                    artifactSha256 = artifactSha256,
+                    contractId = contract.contractId,
+                    platform = platform,
+                    originalStatus = candidate.status.toMdxRuntimeSupportStatus(),
+                    enabled = x86ValidationEnabled,
+                )
+            }
+        } else {
+            null
+        }
+        val qualification = exactQualification ?: x86ValidationSentinel
 
         if (qualification == null) {
             if (platform.androidApi < MINIMUM_UNQUALIFIED_ANDROID_API) {
@@ -119,14 +141,7 @@ object SourceSeparationPresetActivationResolver {
                 qualification.status == ContractRuntimeQualificationStatus.Candidate
         if (qualification.status != ContractRuntimeQualificationStatus.KnownGood &&
             !reviewedExperimentalCandidate &&
-            !(scope == SourceSeparationPresetSelectionScope.InternalValidation &&
-                MdxX86ProcessValidationOverride.permitsCatalogQualification(
-                    modelId = modelId,
-                    artifactSha256 = artifactSha256,
-                    contractId = contract.contractId,
-                    platform = platform,
-                    originalStatus = qualification.status.toMdxRuntimeSupportStatus(),
-                ))
+            x86ValidationSentinel == null
         ) {
             return blocked(
                 SourceSeparationPresetSelectionBlockReason.MissingKnownGoodCpuProfile,
@@ -134,7 +149,13 @@ object SourceSeparationPresetActivationResolver {
             )
         }
         if (scope == SourceSeparationPresetSelectionScope.InternalValidation) {
-            return allowed(qualification, requiresExperimentalConfirmation = false)
+            val effectiveQualification = x86ValidationSentinel?.copy(
+                runtimeVersion = platform.runtimeVersion,
+                status = ContractRuntimeQualificationStatus.KnownGood,
+                evidence = "Compile-time x86 process validation; " +
+                    x86ValidationSentinel.evidence,
+            ) ?: qualification
+            return allowed(effectiveQualification, requiresExperimentalConfirmation = false)
         }
 
         return when (entry.supportLevel) {

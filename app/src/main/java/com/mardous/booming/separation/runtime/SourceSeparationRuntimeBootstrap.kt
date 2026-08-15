@@ -12,14 +12,20 @@ import java.security.MessageDigest
 import java.util.Locale
 
 internal object SourceSeparationRuntimeLayout {
-    const val CONTRACT_SCHEMA_VERSION = "bss-litert-downloadable-runtime-v2"
+    const val CONTRACT_SCHEMA_VERSION = "bss-litert-downloadable-runtime-v3"
     const val CPU_DIRECTORY = "cpu"
     const val CPU_COMPONENT = "cpu-core"
     const val GPU_DIRECTORY = "gpu"
     const val GPU_COMPONENT = "bounded-gpu"
     const val CURRENT_DIRECTORY = "current"
     const val MANIFEST_FILE_NAME = "manifest.json"
-    const val LIBRARY_FILE_NAME = "libLiteRt.so"
+    const val CORE_LIBRARY_FILE_NAME = "libLiteRt.so"
+    const val JNI_LIBRARY_FILE_NAME = "liblitert_jni.so"
+    val CPU_LIBRARY_LOAD_ORDER = listOf(CORE_LIBRARY_FILE_NAME, JNI_LIBRARY_FILE_NAME)
+    val CPU_LIBRARY_ROLES = listOf(
+        SourceSeparationRuntimeLibraryRole.Runtime.id,
+        SourceSeparationRuntimeLibraryRole.Jni.id,
+    )
 
     fun runtimeRoot(context: Context): File = File(
         context.noBackupFilesDir,
@@ -65,16 +71,19 @@ internal data class SourceSeparationCpuRuntimeManifest(
     val capabilities: List<String>,
     val runtimeArtifactVersion: String,
     val releaseVersion: String,
+    val loadOrder: List<String>,
     val files: List<SourceSeparationRuntimeFileManifest>,
     val sourceAar: SourceSeparationRuntimeSourceAar,
 )
 
 @Serializable
 internal data class SourceSeparationRuntimeFileManifest(
+    val role: String,
     val path: String,
     val byteSize: Long,
     val sha256: String,
     val elf: SourceSeparationRuntimeElfManifest,
+    val runtimeLoads: List<String> = emptyList(),
 )
 
 @Serializable
@@ -83,6 +92,7 @@ internal data class SourceSeparationRuntimeElfManifest(
     val machine: String,
     val needed: List<String>,
     val soname: String,
+    val loadAlignment: Long,
 )
 
 @Serializable
@@ -97,15 +107,22 @@ internal data class SourceSeparationRuntimeIdentity(
     val releaseVersion: String,
     val abi: String,
     val librarySha256: String,
+    val jniLibrarySha256: String,
 )
 
 internal data class SourceSeparationCpuRuntimeInstallation(
     val directory: File,
     val manifestFile: File,
-    val libraryFile: File,
+    val libraryFiles: Map<String, File>,
     val manifest: SourceSeparationCpuRuntimeManifest,
     val identity: SourceSeparationRuntimeIdentity,
-)
+) {
+    val libraryFile: File
+        get() = requireNotNull(libraryFiles[SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME])
+
+    val jniLibraryFile: File
+        get() = requireNotNull(libraryFiles[SourceSeparationRuntimeLayout.JNI_LIBRARY_FILE_NAME])
+}
 
 internal class SourceSeparationRuntimeLocator(
     private val root: File,
@@ -145,47 +162,55 @@ internal class SourceSeparationRuntimeLocator(
         }
         validateManifest(manifest)
 
-        val file = manifest.files.single()
-        val libraryFile = File(directory, file.path)
-        val canonicalLibrary = libraryFile.canonicalFile
-        if (canonicalLibrary.parentFile != canonicalDirectory) {
-            throw SourceSeparationRuntimeLoadException(
-                reason = SourceSeparationRuntimeFailureReason.InvalidContract,
-                message = "The LiteRT CPU runtime library escapes its component directory.",
-            )
+        val libraryFiles = linkedMapOf<String, File>()
+        manifest.files.forEach { file ->
+            val canonicalLibrary = File(directory, file.path).canonicalFile
+            if (canonicalLibrary.parentFile != canonicalDirectory) {
+                throw SourceSeparationRuntimeLoadException(
+                    reason = SourceSeparationRuntimeFailureReason.InvalidContract,
+                    message = "The LiteRT CPU runtime library escapes its component directory.",
+                )
+            }
+            if (!canonicalLibrary.isFile) {
+                throw SourceSeparationRuntimeLoadException(
+                    reason = SourceSeparationRuntimeFailureReason.MissingRuntime,
+                    message = "The LiteRT CPU runtime library ${file.path} is missing.",
+                )
+            }
+            if (canonicalLibrary.length() != file.byteSize) {
+                throw SourceSeparationRuntimeLoadException(
+                    reason = SourceSeparationRuntimeFailureReason.CorruptPayload,
+                    message = "The LiteRT CPU runtime library ${file.path} size does not match its manifest.",
+                )
+            }
+            if (verifyPayloadHash &&
+                !canonicalLibrary.sha256().equals(file.sha256, ignoreCase = true)
+            ) {
+                throw SourceSeparationRuntimeLoadException(
+                    reason = SourceSeparationRuntimeFailureReason.CorruptPayload,
+                    message = "The LiteRT CPU runtime library ${file.path} hash does not match its manifest.",
+                )
+            }
+            libraryFiles[file.path] = canonicalLibrary
         }
-        if (!canonicalLibrary.isFile) {
-            throw SourceSeparationRuntimeLoadException(
-                reason = SourceSeparationRuntimeFailureReason.MissingRuntime,
-                message = "The LiteRT CPU runtime library is missing.",
-            )
-        }
-        if (canonicalLibrary.length() != file.byteSize) {
-            throw SourceSeparationRuntimeLoadException(
-                reason = SourceSeparationRuntimeFailureReason.CorruptPayload,
-                message = "The LiteRT CPU runtime library size does not match its manifest.",
-            )
-        }
-        if (verifyPayloadHash &&
-            !canonicalLibrary.sha256().equals(file.sha256, ignoreCase = true)
-        ) {
-            throw SourceSeparationRuntimeLoadException(
-                reason = SourceSeparationRuntimeFailureReason.CorruptPayload,
-                message = "The LiteRT CPU runtime library hash does not match its manifest.",
-            )
-        }
+        val filesByRole = manifest.files.associateBy(SourceSeparationRuntimeFileManifest::role)
 
         return SourceSeparationCpuRuntimeInstallation(
             directory = canonicalDirectory,
             manifestFile = canonicalManifest,
-            libraryFile = canonicalLibrary,
+            libraryFiles = libraryFiles,
             manifest = manifest,
             identity = SourceSeparationRuntimeIdentity(
                 contractSchemaVersion = manifest.contractSchemaVersion,
                 runtimeArtifactVersion = manifest.runtimeArtifactVersion,
                 releaseVersion = manifest.releaseVersion,
                 abi = manifest.abi,
-                librarySha256 = file.sha256.lowercase(Locale.US),
+                librarySha256 = requireNotNull(
+                    filesByRole[SourceSeparationRuntimeLibraryRole.Runtime.id],
+                ).sha256.lowercase(Locale.US),
+                jniLibrarySha256 = requireNotNull(
+                    filesByRole[SourceSeparationRuntimeLibraryRole.Jni.id],
+                ).sha256.lowercase(Locale.US),
             ),
         )
     }
@@ -194,7 +219,7 @@ internal class SourceSeparationRuntimeLocator(
         if (manifest.schemaVersion != MANIFEST_SCHEMA_VERSION ||
             manifest.contractSchemaVersion != SourceSeparationRuntimeLayout.CONTRACT_SCHEMA_VERSION ||
             manifest.component != SourceSeparationRuntimeLayout.CPU_COMPONENT ||
-            manifest.files.size != 1
+            manifest.files.size != SourceSeparationRuntimeLayout.CPU_LIBRARY_LOAD_ORDER.size
         ) {
             invalidContract("The LiteRT CPU runtime manifest has an unsupported shape.")
         }
@@ -220,15 +245,28 @@ internal class SourceSeparationRuntimeLocator(
             invalidContract("The LiteRT CPU runtime manifest has incomplete identity data.")
         }
 
-        val file = manifest.files.single()
-        if (file.path != SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME ||
-            file.byteSize <= 0L ||
-            !SHA256_PATTERN.matches(file.sha256) ||
-            file.elf.elfClass.isBlank() ||
-            file.elf.machine.isBlank() ||
-            file.elf.soname.isBlank()
+        if (manifest.loadOrder != SourceSeparationRuntimeLayout.CPU_LIBRARY_LOAD_ORDER ||
+            manifest.files.map(SourceSeparationRuntimeFileManifest::path) != manifest.loadOrder ||
+            manifest.files.map(SourceSeparationRuntimeFileManifest::role) !=
+                SourceSeparationRuntimeLayout.CPU_LIBRARY_ROLES
+        ) invalidContract("The LiteRT CPU runtime manifest has an invalid library order.")
+        manifest.files.forEach { file ->
+            if (file.byteSize <= 0L ||
+                !SHA256_PATTERN.matches(file.sha256) ||
+                file.elf.elfClass.isBlank() ||
+                file.elf.machine.isBlank() ||
+                file.elf.soname.isBlank() ||
+                file.elf.loadAlignment != REQUIRED_LOAD_ALIGNMENT
+            ) {
+                invalidContract("The LiteRT CPU runtime manifest has an invalid library record.")
+            }
+        }
+        val filesByRole = manifest.files.associateBy(SourceSeparationRuntimeFileManifest::role)
+        if (filesByRole.getValue(SourceSeparationRuntimeLibraryRole.Runtime.id).runtimeLoads.isNotEmpty() ||
+            filesByRole.getValue(SourceSeparationRuntimeLibraryRole.Jni.id).runtimeLoads !=
+                listOf(SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME)
         ) {
-            invalidContract("The LiteRT CPU runtime manifest has an invalid library record.")
+            invalidContract("The LiteRT CPU runtime lookup contract is invalid.")
         }
     }
 
@@ -238,7 +276,8 @@ internal class SourceSeparationRuntimeLocator(
     )
 
     private companion object {
-        const val MANIFEST_SCHEMA_VERSION = 1
+        const val MANIFEST_SCHEMA_VERSION = 2
+        const val REQUIRED_LOAD_ALIGNMENT = 16_384L
         val SHA256_PATTERN = Regex("^[a-fA-F0-9]{64}$")
         val RUNTIME_JSON = Json {
             ignoreUnknownKeys = false
@@ -268,7 +307,7 @@ internal object SourceSeparationRuntimeBootstrap {
         val loaded = loadedInstallation
         if (loaded != null) {
             if (loaded.identity != installation.identity ||
-                loaded.libraryFile != installation.libraryFile
+                loaded.libraryFiles != installation.libraryFiles
             ) {
                 throw SourceSeparationRuntimeLoadException(
                     reason = SourceSeparationRuntimeFailureReason.ConflictingLoaderPath,
@@ -279,12 +318,17 @@ internal object SourceSeparationRuntimeBootstrap {
         }
 
         val libraryPath = installation.libraryFile.absolutePath
+        val jniLibraryPath = installation.jniLibraryFile.absolutePath
         val configuredPath = LiteRtNativeLibraryLoader.configuredAbsolutePath()
             ?.takeIf { it.isNotBlank() }
-        if (configuredPath != null && configuredPath != libraryPath) {
+        val configuredJniPath = LiteRtNativeLibraryLoader.configuredJniAbsolutePath()
+            ?.takeIf { it.isNotBlank() }
+        if ((configuredPath != null && configuredPath != libraryPath) ||
+            (configuredJniPath != null && configuredJniPath != jniLibraryPath)
+        ) {
             throw SourceSeparationRuntimeLoadException(
                 reason = SourceSeparationRuntimeFailureReason.ConflictingLoaderPath,
-                message = "LiteRT is already configured for another native library path.",
+                message = "LiteRT is already configured for another native library set.",
             )
         }
         val lease = SourceSeparationRuntimeProcessLease.tryAcquire(
@@ -295,24 +339,33 @@ internal object SourceSeparationRuntimeBootstrap {
             reason = SourceSeparationRuntimeFailureReason.ConflictingLoaderPath,
             message = "The LiteRT runtime is already leased by another process.",
         )
+        var nativeLoadAttempted = false
         try {
             LiteRtNativeLibraryLoader.configureAbsolutePath(libraryPath)
+            check(LiteRtNativeLibraryLoader.configuredJniAbsolutePath() == jniLibraryPath) {
+                "LiteRT native loader derived an unexpected JNI library path."
+            }
+            nativeLoadAttempted = true
+            activeLease = lease
             LiteRtNativeLibraryLoader.load()
             check(LiteRtNativeLibraryLoader.isLoaded()) {
                 "LiteRT native loader did not report a loaded runtime."
             }
         } catch (error: SourceSeparationRuntimeLoadException) {
-            lease.close()
+            if (!nativeLoadAttempted) lease.close()
             throw error
         } catch (error: Throwable) {
-            lease.close()
+            if (!nativeLoadAttempted) lease.close()
             throw SourceSeparationRuntimeLoadException(
                 reason = classifyLoadFailure(error),
-                message = "Unable to load the verified LiteRT CPU runtime.",
+                message = if (nativeLoadAttempted) {
+                    "Unable to load the verified LiteRT CPU runtime; restart the process before retrying."
+                } else {
+                    "Unable to configure the verified LiteRT CPU runtime."
+                },
                 cause = error,
             )
         }
-        activeLease = lease
         loadedInstallation = installation
         installation
     }

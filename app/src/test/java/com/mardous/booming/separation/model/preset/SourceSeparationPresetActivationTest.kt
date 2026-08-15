@@ -2,6 +2,7 @@ package com.mardous.booming.separation.model.preset
 
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimePlatform
+import com.mardous.booming.separation.model.MdxRuntimeProfiles
 import com.mardous.booming.separation.model.contract.ContractAbi
 import com.mardous.booming.separation.model.contract.ContractRuntimeQualificationStatus
 import com.mardous.booming.separation.model.contract.SourceSeparationModelCatalog
@@ -34,6 +35,26 @@ class SourceSeparationPresetActivationTest {
         assertTrue(eligibility.allowed)
         assertFalse(eligibility.requiresExperimentalConfirmation)
         assertEquals("cpu-default-fp32-v1", eligibility.cpuQualification?.profileId)
+    }
+
+    @Test
+    fun `historic CPU qualification does not qualify the current runtime`() {
+        val platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a)
+        val current = SourceSeparationPresetActivationResolver.resolve(
+            catalog = catalog,
+            modelId = "uvr_mdxnet_3_9662",
+            platform = platform,
+            scope = SourceSeparationPresetSelectionScope.InternalValidation,
+        )
+        val historic = SourceSeparationPresetActivationResolver.resolve(
+            catalog = catalog,
+            modelId = "uvr_mdxnet_3_9662",
+            platform = platform.copy(runtimeVersion = HISTORIC_LITERT_VERSION),
+            scope = SourceSeparationPresetSelectionScope.InternalValidation,
+        )
+
+        assertEquals(null, current.cpuQualification)
+        assertEquals(HISTORIC_LITERT_VERSION, historic.cpuQualification?.runtimeVersion)
     }
 
     @Test
@@ -78,12 +99,40 @@ class SourceSeparationPresetActivationTest {
         val eligibility = SourceSeparationPresetActivationResolver.resolve(
             catalog = catalog,
             modelId = "uvr_mdxnet_3_9662",
-            platform = MdxRuntimePlatform(androidApi = 35, runtimeAbi = MdxRuntimeAbi.X86_64),
+            platform = MdxRuntimePlatform(
+                androidApi = 35,
+                runtimeAbi = MdxRuntimeAbi.X86_64,
+                runtimeVersion = HISTORIC_LITERT_VERSION,
+            ),
             scope = SourceSeparationPresetSelectionScope.InternalValidation,
         )
 
         assertTrue(eligibility.allowed)
         assertEquals(ContractAbi.X86_64, eligibility.cpuQualification?.abi)
+    }
+
+    @Test
+    fun `compile-time x86 validation rebinds the historic sentinel to current LiteRT`() {
+        val eligibility = SourceSeparationPresetActivationResolver.resolve(
+            catalog = catalog,
+            modelId = "uvr_mdxnet_3_9662",
+            platform = MdxRuntimePlatform(
+                androidApi = 26,
+                runtimeAbi = MdxRuntimeAbi.X86,
+            ),
+            scope = SourceSeparationPresetSelectionScope.InternalValidation,
+            x86ValidationEnabled = true,
+        )
+
+        assertTrue(eligibility.allowed)
+        assertEquals(
+            ContractRuntimeQualificationStatus.KnownGood,
+            eligibility.cpuQualification?.status,
+        )
+        assertEquals(
+            MdxRuntimeProfiles.LITERT_VERSION,
+            eligibility.cpuQualification?.runtimeVersion,
+        )
     }
 
     @Test
@@ -122,7 +171,11 @@ class SourceSeparationPresetActivationTest {
         val eligibility = SourceSeparationPresetActivationResolver.resolve(
             catalog = catalog,
             modelId = "uvr_mdxnet_inst_hq_4",
-            platform = MdxRuntimePlatform(androidApi = 35, runtimeAbi = MdxRuntimeAbi.X86_64),
+            platform = MdxRuntimePlatform(
+                androidApi = 35,
+                runtimeAbi = MdxRuntimeAbi.X86_64,
+                runtimeVersion = HISTORIC_LITERT_VERSION,
+            ),
             scope = SourceSeparationPresetSelectionScope.User,
         )
 
@@ -143,11 +196,16 @@ class SourceSeparationPresetActivationTest {
     ) = SourceSeparationPresetActivationResolver.resolve(
         catalog = catalog,
         modelId = modelId,
-        platform = MdxRuntimePlatform(androidApi = 35, runtimeAbi = MdxRuntimeAbi.Arm64V8a),
+        platform = MdxRuntimePlatform(
+            androidApi = 35,
+            runtimeAbi = MdxRuntimeAbi.Arm64V8a,
+            runtimeVersion = HISTORIC_LITERT_VERSION,
+        ),
         scope = scope,
     )
 
     companion object {
+        private const val HISTORIC_LITERT_VERSION = "2.1.5"
         private lateinit var catalog: SourceSeparationModelCatalog
 
         @JvmStatic

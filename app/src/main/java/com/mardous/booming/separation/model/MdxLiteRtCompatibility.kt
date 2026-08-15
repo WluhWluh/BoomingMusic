@@ -25,11 +25,13 @@ enum class MdxRuntimePrecision {
 }
 
 object MdxRuntimeProfiles {
+    const val LITERT_VERSION = "2.2.0"
     const val CPU_DEFAULT_FP32 = "cpu-default-fp32-v1"
     const val GPU_AUTO_FP32 = "gpu-auto-fp32-v1"
 }
 
 data class MdxRuntimeCompatibilityRecord(
+    val runtimeVersion: String,
     val abi: MdxRuntimeAbi,
     val backend: MdxInferenceBackend,
     val profileId: String,
@@ -38,6 +40,7 @@ data class MdxRuntimeCompatibilityRecord(
     val evidence: String,
 ) {
     init {
+        require(runtimeVersion.isNotBlank()) { "Runtime compatibility version is empty." }
         require(profileId.isNotBlank()) { "Runtime compatibility profile ID is empty." }
         require(evidence.isNotBlank()) { "Runtime compatibility evidence is empty." }
     }
@@ -46,9 +49,11 @@ data class MdxRuntimeCompatibilityRecord(
 data class MdxRuntimePlatform(
     val androidApi: Int,
     val runtimeAbi: MdxRuntimeAbi,
+    val runtimeVersion: String = MdxRuntimeProfiles.LITERT_VERSION,
 ) {
     init {
         require(androidApi > 0) { "Android API level must be positive." }
+        require(runtimeVersion.isNotBlank()) { "LiteRT runtime version is empty." }
     }
 }
 
@@ -125,7 +130,8 @@ object MdxLiteRtCompatibilityResolver {
             )
         }
         val record = profile.runtimeCompatibility.singleOrNull {
-            it.abi == platform.runtimeAbi &&
+            it.runtimeVersion == platform.runtimeVersion &&
+                it.abi == platform.runtimeAbi &&
                 it.backend == backend &&
                 it.profileId == profileId &&
                 it.precision == precision

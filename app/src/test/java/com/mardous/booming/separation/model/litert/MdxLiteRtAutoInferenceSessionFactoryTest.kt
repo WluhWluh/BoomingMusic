@@ -478,7 +478,9 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
             MdxCompatibilityPolicy.KnownGoodOnly,
     ) = MdxLiteRtAutoInferenceSessionFactory(
         gpuRuntimeProfile = MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1,
-        platformProvider = { MdxRuntimePlatform(35, abi) },
+        platformProvider = {
+            MdxRuntimePlatform(35, abi, CATALOG_LITERT_VERSION)
+        },
         gpuCompatibilityPolicy = gpuCompatibilityPolicy,
         cpuCompatibilityPolicy = cpuCompatibilityPolicy,
         gpuEligibilityProvider = eligibilityProvider,
@@ -561,6 +563,7 @@ class MdxLiteRtAutoInferenceSessionFactoryTest {
     }
 
     companion object {
+        private const val CATALOG_LITERT_VERSION = "2.1.5"
         private lateinit var catalog: SourceSeparationModelCatalog
 
         @JvmStatic

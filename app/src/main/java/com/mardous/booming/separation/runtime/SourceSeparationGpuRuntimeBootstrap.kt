@@ -78,7 +78,18 @@ internal object SourceSeparationGpuRuntimeBootstrap {
                 cpuRecord.componentType != SourceSeparationRuntimeLayout.CPU_COMPONENT ||
                 cpuRecord.abi != abi ||
                 !cpuRecord.librarySha256.equals(cpu.identity.librarySha256, ignoreCase = true) ||
-                !cpu.identity.librarySha256.equals(catalogEntry.requiredCpuLibrarySha256, ignoreCase = true)
+                !cpuRecord.jniLibrarySha256.equals(
+                    cpu.identity.jniLibrarySha256,
+                    ignoreCase = true,
+                ) ||
+                !cpu.identity.librarySha256.equals(
+                    catalogEntry.requiredCpuLibrarySha256,
+                    ignoreCase = true,
+                ) ||
+                !cpu.identity.jniLibrarySha256.equals(
+                    catalogEntry.requiredCpuJniLibrarySha256,
+                    ignoreCase = true,
+                )
             ) {
                 observation = unavailable(
                     "The installed CPU LiteRT runtime does not match the GPU dependency.",
@@ -166,6 +177,10 @@ internal object SourceSeparationGpuRuntimeBootstrap {
             installation.manifest.runtimeArtifactVersion == entry.runtimeArtifactVersion &&
             installation.manifest.requiredCore.librarySha256.equals(
                 entry.requiredCpuLibrarySha256,
+                ignoreCase = true,
+            ) &&
+            installation.manifest.requiredCore.jniLibrarySha256.equals(
+                entry.requiredCpuJniLibrarySha256,
                 ignoreCase = true,
             ) &&
             installation.manifest.profile == entry.capability &&
