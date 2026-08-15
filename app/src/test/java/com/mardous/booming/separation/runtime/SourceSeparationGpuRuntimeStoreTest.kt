@@ -60,6 +60,21 @@ class SourceSeparationGpuRuntimeStoreTest {
     }
 
     @Test
+    fun `mismatched CPU JNI dependency is rejected before download`() {
+        val fixture = GpuRuntimeFixture.create(
+            temporary.root,
+            requiredCpuJniHash = "f".repeat(64),
+        )
+        val provider = fixture.provider()
+
+        val error = runCatching { fixture.store(provider).install(fixture.entry.componentId) }
+            .exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertEquals(0, provider.acquireCount)
+    }
+
+    @Test
     fun `low disk preflight rejects before acquiring GPU payload`() {
         val fixture = GpuRuntimeFixture.create(temporary.root)
         val provider = fixture.provider()
@@ -119,7 +134,7 @@ class SourceSeparationGpuRuntimeStoreTest {
         recordFile.writeText(
             Json.encodeToString(
                 SourceSeparationRuntimeInstallRecord(
-                    schemaVersion = 1,
+                    schemaVersion = SourceSeparationRuntimeInstallRecord.SCHEMA_VERSION,
                     componentId = "different-cpu-component",
                     componentType = SourceSeparationRuntimeLayout.CPU_COMPONENT,
                     producerReleaseTag = "test-cpu-release-tag",
@@ -128,6 +143,7 @@ class SourceSeparationGpuRuntimeStoreTest {
                     abi = fixture.entry.abi,
                     innerManifestSha256 = "a".repeat(64),
                     librarySha256 = fixture.cpuLibrary.sha256(),
+                    jniLibrarySha256 = fixture.cpuJniLibrary.sha256(),
                     installedAtEpochMs = 1L,
                     lastValidatedAtEpochMs = 1L,
                 ),
@@ -285,6 +301,7 @@ class SourceSeparationGpuRuntimeStoreTest {
         val catalog: SourceSeparationGpuRuntimeCatalog,
         val zipBytes: ByteArray,
         val cpuLibrary: ByteArray,
+        val cpuJniLibrary: ByteArray,
         private val cpuManifest: ByteArray,
     ) {
         fun provider(bytes: ByteArray = zipBytes) = TestGpuRuntimeProvider(bytes)
@@ -300,12 +317,15 @@ class SourceSeparationGpuRuntimeStoreTest {
         init {
             val cpuDirectory = SourceSeparationRuntimeLayout.cpuCurrentDirectory(root, entry.abi)
                 .apply { mkdirs() }
-            File(cpuDirectory, SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME).writeBytes(cpuLibrary)
+            File(cpuDirectory, SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME)
+                .writeBytes(cpuLibrary)
+            File(cpuDirectory, SourceSeparationRuntimeLayout.JNI_LIBRARY_FILE_NAME)
+                .writeBytes(cpuJniLibrary)
             File(cpuDirectory, SourceSeparationRuntimeLayout.MANIFEST_FILE_NAME).writeBytes(cpuManifest)
             File(cpuDirectory, "install.json").writeText(
                 Json.encodeToString(
                     SourceSeparationRuntimeInstallRecord(
-                        schemaVersion = 1,
+                        schemaVersion = SourceSeparationRuntimeInstallRecord.SCHEMA_VERSION,
                         componentId = entry.requiredCpuComponentId,
                         componentType = SourceSeparationRuntimeLayout.CPU_COMPONENT,
                         producerReleaseTag = "test-cpu-release-tag",
@@ -314,6 +334,7 @@ class SourceSeparationGpuRuntimeStoreTest {
                         abi = entry.abi,
                         innerManifestSha256 = cpuManifest.sha256(),
                         librarySha256 = cpuLibrary.sha256(),
+                        jniLibrarySha256 = cpuJniLibrary.sha256(),
                         installedAtEpochMs = 1L,
                         lastValidatedAtEpochMs = 1L,
                     ),
@@ -325,12 +346,16 @@ class SourceSeparationGpuRuntimeStoreTest {
             fun create(
                 root: File,
                 requiredCpuHash: String? = null,
+                requiredCpuJniHash: String? = null,
                 runtimeVersion: String = "test-runtime",
                 releaseVersion: String = "test-release",
             ): GpuRuntimeFixture {
                 val cpuLibrary = byteArrayOf(1, 2, 3, 4)
+                val cpuJniLibrary = byteArrayOf(5, 6, 7, 8)
                 val cpuHash = cpuLibrary.sha256()
+                val cpuJniHash = cpuJniLibrary.sha256()
                 val requiredHash = requiredCpuHash ?: cpuHash
+                val requiredJniHash = requiredCpuJniHash ?: cpuJniHash
                 val accelerator = byteArrayOf(8, 7, 6)
                 val shim = byteArrayOf(5, 4, 3)
                 val acceleratorHash = accelerator.sha256()
@@ -339,12 +364,12 @@ class SourceSeparationGpuRuntimeStoreTest {
                 val cpuComponentId = "test-cpu-core-arm64-v8a"
                 val manifest = """
                     {
-                      "schemaVersion": 1,
-                      "contractSchemaVersion": "bss-litert-downloadable-runtime-v2",
+                      "schemaVersion": 2,
+                      "contractSchemaVersion": "bss-litert-downloadable-runtime-v3",
                       "component": "bounded-gpu",
                       "abi": "arm64-v8a",
                       "androidMinApi": 26,
-                      "baseLiteRtVersion": "2.1.5",
+                      "baseLiteRtVersion": "2.2.0",
                       "capabilities": ["gpu-opencl-bounded-fp32"],
                       "runtimeArtifactVersion": "$runtimeVersion",
                       "releaseVersion": "$releaseVersion",
@@ -357,7 +382,8 @@ class SourceSeparationGpuRuntimeStoreTest {
                             "class": "ELF64",
                             "machine": "EM_AARCH64",
                             "needed": ["libc.so"],
-                            "soname": "libLiteRtClGlAccelerator.so"
+                            "soname": "libLiteRtClGlAccelerator.so",
+                            "loadAlignment": 16384
                           },
                           "runtimeLoads": ["libBssOcl.so"]
                         },
@@ -369,7 +395,8 @@ class SourceSeparationGpuRuntimeStoreTest {
                             "class": "ELF64",
                             "machine": "EM_AARCH64",
                             "needed": ["libc.so"],
-                            "soname": "libBssOcl.so"
+                            "soname": "libBssOcl.so",
+                            "loadAlignment": 16384
                           }
                         }
                       ],
@@ -383,7 +410,8 @@ class SourceSeparationGpuRuntimeStoreTest {
                       },
                       "requiredCore": {
                         "abi": "arm64-v8a",
-                        "librarySha256": "$requiredHash"
+                        "librarySha256": "$requiredHash",
+                        "jniLibrarySha256": "$requiredJniHash"
                       },
                       "sourceAar": {
                         "fileName": "test-api.aar",
@@ -398,7 +426,7 @@ class SourceSeparationGpuRuntimeStoreTest {
                     producerReleaseTag = "test-release-tag",
                     producerReleaseVersion = releaseVersion,
                     runtimeArtifactVersion = runtimeVersion,
-                    baseLiteRtVersion = "2.1.5",
+                    baseLiteRtVersion = "2.2.0",
                     abi = "arm64-v8a",
                     androidMinApi = 26,
                     maturity = "recommended",
@@ -406,6 +434,7 @@ class SourceSeparationGpuRuntimeStoreTest {
                     dependencies = listOf(cpuComponentId),
                     requiredCpuComponentId = cpuComponentId,
                     requiredCpuLibrarySha256 = requiredHash,
+                    requiredCpuJniLibrarySha256 = requiredJniHash,
                     capability = SourceSeparationGpuRuntimeCapability(
                         schemaVersion = 1,
                         profileId = "gpu-opencl-bounded-fp32-v1",
@@ -445,26 +474,45 @@ class SourceSeparationGpuRuntimeStoreTest {
                 )
                 val cpuManifest = """
                     {
-                      "schemaVersion": 1,
-                      "contractSchemaVersion": "bss-litert-downloadable-runtime-v2",
+                      "schemaVersion": 2,
+                      "contractSchemaVersion": "bss-litert-downloadable-runtime-v3",
                       "component": "cpu-core",
                       "abi": "arm64-v8a",
                       "androidMinApi": 26,
-                      "baseLiteRtVersion": "2.1.5",
+                      "baseLiteRtVersion": "2.2.0",
                       "capabilities": ["cpu"],
                       "runtimeArtifactVersion": "test-cpu-runtime",
                       "releaseVersion": "test-cpu-release",
-                      "files": [{
-                        "path": "libLiteRt.so",
-                        "byteSize": 4,
-                        "sha256": "$cpuHash",
-                        "elf": {
-                          "class": "ELF64",
-                          "machine": "EM_AARCH64",
-                          "needed": ["libc.so"],
-                          "soname": "libLiteRt.so"
+                      "loadOrder": ["libLiteRt.so", "liblitert_jni.so"],
+                      "files": [
+                        {
+                          "role": "runtime",
+                          "path": "libLiteRt.so",
+                          "byteSize": 4,
+                          "sha256": "$cpuHash",
+                          "elf": {
+                            "class": "ELF64",
+                            "machine": "EM_AARCH64",
+                            "needed": ["libc.so"],
+                            "soname": "libLiteRt.so",
+                            "loadAlignment": 16384
+                          }
+                        },
+                        {
+                          "role": "jni",
+                          "path": "liblitert_jni.so",
+                          "byteSize": 4,
+                          "sha256": "$cpuJniHash",
+                          "elf": {
+                            "class": "ELF64",
+                            "machine": "EM_AARCH64",
+                            "needed": ["libdl.so", "libc.so"],
+                            "soname": "liblitert_jni.so",
+                            "loadAlignment": 16384
+                          },
+                          "runtimeLoads": ["libLiteRt.so"]
                         }
-                      }],
+                      ],
                       "sourceAar": {
                         "fileName": "test-api.aar",
                         "sha256": "${"a".repeat(64)}"
@@ -472,14 +520,22 @@ class SourceSeparationGpuRuntimeStoreTest {
                     }
                 """.trimIndent().encodeToByteArray()
                 val catalog = SourceSeparationGpuRuntimeCatalog(
-                    schemaVersion = 1,
+                    schemaVersion = SourceSeparationGpuRuntimeCatalogMetadata.SCHEMA_VERSION,
                     catalogId = SourceSeparationGpuRuntimeCatalogMetadata.CATALOG_ID,
                     producerContractSchemaVersion = SourceSeparationRuntimeLayout.CONTRACT_SCHEMA_VERSION,
                     producerContractSha256 = "b".repeat(64),
                     entries = listOf(entry),
                 )
                 SourceSeparationGpuRuntimeCatalogLoader.validate(catalog)
-                return GpuRuntimeFixture(root, entry, catalog, zip, cpuLibrary, cpuManifest)
+                return GpuRuntimeFixture(
+                    root,
+                    entry,
+                    catalog,
+                    zip,
+                    cpuLibrary,
+                    cpuJniLibrary,
+                    cpuManifest,
+                )
             }
 
             private fun zipBytes(

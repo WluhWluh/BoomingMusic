@@ -89,6 +89,8 @@ param(
     [bool]$WindowDecode = $true,
     [switch]$SkipBuild,
     [switch]$SkipInstall,
+    [switch]$SkipRuntimeInstall,
+    [string]$RuntimeReleaseTag = "downloadable-runtime-v2.2.0-bss.2-exp.1",
     [switch]$KeepAppData,
     [switch]$CleanInstallScenario,
     [switch]$PreserveMediaStoreSource,
@@ -1000,10 +1002,6 @@ try {
             Set-Content -LiteralPath $buildIdentityPath -Encoding utf8
         $appCommit = $sourceCommitAtInvocation
     }
-    $litertSha256 = ""
-    $runtimeAsset = Get-ChildItem "app\build\intermediates\merged_native_libs\githubDebug\out\lib\$ProcessAbi\libLiteRt.so" -ErrorAction SilentlyContinue
-    if ($null -ne $runtimeAsset) { $litertSha256 = Get-Sha256 $runtimeAsset.FullName }
-
     if ($SkipInstall) {
         Assert-InstalledApk -PackageName $package -ExpectedSha256 $appApkSha256
         Assert-InstalledApk -PackageName ($package + ".test") -ExpectedSha256 $testApkSha256
@@ -1012,6 +1010,79 @@ try {
         Invoke-Adb install -r -t $testApk.FullName
     }
     if (-not $KeepAppData) { Invoke-Adb shell pm clear $package }
+    $runtimeCatalog = Get-Content -Raw -LiteralPath `
+        "app\src\main\assets\source-separation\litert-runtime-catalog-v2.json" |
+        ConvertFrom-Json
+    $runtimeCatalogEntry = @($runtimeCatalog.entries) | Where-Object {
+        $_.abi -eq $ProcessAbi
+    } | Select-Object -First 1
+    if ($null -eq $runtimeCatalogEntry -or
+            $runtimeCatalogEntry.producerReleaseTag -ne $RuntimeReleaseTag -or
+            $runtimeCatalogEntry.runtimeArtifactVersion -ne "2.2.0-bss.2") {
+        throw "The pinned downloadable LiteRT catalog identity is invalid."
+    }
+    $catalogRuntimeLibrary = @($runtimeCatalogEntry.innerLibraries) | Where-Object {
+        $_.role -eq "runtime"
+    } | Select-Object -First 1
+    $catalogJniLibrary = @($runtimeCatalogEntry.innerLibraries) | Where-Object {
+        $_.role -eq "jni"
+    } | Select-Object -First 1
+    if ($null -eq $catalogRuntimeLibrary -or $null -eq $catalogJniLibrary) {
+        throw "The pinned downloadable LiteRT catalog is missing core or JNI identity."
+    }
+    $litertArtifactVersion = [string]$runtimeCatalogEntry.runtimeArtifactVersion
+    $litertSha256 = ([string]$catalogRuntimeLibrary.sha256).ToLowerInvariant()
+    $litertJniSha256 = ([string]$catalogJniLibrary.sha256).ToLowerInvariant()
+
+    if ($Stage -ne "acquisition") {
+        if (-not $SkipRuntimeInstall) {
+            & (Join-Path $PSScriptRoot "install_litert_cpu_runtime.ps1") `
+                -Serial $Serial `
+                -Package $package `
+                -ProcessAbi $ProcessAbi `
+                -ReleaseTag $RuntimeReleaseTag
+        }
+        foreach ($installedLibrary in @(
+            @{
+                Path = "no_backup/source-separation/runtimes/cpu/$ProcessAbi/current/libLiteRt.so"
+                ExpectedSha256 = $litertSha256
+                Role = "core"
+            },
+            @{
+                Path = "no_backup/source-separation/runtimes/cpu/$ProcessAbi/current/liblitert_jni.so"
+                ExpectedSha256 = $litertJniSha256
+                Role = "JNI"
+            }
+        )) {
+            $installedHash = ((
+                & $adb -s $Serial shell run-as $package sha256sum $installedLibrary.Path
+            ) -join " ").Trim()
+            if ($LASTEXITCODE -ne 0 -or
+                    $installedHash -notmatch '^([0-9a-fA-F]{64})\s+' -or
+                    $Matches[1].ToLowerInvariant() -ne $installedLibrary.ExpectedSha256) {
+                throw "The installed downloadable LiteRT $($installedLibrary.Role) hash is invalid."
+            }
+        }
+        $installedRuntimeRecordPath =
+            "no_backup/source-separation/runtimes/cpu/$ProcessAbi/current/install.json"
+        $installedRuntimeRecordText = ((
+            & $adb -s $Serial shell run-as $package cat $installedRuntimeRecordPath
+        ) -join "`n").Trim()
+        if ($LASTEXITCODE -ne 0 -or
+                [string]::IsNullOrWhiteSpace($installedRuntimeRecordText)) {
+            throw "Could not read the installed downloadable LiteRT runtime identity."
+        }
+        $installedRuntimeRecord = $installedRuntimeRecordText | ConvertFrom-Json
+        if ($installedRuntimeRecord.schemaVersion -ne 2 -or
+                $installedRuntimeRecord.componentType -ne "cpu-core" -or
+                $installedRuntimeRecord.producerReleaseTag -ne $RuntimeReleaseTag -or
+                $installedRuntimeRecord.runtimeArtifactVersion -ne $litertArtifactVersion -or
+                $installedRuntimeRecord.abi -ne $ProcessAbi -or
+                $installedRuntimeRecord.librarySha256 -ne $litertSha256 -or
+                $installedRuntimeRecord.jniLibrarySha256 -ne $litertJniSha256) {
+            throw "The installed downloadable LiteRT runtime identity is invalid."
+        }
+    }
     & $adb -s $Serial shell pm grant $package android.permission.READ_EXTERNAL_STORAGE 2>$null | Out-Null
     & $adb -s $Serial shell pm grant $package android.permission.WRITE_EXTERNAL_STORAGE 2>$null | Out-Null
     & $adb -s $Serial shell pm grant $package android.permission.READ_MEDIA_AUDIO 2>$null | Out-Null
@@ -1054,7 +1125,7 @@ try {
         "-e", "catalogSourceRevision", $catalogSourceRevision,
         "-e", "modelReleaseTag", $artifact.releaseAsset.tag,
         "-e", "pipelineCompatibilityVersion", $pipelineVersion,
-        "-e", "litertVersion", "2.1.5",
+        "-e", "litertVersion", $litertArtifactVersion,
         "-e", "runnerRevision", $RunnerRevision,
         "-e", "thresholdsVersion", $thresholds.schemaVersion,
         "-e", "maximumCancellationLatencyMs",
@@ -2088,7 +2159,14 @@ try {
                 contractSchemaVersion = $secondaryModel.Contract.contractSchemaVersion
             }
         } else { $null }
-        runtime = [ordered]@{ id = "litert"; version = "2.1.5"; abi = $ProcessAbi; nativeLibrarySha256 = $litertSha256 }
+        runtime = [ordered]@{
+            id = "litert"
+            version = $litertArtifactVersion
+            releaseTag = $RuntimeReleaseTag
+            abi = $ProcessAbi
+            nativeLibrarySha256 = $litertSha256
+            nativeJniLibrarySha256 = $litertJniSha256
+        }
         thresholdsVersion = $thresholds.schemaVersion
         fixturesVersion = $fixtures.schemaVersion
         runnerRevision = $RunnerRevision

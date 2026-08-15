@@ -803,7 +803,7 @@ class SourceSeparationPresetRepositoryTest {
                         contractId = contract.contractId,
                         artifactSha256 = hash,
                         runtimeId = "litert",
-                        runtimeVersion = "2.1.5",
+                        runtimeVersion = MdxRuntimeProfiles.LITERT_VERSION,
                         minimumAndroidApi = 26,
                         abi = ContractAbi.Arm64V8a,
                         backend = ContractBackend.Cpu,

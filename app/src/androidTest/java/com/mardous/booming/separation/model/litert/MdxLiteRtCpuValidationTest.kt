@@ -17,6 +17,7 @@ import com.mardous.booming.separation.model.MdxInferenceSession
 import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimePlatform
+import com.mardous.booming.separation.model.MdxRuntimeProfiles
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxSpectrogram
@@ -657,6 +658,7 @@ class MdxLiteRtCpuValidationTest {
         }
         val probeEvidence = "Internal resource probe only; original evidence: ${original.evidence}"
         val overridden = original.copy(
+            runtimeVersion = MdxRuntimeProfiles.LITERT_VERSION,
             status = MdxRuntimeSupportStatus.Untested,
             evidence = probeEvidence,
         )
@@ -670,8 +672,10 @@ class MdxLiteRtCpuValidationTest {
             .put("abi", original.abi.androidName)
             .put("backend", original.backend.name)
             .put("originalStatus", original.status.name)
+            .put("originalRuntimeVersion", original.runtimeVersion)
             .put("originalEvidence", original.evidence)
             .put("effectiveStatus", overridden.status.name)
+            .put("effectiveRuntimeVersion", overridden.runtimeVersion)
         return probeProfile to report
     }
 
@@ -815,7 +819,7 @@ class MdxLiteRtCpuValidationTest {
         .put("catalogSha256", SourceSeparationModelMetadata.CATALOG_SHA256)
         .put("contractSchemaVersion", SourceSeparationModelContractValidator.CONTRACT_SCHEMA_VERSION)
         .put("pipelineVersion", SourceSeparationModelContractValidator.PIPELINE_VERSION)
-        .put("runtime", "LiteRT 2.1.5")
+        .put("runtime", "LiteRT 2.2.0-bss.2")
         .put("packageName", context.packageName)
         .put("startedAtEpochMs", System.currentTimeMillis())
 

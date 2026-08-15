@@ -234,7 +234,7 @@ internal class MdxLiteRtAutoInferenceSessionFactory(
     private val nanoTime: () -> Long = System::nanoTime,
 ) : MdxInferenceSessionFactory {
     override val factoryId: String = buildString {
-        append("litert-2.1.5-auto-").append(gpuRuntimeProfile.profileId)
+        append("litert-2.2.0-auto-").append(gpuRuntimeProfile.profileId)
         append('-').append(gpuFactory.factoryId)
         append('-').append(cpuFactory.factoryId)
     }
@@ -534,7 +534,7 @@ private class MdxLiteRtAutoInferenceSession(
         get() = synchronized(this) {
             val snapshot = snapshotLocked()
             MdxRuntimeDiagnostics(
-                runtimeName = "LiteRT 2.1.5 Auto",
+                runtimeName = "LiteRT 2.2.0 Auto",
                 backend = snapshot.acceptedOutputBackend
                     ?: snapshot.activeBackend
                     ?: MdxInferenceBackend.LiteRtAuto,

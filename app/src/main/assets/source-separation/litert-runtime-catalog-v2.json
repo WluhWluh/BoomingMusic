@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 2,
+  "catalogId": "booming-ss-litert-runtime-catalog-v2",
+  "producerContractSchemaVersion": "bss-litert-downloadable-runtime-v3",
+  "producerContractSha256": "be78535089ef2fd3b1de086303bbc8acde3523703645b7ee534d27707f09f996",
+  "entries": [
+    {
+      "componentId": "litert-cpu-core-2.2.0-bss.2-arm64-v8a",
+      "componentType": "cpu-core",
+      "producerReleaseTag": "downloadable-runtime-v2.2.0-bss.2-exp.1",
+      "producerReleaseVersion": "2.2.0-bss.2-exp.1",
+      "runtimeArtifactVersion": "2.2.0-bss.2",
+      "baseLiteRtVersion": "2.2.0",
+      "abi": "arm64-v8a",
+      "androidMinApi": 26,
+      "maturity": "recommended",
+      "capabilityId": "cpu",
+      "dependencies": [],
+      "delivery": {
+        "providerId": "github",
+        "artifactId": "litert-cpu-core-2.2.0-bss.2-arm64-v8a",
+        "locator": "https://github.com/WluhWluh/bss-litert-android/releases/download/downloadable-runtime-v2.2.0-bss.2-exp.1/litert-cpu-core-2.2.0-bss.2-arm64-v8a.zip",
+        "expectedByteSize": 2548878,
+        "expectedSha256": "da55d4470bf99761b086672822e682b2d48f5e3fcb2a7dc6da53f6bf6db274a2"
+      },
+      "innerManifestSha256": "1c0e9d015d052293d957b4074e37b9e67fef29ef9b7396b69ff023313c53d4ed",
+      "loadOrder": [
+        "libLiteRt.so",
+        "liblitert_jni.so"
+      ],
+      "innerLibraries": [
+        {
+          "role": "runtime",
+          "path": "libLiteRt.so",
+          "byteSize": 5508376,
+          "sha256": "97355a36cb8ac7628cf407773291e98da79f3ef184cc43cb0e57dedf5f0c0637",
+          "elfClass": "ELF64",
+          "machine": "EM_AARCH64",
+          "soname": "libLiteRt.so"
+        },
+        {
+          "role": "jni",
+          "path": "liblitert_jni.so",
+          "byteSize": 713616,
+          "sha256": "708b7a2bcdef55b698878ae237971fbd31d9a6bfcfe6ac81dc62c880ad6b4e8a",
+          "elfClass": "ELF64",
+          "machine": "EM_AARCH64",
+          "soname": "litert_jni"
+        }
+      ],
+      "licenseAssets": [
+        "LICENSE-LiteRT.txt",
+        "THIRD_PARTY_NOTICE-LiteRT.txt"
+      ]
+    },
+    {
+      "componentId": "litert-cpu-core-2.2.0-bss.2-armeabi-v7a",
+      "componentType": "cpu-core",
+      "producerReleaseTag": "downloadable-runtime-v2.2.0-bss.2-exp.1",
+      "producerReleaseVersion": "2.2.0-bss.2-exp.1",
+      "runtimeArtifactVersion": "2.2.0-bss.2",
+      "baseLiteRtVersion": "2.2.0",
+      "abi": "armeabi-v7a",
+      "androidMinApi": 26,
+      "maturity": "recommended",
+      "capabilityId": "cpu",
+      "dependencies": [],
+      "delivery": {
+        "providerId": "github",
+        "artifactId": "litert-cpu-core-2.2.0-bss.2-armeabi-v7a",
+        "locator": "https://github.com/WluhWluh/bss-litert-android/releases/download/downloadable-runtime-v2.2.0-bss.2-exp.1/litert-cpu-core-2.2.0-bss.2-armeabi-v7a.zip",
+        "expectedByteSize": 2062104,
+        "expectedSha256": "6106c506024b15e11ef401bd5e9fea3e50735bc379e68de883d4b2991535ed74"
+      },
+      "innerManifestSha256": "57991e15b34ea8cdca483c58a74c703bb551e05d39ddf45e156b08997974a397",
+      "loadOrder": [
+        "libLiteRt.so",
+        "liblitert_jni.so"
+      ],
+      "innerLibraries": [
+        {
+          "role": "runtime",
+          "path": "libLiteRt.so",
+          "byteSize": 3602584,
+          "sha256": "5860fcecc1cef9bfb69a33b799465eba058102aa4d80e05320bc9be7a687e075",
+          "elfClass": "ELF32",
+          "machine": "EM_ARM",
+          "soname": "libLiteRt.so"
+        },
+        {
+          "role": "jni",
+          "path": "liblitert_jni.so",
+          "byteSize": 323060,
+          "sha256": "6bb45f8c3fa7a97d65a5d44b0800244da7a09a2b17cb8348880fc43c2e2b6c7a",
+          "elfClass": "ELF32",
+          "machine": "EM_ARM",
+          "soname": "liblitert_jni.so"
+        }
+      ],
+      "licenseAssets": [
+        "LICENSE-LiteRT.txt",
+        "THIRD_PARTY_NOTICE-LiteRT.txt"
+      ]
+    },
+    {
+      "componentId": "litert-cpu-core-2.2.0-bss.2-x86_64",
+      "componentType": "cpu-core",
+      "producerReleaseTag": "downloadable-runtime-v2.2.0-bss.2-exp.1",
+      "producerReleaseVersion": "2.2.0-bss.2-exp.1",
+      "runtimeArtifactVersion": "2.2.0-bss.2",
+      "baseLiteRtVersion": "2.2.0",
+      "abi": "x86_64",
+      "androidMinApi": 26,
+      "maturity": "recommended",
+      "capabilityId": "cpu",
+      "dependencies": [],
+      "delivery": {
+        "providerId": "github",
+        "artifactId": "litert-cpu-core-2.2.0-bss.2-x86_64",
+        "locator": "https://github.com/WluhWluh/bss-litert-android/releases/download/downloadable-runtime-v2.2.0-bss.2-exp.1/litert-cpu-core-2.2.0-bss.2-x86_64.zip",
+        "expectedByteSize": 3274732,
+        "expectedSha256": "9c53fa2eb0327bac9f2c4251dbee267518865adaa5ce710185f767bf386e71e7"
+      },
+      "innerManifestSha256": "7c08ce63b92f58f7a41202834765a2fb6d71dad3457b6ef4346cb9f37ebf15fd",
+      "loadOrder": [
+        "libLiteRt.so",
+        "liblitert_jni.so"
+      ],
+      "innerLibraries": [
+        {
+          "role": "runtime",
+          "path": "libLiteRt.so",
+          "byteSize": 7649584,
+          "sha256": "38a71966ac2ccd76c2782d5d96e317f5e6d3322ae9f8e3dfff6e3327e284c591",
+          "elfClass": "ELF64",
+          "machine": "EM_X86_64",
+          "soname": "libLiteRt.so"
+        },
+        {
+          "role": "jni",
+          "path": "liblitert_jni.so",
+          "byteSize": 510768,
+          "sha256": "a05652e65e71ddb5b1f38c569a9e3722b87efeb76d2036266154a429bab9c657",
+          "elfClass": "ELF64",
+          "machine": "EM_X86_64",
+          "soname": "liblitert_jni.so"
+        }
+      ],
+      "licenseAssets": [
+        "LICENSE-LiteRT.txt",
+        "THIRD_PARTY_NOTICE-LiteRT.txt"
+      ]
+    },
+    {
+      "componentId": "litert-cpu-core-2.2.0-bss.2-x86",
+      "componentType": "cpu-core",
+      "producerReleaseTag": "downloadable-runtime-v2.2.0-bss.2-exp.1",
+      "producerReleaseVersion": "2.2.0-bss.2-exp.1",
+      "runtimeArtifactVersion": "2.2.0-bss.2",
+      "baseLiteRtVersion": "2.2.0",
+      "abi": "x86",
+      "androidMinApi": 26,
+      "maturity": "recommended",
+      "capabilityId": "cpu",
+      "dependencies": [],
+      "delivery": {
+        "providerId": "github",
+        "artifactId": "litert-cpu-core-2.2.0-bss.2-x86",
+        "locator": "https://github.com/WluhWluh/bss-litert-android/releases/download/downloadable-runtime-v2.2.0-bss.2-exp.1/litert-cpu-core-2.2.0-bss.2-x86.zip",
+        "expectedByteSize": 3420220,
+        "expectedSha256": "6a06556c25cdd2dbcbcd447beba6e6425efd81504ab2494f2b1be8d6614e6c0f"
+      },
+      "innerManifestSha256": "feff9c0f753206857f95efcecde0f592d814d166775793945eacd603c2569358",
+      "loadOrder": [
+        "libLiteRt.so",
+        "liblitert_jni.so"
+      ],
+      "innerLibraries": [
+        {
+          "role": "runtime",
+          "path": "libLiteRt.so",
+          "byteSize": 8349908,
+          "sha256": "83132f9eb2fbbc0858a2d96c45bc5cb39c54922c9f7f5aed26bb5563ce2cb21c",
+          "elfClass": "ELF32",
+          "machine": "EM_386",
+          "soname": "libLiteRt.so"
+        },
+        {
+          "role": "jni",
+          "path": "liblitert_jni.so",
+          "byteSize": 783540,
+          "sha256": "570452100ba34041b95b066310cbc8db7a14a14d66dc51742727bbe35afc8699",
+          "elfClass": "ELF32",
+          "machine": "EM_386",
+          "soname": "liblitert_jni.so"
+        }
+      ],
+      "licenseAssets": [
+        "LICENSE-LiteRT.txt",
+        "THIRD_PARTY_NOTICE-LiteRT.txt"
+      ]
+    }
+  ]
+}

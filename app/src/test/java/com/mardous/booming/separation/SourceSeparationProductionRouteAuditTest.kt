@@ -295,10 +295,10 @@ class SourceSeparationProductionRouteAuditTest {
 
         assertTrue(refresh.contains("if (isRunningPreStartRequest())"))
         assertTrue(
-            coordinator.contains(
-                "private fun isRunningPreStartRequest(): Boolean =\n" +
-                        "        activeWorkerRequest is SourceSeparationWorkerRequest.StartWindowPreStart",
-            ),
+            Regex(
+                """private fun isRunningPreStartRequest\(\): Boolean =\s*""" +
+                    """activeWorkerRequest is SourceSeparationWorkerRequest\.StartWindowPreStart""",
+            ).containsMatchIn(coordinator),
         )
     }
 
@@ -320,19 +320,19 @@ class SourceSeparationProductionRouteAuditTest {
         assertTrue(seek.contains("playback.seek.preserveRecoveryWaterline"))
         assertTrue(seek.contains("scheduleSourceSeparationPlaybackGateRetry()"))
         assertTrue(
-            seek.contains(
-                "wasWaitingForUnreadyWindow ||\n" +
-                        "                                shouldGateCurrentSourceSeparationWindow()",
-            ),
+            Regex(
+                """wasWaitingForUnreadyWindow\s*\|\|\s*""" +
+                    """shouldGateCurrentSourceSeparationWindow\(\)""",
+            ).containsMatchIn(seek),
         )
         assertTrue(
             seek.contains("activeWindowWait?.requiredReadyWindowCount ?: 1"),
         )
         assertTrue(
-            service.contains(
-                "val recoveryReadyWindowCount = activeWindowWait?.requiredReadyWindowCount\n" +
-                        "            ?: sourceSeparationPlaybackReadyWindowCount.coerceAtLeast(1)",
-            ),
+            Regex(
+                """val recoveryReadyWindowCount = activeWindowWait\?\.requiredReadyWindowCount\s*""" +
+                    """\?: sourceSeparationPlaybackReadyWindowCount\.coerceAtLeast\(1\)""",
+            ).containsMatchIn(service),
         )
         assertTrue(
             service.contains("requiredReadyWindowCount = recoveryReadyWindowCount"),
@@ -449,10 +449,10 @@ class SourceSeparationProductionRouteAuditTest {
             ).contains("preserveExpectedProcessing = effectiveExpectProcessing"),
         )
         assertTrue(
-            service.contains(
-                "sourceSeparationPlaybackSession == null ||\n" +
-                        "                    sourceSeparationPlaybackSession?.requiresReadinessGate == true",
-            ),
+            Regex(
+                """sourceSeparationPlaybackSession == null\s*\|\|\s*""" +
+                    """sourceSeparationPlaybackSession\?\.requiresReadinessGate == true""",
+            ).containsMatchIn(service),
         )
         val dataPlaneResume = section(
             "private fun resumeSourceSeparationDataPlaneIfRequested(",

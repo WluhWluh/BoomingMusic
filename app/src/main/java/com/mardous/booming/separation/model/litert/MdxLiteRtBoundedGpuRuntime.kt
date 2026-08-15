@@ -27,7 +27,7 @@ internal data class MdxLiteRtBoundedGpuCapabilityDecision(
 
 internal object MdxLiteRtBoundedGpuContract {
     const val CAPABILITY_SCHEMA_VERSION = 1
-    const val ARTIFACT_VERSION = "2.1.5-bss.2"
+    const val ARTIFACT_VERSION = "2.2.0-bss.2"
     const val PROFILE_ID = "gpu-opencl-bounded-fp32-v1"
     const val BACKEND = "OpenCL"
     const val PRECISION = "FP32"

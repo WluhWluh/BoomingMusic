@@ -57,7 +57,7 @@ internal object MdxLiteRtNativeSessionAllocator : MdxLiteRtSessionAllocator {
             this.cpuOptions = CompiledModel.CpuOptions(cpuThreads, xnnPackFlags, null)
         },
         diagnostics = MdxRuntimeDiagnostics(
-            runtimeName = "LiteRT 2.1.5",
+            runtimeName = "LiteRT 2.2.0",
             backend = MdxInferenceBackend.LiteRtCpu,
             cpuThreads = cpuThreads,
             detail = buildString {
@@ -107,7 +107,7 @@ internal object MdxLiteRtNativeGpuSessionAllocator : MdxLiteRtGpuSessionAllocato
                 )
             },
             diagnostics = MdxRuntimeDiagnostics(
-                runtimeName = "LiteRT 2.1.5",
+                runtimeName = "LiteRT 2.2.0",
                 backend = MdxInferenceBackend.LiteRtGpu,
                 cpuThreads = null,
                 detail = buildString {

@@ -53,6 +53,7 @@ fun SourceSeparationModelContract.toMdxExecutionProfile(
             .maxOfOrNull(CatalogRuntimeQualification::minimumAndroidApi) ?: 26,
         runtimeCompatibility = qualifications.map { status ->
             MdxRuntimeCompatibilityRecord(
+                runtimeVersion = status.runtimeVersion,
                 abi = status.abi.toMdxRuntimeAbi(),
                 backend = status.backend.toMdxInferenceBackend(),
                 profileId = status.profileId,
@@ -105,6 +106,7 @@ fun SourceSeparationCustomModelProfile.toMdxExecutionProfile(
         minimumAndroidApi = qualifications.maxOfOrNull(CatalogRuntimeQualification::minimumAndroidApi),
         runtimeCompatibility = qualifications.map { status ->
             MdxRuntimeCompatibilityRecord(
+                runtimeVersion = status.runtimeVersion,
                 abi = status.abi.toMdxRuntimeAbi(),
                 backend = status.backend.toMdxInferenceBackend(),
                 profileId = status.profileId,

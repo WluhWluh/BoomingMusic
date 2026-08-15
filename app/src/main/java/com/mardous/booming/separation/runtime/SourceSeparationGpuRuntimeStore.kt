@@ -75,12 +75,14 @@ internal data class SourceSeparationGpuRuntimeElf(
     val machine: String,
     val needed: List<String>,
     val soname: String,
+    val loadAlignment: Long,
 )
 
 @Serializable
 internal data class SourceSeparationGpuRuntimeRequiredCore(
     val abi: String,
     val librarySha256: String,
+    val jniLibrarySha256: String,
 )
 
 internal data class SourceSeparationGpuRuntimeIdentity(
@@ -206,6 +208,7 @@ internal class SourceSeparationGpuRuntimeLocator(
             manifest.releaseVersion.isBlank() ||
             manifest.requiredCore.abi != manifest.abi ||
             !SHA256_PATTERN.matches(manifest.requiredCore.librarySha256) ||
+            !SHA256_PATTERN.matches(manifest.requiredCore.jniLibrarySha256) ||
             !SHA256_PATTERN.matches(manifest.sourceAar.sha256)
         ) {
             invalidContract("The LiteRT GPU runtime manifest has incomplete identity data.")
@@ -230,13 +233,17 @@ internal class SourceSeparationGpuRuntimeLocator(
                 file.byteSize <= 0L ||
                 file.elf.elfClass.isBlank() ||
                 file.elf.machine.isBlank() ||
-                file.elf.soname != file.path
+                file.elf.soname != file.path ||
+                file.elf.loadAlignment != REQUIRED_LOAD_ALIGNMENT
             ) {
                 invalidContract("The LiteRT GPU runtime manifest has an invalid library record.")
             }
         }
         val accelerator = manifest.files.single { it.path == "libLiteRtClGlAccelerator.so" }
-        if (accelerator.runtimeLoads != listOf("libBssOcl.so")) {
+        val openClBridge = manifest.files.single { it.path == "libBssOcl.so" }
+        if (accelerator.runtimeLoads != listOf("libBssOcl.so") ||
+            openClBridge.runtimeLoads.isNotEmpty()
+        ) {
             invalidContract("The GPU accelerator dependency order is invalid.")
         }
     }
@@ -247,7 +254,8 @@ internal class SourceSeparationGpuRuntimeLocator(
     )
 
     private companion object {
-        const val MANIFEST_SCHEMA_VERSION = 1
+        const val MANIFEST_SCHEMA_VERSION = 2
+        const val REQUIRED_LOAD_ALIGNMENT = 16_384L
         val SHA256_PATTERN = Regex("^[a-fA-F0-9]{64}$")
         val GPU_RUNTIME_JSON = Json {
             ignoreUnknownKeys = false
@@ -592,6 +600,10 @@ internal class SourceSeparationGpuRuntimeStore(
             installation.manifest.runtimeArtifactVersion == entry.runtimeArtifactVersion &&
             installation.manifest.abi == entry.abi &&
             installation.manifest.requiredCore.librarySha256.equals(entry.requiredCpuLibrarySha256, true) &&
+            installation.manifest.requiredCore.jniLibrarySha256.equals(
+                entry.requiredCpuJniLibrarySha256,
+                true,
+            ) &&
             installation.identity.fileSha256 == expectedFiles &&
             record.componentId == entry.componentId &&
             record.componentType == entry.componentType &&
@@ -631,7 +643,9 @@ internal class SourceSeparationGpuRuntimeStore(
             return "Required CPU LiteRT runtime is not valid: ${error.message ?: "unknown error"}."
         }
         if (cpu.manifest.component != SourceSeparationRuntimeLayout.CPU_COMPONENT ||
-            cpu.identity.librarySha256 != entry.requiredCpuLibrarySha256.lowercase(Locale.US)
+            cpu.identity.librarySha256 != entry.requiredCpuLibrarySha256.lowercase(Locale.US) ||
+            cpu.identity.jniLibrarySha256 !=
+            entry.requiredCpuJniLibrarySha256.lowercase(Locale.US)
         ) {
             return "The installed CPU LiteRT runtime does not match the GPU dependency."
         }
@@ -640,7 +654,11 @@ internal class SourceSeparationGpuRuntimeStore(
         if (installRecord.componentId != entry.requiredCpuComponentId ||
             installRecord.componentType != SourceSeparationRuntimeLayout.CPU_COMPONENT ||
             installRecord.abi != entry.abi ||
-            !installRecord.librarySha256.equals(cpu.identity.librarySha256, ignoreCase = true)
+            !installRecord.librarySha256.equals(cpu.identity.librarySha256, ignoreCase = true) ||
+            !installRecord.jniLibrarySha256.equals(
+                cpu.identity.jniLibrarySha256,
+                ignoreCase = true,
+            )
         ) {
             return "The installed CPU LiteRT component identity does not match the GPU dependency."
         }
@@ -701,7 +719,15 @@ internal class SourceSeparationGpuRuntimeStore(
             "The GPU runtime artifact version does not match the catalog."
         }
         require(installation.manifest.requiredCore.librarySha256.equals(entry.requiredCpuLibrarySha256, true)) {
-            "The GPU runtime CPU dependency does not match the catalog."
+            "The GPU runtime CPU core dependency does not match the catalog."
+        }
+        require(
+            installation.manifest.requiredCore.jniLibrarySha256.equals(
+                entry.requiredCpuJniLibrarySha256,
+                true,
+            ),
+        ) {
+            "The GPU runtime CPU JNI dependency does not match the catalog."
         }
         require(installation.manifestFile.sha256Gpu().equals(entry.innerManifestSha256, true)) {
             "The GPU runtime manifest hash does not match the catalog."

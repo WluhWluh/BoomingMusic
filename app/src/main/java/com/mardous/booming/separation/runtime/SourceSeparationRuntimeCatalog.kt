@@ -6,9 +6,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 internal object SourceSeparationRuntimeCatalogMetadata {
-    const val ASSET_PATH = "source-separation/litert-runtime-catalog-v1.json"
-    const val CATALOG_ID = "booming-ss-litert-runtime-catalog-v1"
-    const val SCHEMA_VERSION = 1
+    const val ASSET_PATH = "source-separation/litert-runtime-catalog-v2.json"
+    const val CATALOG_ID = "booming-ss-litert-runtime-catalog-v2"
+    const val SCHEMA_VERSION = 2
 }
 
 @Serializable
@@ -38,9 +38,16 @@ internal data class SourceSeparationRuntimeCatalogEntry(
     val dependencies: List<String>,
     val delivery: SourceSeparationRuntimeDelivery,
     val innerManifestSha256: String,
-    val innerLibrary: SourceSeparationRuntimeLibrary,
+    val loadOrder: List<String>,
+    val innerLibraries: List<SourceSeparationRuntimeLibrary>,
     val licenseAssets: List<String>,
 ) {
+    val innerLibrary: SourceSeparationRuntimeLibrary
+        get() = innerLibraries.single { it.role == SourceSeparationRuntimeLibraryRole.Runtime.id }
+
+    val innerJniLibrary: SourceSeparationRuntimeLibrary
+        get() = innerLibraries.single { it.role == SourceSeparationRuntimeLibraryRole.Jni.id }
+
     fun deliveryReference(): SourceSeparationDeliveryReference =
         SourceSeparationDeliveryReference(
             providerId = delivery.providerId,
@@ -62,6 +69,7 @@ internal data class SourceSeparationRuntimeDelivery(
 
 @Serializable
 internal data class SourceSeparationRuntimeLibrary(
+    val role: String,
     val path: String,
     val byteSize: Long,
     val sha256: String,
@@ -69,6 +77,11 @@ internal data class SourceSeparationRuntimeLibrary(
     val machine: String,
     val soname: String,
 )
+
+internal enum class SourceSeparationRuntimeLibraryRole(val id: String) {
+    Runtime("runtime"),
+    Jni("jni"),
+}
 
 internal object SourceSeparationRuntimeCatalogLoader {
     private val json = Json {
@@ -167,17 +180,33 @@ internal object SourceSeparationRuntimeCatalogLoader {
             "Runtime inner manifest hash is invalid.",
         )
         requireCatalog(
-            entry.innerLibrary.path == SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME,
-            "Runtime library path is invalid.",
+            entry.loadOrder == SourceSeparationRuntimeLayout.CPU_LIBRARY_LOAD_ORDER,
+            "Runtime library load order is invalid.",
         )
-        requireCatalog(entry.innerLibrary.byteSize > 0L, "Runtime library size is invalid.")
         requireCatalog(
-            SHA256_PATTERN.matches(entry.innerLibrary.sha256),
-            "Runtime library hash is invalid.",
+            entry.innerLibraries.map(SourceSeparationRuntimeLibrary::path) == entry.loadOrder,
+            "Runtime libraries do not follow the declared load order.",
         )
-        requireCatalog(entry.innerLibrary.elfClass.isNotBlank(), "Runtime ELF class is empty.")
-        requireCatalog(entry.innerLibrary.machine.isNotBlank(), "Runtime ELF machine is empty.")
-        requireCatalog(entry.innerLibrary.soname.isNotBlank(), "Runtime ELF SONAME is empty.")
+        requireCatalog(
+            entry.innerLibraries.map(SourceSeparationRuntimeLibrary::role) ==
+                SourceSeparationRuntimeLayout.CPU_LIBRARY_ROLES,
+            "Runtime library roles are invalid.",
+        )
+        requireCatalog(
+            entry.innerLibraries.map(SourceSeparationRuntimeLibrary::path).toSet().size ==
+                entry.innerLibraries.size,
+            "Runtime library paths are not unique.",
+        )
+        entry.innerLibraries.forEach { library ->
+            requireCatalog(library.byteSize > 0L, "Runtime library size is invalid.")
+            requireCatalog(
+                SHA256_PATTERN.matches(library.sha256),
+                "Runtime library hash is invalid.",
+            )
+            requireCatalog(library.elfClass.isNotBlank(), "Runtime ELF class is empty.")
+            requireCatalog(library.machine.isNotBlank(), "Runtime ELF machine is empty.")
+            requireCatalog(library.soname.isNotBlank(), "Runtime ELF SONAME is empty.")
+        }
         requireCatalog(entry.licenseAssets.isNotEmpty(), "Runtime license references are empty.")
     }
 

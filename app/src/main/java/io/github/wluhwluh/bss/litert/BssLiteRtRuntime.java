@@ -19,7 +19,7 @@ package io.github.wluhwluh.bss.litert;
 /** Explicit-path bridge for the downloadable bounded OpenCL runtime. */
 public final class BssLiteRtRuntime {
     public static final int CAPABILITY_SCHEMA_VERSION = 1;
-    public static final String ARTIFACT_VERSION = "2.1.5-bss.2";
+    public static final String ARTIFACT_VERSION = "2.2.0-bss.2";
     public static final String GPU_PROFILE_ID = "gpu-opencl-bounded-fp32-v1";
     public static final int KERNEL_BATCH_SIZE = 1;
     public static final int COMMAND_QUEUE_WINDOW_SIZE = 1;

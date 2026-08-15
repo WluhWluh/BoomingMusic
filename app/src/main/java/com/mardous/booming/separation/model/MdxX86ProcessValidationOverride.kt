@@ -40,11 +40,16 @@ internal object MdxX86ProcessValidationOverride {
         platform: MdxRuntimePlatform,
         enabled: Boolean = buildEnabled,
     ): MdxX86ProcessValidationOverrideResult? {
-        val originalRecord = model.executionProfile.runtimeCompatibility.singleOrNull { record ->
+        val matchingRecords = model.executionProfile.runtimeCompatibility.filter { record ->
             record.abi == MdxRuntimeAbi.X86 &&
                 record.backend == MdxInferenceBackend.LiteRtCpu &&
                 record.profileId == MdxRuntimeProfiles.CPU_DEFAULT_FP32 &&
                 record.precision == MdxRuntimePrecision.Fp32
+        }
+        val originalRecord = matchingRecords.singleOrNull { record ->
+            record.runtimeVersion == platform.runtimeVersion
+        } ?: matchingRecords.singleOrNull { record ->
+            record.status == MdxRuntimeSupportStatus.Unsupported
         } ?: return null
         if (!permitsCatalogQualification(
                 modelId = model.contract.modelId,
@@ -70,6 +75,7 @@ internal object MdxX86ProcessValidationOverride {
         if (originalDecision.outcome != MdxCompatibilityOutcome.Unsupported) return null
 
         val effectiveRecord = originalRecord.copy(
+            runtimeVersion = platform.runtimeVersion,
             status = MdxRuntimeSupportStatus.KnownGood,
             evidence = VALIDATION_EVIDENCE_PREFIX + originalRecord.evidence,
         )

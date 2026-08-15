@@ -13,7 +13,9 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import com.google.ai.edge.litert.Accelerator;
 import com.google.ai.edge.litert.CompiledModel;
 import com.google.ai.edge.litert.Environment;
+import com.google.ai.edge.litert.LiteRtNativeLibraryLoader;
 import com.google.ai.edge.litert.TensorBuffer;
+import com.mardous.booming.separation.runtime.SourceSeparationCpuRuntimeInstallation;
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap;
 import dalvik.system.BaseDexClassLoader;
 import java.io.File;
@@ -40,7 +42,8 @@ public final class LiteRtPackagingSmokeTest {
             try (ZipFile apk = new ZipFile(path)) {
                 apk.stream()
                         .map(entry -> entry.getName())
-                        .filter(name -> name.matches("lib/[^/]+/libLiteRt(?:ClGlAccelerator)?\\.so"))
+                        .filter(name -> name.matches(
+                                "lib/[^/]+/(?:libLiteRt(?:ClGlAccelerator)?|liblitert_jni)\\.so"))
                         .findAny()
                         .ifPresent(name -> {
                             throw new AssertionError("APK contains LiteRT native payload: " + name);
@@ -52,6 +55,7 @@ public final class LiteRtPackagingSmokeTest {
                 ((BaseDexClassLoader) targetContext.getClassLoader())
                         .findLibrary("LiteRtClGlAccelerator")
         );
+        assertNull(((BaseDexClassLoader) targetContext.getClassLoader()).findLibrary("litert_jni"));
     }
 
     @Test
@@ -62,7 +66,12 @@ public final class LiteRtPackagingSmokeTest {
 
         Context testContext = InstrumentationRegistry.getInstrumentation().getContext();
         Context targetContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        SourceSeparationRuntimeBootstrap.INSTANCE.ensureLoaded(targetContext);
+        SourceSeparationCpuRuntimeInstallation installation =
+                SourceSeparationRuntimeBootstrap.INSTANCE.ensureLoaded(targetContext);
+        assertEquals(
+                installation.getJniLibraryFile().getCanonicalPath(),
+                LiteRtNativeLibraryLoader.configuredJniAbsolutePath()
+        );
         File modelFile = new File(targetContext.getCacheDir(), "simple_add_dynamic_shape.tflite");
         try (InputStream input = testContext.getAssets().open(modelFile.getName());
                 FileOutputStream output = new FileOutputStream(modelFile)) {

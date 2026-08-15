@@ -318,15 +318,15 @@ private fun SourceSeparationRuntimeItemCard(
                 text = stringResource(
                     R.string.source_separation_runtime_size_summary,
                     entry.delivery.expectedByteSize.asReadableFileSize(),
-                    entry.innerLibrary.byteSize.asReadableFileSize(),
+                    entry.innerLibraries.sumOf { it.byteSize }.asReadableFileSize(),
                 ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                text = entry.innerLibrary.sha256,
+                text = entry.innerLibraries.joinToString("\n") { it.sha256 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
+                maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelSmall,
             )

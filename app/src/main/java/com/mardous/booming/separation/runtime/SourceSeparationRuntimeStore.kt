@@ -54,11 +54,12 @@ internal data class SourceSeparationRuntimeInstallRecord(
     val abi: String,
     val innerManifestSha256: String,
     val librarySha256: String,
+    val jniLibrarySha256: String,
     val installedAtEpochMs: Long,
     val lastValidatedAtEpochMs: Long,
 ) {
     companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
     }
 }
 
@@ -210,6 +211,9 @@ internal class SourceSeparationRuntimeStore(
             val sameCurrent = currentInspection.installation?.let { installation ->
                 installation.identity.librarySha256.equals(
                     entry.innerLibrary.sha256,
+                    ignoreCase = true,
+                ) && installation.identity.jniLibrarySha256.equals(
+                    entry.innerJniLibrary.sha256,
                     ignoreCase = true,
                 )
             } == true
@@ -382,7 +386,12 @@ internal class SourceSeparationRuntimeStore(
             installation.manifest.runtimeArtifactVersion == entry.runtimeArtifactVersion &&
             installation.manifest.abi == entry.abi &&
             installation.libraryFile.length() == entry.innerLibrary.byteSize &&
+            installation.jniLibraryFile.length() == entry.innerJniLibrary.byteSize &&
             installation.identity.librarySha256.equals(entry.innerLibrary.sha256, ignoreCase = true) &&
+            installation.identity.jniLibrarySha256.equals(
+                entry.innerJniLibrary.sha256,
+                ignoreCase = true,
+            ) &&
             record.componentId == entry.componentId &&
             record.componentType == entry.componentType &&
             record.producerReleaseTag == entry.producerReleaseTag &&
@@ -391,12 +400,14 @@ internal class SourceSeparationRuntimeStore(
             record.abi == entry.abi &&
             record.innerManifestSha256.equals(entry.innerManifestSha256, ignoreCase = true) &&
             record.librarySha256.equals(entry.innerLibrary.sha256, ignoreCase = true) &&
+            record.jniLibrarySha256.equals(entry.innerJniLibrary.sha256, ignoreCase = true) &&
             runtimeInstallationFilesAreReadOnly(current)
         if (!valid) return invalid(entry, "The runtime files do not match the bundled catalog.")
         return SourceSeparationRuntimeInventoryItem(
             catalogEntry = entry,
             state = SourceSeparationRuntimeState.Installed,
-            installedBytes = installation.libraryFile.length() + installation.manifestFile.length(),
+            installedBytes = installation.libraryFiles.values.sumOf(File::length) +
+                installation.manifestFile.length(),
             installedAtEpochMs = record.installedAtEpochMs,
             lastValidatedAtEpochMs = record.lastValidatedAtEpochMs,
             installation = installation,
@@ -418,7 +429,8 @@ internal class SourceSeparationRuntimeStore(
         val stagedCurrent = SourceSeparationRuntimeLayout.cpuCurrentDirectory(stagingRoot, entry.abi)
             .apply { mkdirs() }
         ZipFile(payload).use { zip ->
-            val expectedNames = setOf("manifest.json", SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME)
+            val expectedNames = setOf(SourceSeparationRuntimeLayout.MANIFEST_FILE_NAME) +
+                SourceSeparationRuntimeLayout.CPU_LIBRARY_LOAD_ORDER
             val names = zip.entries().asSequence().map { it.name }.toList()
             require(names.toSet().size == names.size) {
                 "The runtime ZIP contains duplicate entries."
@@ -457,10 +469,16 @@ internal class SourceSeparationRuntimeStore(
             "The runtime manifest hash does not match the catalog."
         }
         require(installation.libraryFile.length() == entry.innerLibrary.byteSize) {
-            "The runtime library size does not match the catalog."
+            "The runtime core library size does not match the catalog."
         }
         require(installation.identity.librarySha256.equals(entry.innerLibrary.sha256, true)) {
-            "The runtime library hash does not match the catalog."
+            "The runtime core library hash does not match the catalog."
+        }
+        require(installation.jniLibraryFile.length() == entry.innerJniLibrary.byteSize) {
+            "The runtime JNI library size does not match the catalog."
+        }
+        require(installation.identity.jniLibrarySha256.equals(entry.innerJniLibrary.sha256, true)) {
+            "The runtime JNI library hash does not match the catalog."
         }
         return stagedCurrent
     }
@@ -486,7 +504,9 @@ internal class SourceSeparationRuntimeStore(
             abi = entry.abi,
             innerManifestSha256 = File(directory, SourceSeparationRuntimeLayout.MANIFEST_FILE_NAME)
                 .sha256(),
-            librarySha256 = File(directory, SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME)
+            librarySha256 = File(directory, SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME)
+                .sha256(),
+            jniLibrarySha256 = File(directory, SourceSeparationRuntimeLayout.JNI_LIBRARY_FILE_NAME)
                 .sha256(),
             installedAtEpochMs = now,
             lastValidatedAtEpochMs = now,
@@ -574,7 +594,8 @@ internal class SourceSeparationRuntimeStore(
 
     private fun preflight(entry: SourceSeparationRuntimeCatalogEntry): SourceSeparationRuntimeSpacePreflight {
         val expectedDownloadBytes = entry.delivery.expectedByteSize
-        val expectedInstalledBytes = entry.innerLibrary.byteSize + MANIFEST_RESERVE_BYTES + RECORD_RESERVE_BYTES
+        val expectedInstalledBytes = entry.innerLibraries.sumOf(SourceSeparationRuntimeLibrary::byteSize) +
+            MANIFEST_RESERVE_BYTES + RECORD_RESERVE_BYTES
         val requiredBytes = expectedDownloadBytes + expectedInstalledBytes + SAFETY_RESERVE_BYTES
         val availableBytes = usableSpace(root.parentFile ?: root)
         return SourceSeparationRuntimeSpacePreflight(
@@ -747,7 +768,8 @@ internal fun File.sha256(): String {
 }
 
 private fun isSafeZipEntry(name: String): Boolean =
-    name == "manifest.json" || name == SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME
+    name == SourceSeparationRuntimeLayout.MANIFEST_FILE_NAME ||
+        name in SourceSeparationRuntimeLayout.CPU_LIBRARY_LOAD_ORDER
 
 private fun isSafeDirectoryName(name: String): Boolean =
     name.matches(Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"))

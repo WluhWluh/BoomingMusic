@@ -106,9 +106,11 @@ val liteRtApiAar = file(
 
 configurations.configureEach {
     resolutionStrategy.eachDependency {
-        if (requested.group == "com.google.ai.edge.litert" && requested.name == "litert") {
+        if (requested.group == "com.google.ai.edge.litert" &&
+            requested.name in setOf("litert", "litert-api")
+        ) {
             throw GradleException(
-                "Stock LiteRT must not be resolved alongside the bounded Booming SS runtime."
+                "Stock LiteRT AARs must not be resolved alongside the downloadable Booming SS runtime."
             )
         }
     }

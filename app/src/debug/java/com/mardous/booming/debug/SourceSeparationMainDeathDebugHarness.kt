@@ -957,7 +957,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                 )
                 check(journalAfterDeath.request.gpuFallbackLatch == null)
                 val initialRuntime = scenario.getJSONObject("faultHitRuntime")
-                check(initialRuntime.getString("runtimeName") == "LiteRT 2.1.5 Auto")
+                check(initialRuntime.getString("runtimeName") == "LiteRT 2.2.0 Auto")
                 check(initialRuntime.getString("backend") == "LiteRtGpu")
                 check(initialRuntime.isNull("fallbackStage"))
                 check(initialRuntime.isNull("fallbackReason"))
@@ -1022,7 +1022,7 @@ internal object SourceSeparationMainDeathDebugHarness {
                 val resumedRuntime = requireNotNull(resumeFaultHit.runtime) {
                     "The latched CPU fault hit did not capture runtime diagnostics."
                 }
-                check(resumedRuntime.runtimeName == "LiteRT 2.1.5")
+                check(resumedRuntime.runtimeName == "LiteRT 2.2.0")
                 check(resumedRuntime.backend == "LiteRtCpu")
                 check(resumedRuntime.fallbackStage == null)
                 check(resumedRuntime.fallbackReason == null)

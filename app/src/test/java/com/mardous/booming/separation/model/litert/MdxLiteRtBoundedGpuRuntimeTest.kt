@@ -10,7 +10,7 @@ class MdxLiteRtBoundedGpuRuntimeTest {
         val decision = MdxLiteRtBoundedGpuContract.evaluate(exactCapability())
 
         assertTrue(decision.isExact)
-        assertTrue(decision.detail.contains("artifact=2.1.5-bss.2"))
+        assertTrue(decision.detail.contains("artifact=2.2.0-bss.2"))
         assertTrue(decision.detail.contains("kernelBatch=1"))
         assertTrue(decision.detail.contains("queueWindow=1"))
     }

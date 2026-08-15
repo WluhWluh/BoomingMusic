@@ -149,7 +149,9 @@ class MdxLiteRtGpuInferenceSessionFactoryTest {
             MdxLiteRtGpuRuntimeProfile.AutomaticFp32V1,
     ) = MdxLiteRtGpuInferenceSessionFactory(
         runtimeProfile = runtimeProfile,
-        platformProvider = { MdxRuntimePlatform(35, abi) },
+        platformProvider = {
+            MdxRuntimePlatform(35, abi, CATALOG_LITERT_VERSION)
+        },
         compatibilityPolicy = policy,
         sessionAllocator = allocator,
     )
@@ -198,6 +200,7 @@ class MdxLiteRtGpuInferenceSessionFactoryTest {
     }
 
     companion object {
+        private const val CATALOG_LITERT_VERSION = "2.1.5"
         private lateinit var catalog: SourceSeparationModelCatalog
 
         @JvmStatic

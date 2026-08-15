@@ -66,6 +66,7 @@ import com.mardous.booming.separation.model.MdxInferenceSessionProvider
 import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimePrecision
+import com.mardous.booming.separation.model.MdxRuntimeProfiles
 import com.mardous.booming.separation.model.MdxRuntimeSettings
 import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
@@ -8421,6 +8422,7 @@ class SourceSeparationPhase7WorkerDeviceTest {
                     runtimeCompatibility = profile.runtimeCompatibility.map { record ->
                         if (record == matchingRecords.single()) {
                             record.copy(
+                                runtimeVersion = MdxRuntimeProfiles.LITERT_VERSION,
                                 status = MdxRuntimeSupportStatus.Candidate,
                                 evidence = "AndroidTest-only KARA FP32 GPU requalification.",
                             )

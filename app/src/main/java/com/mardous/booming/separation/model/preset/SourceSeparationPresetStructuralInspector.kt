@@ -9,7 +9,7 @@ import com.mardous.booming.separation.model.MdxRuntimePlatform
 import java.io.File
 
 /**
- * Performs the limited structural check LiteRT 2.1.5 exposes without an
+ * Performs the limited structural check LiteRT 2.2 exposes without an
  * Interpreter API: compile the FlatBuffer and enumerate its I/O buffers.
  * Tensor names and shapes remain explicit user-entered contract data.
  */

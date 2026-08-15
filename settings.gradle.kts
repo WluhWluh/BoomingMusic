@@ -6,13 +6,13 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
-private val LITERT_API_VERSION = "2.1.5-bss.2-downloadable-loader"
+private val LITERT_API_VERSION = "2.2.0-bss.2-downloadable-loader"
 private val LITERT_API_AAR_SHA256 =
-    "a68b51546f268b6db0b64bec3d1d95389ba44a48c59beaa1769794682c94b4f9"
+    "88a939aa5f3a65ff89bd90eed4b3af30b2a8866bedbbd3838761b143d2ccb387"
 private val LITERT_API_AAR_URL =
     "https://github.com/WluhWluh/bss-litert-android/releases/download/" +
-        "downloadable-runtime-v2.1.5-bss.2-exp.2/" +
-        "litert-api-2.1.5-bss.2-downloadable-loader.aar"
+        "downloadable-runtime-v2.2.0-bss.2-exp.1/" +
+        "litert-api-2.2.0-bss.2-downloadable-loader.aar"
 
 private fun File.sha256(): String {
     val digest = MessageDigest.getInstance("SHA-256")

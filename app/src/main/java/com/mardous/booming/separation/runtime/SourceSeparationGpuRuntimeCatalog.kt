@@ -6,9 +6,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 internal object SourceSeparationGpuRuntimeCatalogMetadata {
-    const val ASSET_PATH = "source-separation/litert-gpu-runtime-catalog-v1.json"
-    const val CATALOG_ID = "booming-ss-litert-gpu-runtime-catalog-v1"
-    const val SCHEMA_VERSION = 1
+    const val ASSET_PATH = "source-separation/litert-gpu-runtime-catalog-v2.json"
+    const val CATALOG_ID = "booming-ss-litert-gpu-runtime-catalog-v2"
+    const val SCHEMA_VERSION = 2
 }
 
 @Serializable
@@ -35,6 +35,7 @@ internal data class SourceSeparationGpuRuntimeCatalogEntry(
     val dependencies: List<String>,
     val requiredCpuComponentId: String,
     val requiredCpuLibrarySha256: String,
+    val requiredCpuJniLibrarySha256: String,
     val capability: SourceSeparationGpuRuntimeCapability,
     val delivery: SourceSeparationGpuRuntimeDelivery,
     val innerManifestSha256: String,
@@ -163,7 +164,11 @@ internal object SourceSeparationGpuRuntimeCatalogLoader {
         )
         requireCatalog(
             SHA256_PATTERN.matches(entry.requiredCpuLibrarySha256),
-            "GPU CPU dependency hash is invalid.",
+            "GPU CPU core dependency hash is invalid.",
+        )
+        requireCatalog(
+            SHA256_PATTERN.matches(entry.requiredCpuJniLibrarySha256),
+            "GPU CPU JNI dependency hash is invalid.",
         )
         requireCatalog(
             entry.capability == SourceSeparationGpuRuntimeCapability(

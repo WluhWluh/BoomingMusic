@@ -40,7 +40,8 @@ class SourceSeparationRuntimeStoreTest {
 
         assertEquals(SourceSeparationRuntimeState.Installed, installed.state)
         assertEquals(
-            fixture.entry.innerLibrary.byteSize + fixture.manifestBytes.size,
+            fixture.entry.innerLibraries.sumOf(SourceSeparationRuntimeLibrary::byteSize) +
+                fixture.manifestBytes.size,
             installed.installedBytes,
         )
         val current = SourceSeparationRuntimeLayout.cpuCurrentDirectory(
@@ -48,11 +49,29 @@ class SourceSeparationRuntimeStoreTest {
             fixture.entry.abi,
         )
         assertTrue(File(current, "libLiteRt.so").isFile)
+        assertTrue(File(current, "liblitert_jni.so").isFile)
         assertTrue(File(current, "manifest.json").isFile)
         assertTrue(File(current, "install.json").isFile)
         assertTrue(current.listFiles().orEmpty().all { !it.canWrite() })
         assertFalse(File(current, "payload.zip").exists())
         assertEquals(installed, store.inventory(fixture.entry.componentId))
+    }
+
+    @Test
+    fun `catalog rejects a CPU component without the JNI library`() {
+        val fixture = RuntimeFixture.create(temporary.root)
+        val coreOnlyEntry = fixture.entry.copy(
+            loadOrder = listOf(SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME),
+            innerLibraries = listOf(fixture.entry.innerLibrary),
+        )
+
+        val error = runCatching {
+            SourceSeparationRuntimeCatalogLoader.validate(
+                fixture.catalog.copy(entries = listOf(coreOnlyEntry)),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is SourceSeparationRuntimeCatalogException)
     }
 
     @Test
@@ -65,7 +84,7 @@ class SourceSeparationRuntimeStoreTest {
 
         assertEquals(first.state, second.state)
         assertEquals(first.installedBytes, second.installedBytes)
-        assertEquals(3, temporary.root.resolve("cpu/${fixture.entry.abi}/current").listFiles()!!.size)
+        assertEquals(4, temporary.root.resolve("cpu/${fixture.entry.abi}/current").listFiles()!!.size)
     }
 
     @Test
@@ -77,7 +96,7 @@ class SourceSeparationRuntimeStoreTest {
             temporary.root,
             fixture.entry.abi,
         )
-        val library = File(current, SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME)
+        val library = File(current, SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME)
         val manifest = File(current, SourceSeparationRuntimeLayout.MANIFEST_FILE_NAME)
         assertTrue(library.setWritable(true))
         assertTrue(manifest.setWritable(true))
@@ -232,7 +251,7 @@ class SourceSeparationRuntimeStoreTest {
                     temporary.root,
                     initial.entry.abi,
                 ),
-                SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME,
+                SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME,
             ).readBytes(),
         )
 
@@ -246,7 +265,7 @@ class SourceSeparationRuntimeStoreTest {
                     temporary.root,
                     replacement.entry.abi,
                 ),
-                SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME,
+                SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME,
             ).readBytes(),
         )
         assertTrue(temporary.root.resolve(".staging").listFiles().orEmpty().isEmpty())
@@ -315,32 +334,53 @@ class SourceSeparationRuntimeStoreTest {
                 root: File,
                 zipEntryName: String = "libLiteRt.so",
                 library: ByteArray = byteArrayOf(7, 8, 9),
+                jniLibrary: ByteArray = byteArrayOf(10, 11, 12),
                 runtimeVersion: String = "test-runtime",
                 releaseVersion: String = "test-release",
             ): RuntimeFixture {
                 val libraryHash = library.sha256()
+                val jniLibraryHash = jniLibrary.sha256()
                 val manifest = """
                     {
-                      "schemaVersion": 1,
-                      "contractSchemaVersion": "bss-litert-downloadable-runtime-v2",
+                      "schemaVersion": 2,
+                      "contractSchemaVersion": "bss-litert-downloadable-runtime-v3",
                       "component": "cpu-core",
                       "abi": "x86_64",
                       "androidMinApi": 26,
-                      "baseLiteRtVersion": "2.1.5",
+                      "baseLiteRtVersion": "2.2.0",
                       "capabilities": ["cpu"],
                       "runtimeArtifactVersion": "$runtimeVersion",
                       "releaseVersion": "$releaseVersion",
-                      "files": [{
-                        "path": "libLiteRt.so",
-                        "byteSize": 3,
-                        "sha256": "$libraryHash",
-                        "elf": {
-                          "class": "ELF64",
-                          "machine": "EM_X86_64",
-                          "needed": ["libc.so"],
-                          "soname": "libLiteRt.so"
+                      "loadOrder": ["libLiteRt.so", "liblitert_jni.so"],
+                      "files": [
+                        {
+                          "role": "runtime",
+                          "path": "libLiteRt.so",
+                          "byteSize": ${library.size},
+                          "sha256": "$libraryHash",
+                          "elf": {
+                            "class": "ELF64",
+                            "machine": "EM_X86_64",
+                            "needed": ["libc.so"],
+                            "soname": "libLiteRt.so",
+                            "loadAlignment": 16384
+                          }
+                        },
+                        {
+                          "role": "jni",
+                          "path": "liblitert_jni.so",
+                          "byteSize": ${jniLibrary.size},
+                          "sha256": "$jniLibraryHash",
+                          "elf": {
+                            "class": "ELF64",
+                            "machine": "EM_X86_64",
+                            "needed": ["libdl.so", "libc.so"],
+                            "soname": "liblitert_jni.so",
+                            "loadAlignment": 16384
+                          },
+                          "runtimeLoads": ["libLiteRt.so"]
                         }
-                      }],
+                      ],
                       "sourceAar": {
                         "fileName": "test-api.aar",
                         "sha256": "${"a".repeat(64)}"
@@ -350,6 +390,7 @@ class SourceSeparationRuntimeStoreTest {
                 val zip = zipBytes(
                     manifest = manifest,
                     library = library,
+                    jniLibrary = jniLibrary,
                     libraryEntryName = zipEntryName,
                 )
                 val entry = SourceSeparationRuntimeCatalogEntry(
@@ -358,7 +399,7 @@ class SourceSeparationRuntimeStoreTest {
                     producerReleaseTag = "test-release-tag",
                     producerReleaseVersion = releaseVersion,
                     runtimeArtifactVersion = runtimeVersion,
-                    baseLiteRtVersion = "2.1.5",
+                    baseLiteRtVersion = "2.2.0",
                     abi = "x86_64",
                     androidMinApi = 26,
                     maturity = "recommended",
@@ -372,18 +413,31 @@ class SourceSeparationRuntimeStoreTest {
                         expectedSha256 = zip.sha256(),
                     ),
                     innerManifestSha256 = manifest.sha256(),
-                    innerLibrary = SourceSeparationRuntimeLibrary(
-                        path = "libLiteRt.so",
-                        byteSize = library.size.toLong(),
-                        sha256 = libraryHash,
-                        elfClass = "ELF64",
-                        machine = "EM_X86_64",
-                        soname = "libLiteRt.so",
+                    loadOrder = SourceSeparationRuntimeLayout.CPU_LIBRARY_LOAD_ORDER,
+                    innerLibraries = listOf(
+                        SourceSeparationRuntimeLibrary(
+                            role = SourceSeparationRuntimeLibraryRole.Runtime.id,
+                            path = "libLiteRt.so",
+                            byteSize = library.size.toLong(),
+                            sha256 = libraryHash,
+                            elfClass = "ELF64",
+                            machine = "EM_X86_64",
+                            soname = "libLiteRt.so",
+                        ),
+                        SourceSeparationRuntimeLibrary(
+                            role = SourceSeparationRuntimeLibraryRole.Jni.id,
+                            path = "liblitert_jni.so",
+                            byteSize = jniLibrary.size.toLong(),
+                            sha256 = jniLibraryHash,
+                            elfClass = "ELF64",
+                            machine = "EM_X86_64",
+                            soname = "liblitert_jni.so",
+                        ),
                     ),
                     licenseAssets = listOf("LICENSE-LiteRT.txt"),
                 )
                 val catalog = SourceSeparationRuntimeCatalog(
-                    schemaVersion = 1,
+                    schemaVersion = SourceSeparationRuntimeCatalogMetadata.SCHEMA_VERSION,
                     catalogId = SourceSeparationRuntimeCatalogMetadata.CATALOG_ID,
                     producerContractSchemaVersion = SourceSeparationRuntimeLayout.CONTRACT_SCHEMA_VERSION,
                     producerContractSha256 = "b".repeat(64),
@@ -396,6 +450,7 @@ class SourceSeparationRuntimeStoreTest {
             private fun zipBytes(
                 manifest: ByteArray,
                 library: ByteArray,
+                jniLibrary: ByteArray,
                 libraryEntryName: String,
             ): ByteArray = ByteArrayOutputStream().use { buffer ->
                 ZipOutputStream(buffer).use { zip ->
@@ -404,6 +459,9 @@ class SourceSeparationRuntimeStoreTest {
                     zip.closeEntry()
                     zip.putNextEntry(ZipEntry(libraryEntryName))
                     zip.write(library)
+                    zip.closeEntry()
+                    zip.putNextEntry(ZipEntry(SourceSeparationRuntimeLayout.JNI_LIBRARY_FILE_NAME))
+                    zip.write(jniLibrary)
                     zip.closeEntry()
                 }
                 buffer.toByteArray()

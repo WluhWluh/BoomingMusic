@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "catalogId": "booming-ss-litert-gpu-runtime-catalog-v2",
+  "producerContractSchemaVersion": "bss-litert-downloadable-runtime-v3",
+  "producerContractSha256": "be78535089ef2fd3b1de086303bbc8acde3523703645b7ee534d27707f09f996",
+  "entries": [
+    {
+      "componentId": "litert-bounded-gpu-2.2.0-bss.2-arm64-v8a",
+      "componentType": "bounded-gpu",
+      "producerReleaseTag": "downloadable-runtime-v2.2.0-bss.2-exp.1",
+      "producerReleaseVersion": "2.2.0-bss.2-exp.1",
+      "runtimeArtifactVersion": "2.2.0-bss.2",
+      "baseLiteRtVersion": "2.2.0",
+      "abi": "arm64-v8a",
+      "androidMinApi": 26,
+      "maturity": "recommended",
+      "capabilityId": "gpu-opencl-bounded-fp32",
+      "dependencies": [
+        "litert-cpu-core-2.2.0-bss.2-arm64-v8a"
+      ],
+      "requiredCpuComponentId": "litert-cpu-core-2.2.0-bss.2-arm64-v8a",
+      "requiredCpuLibrarySha256": "97355a36cb8ac7628cf407773291e98da79f3ef184cc43cb0e57dedf5f0c0637",
+      "requiredCpuJniLibrarySha256": "708b7a2bcdef55b698878ae237971fbd31d9a6bfcfe6ac81dc62c880ad6b4e8a",
+      "capability": {
+        "schemaVersion": 1,
+        "profileId": "gpu-opencl-bounded-fp32-v1",
+        "precision": "FP32",
+        "backend": "OpenCL",
+        "kernelBatchSize": 1,
+        "commandQueueWindowSize": 1
+      },
+      "delivery": {
+        "providerId": "github",
+        "artifactId": "litert-bounded-gpu-2.2.0-bss.2-arm64-v8a",
+        "locator": "https://github.com/WluhWluh/bss-litert-android/releases/download/downloadable-runtime-v2.2.0-bss.2-exp.1/litert-bounded-gpu-2.2.0-bss.2-arm64-v8a.zip",
+        "expectedByteSize": 1439172,
+        "expectedSha256": "669c9285cf126bff394f8c568b1d395db192f6f6dc31a296c8f818151185245e"
+      },
+      "innerManifestSha256": "dcb26f4b2cccf43c8a591d2734842da0be95299361df77cc4de3fadbe18e56a8",
+      "files": [
+        {
+          "path": "libLiteRtClGlAccelerator.so",
+          "byteSize": 3105544,
+          "sha256": "941f892418dae72b7bd740f2f2a26c61d6e50e0cf32c0c6bffca52aaffbc032f",
+          "elfClass": "ELF64",
+          "machine": "EM_AARCH64",
+          "soname": "libLiteRtClGlAccelerator.so",
+          "runtimeLoads": [
+            "libBssOcl.so"
+          ]
+        },
+        {
+          "path": "libBssOcl.so",
+          "byteSize": 11592,
+          "sha256": "a8490866ed4b42e2c5b3bf39e7a0c5b4f03fe8a977c3d79b52ca31dd4d001bee",
+          "elfClass": "ELF64",
+          "machine": "EM_AARCH64",
+          "soname": "libBssOcl.so"
+        }
+      ],
+      "licenseAssets": [
+        "LICENSE-LiteRT.txt",
+        "THIRD_PARTY_NOTICE-LiteRT.txt"
+      ]
+    }
+  ]
+}

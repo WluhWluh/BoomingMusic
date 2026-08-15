@@ -59,7 +59,8 @@ class SourceSeparationRuntimeLocatorTest {
     @Test
     fun `corrupt native payload is rejected by hash`() {
         val directory = writeRuntime()
-        File(directory, SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME).appendBytes(byteArrayOf(9))
+        File(directory, SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME)
+            .appendBytes(byteArrayOf(9))
 
         val error = assertThrows(SourceSeparationRuntimeLoadException::class.java) {
             locator().resolve()
@@ -69,9 +70,34 @@ class SourceSeparationRuntimeLocatorTest {
     }
 
     @Test
+    fun `corrupt JNI payload is rejected by hash`() {
+        val directory = writeRuntime()
+        File(directory, SourceSeparationRuntimeLayout.JNI_LIBRARY_FILE_NAME)
+            .appendBytes(byteArrayOf(9))
+
+        val error = assertThrows(SourceSeparationRuntimeLoadException::class.java) {
+            locator().resolve()
+        }
+
+        assertEquals(SourceSeparationRuntimeFailureReason.CorruptPayload, error.reason)
+    }
+
+    @Test
+    fun `missing JNI payload is rejected before loading`() {
+        val directory = writeRuntime()
+        assertTrue(File(directory, SourceSeparationRuntimeLayout.JNI_LIBRARY_FILE_NAME).delete())
+
+        val error = assertThrows(SourceSeparationRuntimeLoadException::class.java) {
+            locator().resolve()
+        }
+
+        assertEquals(SourceSeparationRuntimeFailureReason.MissingRuntime, error.reason)
+    }
+
+    @Test
     fun `trusted loading skips payload hash but keeps manifest and size checks`() {
         val directory = writeRuntime()
-        val library = File(directory, SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME)
+        val library = File(directory, SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME)
         library.writeBytes(byteArrayOf(4, 3, 2, 1))
 
         val verifiedError = assertThrows(SourceSeparationRuntimeLoadException::class.java) {
@@ -81,6 +107,7 @@ class SourceSeparationRuntimeLocatorTest {
 
         assertEquals(SourceSeparationRuntimeFailureReason.CorruptPayload, verifiedError.reason)
         assertEquals(library.canonicalFile, trusted.libraryFile)
+        assertTrue(trusted.jniLibraryFile.isFile)
     }
 
     @Test
@@ -91,11 +118,15 @@ class SourceSeparationRuntimeLocatorTest {
 
         assertEquals(directory.canonicalFile, installation.directory)
         assertEquals(
-            SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME,
+            SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME,
             installation.libraryFile.name,
         )
-        assertEquals("2.1.5-bss.2", installation.identity.runtimeArtifactVersion)
-        assertEquals("2.1.5-bss.2-exp.2", installation.identity.releaseVersion)
+        assertEquals(
+            SourceSeparationRuntimeLayout.JNI_LIBRARY_FILE_NAME,
+            installation.jniLibraryFile.name,
+        )
+        assertEquals("2.2.0-bss.2", installation.identity.runtimeArtifactVersion)
+        assertEquals("2.2.0-bss.2-exp.1", installation.identity.releaseVersion)
         assertEquals("arm64-v8a", installation.identity.abi)
     }
 
@@ -129,36 +160,56 @@ class SourceSeparationRuntimeLocatorTest {
             temporary.root,
             directoryAbi,
         ).apply { mkdirs() }
-        val bytes = byteArrayOf(1, 2, 3, 4)
-        val sha256 = bytes.sha256()
-        File(directory, SourceSeparationRuntimeLayout.LIBRARY_FILE_NAME).writeBytes(bytes)
+        val coreBytes = byteArrayOf(1, 2, 3, 4)
+        val jniBytes = byteArrayOf(5, 6, 7, 8)
+        val coreSha256 = coreBytes.sha256()
+        val jniSha256 = jniBytes.sha256()
+        File(directory, SourceSeparationRuntimeLayout.CORE_LIBRARY_FILE_NAME).writeBytes(coreBytes)
+        File(directory, SourceSeparationRuntimeLayout.JNI_LIBRARY_FILE_NAME).writeBytes(jniBytes)
         File(directory, SourceSeparationRuntimeLayout.MANIFEST_FILE_NAME).writeText(
             """
             {
-              "schemaVersion": 1,
-              "contractSchemaVersion": "bss-litert-downloadable-runtime-v2",
+              "schemaVersion": 2,
+              "contractSchemaVersion": "bss-litert-downloadable-runtime-v3",
               "component": "cpu-core",
               "abi": "$abi",
               "androidMinApi": $androidMinApi,
-              "baseLiteRtVersion": "2.1.5",
+              "baseLiteRtVersion": "2.2.0",
               "capabilities": ["cpu"],
-              "runtimeArtifactVersion": "2.1.5-bss.2",
-              "releaseVersion": "2.1.5-bss.2-exp.2",
+              "runtimeArtifactVersion": "2.2.0-bss.2",
+              "releaseVersion": "2.2.0-bss.2-exp.1",
+              "loadOrder": ["libLiteRt.so", "liblitert_jni.so"],
               "files": [
                 {
+                  "role": "runtime",
                   "path": "libLiteRt.so",
                   "byteSize": 4,
-                  "sha256": "$sha256",
+                  "sha256": "$coreSha256",
                   "elf": {
                     "class": "ELF64",
                     "machine": "EM_AARCH64",
                     "needed": ["libc.so"],
-                    "soname": "libLiteRt.so"
+                    "soname": "libLiteRt.so",
+                    "loadAlignment": 16384
                   }
+                },
+                {
+                  "role": "jni",
+                  "path": "liblitert_jni.so",
+                  "byteSize": 4,
+                  "sha256": "$jniSha256",
+                  "elf": {
+                    "class": "ELF64",
+                    "machine": "EM_AARCH64",
+                    "needed": ["libdl.so", "libc.so"],
+                    "soname": "liblitert_jni.so",
+                    "loadAlignment": 16384
+                  },
+                  "runtimeLoads": ["libLiteRt.so"]
                 }
               ],
               "sourceAar": {
-                "fileName": "litert-android-2.1.5-bss.2.aar",
+                "fileName": "litert-android-2.2.0-bss.2.aar",
                 "sha256": "${"a".repeat(64)}"
               }
             }
