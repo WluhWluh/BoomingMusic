@@ -9,7 +9,11 @@ internal class NativeMdxDsp(
         config.dimF,
         config.dimT,
         config.chunkSize,
-    ).also { require(it != 0L) { "Native packed-real MDX DSP plan creation failed." } }
+    ).also {
+        if (it == 0L) {
+            throw MdxNativeDspException("Native packed-real MDX DSP plan creation failed.")
+        }
+    }
 
     fun waveformToNhwcTensorInto(waveform: Array<FloatArray>, tensor: FloatArray) {
         check(handle != 0L) { "Native packed-real MDX DSP plan is closed." }
@@ -24,8 +28,8 @@ internal class NativeMdxDsp(
         require(tensor.size == config.tensorElementCount) {
             "Expected tensor size ${config.tensorElementCount}, got ${tensor.size}."
         }
-        check(nativePreprocess(handle, waveform[0], waveform[1], tensor)) {
-            "Native packed-real MDX STFT failed."
+        if (!nativePreprocess(handle, waveform[0], waveform[1], tensor)) {
+            throw MdxNativeDspException("Native packed-real MDX STFT failed.")
         }
     }
 
@@ -42,8 +46,8 @@ internal class NativeMdxDsp(
                 "Expected channel $channel to contain ${config.chunkSize} samples, got ${samples.size}."
             }
         }
-        check(nativePostprocess(handle, tensor, waveform[0], waveform[1])) {
-            "Native packed-real MDX iSTFT failed."
+        if (!nativePostprocess(handle, tensor, waveform[0], waveform[1])) {
+            throw MdxNativeDspException("Native packed-real MDX iSTFT failed.")
         }
     }
 
@@ -84,3 +88,5 @@ internal class NativeMdxDsp(
         }
     }
 }
+
+internal class MdxNativeDspException(message: String) : IllegalStateException(message)

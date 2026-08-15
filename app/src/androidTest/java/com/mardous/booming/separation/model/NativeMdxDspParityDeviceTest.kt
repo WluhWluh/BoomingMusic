@@ -41,14 +41,20 @@ class NativeMdxDspParityDeviceTest {
         val productTensorNhwc = nchwToNhwc(productTensorNchw, config)
         val productWaveform = productDsp.tensorToWaveform(productTensorNchw)
 
-        val nativeTensorNhwc = FloatArray(config.tensorElementCount)
-        val nativeWaveform = Array(MdxDspConfig.STEREO_CHANNELS) {
-            FloatArray(config.chunkSize)
+        val nativeTensorNchw: FloatArray
+        val nativeWaveform: Array<FloatArray>
+        MdxWindowDspFactory.create(config).use { nativeDsp ->
+            assertEquals(
+                "Product MDX DSP did not select the native implementation",
+                "native-pocketfft-packed-real-v1",
+                nativeDsp.implementationId,
+            )
+            nativeTensorNchw = nativeDsp.waveformToNchwTensor(input).copyOf()
+            nativeWaveform = nativeDsp.nchwTensorToWaveform(productTensorNchw)
+                .map(FloatArray::copyOf)
+                .toTypedArray()
         }
-        NativeMdxDsp(config).use { nativeDsp ->
-            nativeDsp.waveformToNhwcTensorInto(input, nativeTensorNhwc)
-            nativeDsp.nhwcTensorToWaveformInto(productTensorNhwc, nativeWaveform)
-        }
+        val nativeTensorNhwc = nchwToNhwc(nativeTensorNchw, config)
 
         assertEquals(config.tensorElementCount, productTensorNhwc.size)
         assertEquals(config.tensorElementCount, nativeTensorNhwc.size)

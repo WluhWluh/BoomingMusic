@@ -79,7 +79,7 @@ data class SourceSeparationCacheIdentity(
 
     companion object {
         const val SCHEMA_VERSION = 2
-        const val FP32_RENDER_PROFILE_ID = "mdx-fp32-render-v1"
+        const val FP32_RENDER_PROFILE_ID = "mdx-native-packed-fp32-render-v2"
     }
 }
 

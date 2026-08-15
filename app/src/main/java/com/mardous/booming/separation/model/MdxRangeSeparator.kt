@@ -154,7 +154,6 @@ class MdxRangeSeparator(
             )
         )
 
-        val spectrogram = MdxSpectrogram(config)
         val declaredOutputDataSizeBytes = if (segmentOutputDir != null) {
             targetFrames.toLong() * MdxDspConfig.STEREO_CHANNELS * Short.SIZE_BYTES
         } else {
@@ -168,14 +167,16 @@ class MdxRangeSeparator(
         }
         var runtimeDiagnostics: MdxRuntimeDiagnostics? = null
 
-        requireWorkspaceAvailable()
-        WavFileWriter(
-            file = vocalsFile,
-            sampleRate = config.sampleRate,
-            channelCount = MdxDspConfig.STEREO_CHANNELS,
-            declaredDataSizeBytes = declaredOutputDataSizeBytes,
-            preserveExistingData = effectiveResume != null,
-        ).use { vocalsWriter ->
+        val spectrogram = MdxWindowDspFactory.create(config)
+        try {
+            requireWorkspaceAvailable()
+            WavFileWriter(
+                file = vocalsFile,
+                sampleRate = config.sampleRate,
+                channelCount = MdxDspConfig.STEREO_CHANNELS,
+                declaredDataSizeBytes = declaredOutputDataSizeBytes,
+                preserveExistingData = effectiveResume != null,
+            ).use { vocalsWriter ->
             requireWorkspaceAvailable()
             WavFileWriter(
                 file = instrumentalFile,
@@ -493,6 +494,9 @@ class MdxRangeSeparator(
                     }
                 }
             }
+            }
+        } finally {
+            spectrogram.close()
         }
 
         onProgress(
@@ -531,6 +535,7 @@ class MdxRangeSeparator(
             },
             executionProfile = executionProfile,
             sourceDecodeDiagnostics = sourceInput.diagnostics,
+            dspImplementationId = spectrogram.implementationId,
         )
         requireWorkspaceAvailable()
         timingFile.writeText(
@@ -590,14 +595,14 @@ class MdxRangeSeparator(
 
     private fun runWindow(
         session: MdxInferenceSession,
-        spectrogram: MdxSpectrogram,
+        spectrogram: MdxWindowDsp,
         mixWindow: Array<FloatArray>,
         timing: MdxRangeTimingAccumulator,
         shouldCancel: () -> Boolean,
         requireWorkspaceAvailable: () -> Unit,
     ): Array<FloatArray> {
         val modelInput = measureElapsed(timing, "STFT") {
-            spectrogram.waveformToTensor(mixWindow)
+            spectrogram.waveformToNchwTensor(mixWindow)
         }
         val modelOutput = measureElapsed(timing, "Model inference") {
             val runtimeDiagnostics = if (BuildConfig.DEBUG) session.diagnostics else null
@@ -616,7 +621,7 @@ class MdxRangeSeparator(
             session.run(modelInput, shouldCancel)
         }
         return measureElapsed(timing, "ISTFT") {
-            spectrogram.tensorToWaveform(modelOutput)
+            spectrogram.nchwTensorToWaveform(modelOutput)
         }
     }
 

@@ -18,6 +18,7 @@ internal class MdxRangeTimingAccumulator {
         runtimeDiagnostics: MdxRuntimeDiagnostics,
         executionProfile: MdxExecutionProfile,
         sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics,
+        dspImplementationId: String,
     ): MdxRangeTimingReport {
         return MdxRangeTimingReport(
             audioDurationSeconds = audioDurationSeconds,
@@ -28,6 +29,7 @@ internal class MdxRangeTimingAccumulator {
             executionProfile = executionProfile,
             sourceDecodeDiagnostics = sourceDecodeDiagnostics,
             stageMs = LinkedHashMap(stageMs),
+            dspImplementationId = dspImplementationId,
         )
     }
 }
@@ -41,6 +43,7 @@ data class MdxRangeTimingReport(
     val executionProfile: MdxExecutionProfile,
     val sourceDecodeDiagnostics: MdxSourceDecodeDiagnostics,
     val stageMs: Map<String, Long>,
+    val dspImplementationId: String = "unavailable",
 ) {
     fun toFileText(
         vocalsFile: File,
@@ -52,6 +55,7 @@ data class MdxRangeTimingReport(
             appendLine("Audio duration: ${decimal(audioDurationSeconds)} seconds")
             appendLine("Windows: $windowCount")
             appendLine("Model: ${executionProfile.displayName}")
+            appendLine("DSP: $dspImplementationId")
             appendLine(runtimeDiagnostics.toDisplayText())
             appendLine(sourceDecodeDiagnostics.toDisplayText())
             appendLine(
