@@ -227,6 +227,62 @@ class SourceSeparationCacheStoreTest {
     }
 
     @Test
+    fun `forced terminal recovery records cancellation after owner death`() {
+        val store = SourceSeparationCacheStore(cacheRoot())
+        val partial = completedManifest(store).copy(
+            state = SourceSeparationCacheManifestState.Partial,
+            output = null,
+        )
+        store.writeManifest(partial)
+        store.writeRunJournal(runningJournal(partial))
+        val error = SourceSeparationCacheError(
+            type = "java.util.concurrent.CancellationException",
+            message = "forced cancellation",
+        )
+
+        val recovered = store.recoverForcedTerminalRun(
+            cacheKey = partial.cacheKey,
+            runId = "orphaned-run",
+            processGeneration = 1L,
+            terminalTransition = SourceSeparationCacheRunTransitionType.UserCanceled,
+            terminalLifecycle = SourceSeparationCacheRunJournalLifecycle.Canceled,
+            terminalError = error,
+        )
+
+        assertEquals(SourceSeparationCacheRunJournalLifecycle.Canceled, recovered?.lifecycle)
+        assertEquals(SourceSeparationCacheRunTransitionType.UserCanceled,
+            recovered?.transitions?.last()?.type)
+        assertTrue(recovered?.transitions?.any {
+            it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+        } == true)
+        assertEquals(error, store.readManifest(partial.cacheKey)?.error)
+    }
+
+    @Test
+    fun `forced terminal recovery rejects a stale generation`() {
+        val store = SourceSeparationCacheStore(cacheRoot())
+        val partial = completedManifest(store).copy(
+            state = SourceSeparationCacheManifestState.Partial,
+            output = null,
+        )
+        store.writeManifest(partial)
+        store.writeRunJournal(runningJournal(partial))
+
+        assertNull(store.recoverForcedTerminalRun(
+            cacheKey = partial.cacheKey,
+            runId = "orphaned-run",
+            processGeneration = 2L,
+            terminalTransition = SourceSeparationCacheRunTransitionType.ActiveModelSuperseded,
+            terminalLifecycle = SourceSeparationCacheRunJournalLifecycle.Paused,
+            terminalError = null,
+        ))
+        assertEquals(
+            SourceSeparationCacheRunJournalLifecycle.Running,
+            store.readRunJournal(partial.cacheKey)?.lifecycle,
+        )
+    }
+
+    @Test
     fun `recovery removes segment artifacts absent from the committed journal`() {
         val store = SourceSeparationCacheStore(cacheRoot())
         val base = completedManifest(store)

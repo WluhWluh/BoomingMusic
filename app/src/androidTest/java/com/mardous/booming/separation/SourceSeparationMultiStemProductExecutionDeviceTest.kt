@@ -134,7 +134,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("abi", currentProcessAbi())
         val cacheKeys = mutableListOf<String>()
         var mediaUri: Uri? = null
         var controller: MediaController? = null
@@ -312,7 +312,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         val modelId = arguments.getString(ARG_MODEL_ID).orEmpty()
         val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
         assumeTrue(modelId.isNotBlank() && relativeSource.isNotBlank())
-        require(modelId in EXPECTED_MODEL_IDS && SAFE_RELATIVE_PATH.matches(relativeSource))
+        require(modelId == OFFICIAL_SIX_STEM_MODEL_ID && SAFE_RELATIVE_PATH.matches(relativeSource))
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val source = File(context.filesDir, relativeSource).canonicalFile
@@ -357,7 +357,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("abi", currentProcessAbi())
         var mediaUri: Uri? = null
         var cacheKey: String? = null
         var controller: MediaController? = null
@@ -738,7 +738,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("abi", currentProcessAbi())
         val producerResult = AtomicReference<Result<HtdemucsSourceSeparationEngineResult>?>()
         val preparedManifest = AtomicReference<com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest?>()
         val producerFinished = CountDownLatch(1)
@@ -975,7 +975,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("abi", currentProcessAbi())
         val oneReadyReached = CountDownLatch(1)
         val releaseOneReady = CountDownLatch(1)
         val twoReadyReached = CountDownLatch(1)
@@ -1383,7 +1383,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("abi", currentProcessAbi())
         val oneReadyReached = CountDownLatch(1)
         val releaseOneReady = CountDownLatch(1)
         val twoReadyReached = CountDownLatch(1)
@@ -1629,7 +1629,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("abi", currentProcessAbi())
         try {
             mediaUri = importIntoMediaStore(context, source, runId)
             val song = stagedSong(mediaUri, source, runId)
@@ -1644,14 +1644,28 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .forEach { repository.delete(it.cacheKey) }
 
             val pause = AtomicBoolean(false)
+            val pauseRequestedAt = AtomicLong(0L)
+            val pauseSchedulerStarted = AtomicBoolean(false)
+            val preparedManifest = AtomicReference<com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest?>()
             val pauseStartedAt = SystemClock.elapsedRealtime()
             val paused = try {
                 facade.separate(
                     song = song,
                     modelId = modelId,
                     onProgress = { progress ->
-                        if (progress.completedWindows >= 1) pause.set(true)
+                        if (progress.completedWindows >= 1 &&
+                            pauseSchedulerStarted.compareAndSet(false, true)
+                        ) {
+                            scheduleControlDuringNextInvocation(
+                                store = store,
+                                cacheKeyProvider = { preparedManifest.get()?.cacheKey },
+                                completedWindows = progress.completedWindows,
+                                requestedAt = pauseRequestedAt,
+                                applyControl = { pause.set(true) },
+                            )
+                        }
                     },
+                    onPrepared = preparedManifest::set,
                     shouldPause = pause::get,
                     pauseReasonProvider = { SourceSeparationPauseReason.ActiveModelSuperseded },
                 )
@@ -1662,6 +1676,9 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             requireNotNull(paused)
             assertEquals(SourceSeparationPauseReason.ActiveModelSuperseded, paused.pauseReason)
             val pauseElapsedMs = SystemClock.elapsedRealtime() - pauseStartedAt
+            val pauseResponseMs = SystemClock.elapsedRealtime() - pauseRequestedAt.get()
+            assertTrue("Model supersession took ${pauseResponseMs}ms after control was requested.",
+                pauseResponseMs <= MAX_TERMINAL_CONTROL_RESPONSE_MS)
             val oldEntry = repository.entries().single {
                 it.modelId == modelId && it.title == song.title
             }
@@ -1675,6 +1692,9 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 SourceSeparationCacheRunTransitionType.ActiveModelSuperseded,
                 oldJournal.transitions.last().type,
             )
+            assertTrue(oldJournal.transitions.any {
+                it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+            })
 
             val replacementStartedAt = SystemClock.elapsedRealtime()
             val replacement = facade.separate(song, replacementModelId)
@@ -1704,6 +1724,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("oldReadySegments", oldReady)
                 .put("oldTotalSegments", oldPlan.segmentCount)
                 .put("pauseElapsedMs", pauseElapsedMs)
+                .put("pauseResponseMs", pauseResponseMs)
                 .put("replacementCacheKey", replacement.manifest.cacheKey)
                 .put("replacementElapsedMs", replacementElapsedMs)
                 .put("replacementStemCount", replacement.manifest.output?.stems?.size)
@@ -1750,7 +1771,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("abi", currentProcessAbi())
         try {
             mediaUri = importIntoMediaStore(context, source, runId)
             val song = stagedSong(mediaUri, source, runId)
@@ -1763,14 +1784,28 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .forEach { repository.delete(it.cacheKey) }
 
             val cancel = AtomicBoolean(false)
+            val cancelRequestedAt = AtomicLong(0L)
+            val cancelSchedulerStarted = AtomicBoolean(false)
+            val preparedManifest = AtomicReference<com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest?>()
             val cancelStartedAt = SystemClock.elapsedRealtime()
             val canceled = try {
                 facade.separate(
                     song = song,
                     modelId = modelId,
                     onProgress = { progress ->
-                        if (progress.completedWindows >= 1) cancel.set(true)
+                        if (progress.completedWindows >= 1 &&
+                            cancelSchedulerStarted.compareAndSet(false, true)
+                        ) {
+                            scheduleControlDuringNextInvocation(
+                                store = store,
+                                cacheKeyProvider = { preparedManifest.get()?.cacheKey },
+                                completedWindows = progress.completedWindows,
+                                requestedAt = cancelRequestedAt,
+                                applyControl = { cancel.set(true) },
+                            )
+                        }
                     },
+                    onPrepared = preparedManifest::set,
                     shouldCancel = cancel::get,
                 )
                 null
@@ -1779,6 +1814,9 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             }
             requireNotNull(canceled) { "The multi-stem run ignored user cancellation." }
             val cancelElapsedMs = SystemClock.elapsedRealtime() - cancelStartedAt
+            val cancelResponseMs = SystemClock.elapsedRealtime() - cancelRequestedAt.get()
+            assertTrue("Cancellation took ${cancelResponseMs}ms after control was requested.",
+                cancelResponseMs <= MAX_TERMINAL_CONTROL_RESPONSE_MS)
             val canceledEntry = repository.entries().single {
                 it.modelId == modelId && it.title == song.title
             }
@@ -1793,6 +1831,9 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             })
             val canceledJournal = requireNotNull(store.readRunJournal(partial.cacheKey))
             assertEquals(SourceSeparationCacheRunJournalLifecycle.Canceled, canceledJournal.lifecycle)
+            assertTrue(canceledJournal.transitions.any {
+                it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+            })
 
             val restartStartedAt = SystemClock.elapsedRealtime()
             val restarted = facade.separate(song, modelId)
@@ -1814,6 +1855,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 )
                 .put("cacheKey", partial.cacheKey)
                 .put("cancelElapsedMs", cancelElapsedMs)
+                .put("cancelResponseMs", cancelResponseMs)
                 .put("readySegmentsBeforeRestart", readyBeforeRestart)
                 .put("totalSegments", plan.segmentCount)
                 .put("restartElapsedMs", restartElapsedMs)
@@ -1871,7 +1913,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("abi", currentProcessAbi())
             .put("sourceFile", stagedSource.name)
             .put("sourceBytes", stagedSource.length())
             .put("sourceSha256", expectedSourceSha ?: stagedSource.sha256())
@@ -1895,7 +1937,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                     .trustedInventory()
                     .singleOrNull { item ->
                         item.state == SourceSeparationRuntimeState.Installed &&
-                            item.catalogEntry.abi == android.os.Build.SUPPORTED_ABIS.first()
+                            item.catalogEntry.abi == currentProcessAbi()
                     }
                     ?.installation,
             ) { "The trusted CPU runtime installation is unavailable." }
@@ -2071,7 +2113,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("abi", currentProcessAbi())
         val producerResult = AtomicReference<Result<HtdemucsSourceSeparationEngineResult>?>()
         val preparedManifest = AtomicReference<com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest?>()
         val producerFinished = CountDownLatch(1)
@@ -2219,6 +2261,10 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         val relativeSource = arguments.getString(ARG_SOURCE_PATH).orEmpty()
         assumeTrue(modelId.isNotBlank() && relativeSource.isNotBlank())
         require(modelId == OFFICIAL_SIX_STEM_MODEL_ID && SAFE_RELATIVE_PATH.matches(relativeSource))
+        val controlledTerminationGraceMs = arguments
+            .getString(ARG_CONTROLLED_TERMINATION_GRACE_MS)
+            ?.toLongOrNull()
+            ?.also { require(it in 1L..MAX_TERMINAL_CONTROL_RESPONSE_MS) }
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val source = File(context.filesDir, relativeSource).canonicalFile
@@ -2233,11 +2279,19 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             .resolve("$runId.json")
         val report = JSONObject()
             .put("runId", runId)
-            .put("mode", "independent-observer-handoff-cancel")
+            .put(
+                "mode",
+                if (controlledTerminationGraceMs == null) {
+                    "independent-observer-handoff-cancel"
+                } else {
+                    "independent-observer-handoff-hard-cancel"
+                },
+            )
             .put("modelId", modelId)
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
+            .put("controlledTerminationGraceMs", controlledTerminationGraceMs)
         val producerResult = AtomicReference<Result<HtdemucsSourceSeparationEngineResult>?>()
         val preparedManifest = AtomicReference<com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest?>()
         val producerFinished = CountDownLatch(1)
@@ -2282,7 +2336,14 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             }
             val activeCacheKey = requireNotNull(cacheKey)
             assertTrue(committedSegments > 0)
-            val remote = BoundRemoteSourceSeparationMultiStemExecutionHost(context)
+            val remote = if (controlledTerminationGraceMs == null) {
+                BoundRemoteSourceSeparationMultiStemExecutionHost(context)
+            } else {
+                BoundRemoteSourceSeparationMultiStemExecutionHost(
+                    context = context,
+                    controlledTerminationGraceMs = controlledTerminationGraceMs,
+                )
+            }
             val snapshot = requireNotNull(remote.reconnectableRun())
             assertEquals(activeCacheKey, snapshot.descriptor.cacheKey)
             assertEquals(SourceSeparationMultiStemIpcRunAuthority.IndependentForeground,
@@ -2313,19 +2374,58 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             assertTrue(isMultiStemForeground(context))
             assertTrue(hasProcessingNotification(context))
 
-            assertEquals(SourceSeparationMultiStemIpcStatus.Applied, adoptedRun.cancel())
-            check(terminalEvent.await(PRODUCER_AHEAD_READY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                "The adopted observer did not receive a terminal cancellation event."
+            val runningSegmentAtAdoption = store.readManifest(activeCacheKey)
+                ?.segmentPlan
+                ?.segments
+                ?.singleOrNull { segment ->
+                    segment.state ==
+                        com.mardous.booming.separation.cache.SourceSeparationSegmentState.Running
+                }
+                ?.index
+            val inFlightDeadline = SystemClock.elapsedRealtime() +
+                PRODUCER_AHEAD_READY_TIMEOUT_MS
+            var runningSegmentIndex: Int? = null
+            while (SystemClock.elapsedRealtime() < inFlightDeadline) {
+                val candidate = store.readManifest(activeCacheKey)
+                    ?.segmentPlan
+                    ?.segments
+                    ?.singleOrNull { segment ->
+                        segment.state ==
+                            com.mardous.booming.separation.cache.SourceSeparationSegmentState.Running
+                    }
+                    ?.index
+                if (candidate != null && candidate != runningSegmentAtAdoption) {
+                    runningSegmentIndex = candidate
+                    break
+                }
+                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
             }
-            val terminalDeadline = SystemClock.elapsedRealtime() + REMOTE_PROCESS_TIMEOUT_MS
+            requireNotNull(runningSegmentIndex) {
+                "The adopted run never entered an in-flight model invocation."
+            }
+
+            val cancelRequestedAt = SystemClock.elapsedRealtime()
+            assertEquals(SourceSeparationMultiStemIpcStatus.Applied, adoptedRun.cancel())
+            val terminalDeadline = cancelRequestedAt + MAX_TERMINAL_CONTROL_RESPONSE_MS
             var journal = store.readRunJournal(activeCacheKey)
             while (journal?.lifecycle != SourceSeparationCacheRunJournalLifecycle.Canceled &&
                 SystemClock.elapsedRealtime() < terminalDeadline
             ) {
-                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+                terminalEvent.await(MEDIA_SESSION_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS)
                 journal = store.readRunJournal(activeCacheKey)
             }
+            val cancelResponseMs = SystemClock.elapsedRealtime() - cancelRequestedAt
             assertEquals(SourceSeparationCacheRunJournalLifecycle.Canceled, journal?.lifecycle)
+            assertTrue(
+                "Adopted cancellation took ${cancelResponseMs}ms after control was requested.",
+                cancelResponseMs <= MAX_TERMINAL_CONTROL_RESPONSE_MS,
+            )
+            val hardTerminationObserved = journal?.transitions?.any {
+                it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
+            } == true
+            if (controlledTerminationGraceMs != null) {
+                assertTrue(hardTerminationObserved)
+            }
             assertTrue(observedSequences.zipWithNext().all { (first, second) -> second > first })
             val releaseDeadline = SystemClock.elapsedRealtime() + REMOTE_PROCESS_TIMEOUT_MS
             while ((isMultiStemForeground(context) || hasProcessingNotification(context)) &&
@@ -2341,6 +2441,11 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("snapshotSequence", snapshot.latestEvent.sequence)
                 .put("adoptedSequence", adoptedRun.state.latestEvent.sequence)
                 .put("observedSequences", JSONArray(observedSequences))
+                .put("runningSegmentAtAdoption", runningSegmentAtAdoption)
+                .put("runningSegmentIndexAtCancel", runningSegmentIndex)
+                .put("cancelResponseMs", cancelResponseMs)
+                .put("terminalEventObserved", terminalEvent.count == 0L)
+                .put("hardTerminationObserved", hardTerminationObserved)
                 .put("terminalLifecycle", journal?.lifecycle?.name)
                 .put("foregroundSurvivedOriginalDisconnect", true)
                 .put("foregroundReleasedAfterCancel", true)
@@ -2626,6 +2731,36 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         }
     }
 
+    private fun scheduleControlDuringNextInvocation(
+        store: SourceSeparationCacheStore,
+        cacheKeyProvider: () -> String?,
+        completedWindows: Int,
+        requestedAt: AtomicLong,
+        applyControl: () -> Unit,
+    ) {
+        Thread({
+            val deadline = SystemClock.elapsedRealtime() + REMOTE_PROCESS_TIMEOUT_MS
+            while (SystemClock.elapsedRealtime() < deadline) {
+                val observedRunningWindow = cacheKeyProvider()?.let(store::readRunJournal)
+                    ?.transitions
+                    ?.any { transition ->
+                        transition.type == SourceSeparationCacheRunTransitionType.SegmentRunning &&
+                            (transition.segmentIndex ?: -1) >= completedWindows
+                    } == true
+                if (observedRunningWindow) {
+                    SystemClock.sleep(IN_FLIGHT_CONTROL_DELAY_MS)
+                    break
+                }
+                SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+            }
+            requestedAt.compareAndSet(0L, SystemClock.elapsedRealtime())
+            applyControl()
+        }, "BSS-Multistem-InFlight-Control").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
     private fun importIntoMediaStore(context: Context, source: File, runId: String): Uri {
         val values = ContentValues().apply {
             put(MediaStore.Audio.Media.DISPLAY_NAME, "$runId.wav")
@@ -2696,6 +2831,15 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
 
     private fun thermalStatus(context: Context): Int =
         context.getSystemService(PowerManager::class.java).currentThermalStatus
+
+    private fun currentProcessAbi(): String {
+        val abis = if (android.os.Process.is64Bit()) {
+            android.os.Build.SUPPORTED_64_BIT_ABIS
+        } else {
+            android.os.Build.SUPPORTED_32_BIT_ABIS
+        }
+        return requireNotNull(abis.firstOrNull()) { "The current process has no reported ABI." }
+    }
 
     private fun compareProductWavsWithHostReference(
         store: SourceSeparationCacheStore,
@@ -3004,6 +3148,8 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val ARG_DELETE_ACTIVE_CACHE = "bssMultistemDeleteActiveCache"
         const val ARG_APP_COMMIT = "bssAppCommit"
         const val ARG_TEST_COMMIT = "bssTestCommit"
+        const val ARG_CONTROLLED_TERMINATION_GRACE_MS =
+            "bssMultistemControlledTerminationGraceMs"
         const val REPORT_DIRECTORY = "source-separation/multistem-product-device-reports"
         const val MAIN_DEATH_SCENARIO_DIRECTORY =
             "source-separation/multistem-main-death-scenarios"
@@ -3017,6 +3163,8 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val PRODUCER_AHEAD_READY_WINDOWS = 2
         const val PRODUCER_AHEAD_READY_TIMEOUT_MS = 10L * 60L * 1_000L
         const val REMOTE_PROCESS_TIMEOUT_MS = 30_000L
+        const val MAX_TERMINAL_CONTROL_RESPONSE_MS = 10_000L
+        const val IN_FLIGHT_CONTROL_DELAY_MS = 750L
         const val REMOTE_RESOURCE_SAMPLE_INTERVAL_MS = 100L
         const val OFFICIAL_SIX_STEM_MODEL_ID =
             "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0"

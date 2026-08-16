@@ -197,6 +197,33 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
             }
         }
 
+        override fun terminateControlledRun(
+            runId: String,
+            processGeneration: Long,
+        ): Boolean {
+            val run = synchronized(stateLock) { active } ?: return false
+            if (!SourceSeparationMultiStemHardTerminationPolicy.canTerminate(
+                    activeRunId = run.descriptor.runId,
+                    activeProcessGeneration = run.descriptor.processGeneration,
+                    activeCancelRequested = run.shouldCancel(),
+                    activePauseRequested = run.shouldPause(),
+                    requestedRunId = runId,
+                    requestedProcessGeneration = processGeneration,
+                ) || !run.authorizeForcedTermination()
+            ) return false
+            Thread({
+                Thread.sleep(FORCED_TERMINATION_DELAY_MS)
+                val stillBlocked = synchronized(stateLock) {
+                    active === run && run.forcedTerminationAuthorized()
+                }
+                if (stillBlocked) Process.killProcess(Process.myPid())
+            }, "BSS-MultiStem-ControlledDeath").apply {
+                isDaemon = true
+                start()
+            }
+            return true
+        }
+
         override fun activeRun(): String = synchronized(stateLock) {
             val state = active?.snapshot()
             SourceSeparationMultiStemExecutionCodec.encodeActiveRunResponse(
@@ -496,6 +523,7 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
         private val sequence = AtomicLong(0L)
         private val pause = AtomicBoolean(false)
         private val cancel = AtomicBoolean(false)
+        private val forcedTermination = AtomicBoolean(false)
         private val pauseReason = AtomicReference<SourceSeparationPauseReason?>(null)
         private val playbackPositionMs = AtomicReference<Long?>(descriptor.runtime.initialPlaybackPositionMs)
         private val playbackReadyWindowCount = AtomicLong(
@@ -525,6 +553,11 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
             pause.set(false)
             cancel.set(true)
         }
+
+        fun authorizeForcedTermination(): Boolean =
+            (shouldCancel() || shouldPause()) && forcedTermination.compareAndSet(false, true)
+
+        fun forcedTerminationAuthorized(): Boolean = forcedTermination.get()
 
         fun markExecutionFinished() {
             processExecutionLifetime.markExecutionFinished()
@@ -635,6 +668,7 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
     }
 
     companion object {
+        private const val FORCED_TERMINATION_DELAY_MS = 100L
         const val ACTION_BIND = "com.wluhwluh.booming.action.BIND_MULTISTEM_EXECUTION"
         const val ACTION_START_MEDIA_PROCESSING =
             "com.wluhwluh.booming.action.START_MULTISTEM_MEDIA_PROCESSING"

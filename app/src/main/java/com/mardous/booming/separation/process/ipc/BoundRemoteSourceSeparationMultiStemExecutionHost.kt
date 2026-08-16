@@ -34,6 +34,7 @@ import com.mardous.booming.separation.toExecutionDescriptor
 import com.mardous.booming.separation.process.toMdxRangeProgress
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.UUID
 import kotlin.concurrent.thread
@@ -43,11 +44,19 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
     context: Context,
     private val connectionTimeoutMs: Long = DEFAULT_CONNECTION_TIMEOUT_MS,
     private val controlPollMs: Long = DEFAULT_CONTROL_POLL_MS,
+    private val controlledTerminationGraceMs: Long =
+        SourceSeparationMultiStemHardTerminationPolicy.DEFAULT_GRACE_MS,
 ) : SourceSeparationMultiStemExecutionHost {
     private val applicationContext = context.applicationContext
     private val cacheStore = SourceSeparationCacheStore(
         AndroidSourceSeparationCacheRootProvider(applicationContext).resolveRoot(),
     )
+
+    init {
+        require(connectionTimeoutMs > 0L)
+        require(controlPollMs > 0L)
+        require(controlledTerminationGraceMs > 0L)
+    }
 
     internal fun terminateRemoteProcessForValidation() {
         val connected = bind()
@@ -76,9 +85,15 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
     ): SourceSeparationMultiStemAdoptedRun? {
         val connected = bind()
         var adopted = false
+        val terminal = CountDownLatch(1)
+        val forcedControl = AtomicReference<SourceSeparationMultiStemTerminalControl?>(null)
+        val forceScheduled = AtomicBoolean(false)
+        val hardTerminationReconciled = AtomicBoolean(false)
         val callback = object : ISourceSeparationMultiStemExecutionCallback.Stub() {
             override fun onEvent(eventJson: String) {
-                onEvent(SourceSeparationMultiStemExecutionCodec.decodeEvent(eventJson))
+                val event = SourceSeparationMultiStemExecutionCodec.decodeEvent(eventJson)
+                if (event.payload.isTerminal()) terminal.countDown()
+                onEvent(event)
             }
         }
         return try {
@@ -106,6 +121,44 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                         ).status
                     } catch (error: Throwable) {
                         throw error.asSourceSeparationRemoteHostDied()
+                    }
+                },
+                forceControl = { control ->
+                    forcedControl.set(control)
+                    if (forceScheduled.compareAndSet(false, true)) {
+                        thread(
+                            isDaemon = true,
+                            name = "BSS-MultiStem-Adopted-Control",
+                        ) {
+                            runCatching {
+                                if (!terminal.await(
+                                        controlledTerminationGraceMs,
+                                        TimeUnit.MILLISECONDS,
+                                    ) && connected.service.terminateControlledRun(
+                                        state.descriptor.runId,
+                                        state.descriptor.processGeneration,
+                                    )
+                                ) {
+                                    val deadlineNanos = System.nanoTime() +
+                                        TimeUnit.MILLISECONDS.toNanos(connectionTimeoutMs)
+                                    while (connected.binder.isBinderAlive &&
+                                        terminal.count > 0L &&
+                                        System.nanoTime() < deadlineNanos
+                                    ) {
+                                        Thread.sleep(controlPollMs)
+                                    }
+                                    if (!connected.binder.isBinderAlive) {
+                                        reconcileControlledProcessDeath(
+                                            descriptor = state.descriptor,
+                                            control = forcedControl.get(),
+                                            reconciled = hardTerminationReconciled,
+                                        )
+                                    }
+                                }
+                            }.onFailure { error ->
+                                Log.w(TAG, "Unable to force-stop an adopted multi-stem run", error)
+                            }
+                        }
                     }
                 },
                 closeBinding = {
@@ -141,6 +194,8 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
         }
         val terminal = CountDownLatch(1)
         val failure = AtomicReference<Throwable?>(null)
+        val terminalControl = AtomicReference<SourceSeparationMultiStemTerminalControl?>(null)
+        val hardTerminationReconciled = AtomicBoolean(false)
         val service = connected.service
         val callback = object : ISourceSeparationMultiStemExecutionCallback.Stub() {
             override fun onEvent(eventJson: String) {
@@ -214,7 +269,12 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
         val deathRecipient = IBinder.DeathRecipient {
             failure.compareAndSet(
                 null,
-                SourceSeparationRemoteHostDiedException(
+                terminalControl.get()?.let { control ->
+                    SourceSeparationMultiStemHardTerminationPolicy.failure(
+                        control,
+                        DeadObjectException("Multi-stem service died after terminal control."),
+                    )
+                } ?: SourceSeparationRemoteHostDiedException(
                     DeadObjectException("Multi-stem service died."),
                 ),
             )
@@ -232,24 +292,36 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             while (terminal.count > 0L) {
                 try {
                     if (request.shouldCancel()) {
-                        service.updateControl(SourceSeparationMultiStemExecutionCodec.encodeControlCommand(
-                            SourceSeparationMultiStemIpcControlCommand(
-                                runId = descriptor.runId,
-                                processGeneration = descriptor.processGeneration,
-                                action = SourceSeparationMultiStemIpcControlAction.Cancel,
-                            ),
-                        ))
+                        val control = SourceSeparationMultiStemTerminalControl.Cancel
+                        terminalControl.set(control)
+                        val status = sendTerminalControl(
+                            service = service,
+                            descriptor = descriptor,
+                            action = SourceSeparationMultiStemIpcControlAction.Cancel,
+                        )
+                        forceControlledTerminationAfterGrace(
+                            service,
+                            descriptor,
+                            terminal,
+                            status,
+                        )
                         return@thread
                     }
                     if (request.shouldPause()) {
-                        service.updateControl(SourceSeparationMultiStemExecutionCodec.encodeControlCommand(
-                            SourceSeparationMultiStemIpcControlCommand(
-                                runId = descriptor.runId,
-                                processGeneration = descriptor.processGeneration,
-                                action = SourceSeparationMultiStemIpcControlAction.Pause,
-                                pauseReason = request.pauseReasonProvider(),
-                            ),
-                        ))
+                        val reason = request.pauseReasonProvider()
+                        terminalControl.set(SourceSeparationMultiStemTerminalControl.Pause(reason))
+                        val status = sendTerminalControl(
+                            service = service,
+                            descriptor = descriptor,
+                            action = SourceSeparationMultiStemIpcControlAction.Pause,
+                            pauseReason = reason,
+                        )
+                        forceControlledTerminationAfterGrace(
+                            service,
+                            descriptor,
+                            terminal,
+                            status,
+                        )
                         return@thread
                     }
                     val playbackPositionMs = request.playbackPositionMsProvider()
@@ -278,7 +350,10 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                     }
                     Thread.sleep(controlPollMs)
                 } catch (error: Throwable) {
-                    failure.compareAndSet(null, error.asSourceSeparationRemoteHostDied())
+                    failure.compareAndSet(
+                        null,
+                        mapTerminalControlFailure(error, terminalControl.get()),
+                    )
                     terminal.countDown()
                     return@thread
                 }
@@ -329,7 +404,12 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                 if (!connected.binder.isBinderAlive) {
                     failure.compareAndSet(
                         null,
-                        SourceSeparationRemoteHostDiedException(
+                        terminalControl.get()?.let { control ->
+                            SourceSeparationMultiStemHardTerminationPolicy.failure(
+                                control,
+                                DeadObjectException("Multi-stem service is no longer alive."),
+                            )
+                        } ?: SourceSeparationRemoteHostDiedException(
                             DeadObjectException("Multi-stem service is no longer alive."),
                         ),
                     )
@@ -389,7 +469,15 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                     )
                 }
             }
-            awaitRemoteRunRelease(service, descriptor)
+            if (!connected.binder.isBinderAlive) {
+                reconcileControlledProcessDeath(
+                    descriptor = descriptor,
+                    control = terminalControl.get(),
+                    reconciled = hardTerminationReconciled,
+                )
+            } else {
+                awaitRemoteRunRelease(service, descriptor)
+            }
             recycleTerminalProcess = SourceSeparationProcessLifecyclePolicy
                 .requiresMultiStemTerminalRecycle(Process.is64Bit())
             failure.get()?.takeUnless { it === AlreadyCompletedSignal }?.let { error ->
@@ -407,12 +495,92 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
                 HtdemucsSourceSeparationEngineResult.Completed(manifest)
             }
         } catch (error: Throwable) {
-            throw error.asSourceSeparationRemoteHostDied()
+            val mapped = mapTerminalControlFailure(error, terminalControl.get())
+            if (!connected.binder.isBinderAlive) {
+                reconcileControlledProcessDeath(
+                    descriptor = descriptor,
+                    control = terminalControl.get(),
+                    reconciled = hardTerminationReconciled,
+                )
+            }
+            throw mapped
         } finally {
             controlThread.interrupt()
             runCatching { connected.binder.unlinkToDeath(deathRecipient, 0) }
             runCatching { applicationContext.unbindService(connected.connection) }
             if (recycleTerminalProcess) recycleTerminalProcess()
+        }
+    }
+
+    private fun sendTerminalControl(
+        service: ISourceSeparationMultiStemExecutionService,
+        descriptor: SourceSeparationMultiStemExecutionDescriptor,
+        action: SourceSeparationMultiStemIpcControlAction,
+        pauseReason: SourceSeparationPauseReason? = null,
+    ): SourceSeparationMultiStemIpcStatus = SourceSeparationMultiStemExecutionCodec
+        .decodeControlResponse(
+            service.updateControl(
+                SourceSeparationMultiStemExecutionCodec.encodeControlCommand(
+                    SourceSeparationMultiStemIpcControlCommand(
+                        runId = descriptor.runId,
+                        processGeneration = descriptor.processGeneration,
+                        action = action,
+                        pauseReason = pauseReason,
+                    ),
+                ),
+            ),
+        ).status
+
+    private fun forceControlledTerminationAfterGrace(
+        service: ISourceSeparationMultiStemExecutionService,
+        descriptor: SourceSeparationMultiStemExecutionDescriptor,
+        terminal: CountDownLatch,
+        controlStatus: SourceSeparationMultiStemIpcStatus,
+    ) {
+        if (controlStatus != SourceSeparationMultiStemIpcStatus.Applied ||
+            terminal.await(controlledTerminationGraceMs, TimeUnit.MILLISECONDS)
+        ) return
+        service.terminateControlledRun(descriptor.runId, descriptor.processGeneration)
+    }
+
+    private fun reconcileControlledProcessDeath(
+        descriptor: SourceSeparationMultiStemExecutionDescriptor,
+        control: SourceSeparationMultiStemTerminalControl?,
+        reconciled: AtomicBoolean,
+    ) {
+        if (control == null || !reconciled.compareAndSet(false, true)) return
+        val expectedTransition = SourceSeparationMultiStemHardTerminationPolicy.transition(control)
+        val expectedLifecycle = SourceSeparationMultiStemHardTerminationPolicy.lifecycle(control)
+        val deadlineNanos = System.nanoTime() +
+            TimeUnit.MILLISECONDS.toNanos(connectionTimeoutMs)
+        while (true) {
+            val journal = cacheStore.recoverForcedTerminalRun(
+                cacheKey = descriptor.cacheKey,
+                runId = descriptor.runId,
+                processGeneration = descriptor.processGeneration,
+                terminalTransition = expectedTransition,
+                terminalLifecycle = expectedLifecycle,
+                terminalError = SourceSeparationMultiStemHardTerminationPolicy.cacheError(control),
+            )
+            if (journal?.lifecycle == expectedLifecycle &&
+                journal.transitions.last().type == expectedTransition
+            ) return
+            check(System.nanoTime() < deadlineNanos) {
+                "Timed out recovering cache state after controlled multi-stem process death."
+            }
+            Thread.sleep(controlPollMs)
+        }
+    }
+
+    private fun mapTerminalControlFailure(
+        error: Throwable,
+        control: SourceSeparationMultiStemTerminalControl?,
+    ): Throwable {
+        val mapped = error.asSourceSeparationRemoteHostDied()
+        return if (control != null && mapped is SourceSeparationRemoteHostDiedException) {
+            SourceSeparationMultiStemHardTerminationPolicy.failure(control, mapped)
+        } else {
+            mapped
         }
     }
 
@@ -517,6 +685,7 @@ internal class SourceSeparationMultiStemAdoptedRun(
         SourceSeparationMultiStemIpcControlAction,
         SourceSeparationPauseReason?,
     ) -> SourceSeparationMultiStemIpcStatus,
+    private val forceControl: (SourceSeparationMultiStemTerminalControl) -> Unit,
     private val closeBinding: () -> Unit,
 ) : AutoCloseable {
     fun pause(
@@ -524,12 +693,30 @@ internal class SourceSeparationMultiStemAdoptedRun(
     ): SourceSeparationMultiStemIpcStatus = control(
         SourceSeparationMultiStemIpcControlAction.Pause,
         reason,
-    )
+    ).also { status ->
+        if (status == SourceSeparationMultiStemIpcStatus.Applied) {
+            forceControl(SourceSeparationMultiStemTerminalControl.Pause(reason))
+        }
+    }
 
     fun cancel(): SourceSeparationMultiStemIpcStatus = control(
         SourceSeparationMultiStemIpcControlAction.Cancel,
         null,
-    )
+    ).also { status ->
+        if (status == SourceSeparationMultiStemIpcStatus.Applied) {
+            forceControl(SourceSeparationMultiStemTerminalControl.Cancel)
+        }
+    }
 
     override fun close() = closeBinding()
+}
+
+private fun SourceSeparationMultiStemExecutionEventPayload.isTerminal(): Boolean = when (this) {
+    is SourceSeparationMultiStemExecutionEventPayload.Completed,
+    is SourceSeparationMultiStemExecutionEventPayload.AlreadyCompleted,
+    is SourceSeparationMultiStemExecutionEventPayload.Paused,
+    is SourceSeparationMultiStemExecutionEventPayload.Canceled,
+    is SourceSeparationMultiStemExecutionEventPayload.Failed,
+    -> true
+    else -> false
 }

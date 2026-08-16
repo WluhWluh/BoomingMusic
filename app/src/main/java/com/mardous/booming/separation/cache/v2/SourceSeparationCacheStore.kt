@@ -315,6 +315,65 @@ class SourceSeparationCacheStore(
 
     fun entrySize(cacheKey: String): Long = entryDirectory(cacheKey).directorySize()
 
+    fun recoverForcedTerminalRun(
+        cacheKey: String,
+        runId: String,
+        processGeneration: Long,
+        terminalTransition: SourceSeparationCacheRunTransitionType,
+        terminalLifecycle: SourceSeparationCacheRunJournalLifecycle,
+        terminalError: SourceSeparationCacheError?,
+    ): SourceSeparationCacheRunJournal? {
+        require(terminalTransition == SourceSeparationCacheRunTransitionType.Paused ||
+            terminalTransition == SourceSeparationCacheRunTransitionType.ActiveModelSuperseded ||
+            terminalTransition == SourceSeparationCacheRunTransitionType.UserCanceled
+        ) { "Unsupported forced terminal transition: $terminalTransition" }
+        require(terminalLifecycle == SourceSeparationCacheRunJournalLifecycle.Paused ||
+            terminalLifecycle == SourceSeparationCacheRunJournalLifecycle.Canceled
+        ) { "Unsupported forced terminal lifecycle: $terminalLifecycle" }
+        val directory = entryDirectory(cacheKey)
+        if (!directory.isDirectory) return null
+        val lease = entryLockManager.tryAcquire(
+            cacheKey = cacheKey,
+            owner = SourceSeparationCacheLockOwner(SourceSeparationCacheLockPurpose.Recovery),
+        ) ?: return null
+        return lease.use {
+            it.bindEntryDirectory(directory)
+            var manifest = readManifestFromDirectory(directory, cacheKey) ?: return@use null
+            var journal = readRunJournal(cacheKey)?.takeIf { candidate ->
+                candidate.request.cacheKey == cacheKey &&
+                    candidate.request.runId == runId &&
+                    candidate.request.processGeneration == processGeneration
+            } ?: return@use null
+            if (journal.lifecycle == SourceSeparationCacheRunJournalLifecycle.Running) {
+                journal = journal.reconcileOrphanedOwner(nowEpochMs())
+                writeRunJournal(journal)
+            }
+            if (journal.lifecycle == terminalLifecycle &&
+                journal.transitions.last().type == terminalTransition
+            ) return@use journal
+            if (journal.lifecycle != SourceSeparationCacheRunJournalLifecycle.Paused) {
+                return@use journal
+            }
+            manifest = normalizeOrphanedPartialState(manifest)
+            journal = journal.append(
+                type = terminalTransition,
+                nowEpochMs = nowEpochMs(),
+                error = terminalError,
+                lifecycle = terminalLifecycle,
+            )
+            writeRunJournal(journal)
+            val updatedManifest = manifest.copy(
+                state = SourceSeparationCacheManifestState.Partial,
+                error = terminalError,
+                updatedAtEpochMs = maxOf(manifest.updatedAtEpochMs, nowEpochMs()),
+            )
+            writeManifest(updatedManifest)
+            removeTemporaryFiles(directory)
+            recoverDerivedArtifacts(updatedManifest, journal)
+            journal
+        }
+    }
+
     fun recover(): SourceSeparationCacheRecoveryResult {
         ensureLayout()
         val stagingDirectory = File(root.directory, STAGING_DIR_NAME)
