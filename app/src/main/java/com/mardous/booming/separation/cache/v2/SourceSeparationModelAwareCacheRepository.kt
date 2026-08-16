@@ -126,6 +126,25 @@ class SourceSeparationModelAwareCacheRepository(
     fun readyHorizon(
         identity: SourceSeparationCacheIdentity,
         playbackPositionMs: Long,
+    ): SourceSeparationModelAwareReadyHorizonStatus = readyHorizon(
+        identity = identity,
+        requestedPositionMs = playbackPositionMs.coerceAtLeast(0L),
+        requestedFrame = null,
+    )
+
+    fun readyHorizonAtFrame(
+        identity: SourceSeparationCacheIdentity,
+        playbackFrame: Long,
+    ): SourceSeparationModelAwareReadyHorizonStatus = readyHorizon(
+        identity = identity,
+        requestedPositionMs = null,
+        requestedFrame = playbackFrame.coerceAtLeast(0L),
+    )
+
+    private fun readyHorizon(
+        identity: SourceSeparationCacheIdentity,
+        requestedPositionMs: Long?,
+        requestedFrame: Long?,
     ): SourceSeparationModelAwareReadyHorizonStatus {
         val lease = leases.tryAcquireRead(identity.cacheKey)
             ?: return SourceSeparationModelAwareReadyHorizonStatus.Busy
@@ -161,10 +180,13 @@ class SourceSeparationModelAwareCacheRepository(
             if (plan.segments.isEmpty()) {
                 return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
             }
-            val positionMs = playbackPositionMs.coerceAtLeast(0L)
-            val frame = ((positionMs * sampleRate) / 1_000L)
+            val frame = (requestedFrame ?: (
+                    requireNotNull(requestedPositionMs) * sampleRate
+                    ) / 1_000L)
                 .coerceAtMost(Int.MAX_VALUE.toLong())
                 .toInt()
+            val positionMs = requestedPositionMs
+                ?: (frame.toLong() * 1_000L) / sampleRate
             val segmentIndex = plan.segmentIndexForFrame(frame)
             val current = plan.segments.getOrNull(segmentIndex)
                 ?: return@use SourceSeparationModelAwareReadyHorizonStatus.Processing
@@ -193,7 +215,9 @@ class SourceSeparationModelAwareCacheRepository(
             SourceSeparationModelAwareReadyHorizonStatus.Ready(
                 manifest = manifest,
                 positionMs = positionMs,
+                positionFrame = frame.toLong(),
                 readyUntilMs = readyUntilMs,
+                readyUntilFrame = readyUntilFrame.toLong(),
                 readyAheadMs = (readyUntilMs - positionMs).coerceAtLeast(0L),
                 segmentIndex = segmentIndex,
                 readyThroughSegmentIndex = readyThroughSegmentIndex,
@@ -744,7 +768,9 @@ sealed interface SourceSeparationModelAwareReadyHorizonStatus {
     data class Ready(
         val manifest: SourceSeparationCacheManifest,
         val positionMs: Long,
+        val positionFrame: Long,
         val readyUntilMs: Long,
+        val readyUntilFrame: Long,
         val readyAheadMs: Long,
         val segmentIndex: Int,
         val readyThroughSegmentIndex: Int,

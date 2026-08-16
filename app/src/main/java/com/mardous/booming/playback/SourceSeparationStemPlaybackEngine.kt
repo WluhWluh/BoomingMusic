@@ -30,6 +30,11 @@ internal interface SourceSeparationPlaybackStemSourceFactory {
     fun open(): SourceSeparationPlaybackStemSource
 }
 
+internal fun interface SourceSeparationPlaybackFrameAvailability {
+    /** Returns the first frame that is not currently safe to read. */
+    fun readableEndFrame(startFrame: Long): Long
+}
+
 internal class SourceSeparationStemPlaybackEngine(
     private val blockFrames: Int = DEFAULT_BLOCK_FRAMES,
     private val resumeWaterlineBlocks: Int = DEFAULT_RESUME_WATERLINE_BLOCKS,
@@ -58,6 +63,7 @@ internal class SourceSeparationStemPlaybackEngine(
     private val underflowEpoch = AtomicLong(0L)
     private val readyNotificationEpoch = AtomicLong(0L)
     private val consumedFrame = AtomicLong(0L)
+    private val unavailableFrame = AtomicLong(NO_UNAVAILABLE_FRAME)
     private val readyBlocks = ArrayBlockingQueue<StemPcmBlockSet>(blockCapacity)
     private val freeBlocks = ArrayBlockingQueue<StemPcmBlockSet>(blockCapacity)
     private val worker = Thread(::workerLoop, "BoomingStemDecode")
@@ -70,6 +76,9 @@ internal class SourceSeparationStemPlaybackEngine(
 
     @Volatile
     private var workerFactories: List<SourceSeparationPlaybackStemSourceFactory> = emptyList()
+
+    @Volatile
+    private var workerFrameAvailability: SourceSeparationPlaybackFrameAvailability? = null
 
     @Volatile
     private var workerNextFrame = 0L
@@ -121,6 +130,7 @@ internal class SourceSeparationStemPlaybackEngine(
         sessionId: Long,
         factories: List<SourceSeparationPlaybackStemSourceFactory>,
         startFrame: Long = 0L,
+        frameAvailability: SourceSeparationPlaybackFrameAvailability? = null,
     ): Long {
         check(!closed.get()) { "Playback engine is closed." }
         require(sessionId > 0L) { "Playback session ID must be positive." }
@@ -139,9 +149,11 @@ internal class SourceSeparationStemPlaybackEngine(
             underflowEpoch.set(0L)
             readyNotificationEpoch.set(0L)
             consumedFrame.set(startFrame.coerceAtLeast(0L))
+            unavailableFrame.set(NO_UNAVAILABLE_FRAME)
             drainReadyBlocks()
             ensureBlockPool(specs.size, specs.first().geometry.channelCount)
             workerFactories = factories.toList()
+            workerFrameAvailability = frameAvailability
             workerNextFrame = startFrame.coerceIn(0L, session.geometry.frameCount)
             state.set(SourceSeparationPlaybackDataState.Preparing)
             metrics.recordEpochChange()
@@ -164,6 +176,7 @@ internal class SourceSeparationStemPlaybackEngine(
             underflowEpoch.set(0L)
             readyNotificationEpoch.set(0L)
             consumedFrame.set(frame.coerceAtLeast(0L))
+            unavailableFrame.set(NO_UNAVAILABLE_FRAME)
             workerNextFrame = frame.coerceIn(0L, current.geometry.frameCount)
             state.set(SourceSeparationPlaybackDataState.Seeking)
             metrics.recordEpochChange()
@@ -199,6 +212,7 @@ internal class SourceSeparationStemPlaybackEngine(
             underflowEpoch.set(0L)
             readyNotificationEpoch.set(0L)
             consumedFrame.set(startFrame.coerceAtLeast(0L))
+            unavailableFrame.set(NO_UNAVAILABLE_FRAME)
             drainReadyBlocks()
             ensureBlockPool(session.stems.size, session.geometry.channelCount)
             workerFactories = factories.toList()
@@ -335,6 +349,9 @@ internal class SourceSeparationStemPlaybackEngine(
 
     fun currentFrame(): Long = consumedFrame.get().coerceAtLeast(0L)
 
+    fun currentUnavailableFrame(): Long? = unavailableFrame.get()
+        .takeIf { frame -> frame != NO_UNAVAILABLE_FRAME }
+
     fun metricsSnapshot(): SourceSeparationPlaybackMetricsSnapshot = metrics.snapshot()
 
     fun recordAudioThreadTime(elapsedNs: Long) {
@@ -353,9 +370,11 @@ internal class SourceSeparationStemPlaybackEngine(
             recoveryRequired.set(false)
             seekResumeState.set(SeekResumeState.None)
             readyNotificationEpoch.set(0L)
+            unavailableFrame.set(NO_UNAVAILABLE_FRAME)
             command.set(EngineCommand.Stop(newEpoch))
             activeSession = null
             workerFactories = emptyList()
+            workerFrameAvailability = null
             clearConsumerBlock()
             state.set(SourceSeparationPlaybackDataState.Idle)
             startWorkerIfNeeded()
@@ -373,6 +392,8 @@ internal class SourceSeparationStemPlaybackEngine(
         drainReadyBlocks()
         workerSources.forEach { source -> runCatching { source.close() } }
         workerSources = emptyList()
+        workerFrameAvailability = null
+        unavailableFrame.set(NO_UNAVAILABLE_FRAME)
         freeBlocks.clear()
         readyBlocks.clear()
         metrics.setBufferPool(0, 0L)
@@ -419,6 +440,7 @@ internal class SourceSeparationStemPlaybackEngine(
                 val startNs = System.nanoTime()
                 val remaining = current.geometry.frameCount - workerNextFrame
                 if (remaining <= 0L) {
+                    unavailableFrame.set(NO_UNAVAILABLE_FRAME)
                     block.reset(currentEpoch)
                     block.frameCount = 0
                     block.endOfStream = true
@@ -427,7 +449,25 @@ internal class SourceSeparationStemPlaybackEngine(
                     workerExhausted = true
                     continue
                 }
-                val frames = min(blockFrames.toLong(), remaining).toInt()
+                val readableFrames = workerFrameAvailability?.let { availability ->
+                    runCatching {
+                        availability.readableEndFrame(workerNextFrame)
+                    }.getOrDefault(workerNextFrame)
+                        .coerceIn(workerNextFrame, current.geometry.frameCount) - workerNextFrame
+                } ?: remaining
+                if (readableFrames <= 0L) {
+                    unavailableFrame.set(workerNextFrame)
+                    block.reset(currentEpoch)
+                    freeBlocks.offer(block)
+                    publishWorkerState(SourceSeparationPlaybackDataState.Buffering, currentEpoch)
+                    Thread.sleep(WORKER_AVAILABILITY_RETRY_MS)
+                    continue
+                }
+                unavailableFrame.set(NO_UNAVAILABLE_FRAME)
+                val frames = min(
+                    min(blockFrames.toLong(), remaining),
+                    readableFrames,
+                ).toInt()
                 var successful = true
                 for (stemIndex in factories.indices) {
                     val read = try {
@@ -780,6 +820,8 @@ internal class SourceSeparationStemPlaybackEngine(
         const val BYTES_PER_SAMPLE = 2
         const val WORKER_IDLE_SLEEP_MS = 2L
         const val WORKER_FULL_SLEEP_MS = 1L
+        const val WORKER_AVAILABILITY_RETRY_MS = 25L
+        const val NO_UNAVAILABLE_FRAME = -1L
         const val WORKER_JOIN_TIMEOUT_MS = 1_000L
     }
 }

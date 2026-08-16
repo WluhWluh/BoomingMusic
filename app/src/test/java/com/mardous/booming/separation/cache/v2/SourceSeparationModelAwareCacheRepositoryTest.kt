@@ -196,6 +196,11 @@ class SourceSeparationModelAwareCacheRepositoryTest {
         assertEquals(0, currentHorizon.segmentIndex)
         assertEquals(0, currentHorizon.readyThroughSegmentIndex)
         assertFalse(currentHorizon.readyThroughEnd)
+        assertEquals(0L, currentHorizon.positionFrame)
+        assertEquals(
+            running.segmentPlan.segments[0].playbackEndFrame.toLong(),
+            currentHorizon.readyUntilFrame,
+        )
         assertEquals(
             SourceSeparationModelAwarePlayableStatus.Processing,
             repository.playableStatus(running.identity, 0L, 2),
@@ -259,6 +264,15 @@ class SourceSeparationModelAwareCacheRepositoryTest {
             as SourceSeparationModelAwareReadyHorizonStatus.Ready
         assertEquals(0, horizon.segmentIndex)
         assertEquals(1, horizon.readyThroughSegmentIndex)
+        val exactFrameHorizon = repository.readyHorizonAtFrame(
+            identity = provisional.identity,
+            playbackFrame = provisionalStartFrame.toLong(),
+        ) as SourceSeparationModelAwareReadyHorizonStatus.Ready
+        assertEquals(provisionalStartFrame.toLong(), exactFrameHorizon.positionFrame)
+        assertEquals(
+            provisionalPlan.segments[1].playbackEndFrame.toLong(),
+            exactFrameHorizon.readyUntilFrame,
+        )
     }
 
     @Test

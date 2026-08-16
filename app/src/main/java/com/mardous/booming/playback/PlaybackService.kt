@@ -103,6 +103,7 @@ import com.mardous.booming.separation.SourceSeparationModelAwareEngineResult
 import com.mardous.booming.separation.SourceSeparationBlendDemand
 import com.mardous.booming.separation.SourceSeparationMixModelKey
 import com.mardous.booming.separation.SourceSeparationModelMixSettingsStore
+import com.mardous.booming.separation.SourceSeparationPlaybackDataDemand
 import com.mardous.booming.separation.SourceSeparationRuntimeFacade
 import com.mardous.booming.separation.SourceSeparationExecutionRunClass
 import com.mardous.booming.separation.SourceSeparationExecutionSelectionResolver
@@ -240,6 +241,7 @@ class PlaybackService :
     private var sourceSeparationPlaybackSession: SourceSeparationPlaybackSession? = null
     private var sourceSeparationRequestedStemMix: SourceSeparationRequestedStemMix? = null
     private var sourceSeparationPlaybackRequested = false
+    private val sourceSeparationPlaybackDataDemand = SourceSeparationPlaybackDataDemand()
     private var sourceSeparationPlaybackAutoSyncOnTransition = true
     private var sourceSeparationPlaybackIsProcessing = false
     private var sourceSeparationPlaybackProcessingCacheKey: String? = null
@@ -1262,12 +1264,9 @@ class PlaybackService :
             scheduleSourceSeparationPlaybackGateRetry()
         } else if (!isInternalPlayWhenReadyChange &&
             playWhenReady &&
-            sourceSeparationPlaybackRequested &&
             (sourceSeparationPlaybackSession == null ||
                     sourceSeparationPlaybackSession?.requiresReadinessGate == true) &&
-            SourceSeparationBlendDemand.requiresSeparatedOutput(
-                sourceSeparationMixProcessor.blend,
-            )
+            requiresSourceSeparationPlaybackData()
         ) {
             serviceScope.launch {
                 ensureSourceSeparationPlaybackReady(
@@ -1339,6 +1338,10 @@ class PlaybackService :
             "reason=${mediaItemTransitionReasonName(reason)} mediaId=${mediaItem?.mediaId} " +
                     "activeSession=${activeSession?.songId}"
         )
+        sourceSeparationPlaybackDataDemand.moveToMedia(mediaItem?.mediaId)
+        if (sourceSeparationPlaybackAutoSyncOnTransition) {
+            observeCurrentSourceSeparationMixDemand()
+        }
         sourceSeparationPlaybackContextGeneration++
         if (activeSession != null) {
             if (mediaItem?.mediaId != activeSession.songId.toString()) {
@@ -1464,9 +1467,10 @@ class PlaybackService :
             "songId=${song.id} blend=$normalizedBlend"
         )
         applySourceSeparationBlend(normalizedBlend)
+        observeCurrentSourceSeparationMixDemand()
         updateSourceSeparationForegroundWorkerSong(song)
 
-        if (SourceSeparationBlendDemand.isCentered(normalizedBlend)) {
+        if (!requiresSourceSeparationPlaybackData()) {
             clearSourceSeparationPlayback(restoreOriginalItem = true, broadcast = false)
             clearSourceSeparationPlaybackProcessing()
             restoreSourceSeparationOutputVolume("perSongTransition.defaultBlend")
@@ -1709,6 +1713,12 @@ class PlaybackService :
                     "expectProcessing=$expectProcessing"
         )
         sourceSeparationPlaybackRequested = enabled
+        if (enabled) {
+            sourceSeparationPlaybackDataDemand.moveToMedia(player.currentMediaItem?.mediaId)
+            observeCurrentSourceSeparationMixDemand()
+        } else {
+            sourceSeparationPlaybackDataDemand.reset()
+        }
         sourceSeparationPlaybackAutoSyncOnTransition = autoSyncOnTransition
         if (enabled && (player.playWhenReady || player.isPlaying)) {
             sourceSeparationPlaybackPlayIntent = true
@@ -1790,9 +1800,7 @@ class PlaybackService :
         }
         val effectiveExpectProcessing =
             (expectProcessing || sourceSeparationPlaybackExpectProcessing) &&
-                    SourceSeparationBlendDemand.requiresSeparatedOutput(
-                        sourceSeparationMixProcessor.blend,
-                    )
+                    requiresSourceSeparationPlaybackData()
         setSourceSeparationPlaybackExpectProcessing(effectiveExpectProcessing)
         val result = ensureSourceSeparationPlaybackReady(
             showUnavailableMessage = false,
@@ -1878,11 +1886,19 @@ class PlaybackService :
             traceSourceSeparationPlayback("check.skip", "id=$checkId requested=false")
             return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
         }
+        if (!requiresSourceSeparationPlaybackData()) {
+            setSourceSeparationPlaybackExpectProcessing(false)
+            if (sourceSeparationPlaybackSession != null) {
+                clearSourceSeparationPlayback(restoreOriginalItem = true, broadcast = false)
+            } else {
+                clearSourceSeparationPlaybackProcessing(broadcast = false)
+            }
+            traceSourceSeparationPlayback("check.skip", "id=$checkId separatedData=false")
+            return sourceSeparationPlaybackResult(SessionResult.RESULT_SUCCESS)
+        }
         val effectiveExpectProcessing =
             sourceSeparationPlaybackExpectProcessing &&
-                    SourceSeparationBlendDemand.requiresSeparatedOutput(
-                        sourceSeparationMixProcessor.blend,
-                    )
+                    requiresSourceSeparationPlaybackData()
         if (expectProcessing && !effectiveExpectProcessing) {
             traceSourceSeparationPlayback(
                 "check.expectProcessing.superseded",
@@ -2221,6 +2237,14 @@ class PlaybackService :
                     stemIds = stemIds,
                     stemSampleRate = output.outputSampleRate,
                     stemChannelCount = channelCount,
+                    frameAvailability = if (isPartialCache) {
+                        sourceSeparationPlaybackFrameAvailability(
+                            runtimeSong = runtimeSong,
+                            outputFrameCount = output.outputFrameCount.toLong(),
+                        )
+                    } else {
+                        null
+                    },
                 )
             }
             val blendEndpointStemIds = manifest.mdxBlendEndpointStemIds()
@@ -2684,9 +2708,11 @@ class PlaybackService :
     }
 
     private suspend fun setSourceSeparationBlend(blend: Float, persist: Boolean): SessionResult {
-        val previousBlend = sourceSeparationMixProcessor.blend
+        val previouslyRequiredData = requiresSourceSeparationPlaybackData()
         applySourceSeparationBlend(blend)
-        if (SourceSeparationBlendDemand.isCentered(blend)) {
+        observeCurrentSourceSeparationMixDemand()
+        val requiresData = requiresSourceSeparationPlaybackData()
+        if (!requiresData) {
             setSourceSeparationPlaybackExpectProcessing(false)
             cancelSourceSeparationPlaybackReadinessMonitor("centerBlend")
             if (sourceSeparationPlaybackIsProcessing &&
@@ -2719,15 +2745,10 @@ class PlaybackService :
             sourceSeparationPausedBlendFlushPending = true
         }
         broadcastSourceSeparationPlaybackChanged()
-        if (SourceSeparationBlendDemand.requiresSeparatedOutput(previousBlend) !=
-            SourceSeparationBlendDemand.requiresSeparatedOutput(blend)
-        ) {
+        if (previouslyRequiredData != requiresData) {
             maybePreStartNextSourceSeparation("blendDemandChanged")
         }
-        if (persist &&
-            sourceSeparationPlaybackRequested &&
-            SourceSeparationBlendDemand.requiresSeparatedOutput(blend)
-        ) {
+        if (persist && requiresData) {
             val expectProcessing = preferences.getBoolean(
                 SOURCE_SEPARATION_AUTO_START,
                 DEFAULT_SOURCE_SEPARATION_AUTO_START,
@@ -2763,7 +2784,7 @@ class PlaybackService :
         }
         val normalizedGains = stemIds.map(normalizedByStemId::getValue)
         val demandBlend = SourceSeparationStemGainPolicy.demandBlend(normalizedGains)
-        val previousBlend = sourceSeparationMixProcessor.blend
+        val previouslyRequiredData = requiresSourceSeparationPlaybackData()
         val persistPerSong = commit && preferences.getBoolean(
             SOURCE_SEPARATION_REMEMBER_PER_SONG,
             true,
@@ -2796,12 +2817,17 @@ class PlaybackService :
             activeSession.stemGains = normalizedGains
             sourceSeparationMixProcessor.setStemGains(normalizedGains)
         }
+        if (affectsCurrentPlayback) {
+            observeSourceSeparationMixDemand(
+                SourceSeparationStemGainPolicy.requiresSeparatedOutput(normalizedGains),
+            )
+        }
         if (!commit) {
             return SessionResult(SessionResult.RESULT_SUCCESS)
         }
 
         if (affectsCurrentPlayback) {
-            if (SourceSeparationBlendDemand.isCentered(demandBlend)) {
+            if (!requiresSourceSeparationPlaybackData()) {
                 setSourceSeparationPlaybackExpectProcessing(false)
                 cancelSourceSeparationPlaybackReadinessMonitor("neutralStemGains")
                 if (sourceSeparationPlaybackIsProcessing &&
@@ -2828,16 +2854,11 @@ class PlaybackService :
             sourceSeparationPausedBlendFlushPending = true
         }
         broadcastSourceSeparationPlaybackChanged()
-        if (affectsCurrentPlayback &&
-            SourceSeparationBlendDemand.requiresSeparatedOutput(previousBlend) !=
-            SourceSeparationBlendDemand.requiresSeparatedOutput(demandBlend)
-        ) {
+        val requiresData = requiresSourceSeparationPlaybackData()
+        if (affectsCurrentPlayback && previouslyRequiredData != requiresData) {
             maybePreStartNextSourceSeparation("stemGainDemandChanged")
         }
-        if (commit &&
-            sourceSeparationPlaybackRequested &&
-            SourceSeparationStemGainPolicy.requiresSeparatedOutput(normalizedGains)
-        ) {
+        if (commit && requiresData) {
             val expectProcessing = preferences.getBoolean(
                 SOURCE_SEPARATION_AUTO_START,
                 DEFAULT_SOURCE_SEPARATION_AUTO_START,
@@ -2931,9 +2952,7 @@ class PlaybackService :
             sourceSeparationPlaybackSession != null ||
             sourceSeparationPlaybackIsProcessing ||
             player.currentMediaItem?.mediaId != songId.toString() ||
-            !SourceSeparationBlendDemand.requiresSeparatedOutput(
-                sourceSeparationMixProcessor.blend,
-            )
+            !requiresSourceSeparationPlaybackData()
         ) {
             return
         }
@@ -3025,9 +3044,7 @@ class PlaybackService :
                 DEFAULT_SOURCE_SEPARATION_AUTO_START,
             )
             val expectProcessing = automaticDemand &&
-                    SourceSeparationBlendDemand.requiresSeparatedOutput(
-                        sourceSeparationMixProcessor.blend,
-                    )
+                    requiresSourceSeparationPlaybackData()
             setSourceSeparationPlaybackExpectProcessing(expectProcessing)
             ensureSourceSeparationPlaybackReady(
                 showUnavailableMessage = false,
@@ -3319,13 +3336,33 @@ class PlaybackService :
         )
         setSourceSeparationPlaybackProcessing(processingCacheKey)
         sourceSeparationPlaybackResumeWhenReady = windowWait.resumeWhenReady
-        if (player.playWhenReady) {
+        val activeSession = sourceSeparationPlaybackSession
+        if (activeSession != null) {
             muteSourceSeparationOutputForSwitch(
-                reason = "$source.processingPause",
+                reason = "$source.processingWait",
                 waitForMixedOutput = true,
             )
+        }
+        if (player.playWhenReady) {
+            if (activeSession == null) {
+                muteSourceSeparationOutputForSwitch(
+                    reason = "$source.processingPause",
+                    waitForMixedOutput = true,
+                )
+            }
             setSourceSeparationPlayWhenReady(false)
             flushSourceSeparationPausedOutput("$source.processingPause")
+        }
+        if (activeSession != null &&
+            sourceSeparationMixProcessor.dataPlaneState() !=
+            SourceSeparationPlaybackDataState.Idle
+        ) {
+            traceSourceSeparationPlayback(
+                "playback.dataPlane.suspendForWindowWait",
+                "source=$source songId=${activeSession.songId} session=${activeSession.sessionId}",
+            )
+            cancelSourceSeparationDataPlaneMonitor("windowWait")
+            sourceSeparationMixProcessor.disable()
         }
         if (restoreOriginalItem) {
             clearSourceSeparationPlayback(restoreOriginalItem = true, broadcast = false)
@@ -3399,10 +3436,7 @@ class PlaybackService :
                     delay(nextCheckDelayMs)
                     nextCheckDelayMs = SOURCE_SEPARATION_READINESS_MONITOR_DELAY_MS
                     val activeSession = sourceSeparationPlaybackSession
-                    if (!sourceSeparationPlaybackRequested ||
-                        SourceSeparationBlendDemand.isCentered(
-                            sourceSeparationMixProcessor.blend,
-                        ) ||
+                    if (!requiresSourceSeparationPlaybackData() ||
                         activeSession?.sessionId != session.sessionId ||
                         !activeSession.requiresReadinessGate
                     ) {
@@ -3499,6 +3533,46 @@ class PlaybackService :
                     "playback.readinessMonitor.stop",
                     "songId=${session.songId} session=${session.sessionId}"
                 )
+            }
+        }
+    }
+
+    private fun sourceSeparationPlaybackFrameAvailability(
+        runtimeSong: SourceSeparationRuntimeSong,
+        outputFrameCount: Long,
+    ): SourceSeparationPlaybackFrameAvailability {
+        var cachedReadyStartFrame = -1L
+        var cachedReadyEndFrame = -1L
+        return SourceSeparationPlaybackFrameAvailability { startFrame ->
+            if (startFrame >= cachedReadyStartFrame && startFrame < cachedReadyEndFrame) {
+                cachedReadyEndFrame
+            } else {
+                val horizon = sourceSeparationRuntime.readyHorizonAtFrame(
+                    song = runtimeSong,
+                    playbackFrame = startFrame,
+                )
+                val readableEndFrame = when (horizon) {
+                    is SourceSeparationModelAwareReadyHorizonStatus.Ready ->
+                        horizon.readyUntilFrame
+                    is SourceSeparationModelAwareReadyHorizonStatus.Completed ->
+                        horizon.manifest.output?.outputFrameCount?.toLong()
+                            ?: outputFrameCount
+                    SourceSeparationModelAwareReadyHorizonStatus.Busy,
+                    SourceSeparationModelAwareReadyHorizonStatus.Processing,
+                    SourceSeparationModelAwareReadyHorizonStatus.Unavailable,
+                    -> startFrame
+                }.coerceIn(startFrame, outputFrameCount)
+                if (readableEndFrame > startFrame) {
+                    cachedReadyStartFrame = if (
+                        horizon is SourceSeparationModelAwareReadyHorizonStatus.Completed
+                    ) {
+                        0L
+                    } else {
+                        startFrame
+                    }
+                    cachedReadyEndFrame = readableEndFrame
+                }
+                readableEndFrame
             }
         }
     }
@@ -3608,6 +3682,30 @@ class PlaybackService :
                 player.isPlaying ||
                 sourceSeparationPlaybackPlayIntent
         sourceSeparationDataPlaneResumeWhenReady = shouldResume
+        val unavailableFrame = sourceSeparationMixProcessor.dataPlaneUnavailableFrame()
+        if (session.requiresReadinessGate &&
+            unavailableFrame != null &&
+            !sourceSeparationPlaybackIsProcessing
+        ) {
+            val unavailablePositionMs = (
+                    unavailableFrame * 1_000L
+                    ) / session.stemSampleRate.coerceAtLeast(1)
+            traceSourceSeparationPlayback(
+                "playback.dataPlaneMonitor.unavailableFrame",
+                "songId=${session.songId} session=${session.sessionId} " +
+                        "frame=$unavailableFrame position=$unavailablePositionMs reason=$reason",
+            )
+            waitForSourceSeparationPlayback(
+                source = "dataPlaneFrameAvailability",
+                processingCacheKey = session.runtimeSong.cacheKey,
+                waitingPositionMs = unavailablePositionMs,
+                requiredReadyWindowCount = sourceSeparationPlaybackReadyWindowCount,
+                restoreOriginalItem = false,
+                resumeWhenReady = shouldResume,
+                showMessage = false,
+            )
+            return
+        }
         if (player.playWhenReady) {
             traceSourceSeparationPlayback(
                 "playback.dataPlaneMonitor.pause",
@@ -3837,6 +3935,15 @@ class PlaybackService :
                 SOURCE_SEPARATION_OUTPUT_UNMUTE_DELAY_MS
             }
             delay(delayMs)
+            if (sourceSeparationPlaybackIsProcessing ||
+                sourceSeparationPlaybackWindowWaitTracker.current != null
+            ) {
+                traceSourceSeparationPlayback(
+                    "playback.outputUnmute.deferred",
+                    "reason=$reason cacheWait=true",
+                )
+                return@launch
+            }
             restoreSourceSeparationOutputVolume("$reason.timeout")
         }
     }
@@ -3943,9 +4050,7 @@ class PlaybackService :
             return false
         }
         if (!sourceSeparationPlaybackAutoSyncOnTransition) return false
-        return SourceSeparationBlendDemand.requiresSeparatedOutput(
-            sourceSeparationMixProcessor.blend,
-        )
+        return requiresSourceSeparationPlaybackData()
     }
 
     private fun setSourceSeparationPlaybackExpectProcessing(expectProcessing: Boolean) {
@@ -3965,11 +4070,27 @@ class PlaybackService :
                 sourceSeparationPlaybackPlayIntent
     }
 
+    private fun observeCurrentSourceSeparationMixDemand() {
+        observeSourceSeparationMixDemand(
+            SourceSeparationBlendDemand.requiresSeparatedOutput(
+                sourceSeparationMixProcessor.blend,
+            ),
+        )
+    }
+
+    private fun observeSourceSeparationMixDemand(requiresSeparatedOutput: Boolean) {
+        if (sourceSeparationPlaybackRequested) {
+            sourceSeparationPlaybackDataDemand.observeMix(requiresSeparatedOutput)
+        }
+    }
+
+    private fun requiresSourceSeparationPlaybackData(): Boolean =
+        sourceSeparationPlaybackDataDemand.requiresSeparatedData(
+            playbackRequested = sourceSeparationPlaybackRequested,
+        )
+
     private fun shouldGateCurrentSourceSeparationWindow(): Boolean {
-        return sourceSeparationPlaybackRequested &&
-                SourceSeparationBlendDemand.requiresSeparatedOutput(
-                    sourceSeparationMixProcessor.blend,
-                ) &&
+        return requiresSourceSeparationPlaybackData() &&
                 shouldResumeSourceSeparationPlaybackWhenReady()
     }
 
@@ -4914,6 +5035,7 @@ class PlaybackService :
         val session = sourceSeparationPlaybackSession
         val windowWait = sourceSeparationPlaybackWindowWaitTracker.current
         val base = "requested=$sourceSeparationPlaybackRequested " +
+                "separatedData=${requiresSourceSeparationPlaybackData()} " +
                 "processing=$sourceSeparationPlaybackIsProcessing " +
                 "processingCache=${sourceSeparationPlaybackProcessingCacheKey?.take(12)} " +
                 "waitEpoch=${windowWait?.epoch} " +

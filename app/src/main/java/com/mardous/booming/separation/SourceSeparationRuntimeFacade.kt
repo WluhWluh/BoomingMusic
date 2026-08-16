@@ -56,6 +56,11 @@ interface SourceSeparationRuntimeFacade {
         playbackPositionMs: Long,
     ): SourceSeparationModelAwareReadyHorizonStatus
 
+    fun readyHorizonAtFrame(
+        song: SourceSeparationRuntimeSong,
+        playbackFrame: Long,
+    ): SourceSeparationModelAwareReadyHorizonStatus
+
     fun readBlend(song: SourceSeparationRuntimeSong): Float?
 
     fun writeBlend(song: SourceSeparationRuntimeSong, blend: Float): Boolean
@@ -236,6 +241,14 @@ class DefaultSourceSeparationRuntimeFacade internal constructor(
     ): SourceSeparationModelAwareReadyHorizonStatus = cacheRepository.readyHorizon(
         identity = song.identity,
         playbackPositionMs = playbackPositionMs,
+    )
+
+    override fun readyHorizonAtFrame(
+        song: SourceSeparationRuntimeSong,
+        playbackFrame: Long,
+    ): SourceSeparationModelAwareReadyHorizonStatus = cacheRepository.readyHorizonAtFrame(
+        identity = song.identity,
+        playbackFrame = playbackFrame,
     )
 
     override fun readBlend(song: SourceSeparationRuntimeSong): Float? =

@@ -5,6 +5,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,6 +13,59 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SourceSeparationStemPlaybackEngineTest {
+    @Test
+    fun partialSourceNeverReadsPastThePublishedFrameHorizon() {
+        val geometry = geometry(frameCount = 16)
+        val readableEndFrame = AtomicLong(8L)
+        val greatestReadStart = AtomicLong(-1L)
+        val source = testFactory(
+            stemId = "vocals",
+            geometry = geometry,
+            pcm = pcm(0, 16),
+            beforeRead = greatestReadStart::set,
+        )
+        val engine = SourceSeparationStemPlaybackEngine(
+            blockFrames = 4,
+            resumeWaterlineBlocks = 1,
+            targetWaterlineBlocks = 2,
+            blockCapacity = 3,
+        )
+        try {
+            engine.start(
+                sessionId = 1L,
+                factories = listOf(source),
+                frameAvailability = SourceSeparationPlaybackFrameAvailability {
+                    readableEndFrame.get()
+                },
+            )
+            await { engine.hasResumeWaterline() }
+
+            val first = Array(1) { ByteArray(4 * 4) }
+            val second = Array(1) { ByteArray(4 * 4) }
+            assertEquals(4, engine.readInto(first, 4))
+            assertEquals(4, engine.readInto(second, 4))
+            await {
+                engine.currentState == SourceSeparationPlaybackDataState.Buffering &&
+                        engine.currentUnavailableFrame() == 8L
+            }
+            assertEquals(0, engine.readInto(Array(1) { ByteArray(4 * 4) }, 4))
+            assertTrue(greatestReadStart.get() < 8L)
+            assertEquals(8L, engine.currentUnavailableFrame())
+
+            readableEndFrame.set(16L)
+            await {
+                engine.currentState == SourceSeparationPlaybackDataState.Ready &&
+                        engine.hasResumeWaterline()
+            }
+            val resumed = Array(1) { ByteArray(8 * 4) }
+            assertEquals(8, engine.readInto(resumed, 8))
+            assertArrayEquals(pcm(8, 8), resumed[0])
+            assertEquals(null, engine.currentUnavailableFrame())
+        } finally {
+            engine.close()
+        }
+    }
+
     @Test
     fun enginePublishesOnlyCompleteSameFrameBlocks() {
         val geometry = geometry(frameCount = 12)
@@ -358,8 +412,10 @@ class SourceSeparationStemPlaybackEngineTest {
                 1L,
                 listOf(testFactory("vocals", geometry, pcm(0, 3))),
             )
-            await { engine.hasResumeWaterline() }
-            assertEquals(SourceSeparationPlaybackDataState.Ready, engine.currentState)
+            await {
+                engine.hasResumeWaterline() &&
+                        engine.currentState == SourceSeparationPlaybackDataState.Ready
+            }
             val output = Array(1) { ByteArray(3 * 4) }
             assertEquals(3, engine.readInto(output, 3))
             assertArrayEquals(pcm(0, 3), output[0])

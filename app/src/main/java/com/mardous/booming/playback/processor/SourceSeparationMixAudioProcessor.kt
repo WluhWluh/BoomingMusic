@@ -7,6 +7,7 @@ import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import com.mardous.booming.playback.SourceSeparationFileStemSourceFactory
 import com.mardous.booming.playback.SourceSeparationFlacStemSourceFactory
+import com.mardous.booming.playback.SourceSeparationPlaybackFrameAvailability
 import com.mardous.booming.playback.SourceSeparationPlaybackDataState
 import com.mardous.booming.playback.SourceSeparationPlaybackStemSourceFactory
 import com.mardous.booming.playback.SourceSeparationStemPlaybackEngine
@@ -17,6 +18,7 @@ import java.io.Closeable
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.floor
@@ -29,6 +31,7 @@ class PreparedSourceSeparationPlaybackInputs internal constructor(
     internal val stemSampleRate: Int,
     internal val stemChannelCount: Int,
     internal val factories: List<SourceSeparationPlaybackStemSourceFactory>,
+    internal val frameAvailability: SourceSeparationPlaybackFrameAvailability? = null,
 ) {
     internal val stemFiles: List<File> = stemFiles.toList()
     internal val stemIds: List<String> = stemIds.toList()
@@ -70,6 +73,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     @Volatile
     private var active = false
 
+    private val dataPlaneUnderflowSignaled = AtomicBoolean(false)
     private val gainGeneration = AtomicLong()
     private val gainSnapshot = AtomicReference(GainSnapshot.centered())
     private var appliedGainGeneration = 0L
@@ -184,6 +188,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             debugSessionId = debugSessionSeq.incrementAndGet()
             debugQueueSeq.set(0)
             debugQueueTraceRemaining = DEBUG_INITIAL_QUEUE_TRACE_COUNT
+            dataPlaneUnderflowSignaled.set(false)
             this.inputMode = inputMode
             this.stemSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
             this.stemChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
@@ -229,6 +234,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                     sessionId = debugSessionId,
                     factories = engineFactories,
                     startFrame = startFrame,
+                    frameAvailability = preparedInputs?.frameAvailability,
                 )
             } else {
                 require(stemFiles.size <= 2) {
@@ -254,6 +260,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         stemIds: List<String>,
         stemSampleRate: Int,
         stemChannelCount: Int,
+        frameAvailability: SourceSeparationPlaybackFrameAvailability? = null,
     ): PreparedSourceSeparationPlaybackInputs {
         val normalizedSampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
         val normalizedChannelCount = stemChannelCount.takeIf { it > 0 } ?: CHANNEL_COUNT_STEREO
@@ -271,6 +278,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             stemSampleRate = normalizedSampleRate,
             stemChannelCount = normalizedChannelCount,
             factories = factories,
+            frameAvailability = frameAvailability,
         )
     }
 
@@ -539,8 +547,21 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 )
             }
             engine.recordAudioThreadTime(System.nanoTime() - audioThreadStartNs)
-            if (inputBuffer.hasRemaining()) {
-                buffer.put(inputBuffer)
+            if (mixedFrames != frames) {
+                // Media3 retries forever if a processor neither consumes input nor
+                // produces output. Drop this clock block without emitting silence;
+                // PlaybackService realigns the session before resuming.
+                inputBuffer.position(inputBuffer.limit())
+                if (dataPlaneUnderflowSignaled.compareAndSet(false, true)) {
+                    runCatching {
+                        dataPlaneStateChangedSink?.invoke(engine.currentState)
+                    }
+                }
+            } else {
+                dataPlaneUnderflowSignaled.set(false)
+                if (inputBuffer.hasRemaining()) {
+                    buffer.put(inputBuffer)
+                }
             }
             buffer.flip()
             if (mixedFrames > 0) notifyMixedOutputStartedIfNeeded(mixedFrames)
@@ -690,11 +711,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 }
                 mixedFrames += chunkFrames
             } else {
-                writeUnmixedInput(
-                    inputBuffer = inputBuffer,
-                    outputBuffer = outputBuffer,
-                    byteCount = chunkBytes,
-                )
+                break
             }
             handledFrames += chunkFrames
         }
@@ -738,11 +755,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 cachedEndFrame < startFrame ||
                 framesToReadLong > engine.blockFrameCapacity
             ) {
-                writeUnmixedInput(
-                    inputBuffer = inputBuffer,
-                    outputBuffer = outputBuffer,
-                    byteCount = (frameCount - handledFrames) * frameSize,
-                )
                 break
             }
             val framesToRead = framesToReadLong.toInt()
@@ -750,11 +762,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                     !cache.canAppend(framesToRead, cacheFrameSize)
                 }
             ) {
-                writeUnmixedInput(
-                    inputBuffer = inputBuffer,
-                    outputBuffer = outputBuffer,
-                    byteCount = (frameCount - handledFrames) * frameSize,
-                )
                 break
             }
             if (framesToRead > 0) {
@@ -767,11 +774,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                     )
                 }
                 if (!appended) {
-                    writeUnmixedInput(
-                        inputBuffer = inputBuffer,
-                        outputBuffer = outputBuffer,
-                        byteCount = (frameCount - handledFrames) * frameSize,
-                    )
                     break
                 }
             }
@@ -808,19 +810,6 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
         return mixedFrames
     }
 
-    private fun writeUnmixedInput(
-        inputBuffer: ByteBuffer,
-        outputBuffer: ByteBuffer,
-        byteCount: Int,
-    ) {
-        if (active && inputMode == InputMode.OriginalSource) {
-            repeat(byteCount) { outputBuffer.put(0) }
-            inputBuffer.position(inputBuffer.position() + byteCount)
-        } else {
-            repeat(byteCount) { outputBuffer.put(inputBuffer.get()) }
-        }
-    }
-
     internal fun isDataPlaneReady(): Boolean = playbackEngine?.hasResumeWaterline() ?: active
 
     internal fun dataPlaneState(): SourceSeparationPlaybackDataState {
@@ -830,6 +819,9 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             SourceSeparationPlaybackDataState.Idle
         }
     }
+
+    internal fun dataPlaneUnavailableFrame(): Long? =
+        playbackEngine?.currentUnavailableFrame()
 
     internal fun dataPlaneMetrics() = playbackEngine?.metricsSnapshot()
 
@@ -1105,6 +1097,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     private fun seekToLocked(positionMs: Long) {
+        dataPlaneUnderflowSignaled.set(false)
         val sampleRate = stemSampleRate.takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
         val frameSize = stemChannelCount
             .takeIf { it > 0 }
@@ -1130,6 +1123,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
     }
 
     private fun closeLocked() {
+        dataPlaneUnderflowSignaled.set(false)
         playbackEngine?.close()
         playbackEngine = null
         clearResampleCachesLocked()

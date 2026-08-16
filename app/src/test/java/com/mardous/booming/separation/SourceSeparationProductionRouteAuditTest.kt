@@ -435,13 +435,9 @@ class SourceSeparationProductionRouteAuditTest {
             "private suspend fun setSourceSeparationBlend(",
             "private suspend fun probeSourceSeparationPlaybackFromWorker(",
         )
-        assertTrue(committedBlend.contains("if (persist &&"))
-        assertTrue(committedBlend.contains("sourceSeparationPlaybackRequested"))
-        assertTrue(
-            committedBlend.contains(
-                "SourceSeparationBlendDemand.requiresSeparatedOutput(blend)",
-            ),
-        )
+        assertTrue(committedBlend.contains("observeCurrentSourceSeparationMixDemand()"))
+        assertTrue(committedBlend.contains("if (persist && requiresData)"))
+        assertTrue(committedBlend.contains("requiresSourceSeparationPlaybackData()"))
         assertTrue(
             section(
                 "private suspend fun ensureSourceSeparationPlaybackReadyLocked(",
@@ -461,6 +457,21 @@ class SourceSeparationProductionRouteAuditTest {
         assertTrue(dataPlaneResume.contains("sourceSeparationPlaybackIsProcessing"))
         assertTrue(dataPlaneResume.contains("sourceSeparationPlaybackWindowWaitTracker.current"))
         assertTrue(dataPlaneResume.contains("playback.dataPlaneMonitor.readyDeferred"))
+        assertTrue(service.contains("frameAvailability = if (isPartialCache)"))
+        assertTrue(service.contains("sourceSeparationPlaybackFrameAvailability("))
+
+        val engine = mainSource(
+            "com/mardous/booming/playback/SourceSeparationStemPlaybackEngine.kt",
+        ).readText()
+        val processor = mainSource(
+            "com/mardous/booming/playback/processor/SourceSeparationMixAudioProcessor.kt",
+        ).readText()
+        assertTrue(engine.contains("availability.readableEndFrame(workerNextFrame)"))
+        assertTrue(service.contains("source = \"dataPlaneFrameAvailability\""))
+        assertTrue(service.contains("playback.dataPlane.suspendForWindowWait"))
+        assertTrue(processor.contains("playbackEngine?.currentUnavailableFrame()"))
+        assertTrue(processor.contains("inputBuffer.position(inputBuffer.limit())"))
+        assertFalse(processor.contains("writeUnmixedInput("))
     }
 
     @Test

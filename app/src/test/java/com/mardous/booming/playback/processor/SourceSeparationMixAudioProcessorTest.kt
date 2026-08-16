@@ -2,12 +2,15 @@ package com.mardous.booming.playback.processor
 
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
+import com.mardous.booming.playback.SourceSeparationPlaybackDataState
+import com.mardous.booming.playback.SourceSeparationPlaybackFrameAvailability
 import com.mardous.booming.separation.audio.Pcm16StereoFlacEncoder
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicLong
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -19,6 +22,70 @@ import org.junit.rules.TemporaryFolder
 class SourceSeparationMixAudioProcessorTest {
     @get:Rule
     val temporaryFolder = TemporaryFolder()
+
+    @Test
+    fun partialCacheUnderflowDropsBlockedTransportInputWithoutQueuingSilence() {
+        val frameCount = 32_768
+        val vocals = writeWav("partial-vocals.wav", frameCount, 1_000)
+        val instrumental = writeWav("partial-instrumental.wav", frameCount, 2_000)
+        val readableEndFrame = AtomicLong(0L)
+        val processor = SourceSeparationMixAudioProcessor()
+        val stateChanges = CopyOnWriteArrayList<SourceSeparationPlaybackDataState>()
+        processor.dataPlaneStateChangedSink = stateChanges::add
+        try {
+            val preparedInputs = processor.prepareInputs(
+                stemFiles = listOf(vocals, instrumental),
+                stemIds = MDX_STEM_IDS,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                frameAvailability = SourceSeparationPlaybackFrameAvailability {
+                    readableEndFrame.get()
+                },
+            )
+            processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = listOf(vocals, instrumental),
+                stemIds = MDX_STEM_IDS,
+                blendEndpointStemIds = MDX_STEM_IDS,
+                positionMs = 0L,
+                inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+                preparedInputs = preparedInputs,
+            )
+            await { processor.dataPlaneState() == SourceSeparationPlaybackDataState.Buffering }
+            assertEquals(0L, processor.dataPlaneUnavailableFrame())
+            stateChanges.clear()
+
+            val input = silentInput(512)
+            processor.queueInput(input)
+
+            assertEquals(input.limit(), input.position())
+            assertFalse(processor.output.hasRemaining())
+            assertEquals(
+                listOf(SourceSeparationPlaybackDataState.Buffering),
+                stateChanges.toList(),
+            )
+
+            val repeatedInput = silentInput(512)
+            processor.queueInput(repeatedInput)
+            assertEquals(repeatedInput.limit(), repeatedInput.position())
+            assertEquals(1, stateChanges.size)
+
+            readableEndFrame.set(frameCount.toLong())
+            await { processor.isDataPlaneReady() }
+            assertEquals(null, processor.dataPlaneUnavailableFrame())
+            input.rewind()
+            processor.queueInput(input)
+
+            assertEquals(input.limit(), input.position())
+            assertLastSample(processor.output, 3_000)
+        } finally {
+            processor.disable()
+        }
+    }
 
     @Test
     fun outputFlushBarrierSkipsPrerollOnlyAfterTheAudioProcessorFlushes() {
