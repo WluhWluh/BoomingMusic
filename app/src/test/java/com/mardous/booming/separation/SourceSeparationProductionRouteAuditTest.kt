@@ -137,6 +137,42 @@ class SourceSeparationProductionRouteAuditTest {
     }
 
     @Test
+    fun `media transition resolutions cannot commit after a newer song wins`() {
+        val service = mainSource(
+            "com/mardous/booming/playback/PlaybackService.kt",
+        ).readText()
+        val transitionStart = service.indexOf("override fun onMediaItemTransition(")
+        val ioStart = service.indexOf("serviceScope.launch(IO)", transitionStart)
+        val ioEnd = service.indexOf(
+            "if (player.currentMediaItemIndex == stopIndex)",
+            ioStart,
+        )
+        val workerUpdateStart = service.indexOf(
+            "private fun updateSourceSeparationForegroundWorkerSong(",
+        )
+        val workerUpdateEnd = service.indexOf(
+            "private fun updateSourceSeparationForegroundWorkerPosition(",
+            workerUpdateStart,
+        )
+        require(
+            transitionStart >= 0 && ioStart > transitionStart && ioEnd > ioStart &&
+                    workerUpdateStart >= 0 && workerUpdateEnd > workerUpdateStart,
+        )
+
+        val callbackSetup = service.substring(transitionStart, ioStart)
+        val ioResolution = service.substring(ioStart, ioEnd)
+        val workerUpdate = service.substring(workerUpdateStart, workerUpdateEnd)
+        assertTrue(
+            callbackSetup.contains(
+                "mediaItemTransitionTracker.begin(mediaItem?.mediaId)",
+            ),
+        )
+        assertTrue(ioResolution.contains("isCurrentResolvedMediaTransition(mediaTransition, newSong)"))
+        assertTrue(ioResolution.contains("return@withContext null"))
+        assertTrue(workerUpdate.contains("isCurrentResolvedMediaTransition(transition, song)"))
+    }
+
+    @Test
     fun `next song prestart checks its model and cache off the main thread`() {
         val coordinator = mainSource(
             "com/mardous/booming/ui/screen/player/SourceSeparationForegroundWorkerCoordinator.kt",

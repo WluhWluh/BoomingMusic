@@ -213,6 +213,7 @@ class PlaybackService :
 
     private val libraryProvider = LibraryProvider(repository)
     private val songPlayCountHelper = SongPlayCountHelper()
+    private val mediaItemTransitionTracker = PlaybackMediaItemTransitionTracker()
     private val mediaStoreObserver = MediaStoreObserver(uiHandler) {
         mediaSession?.broadcastCustomCommand(
             SessionCommand(Playback.EVENT_MEDIA_CONTENT_CHANGED, Bundle.EMPTY),
@@ -1194,8 +1195,19 @@ class PlaybackService :
         maybePreStartNextSourceSeparation("timelineChanged")
     }
 
-    private fun updateSourceSeparationForegroundWorkerSong(song: Song) {
-        if (song == Song.emptySong) return
+    private fun updateSourceSeparationForegroundWorkerSong(
+        song: Song,
+        transition: PlaybackMediaItemTransition,
+    ): Boolean {
+        if (!isCurrentResolvedMediaTransition(transition, song)) {
+            traceSourceSeparationPlayback(
+                "worker.songUpdate.skipStale",
+                "generation=${transition.generation} targetMediaId=${transition.mediaId} " +
+                        "resolvedSongId=${song.id} currentMediaId=${player.currentMediaItem?.mediaId}",
+            )
+            return false
+        }
+        if (song == Song.emptySong) return false
         sourceSeparationForegroundWorkerCoordinator.updateSong(
             song = song,
             positionMs = player.currentPosition,
@@ -1204,6 +1216,21 @@ class PlaybackService :
             sourceSeparationBlend = sourceSeparationMixProcessor.blend,
         )
         maybePreStartNextSourceSeparation("songChanged")
+        return true
+    }
+
+    private fun isCurrentResolvedMediaTransition(
+        transition: PlaybackMediaItemTransition,
+        song: Song,
+    ): Boolean {
+        if (!mediaItemTransitionTracker.isCurrent(
+                transition = transition,
+                currentMediaId = player.currentMediaItem?.mediaId,
+            )
+        ) {
+            return false
+        }
+        return song == Song.emptySong || song.id.toString() == transition.mediaId
     }
 
     private fun updateSourceSeparationForegroundWorkerPosition() {
@@ -1331,6 +1358,7 @@ class PlaybackService :
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         // Media3 listener callbacks run on the player application thread. Capture the
         // state here before the bookkeeping coroutine moves to IO.
+        val mediaTransition = mediaItemTransitionTracker.begin(mediaItem?.mediaId)
         val isPlayingAtTransition = player.isPlaying
         val activeSession = sourceSeparationPlaybackSession
         traceSourceSeparationPlayback(
@@ -1379,31 +1407,68 @@ class PlaybackService :
 
         serviceScope.launch(IO) {
             val newSong = repository.songByMediaItem(mediaItem)
-
-            val previousSong = songPlayCountHelper.song
-            val shouldBumpPlayCount = songPlayCountHelper.shouldBumpPlayCount()
-            songPlayCountHelper.notifySongChanged(newSong, isPlayingAtTransition)
-
-            if (newSong != Song.emptySong) {
-                val deferredPerSongBlend = if (shouldApplyDeferredPerSongSourceSeparationSync) {
-                    sourceSeparationForegroundWorkerCoordinator.recordedBlendForSong(newSong)
-                        ?: SourceSeparationBlendDemand.CENTER_BLEND
+            val resolutionIsCurrent = withContext(Main) {
+                if (!isCurrentResolvedMediaTransition(mediaTransition, newSong)) {
+                    traceSourceSeparationPlayback(
+                        "player.onMediaItemTransition.skipStaleResolution",
+                        "stage=afterLookup generation=${mediaTransition.generation} " +
+                                "targetMediaId=${mediaTransition.mediaId} " +
+                                "resolvedSongId=${newSong.id} " +
+                                "currentMediaId=${player.currentMediaItem?.mediaId}",
+                    )
+                    false
                 } else {
-                    null
+                    true
                 }
-                withContext(Main) {
+            }
+            if (!resolutionIsCurrent) return@launch
+
+            val deferredPerSongBlend = if (newSong != Song.emptySong &&
+                shouldApplyDeferredPerSongSourceSeparationSync
+            ) {
+                sourceSeparationForegroundWorkerCoordinator.recordedBlendForSong(newSong)
+                    ?: SourceSeparationBlendDemand.CENTER_BLEND
+            } else {
+                null
+            }
+            val replayGain = newSong.takeIf { it != Song.emptySong }
+                ?.let(ReplayGainTagExtractor::getReplayGain)
+            val previousSongAndPlayCount = withContext(Main) {
+                if (!isCurrentResolvedMediaTransition(mediaTransition, newSong)) {
+                    traceSourceSeparationPlayback(
+                        "player.onMediaItemTransition.skipStaleResolution",
+                        "stage=beforeCommit generation=${mediaTransition.generation} " +
+                                "targetMediaId=${mediaTransition.mediaId} " +
+                                "resolvedSongId=${newSong.id} " +
+                                "currentMediaId=${player.currentMediaItem?.mediaId}",
+                    )
+                    return@withContext null
+                }
+
+                val previousSong = songPlayCountHelper.song
+                val shouldBumpPlayCount = songPlayCountHelper.shouldBumpPlayCount()
+                songPlayCountHelper.notifySongChanged(newSong, isPlayingAtTransition)
+                if (newSong != Song.emptySong) {
+                    replayGainProcessor.currentGain = replayGain
                     val deferredMediaItem = mediaItem
                     if (deferredPerSongBlend != null && deferredMediaItem != null) {
                         applyDeferredPerSongSourceSeparationTransition(
                             mediaItem = deferredMediaItem,
                             song = newSong,
                             blend = deferredPerSongBlend,
+                            transition = mediaTransition,
                         )
                     } else {
-                        updateSourceSeparationForegroundWorkerSong(newSong)
+                        updateSourceSeparationForegroundWorkerSong(
+                            song = newSong,
+                            transition = mediaTransition,
+                        )
                     }
                 }
-                replayGainProcessor.currentGain = ReplayGainTagExtractor.getReplayGain(newSong)
+                previousSong to shouldBumpPlayCount
+            } ?: return@launch
+
+            if (newSong != Song.emptySong) {
                 if (preferences.getBoolean(ENABLE_HISTORY, true)) {
                     repository.upsertSongInHistory(newSong)
                 }
@@ -1414,6 +1479,7 @@ class PlaybackService :
                     launch { repository.updateNowPlaying(ScrobblingService.ListenBrainz, newSong) }
                 }
             }
+            val (previousSong, shouldBumpPlayCount) = previousSongAndPlayCount
             if (previousSong != Song.emptySong) {
                 val timestampMillis = System.currentTimeMillis()
                 val timestampSeconds = (timestampMillis / 1000)
@@ -1446,18 +1512,23 @@ class PlaybackService :
         mediaItem: MediaItem,
         song: Song,
         blend: Float,
+        transition: PlaybackMediaItemTransition,
     ) {
+        val isCurrentTransition = isCurrentResolvedMediaTransition(transition, song)
         if (!sourceSeparationPlaybackRequested ||
             sourceSeparationPlaybackAutoSyncOnTransition ||
-            player.currentMediaItem?.mediaId != mediaItem.mediaId
+            !isCurrentTransition
         ) {
             traceSourceSeparationPlayback(
                 "perSongTransition.skip",
                 "songId=${song.id} requested=$sourceSeparationPlaybackRequested " +
                         "autoSync=$sourceSeparationPlaybackAutoSyncOnTransition " +
-                        "currentMediaId=${player.currentMediaItem?.mediaId} targetMediaId=${mediaItem.mediaId}"
+                        "currentMediaId=${player.currentMediaItem?.mediaId} targetMediaId=${mediaItem.mediaId} " +
+                        "generation=${transition.generation} currentTransition=$isCurrentTransition"
             )
-            updateSourceSeparationForegroundWorkerSong(song)
+            if (isCurrentTransition) {
+                updateSourceSeparationForegroundWorkerSong(song, transition)
+            }
             return
         }
 
@@ -1468,7 +1539,7 @@ class PlaybackService :
         )
         applySourceSeparationBlend(normalizedBlend)
         observeCurrentSourceSeparationMixDemand()
-        updateSourceSeparationForegroundWorkerSong(song)
+        if (!updateSourceSeparationForegroundWorkerSong(song, transition)) return
 
         if (!requiresSourceSeparationPlaybackData()) {
             clearSourceSeparationPlayback(restoreOriginalItem = true, broadcast = false)
@@ -1481,7 +1552,14 @@ class PlaybackService :
 
         val autoStartDecision =
             sourceSeparationForegroundWorkerCoordinator.autoStartDecision(song, normalizedBlend)
-        if (autoStartDecision.shouldStart && player.currentMediaItem?.mediaId == mediaItem.mediaId) {
+        if (!isCurrentResolvedMediaTransition(transition, song)) {
+            traceSourceSeparationPlayback(
+                "perSongTransition.skipStaleDecision",
+                "songId=${song.id} generation=${transition.generation}",
+            )
+            return
+        }
+        if (autoStartDecision.shouldStart) {
             sourceSeparationForegroundWorkerCoordinator.requestPlaybackDemandSong(song)
         }
         val expectProcessing = autoStartDecision.shouldStart ||
@@ -1495,7 +1573,9 @@ class PlaybackService :
             gateOnUnreadyWindow = shouldGateCurrentSourceSeparationWindow(),
             requiredReadyWindowCount = 1,
         )
-        maybePreStartNextSourceSeparation("perSongTransition")
+        if (isCurrentResolvedMediaTransition(transition, song)) {
+            maybePreStartNextSourceSeparation("perSongTransition")
+        }
     }
 
     override fun onPositionDiscontinuity(

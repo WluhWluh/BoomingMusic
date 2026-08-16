@@ -2115,6 +2115,31 @@ session. No validation cache was retained; the device was restored to the
 official six-stem selection, `01-第1课`, output off, paused at 0, and its original
 `3/127`, `11/11`, and `4/11` caches remained unchanged.
 
+Rapid Media3 song transitions now use a dedicated monotonic transition token.
+An asynchronously resolved song that is already stale at its commit boundary
+cannot update the worker projection, per-song mix, ReplayGain, history, or
+now-playing bookkeeping. Both its token and media ID must still match the
+current player item. The worker-song update entry point repeats the same
+check, and the deferred per-song path rechecks after its suspending admission
+query. Stale lookups are rejected before ReplayGain or mix metadata I/O, so
+they cannot delay or overwrite the winning song.
+
+The tracker unit tests, production-route audit, all 739 GitHub Debug unit
+tests, and `:app:assembleGithubDebug` passed. On S10 (`SM-G9730`, API 31,
+arm64), concurrent five-song Debug `playback.song` waves produced real
+out-of-order completions: generation 32 for song `101098` returned after
+`253661` was current, and generation 33 for `253661` returned after `633469`
+was current. Both logged `skipStaleResolution`. Three subsequent waves ended
+at songs `253661`, `633469`, and `21`; each safely paused the previous CPU
+inference at a window boundary and converged within 10.7, 12.6, and 20.6
+seconds respectively. After an additional stability delay, `mediaId`,
+coordinator `currentSong`, and active `workerSong` matched in every case,
+`pending` was empty, and the final worker remained `Running`.
+After rebuilding and reinstalling the final APK, one additional concurrent
+wave recorded five stale-resolution drops and converged to `101098` in 12.3
+seconds; a five-second delayed check retained exact playback/worker identity
+and an empty pending slot.
+
 #### Phase 8 S25 boundary matrix (2026-08-14)
 
 A disposable clean-data pass used the Debug control provider on S25
