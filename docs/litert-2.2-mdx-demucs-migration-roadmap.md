@@ -457,8 +457,9 @@ test(separation): qualify LiteRT 2.2 MDX product shapes
 
 ## Phase 3: Integrate the CPU HTDemucs Pipeline
 
-Status: Phase 3A through Phase 3C are implemented; Phase 3D qualification is
-in progress.
+Status: complete. Phase 3A through Phase 3D are implemented and qualified;
+Phase 5 still owns the final exact-candidate aggregate rerun and evidence
+report.
 
 Current evidence as of 2026-08-17:
 
@@ -469,14 +470,36 @@ Current evidence as of 2026-08-17:
 - at `b95fe281`, canonical executable fixtures passed for official 4-stem,
   official 6-stem, and guitar-ft on S25. All three also completed the real
   installed-Release product/cache/FLAC path on the 30-second YOASOBI fixture;
-- S10 arm64 passed the official 6-stem executable fixture, the guitar-ft
-  30-second product path, cancel/restart, 6-to-4 supersession, and typed hard
-  termination. S10 armeabi-v7a passed exact Release installation for all
-  three candidates and 30-second official 4/6 product execution; and
-- these short representative-content runs do not satisfy the explicit
-  full-song wording below. Still required are current-candidate full-song
-  product runs for all three models on S25, official 6-stem full-song product
-  execution on S10 arm64, and the final sustained resource/thermal record.
+- at `2b0a6dbe`, the immutable 261.013-second YOASOBI source (SHA-256
+  `8ff6b5f84deade9ddc9060ff3702dca80cb3aa304bb06eb99e479fa2d92a424b`)
+  completed five full-song Release/product/cache/FLAC runs. S25 official
+  6-stem, official 4-stem, and guitar-ft inference/promotion times were
+  `195374/85557`, `233260/60127`, and `200531/87230` ms. S10 arm64 official
+  6-stem and guitar-ft were `310764/142020` and `333969/148589` ms. Every run
+  published 45 windows and 11,510,688 frames, reopened the ordered indexed
+  FLAC cache, and removed its WAV temporaries;
+- at `ed905c8b`, sustained official-6 resource sampling measured the actual
+  remote process rather than the instrumentation process. S25 recorded window
+  p50/p95/max `3828/4247/4389` ms, remote PSS peak `1,105,479 KiB`, 62 GCs
+  totaling 1,361 ms, four blocking GCs totaling 107 ms, and thermal peak 2.
+  S10 arm64 recorded `6994/7358/7387` ms, `1,079,492 KiB`, 192 GCs totaling
+  7,742 ms, no blocking GC, and thermal peak 1; and
+- at `447175fb`, S10 was explicitly installed as `armeabi-v7a` with the exact
+  downloaded CPU runtime and Release models. Full-song official 4/6 product
+  runs completed in `490947/453161` ms and promoted in `147824/183493` ms.
+  Their remote PSS peaks were `1,127,173/1,057,131 KiB`; neither run recorded
+  a blocking GC, diagnostics failure, or identity mismatch. Terminal recycle
+  changed PID `19472 -> 20648` and `21373 -> 23842`, with a different process
+  generation and start identity each time, while the completed caches stayed
+  playable and repeat entry returned `AlreadyCompleted`.
+
+The detailed reports remain ignored under `build/litert-validation/` in the
+`formal-2b0a6dbe`, `formal-ed905c8b`, and `formal-447175fb` sets. They are
+incremental Phase 3 evidence; Phase 5 must still consolidate the accepted
+results into one tracked exact-candidate report. The arm32 official-4 and
+official-6 report SHA-256 values are respectively
+`d15ad9f4da033dda35d02f97eb185bb35972fffc93a7acd876d88f4e8ffe9ce2` and
+`16c1f3d07dd6760c6532b55336d94f0beee0c87ccf0243585e260793e2f4e6e7`.
 
 ### Phase 3A: Direct native pipeline
 
@@ -622,10 +645,12 @@ lint, a successful minified GitHub Release build, verified runtime-free
 four-ABI and universal APKs with the product DSP library in every ABI, and a
 passing API 26 x86 GitHub product gate after a no-override cold AVD restart.
 The later `15bbe455` and `a25198b5` S25 full-song MDX, playback, model-switch,
-and real GPU-to-CPU fallback runs close the Phase 2 device gaps. These are
-valid incremental evidence, not the Phase 5 exit: the remaining HTDemucs
-full-song runs, S10/S25 resource consolidation, final UI, exact-candidate
-report, and pushed CI gates below still apply.
+and real GPU-to-CPU fallback runs close the Phase 2 device gaps. The
+`2b0a6dbe`, `ed905c8b`, and `447175fb` HTDemucs full-song, resource, and arm32
+terminal-recycle runs close the Phase 3 device gaps. These are valid
+incremental evidence, not the Phase 5 exit: final UI closeout, a clean
+exact-candidate aggregate rerun and report, and pushed CI gates below still
+apply.
 
 ### Phase 5A: Host and packaging gates
 
@@ -692,8 +717,8 @@ docs(separation): reconcile runtime and model roadmaps
 
 ## Phase 6: Migration Closeout
 
-Status: not started. Phase 6 remains blocked on the open Phase 3D, Phase 4,
-and Phase 5 gates above.
+Status: not started. Phase 6 remains blocked on the open Phase 4 and Phase 5
+gates above.
 
 - Confirm the branch contains no generated binaries, raw test audio, runtime
   downloads, device output, or relay payloads.

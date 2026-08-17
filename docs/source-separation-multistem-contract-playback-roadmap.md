@@ -57,6 +57,18 @@ general all-ABI claim. The only remaining Phase 6 closeout is to attribute the
 wider-than-frozen PCM16 deltas exposed by that representative listening sample
 without silently weakening the numerical gate.
 
+The LiteRT 2.2 formal-migration checkpoint `447175fb` reran the arm32 row on
+the full 261.013-second YOASOBI source through the current installed-Release
+product path. Official 4-stem and 6-stem both completed 45 windows, published
+and reopened ordered indexed FLAC, removed every WAV temporary, and returned
+`AlreadyCompleted` on cache re-entry. Their terminal processes recycled from
+PID `19472` to `20648` and from `21373` to `23842`; process generation and
+start identity changed in both runs with zero diagnostics failure or identity
+mismatch. The ignored reports are under
+`build/litert-validation/formal-447175fb/s10/`. This current-tip lifecycle
+confirmation supplements rather than replaces the broader 2026-08-14 Phase 8
+boundary matrix below.
+
 The current GitHub product also exposes source separation on API 26 x86
 through the CPU-only JVM MDX fallback; it does not apply an ABI-wide UI or
 runtime block. That result qualifies the two-stem MDX product/cache route at
