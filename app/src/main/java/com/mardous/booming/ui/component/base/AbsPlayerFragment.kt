@@ -627,6 +627,12 @@ abstract class AbsPlayerFragment(@LayoutRes layoutRes: Int) : Fragment(layoutRes
         }
     }
 
+    internal fun showCoverLyricsForDebug(): Boolean {
+        val cover = coverFragment?.takeIf { it.isAllowedToLoadLyrics } ?: return false
+        cover.showLyrics(isForced = true)
+        return true
+    }
+
     @CallSuper
     open fun onShow() {
         coverFragment?.showLyrics()

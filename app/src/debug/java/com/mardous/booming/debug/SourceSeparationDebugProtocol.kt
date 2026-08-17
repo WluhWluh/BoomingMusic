@@ -105,7 +105,9 @@ internal object SourceSeparationDebugProtocol {
         "operation.list" to emptyList(),
         "operation.cancel" to listOf("operation_id:string"),
         "diagnostics.export" to emptyList(),
-        "ui.launch" to emptyList(),
+        "ui.launch" to listOf(
+            "surface:main|source_separation|lyrics=main",
+        ),
     )
 
     fun success(

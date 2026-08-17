@@ -99,6 +99,33 @@ class SourceSeparationDebugControlAuditTest {
         assertTrue(provider.contains("percent / 100f"))
     }
 
+    @Test
+    fun `debug UI launch has deterministic panel and lyrics surfaces`() {
+        val protocol = appFile(
+            "src/debug/java/com/mardous/booming/debug/SourceSeparationDebugProtocol.kt",
+        ).readText()
+        val provider = appFile(
+            "src/debug/java/com/mardous/booming/debug/SourceSeparationDebugControlProvider.kt",
+        ).readText()
+        val activity = appFile(
+            "src/main/java/com/mardous/booming/ui/screen/MainActivity.kt",
+        ).readText()
+        val player = appFile(
+            "src/main/java/com/mardous/booming/ui/component/base/AbsPlayerFragment.kt",
+        ).readText()
+        val launchBranch = provider.substringAfter("\"ui.launch\" ->")
+            .substringBefore("else ->")
+
+        assertTrue(protocol.contains("surface:main|source_separation|lyrics=main"))
+        assertTrue(launchBranch.contains("surface in MainActivity.DEBUG_SURFACES"))
+        assertTrue(launchBranch.contains("MainActivity.EXTRA_DEBUG_SURFACE"))
+        assertTrue(activity.contains("if (!BuildConfig.DEBUG) return"))
+        assertTrue(activity.contains("R.id.nav_source_separation_settings"))
+        assertTrue(activity.contains("dismissDebugDialogDestinations()"))
+        assertTrue(activity.contains("showDebugCoverLyrics()"))
+        assertTrue(player.contains("cover.showLyrics(isForced = true)"))
+    }
+
     private fun appFile(relativePath: String): File {
         val workingDirectory = File(requireNotNull(System.getProperty("user.dir")))
         val appRoot = if (File(workingDirectory, "src/main").isDirectory) {

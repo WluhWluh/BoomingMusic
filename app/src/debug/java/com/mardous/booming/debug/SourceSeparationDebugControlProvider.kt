@@ -428,11 +428,19 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
         )
         "diagnostics.export" -> accepted(diagnostics.submit())
         "ui.launch" -> {
+            val surface = args.optionalString("surface") ?: MainActivity.DEBUG_SURFACE_MAIN
+            require(surface in MainActivity.DEBUG_SURFACES) {
+                "Unknown debug UI surface '$surface'."
+            }
             providerContext().startActivity(
                 Intent(providerContext(), MainActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra(MainActivity.EXTRA_DEBUG_SURFACE, surface),
             )
-            SourceSeparationDebugProtocol.success(message = "Main activity launched.")
+            SourceSeparationDebugProtocol.success(
+                data = JSONObject().put("surface", surface),
+                message = "Main activity launched.",
+            )
         }
         else -> SourceSeparationDebugProtocol.failure(
             "unknown_command",

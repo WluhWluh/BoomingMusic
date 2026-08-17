@@ -15,6 +15,7 @@ import androidx.navigation.ui.setupWithNavController
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.mardous.booming.BuildConfig
 import com.mardous.booming.R
 import com.mardous.booming.core.model.CategoryInfo
 import com.mardous.booming.core.model.MediaEvent
@@ -27,6 +28,7 @@ import com.mardous.booming.playback.Playback
 import com.mardous.booming.playback.library.MediaIDs
 import com.mardous.booming.core.model.shuffle.OpenShuffleMode
 import com.mardous.booming.ui.IScrollHelper
+import com.mardous.booming.ui.component.base.AbsPlayerFragment
 import com.mardous.booming.ui.component.base.AbsSlidingMusicPanelActivity
 import com.mardous.booming.ui.screen.update.UpdateDialog
 import com.mardous.booming.ui.screen.update.UpdateSearchResult
@@ -47,6 +49,7 @@ class MainActivity : AbsSlidingMusicPanelActivity(), MediaController.Listener {
 
         updateTabs()
         setupNavigationController()
+        handleDebugSurfaceIntent(intent)
 
         val shortcutManager = getSystemService<ShortcutManager>()
         shortcutManager?.removeDynamicShortcuts(OLD_SHORTCUT_IDS)
@@ -206,6 +209,57 @@ class MainActivity : AbsSlidingMusicPanelActivity(), MediaController.Listener {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handlePlaybackIntent(intent, false)
+        handleDebugSurfaceIntent(intent)
+    }
+
+    private fun handleDebugSurfaceIntent(intent: Intent?) {
+        if (!BuildConfig.DEBUG) return
+        val surface = intent?.getStringExtra(EXTRA_DEBUG_SURFACE) ?: return
+        intent.removeExtra(EXTRA_DEBUG_SURFACE)
+        window.decorView.post {
+            when (surface) {
+                DEBUG_SURFACE_MAIN -> dismissDebugDialogDestinations()
+                DEBUG_SURFACE_SOURCE_SEPARATION -> {
+                    val navController = whichFragment<NavHostFragment>(
+                        R.id.fragment_container,
+                    ).navController
+                    if (navController.currentDestination?.id !=
+                        R.id.nav_source_separation_settings
+                    ) {
+                        navController.navigate(R.id.nav_source_separation_settings)
+                    }
+                }
+                DEBUG_SURFACE_LYRICS -> {
+                    dismissDebugDialogDestinations()
+                    window.decorView.post {
+                        expandPanel()
+                        showDebugCoverLyrics()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun dismissDebugDialogDestinations() {
+        val navController = whichFragment<NavHostFragment>(
+            R.id.fragment_container,
+        ).navController
+        while (navController.currentDestination?.navigatorName == "dialog") {
+            if (!navController.popBackStack()) return
+        }
+    }
+
+    private fun showDebugCoverLyrics(attempt: Int = 0) {
+        val player = supportFragmentManager.findFragmentById(
+            R.id.player_container,
+        ) as? AbsPlayerFragment
+        if (player?.showCoverLyricsForDebug() == true ||
+            attempt >= DEBUG_SURFACE_ATTACH_RETRIES
+        ) return
+        window.decorView.postDelayed(
+            { showDebugCoverLyrics(attempt + 1) },
+            DEBUG_SURFACE_ATTACH_RETRY_MS,
+        )
     }
 
     private fun handlePlaybackIntent(intent: Intent, canRestorePlayback: Boolean) {
@@ -282,6 +336,19 @@ class MainActivity : AbsSlidingMusicPanelActivity(), MediaController.Listener {
     }
 
     companion object {
+        internal const val EXTRA_DEBUG_SURFACE =
+            "com.wluhwluh.booming.sourcesep.extra.DEBUG_SURFACE"
+        internal const val DEBUG_SURFACE_MAIN = "main"
+        internal const val DEBUG_SURFACE_SOURCE_SEPARATION = "source_separation"
+        internal const val DEBUG_SURFACE_LYRICS = "lyrics"
+        internal val DEBUG_SURFACES = setOf(
+            DEBUG_SURFACE_MAIN,
+            DEBUG_SURFACE_SOURCE_SEPARATION,
+            DEBUG_SURFACE_LYRICS,
+        )
+
+        private const val DEBUG_SURFACE_ATTACH_RETRIES = 20
+        private const val DEBUG_SURFACE_ATTACH_RETRY_MS = 100L
         private const val APP_SHORTCUT_LAST_ADDED = "com.mardous.booming.shortcut.LAST_ADDED"
         private const val APP_SHORTCUT_TOP_TRACKS = "com.mardous.booming.shortcut.TOP_TRACKS"
         private const val APP_SHORTCUT_SHUFFLE = "com.mardous.booming.shortcut.SHUFFLE"
