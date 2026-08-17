@@ -219,6 +219,8 @@ docs(migration): plan LiteRT 2.2 native pipeline integration
 
 ## Phase 1: Migrate Runtime Delivery to Exact LiteRT 2.2
 
+Status: complete on `bd96eb55`.
+
 ### Phase 1A: API, catalogs, and loader
 
 - Transplant `7487bd7c` onto the new base.
@@ -265,6 +267,32 @@ any native DSP commit is introduced.
 **Phase 1 exit:** runtime installation, loading, restart, cleanup, four-ABI
 policy, and bounded GPU evidence pass on the formal branch while APK inventory
 remains runtime-free.
+
+### Phase 1 Evidence
+
+- The checksum-pinned classes-only API, all four CPU components, and the
+  arm64 bounded GPU component pass `verify_litert_native.py`; the API AAR
+  identity is
+  `88a939aa5f3a65ff89bd90eed4b3af30b2a8866bedbbd3838761b143d2ccb387`.
+- `SourceSeparationRuntimeStore` installed the released CPU and GPU ZIPs on
+  the S25. A fresh process loaded `libLiteRt.so` followed by
+  `liblitert_jni.so`, and the exact bounded-GPU capability handshake passed.
+- The released CPU ZIP and ordered dual-library load passed on S10 arm32,
+  API 37 x86_64, and API 26 x86. API 26 x86 remains explicitly classified as
+  the JVM fallback/test tier rather than native-managed product support.
+- `:app:testGithubDebugUnitTest` passed all 748 tests. GitHub debug app and
+  instrumentation APK assembly passed, and `verify_litert_apks.py` confirmed
+  that all four ABI splits and the universal APK contain no LiteRT runtime.
+- S25 run `formal-phase1-runtime-only-s25-cpu-r2` exercised the production
+  runtime store and released model contract on exact `2.2.0-bss.2`: setup
+  59 ms, first inference 2106 ms, reused inference 1686 ms, ORT SNR
+  97.764523 dB, maximum absolute error `5.9247e-5`, and byte-identical reused
+  output. The app and test APK SHA-256 values were respectively
+  `42ccc942c4bfcd29b3562e20508d735d6bbdca4fab87802d409239719ffe4b17`
+  and `475561549fab6e1c9000ab9ac2ce9fee019464977b99c399b85bec45930781b5`.
+
+Phase 2 may begin only from this accepted Phase 1 tip. Later MDX or HTDemucs
+qualification must not be cited as a substitute for these runtime-only gates.
 
 Recommended commits:
 
