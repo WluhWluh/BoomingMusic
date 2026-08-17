@@ -587,17 +587,45 @@ test(separation): qualify CPU HTDemucs lifecycle
 
 ## Phase 4: Reconcile the Latest Playback Baseline
 
-Status: implementation reconciliation and targeted regression coverage are
-substantially complete; final UI/device closeout remains open.
+Status: complete. Implementation reconciliation, targeted regression coverage,
+and the final 2-/4-/6-stem UI/device closeout passed.
 
 At `b95fe281`, S25 device gates passed unready-window seek retargeting,
 completed 6-to-4 cache switching, active-cache UI deletion, and remote
 multi-stem process death recovery. The corresponding S10 playback wait/seek
 gate also passed, while host tests cover ready-frontier generations, stale
 resolution rejection, gain-only updates, EOF, FLAC promotion, and exact-model
-cache selection. Before marking this phase complete, rerun the high-level
-playback smoke on the final candidate and exercise real 2-, 4-, and 6-stem
-sessions through both the separation panel and lyrics-overlay controls.
+cache selection.
+
+The final S25 closeout used only the ADB Debug control API, without simulated
+touch input. It exercised actual playback for:
+
+- the completed MDX 2-stem cache
+  `3ac77c31714860aacfaeeceb3fe6f6f6a21148bb8791c76f243e2a98667a0314`,
+  with the data plane ready, blend `0.2`, and playback position advancing;
+- the completed official 4-stem cache
+  `7856a0d3834e48bd517d4b556b04815ea721cf3db03ca9e62a8638c5f16d3cd3`,
+  in ordered `drums,bass,other,vocals` playback with gains
+  `0.3,0.5,0.7,1`; and
+- the completed official 6-stem cache
+  `d8b7203421f2dd473d56da2c0b199e791f3af3de6c1d7c5c11748284094c36db`,
+  in ordered `drums,bass,other,vocals,guitar,piano` playback with gains
+  `0.2,0.4,0.6,1,0.8,0.5`.
+
+All three sessions avoided a spurious window wait. Both the source-separation
+panel and lyrics-overlay controls remained stable without overlap, and the
+established stem-icon contract was exercised unchanged. Raw screenshots remain
+ignored under `build/litert-validation/phase4-ui/s25/`. The device's existing
+`autoCacheCleanup=true` and `completedCacheLimit=1` policy later pruned the
+generated 4-/6-stem entries as expected. After qualification, the selected
+model was restored to `uvr_mdxnet_3_9662`, test gains were cleared to neutral,
+separated output and mix mode were disabled, playback was paused, and the
+Debug app was left in the foreground.
+
+The closeout source is recorded by `edbb219e`, which adds deterministic
+Debug-only navigation to the source-separation panel and lyrics overlay. Its
+focused audit and GitHub Debug Kotlin compilation pass, while release handling
+remains disabled by `BuildConfig.DEBUG`.
 
 This phase is mandatory even if earlier cherry-picks apply without textual
 conflicts. It validates the semantic overlap introduced by the new base.
@@ -630,10 +658,10 @@ conflicts. It validates the semantic overlap introduced by the new base.
 **Phase 4 exit:** the final inference implementation coexists with all
 post-donor playback fixes and passes their host and S25 regression suites.
 
-Recommended commit:
+Closeout commit:
 
 ```text
-fix(separation): reconcile LiteRT 2.2 with playback demand state
+test(separation): expose deterministic UI debug surfaces
 ```
 
 ## Phase 5: Formal Integration Qualification
@@ -648,9 +676,8 @@ The later `15bbe455` and `a25198b5` S25 full-song MDX, playback, model-switch,
 and real GPU-to-CPU fallback runs close the Phase 2 device gaps. The
 `2b0a6dbe`, `ed905c8b`, and `447175fb` HTDemucs full-song, resource, and arm32
 terminal-recycle runs close the Phase 3 device gaps. These are valid
-incremental evidence, not the Phase 5 exit: final UI closeout, a clean
-exact-candidate aggregate rerun and report, and pushed CI gates below still
-apply.
+incremental evidence, not the Phase 5 exit: a clean exact-candidate aggregate
+rerun and report, and the pushed CI gates below still apply.
 
 ### Phase 5A: Host and packaging gates
 
@@ -717,8 +744,7 @@ docs(separation): reconcile runtime and model roadmaps
 
 ## Phase 6: Migration Closeout
 
-Status: not started. Phase 6 remains blocked on the open Phase 4 and Phase 5
-gates above.
+Status: not started. Phase 6 remains blocked on the open Phase 5 gates above.
 
 - Confirm the branch contains no generated binaries, raw test audio, runtime
   downloads, device output, or relay payloads.
