@@ -136,12 +136,8 @@ class SourceSeparationPresetActivationTest {
     }
 
     @Test
-    fun `unqualified reviewed models support product ABIs except pure x86`() {
-        for (abi in listOf(
-            MdxRuntimeAbi.Arm64V8a,
-            MdxRuntimeAbi.ArmeabiV7a,
-            MdxRuntimeAbi.X86_64,
-        )) {
+    fun `unqualified reviewed models support every packaged ABI`() {
+        for (abi in MdxRuntimeAbi.entries) {
             val eligibility = SourceSeparationPresetActivationResolver.resolve(
                 catalog = catalog,
                 modelId = "kuielab_a_bass",
@@ -152,22 +148,10 @@ class SourceSeparationPresetActivationTest {
             assertTrue(eligibility.requiresExperimentalConfirmation)
             assertEquals(null, eligibility.cpuQualification)
         }
-
-        val x86 = SourceSeparationPresetActivationResolver.resolve(
-            catalog = catalog,
-            modelId = "kuielab_a_bass",
-            platform = MdxRuntimePlatform(androidApi = 35, runtimeAbi = MdxRuntimeAbi.X86),
-            scope = SourceSeparationPresetSelectionScope.User,
-        )
-        assertFalse(x86.allowed)
-        assertEquals(
-            SourceSeparationPresetSelectionBlockReason.MissingKnownGoodCpuProfile,
-            x86.blockReason,
-        )
     }
 
     @Test
-    fun `explicit CPU rejection is not replaced by unqualified admission`() {
+    fun `explicit CPU rejection remains visible but does not block a user attempt`() {
         val eligibility = SourceSeparationPresetActivationResolver.resolve(
             catalog = catalog,
             modelId = "uvr_mdxnet_inst_hq_4",
@@ -179,11 +163,8 @@ class SourceSeparationPresetActivationTest {
             scope = SourceSeparationPresetSelectionScope.User,
         )
 
-        assertFalse(eligibility.allowed)
-        assertEquals(
-            SourceSeparationPresetSelectionBlockReason.MissingKnownGoodCpuProfile,
-            eligibility.blockReason,
-        )
+        assertTrue(eligibility.allowed)
+        assertTrue(eligibility.requiresExperimentalConfirmation)
         assertEquals(
             ContractRuntimeQualificationStatus.Rejected,
             eligibility.cpuQualification?.status,

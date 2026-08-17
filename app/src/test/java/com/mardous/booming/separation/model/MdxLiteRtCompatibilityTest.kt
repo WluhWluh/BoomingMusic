@@ -225,6 +225,47 @@ class MdxLiteRtCompatibilityTest {
     }
 
     @Test
+    fun `user attempts admit every published MDX model on every packaged ABI`() {
+        assertEquals(30, catalog.contracts.size)
+
+        for (abi in MdxRuntimeAbi.entries) {
+            catalog.contracts.forEach { contract ->
+                val decision = MdxLiteRtCompatibilityResolver.resolve(
+                    profile = contract.toMdxExecutionProfile(catalog.runtimeQualifications),
+                    backend = MdxInferenceBackend.LiteRtCpu,
+                    platform = MdxRuntimePlatform(35, abi),
+                    policy = MdxCompatibilityPolicy.AllowUserAttempts,
+                )
+
+                assertTrue(
+                    "CPU attempt was blocked for ${contract.modelId}/${abi.androidName}: " +
+                        decision.reason,
+                    decision.isAllowed,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `user attempts preserve but do not enforce historic rejection evidence`() {
+        val rejected = decision(
+            "uvr_mdxnet_inst_hq_4",
+            MdxRuntimePlatform(35, MdxRuntimeAbi.X86_64),
+            MdxCompatibilityPolicy.AllowUserAttempts,
+        )
+        val unsupported = decision(
+            "uvr_mdxnet_inst_hq_4",
+            MdxRuntimePlatform(26, MdxRuntimeAbi.X86),
+            MdxCompatibilityPolicy.AllowUserAttempts,
+        )
+
+        assertEquals(MdxCompatibilityOutcome.Experimental, rejected.outcome)
+        assertTrue(rejected.evidence.orEmpty().contains("1.3 GiB"))
+        assertEquals(MdxCompatibilityOutcome.Experimental, unsupported.outcome)
+        assertTrue(unsupported.evidence.orEmpty().contains("XNNPACK"))
+    }
+
+    @Test
     fun `explicitly unsupported catalog targets and missing targets remain blocked internally`() {
         val lifecycleUnsafeX86 = listOf("uvr_mdxnet_3_9662", "uvr_mdxnet_kara").map { modelId ->
             decision(

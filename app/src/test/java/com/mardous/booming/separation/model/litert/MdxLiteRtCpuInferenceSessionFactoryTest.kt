@@ -44,6 +44,24 @@ class MdxLiteRtCpuInferenceSessionFactoryTest {
     }
 
     @Test
+    fun `user attempts send HQ4 to the allocator on every packaged ABI`() {
+        val profile = profile("uvr_mdxnet_inst_hq_4")
+        for (abi in MdxRuntimeAbi.entries) {
+            val allocator = RecordingAllocator()
+            val factory = factory(
+                abi = abi,
+                allocator = allocator,
+                processors = 4,
+                compatibilityPolicy = MdxCompatibilityPolicy.AllowUserAttempts,
+            )
+
+            factory.create(artifact(profile), profile, MdxRuntimeSettings())
+
+            assertEquals("Allocator was blocked for ${abi.androidName}", 1, allocator.createCount)
+        }
+    }
+
+    @Test
     fun `known good target reaches allocator with bounded thread policy`() {
         val allocator = RecordingAllocator()
         val profile = profile("uvr_mdxnet_3_9662")

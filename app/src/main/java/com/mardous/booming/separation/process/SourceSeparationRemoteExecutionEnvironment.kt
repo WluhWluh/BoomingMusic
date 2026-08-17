@@ -369,7 +369,7 @@ private fun createRemoteSessionControllerProvider(
         cpuControllerFactory = {
             SourceSeparationProcessSessionController(
                 factory = MdxLiteRtCpuInferenceSessionFactory(
-                    compatibilityPolicy = MdxCompatibilityPolicy.AllowCandidates,
+                    compatibilityPolicy = MdxCompatibilityPolicy.AllowUserAttempts,
                 ).withMdxInferenceTiming(),
                 ownership = ownership,
                 runtimeAbi = runtimeAbi,

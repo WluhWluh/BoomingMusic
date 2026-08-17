@@ -116,8 +116,7 @@ object SourceSeparationPresetActivationResolver {
                 return blocked(SourceSeparationPresetSelectionBlockReason.AndroidApiTooLow)
             }
             val unqualifiedExperimentalCpuAllowed =
-                entry.supportLevel == CatalogSupportLevel.Experimental &&
-                    platform.runtimeAbi != MdxRuntimeAbi.X86
+                entry.supportLevel == CatalogSupportLevel.Experimental
             if (!unqualifiedExperimentalCpuAllowed) {
                 return blocked(
                     SourceSeparationPresetSelectionBlockReason.MissingKnownGoodCpuProfile
@@ -139,8 +138,10 @@ object SourceSeparationPresetActivationResolver {
         val reviewedExperimentalCandidate =
             entry.supportLevel == CatalogSupportLevel.Experimental &&
                 qualification.status == ContractRuntimeQualificationStatus.Candidate
+        val reviewedUserAttempt = entry.supportLevel == CatalogSupportLevel.Experimental
         if (qualification.status != ContractRuntimeQualificationStatus.KnownGood &&
             !reviewedExperimentalCandidate &&
+            !reviewedUserAttempt &&
             x86ValidationSentinel == null
         ) {
             return blocked(

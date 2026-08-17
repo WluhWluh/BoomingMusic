@@ -79,6 +79,7 @@ object AndroidMdxRuntimePlatformProvider : MdxRuntimePlatformProvider {
 enum class MdxCompatibilityPolicy {
     KnownGoodOnly,
     AllowCandidates,
+    AllowUserAttempts,
     AllowUntestedInternal,
 }
 
@@ -155,7 +156,8 @@ object MdxLiteRtCompatibilityResolver {
                     "The runtime target is experimental and requires explicit candidate admission.",
                     record.evidence,
                 )
-                MdxCompatibilityPolicy.AllowCandidates -> MdxCompatibilityDecision(
+                MdxCompatibilityPolicy.AllowCandidates,
+                MdxCompatibilityPolicy.AllowUserAttempts -> MdxCompatibilityDecision(
                     outcome = MdxCompatibilityOutcome.Experimental,
                     reason = "The reviewed experimental runtime target is allowed.",
                     evidence = record.evidence,
@@ -167,30 +169,39 @@ object MdxLiteRtCompatibilityResolver {
                 )
             }
 
-            MdxRuntimeSupportStatus.Untested -> if (
-                policy == MdxCompatibilityPolicy.AllowUntestedInternal
-            ) {
-                MdxCompatibilityDecision(
+            MdxRuntimeSupportStatus.Untested -> when (policy) {
+                MdxCompatibilityPolicy.AllowUserAttempts -> MdxCompatibilityDecision(
+                    outcome = MdxCompatibilityOutcome.Experimental,
+                    reason = "The untested runtime target is available for a user-requested attempt.",
+                    evidence = record.evidence,
+                )
+                MdxCompatibilityPolicy.AllowUntestedInternal -> MdxCompatibilityDecision(
                     outcome = MdxCompatibilityOutcome.InternalValidationOnly,
                     reason = "The runtime target is available only for internal validation.",
                     evidence = record.evidence,
                 )
-            } else {
-                unsupported(
+                MdxCompatibilityPolicy.KnownGoodOnly,
+                MdxCompatibilityPolicy.AllowCandidates -> unsupported(
                     "The runtime target is untested and cannot be used by the product.",
                     record.evidence,
                 )
             }
 
-            MdxRuntimeSupportStatus.Rejected -> unsupported(
-                "The runtime profile was rejected by validation.",
-                record.evidence,
-            )
+            MdxRuntimeSupportStatus.Rejected -> if (
+                policy == MdxCompatibilityPolicy.AllowUserAttempts
+            ) {
+                userAttempt("The runtime profile has prior rejection evidence.", record.evidence)
+            } else {
+                unsupported("The runtime profile was rejected by validation.", record.evidence)
+            }
 
-            MdxRuntimeSupportStatus.Unsupported -> unsupported(
-                "The runtime target is explicitly unsupported.",
-                record.evidence,
-            )
+            MdxRuntimeSupportStatus.Unsupported -> if (
+                policy == MdxCompatibilityPolicy.AllowUserAttempts
+            ) {
+                userAttempt("The runtime target has prior unsupported evidence.", record.evidence)
+            } else {
+                unsupported("The runtime target is explicitly unsupported.", record.evidence)
+            }
         }
     }
 
@@ -207,7 +218,8 @@ object MdxLiteRtCompatibilityResolver {
                 "${platform.runtimeAbi.androidName}, profile=$profileId, precision=$precision."
         val isReviewedCpu = profile.allowUnqualifiedExperimentalCpu &&
             backend == MdxInferenceBackend.LiteRtCpu &&
-            platform.runtimeAbi != MdxRuntimeAbi.X86
+            (platform.runtimeAbi != MdxRuntimeAbi.X86 ||
+                policy == MdxCompatibilityPolicy.AllowUserAttempts)
         val isReviewedGpu = profile.allowUnqualifiedExperimentalGpu &&
             backend == MdxInferenceBackend.LiteRtGpu &&
             platform.runtimeAbi == MdxRuntimeAbi.Arm64V8a &&
@@ -219,7 +231,8 @@ object MdxLiteRtCompatibilityResolver {
         val pathName = if (isReviewedGpu) "GPU" else "CPU"
         return when (policy) {
             MdxCompatibilityPolicy.KnownGoodOnly -> unsupported(missingRecordReason)
-            MdxCompatibilityPolicy.AllowCandidates -> MdxCompatibilityDecision(
+            MdxCompatibilityPolicy.AllowCandidates,
+            MdxCompatibilityPolicy.AllowUserAttempts -> MdxCompatibilityDecision(
                 outcome = MdxCompatibilityOutcome.Experimental,
                 reason = "The reviewed model is admitted to the unqualified experimental $pathName path.",
                 evidence = missingRecordReason,
@@ -236,6 +249,13 @@ object MdxLiteRtCompatibilityResolver {
         MdxCompatibilityDecision(
             outcome = MdxCompatibilityOutcome.Unsupported,
             reason = reason,
+            evidence = evidence,
+        )
+
+    private fun userAttempt(reason: String, evidence: String?) =
+        MdxCompatibilityDecision(
+            outcome = MdxCompatibilityOutcome.Experimental,
+            reason = "$reason The user-requested attempt is allowed.",
             evidence = evidence,
         )
 }

@@ -522,7 +522,7 @@ internal class LocalSeparationReadinessEvaluator(
                             profile = modelResolution.model.executionProfile,
                             backend = MdxInferenceBackend.LiteRtCpu,
                             platform = current,
-                            policy = MdxCompatibilityPolicy.AllowCandidates,
+                            policy = MdxCompatibilityPolicy.AllowUserAttempts,
                         )
                     }
                     if (compatibility != null && !compatibility.isAllowed) {

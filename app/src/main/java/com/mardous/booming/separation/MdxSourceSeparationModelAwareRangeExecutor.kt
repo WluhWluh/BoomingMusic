@@ -104,7 +104,7 @@ internal fun createCpuLiteRtSessionProvider(context: Context): MdxInferenceSessi
     SourceSeparationRuntimeBootstrap.ensureLoaded(context.applicationContext)
     return SingleUseMdxInferenceSessionProvider(
         MdxLiteRtCpuInferenceSessionFactory(
-            compatibilityPolicy = MdxCompatibilityPolicy.AllowCandidates,
+            compatibilityPolicy = MdxCompatibilityPolicy.AllowUserAttempts,
         ).withMdxInferenceTiming()
     )
 }
@@ -118,10 +118,11 @@ internal fun createAutoLiteRtSessionFactory(
     SourceSeparationRuntimeBootstrap.ensureLoaded(applicationContext)
     SourceSeparationGpuRuntimeBootstrap.ensureLoaded(applicationContext)
     val candidateCompatibilityPolicy = MdxCompatibilityPolicy.AllowCandidates
+    val cpuCompatibilityPolicy = MdxCompatibilityPolicy.AllowUserAttempts
     val factory = MdxLiteRtAutoInferenceSessionFactory(
         gpuRuntimeProfile = gpuProfile,
         gpuCompatibilityPolicy = candidateCompatibilityPolicy,
-        cpuCompatibilityPolicy = candidateCompatibilityPolicy,
+        cpuCompatibilityPolicy = cpuCompatibilityPolicy,
         gpuEligibilityProvider = AndroidMdxLiteRtGpuEligibilityProvider(applicationContext),
         gpuProbe = { session, profile ->
             val output = session.run(FloatArray(profile.inputTensor.elementCount))
@@ -138,7 +139,7 @@ internal fun createAutoLiteRtSessionFactory(
             compatibilityPolicy = candidateCompatibilityPolicy,
         ),
         cpuFactory = MdxLiteRtCpuInferenceSessionFactory(
-            compatibilityPolicy = candidateCompatibilityPolicy,
+            compatibilityPolicy = cpuCompatibilityPolicy,
         ),
     )
     return factory.withMdxInferenceTiming()
