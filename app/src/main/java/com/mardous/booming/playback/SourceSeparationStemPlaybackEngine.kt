@@ -239,7 +239,9 @@ internal class SourceSeparationStemPlaybackEngine(
             clearConsumerBlock()
             return 0
         }
-        if (readyFrameCount.get() < frameCount.toLong()) {
+        val availableFrames = readyFrameCount.get()
+        val hasCleanEndOfStreamTail = endOfStreamQueued.get() && availableFrames > 0L
+        if (availableFrames < frameCount.toLong() && !hasCleanEndOfStreamTail) {
             if (seekResumeState.get() == SeekResumeState.Waiting) {
                 return 0
             }
@@ -312,6 +314,7 @@ internal class SourceSeparationStemPlaybackEngine(
 
         metrics.recordRingOccupancy(readyBlocks.size)
         if (copiedFrames > 0 &&
+            state.get() != SourceSeparationPlaybackDataState.Ended &&
             !endOfStreamQueued.get() &&
             seekResumeState.get() == SeekResumeState.None &&
             readyFrameCount.get() <= lowWaterFrameCount()

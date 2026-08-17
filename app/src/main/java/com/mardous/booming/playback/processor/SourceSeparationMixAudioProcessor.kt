@@ -547,7 +547,15 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 )
             }
             engine.recordAudioThreadTime(System.nanoTime() - audioThreadStartNs)
-            if (mixedFrames != frames) {
+            val paddedCleanEndOfStream = mixedFrames != frames &&
+                    engine.currentState == SourceSeparationPlaybackDataState.Ended
+            if (paddedCleanEndOfStream) {
+                while (inputBuffer.hasRemaining()) {
+                    inputBuffer.get()
+                    buffer.put(0)
+                }
+                dataPlaneUnderflowSignaled.set(false)
+            } else if (mixedFrames != frames) {
                 // Media3 retries forever if a processor neither consumes input nor
                 // produces output. Drop this clock block without emitting silence;
                 // PlaybackService realigns the session before resuming.
@@ -568,6 +576,7 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
             traceQueueIfNeeded(
                 queueSeq = queueSeq,
                 branch = when {
+                    paddedCleanEndOfStream -> "mixed-engine-eof-padded"
                     mixedFrames != frames -> "engine-underflow"
                     resampled -> "mixed-engine-resampled"
                     else -> "mixed-engine"
@@ -686,34 +695,35 @@ class SourceSeparationMixAudioProcessor : BaseAudioProcessor() {
                 frameCount - handledFrames,
                 engine.blockFrameCapacity,
             )
-            val chunkBytes = chunkFrames * frameSize
             val readFrames = engine.readInto(engineStemBuffers, chunkFrames)
-            if (readFrames == chunkFrames) {
+            if (readFrames > 0) {
+                val readBytes = readFrames * frameSize
                 var stemOffset = 0
-                repeat(chunkFrames) {
+                repeat(readFrames) {
                     advanceGainRamp()
                     inputBuffer.position(inputBuffer.position() + frameSize)
                     outputBuffer.putShort(
                         mixEngineSample(
                             stemOffset = stemOffset,
-                            bytesRead = chunkBytes,
+                            bytesRead = readBytes,
                             channel = CHANNEL_LEFT,
                         ),
                     )
                     outputBuffer.putShort(
                         mixEngineSample(
                             stemOffset = stemOffset,
-                            bytesRead = chunkBytes,
+                            bytesRead = readBytes,
                             channel = CHANNEL_RIGHT,
                         ),
                     )
                     stemOffset += frameSize
                 }
-                mixedFrames += chunkFrames
-            } else {
+                handledFrames += readFrames
+                mixedFrames += readFrames
+            }
+            if (readFrames != chunkFrames) {
                 break
             }
-            handledFrames += chunkFrames
         }
         return mixedFrames
     }

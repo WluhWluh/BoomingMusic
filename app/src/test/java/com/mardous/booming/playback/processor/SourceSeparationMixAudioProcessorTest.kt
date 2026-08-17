@@ -88,6 +88,47 @@ class SourceSeparationMixAudioProcessorTest {
     }
 
     @Test
+    fun cleanStemEndPadsTheTransportTailAndSurvivesRepeatSeek() {
+        val vocals = writeWav("short-tail-vocals.wav", 3, 1_000)
+        val instrumental = writeWav("short-tail-instrumental.wav", 3, 2_000)
+        val processor = SourceSeparationMixAudioProcessor()
+        val stateChanges = CopyOnWriteArrayList<SourceSeparationPlaybackDataState>()
+        processor.dataPlaneStateChangedSink = stateChanges::add
+        try {
+            processor.configure(AudioProcessor.AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT))
+            processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
+            processor.enable(
+                stemFiles = listOf(vocals, instrumental),
+                stemIds = MDX_STEM_IDS,
+                blendEndpointStemIds = MDX_STEM_IDS,
+                positionMs = 0L,
+                inputMode = SourceSeparationMixAudioProcessor.InputMode.OriginalSource,
+                stemSampleRate = 44_100,
+                stemChannelCount = 2,
+                mixedOutputReadyPrerollMs = 0L,
+            )
+
+            repeat(2) { pass ->
+                await { processor.isDataPlaneReady() }
+                stateChanges.clear()
+                val input = silentInput(4)
+                processor.queueInput(input)
+                val output = processor.output.order(ByteOrder.LITTLE_ENDIAN)
+
+                assertEquals(input.limit(), input.position())
+                assertEquals(4 * BYTES_PER_FRAME, output.remaining())
+                repeat(3 * 2) { assertEquals(3_000, output.short.toInt()) }
+                repeat(2) { assertEquals(0, output.short.toInt()) }
+                assertFalse(stateChanges.contains(SourceSeparationPlaybackDataState.Buffering))
+
+                if (pass == 0) processor.seekTo(0L)
+            }
+        } finally {
+            processor.disable()
+        }
+    }
+
+    @Test
     fun outputFlushBarrierSkipsPrerollOnlyAfterTheAudioProcessorFlushes() {
         val vocals = writeWav("flush-barrier-vocals.wav", 16_384, 1_000)
         val instrumental = writeWav("flush-barrier-instrumental.wav", 16_384, 2_000)
