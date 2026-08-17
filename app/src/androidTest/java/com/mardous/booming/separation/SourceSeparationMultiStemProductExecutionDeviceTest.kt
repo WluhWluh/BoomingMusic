@@ -1960,6 +1960,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
 
             val progress = mutableListOf<JSONObject>()
             val windowElapsedMs = mutableListOf<Long>()
+            val expectsTerminalProcessRecycle = !android.os.Process.is64Bit()
             val mainSampler = PssSampler().also(PssSampler::start)
             val initialRemoteDiagnostics = remoteHost.processDiagnostics()
             val remoteSampler = RemoteProcessResourceSampler(
@@ -1967,6 +1968,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 pid = initialRemoteDiagnostics.pid,
                 diagnosticsProvider = remoteHost::processDiagnostics,
                 initialDiagnostics = initialRemoteDiagnostics,
+                allowProcessIdentityTransition = expectsTerminalProcessRecycle,
             ).also(RemoteProcessResourceSampler::start)
             val thermalBefore = thermalStatus(context)
             val startedAt = SystemClock.elapsedRealtime()
@@ -1995,8 +1997,15 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 remoteSampler.stop()
             }
             val remoteResources = remoteSampler.snapshot()
+            val terminalRemoteDiagnostics = remoteHost.processDiagnostics()
             assertTrue(remoteResources.diagnosticsSampleCount > 0)
             assertFalse(remoteResources.diagnosticsIdentityMismatch)
+            assertTerminalProcessLifecycle(
+                before = initialRemoteDiagnostics,
+                after = terminalRemoteDiagnostics,
+                expectsRecycle = expectsTerminalProcessRecycle,
+                sampledTransition = remoteResources.diagnosticsTransition,
+            )
             val elapsedMs = SystemClock.elapsedRealtime() - startedAt
             require(result is HtdemucsSourceSeparationEngineResult.Completed) {
                 "Fresh product run did not publish a completed cache: $result"
@@ -2072,6 +2081,15 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                     .put("pssFinalKiB", Debug.getPss())
                     .put("nativeHeapFinalBytes", Debug.getNativeHeapAllocatedSize()))
                 .put("remoteProcess", remoteResources.toJson())
+                .put(
+                    "remoteProcessLifecycle",
+                    terminalProcessLifecycleJson(
+                        before = initialRemoteDiagnostics,
+                        after = terminalRemoteDiagnostics,
+                        expectsRecycle = expectsTerminalProcessRecycle,
+                        sampledTransition = remoteResources.diagnosticsTransition,
+                    ),
+                )
                 .put("outputSampleRate", output.outputSampleRate)
                 .put("outputFrameCount", output.outputFrameCount)
                 .put("windowCount", output.windowCount)
@@ -3172,6 +3190,46 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         digest.digest().joinToString("") { "%02x".format(it) }
     }
 
+    private fun assertTerminalProcessLifecycle(
+        before: SourceSeparationProcessDiagnostics,
+        after: SourceSeparationProcessDiagnostics,
+        expectsRecycle: Boolean,
+        sampledTransition: SourceSeparationProcessDiagnostics?,
+    ) {
+        if (expectsRecycle) {
+            assertNotEquals(before.processGeneration, after.processGeneration)
+            assertNotEquals(before.processStartTicks, after.processStartTicks)
+            val transition = requireNotNull(sampledTransition) {
+                "The arm32 terminal process recycle was not observed by diagnostics."
+            }
+            assertEquals(after.pid, transition.pid)
+            assertEquals(after.processGeneration, transition.processGeneration)
+            assertEquals(after.processStartTicks, transition.processStartTicks)
+        } else {
+            assertEquals(before.pid, after.pid)
+            assertEquals(before.processGeneration, after.processGeneration)
+            assertEquals(before.processStartTicks, after.processStartTicks)
+            assertNull(sampledTransition)
+        }
+    }
+
+    private fun terminalProcessLifecycleJson(
+        before: SourceSeparationProcessDiagnostics,
+        after: SourceSeparationProcessDiagnostics,
+        expectsRecycle: Boolean,
+        sampledTransition: SourceSeparationProcessDiagnostics?,
+    ): JSONObject = JSONObject()
+        .put("expectedTerminalRecycle", expectsRecycle)
+        .put("before", processIdentityJson(before))
+        .put("after", processIdentityJson(after))
+        .put("pidChanged", before.pid != after.pid)
+        .put("processGenerationChanged", before.processGeneration != after.processGeneration)
+        .put("processStartTicksChanged", before.processStartTicks != after.processStartTicks)
+        .put(
+            "samplerTransition",
+            sampledTransition?.let(::processIdentityJson) ?: JSONObject.NULL,
+        )
+
     private class PssSampler {
         private val running = AtomicBoolean(false)
         val baselineKiB = Debug.getPss()
@@ -3200,6 +3258,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         private val pid: Int,
         private val diagnosticsProvider: (() -> SourceSeparationProcessDiagnostics)? = null,
         initialDiagnostics: SourceSeparationProcessDiagnostics? = null,
+        private val allowProcessIdentityTransition: Boolean = false,
     ) {
         private val activityManager = context.getSystemService(ActivityManager::class.java)
         private val powerManager = context.getSystemService(PowerManager::class.java)
@@ -3219,6 +3278,8 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         private val diagnosticsIdentityMismatch = AtomicBoolean(false)
         private val diagnosticsBaseline = AtomicReference(initialDiagnostics)
         private val diagnosticsLatest = AtomicReference(initialDiagnostics)
+        private val diagnosticsTransition =
+            AtomicReference<SourceSeparationProcessDiagnostics?>(null)
         private val javaHeapAllocatedPeakBytes = AtomicLong(
             initialDiagnostics?.memory?.javaHeapAllocatedBytes ?: 0L,
         )
@@ -3272,6 +3333,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 nativeHeapAllocatedPeakBytes = nativeHeapAllocatedPeakBytes.get(),
                 diagnosticsBaseline = diagnosticsBaseline.get(),
                 diagnosticsFinal = diagnosticsLatest.get(),
+                diagnosticsTransition = diagnosticsTransition.get(),
             )
         }
 
@@ -3308,9 +3370,18 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 diagnosticsFailures.incrementAndGet()
                 return
             }
-            if (current.pid != pid ||
-                expectedProcessGeneration?.let { it != current.processGeneration } == true
+            val expectedStartTicks = diagnosticsBaseline.get()?.processStartTicks
+            val identityChanged = current.pid != pid ||
+                expectedProcessGeneration?.let { it != current.processGeneration } == true ||
+                expectedStartTicks?.let { it != current.processStartTicks } == true
+            if (identityChanged && allowProcessIdentityTransition &&
+                expectedProcessGeneration != current.processGeneration &&
+                expectedStartTicks != current.processStartTicks
             ) {
+                diagnosticsTransition.compareAndSet(null, current)
+                return
+            }
+            if (identityChanged) {
                 diagnosticsIdentityMismatch.set(true)
                 return
             }
@@ -3356,6 +3427,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         val nativeHeapAllocatedPeakBytes: Long = 0L,
         val diagnosticsBaseline: SourceSeparationProcessDiagnostics? = null,
         val diagnosticsFinal: SourceSeparationProcessDiagnostics? = null,
+        val diagnosticsTransition: SourceSeparationProcessDiagnostics? = null,
     ) {
         fun toJson(): JSONObject {
             val baselineMemory = diagnosticsBaseline?.memory
@@ -3367,6 +3439,14 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("diagnosticsSampleCount", diagnosticsSampleCount)
                 .put("diagnosticsFailureCount", diagnosticsFailureCount)
                 .put("diagnosticsIdentityMismatch", diagnosticsIdentityMismatch)
+                .put(
+                    "diagnosticsIdentityTransitionObserved",
+                    diagnosticsTransition != null,
+                )
+                .put(
+                    "diagnosticsTransition",
+                    diagnosticsTransition?.let(::processIdentityJson) ?: JSONObject.NULL,
+                )
                 .put("processMissing", processMissing)
                 .put("totalPssBaselineKiB", totalPssBaselineKiB)
                 .put("totalPssPeakKiB", totalPssPeakKiB)
@@ -3487,5 +3567,12 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             "htdemucs_4s_core_canonical_7p8s_fp32_v1_0_0",
             "htdemucs_6s_guitar_ft_core_canonical_7p8s_fp32_v1_0_0",
         )
+
+        private fun processIdentityJson(
+            diagnostics: SourceSeparationProcessDiagnostics,
+        ): JSONObject = JSONObject()
+            .put("pid", diagnostics.pid)
+            .put("processGeneration", diagnostics.processGeneration)
+            .put("processStartTicks", diagnostics.processStartTicks)
     }
 }
