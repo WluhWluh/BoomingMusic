@@ -33,6 +33,22 @@ class SourceSeparationDebugControlAuditTest {
     }
 
     @Test
+    fun `cold debug calls wait until application startup completes`() {
+        val provider = appFile(
+            "src/debug/java/com/mardous/booming/debug/SourceSeparationDebugControlProvider.kt",
+        ).readText()
+        val onCreate = provider.substringAfter("override fun onCreate(): Boolean")
+            .substringBefore("override fun shutdown()")
+        val call = provider.substringAfter("override fun call(")
+            .substringBefore("private fun awaitApplicationReady()")
+
+        assertTrue(provider.contains("CountDownLatch(1)"))
+        assertTrue(onCreate.contains("Handler(Looper.getMainLooper()).post(applicationReady::countDown)"))
+        assertTrue(call.indexOf("awaitApplicationReady()") < call.indexOf("execute("))
+        assertTrue(provider.contains("applicationReady.await("))
+    }
+
+    @Test
     fun `help advertises exactly the commands implemented by the provider`() {
         val protocol = appFile(
             "src/debug/java/com/mardous/booming/debug/SourceSeparationDebugProtocol.kt",

@@ -7,6 +7,8 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Binder
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import androidx.media3.common.C
 import com.mardous.booming.data.local.repository.Repository
@@ -20,8 +22,11 @@ import com.mardous.booming.ui.screen.player.SourceSeparationForegroundWorkerDebu
 import org.json.JSONArray
 import org.json.JSONObject
 import org.koin.java.KoinJavaComponent.get
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class SourceSeparationDebugControlProvider : ContentProvider() {
+    private val applicationReady = CountDownLatch(1)
     private val mediaClientLock = Any()
     private var mediaClient: SourceSeparationDebugMediaClient? = null
     private val operations = SourceSeparationDebugOperationRegistry()
@@ -43,7 +48,12 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
         )
     }
 
-    override fun onCreate(): Boolean = true
+    override fun onCreate(): Boolean {
+        // Providers are installed before Application.onCreate. An external
+        // content call can otherwise start an operation before Koin exists.
+        Handler(Looper.getMainLooper()).post(applicationReady::countDown)
+        return true
+    }
 
     override fun shutdown() {
         operations.close()
@@ -58,12 +68,23 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
         enforceDebugCaller()
         val arguments = DebugArguments(arg, extras ?: Bundle.EMPTY)
         return runCatching {
+            awaitApplicationReady()
             execute(method.trim().lowercase(), arguments)
         }.getOrElse { error ->
             SourceSeparationDebugProtocol.failure(
                 code = error.debugCode(),
                 message = error.message ?: error::class.java.simpleName,
             )
+        }
+    }
+
+    private fun awaitApplicationReady() {
+        if (applicationReady.count == 0L) return
+        check(Looper.myLooper() != Looper.getMainLooper()) {
+            "Debug control was called on the main thread before application initialization."
+        }
+        check(applicationReady.await(APPLICATION_READY_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            "Timed out waiting for debug-control application initialization."
         }
     }
 
@@ -598,6 +619,10 @@ class SourceSeparationDebugControlProvider : ContentProvider() {
         selection: String?,
         selectionArgs: Array<out String>?,
     ): Int = 0
+
+    private companion object {
+        const val APPLICATION_READY_TIMEOUT_SECONDS = 10L
+    }
 }
 
 internal class DebugArguments(
