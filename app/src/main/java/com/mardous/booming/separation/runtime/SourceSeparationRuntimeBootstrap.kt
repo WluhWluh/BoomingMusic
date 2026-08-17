@@ -339,6 +339,7 @@ internal object SourceSeparationRuntimeBootstrap {
             reason = SourceSeparationRuntimeFailureReason.ConflictingLoaderPath,
             message = "The LiteRT runtime is already leased by another process.",
         )
+
         var nativeLoadAttempted = false
         try {
             LiteRtNativeLibraryLoader.configureAbsolutePath(libraryPath)
@@ -368,6 +369,12 @@ internal object SourceSeparationRuntimeBootstrap {
         }
         loadedInstallation = installation
         installation
+    }
+
+    fun requireLoadedInstallation(): SourceSeparationCpuRuntimeInstallation = synchronized(lock) {
+        checkNotNull(loadedInstallation) {
+            "The verified LiteRT CPU runtime has not been loaded in this process."
+        }
     }
 
     private fun currentProcessAbi(): String {
