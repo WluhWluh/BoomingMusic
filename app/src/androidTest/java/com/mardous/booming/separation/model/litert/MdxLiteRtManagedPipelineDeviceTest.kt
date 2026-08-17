@@ -6,12 +6,25 @@ import android.os.Process
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.separation.model.MdxDspConfig
+import com.mardous.booming.separation.model.MdxCompatibilityPolicy
+import com.mardous.booming.separation.model.MdxExecutionProfile
+import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxModelArtifact
+import com.mardous.booming.separation.model.MdxRuntimeAbi
+import com.mardous.booming.separation.model.MdxRuntimePrecision
+import com.mardous.booming.separation.model.MdxRuntimeProfiles
+import com.mardous.booming.separation.model.MdxRuntimePlatform
+import com.mardous.booming.separation.model.MdxRuntimeSettings
+import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxSpectrogram
+import com.mardous.booming.separation.model.MdxWaveformInferenceSession
+import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
+import com.mardous.booming.separation.model.withMdxInferenceTiming
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractValidator
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
 import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeBootstrap
+import com.mardous.booming.separation.runtime.SourceSeparationCpuRuntimeInstallation
 import org.json.JSONObject
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -70,116 +83,136 @@ class MdxLiteRtManagedPipelineDeviceTest {
                 arguments.requiredString(ARG_REFERENCE_SHA256),
                 ignoreCase = true,
             )) { "Staged reference hash mismatch." }
-            profile.validateArtifact(
-                MdxModelArtifact(modelFile, modelFile.length(), modelFile.sha256()),
-            )
+            val artifact = MdxModelArtifact(modelFile, modelFile.length(), modelFile.sha256())
+            profile.validateArtifact(artifact)
             val input = readFloat32(inputFile, profile.inputTensor.elementCount)
             val reference = readFloat32(referenceFile, profile.outputTensor.elementCount)
             val installation = SourceSeparationRuntimeBootstrap.ensureLoaded(context)
             require(installation.identity.runtimeArtifactVersion == EXPECTED_RUNTIME_ARTIFACT) {
                 "Unexpected runtime artifact ${installation.identity.runtimeArtifactVersion}."
             }
-
-            val slotOutputs = Array(2) { FloatArray(0) }
-            MdxLiteRtManagedPipeline(
-                coreLibraryFile = installation.libraryFile,
-                modelFile = modelFile,
-                profile = profile,
-                cpuThreads = arguments.getString(ARG_CPU_THREADS)?.toIntOrNull() ?: 4,
-                backend = MdxLiteRtManagedPipeline.Backend.Cpu,
-                slotCount = 2,
-            ).use { pipeline ->
-                val executor = Executors.newSingleThreadExecutor()
-                try {
-                    pipeline.writeTensorNchw(input, 0)
-                    val firstRun = executor.submit { pipeline.run(0) }
-                    val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-                    while (!pipeline.isInvocationInFlight() && System.nanoTime() < deadlineNanos) {
-                        Thread.yield()
+            val runtimeAbi = MdxRuntimeAbi.entries.single { it.androidName == expectedAbi }
+            val directOutputs = if (runtimeAbi != MdxRuntimeAbi.X86) {
+                qualifyDirectManagedPipeline(
+                    installation = installation,
+                    modelFile = modelFile,
+                    profile = profile,
+                    input = input,
+                    reference = reference,
+                    cpuThreads = arguments.getString(ARG_CPU_THREADS)?.toIntOrNull() ?: 4,
+                    report = report,
+                )
+            } else {
+                report.put(
+                    "directManagedQualification",
+                    JSONObject()
+                        .put("status", "skipped")
+                        .put("reason", "pure-x86-uses-jvm-tensor-buffer"),
+                )
+                null
+            }
+            val productProfile = if (runtimeAbi == MdxRuntimeAbi.X86) {
+                require(MdxX86ProcessValidationOverride.buildEnabled) {
+                    "The x86 product gate requires the validation build."
+                }
+                val sourceRecord = profile.runtimeCompatibility.single { record ->
+                    record.abi == MdxRuntimeAbi.X86 &&
+                        record.backend == MdxInferenceBackend.LiteRtCpu &&
+                        record.profileId == MdxRuntimeProfiles.CPU_DEFAULT_FP32 &&
+                        record.precision == MdxRuntimePrecision.Fp32 &&
+                        record.status == MdxRuntimeSupportStatus.Unsupported
+                }
+                profile.copy(
+                    runtimeCompatibility = profile.runtimeCompatibility + sourceRecord.copy(
+                        runtimeVersion = MdxRuntimeProfiles.LITERT_VERSION,
+                        status = MdxRuntimeSupportStatus.KnownGood,
+                        evidence = "Pinned compile-time pure-x86 process validation.",
+                    ),
+                )
+            } else {
+                profile
+            }
+            val productFactory = MdxLiteRtCpuInferenceSessionFactory(
+                platformProvider = {
+                    MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi)
+                },
+                compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+                availableProcessors = { 5 },
+            ).withMdxInferenceTiming()
+            val productSession = productFactory.create(
+                artifact,
+                productProfile,
+                MdxRuntimeSettings(cpuThreads = 4),
+            )
+            lateinit var referenceComparison: Comparison
+            productSession.use { session ->
+                val productTensorOutput = session.run(input)
+                referenceComparison = compare(reference, productTensorOutput)
+                require(referenceComparison.snrDb >= 93.0) {
+                    "Product CPU SNR ${referenceComparison.snrDb} dB is below the gate."
+                }
+                require(referenceComparison.maxAbs <= 0.0001) {
+                    "Product CPU max error ${referenceComparison.maxAbs} exceeds the gate."
+                }
+                if (runtimeAbi == MdxRuntimeAbi.X86) {
+                    require(session !is MdxWaveformInferenceSession) {
+                        "Pure x86 unexpectedly selected the native managed waveform bridge."
                     }
-                    require(pipeline.isInvocationInFlight()) {
-                        "CPU invocation completed before the overlap gate observed it."
+                    require(session.diagnostics.toDisplayText().contains(
+                        "pipeline=jvm-tensor-buffer-x86-fallback",
+                    )) { "Pure x86 did not report the required JVM TensorBuffer pipeline." }
+                    require(session.diagnostics.inferenceInvocationCount == 1L) {
+                        "Timed x86 product session did not record its tensor invocation."
                     }
-                    pipeline.writeTensorNchw(input, 1)
-                    val firstRunStillActiveAfterPrepare = !firstRun.isDone
-                    firstRun.get(2, TimeUnit.MINUTES)
-                    slotOutputs[0] = pipeline.readTensorNchw(0).copyOf()
-                    pipeline.run(1)
-                    slotOutputs[1] = pipeline.readTensorNchw(1).copyOf()
-                    report.put(
-                        "cpuOverlap",
-                        JSONObject()
-                            .put("invocationObserved", true)
-                            .put("firstRunActiveAfterSlot1Prepare", firstRunStillActiveAfterPrepare),
+                    report.put("productFactoryComparison", referenceComparison.toJson())
+                        .put("productPipeline", "jvm-tensor-buffer-x86-fallback")
+                } else {
+                    val direct = requireNotNull(directOutputs)
+                    val productComparison = compare(direct.tensorOutput, productTensorOutput)
+                    require(productComparison.maxAbs == 0.0) {
+                        "The product allocator output differs from the direct managed pipeline."
+                    }
+                    val waveformSession = session as? MdxWaveformInferenceSession
+                        ?: error("The product CPU session lost its managed waveform capability.")
+                    val productWaveform = waveformSession.runWaveform(fixture(profile.dspConfig))
+                    require(productWaveform.all { channel -> channel.all(Float::isFinite) }) {
+                        "The product managed waveform path returned non-finite output."
+                    }
+                    val productWaveformComparison = compareWaveforms(
+                        direct.waveformOutput,
+                        productWaveform,
                     )
-                } finally {
-                    executor.shutdown()
-                    if (!executor.awaitTermination(2, TimeUnit.MINUTES)) {
-                        executor.shutdownNow()
-                        check(executor.awaitTermination(2, TimeUnit.MINUTES)) {
-                            "Managed pipeline executor did not drain before close."
-                        }
+                    require(productWaveformComparison.maxAbs == 0.0) {
+                        "The product managed waveform differs from the direct managed pipeline."
                     }
+                    require(waveformSession.waveformDspImplementationId ==
+                        "native-managed-pocketfft-packed-real-v1"
+                    ) { "Unexpected product waveform implementation identity." }
+                    require(waveformSession.waveformSlotCount == 2) {
+                        "The product managed waveform session is not dual-slot."
+                    }
+                    require(waveformSession.supportsStagedWaveformExecution) {
+                        "The product managed waveform session lost staged execution support."
+                    }
+                    require(session.diagnostics.inferenceInvocationCount == 2L) {
+                        "Timed product session did not record tensor and waveform invocations."
+                    }
+                    report.put("productFactoryComparison", productComparison.toJson())
+                        .put("productWaveformComparison", productWaveformComparison.toJson())
+                        .put("productWaveformSlotCount", waveformSession.waveformSlotCount)
+                        .put(
+                            "productSupportsStagedWaveformExecution",
+                            waveformSession.supportsStagedWaveformExecution,
+                        )
                 }
-
-                val waveformInput = fixture(profile.dspConfig)
-                val productDsp = MdxSpectrogram(profile.dspConfig)
-                val productInput = productDsp.waveformToTensor(waveformInput)
-                pipeline.writeTensorNchw(productInput, 0)
-                pipeline.run(0)
-                val productOutputWaveform = productDsp.tensorToWaveform(
-                    pipeline.readTensorNchw(0).copyOf(),
-                )
-                pipeline.preprocessWaveform(waveformInput, 1)
-                pipeline.run(1)
-                val nativeOutputWaveform = pipeline.postprocessWaveform(1)
-                    .map(FloatArray::copyOf)
-                    .toTypedArray()
-                val directWaveformComparison = compareWaveforms(
-                    productOutputWaveform,
-                    nativeOutputWaveform,
-                )
-                require(directWaveformComparison.snrDb >= 75.0) {
-                    "Direct waveform SNR ${directWaveformComparison.snrDb} dB is too low."
-                }
-                require(directWaveformComparison.maxAbs <= 0.002) {
-                    "Direct waveform max error ${directWaveformComparison.maxAbs} is too high."
-                }
-                report.put("directWaveformComparison", directWaveformComparison.toJson())
-            }
-
-            val referenceComparison = compare(reference, slotOutputs[0])
-            val slotComparison = compare(slotOutputs[0], slotOutputs[1])
-            require(referenceComparison.snrDb >= 93.0) {
-                "Managed CPU SNR ${referenceComparison.snrDb} dB is below the gate."
-            }
-            require(referenceComparison.maxAbs <= 0.0001) {
-                "Managed CPU max error ${referenceComparison.maxAbs} exceeds the gate."
-            }
-            require(slotComparison.maxAbs == 0.0) {
-                "The two managed slots produced different outputs."
-            }
-
-            MdxLiteRtManagedPipeline(
-                coreLibraryFile = installation.libraryFile,
-                modelFile = modelFile,
-                profile = profile,
-                cpuThreads = 2,
-                backend = MdxLiteRtManagedPipeline.Backend.Cpu,
-                slotCount = 1,
-            ).use { replacement ->
-                replacement.writeTensorNchw(input)
-                replacement.run()
-                require(replacement.readTensorNchw().all(Float::isFinite)) {
-                    "Replacement managed pipeline returned non-finite output."
-                }
+                report.put("productRuntimeDiagnostics", session.diagnostics.toDisplayText())
             }
 
             report.put("runtimeArtifactVersion", installation.identity.runtimeArtifactVersion)
                 .put("runtimeCorePath", installation.libraryFile.absolutePath)
                 .put("referenceComparison", referenceComparison.toJson())
-                .put("slotComparison", slotComparison.toJson())
                 .put("status", "complete")
+            directOutputs?.let { report.put("slotComparison", it.slotComparison.toJson()) }
             reportFile.writeText(report.toString(2))
         } catch (error: Throwable) {
             report.put("status", "error")
@@ -189,6 +222,117 @@ class MdxLiteRtManagedPipelineDeviceTest {
             reportFile.writeText(report.toString(2))
             throw error
         }
+    }
+
+    private fun qualifyDirectManagedPipeline(
+        installation: SourceSeparationCpuRuntimeInstallation,
+        modelFile: File,
+        profile: MdxExecutionProfile,
+        input: FloatArray,
+        reference: FloatArray,
+        cpuThreads: Int,
+        report: JSONObject,
+    ): DirectManagedQualification {
+        val slotOutputs = Array(2) { FloatArray(0) }
+        lateinit var nativeOutputWaveform: Array<FloatArray>
+        MdxLiteRtManagedPipeline(
+            coreLibraryFile = installation.libraryFile,
+            modelFile = modelFile,
+            profile = profile,
+            cpuThreads = cpuThreads,
+            backend = MdxLiteRtManagedPipeline.Backend.Cpu,
+            slotCount = 2,
+        ).use { pipeline ->
+            val executor = Executors.newSingleThreadExecutor()
+            try {
+                pipeline.writeTensorNchw(input, 0)
+                val firstRun = executor.submit { pipeline.run(0) }
+                val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while (!pipeline.isInvocationInFlight() && System.nanoTime() < deadlineNanos) {
+                    Thread.yield()
+                }
+                require(pipeline.isInvocationInFlight()) {
+                    "CPU invocation completed before the overlap gate observed it."
+                }
+                pipeline.writeTensorNchw(input, 1)
+                val firstRunStillActiveAfterPrepare = !firstRun.isDone
+                firstRun.get(2, TimeUnit.MINUTES)
+                slotOutputs[0] = pipeline.readTensorNchw(0).copyOf()
+                pipeline.run(1)
+                slotOutputs[1] = pipeline.readTensorNchw(1).copyOf()
+                report.put(
+                    "cpuOverlap",
+                    JSONObject()
+                        .put("invocationObserved", true)
+                        .put("firstRunActiveAfterSlot1Prepare", firstRunStillActiveAfterPrepare),
+                )
+            } finally {
+                executor.shutdown()
+                if (!executor.awaitTermination(2, TimeUnit.MINUTES)) {
+                    executor.shutdownNow()
+                    check(executor.awaitTermination(2, TimeUnit.MINUTES)) {
+                        "Managed pipeline executor did not drain before close."
+                    }
+                }
+            }
+
+            val waveformInput = fixture(profile.dspConfig)
+            val productDsp = MdxSpectrogram(profile.dspConfig)
+            val productInput = productDsp.waveformToTensor(waveformInput)
+            pipeline.writeTensorNchw(productInput, 0)
+            pipeline.run(0)
+            val productOutputWaveform = productDsp.tensorToWaveform(
+                pipeline.readTensorNchw(0).copyOf(),
+            )
+            pipeline.preprocessWaveform(waveformInput, 1)
+            pipeline.run(1)
+            nativeOutputWaveform = pipeline.postprocessWaveform(1)
+                .map(FloatArray::copyOf)
+                .toTypedArray()
+            val directWaveformComparison = compareWaveforms(
+                productOutputWaveform,
+                nativeOutputWaveform,
+            )
+            require(directWaveformComparison.snrDb >= 75.0) {
+                "Direct waveform SNR ${directWaveformComparison.snrDb} dB is too low."
+            }
+            require(directWaveformComparison.maxAbs <= 0.002) {
+                "Direct waveform max error ${directWaveformComparison.maxAbs} is too high."
+            }
+            report.put("directWaveformComparison", directWaveformComparison.toJson())
+        }
+
+        val referenceComparison = compare(reference, slotOutputs[0])
+        val slotComparison = compare(slotOutputs[0], slotOutputs[1])
+        require(referenceComparison.snrDb >= 93.0) {
+            "Managed CPU SNR ${referenceComparison.snrDb} dB is below the gate."
+        }
+        require(referenceComparison.maxAbs <= 0.0001) {
+            "Managed CPU max error ${referenceComparison.maxAbs} exceeds the gate."
+        }
+        require(slotComparison.maxAbs == 0.0) {
+            "The two managed slots produced different outputs."
+        }
+
+        MdxLiteRtManagedPipeline(
+            coreLibraryFile = installation.libraryFile,
+            modelFile = modelFile,
+            profile = profile,
+            cpuThreads = 2,
+            backend = MdxLiteRtManagedPipeline.Backend.Cpu,
+            slotCount = 1,
+        ).use { replacement ->
+            replacement.writeTensorNchw(input)
+            replacement.run()
+            require(replacement.readTensorNchw().all(Float::isFinite)) {
+                "Replacement managed pipeline returned non-finite output."
+            }
+        }
+        return DirectManagedQualification(
+            tensorOutput = slotOutputs[0],
+            waveformOutput = nativeOutputWaveform,
+            slotComparison = slotComparison,
+        )
     }
 
     private fun fixture(config: MdxDspConfig): Array<FloatArray> =
@@ -293,6 +437,12 @@ class MdxLiteRtManagedPipelineDeviceTest {
             .put("maxAbs", maxAbs)
             .put("rmse", rmse)
     }
+
+    private data class DirectManagedQualification(
+        val tensorOutput: FloatArray,
+        val waveformOutput: Array<FloatArray>,
+        val slotComparison: Comparison,
+    )
 
     private companion object {
         const val EXPECTED_RUNTIME_ARTIFACT = "2.2.0-bss.2"

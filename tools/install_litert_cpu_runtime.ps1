@@ -48,6 +48,14 @@ function Get-Sha256([string]$Path) {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Get-InstalledMode([string]$Path) {
+    $mode = ((& $adb -s $Serial shell run-as $Package stat -c "%a" $Path) -join "").Trim()
+    if ($LASTEXITCODE -ne 0 -or $mode -notmatch '^[0-7]{3,4}$') {
+        throw "Could not read installed mode for $Path."
+    }
+    $mode
+}
+
 $asset = $assetByAbi[$ProcessAbi]
 if ($null -eq $asset) {
     throw "No pinned LiteRT CPU asset exists for $ProcessAbi."
@@ -140,8 +148,23 @@ try {
     Invoke-Adb shell run-as $Package cp "$remoteTempRoot/liblitert_jni.so" "$remoteRuntimeRoot/liblitert_jni.so"
     Invoke-Adb shell run-as $Package cp "$remoteTempRoot/manifest.json" "$remoteRuntimeRoot/manifest.json"
     Invoke-Adb shell run-as $Package cp "$remoteTempRoot/install.json" "$remoteRuntimeRoot/install.json"
-    Invoke-Adb shell run-as $Package chmod 755 "$remoteRuntimeRoot/libLiteRt.so"
-    Invoke-Adb shell run-as $Package chmod 755 "$remoteRuntimeRoot/liblitert_jni.so"
+    Invoke-Adb shell run-as $Package chmod 555 "$remoteRuntimeRoot/libLiteRt.so"
+    Invoke-Adb shell run-as $Package chmod 555 "$remoteRuntimeRoot/liblitert_jni.so"
+    Invoke-Adb shell run-as $Package chmod 444 "$remoteRuntimeRoot/manifest.json"
+    Invoke-Adb shell run-as $Package chmod 444 "$remoteRuntimeRoot/install.json"
+
+    $expectedModes = [ordered]@{
+        "$remoteRuntimeRoot/libLiteRt.so" = "555"
+        "$remoteRuntimeRoot/liblitert_jni.so" = "555"
+        "$remoteRuntimeRoot/manifest.json" = "444"
+        "$remoteRuntimeRoot/install.json" = "444"
+    }
+    foreach ($installedPath in $expectedModes.Keys) {
+        $mode = Get-InstalledMode $installedPath
+        if ($mode -ne $expectedModes[$installedPath]) {
+            throw "Installed LiteRT CPU file has mode $mode instead of $($expectedModes[$installedPath]): $installedPath"
+        }
+    }
 
     $installedHash = ((& $adb -s $Serial shell run-as $Package sha256sum "$remoteRuntimeRoot/libLiteRt.so") -join " ").Trim()
     if ($LASTEXITCODE -ne 0 -or $installedHash -notmatch '^([0-9a-fA-F]{64})\s+') {
