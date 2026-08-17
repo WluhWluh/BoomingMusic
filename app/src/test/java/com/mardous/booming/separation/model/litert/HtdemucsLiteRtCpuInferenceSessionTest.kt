@@ -1,6 +1,9 @@
 package com.mardous.booming.separation.model.litert
 
+import com.google.ai.edge.litert.TensorType
 import com.mardous.booming.separation.model.HtdemucsNeuralInputs
+import com.mardous.booming.separation.model.HtdemucsNeuralOutputs
+import com.mardous.booming.separation.model.HtdemucsPipelineAdapter
 import com.mardous.booming.separation.model.HtdemucsWindowStemSet
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContract
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContractLoader
@@ -153,6 +156,141 @@ class HtdemucsLiteRtCpuInferenceSessionTest {
         assertEquals(4, resolveHtdemucsCpuThreadCount(32))
     }
 
+    @Test
+    fun `factory defaults to native direct managed buffers`() {
+        val contract = loadContract("htdemucs-6s-official-fp32.json")
+        val directory = Files.createTempDirectory("htdemucs-direct-session-test").toFile()
+        val model = File(directory, contract.artifact.fileName)
+        RandomAccessFile(model, "rw").use { it.setLength(contract.artifact.byteSize) }
+        val directFactory = RecordingDirectPipelineFactory()
+        try {
+            val session = HtdemucsLiteRtCpuInferenceSessionFactory(
+                directPipelineFactory = directFactory,
+                availableProcessors = { 8 },
+            ).create(
+                HtdemucsVerifiedArtifact(
+                    file = model,
+                    byteSize = contract.artifact.byteSize,
+                    sha256 = contract.artifact.sha256,
+                ),
+                contract,
+            )
+
+            assertEquals(6, directFactory.stemCount)
+            assertEquals(4, directFactory.cpuThreads)
+            assertEquals(4, directFactory.workerCount)
+            assertEquals("fake-native-direct-v1", session.implementationId)
+            session.close()
+            assertTrue(directFactory.pipeline.closed)
+        } finally {
+            model.delete()
+            directory.delete()
+        }
+    }
+
+    @Test
+    fun `direct session publishes only complete output and discards cancellation`() {
+        val pipeline = RecordingDirectPipeline()
+        var observed = 0
+        val session = DirectHtdemucsCpuInferenceSession(
+            pipeline = pipeline,
+            orderedStemIds = listOf("stem"),
+            validatedOutputObserver = { observed += 1 },
+        )
+        val input = FloatArray(
+            HtdemucsPipelineAdapter.CHANNEL_COUNT * HtdemucsPipelineAdapter.WINDOW_SAMPLES,
+        )
+
+        val completed = session.runNormalizedWindow(input) { false }
+        assertEquals(listOf("stem"), completed.orderedStemIds)
+        assertEquals(HtdemucsPipelineAdapter.WINDOW_SAMPLES, completed.samplesPerStem)
+        assertEquals(listOf("preprocess", "run", "read", "postprocess"), pipeline.calls)
+        assertEquals(1, observed)
+
+        pipeline.calls.clear()
+        var canceled = false
+        pipeline.onRun = { canceled = true }
+        assertThrows(CancellationException::class.java) {
+            session.runNormalizedWindow(input) { canceled }
+        }
+        assertEquals(listOf("preprocess", "run", "discard"), pipeline.calls)
+        session.close()
+    }
+
+    @Test
+    fun `managed pipeline fixes canonical logical names shapes and element counts`() {
+        val contract = loadContract("htdemucs-6s-official-fp32.json")
+        val inputs = contract.flatBuffer.inputs.map(HtdemucsTensorBinding::from)
+        val outputs = contract.flatBuffer.outputs.map(HtdemucsTensorBinding::from)
+
+        validateHtdemucsManagedBindings(inputs, outputs)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            validateHtdemucsManagedBindings(
+                inputs = listOf(inputs[0].copy(logicalName = "waveform"), inputs[1]),
+                outputs = outputs,
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            validateHtdemucsManagedBindings(
+                inputs = inputs,
+                outputs = listOf(
+                    outputs[0].copy(shape = outputs[0].shape.dropLast(1)),
+                    outputs[1],
+                ),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            validateHtdemucsManagedBindings(
+                inputs = inputs,
+                outputs = listOf(
+                    outputs[0],
+                    outputs[1].copy(elementCount = outputs[1].elementCount - 1),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `managed pipeline requires fp32 static shapes and sufficient buffers`() {
+        val binding = loadContract("htdemucs-6s-official-fp32.json")
+            .flatBuffer.inputs.first()
+            .let(HtdemucsTensorBinding::from)
+        val expectedBytes = Math.multiplyExact(binding.elementCount, Float.SIZE_BYTES)
+
+        validateHtdemucsManagedTensorType(
+            actual = TensorType(
+                TensorType.ElementType.FLOAT,
+                TensorType.Layout(binding.shape),
+            ),
+            expected = binding,
+            role = "input",
+        )
+        validateHtdemucsManagedBufferSize("input", binding, expectedBytes)
+        validateHtdemucsManagedBufferSize("input", binding, expectedBytes + 64)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            validateHtdemucsManagedTensorType(
+                TensorType(TensorType.ElementType.INT, TensorType.Layout(binding.shape)),
+                binding,
+                "input",
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            validateHtdemucsManagedTensorType(
+                TensorType(
+                    TensorType.ElementType.FLOAT,
+                    TensorType.Layout(binding.shape, List(binding.shape.size) { 1 }),
+                ),
+                binding,
+                "input",
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            validateHtdemucsManagedBufferSize("input", binding, expectedBytes - 1)
+        }
+    }
+
     private fun forward(backend: HtdemucsNamedTensorBackend) =
         AtomicHtdemucsNamedTensorForward(INPUTS, OUTPUTS, backend)
 
@@ -208,6 +346,65 @@ class HtdemucsLiteRtCpuInferenceSessionTest {
             this.outputs = outputs
             this.cpuThreads = cpuThreads
             return backend
+        }
+    }
+
+    private class RecordingDirectPipelineFactory : HtdemucsDirectPipelineFactory {
+        val pipeline = RecordingDirectPipeline()
+        var stemCount = 0
+        var cpuThreads = 0
+        var workerCount = 0
+
+        override fun create(
+            modelFile: File,
+            stemCount: Int,
+            cpuThreads: Int,
+            workerCount: Int,
+        ): HtdemucsDirectPipeline {
+            this.stemCount = stemCount
+            this.cpuThreads = cpuThreads
+            this.workerCount = workerCount
+            return pipeline
+        }
+    }
+
+    private class RecordingDirectPipeline : HtdemucsDirectPipeline {
+        override val implementationId = "fake-native-direct-v1"
+        val calls = mutableListOf<String>()
+        var onRun: () -> Unit = {}
+        var closed = false
+
+        override fun writeInputs(inputs: HtdemucsNeuralInputs) {
+            calls += "write"
+        }
+
+        override fun preprocessAndWriteInput(normalizedPlanarStereo: FloatArray) {
+            calls += "preprocess"
+        }
+
+        override fun run() {
+            calls += "run"
+            onRun()
+        }
+
+        override fun readOutputs(): HtdemucsNeuralOutputs {
+            calls += "read"
+            return HtdemucsNeuralOutputs(floatArrayOf(1f), floatArrayOf(2f))
+        }
+
+        override fun postprocessOutputs(): FloatArray {
+            calls += "postprocess"
+            return FloatArray(
+                HtdemucsPipelineAdapter.CHANNEL_COUNT * HtdemucsPipelineAdapter.WINDOW_SAMPLES,
+            )
+        }
+
+        override fun discard() {
+            calls += "discard"
+        }
+
+        override fun close() {
+            closed = true
         }
     }
 

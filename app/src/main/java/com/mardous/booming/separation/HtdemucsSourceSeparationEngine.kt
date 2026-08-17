@@ -168,7 +168,7 @@ internal class HtdemucsSourceSeparationEngine(
     }
 
     companion object {
-        const val HTDEMUCS_CPU_PROFILE_ID = "htdemucs-cpu-fp32-v1"
+        const val HTDEMUCS_CPU_PROFILE_ID = "htdemucs-cpu-fp32-v2"
     }
 }
 

@@ -45,7 +45,10 @@ class HtdemucsSourceSeparationRangeExecutorTest {
 
         assertEquals(STEMS, preparedStemIds)
         assertEquals(STEMS, result.completion.stemFiles.map { it.stemId.value })
-        assertEquals("htdemucs-cpu-fp32-v1", result.completion.runtimeRecord.runtimeProfileId)
+        assertEquals(
+            HtdemucsSourceSeparationEngine.HTDEMUCS_CPU_PROFILE_ID,
+            result.completion.runtimeRecord.runtimeProfileId,
+        )
         assertEquals("LiteRtCpu", result.completion.runtimeRecord.backend)
         assertEquals(FINGERPRINT, result.completion.sourceAudioFingerprint)
         assertTrue(progress.isNotEmpty())

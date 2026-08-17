@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.model
 
+import android.os.Build
 import com.mardous.booming.separation.audio.WavFileWriter
 import com.mardous.booming.separation.audio.Pcm16WavFileReader
 import com.mardous.booming.separation.SourceSeparationPauseReason
@@ -333,134 +334,135 @@ internal class HtdemucsRangeRunner(
                 val startPlanIndex = passTarget.startPlanIndex
                 val provisionalOutputSegmentIndex =
                     passTarget.provisionalOutputSegmentIndex
-                val ola = HtdemucsStreamingOverlapAdd(
+                return HtdemucsStreamingOverlapAdd(
                     orderedStemIds = session.orderedStemIds,
                     trackSamples = source.frameCount,
                     normalization = normalization,
                     initialPlanIndex = startPlanIndex,
                     initialBufferStart = plans[startPlanIndex].offset,
-                )
-                var reachedTrackEnd = false
-                for (plan in plans.drop(startPlanIndex)) {
-                    if (completedWindows == plans.size) break
-                    retargetForPlaybackDemand(
-                        currentPassTarget = passTarget,
-                        nextPlanIndex = plan.index,
-                    )?.let { retarget ->
-                        return retarget
-                    }
-                    val windowStartedAtNanos = System.nanoTime()
-                    throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
-                    requireWorkspaceAvailable()
-                    if (!currentPlan.segments[plan.index].state.hasPlaybackArtifact) {
-                        currentPlan = currentPlan.withSegmentState(
-                            plan.index,
-                            SourceSeparationSegmentState.Running,
-                        )
-                        onSegmentStateChanged(
-                            plan.index,
-                            SourceSeparationSegmentState.Running,
-                            null,
-                        )
-                    }
-                    val currentPlaybackFrame = playbackFrame(playbackPositionMsProvider())
-                    val playbackIndex = currentPlaybackFrame
-                        ?.let(currentPlan::segmentIndexForFrame)
-                    val readyWindowCount = playbackReadyWindowCountProvider().coerceAtLeast(1)
-                    val selectedPriority = SourceSeparationSegmentScheduler
-                        .prioritize(
-                            segmentPlan = currentPlan,
-                            playbackFrame = playbackIndex
-                                ?.let { currentPlan.segments[it].playbackStartFrame }
-                                ?: plan.offset,
-                            readyWindowCount = readyWindowCount,
-                        )
-                        .firstOrNull { it.segment.index == plan.index }
-                        ?.priority
-                    onProgress(
-                        HtdemucsRangeProgress(
-                            completedWindows = completedWindows,
-                            totalWindows = plans.size,
-                            stage = "Processing window ${plan.index + 1}/${plans.size}",
-                            scheduler = currentPlan.schedulerProgress(
-                                playbackSegmentIndex = playbackIndex,
-                                playbackFrame = currentPlaybackFrame,
-                                processingSegmentIndex = plan.index,
+                ).use { ola ->
+                    var reachedTrackEnd = false
+                    for (plan in plans.drop(startPlanIndex)) {
+                        if (completedWindows == plans.size) break
+                        retargetForPlaybackDemand(
+                            currentPassTarget = passTarget,
+                            nextPlanIndex = plan.index,
+                        )?.let { retarget ->
+                            return retarget
+                        }
+                        val windowStartedAtNanos = System.nanoTime()
+                        throwIfStopped(shouldPause, pauseReasonProvider, shouldCancel)
+                        requireWorkspaceAvailable()
+                        if (!currentPlan.segments[plan.index].state.hasPlaybackArtifact) {
+                            currentPlan = currentPlan.withSegmentState(
+                                plan.index,
+                                SourceSeparationSegmentState.Running,
+                            )
+                            onSegmentStateChanged(
+                                plan.index,
+                                SourceSeparationSegmentState.Running,
+                                null,
+                            )
+                        }
+                        val currentPlaybackFrame = playbackFrame(playbackPositionMsProvider())
+                        val playbackIndex = currentPlaybackFrame
+                            ?.let(currentPlan::segmentIndexForFrame)
+                        val readyWindowCount = playbackReadyWindowCountProvider().coerceAtLeast(1)
+                        val selectedPriority = SourceSeparationSegmentScheduler
+                            .prioritize(
+                                segmentPlan = currentPlan,
+                                playbackFrame = playbackIndex
+                                    ?.let { currentPlan.segments[it].playbackStartFrame }
+                                    ?: plan.offset,
                                 readyWindowCount = readyWindowCount,
-                                priority = selectedPriority,
-                            ),
-                        ),
-                    )
-                    val padded = source.readPlanarStereo(
-                        plan.contextStart,
-                        HtdemucsPipelineAdapter.WINDOW_SAMPLES,
-                        shouldInterrupt,
-                    )
-                    normalizeInPlace(padded, normalization)
-                    val stemSet = session.runNormalizedWindow(padded, shouldInterrupt)
-                    val chunk = ola.addWindow(plan, stemSet)
-                    if (plan.index == plans.lastIndex) reachedTrackEnd = true
-                    val segmentIndex = plan.index
-                    if (!currentPlan.segments[segmentIndex].state.isComplete) {
-                        val outputState = if (
-                            segmentIndex == provisionalOutputSegmentIndex
-                        ) {
-                            SourceSeparationSegmentState.Provisional
-                        } else {
-                            SourceSeparationSegmentState.Ready
-                        }
-                        val playableFromFrame = if (
-                            outputState == SourceSeparationSegmentState.Provisional
-                        ) {
-                            currentPlan.segments[segmentIndex].playbackStartFrame +
-                                HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES
-                        } else {
-                            null
-                        }
-                        publishChunk(
-                            chunk = chunk,
-                            segmentIndex = segmentIndex,
-                            writers = writers,
-                            segmentPlan = currentPlan,
-                            segmentDirectory = segmentDirectory,
-                            publicationId = segmentPublicationId,
-                            requireWorkspaceAvailable = requireWorkspaceAvailable,
-                        )
-                        currentPlan = currentPlan.withSegmentState(
-                            segmentIndex = segmentIndex,
-                            state = outputState,
-                            playableFromFrame = playableFromFrame,
-                        )
-                        onSegmentStateChanged(
-                            segmentIndex,
-                            outputState,
-                            playableFromFrame,
-                        )
-                        if (outputState.isComplete) completedWindows += 1
-                        val latestPlaybackFrame = playbackFrame(
-                            playbackPositionMsProvider(),
-                        )
+                            )
+                            .firstOrNull { it.segment.index == plan.index }
+                            ?.priority
                         onProgress(
                             HtdemucsRangeProgress(
                                 completedWindows = completedWindows,
                                 totalWindows = plans.size,
-                                stage = "Processed window ${segmentIndex + 1}/${plans.size}",
-                                completedWindowElapsedMs =
-                                    (System.nanoTime() - windowStartedAtNanos) / 1_000_000L,
+                                stage = "Processing window ${plan.index + 1}/${plans.size}",
                                 scheduler = currentPlan.schedulerProgress(
-                                    playbackSegmentIndex = latestPlaybackFrame
-                                        ?.let(currentPlan::segmentIndexForFrame),
-                                    playbackFrame = latestPlaybackFrame,
-                                    processingSegmentIndex = segmentIndex,
-                                    readyWindowCount = playbackReadyWindowCountProvider(),
+                                    playbackSegmentIndex = playbackIndex,
+                                    playbackFrame = currentPlaybackFrame,
+                                    processingSegmentIndex = plan.index,
+                                    readyWindowCount = readyWindowCount,
                                     priority = selectedPriority,
                                 ),
                             ),
                         )
+                        val padded = source.readPlanarStereo(
+                            plan.contextStart,
+                            HtdemucsPipelineAdapter.WINDOW_SAMPLES,
+                            shouldInterrupt,
+                        )
+                        normalizeInPlace(padded, normalization)
+                        val stemSet = session.runNormalizedWindow(padded, shouldInterrupt)
+                        val chunk = ola.addWindow(plan, stemSet)
+                        if (plan.index == plans.lastIndex) reachedTrackEnd = true
+                        val segmentIndex = plan.index
+                        if (!currentPlan.segments[segmentIndex].state.isComplete) {
+                            val outputState = if (
+                                segmentIndex == provisionalOutputSegmentIndex
+                            ) {
+                                SourceSeparationSegmentState.Provisional
+                            } else {
+                                SourceSeparationSegmentState.Ready
+                            }
+                            val playableFromFrame = if (
+                                outputState == SourceSeparationSegmentState.Provisional
+                            ) {
+                                currentPlan.segments[segmentIndex].playbackStartFrame +
+                                    HtdemucsTrackWindowPlanner.OVERLAP_SAMPLES
+                            } else {
+                                null
+                            }
+                            publishChunk(
+                                chunk = chunk,
+                                segmentIndex = segmentIndex,
+                                writers = writers,
+                                segmentPlan = currentPlan,
+                                segmentDirectory = segmentDirectory,
+                                publicationId = segmentPublicationId,
+                                requireWorkspaceAvailable = requireWorkspaceAvailable,
+                            )
+                            currentPlan = currentPlan.withSegmentState(
+                                segmentIndex = segmentIndex,
+                                state = outputState,
+                                playableFromFrame = playableFromFrame,
+                            )
+                            onSegmentStateChanged(
+                                segmentIndex,
+                                outputState,
+                                playableFromFrame,
+                            )
+                            if (outputState.isComplete) completedWindows += 1
+                            val latestPlaybackFrame = playbackFrame(
+                                playbackPositionMsProvider(),
+                            )
+                            onProgress(
+                                HtdemucsRangeProgress(
+                                    completedWindows = completedWindows,
+                                    totalWindows = plans.size,
+                                    stage = "Processed window ${segmentIndex + 1}/${plans.size}",
+                                    completedWindowElapsedMs =
+                                        (System.nanoTime() - windowStartedAtNanos) / 1_000_000L,
+                                    scheduler = currentPlan.schedulerProgress(
+                                        playbackSegmentIndex = latestPlaybackFrame
+                                            ?.let(currentPlan::segmentIndexForFrame),
+                                        playbackFrame = latestPlaybackFrame,
+                                        processingSegmentIndex = segmentIndex,
+                                        readyWindowCount = playbackReadyWindowCountProvider(),
+                                        priority = selectedPriority,
+                                    ),
+                                ),
+                            )
+                        }
                     }
+                    if (reachedTrackEnd) ola.finish()
+                    null
                 }
-                if (reachedTrackEnd) ola.finish()
-                return null
             }
 
             // A demand outside the leading overlap can use the first pass immediately.
@@ -534,7 +536,7 @@ internal class HtdemucsRangeRunner(
         require(chunk.startFrame == segment.playbackStartFrame)
         require(chunk.frameCount == segment.playbackFrameCount)
         require(chunk.planarSamples.size ==
-            writers.size * HtdemucsPipelineAdapter.CHANNEL_COUNT * chunk.frameCount)
+            writers.size * HtdemucsPipelineAdapter.CHANNEL_COUNT * chunk.planeStride)
         writers.indices.forEach { stemOrder ->
             requireWorkspaceAvailable()
             val pcm16 = planarStemToPcm16(chunk, stemOrder)
@@ -612,17 +614,39 @@ internal class HtdemucsRangeRunner(
         val output = ByteArray(
             chunk.frameCount * HtdemucsPipelineAdapter.CHANNEL_COUNT * Short.SIZE_BYTES,
         )
-        val planeBase = stemOrder * HtdemucsPipelineAdapter.CHANNEL_COUNT * chunk.frameCount
+        val planeBase = stemOrder * HtdemucsPipelineAdapter.CHANNEL_COUNT * chunk.planeStride
+        if (Build.VERSION.SDK_INT > 0) {
+            val encoded = try {
+                val encodedBytes = NativeHtdemucsPcm16.encodePlanar(
+                    input = chunk.planarSamples,
+                    leftOffset = planeBase,
+                    rightOffset = planeBase + chunk.planeStride,
+                    frameCount = chunk.frameCount,
+                    output = output,
+                )
+                check(encodedBytes == output.size) {
+                    "Native HTDemucs PCM encoder returned $encodedBytes bytes; " +
+                        "expected ${output.size}."
+                }
+                true
+            } catch (_: Exception) {
+                false
+            } catch (_: LinkageError) {
+                false
+            }
+            if (encoded) return output
+        }
         var byteOffset = 0
         repeat(chunk.frameCount) { frame ->
             repeat(HtdemucsPipelineAdapter.CHANNEL_COUNT) { channel ->
-                val sample = chunk.planarSamples[planeBase + channel * chunk.frameCount + frame]
+                val sample = chunk.planarSamples[planeBase + channel * chunk.planeStride + frame]
                 val pcm = (sample.coerceIn(-1f, 1f) * Short.MAX_VALUE).roundToInt()
                     .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
                 output[byteOffset++] = (pcm and 0xff).toByte()
                 output[byteOffset++] = ((pcm ushr 8) and 0xff).toByte()
             }
         }
+        check(byteOffset == output.size)
         return output
     }
 

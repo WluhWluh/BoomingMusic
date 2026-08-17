@@ -1,10 +1,5 @@
 package com.mardous.booming.separation.model.litert
 
-import com.google.ai.edge.litert.Accelerator
-import com.google.ai.edge.litert.CompiledModel
-import com.google.ai.edge.litert.Environment
-import com.google.ai.edge.litert.TensorBuffer
-import com.google.ai.edge.litert.TensorType
 import com.mardous.booming.separation.model.HtdemucsIstftMode
 import com.mardous.booming.separation.model.HtdemucsNeuralInputs
 import com.mardous.booming.separation.model.HtdemucsNeuralOutputs
@@ -25,6 +20,8 @@ internal data class HtdemucsVerifiedArtifact(
 )
 
 internal interface HtdemucsCpuInferenceSession : HtdemucsTrackInferenceSession {
+    val implementationId: String
+
     fun run(
         inputs: HtdemucsNeuralInputs,
         shouldCancel: () -> Boolean = { false },
@@ -32,10 +29,11 @@ internal interface HtdemucsCpuInferenceSession : HtdemucsTrackInferenceSession {
 }
 
 internal class HtdemucsLiteRtCpuInferenceSessionFactory(
-    private val backendFactory: HtdemucsNamedTensorBackendFactory =
-        HtdemucsNativeLiteRtCpuBackendFactory,
+    private val backendFactory: HtdemucsNamedTensorBackendFactory? = null,
+    private val directPipelineFactory: HtdemucsDirectPipelineFactory =
+        HtdemucsNativeDirectPipelineFactory,
     private val availableProcessors: () -> Int = { Runtime.getRuntime().availableProcessors() },
-    private val validatedOutputObserver: (HtdemucsNeuralOutputs) -> Unit = {},
+    private val validatedOutputObserver: ((HtdemucsNeuralOutputs) -> Unit)? = null,
 ) {
     fun create(
         artifact: HtdemucsVerifiedArtifact,
@@ -51,6 +49,31 @@ internal class HtdemucsLiteRtCpuInferenceSessionFactory(
         require(inputs.size == 2 && outputs.size == 2) {
             "HTDemucs LiteRT session requires exactly two inputs and two outputs."
         }
+        validateHtdemucsManagedBindings(inputs, outputs)
+        HtdemucsPipelineAdapter.validateSupportedContract(contract.modelContract)
+        val cpuThreads = resolveHtdemucsCpuThreadCount(availableProcessors())
+        val stemIds = contract.modelContract.stemContract.stems.map { it.stemId }
+        val legacyBackendFactory = backendFactory
+        if (legacyBackendFactory == null) {
+            var pipeline: HtdemucsDirectPipeline? = null
+            try {
+                val activePipeline = directPipelineFactory.create(
+                    modelFile = artifact.file,
+                    stemCount = stemIds.size,
+                    cpuThreads = cpuThreads,
+                    workerCount = HTDEMUCS_ISTFT_WORKERS,
+                )
+                pipeline = activePipeline
+                return DirectHtdemucsCpuInferenceSession(
+                    pipeline = activePipeline,
+                    orderedStemIds = stemIds,
+                    validatedOutputObserver = validatedOutputObserver,
+                )
+            } catch (error: Throwable) {
+                closeAfterFailure(listOfNotNull(pipeline), error)
+                throw error
+            }
+        }
         val adapter = HtdemucsPipelineAdapter(
             contract = contract.modelContract,
             istftMode = HtdemucsIstftMode.ParallelLanes,
@@ -58,12 +81,12 @@ internal class HtdemucsLiteRtCpuInferenceSessionFactory(
         )
         var backend: HtdemucsNamedTensorBackend? = null
         try {
-            val activeBackend = backendFactory.create(
+            val activeBackend = legacyBackendFactory.create(
                 modelFile = artifact.file,
                 signatureKey = contract.flatBuffer.signatureKey,
                 inputs = inputs,
                 outputs = outputs,
-                cpuThreads = resolveHtdemucsCpuThreadCount(availableProcessors()),
+                cpuThreads = cpuThreads,
             )
             backend = activeBackend
             return AtomicHtdemucsCpuInferenceSession(
@@ -147,7 +170,7 @@ internal class AtomicHtdemucsNamedTensorForward(
     private val inputBindings: List<HtdemucsTensorBinding>,
     private val outputBindings: List<HtdemucsTensorBinding>,
     private val backend: HtdemucsNamedTensorBackend,
-    private val validatedOutputObserver: (HtdemucsNeuralOutputs) -> Unit = {},
+    private val validatedOutputObserver: ((HtdemucsNeuralOutputs) -> Unit)? = null,
 ) {
     fun run(
         inputs: HtdemucsNeuralInputs,
@@ -181,7 +204,7 @@ internal class AtomicHtdemucsNamedTensorForward(
         return HtdemucsNeuralOutputs(
             frequency = validated[0],
             waveform = validated[1],
-        ).also(validatedOutputObserver)
+        ).also { outputs -> validatedOutputObserver?.invoke(outputs) }
     }
 
     private fun requireTensor(
@@ -196,6 +219,72 @@ internal class AtomicHtdemucsNamedTensorForward(
     }
 }
 
+internal class DirectHtdemucsCpuInferenceSession(
+    private val pipeline: HtdemucsDirectPipeline,
+    override val orderedStemIds: List<String>,
+    private val validatedOutputObserver: ((HtdemucsNeuralOutputs) -> Unit)? = null,
+) : HtdemucsCpuInferenceSession {
+    override val implementationId: String = pipeline.implementationId
+    private var closed = false
+
+    @Synchronized
+    override fun run(
+        inputs: HtdemucsNeuralInputs,
+        shouldCancel: () -> Boolean,
+    ): HtdemucsWindowStemSet {
+        check(!closed) { "HTDemucs direct CPU session is closed." }
+        throwIfHtdemucsCanceled(shouldCancel)
+        pipeline.writeInputs(inputs)
+        return invokeAndPostprocess(shouldCancel)
+    }
+
+    @Synchronized
+    override fun runNormalizedWindow(
+        normalizedPlanarStereo: FloatArray,
+        shouldCancel: () -> Boolean,
+    ): HtdemucsWindowStemSet {
+        check(!closed) { "HTDemucs direct CPU session is closed." }
+        throwIfHtdemucsCanceled(shouldCancel)
+        pipeline.preprocessAndWriteInput(normalizedPlanarStereo)
+        return invokeAndPostprocess(shouldCancel)
+    }
+
+    private fun invokeAndPostprocess(
+        shouldCancel: () -> Boolean,
+    ): HtdemucsWindowStemSet {
+        try {
+            pipeline.run()
+            throwIfHtdemucsCanceled(shouldCancel)
+            validatedOutputObserver?.invoke(pipeline.readOutputs())
+            throwIfHtdemucsCanceled(shouldCancel)
+            val combined = pipeline.postprocessOutputs()
+            require(combined.size == orderedStemIds.size *
+                HtdemucsPipelineAdapter.CHANNEL_COUNT * HtdemucsPipelineAdapter.WINDOW_SAMPLES
+            ) { "HTDemucs direct pipeline returned an invalid combined waveform size." }
+            throwIfHtdemucsCanceled(shouldCancel)
+            return HtdemucsWindowStemSet(
+                orderedStemIds = orderedStemIds,
+                planarSamples = combined,
+                samplesPerStem = HtdemucsPipelineAdapter.WINDOW_SAMPLES,
+            )
+        } catch (error: Throwable) {
+            try {
+                pipeline.discard()
+            } catch (discardError: Throwable) {
+                error.addSuppressed(discardError)
+            }
+            throw error
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        if (closed) return
+        closed = true
+        pipeline.close()
+    }
+}
+
 internal class AtomicHtdemucsCpuInferenceSession(
     private val forward: AtomicHtdemucsNamedTensorForward,
     private val reconstruct: (HtdemucsNeuralOutputs, () -> Boolean) -> HtdemucsWindowStemSet,
@@ -203,6 +292,7 @@ internal class AtomicHtdemucsCpuInferenceSession(
     override val orderedStemIds: List<String> = emptyList(),
     private val closeResources: () -> Unit,
 ) : HtdemucsCpuInferenceSession {
+    override val implementationId: String = "jvm-tensor-buffer-host-adapter-v1"
     private var closed = false
 
     @Synchronized
@@ -235,113 +325,6 @@ internal class AtomicHtdemucsCpuInferenceSession(
         if (closed) return
         closed = true
         closeResources()
-    }
-}
-
-private object HtdemucsNativeLiteRtCpuBackendFactory : HtdemucsNamedTensorBackendFactory {
-    override fun create(
-        modelFile: File,
-        signatureKey: String,
-        inputs: List<HtdemucsTensorBinding>,
-        outputs: List<HtdemucsTensorBinding>,
-        cpuThreads: Int,
-    ): HtdemucsNamedTensorBackend {
-        val environment = Environment.create()
-        var model: CompiledModel? = null
-        val inputBuffers = linkedMapOf<String, TensorBuffer>()
-        val outputBuffers = linkedMapOf<String, TensorBuffer>()
-        try {
-            require(environment.getAvailableAccelerators().contains(Accelerator.CPU)) {
-                "The installed LiteRT runtime has no CPU accelerator."
-            }
-            val activeModel = CompiledModel.create(
-                modelFile.absolutePath,
-                CompiledModel.Options(Accelerator.CPU).apply {
-                    cpuOptions = CompiledModel.CpuOptions(cpuThreads, null, null)
-                },
-                environment,
-            )
-            model = activeModel
-            inputs.forEach { binding ->
-                validateTensorType(
-                    activeModel.getInputTensorType(binding.signatureName, signatureKey),
-                    binding,
-                    "input",
-                )
-                inputBuffers[binding.signatureName] =
-                    activeModel.createInputBuffer(binding.signatureName, signatureKey)
-            }
-            outputs.forEach { binding ->
-                validateTensorType(
-                    activeModel.getOutputTensorType(binding.signatureName, signatureKey),
-                    binding,
-                    "output",
-                )
-                outputBuffers[binding.signatureName] =
-                    activeModel.createOutputBuffer(binding.signatureName, signatureKey)
-            }
-            return NativeHtdemucsNamedTensorBackend(
-                environment,
-                activeModel,
-                signatureKey,
-                inputBuffers,
-                outputBuffers,
-            )
-        } catch (error: Throwable) {
-            closeAfterFailure(
-                outputBuffers.values.toList().asReversed() +
-                    inputBuffers.values.toList().asReversed() + listOfNotNull(model, environment),
-                error,
-            )
-            throw error
-        }
-    }
-
-    private fun validateTensorType(
-        actual: TensorType,
-        expected: HtdemucsTensorBinding,
-        role: String,
-    ) {
-        require(actual.elementType == TensorType.ElementType.FLOAT) {
-            "HTDemucs LiteRT $role ${expected.signatureName} is not float32."
-        }
-        val layout = requireNotNull(actual.layout) {
-            "HTDemucs LiteRT $role ${expected.signatureName} has no static layout."
-        }
-        require(!layout.hasStrides && layout.dimensions == expected.shape) {
-            "HTDemucs LiteRT $role ${expected.signatureName} shape differs from its contract."
-        }
-    }
-}
-
-private class NativeHtdemucsNamedTensorBackend(
-    private val environment: Environment,
-    private val model: CompiledModel,
-    private val signatureKey: String,
-    private val inputBuffers: LinkedHashMap<String, TensorBuffer>,
-    private val outputBuffers: LinkedHashMap<String, TensorBuffer>,
-) : HtdemucsNamedTensorBackend {
-    private var closed = false
-
-    @Synchronized
-    override fun run(inputs: Map<String, FloatArray>): Map<String, FloatArray> {
-        check(!closed) { "HTDemucs LiteRT backend is closed." }
-        require(inputs.keys == inputBuffers.keys) {
-            "HTDemucs LiteRT invocation received an incomplete named input set."
-        }
-        inputs.forEach { (name, values) -> inputBuffers.getValue(name).writeFloat(values) }
-        model.run(inputBuffers, outputBuffers, signatureKey)
-        return outputBuffers.mapValuesTo(linkedMapOf()) { (_, buffer) -> buffer.readFloat() }
-    }
-
-    @Synchronized
-    override fun close() {
-        if (closed) return
-        closed = true
-        closeAll(
-            *(outputBuffers.values.toList().asReversed() +
-                inputBuffers.values.toList().asReversed() + listOf(model, environment)).toTypedArray(),
-        )
     }
 }
 

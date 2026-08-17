@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.model
 
+import android.os.Build
 import com.mardous.booming.separation.model.contract.MultiTensorDescriptor
 import com.mardous.booming.separation.model.contract.MultiTensorDtype
 import com.mardous.booming.separation.model.contract.MultiTensorRenderMode
@@ -44,24 +45,56 @@ data class HtdemucsWindowStemSet(
     val samplesPerStem: Int,
 )
 
+internal interface HtdemucsDspSession : AutoCloseable {
+    val implementationId: String
+
+    fun waveformToSpectrum(planarStereoWaveform: FloatArray): FloatArray
+
+    fun frequencyToWaveform(
+        packedFrequency: FloatArray,
+        stemCount: Int,
+        shouldCancel: () -> Boolean = { false },
+    ): FloatArray
+
+    fun reconstructBranches(
+        packedFrequency: FloatArray,
+        timeWaveform: FloatArray,
+        stemCount: Int,
+        shouldCancel: () -> Boolean = { false },
+    ): FloatArray
+}
+
 /** Host DSP and branch reconstruction for the reviewed canonical HTDemucs neural core. */
 class HtdemucsPipelineAdapter(
     val contract: SourceSeparationMultiTensorContract,
     istftMode: HtdemucsIstftMode = HtdemucsIstftMode.Serial,
     istftWorkers: Int = 1,
 ) : AutoCloseable {
-    private val dsp = HtdemucsHostDsp(
-        windowSamples = contract.pipelineContract.windowSamples,
-        istftMode = istftMode,
-        istftWorkers = istftWorkers,
-    )
-
-    val orderedStemIds: List<String> = contract.stemContract.stems.map { it.stemId }
-
-    init {
-        SourceSeparationMultiTensorContractValidator.validate(contract)
-        validateSupportedContract(contract)
+    private val validatedIstftWorkers = validateHtdemucsIstftConfig(istftMode, istftWorkers)
+    private val validatedContract = contract.also { candidate ->
+        SourceSeparationMultiTensorContractValidator.validate(candidate)
+        validateSupportedContract(candidate)
     }
+
+    val orderedStemIds: List<String> = validatedContract.stemContract.stems.map { it.stemId }
+
+    private val dsp: HtdemucsDspSession = if (Build.VERSION.SDK_INT > 0) {
+        NativeHtdemucsDsp(
+            sourceCount = validatedContract.stemContract.stems.size,
+            windowSamples = validatedContract.pipelineContract.windowSamples,
+            spectrumFrames = FRAME_COUNT,
+            workerCount = validatedIstftWorkers,
+        )
+    } else {
+        HtdemucsHostDsp(
+            windowSamples = validatedContract.pipelineContract.windowSamples,
+            istftMode = istftMode,
+            istftWorkers = validatedIstftWorkers,
+        )
+    }
+
+    val dspImplementationId: String
+        get() = dsp.implementationId
 
     fun globalNormalization(planarStereoTrack: FloatArray): HtdemucsGlobalNormalization {
         require(planarStereoTrack.size % CHANNEL_COUNT == 0) { "Expected a planar stereo track." }
@@ -157,7 +190,7 @@ class HtdemucsPipelineAdapter(
         const val FEATURE_COUNT = 4
         const val NORMALIZATION_EPSILON = 1e-8f
 
-        private fun validateSupportedContract(contract: SourceSeparationMultiTensorContract) {
+        internal fun validateSupportedContract(contract: SourceSeparationMultiTensorContract) {
             val pipeline = contract.pipelineContract
             require(
                 pipeline.pipelineId == PIPELINE_ID &&
@@ -224,11 +257,23 @@ enum class HtdemucsIstftMode {
     ParallelLanes,
 }
 
+internal fun validateHtdemucsIstftConfig(mode: HtdemucsIstftMode, workers: Int): Int {
+    require(workers in 1..4)
+    require(mode != HtdemucsIstftMode.Serial || workers == 1) {
+        "Serial HTDemucs iSTFT requires exactly one worker."
+    }
+    require(mode != HtdemucsIstftMode.ParallelLanes || workers >= 2) {
+        "Parallel HTDemucs iSTFT requires at least two workers."
+    }
+    return workers
+}
+
 internal class HtdemucsHostDsp(
     private val windowSamples: Int,
     val istftMode: HtdemucsIstftMode = HtdemucsIstftMode.Serial,
     val istftWorkers: Int = 1,
-) : AutoCloseable {
+) : HtdemucsDspSession {
+    override val implementationId: String = "host-jtransforms-v1"
     val frameCount: Int = ceil(windowSamples.toDouble() / HtdemucsPipelineAdapter.HOP_LENGTH).toInt()
 
     private val fft = FloatFFT_1D(HtdemucsPipelineAdapter.FFT_SIZE.toLong())
@@ -248,7 +293,7 @@ internal class HtdemucsHostDsp(
             hann.indices.forEach { sample -> sum[start + sample] += hann[sample] * hann[sample] }
         }
     }
-    private val validatedIstftWorkers = validateIstftConfig(istftMode, istftWorkers)
+    private val validatedIstftWorkers = validateHtdemucsIstftConfig(istftMode, istftWorkers)
     private val inverseWorkspaces = when (istftMode) {
         HtdemucsIstftMode.Serial -> emptyArray()
         HtdemucsIstftMode.ParallelLanes ->
@@ -274,7 +319,7 @@ internal class HtdemucsHostDsp(
     }
 
     @Synchronized
-    fun waveformToSpectrum(planarStereoWaveform: FloatArray): FloatArray {
+    override fun waveformToSpectrum(planarStereoWaveform: FloatArray): FloatArray {
         check(!closed.get()) { "HTDemucs host DSP is closed." }
         require(planarStereoWaveform.size == HtdemucsPipelineAdapter.CHANNEL_COUNT * windowSamples)
         val output = FloatArray(
@@ -311,10 +356,10 @@ internal class HtdemucsHostDsp(
     }
 
     @Synchronized
-    fun frequencyToWaveform(
+    override fun frequencyToWaveform(
         packedFrequency: FloatArray,
         stemCount: Int,
-        shouldCancel: () -> Boolean = { false },
+        shouldCancel: () -> Boolean,
     ): FloatArray {
         check(!closed.get()) { "HTDemucs host DSP is closed." }
         require(stemCount > 0)
@@ -480,11 +525,11 @@ internal class HtdemucsHostDsp(
         }
     }
 
-    fun reconstructBranches(
+    override fun reconstructBranches(
         packedFrequency: FloatArray,
         timeWaveform: FloatArray,
         stemCount: Int,
-        shouldCancel: () -> Boolean = { false },
+        shouldCancel: () -> Boolean,
     ): FloatArray {
         val expectedWaveformElements = stemCount * HtdemucsPipelineAdapter.CHANNEL_COUNT *
             windowSamples
@@ -572,19 +617,8 @@ internal class HtdemucsHostDsp(
         const val CENTER_TRIM = HtdemucsPipelineAdapter.FFT_SIZE / 2
         const val FRAME_PAD_LEFT = 2
         const val FRAME_PAD_RIGHT = 2
-        const val MAX_ISTFT_WORKERS = 4
         const val EXECUTOR_CLOSE_TIMEOUT_SECONDS = 5L
         val ISTFT_THREAD_SEQUENCE = AtomicInteger()
 
-        fun validateIstftConfig(mode: HtdemucsIstftMode, workers: Int): Int {
-            require(workers in 1..MAX_ISTFT_WORKERS)
-            require(mode != HtdemucsIstftMode.Serial || workers == 1) {
-                "Serial HTDemucs iSTFT requires exactly one worker."
-            }
-            require(mode != HtdemucsIstftMode.ParallelLanes || workers >= 2) {
-                "Parallel HTDemucs iSTFT requires at least two workers."
-            }
-            return workers
-        }
     }
 }

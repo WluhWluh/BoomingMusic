@@ -1,5 +1,6 @@
 package com.mardous.booming.separation.model
 
+import android.os.Build
 import kotlin.math.sqrt
 
 data class HtdemucsTrackWindowPlan(
@@ -109,9 +110,16 @@ class HtdemucsGlobalNormalizationAccumulator {
 data class HtdemucsRenderedTrackChunk(
     val startFrame: Int,
     val frameCount: Int,
+    /** Distance between adjacent [stem, channel] planes in [planarSamples]. */
+    val planeStride: Int,
     /** Packed planar [stem, channel, frame] samples. */
     val planarSamples: FloatArray,
-)
+) {
+    init {
+        require(startFrame >= 0 && frameCount > 0 && planeStride >= frameCount)
+        require(planarSamples.isNotEmpty() && planarSamples.size % planeStride == 0)
+    }
+}
 
 internal class HtdemucsStreamingOverlapAdd(
     private val orderedStemIds: List<String>,
@@ -119,20 +127,43 @@ internal class HtdemucsStreamingOverlapAdd(
     private val normalization: HtdemucsGlobalNormalization,
     initialPlanIndex: Int = 0,
     initialBufferStart: Int = 0,
-) {
-    private val planeCount = orderedStemIds.size * HtdemucsPipelineAdapter.CHANNEL_COUNT
-    private val accumulation = FloatArray(planeCount * HtdemucsPipelineAdapter.WINDOW_SAMPLES)
-    private val accumulatedWeight = FloatArray(HtdemucsPipelineAdapter.WINDOW_SAMPLES)
-    private val weight = triangularWeight()
-    private var bufferStart = initialBufferStart
-    private var nextPlanIndex = initialPlanIndex
-    private var finished = false
-
+) : AutoCloseable {
     init {
         require(orderedStemIds.isNotEmpty() && orderedStemIds.distinct().size == orderedStemIds.size)
         require(trackSamples > 0)
         require(initialPlanIndex >= 0)
         require(initialBufferStart in 0 until trackSamples)
+        require(normalization.mean.isFinite())
+        require(normalization.sampleStandardDeviation.isFinite() &&
+            normalization.sampleStandardDeviation >= 0f)
+        require(normalization.divisor.isFinite() && normalization.divisor > 0f)
+    }
+
+    private val planeCount = orderedStemIds.size * HtdemucsPipelineAdapter.CHANNEL_COUNT
+    private val nativeState = if (Build.VERSION.SDK_INT > 0) {
+        NativeHtdemucsOlaState(orderedStemIds.size)
+    } else {
+        null
+    }
+    private val accumulation = if (nativeState == null) {
+        FloatArray(planeCount * HtdemucsPipelineAdapter.WINDOW_SAMPLES)
+    } else {
+        FloatArray(0)
+    }
+    private val accumulatedWeight = if (nativeState == null) {
+        FloatArray(HtdemucsPipelineAdapter.WINDOW_SAMPLES)
+    } else {
+        FloatArray(0)
+    }
+    private val weight = if (nativeState == null) triangularWeight() else FloatArray(0)
+    private var bufferStart = initialBufferStart
+    private var nextPlanIndex = initialPlanIndex
+    private var finished = false
+
+    val implementationId: String = if (nativeState == null) {
+        "scalar-kotlin-v1"
+    } else {
+        "restricted-native-ola-critical-array-v3"
     }
 
     fun addWindow(
@@ -145,6 +176,29 @@ internal class HtdemucsStreamingOverlapAdd(
         require(stemSet.orderedStemIds == orderedStemIds)
         require(stemSet.samplesPerStem == HtdemucsPipelineAdapter.WINDOW_SAMPLES)
         require(stemSet.planarSamples.size == planeCount * HtdemucsPipelineAdapter.WINDOW_SAMPLES)
+
+        nativeState?.let { state ->
+            val hasNext = plan.offset + HtdemucsTrackWindowPlanner.STRIDE_SAMPLES < trackSamples
+            val output = FloatArray(state.outputElements)
+            val chunk = state.processInto(
+                combinedWindow = stemSet.planarSamples,
+                actualSamples = plan.actualSamples,
+                cropLeft = plan.cropLeft,
+                hasNext = hasNext,
+                normalizationScale = normalization.divisor,
+                normalizationMean = normalization.mean,
+                output = output,
+            )
+            val start = bufferStart
+            nextPlanIndex += 1
+            bufferStart += chunk.finalizedFrames
+            return HtdemucsRenderedTrackChunk(
+                startFrame = start,
+                frameCount = chunk.finalizedFrames,
+                planeStride = HtdemucsPipelineAdapter.WINDOW_SAMPLES,
+                planarSamples = output,
+            )
+        }
 
         val activeStart = plan.cropLeft
         repeat(planeCount) { plane ->
@@ -171,7 +225,14 @@ internal class HtdemucsStreamingOverlapAdd(
         require(bufferStart == trackSamples) {
             "HTDemucs overlap-add ended before the complete pass was emitted."
         }
+        nativeState?.let { state ->
+            require(state.carryLength() == 0) {
+                "Native HTDemucs overlap-add retained carry after the final window."
+            }
+        }
     }
+
+    override fun close() = nativeState?.close() ?: Unit
 
     private fun flush(frames: Int): HtdemucsRenderedTrackChunk {
         require(frames in 1..HtdemucsPipelineAdapter.WINDOW_SAMPLES)
@@ -210,7 +271,12 @@ internal class HtdemucsStreamingOverlapAdd(
             HtdemucsPipelineAdapter.WINDOW_SAMPLES,
         )
         bufferStart += frames
-        return HtdemucsRenderedTrackChunk(start, frames, output)
+        return HtdemucsRenderedTrackChunk(
+            startFrame = start,
+            frameCount = frames,
+            planeStride = frames,
+            planarSamples = output,
+        )
     }
 
     private fun triangularWeight(): FloatArray {

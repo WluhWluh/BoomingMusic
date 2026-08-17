@@ -1,5 +1,6 @@
 package com.mardous.booming.ui.screen.player
 
+import com.mardous.booming.separation.HtdemucsSourceSeparationEngine
 import com.mardous.booming.separation.model.contract.SourceSeparationCustomModelProfile
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContract
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiStemReleaseInstaller
@@ -186,7 +187,7 @@ internal fun SourceSeparationMultiStemReleaseInstaller.multiStemCatalogModelDeta
             SourceSeparationModelRuntimeDetails(
                 abi = "arm64-v8a",
                 backend = entry.allowedBackends.joinToString(),
-                profileId = "htdemucs-cpu-fp32-v1",
+                profileId = HtdemucsSourceSeparationEngine.HTDEMUCS_CPU_PROFILE_ID,
                 precision = "float32",
                 status = entry.supportLevel,
                 evidence = entry.validation.entries.joinToString { "${it.key}=${it.value}" },
