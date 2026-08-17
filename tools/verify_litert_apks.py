@@ -10,6 +10,8 @@ import zipfile
 
 
 VARIANTS = {"arm64-v8a", "armeabi-v7a", "x86_64", "x86", "universal"}
+CPU_ABIS = {"arm64-v8a", "armeabi-v7a", "x86_64", "x86"}
+PRODUCT_DSP_LIBRARY = "libbooming_ss_separation.so"
 FORBIDDEN_LIBRARIES = {
     "libLiteRt.so",
     "liblitert_jni.so",
@@ -26,17 +28,31 @@ def apk_variant(path: Path) -> str | None:
     return None
 
 
-def verify_apk(path: Path) -> None:
+def verify_apk(path: Path, variant: str) -> None:
     with zipfile.ZipFile(path) as archive:
+        entries = {item.filename for item in archive.infolist() if not item.is_dir()}
         forbidden = sorted(
-            item.filename for item in archive.infolist()
-            if Path(item.filename).name in FORBIDDEN_LIBRARIES
+            item
+            for item in entries
+            if Path(item).name in FORBIDDEN_LIBRARIES
         )
     if forbidden:
         raise RuntimeError(
             f"{path.name} packages downloadable LiteRT libraries: {forbidden}"
         )
+    required_abis = CPU_ABIS if variant == "universal" else {variant}
+    missing_product_dsp = sorted(
+        f"lib/{abi}/{PRODUCT_DSP_LIBRARY}"
+        for abi in required_abis
+        if f"lib/{abi}/{PRODUCT_DSP_LIBRARY}" not in entries
+    )
+    if missing_product_dsp:
+        raise RuntimeError(
+            f"{path.name} cannot execute source separation for its ABI set: "
+            f"missing {missing_product_dsp}"
+        )
     print(f"Verified no packaged LiteRT runtime: {path.name}")
+    print(f"Verified packaged source-separation DSP: {path.name}")
 
 
 def main() -> int:
@@ -56,7 +72,7 @@ def main() -> int:
         if missing:
             raise RuntimeError(f"Missing APK variants: {sorted(missing)}")
         for variant in sorted(VARIANTS):
-            verify_apk(paths[variant])
+            verify_apk(paths[variant], variant)
     except (OSError, RuntimeError, zipfile.BadZipFile) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

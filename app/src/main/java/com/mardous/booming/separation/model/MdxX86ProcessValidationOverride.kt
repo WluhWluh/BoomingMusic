@@ -4,7 +4,10 @@ import com.mardous.booming.BuildConfig
 import com.mardous.booming.separation.cache.v2.SourceSeparationResolvedCacheModel
 import java.util.Locale
 
-/** Compile-time-only admission exception for the Phase 3 pure-x86 process experiment. */
+/**
+ * Compile-time-only admission exception for the historical x86 resident-session experiment.
+ * Standard GitHub x86 execution uses AllowUserAttempts and does not depend on this switch.
+ */
 internal object MdxX86ProcessValidationOverride {
     const val MODEL_ID_9662 = "uvr_mdxnet_3_9662"
     const val ARTIFACT_SHA256_9662 =

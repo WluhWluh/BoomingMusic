@@ -282,7 +282,7 @@ androidComponents {
                 "X86_PROCESS_VALIDATION" to BuildConfigField(
                     "boolean",
                     x86ProcessValidationRequested && variant.buildType == "debug" && !isCI,
-                    "Opt-in pure-x86 inference-process validation; never enabled in release or CI.",
+                    "Opt-in x86 resident-session experiment; standard x86 product execution is independent.",
                 ),
                 "ARM32_RESIDENT_PROCESS_VALIDATION" to BuildConfigField(
                     "boolean",

@@ -8377,14 +8377,9 @@ class SourceSeparationPhase7WorkerDeviceTest {
         }
         return DefaultSourceSeparationRuntimeFacade(
             activeModelResolver = presetRepository::resolveActiveCacheModelResolution,
-            compatibilityResolver = if (
-                executionHostMode == Phase7ExecutionHostMode.BoundRemote &&
-                MdxX86ProcessValidationOverride.buildEnabled
-            ) {
-                X86ProcessValidationRuntimeCompatibilityResolver
-            } else {
-                AndroidSourceSeparationRuntimeCompatibilityResolver
-            },
+            compatibilityResolver = AndroidSourceSeparationRuntimeCompatibilityResolver(
+                com.mardous.booming.separation.delivery.GitHubProductCapabilityPolicy,
+            ),
             preflightResolver = AndroidSourceSeparationModelAwarePreflightResolver(context),
             engine = engine,
             cacheRepository = cacheRepository,

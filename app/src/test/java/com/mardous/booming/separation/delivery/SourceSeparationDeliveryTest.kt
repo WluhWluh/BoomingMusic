@@ -29,6 +29,7 @@ class SourceSeparationDeliveryTest {
         val policy = GitHubProductCapabilityPolicy
 
         assertTrue(policy.supports(SourceSeparationProductCapability.RuntimeInstall))
+        assertTrue(policy.supports(SourceSeparationProductCapability.CpuExecution))
         assertTrue(policy.supports(SourceSeparationProductCapability.GpuExecution))
         assertTrue(policy.supports(SourceSeparationProductCapability.CustomModelImport))
         assertTrue(policy.supports(SourceSeparationProductCapability.RuntimeDiagnostics))
@@ -36,6 +37,12 @@ class SourceSeparationDeliveryTest {
         assertFalse(policy.supports(SourceSeparationProductCapability.AotExecution))
         assertFalse(policy.supports(SourceSeparationProductCapability.QnnJitExecution))
         assertFalse(policy.supports(SourceSeparationProductCapability.CustomRuntimeImport))
+        assertEquals(
+            setOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86"),
+            setOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+                .filterTo(mutableSetOf(), policy::supportsCpuRuntimeAbi),
+        )
+        assertFalse(policy.supportsCpuRuntimeAbi("mips"))
         assertTrue(policy.supportsDeliveryProvider("github"))
         assertFalse(policy.supportsDeliveryProvider("play"))
     }

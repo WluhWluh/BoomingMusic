@@ -18,13 +18,14 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheSt
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwarePlayableStatus
 import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareReadyHorizonStatus
 import com.mardous.booming.separation.cache.v2.SourceSeparationResolvedCacheModel
+import com.mardous.booming.separation.delivery.ProductCapabilityPolicy
+import com.mardous.booming.separation.delivery.SourceSeparationProductCapability
 import com.mardous.booming.separation.model.AndroidMdxRuntimePlatformProvider
 import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxLiteRtCompatibilityResolver
 import com.mardous.booming.separation.model.MdxRangeProgress
 import com.mardous.booming.separation.model.MdxRuntimeSettings
-import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.model.preset.SourceSeparationActiveModelReference
 import com.mardous.booming.separation.model.preset.SourceSeparationPresetBindingKind
 import com.mardous.booming.separation.process.SourceSeparationExecutionBackendPolicy
@@ -455,13 +456,21 @@ internal fun interface SourceSeparationRuntimeSongInputFactory {
     fun create(song: Song): SourceSeparationModelAwareSongInput
 }
 
-internal object AndroidSourceSeparationRuntimeCompatibilityResolver :
-    SourceSeparationRuntimeCompatibilityResolver {
+internal class AndroidSourceSeparationRuntimeCompatibilityResolver(
+    private val capabilityPolicy: ProductCapabilityPolicy,
+) : SourceSeparationRuntimeCompatibilityResolver {
     override fun unsupportedReason(model: SourceSeparationResolvedCacheModel): String? {
         val platform = try {
             AndroidMdxRuntimePlatformProvider.current()
         } catch (error: Throwable) {
             return error.message ?: "The process ABI is unsupported."
+        }
+        if (!capabilityPolicy.supports(SourceSeparationProductCapability.CpuExecution)) {
+            return "This product channel does not provide CPU source separation."
+        }
+        if (!capabilityPolicy.supportsCpuRuntimeAbi(platform.runtimeAbi.androidName)) {
+            return "This product channel does not provide CPU source separation for " +
+                "${platform.runtimeAbi.androidName}."
         }
         val decision = MdxLiteRtCompatibilityResolver.resolve(
             profile = model.executionProfile,
@@ -470,23 +479,6 @@ internal object AndroidSourceSeparationRuntimeCompatibilityResolver :
             policy = MdxCompatibilityPolicy.AllowUserAttempts,
         )
         return decision.reason.takeUnless { decision.isAllowed }
-    }
-}
-
-/** Used only by the compile-time-gated AndroidTest bound-process harness. */
-internal object X86ProcessValidationRuntimeCompatibilityResolver :
-    SourceSeparationRuntimeCompatibilityResolver {
-    override fun unsupportedReason(model: SourceSeparationResolvedCacheModel): String? {
-        val normalReason = AndroidSourceSeparationRuntimeCompatibilityResolver
-            .unsupportedReason(model)
-            ?: return null
-        val platform = runCatching { AndroidMdxRuntimePlatformProvider.current() }
-            .getOrElse { return normalReason }
-        return if (MdxX86ProcessValidationOverride.applyTo(model, platform) != null) {
-            null
-        } else {
-            normalReason
-        }
     }
 }
 

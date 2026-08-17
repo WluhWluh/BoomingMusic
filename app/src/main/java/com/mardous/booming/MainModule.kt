@@ -79,6 +79,7 @@ import com.mardous.booming.separation.cache.v2.SourceSeparationModelAwareCacheRe
 import com.mardous.booming.separation.cache.v2.SourceSeparationMultiStemCacheAvailabilityProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationPresetCacheAvailabilityProvider
 import com.mardous.booming.separation.cache.v2.SourceSeparationProductCacheAvailabilityProvider
+import com.mardous.booming.separation.delivery.ProductCapabilityPolicy
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackResolver
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.SourceSeparationExecutionSelectionResolver
@@ -381,7 +382,9 @@ private val mainModule = module {
             activeModelResolver = presetRepository::resolveTrustedActiveCacheModelResolution,
             multiStemPlaybackResolver = get(),
             multiStemExecutor = get<SourceSeparationMultiStemProductFacade>(),
-            compatibilityResolver = AndroidSourceSeparationRuntimeCompatibilityResolver,
+            compatibilityResolver = AndroidSourceSeparationRuntimeCompatibilityResolver(
+                get<ProductCapabilityPolicy>(),
+            ),
             preflightResolver = get(),
             sourcePreflightMemo = get(),
             engine = get(),

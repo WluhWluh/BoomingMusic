@@ -8,17 +8,12 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.mardous.booming.separation.model.MdxDspConfig
 import com.mardous.booming.separation.model.MdxCompatibilityPolicy
 import com.mardous.booming.separation.model.MdxExecutionProfile
-import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxModelArtifact
 import com.mardous.booming.separation.model.MdxRuntimeAbi
-import com.mardous.booming.separation.model.MdxRuntimePrecision
-import com.mardous.booming.separation.model.MdxRuntimeProfiles
 import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxRuntimeSettings
-import com.mardous.booming.separation.model.MdxRuntimeSupportStatus
 import com.mardous.booming.separation.model.MdxSpectrogram
 import com.mardous.booming.separation.model.MdxWaveformInferenceSession
-import com.mardous.booming.separation.model.MdxX86ProcessValidationOverride
 import com.mardous.booming.separation.model.withMdxInferenceTiming
 import com.mardous.booming.separation.model.contract.SourceSeparationModelContractValidator
 import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
@@ -111,37 +106,20 @@ class MdxLiteRtManagedPipelineDeviceTest {
                 )
                 null
             }
-            val productProfile = if (runtimeAbi == MdxRuntimeAbi.X86) {
-                require(MdxX86ProcessValidationOverride.buildEnabled) {
-                    "The x86 product gate requires the validation build."
-                }
-                val sourceRecord = profile.runtimeCompatibility.single { record ->
-                    record.abi == MdxRuntimeAbi.X86 &&
-                        record.backend == MdxInferenceBackend.LiteRtCpu &&
-                        record.profileId == MdxRuntimeProfiles.CPU_DEFAULT_FP32 &&
-                        record.precision == MdxRuntimePrecision.Fp32 &&
-                        record.status == MdxRuntimeSupportStatus.Unsupported
-                }
-                profile.copy(
-                    runtimeCompatibility = profile.runtimeCompatibility + sourceRecord.copy(
-                        runtimeVersion = MdxRuntimeProfiles.LITERT_VERSION,
-                        status = MdxRuntimeSupportStatus.KnownGood,
-                        evidence = "Pinned compile-time pure-x86 process validation.",
-                    ),
-                )
-            } else {
-                profile
-            }
             val productFactory = MdxLiteRtCpuInferenceSessionFactory(
                 platformProvider = {
                     MdxRuntimePlatform(Build.VERSION.SDK_INT, runtimeAbi)
                 },
-                compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+                compatibilityPolicy = if (runtimeAbi == MdxRuntimeAbi.X86) {
+                    MdxCompatibilityPolicy.AllowUserAttempts
+                } else {
+                    MdxCompatibilityPolicy.AllowUntestedInternal
+                },
                 availableProcessors = { 5 },
             ).withMdxInferenceTiming()
             val productSession = productFactory.create(
                 artifact,
-                productProfile,
+                profile,
                 MdxRuntimeSettings(cpuThreads = 4),
             )
             lateinit var referenceComparison: Comparison

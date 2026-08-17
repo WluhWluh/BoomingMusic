@@ -51,6 +51,7 @@ enum class SourceSeparationProductCapability {
     RuntimeUpdate,
     RuntimeRepair,
     RuntimeUninstall,
+    CpuExecution,
     GpuExecution,
     VendorNpuExecution,
     AotExecution,
@@ -123,6 +124,8 @@ interface ProductCapabilityPolicy {
 
     fun supports(capability: SourceSeparationProductCapability): Boolean
 
+    fun supportsCpuRuntimeAbi(abi: String): Boolean
+
     fun supportsDeliveryProvider(providerId: String): Boolean
 }
 
@@ -185,6 +188,7 @@ object GitHubProductCapabilityPolicy : ProductCapabilityPolicy {
         SourceSeparationProductCapability.RuntimeUpdate,
         SourceSeparationProductCapability.RuntimeRepair,
         SourceSeparationProductCapability.RuntimeUninstall,
+        SourceSeparationProductCapability.CpuExecution,
         SourceSeparationProductCapability.GpuExecution,
         SourceSeparationProductCapability.CustomModelImport,
         SourceSeparationProductCapability.RuntimeDiagnostics,
@@ -194,8 +198,12 @@ object GitHubProductCapabilityPolicy : ProductCapabilityPolicy {
     override fun supports(capability: SourceSeparationProductCapability): Boolean =
         capability in capabilities
 
+    override fun supportsCpuRuntimeAbi(abi: String): Boolean = abi in CPU_RUNTIME_ABIS
+
     override fun supportsDeliveryProvider(providerId: String): Boolean =
         providerId == channelId
+
+    private val CPU_RUNTIME_ABIS = setOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 }
 
 private class HttpSourceSeparationDeliveryPayload(
