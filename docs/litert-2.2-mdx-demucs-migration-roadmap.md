@@ -346,8 +346,7 @@ test(separation): qualify LiteRT 2.2 runtime delivery
 
 ## Phase 2: Integrate the Native MDX Pipeline
 
-Status: implementation complete through Phase 2C; Phase 2D qualification is
-in progress.
+Status: complete through Phase 2D at `a25198b5`.
 
 Current evidence as of 2026-08-17:
 
@@ -361,11 +360,22 @@ Current evidence as of 2026-08-17:
 - direct exact-runtime smokes pass on S10 armeabi-v7a, API 37 x86_64, and API
   26 x86. The later x86 product gate additionally exercises GitHub delivery,
   bound-process JVM inference, completed cache publication, and playback
-  opening at the frozen 384 MiB ART heap; and
-- the remaining Phase 2 gate is not another shape smoke. It is the exact-tip
-  full-song product matrix for 9662 plus representative long-window and HQ
-  models, including cancellation, restart, model switching, cache/playback,
-  and a real automatic GPU-to-CPU fallback where applicable.
+  opening at the frozen 384 MiB ART heap;
+- at `15bbe455`, the 273.8-second 9662 bounded-GPU product run reached its
+  first playback-ready window in 3,355 ms and completed in 32,619 ms. Its
+  completed indexed-FLAC cache then passed a 60-second MediaSession soak with
+  five seeks, 108 ms seek p95/max, no underrun, and no unexpected pause;
+- at the same revision, the HQ4 CPU product run reached first-ready in
+  8,393 ms and completed in 197,117 ms with thermal peak 0. Its completed
+  FLAC cache switched to 9662 during playback, released the HQ4 lease in
+  251 ms, and retained the exact HQ4 cache; and
+- at `a25198b5`, the full-song bound-remote invocation failpoint completed a
+  real GPU-to-CPU replay. One GPU session ran six invocations, the injected
+  `GpuInvocation` failure closed it before one CPU session was created, and
+  the CPU run published playable FLAC in 77,577 ms. First-ready was 3,897 ms,
+  thermal peak was 0, remote PSS peaked at 891,102,208 bytes, and summed PSS
+  peaked at 1,006,516,224 bytes. The diagnostic admission fix is part of the
+  exact tested revision, not a report-only override.
 
 ### Phase 2A: Packed-real DSP
 
@@ -426,6 +436,11 @@ Split the MDX-owned parts of `4df22efe` into focused commits:
 - Run full-song product paths for 9662 and representative long/HQ shapes,
   including cache publication, playback admission, cancel, restart, model
   switch, and automatic GPU-to-CPU fallback.
+
+Completion evidence is retained in the ignored local report sets
+`formal-15bbe455` and `formal-a25198b5`. Phase 5 must still rerun the required
+aggregate gates at one final clean candidate revision; that consolidation is
+not a reason to keep Phase 2D open.
 
 **Phase 2 exit:** all 13 MDX shapes and product lifecycle gates pass on exact
 2.2, with no native-managed x86 claim and no regression of current playback
@@ -606,9 +621,11 @@ The `49efc109` checkpoint has a clean 780-test host suite, passing GitHub-debug
 lint, a successful minified GitHub Release build, verified runtime-free
 four-ABI and universal APKs with the product DSP library in every ABI, and a
 passing API 26 x86 GitHub product gate after a no-override cold AVD restart.
-This is valid incremental evidence, not the Phase 5 exit: the remaining
-full-song MDX/HTDemucs, S10/S25 resource, final UI, exact-candidate report, and
-pushed CI gates below still apply.
+The later `15bbe455` and `a25198b5` S25 full-song MDX, playback, model-switch,
+and real GPU-to-CPU fallback runs close the Phase 2 device gaps. These are
+valid incremental evidence, not the Phase 5 exit: the remaining HTDemucs
+full-song runs, S10/S25 resource consolidation, final UI, exact-candidate
+report, and pushed CI gates below still apply.
 
 ### Phase 5A: Host and packaging gates
 
@@ -675,8 +692,8 @@ docs(separation): reconcile runtime and model roadmaps
 
 ## Phase 6: Migration Closeout
 
-Status: not started. Phase 6 remains blocked on the open Phase 2D, Phase 3D,
-Phase 4, and Phase 5 gates above.
+Status: not started. Phase 6 remains blocked on the open Phase 3D, Phase 4,
+and Phase 5 gates above.
 
 - Confirm the branch contains no generated binaries, raw test audio, runtime
   downloads, device output, or relay payloads.
