@@ -5,7 +5,7 @@ one representative-content PCM16 attribution gate. This remains the design
 authority for stem identity, model contracts, imported metadata, cache output
 shape, and playback data flow.
 
-Updated: 2026-08-14
+Updated: 2026-08-17
 
 ## Current Release and Product-Path Baseline (2026-08-08)
 
@@ -56,6 +56,13 @@ This is an experimental CPU row only; it does not qualify GPU, NPU, or a
 general all-ABI claim. The only remaining Phase 6 closeout is to attribute the
 wider-than-frozen PCM16 deltas exposed by that representative listening sample
 without silently weakening the numerical gate.
+
+The current GitHub product also exposes source separation on API 26 x86
+through the CPU-only JVM MDX fallback; it does not apply an ABI-wide UI or
+runtime block. That result qualifies the two-stem MDX product/cache route at
+the frozen 4 GiB RAM / 384 MiB ART-heap AVD baseline. It does not qualify any
+HTDemucs artifact on x86, alter N-stem playback contracts, or imply that a
+high-memory model will fit every 32-bit address layout.
 
 This roadmap prepares Booming SS for more than two rendered stems while
 preserving the currently qualified MDX two-stem product path. It combines the
@@ -2358,9 +2365,10 @@ reproduction.
    every published form. Do not generalize MDX GPU/QNN evidence or a
    neural-core hybrid to Demucs.
 9. Whether CPU-only qualification should imply all-ABI support. Decision: no.
-   Begin with arm64 device qualification. Admit arm32, x86, or x86_64 only from
-   separate allocation, address-space, sustained, and lifecycle evidence for
-   the exact artifact.
+   Begin HTDemucs qualification with arm64 devices. Admit an HTDemucs artifact
+   on arm32, x86, or x86_64 only from separate allocation, address-space,
+   sustained, and lifecycle evidence for that exact artifact. The separate
+   user-accessible x86 MDX fallback does not waive this multi-stem gate.
 
 ## Completion Definition
 

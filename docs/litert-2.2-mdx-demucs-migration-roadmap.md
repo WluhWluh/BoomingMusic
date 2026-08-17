@@ -7,6 +7,7 @@ HTDemucs pipelines. It does not authorize QNN, HTDemucs GPU, stable model-tier
 promotion, or a generic LiteRT 2.2.x runtime.
 
 Created: 2026-08-16
+Updated: 2026-08-17
 
 ## Frozen Branch and Source Boundary
 
@@ -145,7 +146,8 @@ The following policies are frozen:
   one, queue window one, with equal positive dispatch and event-wait counts;
 - the new LiteRT mixed FP16 mode is a future profile and is not enabled by
   this migration;
-- API 26 x86 uses the JVM `TensorBuffer` fallback and is an emulator/test tier;
+- API 26 x86 uses the CPU-only JVM `TensorBuffer` fallback as an experimental
+  GitHub product tier; the app does not apply an ABI-wide feature block, while
   native-managed x86 remains rejected;
 - x86_64 may use the native-managed MDX path only while its exact device gate
   remains passing;
@@ -153,6 +155,47 @@ The following policies are frozen:
 - no backward-compatibility shim is added for unreleased 2.1.5 runtime
   manifests or obsolete render identities. Development installs may be
   cleaned and reinstalled through Runtime Management or Quick Setup.
+
+## Frozen x86 Product and Qualification Policy (2026-08-17)
+
+The GitHub product publishes and verifies an x86 split, offers the x86 CPU
+runtime through the normal runtime catalog, and permits explicit user
+selection and execution of experimental models. Runtime Management, Model
+Management, Quick Setup, the separation panel, and the runtime facade must not
+hide or reject source separation solely because the process ABI is x86.
+Existing catalog `Unsupported` records remain model/runtime evidence for
+stable or recommended promotion; they are not an ABI-wide activation ban.
+
+The product execution contract is narrow and explicit:
+
+- CPU only, through the JVM `TensorBuffer` fallback in the dedicated bound
+  separation process;
+- no native-managed x86, GPU, NPU, AOT, or resident-session claim;
+- the historical `X86_PROCESS_VALIDATION` switch remains only for old
+  resident-session fault matrices and is not required by users, CI, or a
+  release APK; and
+- high-memory models may still fail because one 32-bit process must obtain a
+  large contiguous native mapping for XNNPACK.
+
+The reproducible API 26 x86 validation environment is frozen at 4 GiB guest
+RAM and a 384 MiB ART maximum heap. Controlled 576 MiB and 768 MiB runs failed
+at the first XNNPACK invocation, while 1024 MiB prevented the 32-bit zygote
+from mapping its address space. Two 384 MiB runs passed the frozen ORT oracle;
+an additional-session replacement attempt still exposed address
+fragmentation. The local `Medium_Phone` AVD therefore keeps both
+`vm.heapSize=384` and a persistent API 26 `/data/local.prop` override, while
+GitHub CI and release jobs declare `heap-size: 384M`. This is a qualification
+environment constraint, not an app-side RAM check or user-facing restriction.
+
+At the current branch state, the standard JVM fallback produced 97.5986 dB
+SNR and maximum absolute error `5.9530e-5` against the frozen ORT reference.
+Two fresh product-process runs also downloaded the real x86 runtime and 9662
+model, published a completed two-stem cache, opened it through the playback
+repository, and cleaned it successfully. CI and release publication must run
+`MdxLiteRtX86GithubProductDeviceTest` through those production providers.
+
+Future GitHub Release Notes need only the concise limitation: "32-bit x86 and
+high-memory models may fail depending on device memory layout."
 
 ## Pipeline and Product Invariants
 
@@ -278,8 +321,8 @@ remains runtime-free.
   the S25. A fresh process loaded `libLiteRt.so` followed by
   `liblitert_jni.so`, and the exact bounded-GPU capability handshake passed.
 - The released CPU ZIP and ordered dual-library load passed on S10 arm32,
-  API 37 x86_64, and API 26 x86. API 26 x86 remains explicitly classified as
-  the JVM fallback/test tier rather than native-managed product support.
+  API 37 x86_64, and API 26 x86. API 26 x86 is the experimental JVM fallback
+  product tier rather than native-managed support.
 - `:app:testGithubDebugUnitTest` passed all 748 tests. GitHub debug app and
   instrumentation APK assembly passed, and `verify_litert_apks.py` confirmed
   that all four ABI splits and the universal APK contain no LiteRT runtime.
@@ -329,7 +372,7 @@ test(separation): qualify LiteRT 2.2 runtime delivery
 - Keep invocation non-interruptible within LiteRT; cancellation is observed at
   the established window/session boundaries.
 - Preserve the JVM path when XNNPACK flags are explicitly required and for
-  the API 26 x86 test tier.
+  the API 26 x86 experimental product tier.
 
 ### Phase 2C: Product routing, identity, and fallback
 
@@ -357,7 +400,8 @@ Split the MDX-owned parts of `4df22efe` into focused commits:
 - On GPU require positive equal dispatch/wait evidence for every accepted
   shape.
 - Run direct managed CPU smokes on arm64-v8a, armeabi-v7a, and x86_64.
-- Run API 26 x86 through the JVM fallback with its explicit heap/test policy.
+- Run API 26 x86 through the user-accessible JVM fallback with the frozen
+  384 MiB qualification heap and no app-side memory gate.
 - Run full-song product paths for 9662 and representative long/HQ shapes,
   including cache publication, playback admission, cancel, restart, model
   switch, and automatic GPU-to-CPU fallback.
@@ -533,7 +577,7 @@ Also require:
 | S10 arm64 | CPU/GPU runtime install, representative MDX shapes, official 6-stem and guitar-ft, long-session memory/thermal, cancel/supersession, hard termination. |
 | S10 armeabi-v7a | CPU runtime, MDX managed smoke, official 4/6-stem lifecycle, process recycle; no GPU claim. |
 | API 37 x86_64 AVD | CPU runtime/store and native-managed MDX smoke. |
-| API 26 x86 AVD | CPU runtime/store and JVM MDX fallback with explicit heap policy; native-managed remains rejected. |
+| API 26 x86 AVD | Real GitHub runtime/model download plus bound-process JVM MDX fallback and completed-cache gate at 4 GiB RAM / 384 MiB ART heap; native-managed remains rejected and the app applies no ABI-wide block. |
 
 All device tests must install runtime and model assets through the same
 providers/stores used by the product. Test-only bundled native libraries or
@@ -612,7 +656,7 @@ document.
 | GPU delivery | arm64 bounded FP32 profile only; positive equal dispatch/wait counts. |
 | MDX | 13 shapes, finite output, exact slot repeat, profile thresholds, product lifecycle, correct cache identity. |
 | HTDemucs | Frozen 4/6/guitar contracts, finite energy-aware stems, ordered PCM/cache publication, CPU-only. |
-| x86 | JVM fallback/test tier only; no native-managed claim. |
+| x86 | User-accessible experimental GitHub CPU tier through the bound-process JVM fallback; API 26 CI uses 4 GiB RAM / 384 MiB ART heap; no native-managed, GPU, NPU, or stable-support claim. |
 | Cancellation | Cooperative first, typed hard termination after grace, durable partial cache and ownership recovery. |
 | Playback | Ready-frontier, rapid-transition, EOF, seek, model-switch, FLAC, and active-delete regressions pass. |
 | Efficiency | No repeated full hashes, no Java tensor churn on accepted ARM native paths, bounded memory/GC and recorded thermal state. |
@@ -651,8 +695,11 @@ document.
 - HTDemucs inference is non-interruptible inside one LiteRT invocation. The
   typed process-level hard-termination path is required for bounded user
   cancellation on slow or throttled devices.
-- x86 can consume very high memory for a full MDX tensor. Its passing JVM
-  fixture is an emulator packaging/runtime gate, not a user-device tier.
+- x86 can consume very high memory and about 500-600 MiB of native XNNPACK
+  buffers. The 384 MiB ART heap leaves a viable contiguous mapping on the
+  frozen AVD, but different device layouts and high-memory models may still
+  fail. Preserve user access and report the failure; do not convert this risk
+  into an ABI-wide app gate.
 - Runtime-only and DSP performance runs are sensitive to device temperature
   and run order. Use alternating cold pairs before attributing a regression or
   improvement to LiteRT 2.2.

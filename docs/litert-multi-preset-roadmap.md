@@ -4,7 +4,24 @@ Status: active model-catalog and release-qualification plan. Runtime setup,
 lifecycle/cache ownership, and N-stem playback continue under their dedicated
 roadmaps; completed sections here remain historical implementation evidence.
 
-Updated: 2026-08-08
+Updated: 2026-08-17
+
+## Current x86 Model Policy (2026-08-17)
+
+All published MDX entries remain selectable experimental models on 32-bit
+x86. Historical `Unsupported` or `Rejected` qualification records continue to
+block stable/recommended claims for the exact model/backend row, but they no
+longer impose an ABI-wide activation or source-separation ban in the GitHub
+product. Explicit user attempts run CPU-only through the dedicated-process JVM
+`TensorBuffer` fallback. Native-managed x86, GPU, NPU, and generic HTDemucs
+x86 qualification remain outside the claim.
+
+The API 26 x86 release gate is intentionally environment-specific: 4 GiB
+guest RAM and a 384 MiB ART heap preserve enough contiguous 32-bit address
+space for the approximately 500-600 MiB native XNNPACK mapping. The app does
+not enforce that limit. Models with larger memory demand or devices with a
+different address layout may fail and should report a normal allocation error.
+This risk affects qualification and Release Notes, not model visibility.
 
 ## Current Release Baseline (2026-08-07)
 
@@ -73,11 +90,12 @@ dedicated runtime setup contract.
   available on its recorded ABI rows; bounded FP32 GPU is allowed on qualified
   arm64 devices. Its S10 GPU path is slower than CPU, FP16 remains rejected,
   and no backend result promotes KARA to recommended.
-- HQ4 FP32 is selectable as a high-resource experimental model on the exact
-  arm64 CPU/GPU candidate rows. Manual listening across multiple songs found no
-  apparent CPU/GPU quality problem, but formal full-song repetition, memory,
-  cancellation, and lower-device gates remain incomplete. Arm32, x86, and
-  x86_64 remain rejected or unsupported as recorded by the catalog.
+- HQ4 FP32 is selectable as a high-resource experimental model. Manual
+  listening across multiple songs found no apparent arm64 CPU/GPU quality
+  problem, but formal full-song repetition, memory, cancellation, and
+  lower-device gates remain incomplete. Arm32, x86, and x86_64 records do not
+  qualify HQ4 there; the GitHub product nevertheless permits an explicit CPU
+  attempt instead of applying an ABI-wide model-visibility block.
 - All 30 MDX candidates are now selectable experimental entries with reviewed
   v2 contracts. Runtime, resource, full-song, and listening evidence remains
   model-specific. The three HTDemucs candidates are selectable CPU-only
@@ -238,8 +256,8 @@ experimental; all tested FP16 profiles remain rejected.
 - LiteRT 2.1.5 inference for MDX two-stem models.
 - CPU execution on supported Android devices.
 - Distribution and validation of pure-x86 CPU execution through the separately
-  built and audited downloadable LiteRT runtime. User-visible x86 support,
-  model/resource scope, and minimum tested memory remain evidence-gated.
+  built and audited downloadable LiteRT runtime. User-visible access is open;
+  model/backend promotion and resource claims remain evidence-gated.
 - GPU execution when the LiteRT GPU backend initializes and runs successfully.
 - Automatic GPU-to-CPU fallback for a single separation session.
 - Multiple official TFLite presets installed side by side.
@@ -652,18 +670,15 @@ Pure x86 is CPU-only for this stage. `Auto` must skip GPU setup there rather
 than fail into CPU after an avoidable accelerator attempt. The x86 validation
 passed 9662 and KARA inference and numerical comparison. An explicit HQ4 probe
 still failed XNNPACK tensor allocation after the API 26 AVD was expanded to
-3,036 MiB and the CPU policy was reduced to two threads. HQ4 is unsupported for
-the current x86 contract and must not become x86-selectable without a new
-artifact/runtime review and explicit memory validation.
+3,036 MiB and the CPU policy was reduced to two threads. HQ4 remains
+unqualified for x86 promotion and may fail when explicitly attempted, but the
+current GitHub catalog does not hide or block the model solely by ABI.
 
 Arm64 devices equivalent to the tested S10 and S25 remain the primary
-performance and GPU targets. Pure x86 now has a validated runtime and exact
-9662/KARA numerical evidence, but that is not yet a product support promise.
-The final catalog and downloadable-runtime qualification must decide whether
-x86 remains `Unsupported` or becomes a narrowly scoped
-`Experimental`/`Supported` `RemoteRequired` tier after cache-safety,
-memory-configuration, process-recycle, binary-provenance, and release
-qualification.
+performance and GPU targets. The final LiteRT 2.2 policy makes pure x86 a
+narrow user-accessible experimental JVM-fallback tier after cache-safety,
+memory-configuration, binary-provenance, and release qualification. This does
+not promote any model/backend row to stable or supported.
 
 ### Provisional resource budgets
 
@@ -1500,8 +1515,9 @@ JNI/API coverage; it does not use UVR weights.
 - [x] Add unit tests for NCHW/NHWC round trips with non-symmetric dimensions,
   exact output compensation, residual reconstruction, tensor mismatch,
   non-finite output, compatibility decisions, and session replacement.
-- [x] Add a factory-spy test proving HQ4/x86 is rejected before
-  `CompiledModel.create` or any large tensor allocation.
+- [x] Add a factory-spy test proving the historical known-good-only policy
+  rejected HQ4/x86 before `CompiledModel.create` or large tensor allocation.
+  The current explicit-user-attempt policy supersedes that UI admission rule.
 
 #### Phase 2D: Internal integration and parity validation
 
@@ -1569,11 +1585,11 @@ Acceptance criteria:
 - Unit and connected tests prove that the contract scale is applied exactly
   once and that scaled primary plus residual reconstructs the unclipped input
   window with maximum absolute error at most `0.00001`.
-- HQ4 returns an explicit unsupported compatibility result on the normal x86
-  path, and a factory spy confirms no `CompiledModel`, tensor buffer, or large
-  conversion buffer was allocated. The separate opt-in probe records that
-  allocation still fails with 3,036 MiB AVD RAM and two CPU threads; it does
-  not weaken the preflight block.
+- Under the historical known-good-only policy HQ4 returned an unsupported x86
+  result before `CompiledModel` or tensor allocation. The separate probe still
+  records an allocation failure with 3,036 MiB AVD RAM and two CPU threads.
+  Current explicit user attempts may cross that preflight, but do not turn the
+  failed row into promotion evidence.
 - A cancellation received during invocation waits for the call to return,
   discards its output, does not close the session concurrently, and does not
   mark the segment ready.
@@ -2436,10 +2452,11 @@ passed real MediaSession pause/seek/resume/blend with zero timestamp drift. See
 These are not promotion results yet. The v2 threshold revision must be used to
 rerun the affected rows after the final decision commit. Representative
 listening and UI coverage, KARA's human review, the immutable non-prerelease
-model Release, and the final catalog promotion matrix remain open. Pure x86
-retains ordinary playback but source separation now fails closed before native
-allocation; x86_64 remains CPU evidence only until a separate GPU qualification
-exists.
+model Release, and the final catalog promotion matrix remain open. At this
+historical checkpoint pure x86 source separation failed closed before native
+allocation; the 2026-08-17 LiteRT 2.2 product policy above supersedes that
+admission decision. x86_64 remains CPU evidence only until a separate GPU
+qualification exists.
 
 #### Superseding research and catalog update (2026-08-05)
 
@@ -2622,8 +2639,8 @@ identities:
   now permits explicit CPU and bounded FP32 GPU testing on the exact arm64
   candidate rows, with GPU opt-out and resource warnings. Formal full-song,
   repeated-session, cancellation, and memory evidence remain open; arm32, x86,
-  and x86_64 remain unsupported/rejected. A user-listening pass does not waive
-  the stable S10 resource gate.
+  and x86_64 remain unqualified for promotion but may be explicitly attempted
+  on CPU. A user-listening pass does not waive the stable S10 resource gate.
 - [x] For every published candidate, verify the pinned Release download,
   contract and sidecar inspection, and structural/TFLite smoke on a compatible
   target. Do not reconvert the model in this repository; conversion
@@ -2805,7 +2822,7 @@ Every runtime or model change should run the narrowest applicable checks:
 | Cache | Canonical identity/key determinism, current manifest/journal schemas and relative-path validation, multiple models per song, profile revisions, deleted custom profile, partial stale/resume, retained inactive completed entries, FLAC promotion, entry leases, prompt obsolete-artifact cleanup, crash consistency, delete/cleanup, and system clear-cache recovery |
 | Persistence/Backup | Format/schema v1, key allowlists, pending active model, unknown fork payload, canonical/legacy priority, both package directions, and excluded model/cache/per-song data |
 | Lifecycle | Activity recreation, process restart, background worker continuation, and the companion roadmap's independently qualified host/session/background policy |
-| Device | Galaxy S10/S25 arm64 9662 CPU and eligible GPU evidence, exact-row experimental KARA CPU/GPU and HQ4 CPU/GPU evidence, S10 armeabi-v7a CPU, official x86_64 CPU/runtime evidence without GPU promotion, API 26 pure-x86 validation plus an explicit process support tier and emulator-only limitation, actual process-ABI evidence, and explicit unsupported/rejected HQ4 non-arm64 rows |
+| Device | Galaxy S10/S25 arm64 9662 CPU and eligible GPU evidence, exact-row experimental KARA CPU/GPU and HQ4 CPU/GPU evidence, S10 armeabi-v7a CPU, official x86_64 CPU/runtime evidence without GPU promotion, API 26 pure-x86 validation plus its experimental JVM product tier and 384 MiB ART-heap limitation, actual process-ABI evidence, and unqualified HQ4 non-arm64 rows that remain available only as explicit user attempts |
 | Resource budgets | Model/runtime install size, peak and summed PSS, graphics/native memory, 32-bit VA gap, tested device/AVD memory scope, thermal behavior, and target/hard-limit decisions |
 | Native supply chain | Pinned source/toolchain, Release hash, ELF/JNI audit, checksums, notices, and GitHub provenance |
 | Packaging | Four ABI splits plus universal APK built separately from AndroidTest, classes-only LiteRT API, no downloadable native payload in the APK, downloaded runtime inventory, and separate APK/download/install size |

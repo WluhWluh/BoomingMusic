@@ -4,7 +4,26 @@ Status: active product and implementation plan. The product and data contracts
 in this document are frozen; phase checklists may be refined only without
 silently changing those contracts.
 
-Updated: 2026-08-14
+Updated: 2026-08-17
+
+## Current x86 GitHub Policy (2026-08-17)
+
+The GitHub product supports CPU runtime delivery and explicit source
+separation attempts on all four packaged ABIs, including 32-bit x86. Runtime
+Management, Model Management, Quick Setup, and readiness evaluation must not
+disable the feature solely because the current ABI is x86. The x86 execution
+path remains CPU-only, experimental, and backed by the dedicated-process JVM
+`TensorBuffer` fallback; native-managed x86, GPU, and NPU remain unclaimed.
+
+The reproducible API 26 x86 AVD and both GitHub workflow gates use 4 GiB guest
+RAM with a 384 MiB ART heap. The local `Medium_Phone` AVD keeps this heap as a
+persistent environment setting. Larger ART heaps have reduced the contiguous
+32-bit address space available to XNNPACK and failed controlled tests. This is
+a test-environment requirement only: the app must not enforce a heap/RAM
+minimum, hide models, or add an x86-specific setup blocker. Runtime or model
+allocation failures remain ordinary actionable errors. Release Notes should
+state only that 32-bit x86 and high-memory models may fail depending on device
+memory layout.
 
 ## Current Model-Delivery Baseline (2026-08-07)
 
@@ -1145,10 +1164,12 @@ change the frozen source-separation algorithm:
    smoke on four ABI rows and bounded-GPU loading only on the qualified arm64
    path. The S10 `armeabi-v7a` row now has full CPU product-path evidence,
    including the experimental HTDemucs lifecycle rule that recycles the
-   inference process after terminal runs; it still has no GPU row. x86,
-   x86_64, and API 29 remain loader-only or unqualified unless separately
-   tested. NPU work may initially target only a named, qualified arm64 device
-   and exact model/runtime combination.
+   inference process after terminal runs; it still has no GPU row. API 26 x86
+   now has a separate experimental product row using real GitHub delivery,
+   bound-process JVM inference, and completed-cache playback at the frozen
+   384 MiB ART heap. x86_64 and API 29 remain loader-only or unqualified unless
+   separately tested. NPU work may initially target only a named, qualified
+   arm64 device and exact model/runtime combination.
 
 Scope boundary: keep the Demucs research matrix separate from this gate. Its
 CPU, hybrid GPU, and failed QNN rows may inform future adapter work, but cannot
@@ -1225,8 +1246,9 @@ are either completed or explicitly waived with a documented support boundary.
   cancellation, background continuation, foreground FrameTimeline, and
   playback underruns. These measurements become the comparison baseline for
   every NPU claim.
-- [x] Record the current downloaded CPU-loader support evidence for S10 arm32,
-  S25 arm64, API 26 pure x86, and API 37 x86_64.
+- [x] Record downloaded CPU-loader support for S10 arm32, S25 arm64, API 26
+  x86, and API 37 x86_64; additionally gate the API 26 x86 GitHub product on
+  real runtime/model acquisition, JVM inference, and completed-cache opening.
 - [ ] Close the Phase 1 ABI/API support table by adding API 29 evidence or
   explicitly marking it unavailable, and assign non-arm64 rows a loader-only
   or ordinary-player tier. NPU work may target only a named qualified arm64
@@ -1238,9 +1260,10 @@ backend block or mutate the required path; GPU intent survives backup/restore;
 the downloaded CPU/GPU lifecycle and clean-install flows pass on the claimed
 support rows; Quick Setup and Runtime Management have stable UI/accessibility
 coverage; and S10/S25 provide a repeatable full-song CPU/GPU baseline against
-which an exact NPU claim can be measured. Unqualified API/ABI rows remain
-loader-only or disabled, and the frozen window-decoding policy remains
-unchanged.
+which an exact NPU claim can be measured. Unqualified model/backend rows remain
+experimental or loader-only, but packaged x86 remains user-accessible and is
+not assigned an ABI-wide disabled tier. The frozen window-decoding policy
+remains unchanged.
 
 ### Phase 5: Add exact vendor NPU AOT variants
 

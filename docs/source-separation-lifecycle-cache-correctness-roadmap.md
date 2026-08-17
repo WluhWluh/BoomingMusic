@@ -4,7 +4,14 @@ Status: implementation and automated/device qualification complete. This file
 is retained as the correctness contract and regression checklist; only the
 short human handoff-listening check remains open as release-confidence work.
 
-Updated: 2026-08-08
+Updated: 2026-08-17
+
+The current LiteRT 2.2 GitHub policy supersedes historical statements below
+that called x86 validation-only or fail-closed. API 26 x86 is now a
+user-accessible experimental CPU path through the dedicated-process JVM
+fallback. The lifecycle/cache contract does not add ABI-specific admission;
+the frozen CI environment uses a 384 MiB ART heap only to make the 32-bit
+address layout reproducible.
 
 This roadmap governs active-model changes, separation scheduling, playback
 cache selection, recovery, retention, and deletion. It must reach its focused
@@ -566,9 +573,10 @@ remain under the ignored `build/phase7-validation/` directory.
   process-death, and task-removal evidence passes on the previously qualified
   arm32 baseline. This is a CPU lifecycle qualification; no new GPU claim is
   made for arm32.
-- API 26 x86: the current CPU worker report passes with automatic GPU
-  selection correctly falling back to `LiteRtCpu`. This remains a
-  validation-only route; it does not reopen product x86 support.
+- API 26 x86: this historical CPU worker report passed with automatic GPU
+  selection correctly falling back to `LiteRtCpu`. The later LiteRT 2.2
+  product gate supersedes its validation-only policy: users may now execute
+  the CPU JVM fallback, while the old report remains lifecycle evidence only.
 - API 37 x86_64: the current CPU lifecycle report passes. GPU is not required
   for this smoke route.
 
