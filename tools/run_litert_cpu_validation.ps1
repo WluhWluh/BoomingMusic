@@ -259,9 +259,14 @@ try {
     }
     Invoke-Adb shell am force-stop $package
     if (-not $PreflightOnly) {
-        & $adb -s $Serial shell monkey -p $package 1 2>$null | Out-Null
-        Start-Sleep -Milliseconds 750
-        & $adb -s $Serial shell input keyevent KEYCODE_HOME 2>$null | Out-Null
+        & (Join-Path $PSScriptRoot "source_separation_debug_control.ps1") `
+            -Serial $Serial `
+            -PackageName $package `
+            -Command "ui.launch" `
+            -Extra @("surface:s:main") | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to launch the Debug application through its control API."
+        }
     }
 
     $appDataRoot = (& $adb -s $Serial shell run-as $package pwd) -join "`n"
