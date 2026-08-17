@@ -747,6 +747,9 @@ class SourceSeparationProductionRouteAuditTest {
             require(source.isFile) { "Missing production AIDL: $relativePath" }
         }
 
+    private fun File.readText(): String =
+        java.nio.file.Files.readString(toPath()).replace("\r\n", "\n")
+
     private val mainKotlinRoot: File
         get() {
             val workingDirectory = File(requireNotNull(System.getProperty("user.dir")))
