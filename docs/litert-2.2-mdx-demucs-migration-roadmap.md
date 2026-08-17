@@ -346,6 +346,27 @@ test(separation): qualify LiteRT 2.2 runtime delivery
 
 ## Phase 2: Integrate the Native MDX Pipeline
 
+Status: implementation complete through Phase 2C; Phase 2D qualification is
+in progress.
+
+Current evidence as of 2026-08-17:
+
+- the native packed-real DSP, managed dual-slot bridge, exact 2.2 runtime
+  identity, staged waveform execution, one-way GPU fallback, and experimental
+  user-attempt policy are present as focused commits;
+- at `b95fe281`, all 13 frozen MDX shapes passed on S25 CPU, S25 bounded GPU,
+  and S10 CPU. Every S25 GPU row recorded equal positive dispatch and event
+  wait counts, and the S10 CPU matrix completed with bounded post-close
+  accounting;
+- direct exact-runtime smokes pass on S10 armeabi-v7a, API 37 x86_64, and API
+  26 x86. The later x86 product gate additionally exercises GitHub delivery,
+  bound-process JVM inference, completed cache publication, and playback
+  opening at the frozen 384 MiB ART heap; and
+- the remaining Phase 2 gate is not another shape smoke. It is the exact-tip
+  full-song product matrix for 9662 plus representative long-window and HQ
+  models, including cancellation, restart, model switching, cache/playback,
+  and a real automatic GPU-to-CPU fallback where applicable.
+
 ### Phase 2A: Packed-real DSP
 
 - Transplant `71f53249` and `3df22cb8` while preserving the latest cache and
@@ -420,6 +441,27 @@ test(separation): qualify LiteRT 2.2 MDX product shapes
 ```
 
 ## Phase 3: Integrate the CPU HTDemucs Pipeline
+
+Status: Phase 3A through Phase 3C are implemented; Phase 3D qualification is
+in progress.
+
+Current evidence as of 2026-08-17:
+
+- the direct managed-spectrum/waveform path, native packed pocketfft DSP,
+  bounded parallel iSTFT, overlap-add, planar PCM16 publication, ordered
+  N-stem cache integration, and typed cooperative/hard terminal control are
+  present on the formal branch;
+- at `b95fe281`, canonical executable fixtures passed for official 4-stem,
+  official 6-stem, and guitar-ft on S25. All three also completed the real
+  installed-Release product/cache/FLAC path on the 30-second YOASOBI fixture;
+- S10 arm64 passed the official 6-stem executable fixture, the guitar-ft
+  30-second product path, cancel/restart, 6-to-4 supersession, and typed hard
+  termination. S10 armeabi-v7a passed exact Release installation for all
+  three candidates and 30-second official 4/6 product execution; and
+- these short representative-content runs do not satisfy the explicit
+  full-song wording below. Still required are current-candidate full-song
+  product runs for all three models on S25, official 6-stem full-song product
+  execution on S10 arm64, and the final sustained resource/thermal record.
 
 ### Phase 3A: Direct native pipeline
 
@@ -507,6 +549,18 @@ test(separation): qualify CPU HTDemucs lifecycle
 
 ## Phase 4: Reconcile the Latest Playback Baseline
 
+Status: implementation reconciliation and targeted regression coverage are
+substantially complete; final UI/device closeout remains open.
+
+At `b95fe281`, S25 device gates passed unready-window seek retargeting,
+completed 6-to-4 cache switching, active-cache UI deletion, and remote
+multi-stem process death recovery. The corresponding S10 playback wait/seek
+gate also passed, while host tests cover ready-frontier generations, stale
+resolution rejection, gain-only updates, EOF, FLAC promotion, and exact-model
+cache selection. Before marking this phase complete, rerun the high-level
+playback smoke on the final candidate and exercise real 2-, 4-, and 6-stem
+sessions through both the separation panel and lyrics-overlay controls.
+
 This phase is mandatory even if earlier cherry-picks apply without textual
 conflicts. It validates the semantic overlap introduced by the new base.
 
@@ -545,6 +599,16 @@ fix(separation): reconcile LiteRT 2.2 with playback demand state
 ```
 
 ## Phase 5: Formal Integration Qualification
+
+Status: in progress.
+
+The `49efc109` checkpoint has a clean 780-test host suite, passing GitHub-debug
+lint, a successful minified GitHub Release build, verified runtime-free
+four-ABI and universal APKs with the product DSP library in every ABI, and a
+passing API 26 x86 GitHub product gate after a no-override cold AVD restart.
+This is valid incremental evidence, not the Phase 5 exit: the remaining
+full-song MDX/HTDemucs, S10/S25 resource, final UI, exact-candidate report, and
+pushed CI gates below still apply.
 
 ### Phase 5A: Host and packaging gates
 
@@ -610,6 +674,9 @@ docs(separation): reconcile runtime and model roadmaps
 ```
 
 ## Phase 6: Migration Closeout
+
+Status: not started. Phase 6 remains blocked on the open Phase 2D, Phase 3D,
+Phase 4, and Phase 5 gates above.
 
 - Confirm the branch contains no generated binaries, raw test audio, runtime
   downloads, device output, or relay payloads.
