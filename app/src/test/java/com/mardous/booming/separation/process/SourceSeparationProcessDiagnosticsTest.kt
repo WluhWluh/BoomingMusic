@@ -68,4 +68,25 @@ class SourceSeparationProcessDiagnosticsTest {
             SourceSeparationProcParser.mappedNativeLibraryNames(maps),
         )
     }
+
+    @Test
+    fun `ART runtime counters preserve available values and ignore malformed values`() {
+        val diagnostics = SourceSeparationArtRuntimeDiagnostics.fromRuntimeStats(
+            mapOf(
+                "art.gc.gc-count" to "12",
+                "art.gc.gc-time" to "345",
+                "art.gc.bytes-allocated" to "6789",
+                "art.gc.bytes-freed" to "4567",
+                "art.gc.blocking-gc-count" to "2",
+                "art.gc.blocking-gc-time" to "not-a-number",
+            ),
+        )
+
+        assertEquals(12L, diagnostics.gcCount)
+        assertEquals(345L, diagnostics.gcTimeMs)
+        assertEquals(6_789L, diagnostics.bytesAllocated)
+        assertEquals(4_567L, diagnostics.bytesFreed)
+        assertEquals(2L, diagnostics.blockingGcCount)
+        assertNull(diagnostics.blockingGcTimeMs)
+    }
 }

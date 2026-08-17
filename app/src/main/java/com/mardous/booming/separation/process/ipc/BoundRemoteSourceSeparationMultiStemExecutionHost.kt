@@ -28,6 +28,7 @@ import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStartC
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStatus
 import com.mardous.booming.separation.process.SourceSeparationForegroundExecutionDeferredException
 import com.mardous.booming.separation.process.SourceSeparationProcessLifecyclePolicy
+import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcActiveRunState
 import com.mardous.booming.separation.process.SourceSeparationForegroundLeaseRequest
 import com.mardous.booming.separation.toExecutionDescriptor
@@ -73,6 +74,23 @@ internal class BoundRemoteSourceSeparationMultiStemExecutionHost(
             SourceSeparationMultiStemExecutionCodec.decodeActiveRunResponse(
                 connected.service.activeRun(),
             ).state
+        } catch (error: Throwable) {
+            throw error.asSourceSeparationRemoteHostDied()
+        } finally {
+            runCatching { applicationContext.unbindService(connected.connection) }
+        }
+    }
+
+    internal fun processDiagnostics(): SourceSeparationProcessDiagnostics {
+        val connected = bind()
+        return try {
+            SourceSeparationMultiStemExecutionCodec.decodeProcessDiagnostics(
+                connected.service.diagnostics(),
+            ).also { diagnostics ->
+                check(diagnostics.processGeneration == connected.generation) {
+                    "Multi-stem diagnostics target a stale process generation."
+                }
+            }
         } catch (error: Throwable) {
             throw error.asSourceSeparationRemoteHostDied()
         } finally {

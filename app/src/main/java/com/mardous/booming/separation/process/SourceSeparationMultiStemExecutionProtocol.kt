@@ -509,6 +509,12 @@ internal object SourceSeparationMultiStemExecutionCodec {
 
     fun decodeActiveRunResponse(value: String): SourceSeparationMultiStemIpcActiveRunResponse =
         json.decodeFromString(SourceSeparationMultiStemIpcActiveRunResponse.serializer(), value)
+
+    fun encodeProcessDiagnostics(value: SourceSeparationProcessDiagnostics): String =
+        json.encodeToString(SourceSeparationProcessDiagnostics.serializer(), value)
+
+    fun decodeProcessDiagnostics(value: String): SourceSeparationProcessDiagnostics =
+        json.decodeFromString(SourceSeparationProcessDiagnostics.serializer(), value)
 }
 
 private fun requireStemPaths(paths: List<SourceSeparationMultiStemExecutionStemPath>) {

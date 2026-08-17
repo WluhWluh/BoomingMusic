@@ -12,5 +12,6 @@ interface ISourceSeparationMultiStemExecutionService {
     boolean terminateControlledRun(String runId, long processGeneration);
     String activeRun();
     String adopt(ISourceSeparationMultiStemExecutionCallback callback);
+    String diagnostics();
     void terminateForValidation();
 }

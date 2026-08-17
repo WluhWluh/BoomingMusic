@@ -61,6 +61,8 @@ internal data class SourceSeparationProcessMemoryDiagnostics(
     val runtimeMaxMemoryBytes: Long = 0L,
     val processCpuTimeMs: Long = 0L,
     val oomScoreAdj: Int? = null,
+    val artRuntime: SourceSeparationArtRuntimeDiagnostics =
+        SourceSeparationArtRuntimeDiagnostics(),
 ) {
     init {
         require(
@@ -74,6 +76,51 @@ internal data class SourceSeparationProcessMemoryDiagnostics(
         require(threadCount >= 0 && mappedRegionCount >= 0) {
             "Process diagnostic count is invalid."
         }
+    }
+}
+
+@Serializable
+internal data class SourceSeparationArtRuntimeDiagnostics(
+    val gcCount: Long? = null,
+    val gcTimeMs: Long? = null,
+    val bytesAllocated: Long? = null,
+    val bytesFreed: Long? = null,
+    val blockingGcCount: Long? = null,
+    val blockingGcTimeMs: Long? = null,
+) {
+    init {
+        require(
+            listOf(
+                gcCount,
+                gcTimeMs,
+                bytesAllocated,
+                bytesFreed,
+                blockingGcCount,
+                blockingGcTimeMs,
+            ).all { value -> value == null || value >= 0L },
+        ) { "ART runtime diagnostics contain a negative counter." }
+    }
+
+    companion object {
+        fun fromRuntimeStats(stats: Map<String, String>) =
+            SourceSeparationArtRuntimeDiagnostics(
+                gcCount = stats.longValue(ART_GC_COUNT),
+                gcTimeMs = stats.longValue(ART_GC_TIME),
+                bytesAllocated = stats.longValue(ART_BYTES_ALLOCATED),
+                bytesFreed = stats.longValue(ART_BYTES_FREED),
+                blockingGcCount = stats.longValue(ART_BLOCKING_GC_COUNT),
+                blockingGcTimeMs = stats.longValue(ART_BLOCKING_GC_TIME),
+            )
+
+        private fun Map<String, String>.longValue(key: String): Long? =
+            get(key)?.trim()?.toLongOrNull()?.takeIf { value -> value >= 0L }
+
+        private const val ART_GC_COUNT = "art.gc.gc-count"
+        private const val ART_GC_TIME = "art.gc.gc-time"
+        private const val ART_BYTES_ALLOCATED = "art.gc.bytes-allocated"
+        private const val ART_BYTES_FREED = "art.gc.bytes-freed"
+        private const val ART_BLOCKING_GC_COUNT = "art.gc.blocking-gc-count"
+        private const val ART_BLOCKING_GC_TIME = "art.gc.blocking-gc-time"
     }
 }
 
@@ -191,6 +238,9 @@ internal object SourceSeparationProcessDiagnosticsCollector {
         val memoryInfo = Debug.MemoryInfo().also(Debug::getMemoryInfo)
         val smaps = readSmaps(procRoot)
         val runtime = Runtime.getRuntime()
+        val artRuntime = runCatching {
+            SourceSeparationArtRuntimeDiagnostics.fromRuntimeStats(Debug.getRuntimeStats())
+        }.getOrDefault(SourceSeparationArtRuntimeDiagnostics())
         val processStartTicks = SourceSeparationProcParser.parseProcessStartTicks(
             requireNotNull(readText(File(procRoot, "stat"))) {
                 "Unable to read the inference process start identity."
@@ -228,6 +278,7 @@ internal object SourceSeparationProcessDiagnosticsCollector {
                 runtimeMaxMemoryBytes = runtime.maxMemory().coerceAtLeast(0L),
                 processCpuTimeMs = Process.getElapsedCpuTime().coerceAtLeast(0L),
                 oomScoreAdj = readText(File(procRoot, "oom_score_adj"))?.trim()?.toIntOrNull(),
+                artRuntime = artRuntime,
             ),
             mappedNativeLibraries = SourceSeparationProcParser.mappedNativeLibraryNames(maps),
             session = session,

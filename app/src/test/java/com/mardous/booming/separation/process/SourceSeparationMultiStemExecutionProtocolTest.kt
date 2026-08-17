@@ -142,6 +142,40 @@ class SourceSeparationMultiStemExecutionProtocolTest {
     }
 
     @Test
+    fun `process diagnostics round trip preserves ART counters`() {
+        val diagnostics = SourceSeparationProcessDiagnostics(
+            processGeneration = 42L,
+            processName = "com.example:source_separation",
+            pid = 1234,
+            processStartTicks = 5678L,
+            capturedAtElapsedRealtimeNanos = 9_000L,
+            activeRunId = "multistem-run",
+            memory = SourceSeparationProcessMemoryDiagnostics(
+                pssBytes = 100L,
+                nativePssBytes = 40L,
+                threadCount = 8,
+                mappedRegionCount = 20,
+                smapsSource = SourceSeparationSmapsSource.Rollup,
+                artRuntime = SourceSeparationArtRuntimeDiagnostics(
+                    gcCount = 7L,
+                    gcTimeMs = 12L,
+                    bytesAllocated = 34L,
+                    bytesFreed = 21L,
+                    blockingGcCount = 1L,
+                    blockingGcTimeMs = 2L,
+                ),
+            ),
+        )
+
+        assertEquals(
+            diagnostics,
+            SourceSeparationMultiStemExecutionCodec.decodeProcessDiagnostics(
+                SourceSeparationMultiStemExecutionCodec.encodeProcessDiagnostics(diagnostics),
+            ),
+        )
+    }
+
+    @Test
     fun `progress and demand control preserve scheduler waterline`() {
         val scheduler = com.mardous.booming.separation.model
             .SourceSeparationSegmentSchedulerProgress(

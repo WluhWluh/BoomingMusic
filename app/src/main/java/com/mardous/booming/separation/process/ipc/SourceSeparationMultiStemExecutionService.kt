@@ -45,6 +45,7 @@ import com.mardous.booming.separation.process.SourceSeparationProcessExecutionBu
 import com.mardous.booming.separation.process.SourceSeparationProcessExecutionLease
 import com.mardous.booming.separation.process.SourceSeparationProcessExecutionLifetime
 import com.mardous.booming.separation.process.SourceSeparationProcessExecutionOwner
+import com.mardous.booming.separation.process.SourceSeparationProcessDiagnosticsCollector
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -254,6 +255,20 @@ internal class SourceSeparationMultiStemExecutionService : Service() {
                 SourceSeparationMultiStemIpcActiveRunResponse(
                     status = SourceSeparationMultiStemIpcStatus.Active,
                     state = requireNotNull(run.snapshot()),
+                ),
+            )
+        }
+
+        override fun diagnostics(): String {
+            val process = AppProcessResolver.resolve(this@SourceSeparationMultiStemExecutionService)
+            val activeRunId = synchronized(stateLock) { active?.descriptor?.runId }
+            return SourceSeparationMultiStemExecutionCodec.encodeProcessDiagnostics(
+                SourceSeparationProcessDiagnosticsCollector.capture(
+                    processGeneration = engine.processGeneration,
+                    processName = process.processName,
+                    activeRunId = activeRunId,
+                    foregroundService = foregroundController.diagnostics(),
+                    processingWakeLock = processingWakeLockController.diagnostics(),
                 ),
             )
         }
