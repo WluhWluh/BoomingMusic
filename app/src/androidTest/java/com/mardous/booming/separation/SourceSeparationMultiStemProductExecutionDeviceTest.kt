@@ -49,6 +49,8 @@ import com.mardous.booming.separation.process.ipc.SourceSeparationMultiStemExecu
 import com.mardous.booming.separation.process.SourceSeparationMultiStemExecutionEventPayload
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcRunAuthority
 import com.mardous.booming.separation.process.SourceSeparationMultiStemIpcStatus
+import com.mardous.booming.separation.process.SourceSeparationArtRuntimeDiagnostics
+import com.mardous.booming.separation.process.SourceSeparationProcessDiagnostics
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorQualityGate
 import com.mardous.booming.separation.SourceSeparationMultiStemPlaybackSelectionStore
 import com.mardous.booming.separation.runtime.SourceSeparationRuntimeState
@@ -1924,6 +1926,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             val song = stagedSong(mediaUri, stagedSource, runId)
             val koin = GlobalContext.get()
             val facade = koin.get<SourceSeparationMultiStemProductFacade>()
+            val remoteHost = koin.get<BoundRemoteSourceSeparationMultiStemExecutionHost>()
             val repository = koin.get<SourceSeparationModelAwareCacheRepository>()
             val store = koin.get<SourceSeparationCacheStore>()
             val coordinator = koin.get<SourceSeparationCacheRunCoordinator>()
@@ -1956,7 +1959,15 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 }
 
             val progress = mutableListOf<JSONObject>()
-            val sampler = PssSampler().also(PssSampler::start)
+            val windowElapsedMs = mutableListOf<Long>()
+            val mainSampler = PssSampler().also(PssSampler::start)
+            val initialRemoteDiagnostics = remoteHost.processDiagnostics()
+            val remoteSampler = RemoteProcessResourceSampler(
+                context = context,
+                pid = initialRemoteDiagnostics.pid,
+                diagnosticsProvider = remoteHost::processDiagnostics,
+                initialDiagnostics = initialRemoteDiagnostics,
+            ).also(RemoteProcessResourceSampler::start)
             val thermalBefore = thermalStatus(context)
             val startedAt = SystemClock.elapsedRealtime()
             val result = try {
@@ -1965,18 +1976,27 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                     modelId = modelId,
                     runClass = SourceSeparationExecutionRunClass.ManualFullSong,
                     onProgress = { event ->
+                        event.completedWindowElapsedMs?.let(windowElapsedMs::add)
                         val snapshot = JSONObject()
                             .put("completedWindows", event.completedWindows)
                             .put("totalWindows", event.totalWindows)
                             .put("stage", event.stage)
+                            .put(
+                                "completedWindowElapsedMs",
+                                event.completedWindowElapsedMs ?: JSONObject.NULL,
+                            )
                         if (progress.lastOrNull()?.toString() != snapshot.toString()) {
                             progress += snapshot
                         }
                     },
                 )
             } finally {
-                sampler.stop()
+                mainSampler.stop()
+                remoteSampler.stop()
             }
+            val remoteResources = remoteSampler.snapshot()
+            assertTrue(remoteResources.diagnosticsSampleCount > 0)
+            assertFalse(remoteResources.diagnosticsIdentityMismatch)
             val elapsedMs = SystemClock.elapsedRealtime() - startedAt
             require(result is HtdemucsSourceSeparationEngineResult.Completed) {
                 "Fresh product run did not publish a completed cache: $result"
@@ -2039,15 +2059,23 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("sourceAudioFingerprint", manifest.identity.source.audioFingerprint)
                 .put("elapsedMs", elapsedMs)
                 .put("repeatElapsedMs", repeatElapsedMs)
-                .put("pssBaselineKiB", sampler.baselineKiB)
-                .put("pssPeakKiB", sampler.peakKiB.get())
+                .put("pssBaselineKiB", mainSampler.baselineKiB)
+                .put("pssPeakKiB", mainSampler.peakKiB.get())
                 .put("pssFinalKiB", Debug.getPss())
                 .put("nativeHeapFinalBytes", Debug.getNativeHeapAllocatedSize())
                 .put("thermalBefore", thermalBefore)
+                .put("thermalPeak", remoteResources.thermalPeak)
                 .put("thermalAfter", thermalStatus(context))
+                .put("mainProcess", JSONObject()
+                    .put("pssBaselineKiB", mainSampler.baselineKiB)
+                    .put("pssPeakKiB", mainSampler.peakKiB.get())
+                    .put("pssFinalKiB", Debug.getPss())
+                    .put("nativeHeapFinalBytes", Debug.getNativeHeapAllocatedSize()))
+                .put("remoteProcess", remoteResources.toJson())
                 .put("outputSampleRate", output.outputSampleRate)
                 .put("outputFrameCount", output.outputFrameCount)
                 .put("windowCount", output.windowCount)
+                .put("windowTiming", windowTimingJson(windowElapsedMs))
                 .put("outputBytes", output.totalBytes)
                 .put("promotionElapsedMs", promotionElapsedMs)
                 .put("promotedBytes", promotedOutput.stems.sumOf { stem ->
@@ -3110,6 +3138,29 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         (this as? SourceSeparationModelAwarePlayableStatus.Ready)?.playback?.close()
     }
 
+    private fun windowTimingJson(samples: List<Long>): JSONObject {
+        val sorted = samples.sorted()
+        return JSONObject()
+            .put("sampleCount", sorted.size)
+            .put(
+                "meanMs",
+                sorted.takeIf { it.isNotEmpty() }?.let { values ->
+                    values.sum().toDouble() / values.size
+                } ?: JSONObject.NULL,
+            )
+            .put("p50Ms", percentile(sorted, 50) ?: JSONObject.NULL)
+            .put("p95Ms", percentile(sorted, 95) ?: JSONObject.NULL)
+            .put("maxMs", sorted.maxOrNull() ?: JSONObject.NULL)
+            .put("samplesMs", JSONArray(sorted))
+    }
+
+    private fun percentile(sorted: List<Long>, percentile: Int): Long? {
+        require(percentile in 1..100)
+        if (sorted.isEmpty()) return null
+        val rank = ((percentile * sorted.size + 99) / 100).coerceAtLeast(1)
+        return sorted[rank - 1]
+    }
+
     private fun File.sha256(): String = inputStream().use { input ->
         val digest = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(256 * 1024)
@@ -3123,7 +3174,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
 
     private class PssSampler {
         private val running = AtomicBoolean(false)
-        val baselineKiB = Debug.getPss().toLong()
+        val baselineKiB = Debug.getPss()
         val peakKiB = AtomicLong(baselineKiB)
         private var thread: Thread? = null
 
@@ -3131,7 +3182,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             check(running.compareAndSet(false, true))
             thread = Thread({
                 while (running.get()) {
-                    peakKiB.accumulateAndGet(Debug.getPss().toLong(), ::maxOf)
+                    peakKiB.accumulateAndGet(Debug.getPss(), ::maxOf)
                     Thread.sleep(100L)
                 }
             }, "BSS-Multistem-Pss").apply { start() }
@@ -3140,13 +3191,15 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         fun stop() {
             running.set(false)
             thread?.join(2_000L)
-            peakKiB.accumulateAndGet(Debug.getPss().toLong(), ::maxOf)
+            peakKiB.accumulateAndGet(Debug.getPss(), ::maxOf)
         }
     }
 
     private class RemoteProcessResourceSampler(
         private val context: Context,
         private val pid: Int,
+        private val diagnosticsProvider: (() -> SourceSeparationProcessDiagnostics)? = null,
+        initialDiagnostics: SourceSeparationProcessDiagnostics? = null,
     ) {
         private val activityManager = context.getSystemService(ActivityManager::class.java)
         private val powerManager = context.getSystemService(PowerManager::class.java)
@@ -3159,14 +3212,30 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         private val processMissing = AtomicBoolean(false)
         private val baseline = AtomicReference<RemoteMemorySample?>()
         private val latest = AtomicReference<RemoteMemorySample?>()
+        private val expectedProcessGeneration = initialDiagnostics?.processGeneration
+        private val hasInitialDiagnostics = initialDiagnostics != null
+        private val diagnosticsSamples = AtomicInteger(if (initialDiagnostics == null) 0 else 1)
+        private val diagnosticsFailures = AtomicInteger(0)
+        private val diagnosticsIdentityMismatch = AtomicBoolean(false)
+        private val diagnosticsBaseline = AtomicReference(initialDiagnostics)
+        private val diagnosticsLatest = AtomicReference(initialDiagnostics)
+        private val javaHeapAllocatedPeakBytes = AtomicLong(
+            initialDiagnostics?.memory?.javaHeapAllocatedBytes ?: 0L,
+        )
+        private val nativeHeapAllocatedPeakBytes = AtomicLong(
+            initialDiagnostics?.memory?.nativeHeapAllocatedBytes ?: 0L,
+        )
+        private val nextDiagnosticsSampleAtMs = AtomicLong(0L)
         private var thread: Thread? = null
 
         fun start() {
             if (!running.compareAndSet(false, true)) return
-            sample()
+            sampleMemory()
+            sampleDiagnostics(force = !hasInitialDiagnostics)
             thread = Thread({
                 while (running.get()) {
-                    sample()
+                    sampleMemory()
+                    sampleDiagnostics(force = false)
                     SystemClock.sleep(REMOTE_RESOURCE_SAMPLE_INTERVAL_MS)
                 }
             }, "BSS-Multistem-Remote-Resources").apply { start() }
@@ -3175,7 +3244,8 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         fun stop() {
             if (!running.getAndSet(false)) return
             thread?.join(2_000L)
-            sample()
+            sampleMemory()
+            sampleDiagnostics(force = true)
         }
 
         fun snapshot(): RemoteResourceSnapshot {
@@ -3194,10 +3264,18 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 thermalPeak = thermalPeak.get(),
                 thermalFinal = last.thermalStatus,
                 processMissing = processMissing.get(),
+                processGeneration = expectedProcessGeneration,
+                diagnosticsSampleCount = diagnosticsSamples.get(),
+                diagnosticsFailureCount = diagnosticsFailures.get(),
+                diagnosticsIdentityMismatch = diagnosticsIdentityMismatch.get(),
+                javaHeapAllocatedPeakBytes = javaHeapAllocatedPeakBytes.get(),
+                nativeHeapAllocatedPeakBytes = nativeHeapAllocatedPeakBytes.get(),
+                diagnosticsBaseline = diagnosticsBaseline.get(),
+                diagnosticsFinal = diagnosticsLatest.get(),
             )
         }
 
-        private fun sample() {
+        private fun sampleMemory() {
             val processAlive = activityManager.runningAppProcesses
                 ?.any { it.pid == pid } == true
             if (!processAlive) {
@@ -3219,6 +3297,34 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             nativePeak.accumulateAndGet(current.nativePssKiB, ::maxOf)
             dalvikPeak.accumulateAndGet(current.dalvikPssKiB, ::maxOf)
             thermalPeak.accumulateAndGet(current.thermalStatus, ::maxOf)
+        }
+
+        private fun sampleDiagnostics(force: Boolean) {
+            val provider = diagnosticsProvider ?: return
+            val now = SystemClock.elapsedRealtime()
+            if (!force && now < nextDiagnosticsSampleAtMs.get()) return
+            nextDiagnosticsSampleAtMs.set(now + REMOTE_DIAGNOSTICS_SAMPLE_INTERVAL_MS)
+            val current = runCatching(provider).getOrElse {
+                diagnosticsFailures.incrementAndGet()
+                return
+            }
+            if (current.pid != pid ||
+                expectedProcessGeneration?.let { it != current.processGeneration } == true
+            ) {
+                diagnosticsIdentityMismatch.set(true)
+                return
+            }
+            diagnosticsBaseline.compareAndSet(null, current)
+            diagnosticsLatest.set(current)
+            diagnosticsSamples.incrementAndGet()
+            javaHeapAllocatedPeakBytes.accumulateAndGet(
+                current.memory.javaHeapAllocatedBytes,
+                ::maxOf,
+            )
+            nativeHeapAllocatedPeakBytes.accumulateAndGet(
+                current.memory.nativeHeapAllocatedBytes,
+                ::maxOf,
+            )
         }
     }
 
@@ -3242,7 +3348,103 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         val thermalPeak: Int,
         val thermalFinal: Int,
         val processMissing: Boolean,
-    )
+        val processGeneration: Long? = null,
+        val diagnosticsSampleCount: Int = 0,
+        val diagnosticsFailureCount: Int = 0,
+        val diagnosticsIdentityMismatch: Boolean = false,
+        val javaHeapAllocatedPeakBytes: Long = 0L,
+        val nativeHeapAllocatedPeakBytes: Long = 0L,
+        val diagnosticsBaseline: SourceSeparationProcessDiagnostics? = null,
+        val diagnosticsFinal: SourceSeparationProcessDiagnostics? = null,
+    ) {
+        fun toJson(): JSONObject {
+            val baselineMemory = diagnosticsBaseline?.memory
+            val finalMemory = diagnosticsFinal?.memory
+            return JSONObject()
+                .put("pid", diagnosticsFinal?.pid ?: diagnosticsBaseline?.pid ?: JSONObject.NULL)
+                .put("processGeneration", processGeneration ?: JSONObject.NULL)
+                .put("pssSampleCount", sampleCount)
+                .put("diagnosticsSampleCount", diagnosticsSampleCount)
+                .put("diagnosticsFailureCount", diagnosticsFailureCount)
+                .put("diagnosticsIdentityMismatch", diagnosticsIdentityMismatch)
+                .put("processMissing", processMissing)
+                .put("totalPssBaselineKiB", totalPssBaselineKiB)
+                .put("totalPssPeakKiB", totalPssPeakKiB)
+                .put("totalPssFinalKiB", totalPssFinalKiB)
+                .put("nativePssBaselineKiB", nativePssBaselineKiB)
+                .put("nativePssPeakKiB", nativePssPeakKiB)
+                .put("nativePssFinalKiB", nativePssFinalKiB)
+                .put("dalvikPssPeakKiB", dalvikPssPeakKiB)
+                .put("javaHeapAllocatedPeakBytes", javaHeapAllocatedPeakBytes)
+                .put("nativeHeapAllocatedPeakBytes", nativeHeapAllocatedPeakBytes)
+                .put(
+                    "javaHeapAllocatedFinalBytes",
+                    finalMemory?.javaHeapAllocatedBytes ?: JSONObject.NULL,
+                )
+                .put(
+                    "nativeHeapAllocatedFinalBytes",
+                    finalMemory?.nativeHeapAllocatedBytes ?: JSONObject.NULL,
+                )
+                .put(
+                    "runtimeMaxMemoryBytes",
+                    finalMemory?.runtimeMaxMemoryBytes ?: baselineMemory?.runtimeMaxMemoryBytes
+                        ?: JSONObject.NULL,
+                )
+                .put(
+                    "processCpuTimeDeltaMs",
+                    monotonicDelta(
+                        baselineMemory?.processCpuTimeMs,
+                        finalMemory?.processCpuTimeMs,
+                    ) ?: JSONObject.NULL,
+                )
+                .put("thermalBaseline", thermalBaseline)
+                .put("thermalPeak", thermalPeak)
+                .put("thermalFinal", thermalFinal)
+                .put(
+                    "artRuntime",
+                    artRuntimeJson(
+                        diagnosticsBaseline?.memory?.artRuntime,
+                        diagnosticsFinal?.memory?.artRuntime,
+                    ),
+                )
+        }
+
+        private fun artRuntimeJson(
+            baseline: SourceSeparationArtRuntimeDiagnostics?,
+            final: SourceSeparationArtRuntimeDiagnostics?,
+        ) = JSONObject()
+            .put("baseline", artCountersJson(baseline))
+            .put("final", artCountersJson(final))
+            .put("delta", JSONObject()
+                .put("gcCount", jsonValue(monotonicDelta(baseline?.gcCount, final?.gcCount)))
+                .put("gcTimeMs", jsonValue(monotonicDelta(baseline?.gcTimeMs, final?.gcTimeMs)))
+                .put(
+                    "bytesAllocated",
+                    jsonValue(monotonicDelta(baseline?.bytesAllocated, final?.bytesAllocated)),
+                )
+                .put("bytesFreed", jsonValue(monotonicDelta(baseline?.bytesFreed, final?.bytesFreed)))
+                .put(
+                    "blockingGcCount",
+                    jsonValue(monotonicDelta(baseline?.blockingGcCount, final?.blockingGcCount)),
+                )
+                .put(
+                    "blockingGcTimeMs",
+                    jsonValue(monotonicDelta(baseline?.blockingGcTimeMs, final?.blockingGcTimeMs)),
+                ))
+
+        private fun artCountersJson(value: SourceSeparationArtRuntimeDiagnostics?) = JSONObject()
+            .put("gcCount", jsonValue(value?.gcCount))
+            .put("gcTimeMs", jsonValue(value?.gcTimeMs))
+            .put("bytesAllocated", jsonValue(value?.bytesAllocated))
+            .put("bytesFreed", jsonValue(value?.bytesFreed))
+            .put("blockingGcCount", jsonValue(value?.blockingGcCount))
+            .put("blockingGcTimeMs", jsonValue(value?.blockingGcTimeMs))
+
+        private fun monotonicDelta(baseline: Long?, final: Long?): Long? =
+            if (baseline != null && final != null && final >= baseline) final - baseline else null
+
+        private fun jsonValue(value: Long?): Any = value ?: JSONObject.NULL
+    }
 
     private companion object {
         const val ARG_MODEL_ID = "bssMultistemModelId"
@@ -3273,6 +3475,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         const val MAX_TERMINAL_CONTROL_RESPONSE_MS = 10_000L
         const val IN_FLIGHT_CONTROL_DELAY_MS = 750L
         const val REMOTE_RESOURCE_SAMPLE_INTERVAL_MS = 100L
+        const val REMOTE_DIAGNOSTICS_SAMPLE_INTERVAL_MS = 5_000L
         const val OFFICIAL_SIX_STEM_MODEL_ID =
             "htdemucs_6s_core_canonical_7p8s_fp32_v1_0_0"
         val SHA256 = Regex("^[0-9a-f]{64}$")
