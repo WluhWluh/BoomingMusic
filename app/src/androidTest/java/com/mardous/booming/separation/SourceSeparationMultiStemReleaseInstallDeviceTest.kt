@@ -37,7 +37,7 @@ class SourceSeparationMultiStemReleaseInstallDeviceTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("abi", currentProcessAbi())
         try {
             val facade = GlobalContext.get().get<SourceSeparationMultiStemProductFacade>()
             val catalog = facade.catalog()
@@ -99,6 +99,15 @@ class SourceSeparationMultiStemReleaseInstallDeviceTest {
             if (read > 0) digest.update(buffer, 0, read)
         }
         digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun currentProcessAbi(): String {
+        val abis = if (android.os.Process.is64Bit()) {
+            android.os.Build.SUPPORTED_64_BIT_ABIS
+        } else {
+            android.os.Build.SUPPORTED_32_BIT_ABIS
+        }
+        return requireNotNull(abis.firstOrNull()) { "The current process has no reported ABI." }
     }
 
     private companion object {

@@ -1,13 +1,16 @@
 package com.mardous.booming.separation.model.litert
 
 import android.os.SystemClock
+import android.os.Process
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.mardous.booming.separation.model.HtdemucsPipelineAdapter
 import com.mardous.booming.separation.model.HtdemucsHostDsp
 import com.mardous.booming.separation.model.HtdemucsIstftMode
-import com.mardous.booming.separation.model.HtdemucsStreamingPlan
-import com.mardous.booming.separation.model.HtdemucsWindowOutput
+import com.mardous.booming.separation.model.HtdemucsPipelineAdapter
+import com.mardous.booming.separation.model.HtdemucsRenderedTrackChunk
+import com.mardous.booming.separation.model.HtdemucsStreamingOverlapAdd
+import com.mardous.booming.separation.model.HtdemucsTrackWindowPlanner
+import com.mardous.booming.separation.model.NativeHtdemucsPcm16
 import com.mardous.booming.separation.model.contract.MultiTensorFixtureIdentity
 import com.mardous.booming.separation.model.contract.MultiTensorFixtureRole
 import com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorExecutableContract
@@ -21,6 +24,7 @@ import java.nio.ByteOrder
 import java.nio.channels.FileChannel
 import java.security.MessageDigest
 import kotlin.math.log10
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import org.json.JSONArray
 import org.json.JSONObject
@@ -36,6 +40,7 @@ class HtdemucsExecutableFixtureDeviceTest {
         val context = instrumentation.targetContext
         val arguments = InstrumentationRegistry.getArguments()
         val runId = arguments.requiredSafeName(ARG_RUN_ID)
+        val processAbi = currentProcessAbi()
         val reportDirectory = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
         val reportFile = File(reportDirectory, "$runId.json")
         val report = JSONObject()
@@ -43,8 +48,11 @@ class HtdemucsExecutableFixtureDeviceTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("processAbi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("processAbi", processAbi)
         try {
+            require(processAbi == arguments.requiredSafeName(ARG_PROCESS_ABI)) {
+                "Expected process ABI ${arguments.getString(ARG_PROCESS_ABI)}, got $processAbi."
+            }
             val appCommit = arguments.requiredSha(ARG_APP_COMMIT, SHA1)
             val appApkSha = File(context.applicationInfo.sourceDir).sha256()
             val testApkSha = File(instrumentation.context.applicationInfo.sourceDir).sha256()
@@ -119,10 +127,21 @@ class HtdemucsExecutableFixtureDeviceTest {
                     runCanonicalWindowGate(adapter, session, fixtureDirectory, contract),
                 )
                 report.put("canonicalBranches", requireNotNull(branchReport))
-                report.put(
-                    "overlapAdd",
-                    runOverlapAddGate(adapter, session, fixtureDirectory, contract),
+                val overlapAdd = runOverlapAddGate(
+                    adapter,
+                    session,
+                    fixtureDirectory,
+                    contract,
                 )
+                report.put(
+                    "implementations",
+                    JSONObject()
+                        .put("inferenceImplementationId", session.implementationId)
+                        .put("dspImplementationId", adapter.dspImplementationId)
+                        .put("olaImplementationId", overlapAdd.implementationId)
+                        .put("pcm16ImplementationId", overlapAdd.pcm16ImplementationId),
+                )
+                report.put("overlapAdd", overlapAdd.report)
             } finally {
                 session.close()
                 adapter.close()
@@ -182,6 +201,8 @@ class HtdemucsExecutableFixtureDeviceTest {
             .put(
                 "frequencyWaveformStrictHostGate",
                 JSONObject()
+                    .put("scope", "host-fixture-generation-only")
+                    .put("requiredForDeviceAdmission", false)
                     .put("passes", SourceSeparationMultiTensorQualityGate.passesStrictHost(
                         reconstructedGate,
                     ))
@@ -233,6 +254,14 @@ class HtdemucsExecutableFixtureDeviceTest {
             .put("stft", stftStats.toJson())
             .put("combined", combinedStats.toJson())
             .put("energyAwareStemGate", perStemGate.toJson(contract))
+            .put(
+                "deviceAdmission",
+                JSONObject()
+                    .put("scope", "android-product-execution")
+                    .put("required", true)
+                    .put("finite", combinedStats.finite)
+                    .put("energyAwareStemGatePasses", perStemGate.all { it.passes }),
+            )
     }
 
     private fun runOverlapAddGate(
@@ -240,37 +269,103 @@ class HtdemucsExecutableFixtureDeviceTest {
         session: HtdemucsCpuInferenceSession,
         fixtureDirectory: File,
         contract: SourceSeparationMultiTensorExecutableContract,
-    ): JSONObject {
+    ): OverlapAddGateResult {
         val inputFixture = contract.fixture(MultiTensorFixtureRole.OlaMixInput)
         val outputFixture = contract.fixture(MultiTensorFixtureRole.OlaCombinedGolden)
         val track = readFloatFixture(fixtureDirectory, inputFixture)
         val trackSamples = inputFixture.shape.last()
         val stemCount = contract.modelContract.stemContract.stems.size
+        val planeCount = stemCount * HtdemucsPipelineAdapter.CHANNEL_COUNT
         val normalization = adapter.globalNormalization(track)
         val normalized = adapter.normalizeTrack(track, normalization)
-        val plan = HtdemucsStreamingPlan()
-        val windows = plan.windowPlans(trackSamples)
+        val windows = HtdemucsTrackWindowPlanner.plans(trackSamples)
+        val result = FloatArray(planeCount * trackSamples)
+        var overlapAddImplementationId = "unavailable"
+        var encodedPcm16Bytes = 0L
         val started = SystemClock.elapsedRealtimeNanos()
-        val outputs = windows.map { window ->
-            val padded = plan.extractPaddedWindow(normalized, 2, window)
-            HtdemucsWindowOutput(
-                offset = window.offset,
-                planarSamples = session.run(adapter.prepareWindow(padded)).planarSamples,
-            )
-        }
-        val normalizedResult = plan.overlapAdd(
+        HtdemucsStreamingOverlapAdd(
+            orderedStemIds = adapter.orderedStemIds,
             trackSamples = trackSamples,
-            outputPlaneCount = stemCount * 2,
-            windowOutputs = outputs,
-        )
-        val result = adapter.denormalizeStemSet(normalizedResult.planarSamples, normalization)
+            normalization = normalization,
+        ).use { overlapAdd ->
+            overlapAddImplementationId = overlapAdd.implementationId
+            windows.forEach { window ->
+                val padded = HtdemucsTrackWindowPlanner.paddedWindow(normalized, window)
+                val chunk = overlapAdd.addWindow(
+                    window,
+                    session.run(adapter.prepareWindow(padded)),
+                )
+                require(chunk.startFrame + chunk.frameCount <= trackSamples)
+                repeat(planeCount) { plane ->
+                    val sourceOffset = plane * chunk.planeStride
+                    chunk.planarSamples.copyInto(
+                        destination = result,
+                        destinationOffset = plane * trackSamples + chunk.startFrame,
+                        startIndex = sourceOffset,
+                        endIndex = sourceOffset + chunk.frameCount,
+                    )
+                }
+                repeat(stemCount) { stemOrder ->
+                    val pcm16 = ByteArray(Math.multiplyExact(chunk.frameCount, PCM16_STEREO_BYTES))
+                    val planeBase = stemOrder * HtdemucsPipelineAdapter.CHANNEL_COUNT *
+                        chunk.planeStride
+                    val encoded = NativeHtdemucsPcm16.encodePlanar(
+                        input = chunk.planarSamples,
+                        leftOffset = planeBase,
+                        rightOffset = planeBase + chunk.planeStride,
+                        frameCount = chunk.frameCount,
+                        output = pcm16,
+                    )
+                    require(encoded == pcm16.size) {
+                        "Native HTDemucs PCM encoder returned an incomplete chunk."
+                    }
+                    require(pcm16.contentEquals(scalarPcm16(chunk, stemOrder))) {
+                        "Native HTDemucs PCM differs from scalar product quantization."
+                    }
+                    encodedPcm16Bytes += encoded
+                }
+            }
+            overlapAdd.finish()
+        }
+        require(encodedPcm16Bytes ==
+            trackSamples.toLong() * PCM16_STEREO_BYTES * stemCount)
         val elapsedNanos = SystemClock.elapsedRealtimeNanos() - started
         val stats = compareWithFixture(result, File(fixtureDirectory, outputFixture.fileName))
         require(stats.finite) { "HTDemucs OLA output contains non-finite values." }
-        return JSONObject()
-            .put("windowCount", windows.size)
-            .put("elapsedNanos", elapsedNanos)
-            .put("comparison", stats.toJson())
+        require(stats.signalToNoiseDb >= OLA_MINIMUM_SNR_DB &&
+            stats.correlation >= OLA_MINIMUM_CORRELATION &&
+            stats.maxAbsoluteError <= OLA_MAXIMUM_ABSOLUTE_ERROR
+        ) { "HTDemucs native OLA differs from the frozen host fixture: $stats" }
+        val pcm16ImplementationId = NativeHtdemucsPcm16.implementationId()
+        return OverlapAddGateResult(
+            implementationId = overlapAddImplementationId,
+            pcm16ImplementationId = pcm16ImplementationId,
+            report = JSONObject()
+                .put("windowCount", windows.size)
+                .put("elapsedNanos", elapsedNanos)
+                .put("encodedPcm16Bytes", encodedPcm16Bytes)
+                .put("pcm16ScalarParity", true)
+                .put("comparison", stats.toJson()),
+        )
+    }
+
+    private fun scalarPcm16(
+        chunk: HtdemucsRenderedTrackChunk,
+        stemOrder: Int,
+    ): ByteArray {
+        val output = ByteArray(Math.multiplyExact(chunk.frameCount, PCM16_STEREO_BYTES))
+        val planeBase = stemOrder * HtdemucsPipelineAdapter.CHANNEL_COUNT * chunk.planeStride
+        var byteOffset = 0
+        repeat(chunk.frameCount) { frame ->
+            repeat(HtdemucsPipelineAdapter.CHANNEL_COUNT) { channel ->
+                val sample = chunk.planarSamples[planeBase + channel * chunk.planeStride + frame]
+                val pcm = (sample.coerceIn(-1f, 1f) * Short.MAX_VALUE).roundToInt()
+                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                output[byteOffset++] = (pcm and 0xff).toByte()
+                output[byteOffset++] = ((pcm ushr 8) and 0xff).toByte()
+            }
+        }
+        return output
     }
 
     private fun verifyArtifact(
@@ -419,6 +514,15 @@ class HtdemucsExecutableFixtureDeviceTest {
             .lowercase()
             .also { value -> require(pattern.matches(value)) { "Invalid $key." } }
 
+    private fun currentProcessAbi(): String {
+        val abis = if (Process.is64Bit()) {
+            android.os.Build.SUPPORTED_64_BIT_ABIS
+        } else {
+            android.os.Build.SUPPORTED_32_BIT_ABIS
+        }
+        return requireNotNull(abis.firstOrNull()) { "The current process has no reported ABI." }
+    }
+
     private fun File.requireInside(root: File): File {
         require(path.startsWith(root.path + File.separator)) { "Staged path escapes its root." }
         return this
@@ -460,6 +564,12 @@ class HtdemucsExecutableFixtureDeviceTest {
         val sidecarSha256: String?,
     )
 
+    private data class OverlapAddGateResult(
+        val implementationId: String,
+        val pcm16ImplementationId: String,
+        val report: JSONObject,
+    )
+
     private fun List<com.mardous.booming.separation.model.contract.SourceSeparationMultiTensorStemMetrics>.toJson(
         contract: SourceSeparationMultiTensorExecutableContract,
     ): JSONObject {
@@ -496,6 +606,7 @@ class HtdemucsExecutableFixtureDeviceTest {
 
     private companion object {
         const val ARG_RUN_ID = "htdemucsRunId"
+        const val ARG_PROCESS_ABI = "htdemucsProcessAbi"
         const val ARG_CONTRACT_ASSET = "htdemucsContractAsset"
         const val ARG_BUNDLE_DIRECTORY = "htdemucsBundleDirectory"
         const val ARG_INSTALLED_MODEL_ID = "htdemucsInstalledModelId"
@@ -506,7 +617,11 @@ class HtdemucsExecutableFixtureDeviceTest {
         const val FIXTURE_DIRECTORY = "fixtures"
         const val REPORT_DIRECTORY = "htdemucs-fixture-reports"
         const val HASH_BUFFER_BYTES = 1024 * 1024
+        const val PCM16_STEREO_BYTES = 4
         const val HOST_STFT_MAX_ERROR = 1e-5
+        const val OLA_MINIMUM_SNR_DB = 60.0
+        const val OLA_MINIMUM_CORRELATION = 0.9999
+        const val OLA_MAXIMUM_ABSOLUTE_ERROR = 2.5e-4
         const val MIN_RMS = 1e-30
         val SAFE_NAME = Regex("^[A-Za-z0-9._-]+$")
         val SHA1 = Regex("^[0-9a-f]{40}$")

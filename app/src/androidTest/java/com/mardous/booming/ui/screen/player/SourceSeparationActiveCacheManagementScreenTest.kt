@@ -93,7 +93,7 @@ class SourceSeparationActiveCacheManagementScreenTest {
             .put("status", "running")
             .put("deviceModel", android.os.Build.MODEL)
             .put("sdk", android.os.Build.VERSION.SDK_INT)
-            .put("abi", android.os.Build.SUPPORTED_ABIS.first())
+            .put("abi", currentProcessAbi())
         var mediaUri: Uri? = null
         var cacheKey: String? = null
         var controller: MediaController? = null
@@ -342,6 +342,15 @@ class SourceSeparationActiveCacheManagementScreenTest {
                 }
             }
         }.commit()
+    }
+
+    private fun currentProcessAbi(): String {
+        val abis = if (android.os.Process.is64Bit()) {
+            android.os.Build.SUPPORTED_64_BIT_ABIS
+        } else {
+            android.os.Build.SUPPORTED_32_BIT_ABIS
+        }
+        return requireNotNull(abis.firstOrNull()) { "The current process has no reported ABI." }
     }
 
     private companion object {
