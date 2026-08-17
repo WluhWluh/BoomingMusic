@@ -97,7 +97,9 @@ import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershi
 import com.mardous.booming.separation.process.SourceSeparationProcessingOwnershipSnapshot
 import com.mardous.booming.separation.process.SourceSeparationProcParser
 import com.mardous.booming.separation.process.SourceSeparationProcessSessionState
+import com.mardous.booming.separation.process.SourceSeparationProcessSessionOwnership
 import com.mardous.booming.separation.process.SourceSeparationArm32ResidentValidation
+import com.mardous.booming.separation.process.resolveRemoteSessionOwnership
 import com.mardous.booming.separation.process.ipc.BoundRemoteSourceSeparationExecutionHost
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcRecycleReason
 import com.mardous.booming.separation.process.ipc.SourceSeparationIpcErrorCategory
@@ -420,6 +422,19 @@ class SourceSeparationPhase7WorkerDeviceTest {
         val rebindAfterCompletion = arguments.optionalBoolean(
             ARG_REBIND_AFTER_COMPLETION,
             false,
+        )
+        val expectedSessionOwnership = resolveRemoteSessionOwnership(
+            runtimeAbi = MdxRuntimeAbi.entries.singleOrNull {
+                it.androidName == arguments.requiredString(ARG_PROCESS_ABI)
+            },
+            x86ValidationEnabled = arguments.optionalBoolean(
+                ARG_X86_PROCESS_VALIDATION,
+                false,
+            ),
+            arm32ResidentValidationEnabled = arguments.optionalBoolean(
+                ARG_ARM32_RESIDENT_PROCESS_VALIDATION,
+                false,
+            ),
         )
         val probeOriginalPlayback = arguments.optionalBoolean(
             ARG_PROBE_ORIGINAL_PLAYBACK,
@@ -1063,14 +1078,27 @@ class SourceSeparationPhase7WorkerDeviceTest {
             if (rebindAfterCompletion) {
                 val originalHost = requireNotNull(boundRemoteHost)
                 val beforeRebind = originalHost.processDiagnostics()
-                assertEquals(
-                    SourceSeparationProcessSessionState.Resident,
-                    beforeRebind.session.state,
-                )
                 assertEquals(1, beforeRebind.session.nativeSessionCreationCount)
                 assertEquals(0, beforeRebind.session.activeLeaseCount)
                 assertTrue(beforeRebind.session.invocationCount > 0L)
-                val expectedSessionId = requireNotNull(beforeRebind.session.sessionId)
+                val expectedSessionId = when (expectedSessionOwnership) {
+                    SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit -> {
+                        assertEquals(
+                            SourceSeparationProcessSessionState.Resident,
+                            beforeRebind.session.state,
+                        )
+                        requireNotNull(beforeRebind.session.sessionId)
+                    }
+
+                    SourceSeparationProcessSessionOwnership.SingleUse -> {
+                        assertEquals(
+                            SourceSeparationProcessSessionState.Empty,
+                            beforeRebind.session.state,
+                        )
+                        assertNull(beforeRebind.session.sessionId)
+                        null
+                    }
+                }
 
                 originalHost.close()
                 SystemClock.sleep(PROCESS_REBIND_SETTLE_MS)
@@ -1079,22 +1107,51 @@ class SourceSeparationPhase7WorkerDeviceTest {
                 )
                 boundRemoteHost = reboundHost
                 val afterRebind = reboundHost.processDiagnostics()
-                assertEquals(beforeRebind.processGeneration, afterRebind.processGeneration)
-                assertEquals(beforeRebind.pid, afterRebind.pid)
-                assertEquals(beforeRebind.processStartTicks, afterRebind.processStartTicks)
-                assertEquals(expectedSessionId, afterRebind.session.sessionId)
-                assertEquals(1, afterRebind.session.nativeSessionCreationCount)
                 assertEquals(0, afterRebind.session.activeLeaseCount)
-                assertEquals(
-                    beforeRebind.session.invocationCount,
-                    afterRebind.session.invocationCount,
-                )
-                assertEquals(
-                    SourceSeparationProcessSessionState.Resident,
-                    afterRebind.session.state,
-                )
+                val processRetained = beforeRebind.processGeneration ==
+                    afterRebind.processGeneration && beforeRebind.pid == afterRebind.pid &&
+                    beforeRebind.processStartTicks == afterRebind.processStartTicks
+                when (expectedSessionOwnership) {
+                    SourceSeparationProcessSessionOwnership.ResidentUntilProcessExit -> {
+                        assertTrue(processRetained)
+                        assertEquals(expectedSessionId, afterRebind.session.sessionId)
+                        assertEquals(1, afterRebind.session.nativeSessionCreationCount)
+                        assertEquals(
+                            beforeRebind.session.invocationCount,
+                            afterRebind.session.invocationCount,
+                        )
+                        assertEquals(
+                            SourceSeparationProcessSessionState.Resident,
+                            afterRebind.session.state,
+                        )
+                    }
+
+                    SourceSeparationProcessSessionOwnership.SingleUse -> {
+                        assertEquals(
+                            SourceSeparationProcessSessionState.Empty,
+                            afterRebind.session.state,
+                        )
+                        assertNull(afterRebind.session.sessionId)
+                        if (processRetained) {
+                            assertEquals(
+                                beforeRebind.session.nativeSessionCreationCount,
+                                afterRebind.session.nativeSessionCreationCount,
+                            )
+                            assertEquals(
+                                beforeRebind.session.invocationCount,
+                                afterRebind.session.invocationCount,
+                            )
+                        } else {
+                            assertEquals(0, afterRebind.session.nativeSessionCreationCount)
+                            assertEquals(0L, afterRebind.session.invocationCount)
+                        }
+                    }
+                }
                 report.put("processRetention", JSONObject()
                     .put("rebound", true)
+                    .put("ownership", expectedSessionOwnership.name)
+                    .put("processRetained", processRetained)
+                    .put("sessionRetained", afterRebind.session.sessionId != null)
                     .put("processGeneration", afterRebind.processGeneration)
                     .put("pid", afterRebind.pid)
                     .put("processStartTicks", afterRebind.processStartTicks)
