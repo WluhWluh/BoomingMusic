@@ -72,6 +72,8 @@ object Playback {
     const val EXTRA_DEBUG_OUTPUT_GENERATION = "debug_output_generation"
     const val EXTRA_DEBUG_PLAYBACK_REQUESTED = "debug_playback_requested"
     const val EXTRA_DEBUG_PLAYBACK_PLAY_INTENT = "debug_playback_play_intent"
+    const val EXTRA_DEBUG_PLAYER_PLAY_WHEN_READY = "debug_player_play_when_ready"
+    const val EXTRA_DEBUG_PLAYER_IS_PLAYING = "debug_player_is_playing"
     const val EXTRA_DEBUG_WINDOW_WAIT = "debug_window_wait"
     const val EXTRA_DEBUG_DATA_PLANE_READY = "debug_data_plane_ready"
     const val EXTRA_DEBUG_WORKER_STATUS = "debug_worker_status"

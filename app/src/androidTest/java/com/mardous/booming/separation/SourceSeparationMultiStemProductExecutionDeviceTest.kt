@@ -75,6 +75,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -988,9 +989,6 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         val blockedAtTwo = AtomicBoolean(false)
         val blockedAtThree = AtomicBoolean(false)
         val blockedAtFour = AtomicBoolean(false)
-        val observeBoundaryTransitions = AtomicBoolean(false)
-        val boundaryPauseCount = AtomicInteger(0)
-        val boundaryResumeCount = AtomicInteger(0)
         val preparedManifest = AtomicReference<
             com.mardous.booming.separation.cache.v2.SourceSeparationCacheManifest?
         >()
@@ -1000,7 +998,6 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         var mediaUri: Uri? = null
         var cacheKey: String? = null
         var controller: MediaController? = null
-        var boundaryListener: Player.Listener? = null
         try {
             check(
                 preferences.edit()
@@ -1115,20 +1112,6 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 SessionToken(context, ComponentName(context, PlaybackService::class.java)),
             ).buildAsync().get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             controller = mediaController
-            boundaryListener = object : Player.Listener {
-                override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                    if (!observeBoundaryTransitions.get()) return
-                    if (playWhenReady) {
-                        boundaryResumeCount.incrementAndGet()
-                    } else {
-                        boundaryPauseCount.incrementAndGet()
-                    }
-                }
-            }.also { listener ->
-                onMediaControllerThread(mediaController) {
-                    mediaController.addListener(listener)
-                }
-            }
             awaitPlaybackRestoration(mediaController)
             onMediaControllerThread(mediaController) {
                 mediaController.volume = 0f
@@ -1165,23 +1148,34 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
 
             tracePlaybackMarker(mediaController, "$runId:seek-unready")
             onMediaControllerThread(mediaController) { mediaController.seekTo(secondPositionMs) }
-            waitForMediaController(mediaController, "unready-window automatic pause") {
-                !mediaController.playWhenReady &&
-                    kotlin.math.abs(mediaController.currentPosition - secondPositionMs) <=
-                    MEDIA_SESSION_SEEK_TOLERANCE_MS
-            }
+            waitForSourceSeparationWindowWait(
+                controller = mediaController,
+                anchorPositionMs = secondPositionMs,
+                requiredReadyWindowCount = 2,
+            )
             val unreadyPauseAtMs = SystemClock.elapsedRealtime() - producerStartedAt
 
             tracePlaybackMarker(mediaController, "$runId:seek-ready-during-recovery")
             onMediaControllerThread(mediaController) { mediaController.seekTo(firstPositionMs) }
-            waitForMediaController(mediaController, "waiting seek retarget") {
-                kotlin.math.abs(mediaController.currentPosition - firstPositionMs) <=
-                    MEDIA_SESSION_SEEK_TOLERANCE_MS
-            }
+            waitForSourceSeparationWindowWait(
+                controller = mediaController,
+                anchorPositionMs = firstPositionMs,
+                requiredReadyWindowCount = 2,
+            )
             SystemClock.sleep(1_500L)
-            assertFalse(
-                "Playback resumed from one ready window while recovery required two.",
-                onMediaControllerThread(mediaController) { mediaController.playWhenReady },
+            val pendingDebugState = sourceSeparationDebugState(mediaController)
+            val pendingRetargetedWait = pendingDebugState.getString(
+                Playback.EXTRA_DEBUG_WINDOW_WAIT,
+            )
+            assertTrue(
+                "Playback window wait cleared before two windows were ready: " +
+                    pendingRetargetedWait,
+                pendingRetargetedWait?.contains("anchorPositionMs=$firstPositionMs") == true &&
+                    pendingRetargetedWait.contains("requiredReadyWindowCount=2") &&
+                    !pendingDebugState.getBoolean(
+                        Playback.EXTRA_DEBUG_PLAYER_PLAY_WHEN_READY,
+                    ) &&
+                    !pendingDebugState.getBoolean(Playback.EXTRA_DEBUG_PLAYER_IS_PLAYING),
             )
 
             releaseOneReady.countDown()
@@ -1202,10 +1196,12 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 is SourceSeparationModelAwarePlayableStatus.Ready -> status.playback.close()
                 else -> error("Two ready windows did not satisfy recovery: $status")
             }
-            waitForMediaController(mediaController, "two-window automatic recovery") {
-                mediaController.playWhenReady &&
-                    mediaController.isPlaying &&
-                    processor.dataPlaneStemIds() == expectedStemIds
+            waitForSourceSeparationPlaybackResumed(
+                controller = mediaController,
+                operation = "two-window automatic recovery",
+            )
+            waitForMediaController(mediaController, "two-window data-plane recovery") {
+                processor.dataPlaneStemIds() == expectedStemIds
             }
             val recoveredAtMs = SystemClock.elapsedRealtime() - producerStartedAt
 
@@ -1216,19 +1212,15 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             onMediaControllerThread(mediaController) {
                 mediaController.seekTo(boundaryProbePositionMs)
             }
-            waitForMediaController(mediaController, "ready boundary probe playback") {
-                mediaController.playWhenReady &&
-                    mediaController.isPlaying &&
-                    kotlin.math.abs(mediaController.currentPosition - boundaryProbePositionMs) <=
-                    MEDIA_SESSION_SEEK_TOLERANCE_MS
-            }
-            observeBoundaryTransitions.set(true)
-            waitForMediaController(mediaController, "cache boundary automatic pause") {
-                !mediaController.playWhenReady && !mediaController.isPlaying
-            }
+            val boundaryWaitState = waitForSourceSeparationWindowWait(
+                controller = mediaController,
+                anchorPositionMs = null,
+                requiredReadyWindowCount = 2,
+            )
+            val boundaryWindowWait = requireNotNull(
+                boundaryWaitState.getString(Playback.EXTRA_DEBUG_WINDOW_WAIT),
+            )
             val boundaryPausedAtMs = SystemClock.elapsedRealtime() - producerStartedAt
-            assertEquals(1, boundaryPauseCount.get())
-            assertEquals(0, boundaryResumeCount.get())
 
             releaseTwoReady.countDown()
             check(threeReadyReached.await(
@@ -1236,27 +1228,35 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 TimeUnit.MILLISECONDS,
             )) { "The producer did not reach the three-window recovery waterline." }
             SystemClock.sleep(1_000L)
+            val oneNewWindowState = sourceSeparationDebugState(mediaController)
+            assertEquals(
+                "The boundary wait changed after only one new window became ready.",
+                boundaryWindowWait,
+                oneNewWindowState.getString(Playback.EXTRA_DEBUG_WINDOW_WAIT),
+            )
             assertFalse(
                 "Playback resumed with only one new window after the boundary miss.",
-                onMediaControllerThread(mediaController) { mediaController.playWhenReady },
+                oneNewWindowState.getBoolean(Playback.EXTRA_DEBUG_PLAYER_PLAY_WHEN_READY) ||
+                    oneNewWindowState.getBoolean(Playback.EXTRA_DEBUG_PLAYER_IS_PLAYING),
             )
-            assertEquals(1, boundaryPauseCount.get())
-            assertEquals(0, boundaryResumeCount.get())
 
             releaseThreeReady.countDown()
             check(fourReadyReached.await(
                 PRODUCER_AHEAD_READY_TIMEOUT_MS,
                 TimeUnit.MILLISECONDS,
             )) { "The producer did not reach the four-window recovery waterline." }
-            waitForMediaController(mediaController, "cache boundary stable recovery") {
-                mediaController.playWhenReady && mediaController.isPlaying
-            }
+            waitForSourceSeparationPlaybackResumed(
+                controller = mediaController,
+                operation = "cache boundary stable recovery",
+            )
             val boundaryRecoveredAtMs = SystemClock.elapsedRealtime() - producerStartedAt
             SystemClock.sleep(1_000L)
-            assertTrue(onMediaControllerThread(mediaController) { mediaController.playWhenReady })
-            assertEquals(1, boundaryPauseCount.get())
-            assertEquals(1, boundaryResumeCount.get())
-            observeBoundaryTransitions.set(false)
+            val stableRecoveryState = sourceSeparationDebugState(mediaController)
+            assertNull(stableRecoveryState.getString(Playback.EXTRA_DEBUG_WINDOW_WAIT))
+            assertTrue(stableRecoveryState.getBoolean(
+                Playback.EXTRA_DEBUG_PLAYER_PLAY_WHEN_READY,
+            ))
+            assertTrue(stableRecoveryState.getBoolean(Playback.EXTRA_DEBUG_PLAYER_IS_PLAYING))
 
             releaseFourReady.countDown()
             check(producerFinished.await(
@@ -1276,10 +1276,9 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("unreadyPauseAtMs", unreadyPauseAtMs)
                 .put("recoveredAtMs", recoveredAtMs)
                 .put("boundaryProbePositionMs", boundaryProbePositionMs)
+                .put("boundaryWindowWait", boundaryWindowWait)
                 .put("boundaryPausedAtMs", boundaryPausedAtMs)
                 .put("boundaryRecoveredAtMs", boundaryRecoveredAtMs)
-                .put("boundaryPauseCount", boundaryPauseCount.get())
-                .put("boundaryResumeCount", boundaryResumeCount.get())
                 .put("completedAtMs", SystemClock.elapsedRealtime() - producerStartedAt)
                 .put("stemIds", JSONArray(expectedStemIds))
             reportFile.writeText(report.toString(2))
@@ -1299,11 +1298,6 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             producerThread?.join(PRODUCER_AHEAD_READY_TIMEOUT_MS)
             controller?.let { mediaController ->
                 runCatching {
-                    boundaryListener?.let { listener ->
-                        onMediaControllerThread(mediaController) {
-                            mediaController.removeListener(listener)
-                        }
-                    }
                     val disable = onMediaControllerThread(mediaController) {
                         mediaController.sendCustomCommand(
                             SessionCommand(
@@ -2976,6 +2970,72 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             )
         }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         assertEquals(SessionResult.RESULT_SUCCESS, result.resultCode)
+    }
+
+    private fun waitForSourceSeparationWindowWait(
+        controller: MediaController,
+        anchorPositionMs: Long?,
+        requiredReadyWindowCount: Int,
+    ): Bundle {
+        val expectedAnchor = anchorPositionMs?.let { "anchorPositionMs=$it" }
+        val expectedWindowCount = "requiredReadyWindowCount=$requiredReadyWindowCount"
+        val deadline = SystemClock.elapsedRealtime() + MEDIA_SESSION_TIMEOUT_MS
+        var lastWindowWait: String? = null
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val debugState = sourceSeparationDebugState(controller)
+            lastWindowWait = debugState.getString(Playback.EXTRA_DEBUG_WINDOW_WAIT)
+            if ((expectedAnchor == null || lastWindowWait?.contains(expectedAnchor) == true) &&
+                lastWindowWait?.contains(expectedWindowCount) == true &&
+                !debugState.getBoolean(Playback.EXTRA_DEBUG_PLAYER_PLAY_WHEN_READY) &&
+                !debugState.getBoolean(Playback.EXTRA_DEBUG_PLAYER_IS_PLAYING)
+            ) {
+                return debugState
+            }
+            SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+        }
+        error(
+            "Source separation window wait did not reach ${expectedAnchor ?: "any anchor"}, " +
+                "$expectedWindowCount; last=$lastWindowWait",
+        )
+    }
+
+    private fun waitForSourceSeparationPlaybackResumed(
+        controller: MediaController,
+        operation: String,
+    ): Bundle {
+        val deadline = SystemClock.elapsedRealtime() + MEDIA_SESSION_TIMEOUT_MS
+        var lastState = Bundle.EMPTY
+        while (SystemClock.elapsedRealtime() < deadline) {
+            lastState = sourceSeparationDebugState(controller)
+            if (lastState.getString(Playback.EXTRA_DEBUG_WINDOW_WAIT) == null &&
+                lastState.getBoolean(Playback.EXTRA_DEBUG_PLAYER_PLAY_WHEN_READY) &&
+                lastState.getBoolean(Playback.EXTRA_DEBUG_PLAYER_IS_PLAYING)
+            ) {
+                return lastState
+            }
+            SystemClock.sleep(MEDIA_SESSION_POLL_INTERVAL_MS)
+        }
+        error(
+            "Source separation did not complete $operation; " +
+                "windowWait=${lastState.getString(Playback.EXTRA_DEBUG_WINDOW_WAIT)}, " +
+                "playWhenReady=${lastState.getBoolean(
+                    Playback.EXTRA_DEBUG_PLAYER_PLAY_WHEN_READY,
+                )}, isPlaying=${lastState.getBoolean(Playback.EXTRA_DEBUG_PLAYER_IS_PLAYING)}",
+        )
+    }
+
+    private fun sourceSeparationDebugState(controller: MediaController): Bundle {
+        val result = onMediaControllerThread(controller) {
+            controller.sendCustomCommand(
+                SessionCommand(
+                    Playback.GET_SOURCE_SEPARATION_DEBUG_STATE,
+                    Bundle.EMPTY,
+                ),
+                Bundle.EMPTY,
+            )
+        }.get(MEDIA_SESSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        assertEquals(SessionResult.RESULT_SUCCESS, result.resultCode)
+        return result.extras
     }
 
     private fun snapshotPreferences(

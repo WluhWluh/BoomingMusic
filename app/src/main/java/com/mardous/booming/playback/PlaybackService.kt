@@ -1117,6 +1117,14 @@ class PlaybackService :
                                     Playback.EXTRA_DEBUG_PLAYBACK_PLAY_INTENT,
                                     sourceSeparationPlaybackPlayIntent,
                                 )
+                                putBoolean(
+                                    Playback.EXTRA_DEBUG_PLAYER_PLAY_WHEN_READY,
+                                    player.playWhenReady,
+                                )
+                                putBoolean(
+                                    Playback.EXTRA_DEBUG_PLAYER_IS_PLAYING,
+                                    player.isPlaying,
+                                )
                                 putString(
                                     Playback.EXTRA_DEBUG_WINDOW_WAIT,
                                     sourceSeparationPlaybackWindowWaitTracker.current?.toString(),
