@@ -1686,9 +1686,9 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 SourceSeparationCacheRunTransitionType.ActiveModelSuperseded,
                 oldJournal.transitions.last().type,
             )
-            assertTrue(oldJournal.transitions.any {
+            val hardTerminationObserved = oldJournal.transitions.any {
                 it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
-            })
+            }
 
             val replacementStartedAt = SystemClock.elapsedRealtime()
             val replacement = facade.separate(song, replacementModelId)
@@ -1719,6 +1719,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("oldTotalSegments", oldPlan.segmentCount)
                 .put("pauseElapsedMs", pauseElapsedMs)
                 .put("pauseResponseMs", pauseResponseMs)
+                .put("hardTerminationObserved", hardTerminationObserved)
                 .put("replacementCacheKey", replacement.manifest.cacheKey)
                 .put("replacementElapsedMs", replacementElapsedMs)
                 .put("replacementStemCount", replacement.manifest.output?.stems?.size)
@@ -1825,9 +1826,9 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             })
             val canceledJournal = requireNotNull(store.readRunJournal(partial.cacheKey))
             assertEquals(SourceSeparationCacheRunJournalLifecycle.Canceled, canceledJournal.lifecycle)
-            assertTrue(canceledJournal.transitions.any {
+            val hardTerminationObserved = canceledJournal.transitions.any {
                 it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
-            })
+            }
 
             val restartStartedAt = SystemClock.elapsedRealtime()
             val restarted = facade.separate(song, modelId)
@@ -1850,6 +1851,7 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
                 .put("cacheKey", partial.cacheKey)
                 .put("cancelElapsedMs", cancelElapsedMs)
                 .put("cancelResponseMs", cancelResponseMs)
+                .put("hardTerminationObserved", hardTerminationObserved)
                 .put("readySegmentsBeforeRestart", readyBeforeRestart)
                 .put("totalSegments", plan.segmentCount)
                 .put("restartElapsedMs", restartElapsedMs)
