@@ -1,9 +1,15 @@
 package com.mardous.booming.separation.model.litert
 
+import com.mardous.booming.separation.model.MdxCompatibilityOutcome
 import com.mardous.booming.separation.model.MdxInferenceBackend
 import com.mardous.booming.separation.model.MdxInferenceSession
+import com.mardous.booming.separation.model.MdxLiteRtCompatibilityResolver
+import com.mardous.booming.separation.model.MdxRuntimeAbi
 import com.mardous.booming.separation.model.MdxRuntimeDiagnostics
+import com.mardous.booming.separation.model.MdxRuntimePlatform
 import com.mardous.booming.separation.model.MdxWaveformInferenceSession
+import com.mardous.booming.separation.model.contract.SourceSeparationModelMetadata
+import com.mardous.booming.separation.model.contract.toMdxExecutionProfile
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -13,6 +19,26 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MdxLiteRtRemoteFaultInjectionTest {
+    @Test
+    fun `remote CPU replay admits reviewed models on the current runtime`() {
+        val catalogBytes = requireNotNull(
+            javaClass.classLoader?.getResourceAsStream(
+                SourceSeparationModelMetadata.CATALOG_ASSET_PATH,
+            ),
+        ).use { it.readBytes() }
+        val catalog = SourceSeparationModelMetadata.decodeBundledCatalog(catalogBytes)
+        val contract = catalog.contracts.single { it.modelId == "uvr_mdxnet_3_9662" }
+        val decision = MdxLiteRtCompatibilityResolver.resolve(
+            profile = contract.toMdxExecutionProfile(catalog.runtimeQualifications),
+            backend = MdxInferenceBackend.LiteRtCpu,
+            platform = MdxRuntimePlatform(35, MdxRuntimeAbi.Arm64V8a),
+            policy = MdxLiteRtRemoteFaultCompatibilityPolicies.cpu,
+        )
+
+        assertEquals(MdxCompatibilityOutcome.Experimental, decision.outcome)
+        assertTrue(decision.isAllowed)
+    }
+
     @Test
     fun `remote failpoint names and fallback stages form a stable contract`() {
         MdxLiteRtRemoteFailpoint.entries.forEach { failpoint ->

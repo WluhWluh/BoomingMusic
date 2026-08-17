@@ -228,6 +228,11 @@ internal interface MdxLiteRtRemoteFaultSessionTracker {
     fun selectedFailpoint(): MdxLiteRtRemoteFailpoint
 }
 
+internal object MdxLiteRtRemoteFaultCompatibilityPolicies {
+    val gpu = MdxCompatibilityPolicy.AllowUntestedInternal
+    val cpu = MdxCompatibilityPolicy.AllowUserAttempts
+}
+
 private class MdxLiteRtRemoteFaultController(
     context: Context,
     private val directory: File,
@@ -255,19 +260,20 @@ private class MdxLiteRtRemoteFaultController(
         val gpuFactory = TrackingFactory(
             delegate = MdxLiteRtGpuInferenceSessionFactory(
                 runtimeProfile = gpuProfile,
-                compatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+                compatibilityPolicy = MdxLiteRtRemoteFaultCompatibilityPolicies.gpu,
             ),
             controller = this,
         )
         val cpuFactory = TrackingFactory(
             delegate = MdxLiteRtCpuInferenceSessionFactory(
-                compatibilityPolicy = MdxCompatibilityPolicy.KnownGoodOnly,
+                compatibilityPolicy = MdxLiteRtRemoteFaultCompatibilityPolicies.cpu,
             ),
             controller = this,
         )
         return MdxLiteRtAutoInferenceSessionFactory(
             gpuRuntimeProfile = gpuProfile,
-            gpuCompatibilityPolicy = MdxCompatibilityPolicy.AllowUntestedInternal,
+            gpuCompatibilityPolicy = MdxLiteRtRemoteFaultCompatibilityPolicies.gpu,
+            cpuCompatibilityPolicy = MdxLiteRtRemoteFaultCompatibilityPolicies.cpu,
             gpuEligibilityProvider = AndroidMdxLiteRtGpuEligibilityProvider(applicationContext),
             gpuProbe = { session, profile ->
                 val output = session.run(FloatArray(profile.inputTensor.elementCount))
