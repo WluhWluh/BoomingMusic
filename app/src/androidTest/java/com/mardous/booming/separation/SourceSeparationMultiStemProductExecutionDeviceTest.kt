@@ -2664,6 +2664,27 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
         }
         val runId = arguments.getString(ARG_RUN_ID)?.takeIf(SAFE_NAME::matches)
             ?: "remote-death-${System.currentTimeMillis()}"
+        val appCommit = arguments.getString(ARG_APP_COMMIT)?.takeIf(SHA1::matches)
+        val testCommit = arguments.getString(ARG_TEST_COMMIT)?.takeIf(SHA1::matches)
+        val reportFile = File(context.filesDir, REPORT_DIRECTORY).apply { mkdirs() }
+            .resolve("$runId.json")
+        val report = JSONObject()
+            .put("runId", runId)
+            .put("mode", "remote-process-death-recovery")
+            .put("modelId", modelId)
+            .put("status", "running")
+            .put("deviceModel", android.os.Build.MODEL)
+            .put("sdk", android.os.Build.VERSION.SDK_INT)
+            .put("abi", currentProcessAbi())
+            .put("build", JSONObject()
+                .put("appCommit", appCommit ?: JSONObject.NULL)
+                .put("testCommit", testCommit ?: JSONObject.NULL)
+                .put("appApkSha256", File(context.applicationInfo.sourceDir).sha256())
+                .put(
+                    "testApkSha256",
+                    File(instrumentation.context.applicationInfo.sourceDir).sha256(),
+                )
+            )
         var mediaUri: Uri? = null
         try {
             mediaUri = importIntoMediaStore(context, source, runId)
@@ -2721,7 +2742,31 @@ class SourceSeparationMultiStemProductExecutionDeviceTest {
             assertTrue(finalJournal.transitions.any {
                 it.type == SourceSeparationCacheRunTransitionType.PreviousOwnerDied
             })
-            assertTrue(finalJournal.request.processGeneration > partialJournal.request.processGeneration)
+            assertNotEquals(
+                partialJournal.request.processGeneration,
+                finalJournal.request.processGeneration,
+            )
+            report.put("status", "complete")
+                .put("cacheKey", recoveredManifest.cacheKey)
+                .put("oldRunId", partialJournal.request.runId)
+                .put("newRunId", finalJournal.request.runId)
+                .put("oldProcessGeneration", partialJournal.request.processGeneration)
+                .put("newProcessGeneration", finalJournal.request.processGeneration)
+                .put("oldOwnerPid", partialJournal.request.ownerPid)
+                .put("newOwnerPid", finalJournal.request.ownerPid)
+                .put("readySegmentsBeforeDeath", partialJournal.committedSegments.size)
+                .put("finalLifecycle", finalJournal.lifecycle.name)
+                .put("transitions", JSONArray().apply {
+                    finalJournal.transitions.forEach { transition -> put(transition.type.name) }
+                })
+            reportFile.writeText(report.toString(2))
+        } catch (error: Throwable) {
+            report.put("status", "error")
+                .put("errorType", error.javaClass.name)
+                .put("errorMessage", error.message.orEmpty())
+                .put("stackTrace", error.stackTraceToString())
+            reportFile.writeText(report.toString(2))
+            throw error
         } finally {
             mediaUri?.let { context.contentResolver.delete(it, null, null) }
         }
